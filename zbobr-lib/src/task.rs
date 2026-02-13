@@ -459,6 +459,11 @@ impl TaskSession {
         branch.starts_with(&prefix)
     }
 
+    /// Get a reference to the Zbobr instance (for accessing config).
+    pub fn zbobr(&self) -> &Zbobr {
+        &self.zbobr
+    }
+
     /// Read the full task state.
     pub async fn get_task(&self) -> Result<Task, ZbobrError> {
         self.zbobr.get_task(self.task_id).await

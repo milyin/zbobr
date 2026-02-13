@@ -22,6 +22,10 @@ fork_owner = "{{FORK_OWNER}}"
 # Prefix for work branches
 # work_branch_prefix = "zbobr_fix"
 
+# Automatically send go_work signal after planner posts plan (default: true)
+# Set to false to require manual approval before moving to work stage
+# auto_signal_work = true
+
 # Git user name and email for commits made by the tool
 # These override any global git config when making commits.
 # REQUIRED: Must be set in config, env vars, or global git config.

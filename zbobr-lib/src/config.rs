@@ -65,6 +65,7 @@ pub struct TomlConfig {
     pub work_branch_prefix: Option<String>,
     pub git_user_name: Option<String>,
     pub git_user_email: Option<String>,
+    pub auto_signal_work: Option<bool>,
     pub prompts: Option<TomlPrompts>,
 }
 
@@ -120,6 +121,8 @@ pub struct ZbobrConfig {
     pub git_user_name: String,
     /// Git user email for commits made by the tool.
     pub git_user_email: String,
+    /// Whether to automatically send go_work signal after planner posts plan (default: true).
+    pub auto_signal_work: bool,
 }
 
 impl Default for ZbobrConfig {
@@ -142,6 +145,7 @@ impl Default for ZbobrConfig {
             prompts_path: None,
             git_user_name: String::new(),
             git_user_email: String::new(),
+            auto_signal_work: true,
         }
     }
 }
@@ -318,6 +322,10 @@ impl ZbobrConfig {
             .or_else(|| toml.and_then(|t| t.git_user_email.clone()))
             .unwrap_or_default();
 
+        let auto_signal_work = env_parsed::<bool, _>(env, "ZBOBR_AUTO_SIGNAL_WORK")
+            .or_else(|| toml.and_then(|t| t.auto_signal_work))
+            .unwrap_or(defaults.auto_signal_work);
+
         Ok(Self {
             task_repo,
             fork_owner,
@@ -336,6 +344,7 @@ impl ZbobrConfig {
             prompts_path,
             git_user_name,
             git_user_email,
+            auto_signal_work,
         })
     }
 
@@ -462,6 +471,7 @@ mod tests {
             prompts_path: None,
             git_user_name: "zbobr".to_string(),
             git_user_email: "zbobr@example.com".to_string(),
+            auto_signal_work: true,
         }
     }
 
@@ -577,6 +587,7 @@ mod tests {
             work_branch_prefix: Some("toml_fix".into()),
             git_user_name: Some("test-user".into()),
             git_user_email: Some("test@example.com".into()),
+            auto_signal_work: Some(false),
             prompts: Some(TomlPrompts {
                 path: Some(PathBuf::from("/opt/prompts")),
                 planner: Some(vec![PathBuf::from("p.md")]),
