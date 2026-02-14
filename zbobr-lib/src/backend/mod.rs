@@ -1,5 +1,3 @@
-pub mod github;
-
 use std::path::PathBuf;
 
 use async_trait::async_trait;

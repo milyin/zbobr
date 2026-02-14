@@ -14,7 +14,7 @@ pub use mcp::{planner_instructions, worker_instructions, reviewer_instructions, 
 pub use task::{Model, ChecklistItem, Parameter, Signal, Stage, Task, TaskSession, Tool};
 pub use tool_executor::{ClaudeExecutor, CopilotExecutor, ToolExecutor};
 
-use crate::backend::{github::GitHubBackend, Backend};
+use crate::backend::Backend;
 
 /// Central struct holding configuration and backend.
 #[derive(Clone)]
@@ -27,20 +27,13 @@ pub struct Zbobr {
 }
 
 impl Zbobr {
-    /// Create a new Zbobr instance from config.
-    pub fn new(config: ZbobrConfig) -> Result<Self, ZbobrError> {
-        let config_arc = Arc::new(config.clone());
-        let octocrab = octocrab::Octocrab::builder()
-            .personal_token(config.owner_github_token.clone())
-            .build()
-            .map_err(|e| ZbobrError::GitHub(e.to_string()))?;
-        let backend: Arc<dyn backend::Backend> = Arc::new(GitHubBackend::new(config_arc.clone(), octocrab));
-
-        Ok(Self {
-            config: config_arc,
+    /// Create a new Zbobr instance from config and a pre-built backend.
+    pub fn new(config: ZbobrConfig, backend: Arc<dyn Backend>) -> Self {
+        Self {
+            config: Arc::new(config),
             backend,
             task_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
-        })
+        }
     }
 
     pub fn config(&self) -> &ZbobrConfig {
@@ -273,21 +266,3 @@ pub enum ZbobrError {
     Other(String),
 }
 
-impl From<octocrab::Error> for ZbobrError {
-    fn from(e: octocrab::Error) -> Self {
-        // Provide more detailed error information including GitHub error body
-        let error_msg = match e {
-            octocrab::Error::GitHub { source, .. } => {
-                // Include the primary message, status code and the full debug of the source
-                format!(
-                    "GitHub API error: {} (status: {}) -- details: {:?}",
-                    source.message,
-                    source.status_code,
-                    source
-                )
-            }
-            other => format!("GitHub API error: {:?}", other),
-        };
-        ZbobrError::GitHub(error_msg)
-    }
-}

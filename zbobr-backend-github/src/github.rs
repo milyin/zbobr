@@ -2,8 +2,22 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 
-use super::Backend;
-use crate::{Model, Parameter, Signal, Stage, Task, Tool, ZbobrConfig, ZbobrError};
+use zbobr_lib::backend::Backend;
+use zbobr_lib::{Model, Parameter, Signal, Stage, Task, Tool, ZbobrConfig, ZbobrError};
+
+/// Convert an octocrab error into a ZbobrError with detailed information.
+fn octocrab_to_zbobr_error(e: octocrab::Error) -> ZbobrError {
+    let error_msg = match e {
+        octocrab::Error::GitHub { source, .. } => {
+            format!(
+                "GitHub API error: {} (status: {}) -- details: {:?}",
+                source.message, source.status_code, source
+            )
+        }
+        other => format!("GitHub API error: {:?}", other),
+    };
+    ZbobrError::GitHub(error_msg)
+}
 
 pub struct GitHubBackend {
     config: Arc<ZbobrConfig>,
@@ -51,7 +65,7 @@ impl GitHubBackend {
                         tokio::time::sleep(Duration::from_millis(250 * attempt)).await;
                         continue;
                     }
-                    return Err(e.into());
+                    return Err(octocrab_to_zbobr_error(e));
                 }
             }
         }
@@ -251,7 +265,7 @@ impl GitHubBackend {
             }
             Err(e) => {
                 tracing::error!("merge-upstream failed for {}: {}", fork_repo, e);
-                Err(e.into())
+                Err(octocrab_to_zbobr_error(e))
             }
         }
     }
@@ -285,10 +299,10 @@ impl GitHubBackend {
         branch_name: &str,
     ) -> Result<(), ZbobrError> {
         // Ensure git user is configured for this repository
-        crate::backend::configure_git_user(work_dir, &self.config.git_user_name, &self.config.git_user_email).await?;
+        zbobr_lib::backend::configure_git_user(work_dir, &self.config.git_user_name, &self.config.git_user_email).await?;
 
         // Create placeholder file and commit it
-        crate::backend::create_placeholder_commit(work_dir, branch_name).await?;
+        zbobr_lib::backend::create_placeholder_commit(work_dir, branch_name).await?;
 
         // Push to fork immediately with tracking
         let push_status = tokio::process::Command::new("git")
@@ -325,7 +339,7 @@ impl Backend for GitHubBackend {
 
         let body = issue.body.unwrap_or_default();
         // Parse full description including PARAMETERS, PLAN and CHECKLIST
-        let (description, params_map, plan, checklist) = super::parse_description_full(&body);
+        let (description, params_map, plan, checklist) = zbobr_lib::backend::parse_description_full(&body);
 
         let tool = issue.labels.iter().find_map(|l| {
             if let Some(name) = l.name.strip_prefix("tool:") {
@@ -422,7 +436,7 @@ impl Backend for GitHubBackend {
         if let Some(v) = parameters.get(&Parameter::PrUrl) {
             params_text.insert(Parameter::PrUrl.name().to_string(), v.clone());
         }
-        let body = crate::backend::serialize_description_full(description, &params_text, "", &[]);
+        let body = zbobr_lib::backend::serialize_description_full(description, &params_text, "", &[]);
 
         let stage_number = self.find_stage_number(stage.milestone_name()).await?;
 
@@ -606,7 +620,7 @@ impl Backend for GitHubBackend {
             // Check if there was a concurrent modification
             if current_body != current_expected {
                 // Conflict detected! Merge the changes
-                let merged = super::merge_concurrent_description_updates(
+                let merged = zbobr_lib::backend::merge_concurrent_description_updates(
                     current_expected,
                     &current_body,
                     new_description,
@@ -666,7 +680,7 @@ impl Backend for GitHubBackend {
 
             let body = issue.body.unwrap_or_default();
             // Parse full description including PARAMETERS, PLAN and CHECKLIST
-            let (description, params_map, plan, checklist) = super::parse_description_full(&body);
+            let (description, params_map, plan, checklist) = zbobr_lib::backend::parse_description_full(&body);
             let task_tool = issue.labels.iter().find_map(|l| {
                 if let Some(name) = l.name.strip_prefix("tool:") {
                     match name {

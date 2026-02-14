@@ -1,8 +1,10 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
+use zbobr_backend_github::GitHubBackend;
 use zbobr_lib::{
     Stage, TomlConfig, Zbobr, ZbobrConfig,
     task::{Model, Role, Tool},
@@ -416,7 +418,14 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = parse_cli();
     let config = load_config(&cli)?;
-    let zbobr = Zbobr::new(config)?;
+    let config_arc = Arc::new(config.clone());
+    let octocrab = octocrab::Octocrab::builder()
+        .personal_token(config.owner_github_token.clone())
+        .build()
+        .context("Failed to build octocrab client")?;
+    let backend: Arc<dyn zbobr_lib::backend::Backend> =
+        Arc::new(GitHubBackend::new(config_arc, octocrab));
+    let zbobr = Zbobr::new(config, backend);
     zbobr.validate_connectivity().await?;
     let prompts = resolve_prompts(&cli, zbobr.config())?;
 
