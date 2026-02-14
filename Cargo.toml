@@ -1,5 +1,5 @@
 [workspace]
-members = ["zbobr-lib", "zbobr-backend-github", "zbobr"]
+members = ["zbobr-dispatcher", "zbobr-backend-github", "zbobr"]
 default-members = ["zbobr"]
 resolver = "2"
 
@@ -7,7 +7,7 @@ resolver = "2"
 edition = "2024"
 
 [workspace.dependencies]
-zbobr-lib = { path = "zbobr-lib" }
+zbobr-dispatcher = { path = "zbobr-dispatcher" }
 zbobr-backend-github = { path = "zbobr-backend-github" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use zbobr_backend_github::GitHubBackend;
-use zbobr_lib::{
+use zbobr_dispatcher::{
     Stage, TomlConfig, Zbobr, ZbobrConfig,
     task::{Model, Role, Tool},
 };
@@ -262,17 +262,17 @@ fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::Resul
 /// Build full prompt: hardcoded instructions + user context files + auto-generated API docs.
 fn build_full_prompt(user_context: &str, role: Role, task_repo: &str, fork_owner: &str) -> String {
     let hardcoded = match role {
-        Role::Planner => zbobr_lib::planner_instructions(),
-        Role::Worker => zbobr_lib::worker_instructions(Some(task_repo), Some(fork_owner)),
-        Role::Reviewer => zbobr_lib::reviewer_instructions(Some(task_repo), Some(fork_owner)),
-        Role::Merger => zbobr_lib::merger_instructions(Some(task_repo), Some(fork_owner)),
+        Role::Planner => zbobr_dispatcher::planner_instructions(),
+        Role::Worker => zbobr_dispatcher::worker_instructions(Some(task_repo), Some(fork_owner)),
+        Role::Reviewer => zbobr_dispatcher::reviewer_instructions(Some(task_repo), Some(fork_owner)),
+        Role::Merger => zbobr_dispatcher::merger_instructions(Some(task_repo), Some(fork_owner)),
     };
 
     let api_docs = match role {
-        Role::Planner => zbobr_lib::PlannerMcp::generate_api_docs(),
-        Role::Worker => zbobr_lib::WorkerMcp::generate_api_docs(),
-        Role::Reviewer => zbobr_lib::ReviewerMcp::generate_api_docs(),
-        Role::Merger => zbobr_lib::MergerMcp::generate_api_docs(),
+        Role::Planner => zbobr_dispatcher::PlannerMcp::generate_api_docs(),
+        Role::Worker => zbobr_dispatcher::WorkerMcp::generate_api_docs(),
+        Role::Reviewer => zbobr_dispatcher::ReviewerMcp::generate_api_docs(),
+        Role::Merger => zbobr_dispatcher::MergerMcp::generate_api_docs(),
     };
 
     if user_context.is_empty() {
@@ -317,7 +317,7 @@ fn load_config(cli: &Cli) -> anyhow::Result<ZbobrConfig> {
     }
     if let Some(ref b) = cli.global.backend {
         config.backend = b
-            .parse::<zbobr_lib::config::BackendType>()
+            .parse::<zbobr_dispatcher::config::BackendType>()
             .map_err(|e| anyhow::anyhow!(e))?;
     }
     if let Some(ref t) = cli.global.cli_tool {
@@ -419,7 +419,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = parse_cli();
     let config = load_config(&cli)?;
     let config_arc = Arc::new(config.clone());
-    let backend: Arc<dyn zbobr_lib::backend::Backend> =
+    let backend: Arc<dyn zbobr_dispatcher::backend::Backend> =
         Arc::new(GitHubBackend::new(config_arc).context("Failed to create GitHub backend")?);
     let zbobr = Zbobr::new(config, backend);
     zbobr.validate_connectivity().await?;
@@ -579,7 +579,7 @@ async fn run_role_session(
     let server_zbobr = zbobr.clone();
     let server_role = role;
     let server_handle = tokio::spawn(async move {
-        match zbobr_lib::mcp::run_role_mcp_server(server_zbobr, base_port, server_role, task_id)
+        match zbobr_dispatcher::mcp::run_role_mcp_server(server_zbobr, base_port, server_role, task_id)
             .await
         {
             Ok(assigned_port) => {
@@ -631,7 +631,7 @@ async fn run_role_session(
         match session.get_checklist().await {
             Ok(items) => {
                 let has_unchecked = items.iter().any(|i| !i.checked);
-                use zbobr_lib::Signal;
+                use zbobr_dispatcher::Signal;
                 let next_signal = match role {
                     Role::Worker => {
                         if has_unchecked {

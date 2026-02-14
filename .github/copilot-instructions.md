@@ -25,7 +25,7 @@ Add the following project-wide rules for Copilot / agent-related changes:
 2) Signals are processed on the coordinator level
 - All control signals (stage transitions, cancel, pause, reassign, etc.) must be handled by the coordinator process. Agents should not implement independent signal-handling logic or rely on receiving those signals directly.
 - Rationale: keeps agent implementations simple and ensures a single source of truth for orchestration decisions.
-- Implementation note: Coordinator MCP and orchestration code (see [zbobr-lib/src/mcp.rs](zbobr-lib/src/mcp.rs) and coordinator entrypoint [zbobr/src/main.rs](zbobr/src/main.rs)) should own signal handling and translate changes into agent-facing messages or stage updates.
+- Implementation note: Coordinator MCP and orchestration code (see [zbobr-dispatcher/src/mcp.rs](zbobr-dispatcher/src/mcp.rs) and coordinator entrypoint [zbobr/src/main.rs](zbobr/src/main.rs)) should own signal handling and translate changes into agent-facing messages or stage updates.
 
 3) Run `gh` from the coordinator only as a last resort
 - Prefer using the `octocrab` Rust library (or other supported GitHub API client) for all GitHub API interactions executed by the coordinator.
@@ -33,9 +33,9 @@ Add the following project-wide rules for Copilot / agent-related changes:
 - Rationale: using the API client keeps interactions testable, reproducible, and avoids shelling out where a stable library exists.
 
 4) Keep setup script in sync with stage and label changes
-- When adding, removing, or modifying task stages (milestones) or labels, update [zbobr-lib/src/backend/github.rs](zbobr-lib/src/backend/github.rs) in the `setup_repository` function to match.
+- When adding, removing, or modifying task stages (milestones) or labels, update [zbobr-dispatcher/src/backend/github.rs](zbobr-dispatcher/src/backend/github.rs) in the `setup_repository` function to match.
 - Rationale: ensures the setup command continues to properly initialize repositories with all necessary stages and labels.
 
 Where to apply these rules
 - New code and edits touching agent tooling, task orchestration, GitHub integrations, or shared constants should follow these guidelines.
-- Helpful code locations: [zbobr-lib/src/config.rs](zbobr-lib/src/config.rs), [zbobr-lib/src/tool_executor.rs](zbobr-lib/src/tool_executor.rs), [zbobr-lib/src/mcp.rs](zbobr-lib/src/mcp.rs), and the coordinator binary at [zbobr/src/main.rs](zbobr/src/main.rs).
+- Helpful code locations: [zbobr-dispatcher/src/config.rs](zbobr-dispatcher/src/config.rs), [zbobr-dispatcher/src/tool_executor.rs](zbobr-dispatcher/src/tool_executor.rs), [zbobr-dispatcher/src/mcp.rs](zbobr-dispatcher/src/mcp.rs), and the coordinator binary at [zbobr/src/main.rs](zbobr/src/main.rs).

@@ -2,8 +2,8 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 
-use zbobr_lib::backend::Backend;
-use zbobr_lib::{Model, Parameter, Signal, Stage, Task, Tool, ZbobrConfig, ZbobrError};
+use zbobr_dispatcher::backend::Backend;
+use zbobr_dispatcher::{Model, Parameter, Signal, Stage, Task, Tool, ZbobrConfig, ZbobrError};
 
 /// Convert an octocrab error into a ZbobrError with detailed information.
 fn octocrab_to_zbobr_error(e: octocrab::Error) -> ZbobrError {
@@ -314,7 +314,7 @@ impl Backend for GitHubBackend {
 
         let body = issue.body.unwrap_or_default();
         // Parse full description including PARAMETERS, PLAN and CHECKLIST
-        let (description, params_map, plan, checklist) = zbobr_lib::backend::parse_description_full(&body);
+        let (description, params_map, plan, checklist) = zbobr_dispatcher::backend::parse_description_full(&body);
 
         let tool = issue.labels.iter().find_map(|l| {
             if let Some(name) = l.name.strip_prefix("tool:") {
@@ -411,7 +411,7 @@ impl Backend for GitHubBackend {
         if let Some(v) = parameters.get(&Parameter::PrUrl) {
             params_text.insert(Parameter::PrUrl.name().to_string(), v.clone());
         }
-        let body = zbobr_lib::backend::serialize_description_full(description, &params_text, "", &[]);
+        let body = zbobr_dispatcher::backend::serialize_description_full(description, &params_text, "", &[]);
 
         let stage_number = self.find_stage_number(stage.milestone_name()).await?;
 
@@ -595,7 +595,7 @@ impl Backend for GitHubBackend {
             // Check if there was a concurrent modification
             if current_body != current_expected {
                 // Conflict detected! Merge the changes
-                let merged = zbobr_lib::backend::merge_concurrent_description_updates(
+                let merged = zbobr_dispatcher::backend::merge_concurrent_description_updates(
                     current_expected,
                     &current_body,
                     new_description,
@@ -655,7 +655,7 @@ impl Backend for GitHubBackend {
 
             let body = issue.body.unwrap_or_default();
             // Parse full description including PARAMETERS, PLAN and CHECKLIST
-            let (description, params_map, plan, checklist) = zbobr_lib::backend::parse_description_full(&body);
+            let (description, params_map, plan, checklist) = zbobr_dispatcher::backend::parse_description_full(&body);
             let task_tool = issue.labels.iter().find_map(|l| {
                 if let Some(name) = l.name.strip_prefix("tool:") {
                     match name {
