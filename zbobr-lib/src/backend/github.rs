@@ -332,7 +332,6 @@ impl Backend for GitHubBackend {
                 match name {
                     "copilot" => Some(Tool::Copilot),
                     "claude" => Some(Tool::Claude),
-                    "stub" => Some(Tool::Stub),
                     _ => None,
                 }
             } else {
@@ -673,7 +672,6 @@ impl Backend for GitHubBackend {
                     match name {
                         "copilot" => Some(Tool::Copilot),
                         "claude" => Some(Tool::Claude),
-                        "stub" => Some(Tool::Stub),
                         _ => None,
                     }
                 } else {

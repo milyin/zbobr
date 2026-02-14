@@ -48,17 +48,13 @@ struct GlobalArgs {
     #[arg(long, env = "ZBOBR_REVIEWER_PROMPTS", value_delimiter = ';')]
     reviewer_prompts: Option<Vec<PathBuf>>,
 
-    /// Backend to use: "github" (default) or "stub"
+    /// Backend to use: "github" (default)
     #[arg(long, env = "ZBOBR_BACKEND")]
     backend: Option<String>,
 
-    /// CLI tool to use: "copilot", "claude", or "stub"
+    /// CLI tool to use: "copilot" or "claude"
     #[arg(long, env = "ZBOBR_CLI_TOOL")]
     cli_tool: Option<String>,
-
-    /// Port for the Admin MCP server (optional)
-    #[arg(long, env = "ZBOBR_ADMIN_PORT")]
-    admin_port: Option<u16>,
 }
 
 #[derive(Parser)]
@@ -528,7 +524,6 @@ async fn main() -> anyhow::Result<()> {
                 cleanup_interval,
                 model_enum,
                 port,
-                cli.global.admin_port,
                 &prompts,
             )
             .await?;
@@ -688,7 +683,6 @@ async fn run_manager_loop(
     cleanup_interval_secs: u64,
     model: Option<Model>,
     port: u16,
-    admin_port: Option<u16>,
     prompts: &Prompts,
 ) -> anyhow::Result<()> {
     let model = model.unwrap_or_else(|| zbobr.config().default_model.clone());
@@ -749,17 +743,6 @@ async fn run_manager_loop(
     tracing::info!("Backend: {:?}", zbobr.config().backend);
 
     let mut last_cleanup = std::time::Instant::now();
-
-    // Start Admin MCP server if port is provided
-    if let Some(a_port) = admin_port {
-        let admin_zbobr = zbobr.clone();
-        tokio::spawn(async move {
-            tracing::info!("Starting Admin MCP on port {a_port}");
-            if let Err(e) = zbobr_lib::mcp::run_admin_mcp_server(admin_zbobr, a_port).await {
-                tracing::error!("Admin MCP server error: {e}");
-            }
-        });
-    }
 
     loop {
         // Run cleanup if interval has passed

@@ -225,15 +225,13 @@ pub enum Tool {
     Copilot,
     #[serde(rename = "claude")]
     Claude,
-    #[serde(rename = "stub")]
-    Stub,
 }
 
 
 impl Tool {
     /// Returns all available tools.
     pub fn all() -> &'static [Tool] {
-        &[Tool::Copilot, Tool::Claude, Tool::Stub]
+        &[Tool::Copilot, Tool::Claude]
     }
 
     /// Returns the appropriate executor for this tool.
@@ -241,7 +239,6 @@ impl Tool {
         match self {
             Tool::Copilot => Box::new(crate::tool_executor::CopilotExecutor),
             Tool::Claude => Box::new(crate::tool_executor::ClaudeExecutor),
-            Tool::Stub => Box::new(crate::tool_executor::StubExecutor),
         }
     }
 }
@@ -251,7 +248,6 @@ impl std::fmt::Display for Tool {
         match self {
             Tool::Copilot => write!(f, "copilot"),
             Tool::Claude => write!(f, "claude"),
-            Tool::Stub => write!(f, "stub"),
         }
     }
 }
@@ -262,7 +258,6 @@ impl std::str::FromStr for Tool {
         match s.to_lowercase().as_str() {
             "copilot" => Ok(Tool::Copilot),
             "claude" => Ok(Tool::Claude),
-            "stub" => Ok(Tool::Stub),
             _ => Err(format!("Unknown tool: {}", s)),
         }
     }
@@ -350,7 +345,6 @@ impl Model {
                 Model::Claude3Opus => Some("opus"),
                 _ => None,
             },
-            Tool::Stub => Some("stub-model"),
         }
     }
 }
@@ -1261,10 +1255,6 @@ mod tests {
             Some("sonnet")
         );
         assert_eq!(Model::Gpt5_2.model_name_for_tool(Tool::Claude), None);
-        assert_eq!(
-            Model::Gpt5_1Codex.model_name_for_tool(Tool::Stub),
-            Some("stub-model")
-        );
     }
 
     #[test]

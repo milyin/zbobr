@@ -12,8 +12,6 @@ pub enum BackendType {
     #[serde(rename = "github")]
     #[default]
     GitHub,
-    #[serde(rename = "stub")]
-    Stub,
 }
 
 
@@ -21,7 +19,6 @@ impl std::fmt::Display for BackendType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BackendType::GitHub => write!(f, "github"),
-            BackendType::Stub => write!(f, "stub"),
         }
     }
 }
@@ -31,7 +28,6 @@ impl std::str::FromStr for BackendType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "github" => Ok(BackendType::GitHub),
-            "stub" => Ok(BackendType::Stub),
             _ => Err(format!("Unknown backend: {}", s)),
         }
     }
@@ -452,7 +448,7 @@ mod tests {
             owner_github_token: "owner-token".to_string(),
             agent_github_token: "agent-token".to_string(),
             copilot_github_token: "copilot-token".to_string(),
-            backend: BackendType::Stub,
+            backend: BackendType::GitHub,
             cli_tool: Tool::Copilot,
             planner_prompts: vec![],
             worker_prompts: vec![],
@@ -520,7 +516,6 @@ mod tests {
     fork_owner = "myuser"
     default_model = "gpt-5-mini"
     workspace = "/tmp/workspace"
-    backend = "stub"
     cli_tool = "claude"
     work_branch_prefix = "my_fix"
 
@@ -532,7 +527,6 @@ mod tests {
         let config: TomlConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.task_repo.as_deref(), Some("org/repo"));
         assert_eq!(config.default_model, Some(Model::Gpt5Mini));
-        assert_eq!(config.backend, Some(BackendType::Stub));
         assert_eq!(config.cli_tool, Some(Tool::Claude));
         let prompts = config.prompts.unwrap();
         assert_eq!(prompts.path, Some(PathBuf::from("/opt/prompts")));
@@ -572,7 +566,7 @@ mod tests {
             owner_github_token: Some("toml-owner-token".into()),
             agent_github_token: Some("toml-agent-token".into()),
             copilot_github_token: Some("toml-copilot-token".into()),
-            backend: Some(BackendType::Stub),
+            backend: Some(BackendType::GitHub),
             cli_tool: Some(Tool::Claude),
             work_branch_prefix: Some("toml_fix".into()),
             git_user_name: Some("test-user".into()),
@@ -591,7 +585,7 @@ mod tests {
         assert_eq!(config.fork_owner, "toml-fork");
         assert_eq!(config.default_model, Model::Claude3Opus);
         assert_eq!(config.workspace, PathBuf::from("/tmp/toml-ws"));
-        assert_eq!(config.backend, BackendType::Stub);
+        assert_eq!(config.backend, BackendType::GitHub);
         assert_eq!(config.cli_tool, Tool::Claude);
         assert_eq!(config.work_branch_prefix, "toml_fix");
         assert_eq!(config.planner_prompts, vec![PathBuf::from("p.md")]);
@@ -622,9 +616,8 @@ mod tests {
             "github".parse::<BackendType>().unwrap(),
             BackendType::GitHub
         );
-        assert_eq!("stub".parse::<BackendType>().unwrap(), BackendType::Stub);
+        assert!("stub".parse::<BackendType>().is_err());
         assert!("invalid".parse::<BackendType>().is_err());
         assert_eq!(BackendType::GitHub.to_string(), "github");
-        assert_eq!(BackendType::Stub.to_string(), "stub");
     }
 }

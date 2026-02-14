@@ -12,7 +12,7 @@ use rmcp::{
 use serde_json::Value;
 
 use crate::{
-    task::{Model, ChecklistItem, Parameter, Role, Stage, TaskSession, Tool},
+    task::{ChecklistItem, Parameter, Role, TaskSession},
     Zbobr,
 };
 
@@ -67,44 +67,6 @@ pub struct PathParam {
 pub struct ShortNameParam {
     #[schemars(description = "Short name for the branch (e.g. 'implementation', 'fix-typo')")]
     pub short_name: String,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct TaskIdParam {
-    #[schemars(description = "The task ID")]
-    pub id: u64,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct CreateTaskParam {
-    #[schemars(description = "Task title")]
-    pub title: String,
-    #[schemars(description = "Task description")]
-    pub description: String,
-    #[schemars(description = "Task tool (optional)")]
-    pub tool: Option<Tool>,
-    #[schemars(description = "Task model (optional)")]
-    pub model: Option<Model>,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct UpdateTaskParam {
-    pub id: u64,
-    pub description: String,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct SetStageParam {
-    pub id: u64,
-    pub stage: Stage,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct StageParam {
-    #[schemars(description = "Stage name (e.g. PENDING, GO_PLANNING, etc.)")]
-    pub stage: String,
-    #[schemars(description = "Optional tool filter")]
-    pub tool: Option<Tool>,
 }
 
 // -- Checklist parameter types --
@@ -225,17 +187,6 @@ mcp_tools! {
     PUSH_WORK = "push_work",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
-}
-
-mcp_tools! {
-    admin_tools,
-    LIST_TASKS = "list_tasks",
-    CREATE_TASK = "create_task",
-    GET_TASK = "get_task",
-    UPDATE_TASK_DESCRIPTION = "update_task_description",
-    SET_TASK_STAGE = "set_task_stage",
-    GET_DISCUSSION = "get_discussion",
-    DEBUG_STATE = "debug_state",
 }
 
 /// Generate hardcoded planner instructions using tool name constants.
@@ -1405,151 +1356,6 @@ impl ReviewerMcp {
     }
 }
 
-// -- Admin MCP service --
-
-#[derive(Clone)]
-pub struct AdminMcp {
-    zbobr: Zbobr,
-    tool_router: ToolRouter<Self>,
-}
-
-#[tool_router]
-impl AdminMcp {
-    pub fn new(zbobr: Zbobr) -> Self {
-        Self {
-            zbobr,
-            tool_router: Self::tool_router(),
-        }
-    }
-
-    #[tool(description = "List tasks in a specific stage")]
-    async fn list_tasks(&self, Parameters(params): Parameters<StageParam>) -> String {
-        tracing::info!(
-            "[admin] list_tasks stage={} tool={:?}",
-            params.stage,
-            params.tool
-        );
-        match self
-            .zbobr
-            .list_tasks_by_stage(&params.stage, params.tool)
-            .await
-        {
-            Ok(tasks) => {
-                if tasks.is_empty() {
-                    "No tasks found.".to_string()
-                } else {
-                    let lines: Vec<_> = tasks
-                        .into_iter()
-                        .map(|t| format!("#{} ({}): {}", t.id, t.stage, t.title))
-                        .collect();
-                    lines.join("\n")
-                }
-            }
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
-    #[tool(description = "Create a new task")]
-    async fn create_task(&self, Parameters(params): Parameters<CreateTaskParam>) -> String {
-        tracing::info!("[admin] create_task title={}", params.title);
-        match self
-            .zbobr
-            .create_task(
-                &params.title,
-                &params.description,
-                Stage::Planning,
-                params.tool,
-                params.model,
-                None,
-                None,
-            )
-            .await
-        {
-            Ok(id) => format!("Created task #{}", id),
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
-    #[tool(description = "Get details of a task")]
-    async fn get_task(&self, Parameters(params): Parameters<TaskIdParam>) -> String {
-        tracing::info!("[admin] get_task id={}", params.id);
-        match self.zbobr.get_task(params.id).await {
-            Ok(task) => format!(
-                "ID: {}\nTitle: {}\nStage: {:?}\nTool: {:?}\nModel: {:?}\nDone: {}\n\n{}",
-                task.id, task.title, task.stage, task.tool, task.model, task.done, task.description
-            ),
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
-    #[tool(description = "Update the description of a task")]
-    async fn update_task_description(
-        &self,
-        Parameters(params): Parameters<UpdateTaskParam>,
-    ) -> String {
-        tracing::info!("[admin] update_task_description id={}", params.id);
-        match self
-            .zbobr
-            .update_task_description(params.id, &params.description)
-            .await
-        {
-            Ok(()) => "Task description updated".to_string(),
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
-    #[tool(description = "Change the stage of a task")]
-    async fn set_task_stage(&self, Parameters(params): Parameters<SetStageParam>) -> String {
-        tracing::info!(
-            "[admin] set_task_stage id={} stage={}",
-            params.id,
-            params.stage
-        );
-        match self
-            .zbobr
-            .set_task_stage_by_name(params.id, params.stage.milestone_name())
-            .await
-        {
-            Ok(()) => format!("Stage updated to {}", params.stage),
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
-    #[tool(description = "Get all logs/comments for a task")]
-    async fn get_discussion(&self, Parameters(params): Parameters<TaskIdParam>) -> String {
-        tracing::info!("[admin] get_discussion id={}", params.id);
-        match self.zbobr.get_task_comments(params.id).await {
-            Ok(comments) => {
-                if comments.is_empty() {
-                    "No logs/comments yet.".to_string()
-                } else {
-                    comments.join("\n\n---\n\n")
-                }
-            }
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
-    #[tool(description = "DEBUG: Return internal backend state")]
-    async fn debug_state(&self) -> String {
-        tracing::info!("[admin] debug_state");
-        self.zbobr.debug_state()
-    }
-}
-
-#[tool_handler]
-impl ServerHandler for AdminMcp {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            instructions: Some(
-                "Admin tools: full control over tasks, statuses, and logs.".to_string(),
-            ),
-            ..Default::default()
-        }
-    }
-}
-
 /// Find an available port starting from the given base port.
 /// Tries ports incrementally until one is available.
 async fn find_available_port(base_port: u16) -> Result<u16, crate::ZbobrError> {
@@ -1655,29 +1461,14 @@ pub async fn run_role_mcp_server(
     serve_mcp(base_port, &path, router).await
 }
 
-/// Run the admin MCP HTTP server.
-/// Returns the actual port that was assigned.
-pub async fn run_admin_mcp_server(zbobr: Zbobr, base_port: u16) -> Result<u16, crate::ZbobrError> {
-    let path = "/admin";
-
-    let svc = StreamableHttpService::new(
-        move || Ok(AdminMcp::new(zbobr.clone())),
-        Arc::new(LocalSessionManager::default()),
-        Default::default(),
-    );
-    let router = axum::Router::new().nest_service(path, svc);
-
-    serve_mcp(base_port, path, router).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::task::{Model, Tool};
 
-    /// Verifies that all tools registered in AdminMcp match the constants in admin_tools.
-    #[tokio::test]
-    async fn test_admin_tools_consistency() {
-        let config = crate::config::ZbobrConfig {
+    fn test_config() -> crate::config::ZbobrConfig {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        crate::config::ZbobrConfig {
             task_repo: "test/repo".to_string(),
             fork_owner: "test-owner".to_string(),
             default_model: Model::Gpt4o,
@@ -1685,8 +1476,8 @@ mod tests {
             owner_github_token: "owner-token".to_string(),
             agent_github_token: "agent-token".to_string(),
             copilot_github_token: "copilot-token".to_string(),
-            backend: crate::config::BackendType::Stub,
-            cli_tool: Tool::Stub,
+            backend: crate::config::BackendType::GitHub,
+            cli_tool: Tool::Claude,
             planner_prompts: vec![],
             worker_prompts: vec![],
             reviewer_prompts: vec![],
@@ -1695,45 +1486,12 @@ mod tests {
             prompts_path: None,
             git_user_name: "Test User".to_string(),
             git_user_email: "test@example.com".to_string(),
-        };
-        let zbobr = Zbobr::new(config).unwrap();
-        let admin = AdminMcp::new(zbobr);
-
-        let tools = admin.tool_router.list_all();
-        let mut tool_names: Vec<_> = tools.iter().map(|t| t.name.as_ref()).collect();
-        tool_names.sort();
-
-        let mut expected_names = admin_tools::ALL_TOOLS.to_vec();
-        expected_names.sort();
-
-        assert_eq!(
-            tool_names, expected_names,
-            "Exposed admin tools do not match admin_tools::ALL_TOOLS"
-        );
+        }
     }
 
     #[tokio::test]
     async fn test_planner_tools_consistency() {
-        let config = crate::config::ZbobrConfig {
-            task_repo: "test/repo".to_string(),
-            fork_owner: "test-owner".to_string(),
-            default_model: Model::Gpt4o,
-            workspace: std::path::PathBuf::from("/tmp"),
-            owner_github_token: "owner-token".to_string(),
-            agent_github_token: "agent-token".to_string(),
-            copilot_github_token: "copilot-token".to_string(),
-            backend: crate::config::BackendType::Stub,
-            cli_tool: Tool::Stub,
-            planner_prompts: vec![],
-            worker_prompts: vec![],
-            reviewer_prompts: vec![],
-            merger_prompts: vec![],
-            work_branch_prefix: "zbobr_fix".to_string(),
-            prompts_path: None,
-            git_user_name: "Test User".to_string(),
-            git_user_email: "test@example.com".to_string(),
-        };
-        let zbobr = Zbobr::new(config).unwrap();
+        let zbobr = Zbobr::new(test_config()).unwrap();
         let planner = PlannerMcp::new(zbobr, 123);
 
         let tools = planner.tool_router.list_all();
@@ -1751,26 +1509,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_worker_tools_consistency() {
-        let config = crate::config::ZbobrConfig {
-            task_repo: "test/repo".to_string(),
-            fork_owner: "test-owner".to_string(),
-            default_model: Model::Gpt4o,
-            workspace: std::path::PathBuf::from("/tmp"),
-            owner_github_token: "owner-token".to_string(),
-            agent_github_token: "agent-token".to_string(),
-            copilot_github_token: "copilot-token".to_string(),
-            backend: crate::config::BackendType::Stub,
-            cli_tool: Tool::Stub,
-            planner_prompts: vec![],
-            worker_prompts: vec![],
-            reviewer_prompts: vec![],
-            merger_prompts: vec![],
-            work_branch_prefix: "zbobr_fix".to_string(),
-            prompts_path: None,
-            git_user_name: "Test User".to_string(),
-            git_user_email: "test@example.com".to_string(),
-        };
-        let zbobr = Zbobr::new(config).unwrap();
+        let zbobr = Zbobr::new(test_config()).unwrap();
         let worker = WorkerMcp::new(zbobr, 123);
 
         let tools = worker.tool_router.list_all();

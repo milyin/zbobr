@@ -1,6 +1,6 @@
 # Zbobr
 
-AI-powered task orchestrator that manages GitHub issues through automated stages using pluggable AI tools (GitHub Copilot, Claude Code, or stubs for testing).
+AI-powered task orchestrator that manages GitHub issues through automated stages using pluggable AI tools (GitHub Copilot, Claude Code).
 
 ## Overview
 
@@ -118,7 +118,7 @@ This is the recommended approach for task-project workflows, as it eliminates th
 These are orchestrator-owned and universal—same across all task projects:
 
 **Labels:**
-- `tool:<name>` — Specifies which AI tool to use (e.g., `tool:copilot`, `tool:claude`, `tool:stub`)
+- `tool:<name>` — Specifies which AI tool to use (e.g., `tool:copilot`, `tool:claude`)
 - `model:<name>` — Specifies which AI model to use (e.g., `model:gpt-5-mini`, `model:claude-opus-4.6`)
 - `done` — Issue implementation is complete
 
@@ -194,9 +194,8 @@ All settings can be provided via CLI flags, environment variables, or `zbobr.tom
 | `--prompts-path` | `ZBOBR_PROMPTS_PATH` | Base directory for prompt files |
 | `--planner-prompts` | `ZBOBR_PLANNER_PROMPTS` | Semicolon-separated list of prompt files for planner |
 | `--worker-prompts` | `ZBOBR_WORKER_PROMPTS` | Semicolon-separated list of prompt files for worker |
-| `--backend` | `ZBOBR_BACKEND` | Backend to use: `github` (default) or `stub` |
-| `--cli-tool` | `ZBOBR_CLI_TOOL` | CLI tool to use: `copilot`, `claude`, or `stub` |
-| `--admin-port` | `ZBOBR_ADMIN_PORT` | Port for the Admin MCP server (optional) |
+| `--backend` | `ZBOBR_BACKEND` | Backend to use: `github` (default) |
+| `--cli-tool` | `ZBOBR_CLI_TOOL` | CLI tool to use: `copilot` or `claude` |
 | | `ZBOBR_DEFAULT_MODEL` | Default AI model when no `model:<name>` label is set |
 
 Configuration priority: CLI flags > environment variables > `zbobr.toml` > defaults.

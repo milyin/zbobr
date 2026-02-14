@@ -12,12 +12,9 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 pub use config::{TomlConfig, ZbobrConfig};
 pub use mcp::{planner_instructions, worker_instructions, reviewer_instructions, merger_instructions, PlannerMcp, WorkerMcp, ReviewerMcp, MergerMcp};
 pub use task::{Model, ChecklistItem, Parameter, Signal, Stage, Task, TaskSession, Tool};
-pub use tool_executor::{ClaudeExecutor, CopilotExecutor, StubExecutor, ToolExecutor};
+pub use tool_executor::{ClaudeExecutor, CopilotExecutor, ToolExecutor};
 
-use crate::{
-    backend::{github::GitHubBackend, stub::StubBackend, Backend},
-    config::BackendType,
-};
+use crate::backend::{github::GitHubBackend, Backend};
 
 /// Central struct holding configuration and backend.
 #[derive(Clone)]
@@ -33,16 +30,11 @@ impl Zbobr {
     /// Create a new Zbobr instance from config.
     pub fn new(config: ZbobrConfig) -> Result<Self, ZbobrError> {
         let config_arc = Arc::new(config.clone());
-        let backend: Arc<dyn Backend> = match config.backend {
-            BackendType::GitHub => {
-                let octocrab = octocrab::Octocrab::builder()
-                    .personal_token(config.owner_github_token.clone())
-                    .build()
-                    .map_err(|e| ZbobrError::GitHub(e.to_string()))?;
-                Arc::new(GitHubBackend::new(config_arc.clone(), octocrab))
-            }
-            BackendType::Stub => Arc::new(StubBackend::new(config.workspace.clone())),
-        };
+        let octocrab = octocrab::Octocrab::builder()
+            .personal_token(config.owner_github_token.clone())
+            .build()
+            .map_err(|e| ZbobrError::GitHub(e.to_string()))?;
+        let backend: Arc<dyn backend::Backend> = Arc::new(GitHubBackend::new(config_arc.clone(), octocrab));
 
         Ok(Self {
             config: config_arc,

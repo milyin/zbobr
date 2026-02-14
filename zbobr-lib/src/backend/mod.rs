@@ -1,5 +1,4 @@
 pub mod github;
-pub mod stub;
 
 use std::path::PathBuf;
 

@@ -11,14 +11,13 @@ Add the following project-wide rules for Copilot / agent-related changes:
   pub const ISSUE_LABEL_BUG: &str = "bug";
 
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-  pub enum Tool { Copilot, Claude, Stub }
+  pub enum Tool { Copilot, Claude }
 
   impl std::fmt::Display for Tool {
       fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
           match self {
               Tool::Copilot => write!(f, "copilot"),
               Tool::Claude => write!(f, "claude"),
-              Tool::Stub => write!(f, "stub"),
           }
       }
   }
