@@ -25,8 +25,12 @@ pub struct GitHubBackend {
 }
 
 impl GitHubBackend {
-    pub fn new(config: Arc<ZbobrConfig>, octocrab: octocrab::Octocrab) -> Self {
-        Self { config, octocrab }
+    pub fn new(config: Arc<ZbobrConfig>) -> Result<Self, ZbobrError> {
+        let octocrab = octocrab::Octocrab::builder()
+            .personal_token(config.owner_github_token.clone())
+            .build()
+            .map_err(|e| ZbobrError::GitHub(format!("Failed to build octocrab client: {e}")))?;
+        Ok(Self { config, octocrab })
     }
 
     /// Convert a Signal to its GitHub label representation.

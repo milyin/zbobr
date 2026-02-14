@@ -144,7 +144,6 @@ impl Default for ZbobrConfig {
 
 trait EnvSource {
     fn var(&self, key: &str) -> Option<String>;
-    fn gh_auth_token(&self) -> Option<String>;
 }
 
 struct OsEnv;
@@ -153,32 +152,6 @@ impl EnvSource for OsEnv {
     fn var(&self, key: &str) -> Option<String> {
         std::env::var(key).ok()
     }
-
-    fn gh_auth_token(&self) -> Option<String> {
-        get_gh_auth_token()
-    }
-}
-
-/// Get the default GitHub token from `gh auth token` command.
-/// Returns None if the command fails or token is empty.
-fn get_gh_auth_token() -> Option<String> {
-    std::process::Command::new("gh")
-        .arg("auth")
-        .arg("token")
-        .output()
-        .ok()
-        .and_then(|output| {
-            if output.status.success() {
-                let token = String::from_utf8(output.stdout).ok()?.trim().to_string();
-                if !token.is_empty() {
-                    Some(token)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
 }
 
 /// Read an env var, falling back to a TOML value, then to a default.

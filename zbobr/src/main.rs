@@ -419,12 +419,8 @@ async fn main() -> anyhow::Result<()> {
     let cli = parse_cli();
     let config = load_config(&cli)?;
     let config_arc = Arc::new(config.clone());
-    let octocrab = octocrab::Octocrab::builder()
-        .personal_token(config.owner_github_token.clone())
-        .build()
-        .context("Failed to build octocrab client")?;
     let backend: Arc<dyn zbobr_lib::backend::Backend> =
-        Arc::new(GitHubBackend::new(config_arc, octocrab));
+        Arc::new(GitHubBackend::new(config_arc).context("Failed to create GitHub backend")?);
     let zbobr = Zbobr::new(config, backend);
     zbobr.validate_connectivity().await?;
     let prompts = resolve_prompts(&cli, zbobr.config())?;
