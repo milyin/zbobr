@@ -183,22 +183,10 @@ zbobr work 42 --task-repo YoroolGui/copilot-zenoh --fork-owner YoroolGui
 
 ## Configuration
 
-All settings can be provided via CLI flags, environment variables, or `zbobr.toml`:
+All settings can be provided via CLI flags or `zbobr.toml`:
 
-| CLI Flag | Env Variable | Description |
-|----------|-------------|-------------|
-| `--task-repo` | `ZBOBR_TASK_REPO` | GitHub repo whose issues the orchestrator processes (`owner/repo`) |
-| `--fork-owner` | `ZBOBR_FORK_OWNER` | GitHub user or org where target repos are forked for implementation |
-| `--workspace` | `ZBOBR_WORKSPACE` | Directory for agent workspaces (default: `./workspace`) |
-| `--config` | `ZBOBR_CONFIG` | Path to TOML configuration file (default: `zbobr.toml` in cwd) |
-| `--prompts-path` | `ZBOBR_PROMPTS_PATH` | Base directory for prompt files |
-| `--planner-prompts` | `ZBOBR_PLANNER_PROMPTS` | Semicolon-separated list of prompt files for planner |
-| `--worker-prompts` | `ZBOBR_WORKER_PROMPTS` | Semicolon-separated list of prompt files for worker |
-| `--backend` | `ZBOBR_BACKEND` | Backend to use: `github` (default) |
-| `--cli-tool` | `ZBOBR_CLI_TOOL` | CLI tool to use: `copilot` or `claude` |
-| | `ZBOBR_DEFAULT_MODEL` | Default AI model when no `model:<name>` label is set |
-
-Configuration priority: CLI flags > environment variables > `zbobr.toml` > defaults.
+All configuration is read from CLI flags or the `zbobr.toml` file in the task project.
+CLI flags override values in `zbobr.toml`.
 
 ### Available Models
 
@@ -215,65 +203,57 @@ Use labels like `model:claude-opus-4.6` on issues to select a specific model, an
 
 Zbobr uses the GitHub API via a personal access token. It reads the token from the `GH_TOKEN` environment variable (or `GITHUB_TOKEN` as fallback).
 
-**If you already have `gh` CLI authenticated** (i.e., `gh auth status` shows you're logged in), you can reuse that session — no separate token or login is needed:
+If you already have the `gh` CLI authenticated (i.e., `gh auth status` shows you're logged in), you can export the `gh` session token into `GH_TOKEN` so zbobr picks it up:
 
 ```bash
 # Export your existing gh session token for zbobr to use
 export GH_TOKEN=$(gh auth token)
 ```
 
-Add this to your shell profile (e.g., `~/.bashrc`, `~/.zshrc`) to make it persistent:
+Add this to your shell profile (e.g., `~/.bashrc`, `~/.zshrc`) to make it persistent.
 
-```bash
-# In ~/.zshrc or ~/.bashrc
-export GH_TOKEN=$(gh auth token)
-```
-
-**Alternative: use a personal access token directly.** If you prefer not to depend on `gh`, you can create a [GitHub Personal Access Token](https://github.com/settings/tokens) with `repo` scope and set it manually:
+Alternative: create a [GitHub Personal Access Token](https://github.com/settings/tokens) with `repo` scope and set it directly:
 
 ```bash
 export GH_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 ```
 
-**Token resolution order:**
+Token resolution order used by zbobr:
 1. `GH_TOKEN` environment variable (preferred — matches `gh` CLI convention)
 2. `GITHUB_TOKEN` environment variable (fallback — matches GitHub Actions convention)
 
-**Required token permissions:** The token needs `repo` scope (full access to repositories) to create forks, manage issues/labels/milestones, and push branches.
+Required token permissions: The token needs `repo` scope (full access to repositories) to create forks, manage issues/labels/milestones, and push branches.
 
 ### GitHub Tokens for Agents and Copilot
 
 Zbobr manages **three distinct GitHub tokens** with different access levels and purposes:
 
-#### 1. Owner Token (`ZBOBR_OWNER_GH_TOKEN`)
+#### 1. Owner Token
 - **Purpose**: Used by zbobr orchestrator for repository management (creating forks, managing issues, labels, milestones)
 - **Access Level**: Write access to repositories
 - **Resolution Order**:
-  1. `ZBOBR_OWNER_GH_TOKEN` environment variable
-  2. `GH_TOKEN` environment variable
-  3. `GITHUB_TOKEN` environment variable
-  4. `$(gh auth token)` — **Note**: `gh auth token` itself checks `GH_TOKEN` and `GITHUB_TOKEN`, so this is effectively a convenience wrapper around steps 2-3
+   1. `GH_TOKEN` environment variable
+   2. `GITHUB_TOKEN` environment variable
+   3. `owner_github_token` in `zbobr.toml`
 - **Config File**: `owner_github_token` in `zbobr.toml`
 
-#### 2. Agent Token (`ZBOBR_AGENT_GH_TOKEN`) — **REQUIRED for restricted access**
+#### 2. Agent Token — **REQUIRED for restricted access**
 - **Purpose**: Passed to agent processes (Copilot/Claude sessions) as `GH_TOKEN` and `GITHUB_TOKEN`
 - **Access Level**: Read-only (should have minimal permissions)
 - **Why**: Restricts what agents can do on GitHub—they can read repos but cannot push code or modify settings
-- **Must Be Different From**: `ZBOBR_OWNER_GH_TOKEN` (security requirement—agents cannot have write access)
-- **Resolution**: Explicitly set via environment variable or config file (no fallback)
+- **Must Be Different From**: owner token (security requirement—agents cannot have write access)
+- **Resolution**: Set `agent_github_token` in `zbobr.toml` or provide via CLI. There is no zbobr-specific environment variable fallback for this token.
 - **Config File**: `agent_github_token` in `zbobr.toml`
 
-#### 3. Copilot Token (`ZBOBR_COPILOT_GITHUB_TOKEN`) — **Required when restricting agent token**
+#### 3. Copilot Token — **Required when restricting agent token**
 - **Purpose**: Copilot CLI's own GitHub token (passed as `COPILOT_GITHUB_TOKEN` to agent sessions)
 - **Access Level**: Copilot's own permissions (typically full access)
-- **Why**: When you restrict `ZBOBR_AGENT_GH_TOKEN` for gh commands, Copilot itself needs its own full-access token to work properly
-- **⚠️ IMPORTANT**: If you want to give agents read-only GitHub access via `GH_TOKEN`, you MUST provide `ZBOBR_COPILOT_GITHUB_TOKEN` so Copilot can create forks and push to its own session repos
+- **Why**: When you restrict the agent token for gh commands, Copilot itself may need its own full-access token to work properly
 - **Resolution Order**:
-  1. `ZBOBR_COPILOT_GITHUB_TOKEN` environment variable
-  2. `COPILOT_GITHUB_TOKEN` environment variable
-  3. `GH_TOKEN` environment variable
-  4. `GITHUB_TOKEN` environment variable
-  5. `$(gh auth token)` — **Note**: `gh auth token` itself checks `GH_TOKEN` and `GITHUB_TOKEN`, so this is effectively a convenience wrapper around steps 3-4
+   1. `COPILOT_GITHUB_TOKEN` environment variable
+   2. `GH_TOKEN` environment variable
+   3. `GITHUB_TOKEN` environment variable
+   4. `copilot_github_token` in `zbobr.toml`
 - **Config File**: `copilot_github_token` in `zbobr.toml`
 
 

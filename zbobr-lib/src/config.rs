@@ -45,7 +45,7 @@ pub struct TomlPrompts {
 }
 
 /// Configuration loaded from a TOML file.
-/// All fields are optional — missing fields fall back to env vars or defaults.
+/// All fields are optional — missing fields fall back to TOML or defaults.
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct TomlConfig {
@@ -144,11 +144,6 @@ impl Default for ZbobrConfig {
 
 trait EnvSource {
     fn var(&self, key: &str) -> Option<String>;
-    /// Optionally return a GH auth token by invoking `gh auth token` or another
-    /// mechanism. Default implementation returns `None`.
-    fn gh_auth_token(&self) -> Option<String> {
-        None
-    }
 }
 
 struct OsEnv;
@@ -159,32 +154,16 @@ impl EnvSource for OsEnv {
     }
 }
 
-/// Read an env var, falling back to a TOML value, then to a default.
-fn env_or<E: EnvSource>(env: &E, env_key: &str, toml_val: Option<&str>, default: &str) -> String {
-    env.var(env_key)
-        .or_else(|| toml_val.map(String::from))
-        .unwrap_or_else(|| default.to_string())
-}
-
-/// Read an env var and parse it via FromStr, returning None if unset or parse fails.
-fn env_parsed<T: std::str::FromStr, E: EnvSource>(env: &E, env_key: &str) -> Option<T> {
-    env.var(env_key).and_then(|v| v.parse().ok())
-}
-
-/// Read an env var as semicolon-separated PathBufs, returning None if unset.
-fn env_path_list<E: EnvSource>(env: &E, env_key: &str) -> Option<Vec<PathBuf>> {
-    env.var(env_key).map(|v| {
-        v.split(';')
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from)
-            .collect()
-    })
-}
+// Note: zbobr-specific env helpers were removed — configuration now comes
+// from TOML/CLI or explicit external GH env vars. `EnvSource` provides an
+// abstraction for reading environment variables in tests.
 
 impl ZbobrConfig {
-    /// Build configuration by layering: defaults < TOML < env vars.
+    /// Build configuration by layering: defaults < TOML.
     ///
-    /// Priority: env vars > TOML file > hardcoded defaults.
+    /// Priority: TOML file > hardcoded defaults. Environment variables are not
+    /// consulted for zbobr-specific parameters; only external GH token env vars
+    /// (`COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`) are recognized.
     pub fn build(toml: Option<&TomlConfig>) -> Result<Self, ZbobrError> {
         let env = OsEnv;
         Self::build_with_env(toml, &env)
@@ -193,103 +172,78 @@ impl ZbobrConfig {
     fn build_with_env<E: EnvSource>(toml: Option<&TomlConfig>, env: &E) -> Result<Self, ZbobrError> {
         let defaults = ZbobrConfig::default();
 
-        let task_repo = env_or(
-            env,
-            "ZBOBR_TASK_REPO",
-            toml.and_then(|t| t.task_repo.as_deref()),
-            &defaults.task_repo,
-        );
+        let task_repo = toml
+            .and_then(|t| t.task_repo.clone())
+            .unwrap_or(defaults.task_repo);
 
-        let fork_owner = env_or(
-            env,
-            "ZBOBR_FORK_OWNER",
-            toml.and_then(|t| t.fork_owner.as_deref()),
-            &defaults.fork_owner,
-        );
+        let fork_owner = toml
+            .and_then(|t| t.fork_owner.clone())
+            .unwrap_or(defaults.fork_owner);
 
-        let default_model = env_parsed::<Model, _>(env, "ZBOBR_DEFAULT_MODEL")
-            .or_else(|| toml.and_then(|t| t.default_model.clone()))
+        let default_model = toml
+            .and_then(|t| t.default_model.clone())
             .unwrap_or(defaults.default_model);
 
-        let workspace = env
-            .var("ZBOBR_WORKSPACE")
-            .map(PathBuf::from)
-            .or_else(|| toml.and_then(|t| t.workspace.clone()))
+        let workspace = toml
+            .and_then(|t| t.workspace.clone())
             .unwrap_or(defaults.workspace);
 
-        let backend = env_parsed::<BackendType, _>(env, "ZBOBR_BACKEND")
-            .or_else(|| toml.and_then(|t| t.backend))
-            .unwrap_or(defaults.backend);
+        let backend = toml.and_then(|t| t.backend).unwrap_or(defaults.backend);
 
-        let cli_tool = env_parsed::<Tool, _>(env, "ZBOBR_CLI_TOOL")
-            .or_else(|| toml.and_then(|t| t.cli_tool))
-            .unwrap_or(defaults.cli_tool);
+        let cli_tool = toml.and_then(|t| t.cli_tool).unwrap_or(defaults.cli_tool);
 
-        let work_branch_prefix = env_or(
-            env,
-            "ZBOBR_WORK_BRANCH_PREFIX",
-            toml.and_then(|t| t.work_branch_prefix.as_deref()),
-            &defaults.work_branch_prefix,
-        );
+        let work_branch_prefix = toml
+            .and_then(|t| t.work_branch_prefix.clone())
+            .unwrap_or(defaults.work_branch_prefix);
 
         let toml_prompts = toml.and_then(|t| t.prompts.as_ref());
 
-        let planner_prompts = env_path_list(env, "ZBOBR_PLANNER_PROMPTS")
-            .or_else(|| toml_prompts.and_then(|p| p.planner.clone()))
+        let planner_prompts = toml_prompts
+            .and_then(|p| p.planner.clone())
             .unwrap_or(defaults.planner_prompts);
 
-        let worker_prompts = env_path_list(env, "ZBOBR_WORKER_PROMPTS")
-            .or_else(|| toml_prompts.and_then(|p| p.worker.clone()))
+        let worker_prompts = toml_prompts
+            .and_then(|p| p.worker.clone())
             .unwrap_or(defaults.worker_prompts);
 
-        let reviewer_prompts = env_path_list(env, "ZBOBR_REVIEWER_PROMPTS")
-            .or_else(|| toml_prompts.and_then(|p| p.reviewer.clone()))
+        let reviewer_prompts = toml_prompts
+            .and_then(|p| p.reviewer.clone())
             .unwrap_or(defaults.reviewer_prompts);
 
-        let merger_prompts = env_path_list(env, "ZBOBR_MERGER_PROMPTS")
-            .or_else(|| toml_prompts.and_then(|p| p.merger.clone()))
+        let merger_prompts = toml_prompts
+            .and_then(|p| p.merger.clone())
             .unwrap_or(defaults.merger_prompts);
 
-        let prompts_path = env
-            .var("ZBOBR_PROMPTS_PATH")
-            .map(PathBuf::from)
-            .or_else(|| toml_prompts.and_then(|p| p.path.clone()));
+        let prompts_path = toml_prompts.and_then(|p| p.path.clone());
 
         // Token resolution with proper priority
 
-        // ZBOBR_COPILOT_GITHUB_TOKEN: COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN > $(gh auth token)
+        // COPILOT_GITHUB_TOKEN: check external vars then TOML
         let copilot_github_token = env
-            .var("ZBOBR_COPILOT_GITHUB_TOKEN")
-            .or_else(|| env.var("COPILOT_GITHUB_TOKEN"))
+            .var("COPILOT_GITHUB_TOKEN")
             .or_else(|| env.var("GH_TOKEN"))
             .or_else(|| env.var("GITHUB_TOKEN"))
             .or_else(|| toml.and_then(|t| t.copilot_github_token.clone()))
-            .or_else(|| env.gh_auth_token())
             .unwrap_or_default();
 
-        // ZBOBR_OWNER_GH_TOKEN: GH_TOKEN > GITHUB_TOKEN > $(gh auth token)
+        // Owner token: GH_TOKEN > GITHUB_TOKEN > TOML
         let owner_github_token = env
-            .var("ZBOBR_OWNER_GH_TOKEN")
-            .or_else(|| env.var("GH_TOKEN"))
+            .var("GH_TOKEN")
             .or_else(|| env.var("GITHUB_TOKEN"))
             .or_else(|| toml.and_then(|t| t.owner_github_token.clone()))
-            .or_else(|| env.gh_auth_token())
             .unwrap_or_default();
 
-        // ZBOBR_AGENT_GH_TOKEN: env var or TOML (required)
-        let agent_github_token = env
-            .var("ZBOBR_AGENT_GH_TOKEN")
-            .or_else(|| toml.and_then(|t| t.agent_github_token.clone()))
+        // Agent token: only from TOML/CLI (do not read zbobr-specific env vars)
+        let agent_github_token = toml
+            .and_then(|t| t.agent_github_token.clone())
             .unwrap_or_default();
 
-        let git_user_name = env
-            .var("ZBOBR_GIT_USER_NAME")
-            .or_else(|| toml.and_then(|t| t.git_user_name.clone()))
+        let git_user_name = toml
+            .and_then(|t| t.git_user_name.clone())
             .unwrap_or_default();
 
-        let git_user_email = env
-            .var("ZBOBR_GIT_USER_EMAIL")
-            .or_else(|| toml.and_then(|t| t.git_user_email.clone()))
+        let git_user_email = toml
+            .and_then(|t| t.git_user_email.clone())
             .unwrap_or_default();
 
         Ok(Self {
@@ -322,48 +276,48 @@ impl ZbobrConfig {
     pub fn validate(&self) -> Result<(), ZbobrError> {
         if self.task_repo.is_empty() {
             return Err(ZbobrError::Config(
-                "task repo not set. Use --task-repo owner/repo or set ZBOBR_TASK_REPO.\n  \
+                "task repo not set. Use --task-repo owner/repo or set task_repo in the config file.\n  \
                  This is the GitHub repository whose issues the orchestrator processes."
                     .into(),
             ));
         }
         if self.fork_owner.is_empty() {
             return Err(ZbobrError::Config(
-                "fork owner not set. Use --fork-owner NAME or set ZBOBR_FORK_OWNER.\n  \
+                "fork owner not set. Use --fork-owner NAME or set fork_owner in the config file.\n  \
                  This is the GitHub user or organization where target repos are forked for implementation.".into(),
             ));
         }
         if self.owner_github_token.is_empty() {
             return Err(ZbobrError::Config(
-                "owner GitHub token not set. Set ZBOBR_OWNER_GH_TOKEN, GH_TOKEN, GITHUB_TOKEN env var, \
-                 or run: export GH_TOKEN=$(gh auth token)"
+                "owner GitHub token not set. Set GH_TOKEN or GITHUB_TOKEN env var, or set owner_github_token in the config file.\n  \
+                 You can also run: export GH_TOKEN=$(gh auth token)"
                     .into(),
             ));
         }
         if self.agent_github_token.is_empty() {
             return Err(ZbobrError::Config(
-                "agent GitHub token not set. Set ZBOBR_AGENT_GH_TOKEN env var or in config file.\n  \
+                "agent GitHub token not set. Set agent_github_token in the config file or via CLI.\n  \
                  This must be a token with read-only access for agent processes."
                     .into(),
             ));
         }
         if self.agent_github_token == self.owner_github_token {
             return Err(ZbobrError::Config(
-                "ZBOBR_AGENT_GH_TOKEN must be different from ZBOBR_OWNER_GH_TOKEN.\n  \
+                "agent GitHub token must be different from owner token.\n  \
                  Agent token must have read-only access while owner token requires write access."
                     .into(),
             ));
         }
         if self.git_user_name.is_empty() {
             return Err(ZbobrError::Config(
-                "git user name not set. Use --git-user-name NAME or set ZBOBR_GIT_USER_NAME in config file or env var.\n  \
+                "git user name not set. Use --git-user-name NAME or set git_user_name in the config file.\n  \
                  This is used for git commits made by the tool."
                     .into(),
             ));
         }
         if self.git_user_email.is_empty() {
             return Err(ZbobrError::Config(
-                "git user email not set. Use --git-user-email EMAIL or set ZBOBR_GIT_USER_EMAIL in config file or env var.\n  \
+                "git user email not set. Use --git-user-email EMAIL or set git_user_email in the config file.\n  \
                  This is used for git commits made by the tool."
                     .into(),
             ));
@@ -391,7 +345,6 @@ mod tests {
 
     struct TestEnv {
         vars: HashMap<String, String>,
-        gh_auth_token: Option<String>,
     }
 
     impl TestEnv {
@@ -400,20 +353,13 @@ mod tests {
             for (key, value) in vars {
                 map.insert((*key).to_string(), (*value).to_string());
             }
-            Self {
-                vars: map,
-                gh_auth_token: None,
-            }
+            Self { vars: map }
         }
     }
 
     impl EnvSource for TestEnv {
         fn var(&self, key: &str) -> Option<String> {
             self.vars.get(key).cloned()
-        }
-
-        fn gh_auth_token(&self) -> Option<String> {
-            self.gh_auth_token.clone()
         }
     }
 
@@ -463,10 +409,7 @@ mod tests {
 
     #[test]
     fn build_with_env_missing_required() {
-        let env = TestEnv::new(&[
-            ("ZBOBR_OWNER_GH_TOKEN", "owner-token"),
-            ("ZBOBR_AGENT_GH_TOKEN", "agent-token"),
-        ]);
+        let env = TestEnv::new(&[("GH_TOKEN", "owner-token")]);
 
         let config =
             ZbobrConfig::build_with_env(None, &env).expect("build should succeed with tokens");
