@@ -1500,8 +1500,8 @@ mod tests {
         fn debug_state(&self) -> String { "StubBackend".to_string() }
     }
 
-    fn test_config() -> crate::config::ZbobrConfig {
-        crate::config::ZbobrConfig {
+    fn test_config() -> crate::config::ZbobrDispatcherConfig {
+        crate::config::ZbobrDispatcherConfig {
             task_repo: "test/repo".to_string(),
             fork_owner: "test-owner".to_string(),
             default_model: Model::Gpt4o,

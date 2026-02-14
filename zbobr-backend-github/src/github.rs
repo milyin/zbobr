@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use async_trait::async_trait;
 
 use zbobr_dispatcher::backend::Backend;
-use zbobr_dispatcher::{Model, Parameter, Signal, Stage, Task, Tool, ZbobrConfig, ZbobrError};
+use zbobr_dispatcher::{Model, Parameter, Signal, Stage, Task, Tool, ZbobrDispatcherConfig, ZbobrError};
 
 /// Convert an octocrab error into a ZbobrError with detailed information.
 fn octocrab_to_zbobr_error(e: octocrab::Error) -> ZbobrError {
@@ -20,12 +20,12 @@ fn octocrab_to_zbobr_error(e: octocrab::Error) -> ZbobrError {
 }
 
 pub struct GitHubBackend {
-    config: Arc<ZbobrConfig>,
+    config: Arc<ZbobrDispatcherConfig>,
     octocrab: octocrab::Octocrab,
 }
 
 impl GitHubBackend {
-    pub fn new(config: Arc<ZbobrConfig>) -> Result<Self, ZbobrError> {
+    pub fn new(config: Arc<ZbobrDispatcherConfig>) -> Result<Self, ZbobrError> {
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(config.owner_github_token.clone())
             .build()

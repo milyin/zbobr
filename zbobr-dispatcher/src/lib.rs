@@ -9,7 +9,7 @@ pub mod tool_executor;
 
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-pub use config::{TomlConfig, ZbobrConfig};
+pub use config::{ZbobrDispatcherToml, ZbobrDispatcherConfig};
 pub use mcp::{planner_instructions, worker_instructions, reviewer_instructions, merger_instructions, PlannerMcp, WorkerMcp, ReviewerMcp, MergerMcp};
 pub use task::{Model, ChecklistItem, Parameter, Signal, Stage, Task, TaskSession, Tool};
 pub use tool_executor::{ClaudeExecutor, CopilotExecutor, ToolExecutor};
@@ -19,7 +19,7 @@ use crate::backend::Backend;
 /// Central struct holding configuration and backend.
 #[derive(Clone)]
 pub struct Zbobr {
-    config: Arc<ZbobrConfig>,
+    config: Arc<ZbobrDispatcherConfig>,
     pub(crate) backend: Arc<dyn Backend>,
     /// Per-task mutexes to serialize concurrent read-modify-write cycles
     /// for the same task within this process.
@@ -28,7 +28,7 @@ pub struct Zbobr {
 
 impl Zbobr {
     /// Create a new Zbobr instance from config and a pre-built backend.
-    pub fn new(config: ZbobrConfig, backend: Arc<dyn Backend>) -> Self {
+    pub fn new(config: ZbobrDispatcherConfig, backend: Arc<dyn Backend>) -> Self {
         Self {
             config: Arc::new(config),
             backend,
@@ -36,7 +36,7 @@ impl Zbobr {
         }
     }
 
-    pub fn config(&self) -> &ZbobrConfig {
+    pub fn config(&self) -> &ZbobrDispatcherConfig {
         &self.config
     }
 

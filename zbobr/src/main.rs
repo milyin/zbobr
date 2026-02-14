@@ -6,7 +6,7 @@ use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use zbobr_backend_github::GitHubBackend;
 use zbobr_dispatcher::{
-    Stage, TomlConfig, Zbobr, ZbobrConfig,
+    Stage, ZbobrDispatcherToml, Zbobr, ZbobrDispatcherConfig,
     task::{Model, Role, Tool},
 };
 
@@ -62,8 +62,8 @@ struct GlobalArgs {
 #[derive(Parser)]
 #[command(
     name = "zbobr",
-    about = "AI-powered task orchestrator",
-    long_about = "AI-powered task orchestrator that manages tasks through automated stages.\n\n\
+    about = "AI-powered task dispatcher",
+    long_about = "AI-powered task dispatcher that manages tasks through automated stages.\n\n\
         Tasks flow through: PENDING -> GO_PLANNING -> PLANNING -> GO_WORKING -> WORKING -> GO_REVIEWING -> REVIEWING -> GO_MERGING -> MERGING.\n\
         Planner roles create implementation plans, worker roles implement them\n\
         by forking target repositories and creating pull requests, reviewer roles review the changes,\n\
@@ -177,7 +177,7 @@ struct Prompts {
 
 /// Resolve prompt paths: CLI arg > config values.
 /// Paths are resolved relative to prompts_path if provided, otherwise relative to current directory.
-fn resolve_prompts(cli: &Cli, config: &ZbobrConfig) -> anyhow::Result<Prompts> {
+fn resolve_prompts(cli: &Cli, config: &ZbobrDispatcherConfig) -> anyhow::Result<Prompts> {
     // Use CLI args if provided, otherwise use config (which came from TOML/env/defaults)
     let planner = cli
         .global
@@ -288,22 +288,22 @@ fn build_full_prompt(user_context: &str, role: Role, task_repo: &str, fork_owner
 /// Load TOML config based on CLI args.
 /// If --config is specified, load that file (error if missing).
 /// Otherwise, try zbobr.toml in cwd (silently skip if missing).
-fn load_toml_config(cli: &Cli) -> anyhow::Result<Option<TomlConfig>> {
+fn load_toml_config(cli: &Cli) -> anyhow::Result<Option<ZbobrDispatcherToml>> {
     if let Some(ref path) = cli.global.config {
         // Explicit --config: must exist
-        let config = TomlConfig::load(path)?
+        let config = ZbobrDispatcherToml::load(path)?
             .ok_or_else(|| anyhow::anyhow!("Config file not found: {}", path.display()))?;
         Ok(Some(config))
     } else {
         // Try zbobr.toml in cwd
         let default_path = std::env::current_dir()?.join("zbobr.toml");
-        Ok(TomlConfig::load(&default_path)?)
+        Ok(ZbobrDispatcherToml::load(&default_path)?)
     }
 }
 
-fn load_config(cli: &Cli) -> anyhow::Result<ZbobrConfig> {
+fn load_config(cli: &Cli) -> anyhow::Result<ZbobrDispatcherConfig> {
     let toml_config = load_toml_config(cli)?;
-    let mut config = ZbobrConfig::build(toml_config.as_ref())?;
+    let mut config = ZbobrDispatcherConfig::build(toml_config.as_ref())?;
 
     // CLI arg overrides (highest priority)
     if let Some(ref tr) = cli.global.task_repo {

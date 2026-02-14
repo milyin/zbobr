@@ -1,7 +1,7 @@
 ````markdown
 # Task Project
 
-This repository is managed by [**zbobr**](https://github.com/milyin/zbobr) -- an AI-powered issue orchestrator that uses Claude Code agents to automate software development workflows.
+This repository is managed by [**zbobr**](https://github.com/milyin/zbobr) -- an AI-powered issue dispatcher that uses Claude Code agents to automate software development workflows.
 
 > **Source**: [milyin/zbobr](https://github.com/milyin/zbobr)
 > **Documentation**: See the main repository for installation, architecture, and advanced usage.
