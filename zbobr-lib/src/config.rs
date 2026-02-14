@@ -144,6 +144,11 @@ impl Default for ZbobrConfig {
 
 trait EnvSource {
     fn var(&self, key: &str) -> Option<String>;
+    /// Optionally return a GH auth token by invoking `gh auth token` or another
+    /// mechanism. Default implementation returns `None`.
+    fn gh_auth_token(&self) -> Option<String> {
+        None
+    }
 }
 
 struct OsEnv;

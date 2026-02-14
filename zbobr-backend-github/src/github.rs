@@ -294,35 +294,6 @@ impl GitHubBackend {
         .map(|_: serde_json::Value| ())?;
         Ok(())
     }
-
-    /// Create and push a placeholder file for a branch to ensure it has at least one commit.
-    /// This is pushed immediately to the fork.
-    async fn create_and_push_placeholder(
-        &self,
-        work_dir: &std::path::Path,
-        branch_name: &str,
-    ) -> Result<(), ZbobrError> {
-        // Ensure git user is configured for this repository
-        zbobr_lib::backend::configure_git_user(work_dir, &self.config.git_user_name, &self.config.git_user_email).await?;
-
-        // Create placeholder file and commit it
-        zbobr_lib::backend::create_placeholder_commit(work_dir, branch_name).await?;
-
-        // Push to fork immediately with tracking
-        let push_status = tokio::process::Command::new("git")
-            .args(["push", "-u", "fork", "HEAD"])
-            .current_dir(work_dir)
-            .status()
-            .await
-            .map_err(|e| ZbobrError::Other(format!("Failed to run git push: {}", e)))?;
-
-        if !push_status.success() {
-            return Err(ZbobrError::Other("git push for placeholder failed".to_string()));
-        }
-
-        tracing::info!("Successfully created and pushed placeholder for branch {}", branch_name);
-        Ok(())
-    }
 }
 
 #[async_trait]
