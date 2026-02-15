@@ -549,6 +549,9 @@ pub trait Backend: Send + Sync {
     /// Validate that the backend can reach required resources (fork owner, task repo, etc.).
     async fn validate_connectivity(&self) -> Result<(), ZbobrError>;
 
+    /// Return the task repository identifier (e.g. "owner/repo").
+    fn task_repo(&self) -> &str;
+
     /// Return a debug string of the backend state.
     fn debug_state(&self) -> String;
 }

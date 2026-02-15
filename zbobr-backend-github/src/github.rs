@@ -28,7 +28,13 @@ pub struct GitHubBackend {
 }
 
 impl GitHubBackend {
-    pub fn new(config: Arc<ZbobrDispatcherConfig>, backend_config: ZbobrBackendGithubConfig) -> Result<Self, ZbobrError> {
+    pub fn new(
+        config: Arc<ZbobrDispatcherConfig>,
+        toml: Option<&crate::config::ZbobrBackendGithubToml>,
+        task_repo_override: Option<&str>,
+    ) -> Result<Self, ZbobrError> {
+        let backend_config = ZbobrBackendGithubConfig::build(toml, task_repo_override);
+        backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(config.owner_github_token.clone())
             .build()
@@ -1475,6 +1481,10 @@ impl Backend for GitHubBackend {
         }
 
         Ok(())
+    }
+
+    fn task_repo(&self) -> &str {
+        &self.backend_config.task_repo
     }
 
     fn debug_state(&self) -> String {

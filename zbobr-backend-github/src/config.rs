@@ -10,25 +10,26 @@ pub struct ZbobrBackendGithubToml {
 
 /// Resolved configuration for the GitHub backend.
 #[derive(Debug, Clone, Default)]
-pub struct ZbobrBackendGithubConfig {
+pub(crate) struct ZbobrBackendGithubConfig {
     /// Task project repository ("Org/repo").
-    pub task_repo: String,
+    pub(crate) task_repo: String,
 }
 
 impl ZbobrBackendGithubConfig {
-    /// Build configuration by layering: defaults < TOML.
-    pub fn build(toml: Option<&ZbobrBackendGithubToml>) -> Self {
+    /// Build configuration by layering: defaults < TOML < overrides.
+    pub(crate) fn build(toml: Option<&ZbobrBackendGithubToml>, task_repo_override: Option<&str>) -> Self {
         let defaults = Self::default();
 
-        let task_repo = toml
-            .and_then(|t| t.task_repo.clone())
+        let task_repo = task_repo_override
+            .map(String::from)
+            .or_else(|| toml.and_then(|t| t.task_repo.clone()))
             .unwrap_or(defaults.task_repo);
 
         Self { task_repo }
     }
 
     /// Validate that all required fields are set.
-    pub fn validate(&self) -> Result<(), ZbobrError> {
+    pub(crate) fn validate(&self) -> Result<(), ZbobrError> {
         if self.task_repo.is_empty() {
             return Err(ZbobrError::Config(
                 "task repo not set. Use --task-repo owner/repo or set task_repo in the config file.\n  \
@@ -40,7 +41,7 @@ impl ZbobrBackendGithubConfig {
     }
 
     /// Parse "owner/repo" into (owner, repo).
-    pub fn parse_repo(&self) -> Result<(&str, &str), ZbobrError> {
+    pub(crate) fn parse_repo(&self) -> Result<(&str, &str), ZbobrError> {
         let parts: Vec<&str> = self.task_repo.splitn(2, '/').collect();
         if parts.len() != 2 {
             return Err(ZbobrError::Config(format!(

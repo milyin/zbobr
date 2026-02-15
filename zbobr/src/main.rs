@@ -302,9 +302,7 @@ fn load_root_toml(cli: &Cli) -> anyhow::Result<Option<ZbobrToml>> {
     }
 }
 
-fn load_config(cli: &Cli) -> anyhow::Result<(ZbobrDispatcherConfig, zbobr_backend_github::ZbobrBackendGithubConfig)> {
-    let root_toml = load_root_toml(cli)?;
-
+fn load_config(cli: &Cli, root_toml: &Option<ZbobrToml>) -> anyhow::Result<ZbobrDispatcherConfig> {
     // Build dispatcher config
     let dispatcher_toml = root_toml.as_ref().and_then(|r| r.dispatcher.as_ref());
     let mut config = ZbobrDispatcherConfig::build(dispatcher_toml)?;
@@ -326,17 +324,7 @@ fn load_config(cli: &Cli) -> anyhow::Result<(ZbobrDispatcherConfig, zbobr_backen
     }
     config.validate()?;
 
-    // Build backend-github config
-    let backend_github_toml = root_toml.as_ref().and_then(|r| r.backend_github.as_ref());
-    let mut backend_config = zbobr_backend_github::ZbobrBackendGithubConfig::build(backend_github_toml);
-
-    // CLI arg overrides
-    if let Some(ref tr) = cli.global.task_repo {
-        backend_config.task_repo = tr.clone();
-    }
-    backend_config.validate()?;
-
-    Ok((config, backend_config))
+    Ok(config)
 }
 
 /// Parse CLI, allowing global options both before and after the subcommand.
@@ -429,11 +417,18 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = parse_cli();
-    let (config, backend_config) = load_config(&cli)?;
-    let task_repo = backend_config.task_repo.clone();
+    let root_toml = load_root_toml(&cli)?;
+    let config = load_config(&cli, &root_toml)?;
     let config_arc = Arc::new(config.clone());
-    let backend: Arc<dyn zbobr_dispatcher::backend::Backend> =
-        Arc::new(GitHubBackend::new(config_arc, backend_config).context("Failed to create GitHub backend")?);
+    let backend_github_toml = root_toml.as_ref().and_then(|r| r.backend_github.as_ref());
+    let backend: Arc<dyn zbobr_dispatcher::backend::Backend> = Arc::new(
+        GitHubBackend::new(
+            config_arc,
+            backend_github_toml,
+            cli.global.task_repo.as_deref(),
+        )
+        .context("Failed to create GitHub backend")?,
+    );
     let zbobr = Zbobr::new(config, backend);
     zbobr.validate_connectivity().await?;
     let prompts = resolve_prompts(&cli, zbobr.config())?;
@@ -452,7 +447,7 @@ async fn main() -> anyhow::Result<()> {
             show_prompt,
         } => {
             let base_prompt = load_prompts(&prompts.planner, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Planner, &task_repo, &zbobr.config().fork_owner);
+            let full_prompt = build_full_prompt(&base_prompt, Role::Planner, zbobr.task_repo(), &zbobr.config().fork_owner);
 
             if show_prompt {
                 println!("{}", full_prompt);
@@ -472,7 +467,7 @@ async fn main() -> anyhow::Result<()> {
             show_prompt,
         } => {
             let base_prompt = load_prompts(&prompts.worker, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Worker, &task_repo, &zbobr.config().fork_owner);
+            let full_prompt = build_full_prompt(&base_prompt, Role::Worker, zbobr.task_repo(), &zbobr.config().fork_owner);
 
             if show_prompt {
                 println!("{}", full_prompt);
@@ -492,7 +487,7 @@ async fn main() -> anyhow::Result<()> {
             show_prompt,
         } => {
             let base_prompt = load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Reviewer, &task_repo, &zbobr.config().fork_owner);
+            let full_prompt = build_full_prompt(&base_prompt, Role::Reviewer, zbobr.task_repo(), &zbobr.config().fork_owner);
 
             if show_prompt {
                 println!("{}", full_prompt);
@@ -512,7 +507,7 @@ async fn main() -> anyhow::Result<()> {
             show_prompt,
         } => {
             let base_prompt = load_prompts(&prompts.merger, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Merger, &task_repo, &zbobr.config().fork_owner);
+            let full_prompt = build_full_prompt(&base_prompt, Role::Merger, zbobr.task_repo(), &zbobr.config().fork_owner);
 
             if show_prompt {
                 println!("{}", full_prompt);
@@ -538,7 +533,6 @@ async fn main() -> anyhow::Result<()> {
                 .map_err(anyhow::Error::msg)?;
             run_manager_loop(
                 &zbobr,
-                &task_repo,
                 interval,
                 cleanup_interval,
                 model_enum,
@@ -698,13 +692,13 @@ async fn run_role_session(
 /// Main manager loop: polls for tasks and spawns sessions.
 async fn run_manager_loop(
     zbobr: &Zbobr,
-    task_repo: &str,
     interval_secs: u64,
     cleanup_interval_secs: u64,
     model: Option<Model>,
     port: u16,
     prompts: &Prompts,
 ) -> anyhow::Result<()> {
+    let task_repo = zbobr.task_repo();
     let model = model.unwrap_or_else(|| zbobr.config().default_model.clone());
 
     // Load prompts once at loop start and append API docs
