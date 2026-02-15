@@ -1505,7 +1505,6 @@ mod tests {
         crate::config::ZbobrDispatcherConfig {
             default_model: Model::Gpt4o,
             workspace: std::path::PathBuf::from("/tmp"),
-            owner_github_token: "owner-token".to_string(),
             agent_github_token: "agent-token".to_string(),
             copilot_github_token: "copilot-token".to_string(),
             backend: crate::config::BackendType::GitHub,

@@ -37,7 +37,7 @@ impl GitHubBackend {
         let backend_config = ZbobrBackendGithubConfig::build(toml, task_repo_override, fork_owner_override);
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
-            .personal_token(config.owner_github_token.clone())
+            .personal_token(backend_config.github_token.clone())
             .build()
             .map_err(|e| ZbobrError::GitHub(format!("Failed to build octocrab client: {e}")))?;
         Ok(Self { config, backend_config, octocrab })
@@ -865,8 +865,8 @@ impl Backend for GitHubBackend {
                     "--depth",
                     "1",
                 ])
-                .env("GH_TOKEN", &self.config.owner_github_token)
-                .env("GITHUB_TOKEN", &self.config.owner_github_token)
+                .env("GH_TOKEN", &self.backend_config.github_token)
+                .env("GITHUB_TOKEN", &self.backend_config.github_token)
                 .status()
                 .await?;
             if !status.success() {
@@ -973,8 +973,8 @@ impl Backend for GitHubBackend {
                     "--depth",
                     "1",
                 ])
-                .env("GH_TOKEN", &self.config.owner_github_token)
-                .env("GITHUB_TOKEN", &self.config.owner_github_token)
+                .env("GH_TOKEN", &self.backend_config.github_token)
+                .env("GITHUB_TOKEN", &self.backend_config.github_token)
                 .status()
                 .await?;
             if !status.success() {

@@ -242,8 +242,8 @@ Zbobr manages **three distinct GitHub tokens** with different access levels and 
 - **Resolution Order**:
    1. `GH_TOKEN` environment variable
    2. `GITHUB_TOKEN` environment variable
-   3. `owner_github_token` in `zbobr.toml`
-- **Config File**: `owner_github_token` in `zbobr.toml`
+   3. `github_token` in `[backend_github]` section of `zbobr.toml`
+- **Config File**: `github_token` in `[backend_github]` section of `zbobr.toml`
 
 #### 2. Agent Token — **REQUIRED for restricted access**
 - **Purpose**: Passed to agent processes (Copilot/Claude sessions) as `GH_TOKEN` and `GITHUB_TOKEN`
@@ -282,8 +282,8 @@ Zbobr manages **three distinct GitHub tokens** with different access levels and 
 Detailed configuration parameters:
 
 - Owner token:
-   - Env vars: `ZBOBR_OWNER_GH_TOKEN` (preferred), `GH_TOKEN`, `GITHUB_TOKEN`, or `$(gh auth token)` as fallback.
-   - TOML field: `owner_github_token` in `zbobr.toml`.
+   - Env vars: `GH_TOKEN`, `GITHUB_TOKEN`.
+   - TOML field: `github_token` in `[backend_github]` section of `zbobr.toml`.
    - Used for: `octocrab` API calls and owner-level `gh` operations.
 
 - Agent token (read-only):

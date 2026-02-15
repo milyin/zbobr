@@ -51,7 +51,6 @@ pub struct TomlPrompts {
 pub struct ZbobrDispatcherToml {
     pub default_model: Option<Model>,
     pub workspace: Option<PathBuf>,
-    pub owner_github_token: Option<String>,
     pub agent_github_token: Option<String>,
     pub copilot_github_token: Option<String>,
     pub backend: Option<BackendType>,
@@ -84,8 +83,6 @@ pub struct ZbobrDispatcherConfig {
     pub default_model: Model,
     /// Workspace directory for issue work dirs.
     pub workspace: PathBuf,
-    /// GitHub token with write access for dispatcher (used with octocrab).
-    pub owner_github_token: String,
     /// GitHub token with read-only access for agent processes (passed as GH_TOKEN to agents).
     pub agent_github_token: String,
     /// GitHub token for Copilot CLI with Copilot's access rights (passed as COPILOT_GITHUB_TOKEN).
@@ -117,7 +114,6 @@ impl Default for ZbobrDispatcherConfig {
         Self {
             default_model: Model::default(),
             workspace: PathBuf::from("./workspace"),
-            owner_github_token: String::new(),
             agent_github_token: String::new(),
             copilot_github_token: String::new(),
             backend: BackendType::default(),
@@ -210,13 +206,6 @@ impl ZbobrDispatcherConfig {
             .or_else(|| toml.and_then(|t| t.copilot_github_token.clone()))
             .unwrap_or_default();
 
-        // Owner token: GH_TOKEN > GITHUB_TOKEN > TOML
-        let owner_github_token = env
-            .var("GH_TOKEN")
-            .or_else(|| env.var("GITHUB_TOKEN"))
-            .or_else(|| toml.and_then(|t| t.owner_github_token.clone()))
-            .unwrap_or_default();
-
         // Agent token: only from TOML/CLI (do not read zbobr-specific env vars)
         let agent_github_token = toml
             .and_then(|t| t.agent_github_token.clone())
@@ -233,7 +222,6 @@ impl ZbobrDispatcherConfig {
         Ok(Self {
             default_model,
             workspace,
-            owner_github_token,
             agent_github_token,
             copilot_github_token,
             backend,
@@ -256,24 +244,10 @@ impl ZbobrDispatcherConfig {
 
     /// Validate that all required fields are set.
     pub fn validate(&self) -> Result<(), ZbobrError> {
-        if self.owner_github_token.is_empty() {
-            return Err(ZbobrError::Config(
-                "owner GitHub token not set. Set GH_TOKEN or GITHUB_TOKEN env var, or set owner_github_token in the config file.\n  \
-                 You can also run: export GH_TOKEN=$(gh auth token)"
-                    .into(),
-            ));
-        }
         if self.agent_github_token.is_empty() {
             return Err(ZbobrError::Config(
                 "agent GitHub token not set. Set agent_github_token in the config file or via CLI.\n  \
                  This must be a token with read-only access for agent processes."
-                    .into(),
-            ));
-        }
-        if self.agent_github_token == self.owner_github_token {
-            return Err(ZbobrError::Config(
-                "agent GitHub token must be different from owner token.\n  \
-                 Agent token must have read-only access while owner token requires write access."
                     .into(),
             ));
         }
@@ -323,10 +297,10 @@ mod tests {
 
     #[test]
     fn build_with_env_missing_required() {
-        let env = TestEnv::new(&[("GH_TOKEN", "owner-token")]);
+        let env = TestEnv::new(&[]);
 
         let config =
-            ZbobrDispatcherConfig::build_with_env(None, &env).expect("build should succeed with tokens");
+            ZbobrDispatcherConfig::build_with_env(None, &env).expect("build should succeed");
         // validate() should fail because agent_github_token is missing
         assert!(config.validate().is_err());
     }
@@ -390,7 +364,6 @@ mod tests {
         let toml = ZbobrDispatcherToml {
             default_model: Some(Model::Claude3Opus),
             workspace: Some(PathBuf::from("/tmp/toml-ws")),
-            owner_github_token: Some("toml-owner-token".into()),
             agent_github_token: Some("toml-agent-token".into()),
             copilot_github_token: Some("toml-copilot-token".into()),
             backend: Some(BackendType::GitHub),
@@ -417,7 +390,6 @@ mod tests {
         assert_eq!(config.worker_prompts, vec![PathBuf::from("w.md")]);
         assert_eq!(config.reviewer_prompts, vec![PathBuf::from("r.md")]);
         assert_eq!(config.prompts_path, Some(PathBuf::from("/opt/prompts")));
-        assert_eq!(config.owner_github_token, "toml-owner-token");
         assert_eq!(config.agent_github_token, "toml-agent-token");
         assert_eq!(config.copilot_github_token, "toml-copilot-token");
         assert_eq!(config.git_user_name, "test-user");

@@ -7,6 +7,7 @@ use zbobr_dispatcher::ZbobrError;
 pub struct ZbobrBackendGithubToml {
     pub task_repo: Option<String>,
     pub fork_owner: Option<String>,
+    pub github_token: Option<String>,
 }
 
 /// Resolved configuration for the GitHub backend.
@@ -16,10 +17,12 @@ pub(crate) struct ZbobrBackendGithubConfig {
     pub(crate) task_repo: String,
     /// Owner for forks (GitHub user or org).
     pub(crate) fork_owner: String,
+    /// GitHub token with read/write access to tasks repo and fork org.
+    pub(crate) github_token: String,
 }
 
 impl ZbobrBackendGithubConfig {
-    /// Build configuration by layering: defaults < TOML < overrides.
+    /// Build configuration by layering: defaults < env < TOML < overrides.
     pub(crate) fn build(
         toml: Option<&ZbobrBackendGithubToml>,
         task_repo_override: Option<&str>,
@@ -37,7 +40,14 @@ impl ZbobrBackendGithubConfig {
             .or_else(|| toml.and_then(|t| t.fork_owner.clone()))
             .unwrap_or(defaults.fork_owner);
 
-        Self { task_repo, fork_owner }
+        // github_token: GH_TOKEN > GITHUB_TOKEN > TOML
+        let github_token = std::env::var("GH_TOKEN")
+            .ok()
+            .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+            .or_else(|| toml.and_then(|t| t.github_token.clone()))
+            .unwrap_or(defaults.github_token);
+
+        Self { task_repo, fork_owner, github_token }
     }
 
     /// Validate that all required fields are set.
@@ -53,6 +63,13 @@ impl ZbobrBackendGithubConfig {
             return Err(ZbobrError::Config(
                 "fork owner not set. Use --fork-owner NAME or set fork_owner in [backend_github] config.\n  \
                  This is the GitHub user or organization where target repos are forked for implementation."
+                    .into(),
+            ));
+        }
+        if self.github_token.is_empty() {
+            return Err(ZbobrError::Config(
+                "GitHub token not set. Set GH_TOKEN or GITHUB_TOKEN env var, or set github_token in [backend_github] config.\n  \
+                 This token needs read/write access to the tasks repo and to the organization where repos are forked."
                     .into(),
             ));
         }
