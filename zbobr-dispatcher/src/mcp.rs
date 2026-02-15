@@ -249,7 +249,7 @@ Work autonomously. Do not ask the user for anything.
 
 
 /// Generate hardcoded worker instructions using tool name constants.
-pub fn worker_instructions(_task_repo: Option<&str>, _fork_owner: Option<&str>) -> String {
+pub fn worker_instructions() -> String {
     let instructions = format!(
         r#"# Worker Agent
 
@@ -319,7 +319,7 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 }
 
 /// Generate hardcoded reviewer instructions using tool name constants.
-pub fn reviewer_instructions(_task_repo: Option<&str>, _fork_owner: Option<&str>) -> String {
+pub fn reviewer_instructions() -> String {
     let instructions = format!(
         r#"# Reviewer Agent
 
@@ -352,7 +352,7 @@ Review the implementation changes and ensure they meet coding standards and task
 }
 
 /// Generate hardcoded merger instructions using tool name constants.
-pub fn merger_instructions(_task_repo: Option<&str>, _fork_owner: Option<&str>) -> String {
+pub fn merger_instructions() -> String {
     let instructions = format!(
         r#"# Merger Agent
 

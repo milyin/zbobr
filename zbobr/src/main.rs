@@ -263,12 +263,12 @@ fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::Resul
 }
 
 /// Build full prompt: hardcoded instructions + user context files + auto-generated API docs.
-fn build_full_prompt(user_context: &str, role: Role, task_repo: &str, fork_owner: &str) -> String {
+fn build_full_prompt(user_context: &str, role: Role) -> String {
     let hardcoded = match role {
         Role::Planner => zbobr_dispatcher::planner_instructions(),
-        Role::Worker => zbobr_dispatcher::worker_instructions(Some(task_repo), Some(fork_owner)),
-        Role::Reviewer => zbobr_dispatcher::reviewer_instructions(Some(task_repo), Some(fork_owner)),
-        Role::Merger => zbobr_dispatcher::merger_instructions(Some(task_repo), Some(fork_owner)),
+        Role::Worker => zbobr_dispatcher::worker_instructions(),
+        Role::Reviewer => zbobr_dispatcher::reviewer_instructions(),
+        Role::Merger => zbobr_dispatcher::merger_instructions(),
     };
 
     let api_docs = match role {
@@ -447,7 +447,7 @@ async fn main() -> anyhow::Result<()> {
             show_prompt,
         } => {
             let base_prompt = load_prompts(&prompts.planner, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Planner, zbobr.task_repo(), &zbobr.config().fork_owner);
+            let full_prompt = build_full_prompt(&base_prompt, Role::Planner);
 
             if show_prompt {
                 println!("{}", full_prompt);
@@ -467,7 +467,7 @@ async fn main() -> anyhow::Result<()> {
             show_prompt,
         } => {
             let base_prompt = load_prompts(&prompts.worker, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Worker, zbobr.task_repo(), &zbobr.config().fork_owner);
+            let full_prompt = build_full_prompt(&base_prompt, Role::Worker);
 
             if show_prompt {
                 println!("{}", full_prompt);
@@ -487,7 +487,7 @@ async fn main() -> anyhow::Result<()> {
             show_prompt,
         } => {
             let base_prompt = load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Reviewer, zbobr.task_repo(), &zbobr.config().fork_owner);
+            let full_prompt = build_full_prompt(&base_prompt, Role::Reviewer);
 
             if show_prompt {
                 println!("{}", full_prompt);
@@ -507,7 +507,7 @@ async fn main() -> anyhow::Result<()> {
             show_prompt,
         } => {
             let base_prompt = load_prompts(&prompts.merger, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Merger, zbobr.task_repo(), &zbobr.config().fork_owner);
+            let full_prompt = build_full_prompt(&base_prompt, Role::Merger);
 
             if show_prompt {
                 println!("{}", full_prompt);
@@ -698,7 +698,6 @@ async fn run_manager_loop(
     port: u16,
     prompts: &Prompts,
 ) -> anyhow::Result<()> {
-    let task_repo = zbobr.task_repo();
     let model = model.unwrap_or_else(|| zbobr.config().default_model.clone());
 
     // Load prompts once at loop start and append API docs
@@ -706,12 +705,12 @@ async fn run_manager_loop(
     let worker_base = load_prompts(&prompts.worker, prompts.base_path.as_ref())?;
     let reviewer_base = load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?;
     let merger_base = load_prompts(&prompts.merger, prompts.base_path.as_ref())?;
-    let planner_prompt = build_full_prompt(&planner_base, Role::Planner, &task_repo, &zbobr.config().fork_owner);
-    let worker_prompt = build_full_prompt(&worker_base, Role::Worker, &task_repo, &zbobr.config().fork_owner);
-    let reviewer_prompt = build_full_prompt(&reviewer_base, Role::Reviewer, &task_repo, &zbobr.config().fork_owner);
-    let merger_prompt = build_full_prompt(&merger_base, Role::Merger, &task_repo, &zbobr.config().fork_owner);
+    let planner_prompt = build_full_prompt(&planner_base, Role::Planner);
+    let worker_prompt = build_full_prompt(&worker_base, Role::Worker);
+    let reviewer_prompt = build_full_prompt(&reviewer_base, Role::Reviewer);
+    let merger_prompt = build_full_prompt(&merger_base, Role::Merger);
 
-    tracing::info!("Manager loop started for {}", task_repo);
+    tracing::info!("Manager loop started ({})", zbobr.debug_state());
     tracing::info!("Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s");
     tracing::info!("Default Model: {model}");
     tracing::info!("CLI Tool: {:?}", zbobr.config().cli_tool);

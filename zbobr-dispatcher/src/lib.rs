@@ -246,10 +246,6 @@ impl Zbobr {
         self.backend.create_label(name, color, description).await
     }
 
-    pub fn task_repo(&self) -> &str {
-        self.backend.task_repo()
-    }
-
     pub fn debug_state(&self) -> String {
         self.backend.debug_state()
     }

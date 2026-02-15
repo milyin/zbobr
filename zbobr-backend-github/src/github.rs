@@ -1483,10 +1483,6 @@ impl Backend for GitHubBackend {
         Ok(())
     }
 
-    fn task_repo(&self) -> &str {
-        &self.backend_config.task_repo
-    }
-
     fn debug_state(&self) -> String {
         "GitHubBackend".to_string()
     }
