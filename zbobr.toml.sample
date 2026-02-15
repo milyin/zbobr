@@ -1,6 +1,8 @@
 # zbobr configuration
 # Priority: CLI args > env vars > this file > defaults
-
+#
+[dispatcher]
+[dispatcher]
 # Task project repository ("owner/repo")
 task_repo = "{{TASK_REPO}}"
 
@@ -45,7 +47,7 @@ git_user_email = "your.email@example.com"
 # Prefer env vars instead of storing in config.
 # copilot_github_token = ""
 
-# [prompts]
+[dispatcher.prompts]
 # Base directory for additional prompt files (appended after built-in instructions)
 # path = "./prompts"
 # Additional context files for planner (relative to path above, or absolute)

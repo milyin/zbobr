@@ -96,6 +96,14 @@ zbobr plan 42            # Run planner on issue #42
 zbobr work 42            # Run worker on issue #42
 ```
 
+Notes on TOML layout:
+
+- New (preferred): root `zbobr.toml` may contain a `[dispatcher]` table with dispatcher-specific keys. Example:
+
+   [dispatcher]
+   task_repo = "owner/repo"
+Note: legacy top-level dispatcher-only TOML files are no longer supported; use the root `zbobr.toml` with a `[dispatcher]` table.
+
 This is the recommended approach for task-project workflows, as it eliminates the need to manually specify `--task-repo` and `--fork-owner` flags.
 
 ## How It Works

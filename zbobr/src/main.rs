@@ -10,6 +10,9 @@ use zbobr_dispatcher::{
     task::{Model, Role, Tool},
 };
 
+mod config;
+use config::ZbobrToml;
+
 #[derive(Args, Clone)]
 #[command(next_help_heading = "Global Options")]
 struct GlobalArgs {
@@ -289,15 +292,25 @@ fn build_full_prompt(user_context: &str, role: Role, task_repo: &str, fork_owner
 /// If --config is specified, load that file (error if missing).
 /// Otherwise, try zbobr.toml in cwd (silently skip if missing).
 fn load_toml_config(cli: &Cli) -> anyhow::Result<Option<ZbobrDispatcherToml>> {
+    // Only support the new root `zbobr.toml` layout which contains a
+    // `[dispatcher]` table. Legacy flat dispatcher-only TOML files are no
+    // longer supported.
     if let Some(ref path) = cli.global.config {
-        // Explicit --config: must exist
-        let config = ZbobrDispatcherToml::load(path)?
+        // Explicit --config: must exist and must contain a dispatcher table
+        let root = ZbobrToml::load(path)?
             .ok_or_else(|| anyhow::anyhow!("Config file not found: {}", path.display()))?;
-        Ok(Some(config))
+        let dispatcher = root.dispatcher.ok_or_else(|| {
+            anyhow::anyhow!("Config {} does not contain a [dispatcher] table", path.display())
+        })?;
+        Ok(Some(dispatcher))
     } else {
-        // Try zbobr.toml in cwd
+        // Try zbobr.toml in cwd: only root layout is recognized
         let default_path = std::env::current_dir()?.join("zbobr.toml");
-        Ok(ZbobrDispatcherToml::load(&default_path)?)
+        if let Some(root) = ZbobrToml::load(&default_path)? {
+            Ok(root.dispatcher)
+        } else {
+            Ok(None)
+        }
     }
 }
 
