@@ -5,6 +5,8 @@ use async_trait::async_trait;
 use zbobr_dispatcher::backend::Backend;
 use zbobr_dispatcher::{Model, Parameter, Signal, Stage, Task, Tool, ZbobrDispatcherConfig, ZbobrError};
 
+use crate::config::ZbobrBackendGithubConfig;
+
 /// Convert an octocrab error into a ZbobrError with detailed information.
 fn octocrab_to_zbobr_error(e: octocrab::Error) -> ZbobrError {
     let error_msg = match e {
@@ -21,16 +23,17 @@ fn octocrab_to_zbobr_error(e: octocrab::Error) -> ZbobrError {
 
 pub struct GitHubBackend {
     config: Arc<ZbobrDispatcherConfig>,
+    backend_config: ZbobrBackendGithubConfig,
     octocrab: octocrab::Octocrab,
 }
 
 impl GitHubBackend {
-    pub fn new(config: Arc<ZbobrDispatcherConfig>) -> Result<Self, ZbobrError> {
+    pub fn new(config: Arc<ZbobrDispatcherConfig>, backend_config: ZbobrBackendGithubConfig) -> Result<Self, ZbobrError> {
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(config.owner_github_token.clone())
             .build()
             .map_err(|e| ZbobrError::GitHub(format!("Failed to build octocrab client: {e}")))?;
-        Ok(Self { config, octocrab })
+        Ok(Self { config, backend_config, octocrab })
     }
 
     /// Convert a Signal to its GitHub label representation.
@@ -76,7 +79,7 @@ impl GitHubBackend {
     }
 
     fn parse_repo(&self) -> Result<(&str, &str), ZbobrError> {
-        self.config.parse_repo()
+        self.backend_config.parse_repo()
     }
 
     async fn find_stage_number(&self, title: &str) -> Result<Option<u64>, ZbobrError> {
@@ -737,7 +740,7 @@ impl Backend for GitHubBackend {
     }
 
     async fn is_task_closed(&self, id: u64) -> Result<bool, ZbobrError> {
-        let (owner, repo) = self.config.parse_repo()?;
+        let (owner, repo) = self.backend_config.parse_repo()?;
         let issue: IssueResponse = self
             .retry_octocrab("get issue state", || {
                 self.octocrab
@@ -1336,7 +1339,7 @@ impl Backend for GitHubBackend {
     async fn setup_repository(&self, force: bool) -> Result<(), ZbobrError> {
         tracing::info!(
             "Setting up GitHub repo: {} (force: {})",
-            self.config.task_repo,
+            self.backend_config.task_repo,
             force
         );
 
@@ -1435,7 +1438,7 @@ impl Backend for GitHubBackend {
             }
         }
 
-        tracing::info!("GitHub setup complete for {}", self.config.task_repo);
+        tracing::info!("GitHub setup complete for {}", self.backend_config.task_repo);
         Ok(())
     }
 

@@ -1502,7 +1502,6 @@ mod tests {
 
     fn test_config() -> crate::config::ZbobrDispatcherConfig {
         crate::config::ZbobrDispatcherConfig {
-            task_repo: "test/repo".to_string(),
             fork_owner: "test-owner".to_string(),
             default_model: Model::Gpt4o,
             workspace: std::path::PathBuf::from("/tmp"),

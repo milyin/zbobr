@@ -49,7 +49,6 @@ pub struct TomlPrompts {
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct ZbobrDispatcherToml {
-    pub task_repo: Option<String>,
     pub fork_owner: Option<String>,
     pub default_model: Option<Model>,
     pub workspace: Option<PathBuf>,
@@ -82,8 +81,6 @@ impl ZbobrDispatcherToml {
 /// Configuration for the zbobr dispatcher.
 #[derive(Debug, Clone)]
 pub struct ZbobrDispatcherConfig {
-    /// Task project repository ("Org/repo").
-    pub task_repo: String,
     /// Owner for forks (user or org).
     pub fork_owner: String,
     /// Default AI model to use.
@@ -121,7 +118,6 @@ pub struct ZbobrDispatcherConfig {
 impl Default for ZbobrDispatcherConfig {
     fn default() -> Self {
         Self {
-            task_repo: String::new(),
             fork_owner: String::new(),
             default_model: Model::default(),
             workspace: PathBuf::from("./workspace"),
@@ -171,10 +167,6 @@ impl ZbobrDispatcherConfig {
 
     fn build_with_env<E: EnvSource>(toml: Option<&ZbobrDispatcherToml>, env: &E) -> Result<Self, ZbobrError> {
         let defaults = ZbobrDispatcherConfig::default();
-
-        let task_repo = toml
-            .and_then(|t| t.task_repo.clone())
-            .unwrap_or(defaults.task_repo);
 
         let fork_owner = toml
             .and_then(|t| t.fork_owner.clone())
@@ -247,7 +239,6 @@ impl ZbobrDispatcherConfig {
             .unwrap_or_default();
 
         Ok(Self {
-            task_repo,
             fork_owner,
             default_model,
             workspace,
@@ -274,13 +265,6 @@ impl ZbobrDispatcherConfig {
 
     /// Validate that all required fields are set.
     pub fn validate(&self) -> Result<(), ZbobrError> {
-        if self.task_repo.is_empty() {
-            return Err(ZbobrError::Config(
-                "task repo not set. Use --task-repo owner/repo or set task_repo in the config file.\n  \
-                 This is the GitHub repository whose issues the dispatcher processes."
-                    .into(),
-            ));
-        }
         if self.fork_owner.is_empty() {
             return Err(ZbobrError::Config(
                 "fork owner not set. Use --fork-owner NAME or set fork_owner in the config file.\n  \
@@ -325,17 +309,6 @@ impl ZbobrDispatcherConfig {
         Ok(())
     }
 
-    /// Parse "owner/repo" into (owner, repo).
-    pub fn parse_repo(&self) -> Result<(&str, &str), ZbobrError> {
-        let parts: Vec<&str> = self.task_repo.splitn(2, '/').collect();
-        if parts.len() != 2 {
-            return Err(ZbobrError::Config(format!(
-                "Invalid task_repo format '{}', expected 'owner/repo'",
-                self.task_repo
-            )));
-        }
-        Ok((parts[0], parts[1]))
-    }
 }
 
 #[cfg(test)]
@@ -363,68 +336,22 @@ mod tests {
         }
     }
 
-    fn test_config(task_repo: &str) -> ZbobrDispatcherConfig {
-        ZbobrDispatcherConfig {
-            task_repo: task_repo.to_string(),
-            fork_owner: "test-fork".to_string(),
-            default_model: Model::Gpt5Mini,
-            workspace: PathBuf::from("./workspace"),
-            owner_github_token: "owner-token".to_string(),
-            agent_github_token: "agent-token".to_string(),
-            copilot_github_token: "copilot-token".to_string(),
-            backend: BackendType::GitHub,
-            cli_tool: Tool::Copilot,
-            planner_prompts: vec![],
-            worker_prompts: vec![],
-            reviewer_prompts: vec![],
-            merger_prompts: vec![],
-            work_branch_prefix: "zbobr_fix".to_string(),
-            prompts_path: None,
-            git_user_name: "zbobr".to_string(),
-            git_user_email: "zbobr@example.com".to_string(),
-        }
-    }
-
-    #[test]
-    fn parse_repo_valid() {
-        let cfg = test_config("MyOrg/my-project");
-        let (owner, repo) = cfg.parse_repo().unwrap();
-        assert_eq!(owner, "MyOrg");
-        assert_eq!(repo, "my-project");
-    }
-
-    #[test]
-    fn parse_repo_with_slashes_in_name() {
-        let cfg = test_config("owner/repo/extra");
-        let (owner, repo) = cfg.parse_repo().unwrap();
-        assert_eq!(owner, "owner");
-        assert_eq!(repo, "repo/extra");
-    }
-
-    #[test]
-    fn parse_repo_invalid() {
-        let cfg = test_config("no-slash-here");
-        assert!(cfg.parse_repo().is_err());
-    }
-
     #[test]
     fn build_with_env_missing_required() {
         let env = TestEnv::new(&[("GH_TOKEN", "owner-token")]);
 
         let config =
             ZbobrDispatcherConfig::build_with_env(None, &env).expect("build should succeed with tokens");
-        // validate() should fail because task_repo is missing
+        // validate() should fail because fork_owner is missing
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn toml_config_parse_minimal() {
         let toml_str = r#"
-    task_repo = "org/repo"
     fork_owner = "myuser"
     "#;
         let config: ZbobrDispatcherToml = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.task_repo.as_deref(), Some("org/repo"));
         assert_eq!(config.fork_owner.as_deref(), Some("myuser"));
         assert!(config.default_model.is_none());
         assert!(config.backend.is_none());
@@ -433,7 +360,6 @@ mod tests {
     #[test]
     fn toml_config_parse_full() {
         let toml_str = r#"
-    task_repo = "org/repo"
     fork_owner = "myuser"
     default_model = "gpt-5-mini"
     workspace = "/tmp/workspace"
@@ -446,7 +372,6 @@ mod tests {
     worker = ["work.md"]
     "#;
         let config: ZbobrDispatcherToml = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.task_repo.as_deref(), Some("org/repo"));
         assert_eq!(config.default_model, Some(Model::Gpt5Mini));
         assert_eq!(config.cli_tool, Some(Tool::Claude));
         let prompts = config.prompts.unwrap();
@@ -460,7 +385,7 @@ mod tests {
     #[test]
     fn toml_config_unknown_keys_ignored() {
         let toml_str = r#"
-    task_repo = "org/repo"
+    fork_owner = "myuser"
     unknown_top = "value"
 
     [prompts]
@@ -480,7 +405,6 @@ mod tests {
     fn build_with_toml() {
         let env = TestEnv::new(&[]);
         let toml = ZbobrDispatcherToml {
-            task_repo: Some("toml-org/toml-repo".into()),
             fork_owner: Some("toml-fork".into()),
             default_model: Some(Model::Claude3Opus),
             workspace: Some(PathBuf::from("/tmp/toml-ws")),
@@ -502,7 +426,6 @@ mod tests {
         };
 
         let config = ZbobrDispatcherConfig::build_with_env(Some(&toml), &env).unwrap();
-        assert_eq!(config.task_repo, "toml-org/toml-repo");
         assert_eq!(config.fork_owner, "toml-fork");
         assert_eq!(config.default_model, Model::Claude3Opus);
         assert_eq!(config.workspace, PathBuf::from("/tmp/toml-ws"));

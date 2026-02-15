@@ -6,7 +6,7 @@ use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use zbobr_backend_github::GitHubBackend;
 use zbobr_dispatcher::{
-    Stage, ZbobrDispatcherToml, Zbobr, ZbobrDispatcherConfig,
+    Stage, Zbobr, ZbobrDispatcherConfig,
     task::{Model, Role, Tool},
 };
 
@@ -288,40 +288,28 @@ fn build_full_prompt(user_context: &str, role: Role, task_repo: &str, fork_owner
     }
 }
 
-/// Load TOML config based on CLI args.
+/// Load root TOML config based on CLI args.
 /// If --config is specified, load that file (error if missing).
 /// Otherwise, try zbobr.toml in cwd (silently skip if missing).
-fn load_toml_config(cli: &Cli) -> anyhow::Result<Option<ZbobrDispatcherToml>> {
-    // Only support the new root `zbobr.toml` layout which contains a
-    // `[dispatcher]` table. Legacy flat dispatcher-only TOML files are no
-    // longer supported.
+fn load_root_toml(cli: &Cli) -> anyhow::Result<Option<ZbobrToml>> {
     if let Some(ref path) = cli.global.config {
-        // Explicit --config: must exist and must contain a dispatcher table
         let root = ZbobrToml::load(path)?
             .ok_or_else(|| anyhow::anyhow!("Config file not found: {}", path.display()))?;
-        let dispatcher = root.dispatcher.ok_or_else(|| {
-            anyhow::anyhow!("Config {} does not contain a [dispatcher] table", path.display())
-        })?;
-        Ok(Some(dispatcher))
+        Ok(Some(root))
     } else {
-        // Try zbobr.toml in cwd: only root layout is recognized
         let default_path = std::env::current_dir()?.join("zbobr.toml");
-        if let Some(root) = ZbobrToml::load(&default_path)? {
-            Ok(root.dispatcher)
-        } else {
-            Ok(None)
-        }
+        ZbobrToml::load(&default_path).map_err(Into::into)
     }
 }
 
-fn load_config(cli: &Cli) -> anyhow::Result<ZbobrDispatcherConfig> {
-    let toml_config = load_toml_config(cli)?;
-    let mut config = ZbobrDispatcherConfig::build(toml_config.as_ref())?;
+fn load_config(cli: &Cli) -> anyhow::Result<(ZbobrDispatcherConfig, zbobr_backend_github::ZbobrBackendGithubConfig)> {
+    let root_toml = load_root_toml(cli)?;
+
+    // Build dispatcher config
+    let dispatcher_toml = root_toml.as_ref().and_then(|r| r.dispatcher.as_ref());
+    let mut config = ZbobrDispatcherConfig::build(dispatcher_toml)?;
 
     // CLI arg overrides (highest priority)
-    if let Some(ref tr) = cli.global.task_repo {
-        config.task_repo = tr.clone();
-    }
     if let Some(ref fo) = cli.global.fork_owner {
         config.fork_owner = fo.clone();
     }
@@ -337,7 +325,18 @@ fn load_config(cli: &Cli) -> anyhow::Result<ZbobrDispatcherConfig> {
         config.cli_tool = t.parse::<Tool>().map_err(|e| anyhow::anyhow!(e))?;
     }
     config.validate()?;
-    Ok(config)
+
+    // Build backend-github config
+    let backend_github_toml = root_toml.as_ref().and_then(|r| r.backend_github.as_ref());
+    let mut backend_config = zbobr_backend_github::ZbobrBackendGithubConfig::build(backend_github_toml);
+
+    // CLI arg overrides
+    if let Some(ref tr) = cli.global.task_repo {
+        backend_config.task_repo = tr.clone();
+    }
+    backend_config.validate()?;
+
+    Ok((config, backend_config))
 }
 
 /// Parse CLI, allowing global options both before and after the subcommand.
@@ -430,10 +429,11 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = parse_cli();
-    let config = load_config(&cli)?;
+    let (config, backend_config) = load_config(&cli)?;
+    let task_repo = backend_config.task_repo.clone();
     let config_arc = Arc::new(config.clone());
     let backend: Arc<dyn zbobr_dispatcher::backend::Backend> =
-        Arc::new(GitHubBackend::new(config_arc).context("Failed to create GitHub backend")?);
+        Arc::new(GitHubBackend::new(config_arc, backend_config).context("Failed to create GitHub backend")?);
     let zbobr = Zbobr::new(config, backend);
     zbobr.validate_connectivity().await?;
     let prompts = resolve_prompts(&cli, zbobr.config())?;
@@ -452,7 +452,7 @@ async fn main() -> anyhow::Result<()> {
             show_prompt,
         } => {
             let base_prompt = load_prompts(&prompts.planner, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Planner, &zbobr.config().task_repo, &zbobr.config().fork_owner);
+            let full_prompt = build_full_prompt(&base_prompt, Role::Planner, &task_repo, &zbobr.config().fork_owner);
 
             if show_prompt {
                 println!("{}", full_prompt);
@@ -472,7 +472,7 @@ async fn main() -> anyhow::Result<()> {
             show_prompt,
         } => {
             let base_prompt = load_prompts(&prompts.worker, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Worker, &zbobr.config().task_repo, &zbobr.config().fork_owner);
+            let full_prompt = build_full_prompt(&base_prompt, Role::Worker, &task_repo, &zbobr.config().fork_owner);
 
             if show_prompt {
                 println!("{}", full_prompt);
@@ -492,7 +492,7 @@ async fn main() -> anyhow::Result<()> {
             show_prompt,
         } => {
             let base_prompt = load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Reviewer, &zbobr.config().task_repo, &zbobr.config().fork_owner);
+            let full_prompt = build_full_prompt(&base_prompt, Role::Reviewer, &task_repo, &zbobr.config().fork_owner);
 
             if show_prompt {
                 println!("{}", full_prompt);
@@ -512,7 +512,7 @@ async fn main() -> anyhow::Result<()> {
             show_prompt,
         } => {
             let base_prompt = load_prompts(&prompts.merger, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Merger, &zbobr.config().task_repo, &zbobr.config().fork_owner);
+            let full_prompt = build_full_prompt(&base_prompt, Role::Merger, &task_repo, &zbobr.config().fork_owner);
 
             if show_prompt {
                 println!("{}", full_prompt);
@@ -538,6 +538,7 @@ async fn main() -> anyhow::Result<()> {
                 .map_err(anyhow::Error::msg)?;
             run_manager_loop(
                 &zbobr,
+                &task_repo,
                 interval,
                 cleanup_interval,
                 model_enum,
@@ -697,6 +698,7 @@ async fn run_role_session(
 /// Main manager loop: polls for tasks and spawns sessions.
 async fn run_manager_loop(
     zbobr: &Zbobr,
+    task_repo: &str,
     interval_secs: u64,
     cleanup_interval_secs: u64,
     model: Option<Model>,
@@ -710,12 +712,12 @@ async fn run_manager_loop(
     let worker_base = load_prompts(&prompts.worker, prompts.base_path.as_ref())?;
     let reviewer_base = load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?;
     let merger_base = load_prompts(&prompts.merger, prompts.base_path.as_ref())?;
-    let planner_prompt = build_full_prompt(&planner_base, Role::Planner, &zbobr.config().task_repo, &zbobr.config().fork_owner);
-    let worker_prompt = build_full_prompt(&worker_base, Role::Worker, &zbobr.config().task_repo, &zbobr.config().fork_owner);
-    let reviewer_prompt = build_full_prompt(&reviewer_base, Role::Reviewer, &zbobr.config().task_repo, &zbobr.config().fork_owner);
-    let merger_prompt = build_full_prompt(&merger_base, Role::Merger, &zbobr.config().task_repo, &zbobr.config().fork_owner);
+    let planner_prompt = build_full_prompt(&planner_base, Role::Planner, &task_repo, &zbobr.config().fork_owner);
+    let worker_prompt = build_full_prompt(&worker_base, Role::Worker, &task_repo, &zbobr.config().fork_owner);
+    let reviewer_prompt = build_full_prompt(&reviewer_base, Role::Reviewer, &task_repo, &zbobr.config().fork_owner);
+    let merger_prompt = build_full_prompt(&merger_base, Role::Merger, &task_repo, &zbobr.config().fork_owner);
 
-    tracing::info!("Manager loop started for {}", zbobr.config().task_repo);
+    tracing::info!("Manager loop started for {}", task_repo);
     tracing::info!("Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s");
     tracing::info!("Default Model: {model}");
     tracing::info!("CLI Tool: {:?}", zbobr.config().cli_tool);
