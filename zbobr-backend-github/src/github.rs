@@ -32,8 +32,9 @@ impl GitHubBackend {
         config: Arc<ZbobrDispatcherConfig>,
         toml: Option<&crate::config::ZbobrBackendGithubToml>,
         task_repo_override: Option<&str>,
+        fork_owner_override: Option<&str>,
     ) -> Result<Self, ZbobrError> {
-        let backend_config = ZbobrBackendGithubConfig::build(toml, task_repo_override);
+        let backend_config = ZbobrBackendGithubConfig::build(toml, task_repo_override, fork_owner_override);
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(config.owner_github_token.clone())
@@ -99,7 +100,7 @@ impl GitHubBackend {
             .nth(1)
             .ok_or_else(|| ZbobrError::Config(format!("Invalid repo format: {target_repo}")))?;
 
-        let fork_repo = format!("{}/{}", self.config.fork_owner, repo_name);
+        let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo_name);
 
         // Check if fork already exists
         let exists = self
@@ -117,7 +118,7 @@ impl GitHubBackend {
                     "Invalid target repo: {target_repo}"
                 )));
             }
-            let fork_owner = &self.config.fork_owner;
+            let fork_owner = &self.backend_config.fork_owner;
             let endpoint = format!("/repos/{}/{}/forks", parts[0], parts[1]);
             let payload = serde_json::json!({ "organization": fork_owner });
 
@@ -246,7 +247,7 @@ impl GitHubBackend {
         Ok(())
     }
 
-    /// Sync the fork under `self.config.fork_owner` with the given `target_repo` on `branch`.
+    /// Sync the fork under `self.backend_config.fork_owner` with the given `target_repo` on `branch`.
     /// Uses the server-side merge-upstream endpoint (equivalent to `gh repo sync`).
     /// Returns an error if the operation fails; no fallback is performed.
     pub async fn sync_fork_internal(&self, target_repo: &str, branch: &str) -> Result<(), ZbobrError> {
@@ -1121,7 +1122,7 @@ impl Backend for GitHubBackend {
 
         let pr_payload = serde_json::json!({
             "title": pr_title,
-            "head": format!("{}:{branch_name}", self.config.fork_owner),
+            "head": format!("{}:{branch_name}", self.backend_config.fork_owner),
             "body": pr_body,
         });
 
@@ -1142,17 +1143,12 @@ impl Backend for GitHubBackend {
 
     async fn create_pr_in_fork(
         &self,
-        destination_repository: &str,
+        repo_name: &str,
         work_branch: &str,
         destination_branch: &str,
         task_id: u64,
     ) -> Result<String, ZbobrError> {
-        let repo_name = destination_repository
-            .split('/')
-            .nth(1)
-            .ok_or_else(|| ZbobrError::Other("Invalid destination_repository format".to_string()))?;
-
-        let fork_repo = format!("{}/{}", self.config.fork_owner, repo_name);
+        let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo_name);
 
         // Create PR within the fork using octocrab GitHub API
         let task = self.get_task(task_id).await?;
@@ -1190,6 +1186,66 @@ impl Backend for GitHubBackend {
             .await?;
 
         Ok(response.html_url)
+    }
+
+    async fn setup_fork_remote_and_push(
+        &self,
+        work_dir: &std::path::Path,
+        target_repo: &str,
+        work_branch: &str,
+    ) -> Result<(), ZbobrError> {
+        let repo_name = target_repo
+            .split('/')
+            .nth(1)
+            .ok_or_else(|| ZbobrError::Other(format!("Invalid target_repo format: {}", target_repo)))?;
+        let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo_name);
+        let fork_url = format!("https://github.com/{fork_repo}.git");
+
+        // Remove old "fork" remote (ignore error if it doesn't exist)
+        let _ = tokio::process::Command::new("git")
+            .args(["remote", "remove", "fork"])
+            .current_dir(work_dir)
+            .status()
+            .await;
+
+        // Remove origin remote and replace it with fork remote URL
+        tracing::info!("Replacing origin remote with fork: {}", fork_url);
+        let remove_origin = tokio::process::Command::new("git")
+            .args(["remote", "remove", "origin"])
+            .current_dir(work_dir)
+            .status()
+            .await?;
+
+        if !remove_origin.success() {
+            return Err(ZbobrError::Other("Failed to remove origin remote".to_string()));
+        }
+
+        let add_origin = tokio::process::Command::new("git")
+            .args(["remote", "add", "origin", &fork_url])
+            .current_dir(work_dir)
+            .status()
+            .await?;
+
+        if !add_origin.success() {
+            return Err(ZbobrError::Other("Failed to add fork as origin remote".to_string()));
+        }
+
+        // Push the work branch to the forked repository
+        tracing::info!("Pushing work branch '{}' to fork", work_branch);
+        let push_status = tokio::process::Command::new("git")
+            .args(["push", "-u", "origin", work_branch])
+            .current_dir(work_dir)
+            .status()
+            .await?;
+
+        if !push_status.success() {
+            return Err(ZbobrError::Other(format!(
+                "Failed to push work branch '{}' to fork",
+                work_branch
+            )));
+        }
+
+        Ok(())
     }
 
     async fn sync_fork(&self, target_repo: &str, branch: &str) -> Result<(), ZbobrError> {
@@ -1449,7 +1505,7 @@ impl Backend for GitHubBackend {
     }
 
     async fn validate_connectivity(&self) -> Result<(), ZbobrError> {
-        let fork_owner = &self.config.fork_owner;
+        let fork_owner = &self.backend_config.fork_owner;
         let fork_owner_exists = self
             .retry_octocrab("check fork owner", || {
                 self.octocrab

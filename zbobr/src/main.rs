@@ -308,9 +308,6 @@ fn load_config(cli: &Cli, root_toml: &Option<ZbobrToml>) -> anyhow::Result<Zbobr
     let mut config = ZbobrDispatcherConfig::build(dispatcher_toml)?;
 
     // CLI arg overrides (highest priority)
-    if let Some(ref fo) = cli.global.fork_owner {
-        config.fork_owner = fo.clone();
-    }
     if let Some(ref ws) = cli.global.workspace {
         config.workspace = ws.clone();
     }
@@ -426,6 +423,7 @@ async fn main() -> anyhow::Result<()> {
             config_arc,
             backend_github_toml,
             cli.global.task_repo.as_deref(),
+            cli.global.fork_owner.as_deref(),
         )
         .context("Failed to create GitHub backend")?,
     );

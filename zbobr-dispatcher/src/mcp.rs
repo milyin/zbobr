@@ -1489,7 +1489,8 @@ mod tests {
         async fn parse_pr_to_repo_branch(&self, _pr_ref: &str) -> Result<(String, String), crate::ZbobrError> { unimplemented!() }
         async fn push_and_create_pr(&self, _repo: &str, _task_id: u64) -> Result<String, crate::ZbobrError> { unimplemented!() }
         async fn sync_fork(&self, _repo: &str, _branch: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn create_pr_in_fork(&self, _dest_repo: &str, _work_branch: &str, _dest_branch: &str, _task_id: u64) -> Result<String, crate::ZbobrError> { unimplemented!() }
+        async fn create_pr_in_fork(&self, _repo_name: &str, _work_branch: &str, _dest_branch: &str, _task_id: u64) -> Result<String, crate::ZbobrError> { unimplemented!() }
+        async fn setup_fork_remote_and_push(&self, _work_dir: &std::path::Path, _target_repo: &str, _work_branch: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn list_stages(&self) -> Result<Vec<(u64, String)>, crate::ZbobrError> { unimplemented!() }
         async fn create_stage(&self, _title: &str, _desc: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn delete_stage(&self, _number: u64) -> Result<(), crate::ZbobrError> { unimplemented!() }
@@ -1502,7 +1503,6 @@ mod tests {
 
     fn test_config() -> crate::config::ZbobrDispatcherConfig {
         crate::config::ZbobrDispatcherConfig {
-            fork_owner: "test-owner".to_string(),
             default_model: Model::Gpt4o,
             workspace: std::path::PathBuf::from("/tmp"),
             owner_github_token: "owner-token".to_string(),

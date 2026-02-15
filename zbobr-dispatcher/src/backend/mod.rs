@@ -505,20 +505,31 @@ pub trait Backend: Send + Sync {
         task_id: u64,
     ) -> Result<String, ZbobrError>;
 
-    /// Ensure the fork under `fork_owner` is synchronized with the upstream `target_repo` on `branch`.
+    /// Ensure the fork is synchronized with the upstream `target_repo` on `branch`.
     /// This performs a server-side sync (same as GitHub "Sync fork" button) and is
     /// not a local operation on the cloned copy.
     async fn sync_fork(&self, target_repo: &str, branch: &str) -> Result<(), ZbobrError>;
 
     /// Create a PR from work_branch to destination_branch in the fork repo.
+    /// `repo_name` is just the repository name (e.g. "myrepo"), not a full "owner/repo" path.
+    /// The backend determines the fork owner internally.
     /// Returns the PR URL on success, or empty string on stub backend.
     async fn create_pr_in_fork(
         &self,
-        destination_repository: &str,
+        repo_name: &str,
         work_branch: &str,
         destination_branch: &str,
         task_id: u64,
     ) -> Result<String, ZbobrError>;
+
+    /// Replace origin remote with the fork URL and push a work branch.
+    /// The backend determines the fork owner and constructs the fork URL internally.
+    async fn setup_fork_remote_and_push(
+        &self,
+        work_dir: &std::path::Path,
+        target_repo: &str,
+        work_branch: &str,
+    ) -> Result<(), ZbobrError>;
 
     // -- Setup methods --
 

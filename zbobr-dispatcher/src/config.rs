@@ -49,7 +49,6 @@ pub struct TomlPrompts {
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct ZbobrDispatcherToml {
-    pub fork_owner: Option<String>,
     pub default_model: Option<Model>,
     pub workspace: Option<PathBuf>,
     pub owner_github_token: Option<String>,
@@ -81,8 +80,6 @@ impl ZbobrDispatcherToml {
 /// Configuration for the zbobr dispatcher.
 #[derive(Debug, Clone)]
 pub struct ZbobrDispatcherConfig {
-    /// Owner for forks (user or org).
-    pub fork_owner: String,
     /// Default AI model to use.
     pub default_model: Model,
     /// Workspace directory for issue work dirs.
@@ -118,7 +115,6 @@ pub struct ZbobrDispatcherConfig {
 impl Default for ZbobrDispatcherConfig {
     fn default() -> Self {
         Self {
-            fork_owner: String::new(),
             default_model: Model::default(),
             workspace: PathBuf::from("./workspace"),
             owner_github_token: String::new(),
@@ -167,10 +163,6 @@ impl ZbobrDispatcherConfig {
 
     fn build_with_env<E: EnvSource>(toml: Option<&ZbobrDispatcherToml>, env: &E) -> Result<Self, ZbobrError> {
         let defaults = ZbobrDispatcherConfig::default();
-
-        let fork_owner = toml
-            .and_then(|t| t.fork_owner.clone())
-            .unwrap_or(defaults.fork_owner);
 
         let default_model = toml
             .and_then(|t| t.default_model.clone())
@@ -239,7 +231,6 @@ impl ZbobrDispatcherConfig {
             .unwrap_or_default();
 
         Ok(Self {
-            fork_owner,
             default_model,
             workspace,
             owner_github_token,
@@ -265,12 +256,6 @@ impl ZbobrDispatcherConfig {
 
     /// Validate that all required fields are set.
     pub fn validate(&self) -> Result<(), ZbobrError> {
-        if self.fork_owner.is_empty() {
-            return Err(ZbobrError::Config(
-                "fork owner not set. Use --fork-owner NAME or set fork_owner in the config file.\n  \
-                 This is the GitHub user or organization where target repos are forked for implementation.".into(),
-            ));
-        }
         if self.owner_github_token.is_empty() {
             return Err(ZbobrError::Config(
                 "owner GitHub token not set. Set GH_TOKEN or GITHUB_TOKEN env var, or set owner_github_token in the config file.\n  \
@@ -342,25 +327,23 @@ mod tests {
 
         let config =
             ZbobrDispatcherConfig::build_with_env(None, &env).expect("build should succeed with tokens");
-        // validate() should fail because fork_owner is missing
+        // validate() should fail because agent_github_token is missing
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn toml_config_parse_minimal() {
         let toml_str = r#"
-    fork_owner = "myuser"
+    default_model = "gpt-5-mini"
     "#;
         let config: ZbobrDispatcherToml = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.fork_owner.as_deref(), Some("myuser"));
-        assert!(config.default_model.is_none());
+        assert_eq!(config.default_model, Some(Model::Gpt5Mini));
         assert!(config.backend.is_none());
     }
 
     #[test]
     fn toml_config_parse_full() {
         let toml_str = r#"
-    fork_owner = "myuser"
     default_model = "gpt-5-mini"
     workspace = "/tmp/workspace"
     cli_tool = "claude"
@@ -385,7 +368,7 @@ mod tests {
     #[test]
     fn toml_config_unknown_keys_ignored() {
         let toml_str = r#"
-    fork_owner = "myuser"
+    default_model = "gpt-5-mini"
     unknown_top = "value"
 
     [prompts]
@@ -405,7 +388,6 @@ mod tests {
     fn build_with_toml() {
         let env = TestEnv::new(&[]);
         let toml = ZbobrDispatcherToml {
-            fork_owner: Some("toml-fork".into()),
             default_model: Some(Model::Claude3Opus),
             workspace: Some(PathBuf::from("/tmp/toml-ws")),
             owner_github_token: Some("toml-owner-token".into()),
@@ -426,7 +408,6 @@ mod tests {
         };
 
         let config = ZbobrDispatcherConfig::build_with_env(Some(&toml), &env).unwrap();
-        assert_eq!(config.fork_owner, "toml-fork");
         assert_eq!(config.default_model, Model::Claude3Opus);
         assert_eq!(config.workspace, PathBuf::from("/tmp/toml-ws"));
         assert_eq!(config.backend, BackendType::GitHub);

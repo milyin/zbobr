@@ -206,17 +206,28 @@ impl Zbobr {
 
     pub async fn create_pr_in_fork(
         &self,
-        destination_repository: &str,
+        repo_name: &str,
         work_branch: &str,
         destination_branch: &str,
         task_id: u64,
     ) -> Result<String, ZbobrError> {
         self.backend
-            .create_pr_in_fork(destination_repository, work_branch, destination_branch, task_id)
+            .create_pr_in_fork(repo_name, work_branch, destination_branch, task_id)
             .await
     }
 
-    /// Ensure the fork under `fork_owner` is synchronized with the upstream `target_repo` on `branch`.
+    pub async fn setup_fork_remote_and_push(
+        &self,
+        work_dir: &std::path::Path,
+        target_repo: &str,
+        work_branch: &str,
+    ) -> Result<(), ZbobrError> {
+        self.backend
+            .setup_fork_remote_and_push(work_dir, target_repo, work_branch)
+            .await
+    }
+
+    /// Ensure the fork is synchronized with the upstream `target_repo` on `branch`.
     pub async fn sync_fork(&self, target_repo: &str, branch: &str) -> Result<(), ZbobrError> {
         self.backend.sync_fork(target_repo, branch).await
     }
