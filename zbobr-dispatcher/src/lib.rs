@@ -9,7 +9,7 @@ pub mod tool_executor;
 
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-pub use config::{ZbobrBackendToml, ZbobrDispatcherToml, ZbobrDispatcherConfig};
+pub use config::{ZbobrDispatcherToml, ZbobrDispatcherConfig};
 pub use mcp::{planner_instructions, worker_instructions, reviewer_instructions, merger_instructions, PlannerMcp, WorkerMcp, ReviewerMcp, MergerMcp};
 pub use task::{Model, ChecklistItem, Parameter, Signal, Stage, Task, TaskSession, Tool};
 pub use tool_executor::{ClaudeExecutor, CopilotExecutor, ToolExecutor};

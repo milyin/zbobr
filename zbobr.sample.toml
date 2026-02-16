@@ -38,7 +38,7 @@
 # reviewer = ["prompts/reviewer.md", "prompts/common.md"]
 # merger = ["prompts/merger.md", "prompts/common.md"]
 
-[dispatcher.backend.github]
+[backend.github]
 # GitHub repository used as the task tracker (issues + milestones).
 # task_repo = "myorg/zbobr-tasks"
 

@@ -5,13 +5,11 @@ use std::sync::Arc;
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use zbobr_backend_github::GitHubBackend;
+use zbobr_config::ZbobrConfigToml;
 use zbobr_dispatcher::{
     Stage, Zbobr, ZbobrDispatcherConfig,
     task::{Model, Role, Tool},
 };
-
-mod config;
-use config::ZbobrToml;
 
 #[derive(Args, Clone)]
 #[command(next_help_heading = "Global Options")]
@@ -291,18 +289,18 @@ fn build_full_prompt(user_context: &str, role: Role) -> String {
 /// Load root TOML config based on CLI args.
 /// If --config is specified, load that file (error if missing).
 /// Otherwise, try zbobr.toml in cwd (silently skip if missing).
-fn load_root_toml(cli: &Cli) -> anyhow::Result<Option<ZbobrToml>> {
+fn load_root_toml(cli: &Cli) -> anyhow::Result<Option<ZbobrConfigToml>> {
     if let Some(ref path) = cli.global.config {
-        let root = ZbobrToml::load(path)?
+        let root = ZbobrConfigToml::load(path)?
             .ok_or_else(|| anyhow::anyhow!("Config file not found: {}", path.display()))?;
         Ok(Some(root))
     } else {
         let default_path = std::env::current_dir()?.join("zbobr.toml");
-        ZbobrToml::load(&default_path).map_err(Into::into)
+        ZbobrConfigToml::load(&default_path).map_err(Into::into)
     }
 }
 
-fn load_config(cli: &Cli, root_toml: &Option<ZbobrToml>) -> anyhow::Result<ZbobrDispatcherConfig> {
+fn load_config(cli: &Cli, root_toml: &Option<ZbobrConfigToml>) -> anyhow::Result<ZbobrDispatcherConfig> {
     // Build dispatcher config
     let dispatcher_toml = root_toml.as_ref().and_then(|r| r.dispatcher.as_ref());
     let mut config = ZbobrDispatcherConfig::build(dispatcher_toml)?;
@@ -417,18 +415,14 @@ async fn main() -> anyhow::Result<()> {
     let root_toml = load_root_toml(&cli)?;
     let config = load_config(&cli, &root_toml)?;
     let config_arc = Arc::new(config.clone());
-    let backend_github_toml: Option<zbobr_backend_github::ZbobrBackendGithubToml> = root_toml
+    let backend_github_toml = root_toml
         .as_ref()
-        .and_then(|r| r.dispatcher.as_ref())
-        .and_then(|d| d.backend.as_ref())
-        .and_then(|b| b.github.as_ref())
-        .map(|table| table.clone().try_into())
-        .transpose()
-        .context("Failed to parse [dispatcher.backend.github] config")?;
+        .and_then(|r| r.backend.as_ref())
+        .and_then(|b| b.github.as_ref());
     let backend: Arc<dyn zbobr_dispatcher::backend::Backend> = Arc::new(
         GitHubBackend::new(
             config_arc,
-            backend_github_toml.as_ref(),
+            backend_github_toml,
             cli.global.task_repo.as_deref(),
             cli.global.fork_owner.as_deref(),
         )
