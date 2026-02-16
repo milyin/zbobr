@@ -1,5 +1,9 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
+use crate::separator::{
+    merge_concurrent_description_updates, parse_description_full, serialize_description_full,
+};
+
 use async_trait::async_trait;
 
 use zbobr_dispatcher::backend::Backend;
@@ -285,6 +289,19 @@ impl GitHubBackend {
         }
     }
 
+    /// Low-level: write the raw serialized task body.
+    async fn update_task_description(&self, id: u64, description: &str) -> Result<(), ZbobrError> {
+        let (owner, repo) = self.parse_repo()?;
+        let url = format!("/repos/{owner}/{repo}/issues/{id}");
+        let body = serde_json::json!({ "body": description });
+        self.retry_octocrab("update issue body", || {
+            self.octocrab.patch(url.clone(), Some(&body))
+        })
+        .await
+        .map(|_: serde_json::Value| ())?;
+        Ok(())
+    }
+
     /// Update a label's color and description.
     async fn update_label(
         &self,
@@ -325,7 +342,7 @@ impl Backend for GitHubBackend {
 
         let body = issue.body.unwrap_or_default();
         // Parse full description including PARAMETERS, PLAN and CHECKLIST
-        let (description, params_map, plan, checklist) = zbobr_dispatcher::backend::parse_description_full(&body);
+        let (description, params_map, plan, checklist) = parse_description_full(&body);
 
         let tool = issue.labels.iter().find_map(|l| {
             if let Some(name) = l.name.strip_prefix("tool:") {
@@ -422,7 +439,7 @@ impl Backend for GitHubBackend {
         if let Some(v) = parameters.get(&Parameter::PrUrl) {
             params_text.insert(Parameter::PrUrl.name().to_string(), v.clone());
         }
-        let body = zbobr_dispatcher::backend::serialize_description_full(description, &params_text, "", &[]);
+        let body = serialize_description_full(description, &params_text, "", &[]);
 
         let stage_number = self.find_stage_number(stage).await?;
 
@@ -554,16 +571,69 @@ impl Backend for GitHubBackend {
         Ok(())
     }
 
-    async fn update_task_description(&self, id: u64, description: &str) -> Result<(), ZbobrError> {
-        let (owner, repo) = self.parse_repo()?;
-        // Just store the description as-is, it should be pre-formatted by the caller
-        let url = format!("/repos/{owner}/{repo}/issues/{id}");
-        let body = serde_json::json!({ "body": description });
-        self.retry_octocrab("update issue body", || {
-            self.octocrab.patch(url.clone(), Some(&body))
-        })
-        .await
-        .map(|_: serde_json::Value| ())?;
+    async fn modify_task(
+        &self,
+        id: u64,
+        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
+    ) -> Result<(), ZbobrError> {
+        let task = self.get_task(id).await?;
+        let expected_description = task.etag.clone().unwrap_or_else(|| {
+            let string_params: HashMap<String, String> = task
+                .parameters
+                .iter()
+                .map(|(k, v)| (k.name().to_string(), v.clone()))
+                .collect();
+            serialize_description_full(&task.description, &string_params, &task.plan, &task.checklist)
+        });
+
+        let task = mutate(task);
+
+        let string_params: HashMap<String, String> = task
+            .parameters
+            .iter()
+            .map(|(k, v)| (k.name().to_string(), v.clone()))
+            .collect();
+        let new_description = serialize_description_full(
+            &task.description,
+            &string_params,
+            &task.plan,
+            &task.checklist,
+        );
+
+        // Write with retry and conflict detection
+        const MAX_RETRIES: u32 = 3;
+        let mut new_desc = new_description;
+        let mut expected_desc = expected_description;
+        for attempt in 1..=MAX_RETRIES {
+            match self.update_task_description(id, &new_desc).await {
+                Ok(()) => return Ok(()),
+                Err(e) if attempt >= MAX_RETRIES => return Err(e),
+                Err(_) => {}
+            }
+            // Re-read to check for concurrent modifications
+            let current_task = self.get_task(id).await?;
+            let current_body = current_task.etag.unwrap_or_else(|| {
+                let sp: HashMap<String, String> = current_task
+                    .parameters
+                    .iter()
+                    .map(|(k, v)| (k.name().to_string(), v.clone()))
+                    .collect();
+                serialize_description_full(
+                    &current_task.description,
+                    &sp,
+                    &current_task.plan,
+                    &current_task.checklist,
+                )
+            });
+            if current_body != expected_desc {
+                new_desc = merge_concurrent_description_updates(
+                    &expected_desc,
+                    &current_body,
+                    &new_desc,
+                );
+                expected_desc = current_body;
+            }
+        }
         Ok(())
     }
 
@@ -600,7 +670,7 @@ impl Backend for GitHubBackend {
 
             let body = issue.body.unwrap_or_default();
             // Parse full description including PARAMETERS, PLAN and CHECKLIST
-            let (description, params_map, plan, checklist) = zbobr_dispatcher::backend::parse_description_full(&body);
+            let (description, params_map, plan, checklist) = parse_description_full(&body);
             let task_tool = issue.labels.iter().find_map(|l| {
                 if let Some(name) = l.name.strip_prefix("tool:") {
                     match name {
