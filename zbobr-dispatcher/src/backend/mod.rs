@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
@@ -28,8 +29,8 @@ const CHECKLIST_SEPARATOR: &str = "\n\n---CHECKLIST---\n";
 
 /// Parse parameters from the PARAMETERS section.
 /// Returns a map of parameter names to values.
-pub fn parse_parameters(params_text: &str) -> std::collections::HashMap<String, String> {
-    let mut params = std::collections::HashMap::new();
+pub fn parse_parameters(params_text: &str) -> HashMap<String, String> {
+    let mut params = HashMap::new();
     for line in params_text.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -45,7 +46,7 @@ pub fn parse_parameters(params_text: &str) -> std::collections::HashMap<String, 
 }
 
 /// Serialize parameters into the PARAMETERS section format.
-pub fn serialize_parameters(params: &std::collections::HashMap<String, String>) -> String {
+pub fn serialize_parameters(params: &HashMap<String, String>) -> String {
     let mut result = String::new();
     for (key, value) in params {
         result.push_str(&format!("{}: {}\n", key, value));
@@ -55,7 +56,7 @@ pub fn serialize_parameters(params: &std::collections::HashMap<String, String>) 
 
 /// Parse a task description into (description, parameters, plan, checklist).
 /// Format: description | ---PARAMETERS--- | params | ---PLAN--- | plan text | ---CHECKLIST--- | checklist
-pub fn parse_description_full(full_text: &str) -> (String, std::collections::HashMap<String, String>, String, Vec<ChecklistItem>) {
+pub fn parse_description_full(full_text: &str) -> (String, HashMap<String, String>, String, Vec<ChecklistItem>) {
     // Normalize line endings so separators match regardless of \r\n vs \n.
     let normalized = if full_text.contains("\r\n") {
         full_text.replace("\r\n", "\n")
@@ -153,7 +154,7 @@ pub fn extract_plan(full_text: &str) -> String {
 }
 
 /// Extract parameters from a full description text.
-pub fn extract_parameters(full_text: &str) -> std::collections::HashMap<String, String> {
+pub fn extract_parameters(full_text: &str) -> HashMap<String, String> {
     let (_, params, _, _) = parse_description_full(full_text);
     params
 }
@@ -162,7 +163,7 @@ pub fn extract_parameters(full_text: &str) -> std::collections::HashMap<String, 
 /// Format: description | ---PARAMETERS--- | params | ---PLAN--- | plan | ---CHECKLIST--- | checklist
 pub fn serialize_description_full(
     original_description: &str,
-    parameters: &std::collections::HashMap<String, String>,
+    parameters: &HashMap<String, String>,
     plan: &str,
     items: &[ChecklistItem],
 ) -> String {
@@ -412,7 +413,7 @@ pub trait Backend: Send + Sync {
         stage: Stage,
         tool: Option<Tool>,
         model: Option<Model>,
-        parameters: std::collections::HashMap<Parameter, String>,
+        parameters: HashMap<Parameter, String>,
     ) -> Result<u64, ZbobrError>;
 
     /// Close a task.

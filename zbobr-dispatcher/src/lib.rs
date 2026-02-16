@@ -1,7 +1,6 @@
 pub mod backend;
 pub mod cleanup;
 pub mod config;
-pub mod manager;
 pub mod mcp;
 pub mod setup;
 pub mod task;
@@ -107,12 +106,12 @@ impl Zbobr {
             .await
     }
 
-    pub async fn set_task_stage_by_name(
+    pub async fn set_task_stage(
         &self,
         id: u64,
-        stage_name: &str,
+        stage: Stage,
     ) -> Result<(), ZbobrError> {
-        self.backend.set_task_stage(id, stage_name).await
+        self.backend.set_task_stage(id, stage.milestone_name()).await
     }
 
     pub async fn set_task_signal(&self, id: u64, signal: Option<Signal>) -> Result<(), ZbobrError> {
