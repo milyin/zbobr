@@ -504,7 +504,8 @@ impl Backend for GitHubBackend {
         Ok(())
     }
 
-    async fn set_task_stage(&self, id: u64, stage_name: &str) -> Result<(), ZbobrError> {
+    async fn set_task_stage(&self, id: u64, stage: Stage) -> Result<(), ZbobrError> {
+        let stage_name = stage.milestone_name();
         let stage_number = self
             .find_stage_number(stage_name)
             .await?
@@ -634,10 +635,10 @@ impl Backend for GitHubBackend {
 
     async fn list_tasks_by_stage(
         &self,
-        stage_name: &str,
+        stage: Stage,
         tool: Option<Tool>,
     ) -> Result<Vec<Task>, ZbobrError> {
-        let stage_number = match self.find_stage_number(stage_name).await? {
+        let stage_number = match self.find_stage_number(stage.milestone_name()).await? {
             Some(n) => n,
             None => return Ok(vec![]),
         };

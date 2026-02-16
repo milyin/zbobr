@@ -431,8 +431,8 @@ pub trait Backend: Send + Sync {
         hostname: &str,
     ) -> Result<(), ZbobrError>;
 
-    /// Set the stage on a task by stage name.
-    async fn set_task_stage(&self, id: u64, stage_name: &str) -> Result<(), ZbobrError>;
+    /// Set the stage on a task.
+    async fn set_task_stage(&self, id: u64, stage: Stage) -> Result<(), ZbobrError>;
 
     /// Set or clear a signal on a task.
     async fn set_task_signal(&self, id: u64, signal: Option<Signal>) -> Result<(), ZbobrError>;
@@ -455,10 +455,10 @@ pub trait Backend: Send + Sync {
         new_description: &str,
     ) -> Result<(), ZbobrError>;
 
-    /// List open tasks with a given stage name, optionally filtered by tool.
+    /// List open tasks with a given stage, optionally filtered by tool.
     async fn list_tasks_by_stage(
         &self,
-        stage_name: &str,
+        stage: Stage,
         tool: Option<Tool>,
     ) -> Result<Vec<Task>, ZbobrError>;
 

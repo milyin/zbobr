@@ -1475,11 +1475,11 @@ mod tests {
         async fn close_task(&self, _id: u64) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn get_task_comments(&self, _id: u64) -> Result<Vec<String>, crate::ZbobrError> { unimplemented!() }
         async fn post_task_comment(&self, _id: u64, _body: &str, _role: &str, _hostname: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn set_task_stage(&self, _id: u64, _stage_name: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
+        async fn set_task_stage(&self, _id: u64, _stage: crate::Stage) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn set_task_signal(&self, _id: u64, _signal: Option<crate::Signal>) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn update_task_description(&self, _id: u64, _description: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn update_task_description_with_conflict_detection(&self, _id: u64, _expected: &str, _new: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn list_tasks_by_stage(&self, _stage: &str, _tool: Option<crate::Tool>) -> Result<Vec<crate::Task>, crate::ZbobrError> { unimplemented!() }
+        async fn list_tasks_by_stage(&self, _stage: crate::Stage, _tool: Option<crate::Tool>) -> Result<Vec<crate::Task>, crate::ZbobrError> { unimplemented!() }
         async fn is_task_closed(&self, _id: u64) -> Result<bool, crate::ZbobrError> { unimplemented!() }
         async fn repo_file_exists(&self, _path: &str) -> Result<bool, crate::ZbobrError> { unimplemented!() }
         async fn create_repo_file(&self, _path: &str, _content: &str, _msg: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }

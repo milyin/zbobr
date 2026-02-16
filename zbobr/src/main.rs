@@ -773,7 +773,7 @@ async fn run_manager_loop(
         // Note: Only PENDING tasks are checked - tasks already in GO_PLANNING or GO_WORKING
         // stages are locked and should not be transitioned by this logic.
         let pending_tasks = match zbobr
-            .list_tasks_by_stage(Stage::Pending.milestone_name(), Some(current_tool))
+            .list_tasks_by_stage(Stage::Pending, Some(current_tool))
             .await
         {
             Ok(tasks) => tasks,
@@ -803,7 +803,7 @@ async fn run_manager_loop(
 
         // Check for GO_PLANNING tasks
         let planning_tasks = match zbobr
-            .list_tasks_by_stage(Stage::GoPlanning.milestone_name(), Some(current_tool))
+            .list_tasks_by_stage(Stage::GoPlanning, Some(current_tool))
             .await
         {
             Ok(tasks) => tasks,
@@ -838,7 +838,7 @@ async fn run_manager_loop(
 
         // Check for GO_WORKING tasks
         let working_tasks = match zbobr
-            .list_tasks_by_stage(Stage::GoWorking.milestone_name(), Some(current_tool))
+            .list_tasks_by_stage(Stage::GoWorking, Some(current_tool))
             .await
         {
             Ok(tasks) => tasks,
@@ -873,7 +873,7 @@ async fn run_manager_loop(
 
         // Check for GO_REVIEWING tasks
         let reviewing_tasks = match zbobr
-            .list_tasks_by_stage(Stage::GoReviewing.milestone_name(), Some(current_tool))
+            .list_tasks_by_stage(Stage::GoReviewing, Some(current_tool))
             .await
         {
             Ok(tasks) => tasks,
@@ -908,7 +908,7 @@ async fn run_manager_loop(
 
         // Check for GO_MERGING tasks
         let merging_tasks = match zbobr
-            .list_tasks_by_stage(Stage::GoMerging.milestone_name(), Some(current_tool))
+            .list_tasks_by_stage(Stage::GoMerging, Some(current_tool))
             .await
         {
             Ok(tasks) => tasks,

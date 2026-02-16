@@ -111,7 +111,7 @@ impl Zbobr {
         id: u64,
         stage: Stage,
     ) -> Result<(), ZbobrError> {
-        self.backend.set_task_stage(id, stage.milestone_name()).await
+        self.backend.set_task_stage(id, stage).await
     }
 
     pub async fn set_task_signal(&self, id: u64, signal: Option<Signal>) -> Result<(), ZbobrError> {
@@ -128,10 +128,10 @@ impl Zbobr {
 
     pub async fn list_tasks_by_stage(
         &self,
-        stage_name: &str,
+        stage: Stage,
         tool: Option<Tool>,
     ) -> Result<Vec<Task>, ZbobrError> {
-        self.backend.list_tasks_by_stage(stage_name, tool).await
+        self.backend.list_tasks_by_stage(stage, tool).await
     }
 
     pub async fn is_task_closed(&self, id: u64) -> Result<bool, ZbobrError> {
