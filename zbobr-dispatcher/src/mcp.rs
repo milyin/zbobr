@@ -655,20 +655,18 @@ pub trait CommonMcpImpl: Send + Sync {
 #[allow(async_fn_in_trait)]
 pub trait PlannerMcpImpl: CommonMcpImpl {
     async fn get_param_impl(&self, param: Parameter) -> String {
-        let param_name = param.name();
-        tracing::info!("[planner#{}] get_param_{}", self.session().task_id(), param_name);
-        match self.session().get_parameter(param_name).await {
+        tracing::info!("[planner#{}] get_param_{}", self.session().task_id(), param.name());
+        match self.session().get_parameter(param).await {
             Ok(Some(value)) => value,
-            Ok(None) => format!("{} is not set", param_name),
+            Ok(None) => format!("{} is not set", param.name()),
             Err(e) => format!("Error: {e}"),
         }
     }
 
     async fn set_param_impl(&self, param: Parameter, value: Option<String>) -> String {
-        let param_name = param.name();
-        tracing::info!("[planner#{}] set_param_{} value={:?}", self.session().task_id(), param_name, value);
-        match self.session().set_parameter(param_name, value).await {
-            Ok(()) => format!("{} updated", param_name),
+        tracing::info!("[planner#{}] set_param_{} value={:?}", self.session().task_id(), param.name(), value);
+        match self.session().set_parameter(param, value).await {
+            Ok(()) => format!("{} updated", param.name()),
             Err(e) => format!("Error: {e}"),
         }
     }
@@ -739,11 +737,10 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
 #[allow(async_fn_in_trait)]
 pub trait WorkerMcpImpl: CommonMcpImpl {
     async fn get_param_impl(&self, param: Parameter) -> String {
-        let param_name = param.name();
-        tracing::info!("[worker#{}] get_param_{}", self.session().task_id(), param_name);
-        match self.session().get_parameter(param_name).await {
+        tracing::info!("[worker#{}] get_param_{}", self.session().task_id(), param.name());
+        match self.session().get_parameter(param).await {
             Ok(Some(value)) => value,
-            Ok(None) => format!("{} is not set", param_name),
+            Ok(None) => format!("{} is not set", param.name()),
             Err(e) => format!("Error: {e}"),
         }
     }
@@ -820,11 +817,10 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
 #[allow(async_fn_in_trait)]
 pub trait ReviewerMcpImpl: CommonMcpImpl {
     async fn get_param_impl(&self, param: Parameter) -> String {
-        let param_name = param.name();
-        tracing::info!("[reviewer#{}] get_param_{}", self.session().task_id(), param_name);
-        match self.session().get_parameter(param_name).await {
+        tracing::info!("[reviewer#{}] get_param_{}", self.session().task_id(), param.name());
+        match self.session().get_parameter(param).await {
             Ok(Some(value)) => value,
-            Ok(None) => format!("{} is not set", param_name),
+            Ok(None) => format!("{} is not set", param.name()),
             Err(e) => format!("Error: {e}"),
         }
     }
@@ -851,11 +847,10 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
 #[allow(async_fn_in_trait)]
 pub trait MergerMcpImpl: CommonMcpImpl {
     async fn get_param_impl(&self, param: Parameter) -> String {
-        let param_name = param.name();
-        tracing::info!("[merger#{}] get_param_{}", self.session().task_id(), param_name);
-        match self.session().get_parameter(param_name).await {
+        tracing::info!("[merger#{}] get_param_{}", self.session().task_id(), param.name());
+        match self.session().get_parameter(param).await {
             Ok(Some(value)) => value,
-            Ok(None) => format!("{} is not set", param_name),
+            Ok(None) => format!("{} is not set", param.name()),
             Err(e) => format!("Error: {e}"),
         }
     }

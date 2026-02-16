@@ -735,7 +735,7 @@ impl TaskSession {
     /// The work repository has all remote information cleared - only pull_work and push_work know where to push.
     pub async fn push_work(&self) -> Result<(), ZbobrError> {
         // Get the destination repo (needed to find the cloned path)
-        let dest_repo = self.get_parameter(Parameter::DestinationRepository.name()).await?
+        let dest_repo = self.get_parameter(Parameter::DestinationRepository).await?
             .ok_or_else(|| ZbobrError::Other("destination_repository parameter not set".to_string()))?;
         
         // Compute the work directory: workspace/task#<id>/<repo>
@@ -759,7 +759,7 @@ impl TaskSession {
         }
 
         // Get the work_branch name
-        let work_branch = self.get_parameter(Parameter::WorkBranch.name()).await?
+        let work_branch = self.get_parameter(Parameter::WorkBranch).await?
             .ok_or_else(|| ZbobrError::Other("work_branch parameter not set".to_string()))?;
 
         // Get current branch
@@ -848,13 +848,13 @@ impl TaskSession {
     /// Also creates a PR from work_branch to destination_branch in the fork repo if all parameters are set.
     pub async fn pull_work(&self) -> Result<String, ZbobrError> {
         // Get required parameters
-        let dest_repo = self.get_parameter(Parameter::DestinationRepository.name()).await?
+        let dest_repo = self.get_parameter(Parameter::DestinationRepository).await?
             .ok_or_else(|| ZbobrError::Other("destination_repository parameter not set".to_string()))?;
         
-        let dest_branch = self.get_parameter(Parameter::DestinationBranch.name()).await?
+        let dest_branch = self.get_parameter(Parameter::DestinationBranch).await?
             .ok_or_else(|| ZbobrError::Other("destination_branch parameter not set".to_string()))?;
 
-        let work_branch = self.get_parameter(Parameter::WorkBranch.name()).await?
+        let work_branch = self.get_parameter(Parameter::WorkBranch).await?
             .ok_or_else(|| ZbobrError::Other("work_branch parameter not set".to_string()))?;
 
         // Clone and setup the repository with forking
@@ -1024,7 +1024,7 @@ impl TaskSession {
 
         // If a PR URL is already stored in the task parameters, verify it exists
         // and skip creating a new PR when that's the case.
-        if let Ok(Some(existing_pr)) = self.get_parameter(Parameter::PrUrl.name()).await {
+        if let Ok(Some(existing_pr)) = self.get_parameter(Parameter::PrUrl).await {
             match self.zbobr.parse_pr_to_repo_branch(&existing_pr).await {
                 Ok((_repo, _branch)) => {
                     tracing::info!("PR already exists for task {}: {}", self.task_id, existing_pr);
@@ -1051,7 +1051,7 @@ impl TaskSession {
             .await?;
 
         // Store the PR URL in the task
-        self.set_parameter(Parameter::PrUrl.name(), Some(pr_url)).await?;
+        self.set_parameter(Parameter::PrUrl, Some(pr_url)).await?;
 
         Ok(())
     }
@@ -1064,50 +1064,20 @@ impl TaskSession {
     }
 
     /// Get a task parameter value. Parameters are stored in the task's parameters HashMap.
-    pub async fn get_parameter(&self, param_name: &str) -> Result<Option<String>, ZbobrError> {
+    pub async fn get_parameter(&self, param: Parameter) -> Result<Option<String>, ZbobrError> {
         let task = self.zbobr.get_task(self.task_id).await?;
-        
-        // Try to match parameter name to Parameter enum
-        let param = match param_name.to_lowercase().as_str() {
-            name if name == Parameter::DestinationRepository.name() => Some(Parameter::DestinationRepository),
-            name if name == Parameter::DestinationBranch.name() => Some(Parameter::DestinationBranch),
-            name if name == Parameter::WorkBranch.name() => Some(Parameter::WorkBranch),
-            name if name == Parameter::PrUrl.name() => Some(Parameter::PrUrl),
-            _ => None,
-        };
-        
-        if let Some(p) = param {
-            return Ok(task.parameters.get(&p).cloned());
-        }
-        
-        // If not a known parameter, extract from PARAMETERS section
-        use crate::backend::extract_parameters;
-        let parameters = extract_parameters(&task.description);
-        Ok(parameters.get(param_name).cloned())
+        Ok(task.parameters.get(&param).cloned())
     }
 
     /// Set a task parameter value with automatic conflict detection.
     /// Parameters are stored in the visible PARAMETERS section.
-    pub async fn set_parameter(&self, param_name: &str, value: Option<String>) -> Result<(), ZbobrError> {
-        let param_key = param_name.to_lowercase();
-        let param_enum = match param_key.as_str() {
-            name if name == Parameter::DestinationRepository.name() => Some(Parameter::DestinationRepository),
-            name if name == Parameter::DestinationBranch.name() => Some(Parameter::DestinationBranch),
-            name if name == Parameter::WorkBranch.name() => Some(Parameter::WorkBranch),
-            name if name == Parameter::PrUrl.name() => Some(Parameter::PrUrl),
-            _ => None,
-        };
-
+    pub async fn set_parameter(&self, param: Parameter, value: Option<String>) -> Result<(), ZbobrError> {
         self.modify_task(|task| {
-            if let Some(p) = param_enum {
-                if let Some(v) = value {
-                    task.parameters.insert(p, v);
-                } else {
-                    task.parameters.remove(&p);
-                }
+            if let Some(v) = value {
+                task.parameters.insert(param, v);
+            } else {
+                task.parameters.remove(&param);
             }
-            // For unknown parameter names, we currently only support the known Parameter enum.
-            // Unknown parameters are silently ignored.
         }).await
     }
 }

@@ -89,7 +89,8 @@ impl GitHubBackend {
         self.backend_config.parse_repo()
     }
 
-    async fn find_stage_number(&self, title: &str) -> Result<Option<u64>, ZbobrError> {
+    async fn find_stage_number(&self, stage: Stage) -> Result<Option<u64>, ZbobrError> {
+        let title = stage.milestone_name();
         let stages = self.list_stages().await?;
         Ok(stages.into_iter().find(|(_, t)| t == title).map(|(n, _)| n))
     }
@@ -423,7 +424,7 @@ impl Backend for GitHubBackend {
         }
         let body = zbobr_dispatcher::backend::serialize_description_full(description, &params_text, "", &[]);
 
-        let stage_number = self.find_stage_number(stage.milestone_name()).await?;
+        let stage_number = self.find_stage_number(stage).await?;
 
         let mut labels = vec![];
         if let Some(t) = tool {
@@ -505,11 +506,10 @@ impl Backend for GitHubBackend {
     }
 
     async fn set_task_stage(&self, id: u64, stage: Stage) -> Result<(), ZbobrError> {
-        let stage_name = stage.milestone_name();
         let stage_number = self
-            .find_stage_number(stage_name)
+            .find_stage_number(stage)
             .await?
-            .ok_or_else(|| ZbobrError::GitHub(format!("Milestone '{stage_name}' not found")))?;
+            .ok_or_else(|| ZbobrError::GitHub(format!("Milestone '{}' not found", stage)))?;
 
         let (owner, repo) = self.parse_repo()?;
         let url = format!("/repos/{owner}/{repo}/issues/{id}");
@@ -638,7 +638,7 @@ impl Backend for GitHubBackend {
         stage: Stage,
         tool: Option<Tool>,
     ) -> Result<Vec<Task>, ZbobrError> {
-        let stage_number = match self.find_stage_number(stage.milestone_name()).await? {
+        let stage_number = match self.find_stage_number(stage).await? {
             Some(n) => n,
             None => return Ok(vec![]),
         };
