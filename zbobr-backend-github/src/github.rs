@@ -302,6 +302,57 @@ impl GitHubBackend {
         Ok(())
     }
 
+    /// Apply a stage change on a GitHub issue (update milestone).
+    async fn apply_stage_change(&self, id: u64, stage: Stage) -> Result<(), ZbobrError> {
+        let stage_number = self
+            .find_stage_number(stage)
+            .await?
+            .ok_or_else(|| ZbobrError::GitHub(format!("Milestone '{}' not found", stage)))?;
+
+        let (owner, repo) = self.parse_repo()?;
+        let url = format!("/repos/{owner}/{repo}/issues/{id}");
+        let body = serde_json::json!({ "milestone": stage_number });
+        self.retry_octocrab("set issue milestone", || {
+            self.octocrab.patch(url.clone(), Some(&body))
+        })
+        .await
+        .map(|_: serde_json::Value| ())?;
+        Ok(())
+    }
+
+    /// Apply a signal change on a GitHub issue (remove old signal labels, add new one).
+    async fn apply_signal_change(&self, id: u64, signal: Option<Signal>) -> Result<(), ZbobrError> {
+        let (owner, repo) = self.parse_repo()?;
+
+        // Remove all existing signal labels
+        for sig in Signal::all() {
+            let label = Self::signal_to_label(*sig);
+            let _ = self
+                .retry_octocrab("remove signal label", || async {
+                    self.octocrab
+                        .issues(owner, repo)
+                        .remove_label(id, &label)
+                        .await
+                })
+                .await;
+        }
+
+        // Add new signal label if provided
+        if let Some(sig) = signal {
+            let label = Self::signal_to_label(sig);
+            let labels: Vec<String> = vec![label];
+            self.retry_octocrab("add signal label", || async {
+                self.octocrab
+                    .issues(owner, repo)
+                    .add_labels(id, &labels)
+                    .await
+            })
+            .await?;
+        }
+
+        Ok(())
+    }
+
     /// Update a label's color and description.
     async fn update_label(
         &self,
@@ -522,61 +573,14 @@ impl Backend for GitHubBackend {
         Ok(())
     }
 
-    async fn set_task_stage(&self, id: u64, stage: Stage) -> Result<(), ZbobrError> {
-        let stage_number = self
-            .find_stage_number(stage)
-            .await?
-            .ok_or_else(|| ZbobrError::GitHub(format!("Milestone '{}' not found", stage)))?;
-
-        let (owner, repo) = self.parse_repo()?;
-        let url = format!("/repos/{owner}/{repo}/issues/{id}");
-        let body = serde_json::json!({ "milestone": stage_number });
-        self.retry_octocrab("set issue milestone", || {
-            self.octocrab.patch(url.clone(), Some(&body))
-        })
-        .await
-        .map(|_: serde_json::Value| ())?;
-        Ok(())
-    }
-
-    async fn set_task_signal(&self, id: u64, signal: Option<Signal>) -> Result<(), ZbobrError> {
-        let (owner, repo) = self.parse_repo()?;
-        
-        // Remove all existing signal labels
-        for sig in Signal::all() {
-            let label = Self::signal_to_label(*sig);
-            let _ = self
-                .retry_octocrab("remove signal label", || async {
-                    self.octocrab
-                        .issues(owner, repo)
-                        .remove_label(id, &label)
-                        .await
-                })
-                .await;
-        }
-        
-        // Add new signal label if provided
-        if let Some(sig) = signal {
-            let label = Self::signal_to_label(sig);
-            let labels: Vec<String> = vec![label];
-            self.retry_octocrab("add signal label", || async {
-                self.octocrab
-                    .issues(owner, repo)
-                    .add_labels(id, &labels)
-                    .await
-            })
-            .await?;
-        }
-        
-        Ok(())
-    }
-
     async fn modify_task(
         &self,
         id: u64,
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
     ) -> Result<(), ZbobrError> {
         let task = self.get_task(id).await?;
+        let original_stage = task.stage;
+        let original_signal = task.signal;
         let expected_description = task.etag.clone().unwrap_or_else(|| {
             let string_params: HashMap<String, String> = task
                 .parameters
@@ -600,13 +604,13 @@ impl Backend for GitHubBackend {
             &task.checklist,
         );
 
-        // Write with retry and conflict detection
+        // Write description with retry and conflict detection
         const MAX_RETRIES: u32 = 3;
         let mut new_desc = new_description;
         let mut expected_desc = expected_description;
         for attempt in 1..=MAX_RETRIES {
             match self.update_task_description(id, &new_desc).await {
-                Ok(()) => return Ok(()),
+                Ok(()) => break,
                 Err(e) if attempt >= MAX_RETRIES => return Err(e),
                 Err(_) => {}
             }
@@ -634,6 +638,17 @@ impl Backend for GitHubBackend {
                 expected_desc = current_body;
             }
         }
+
+        // Apply stage change if it differs
+        if task.stage != original_stage {
+            self.apply_stage_change(id, task.stage).await?;
+        }
+
+        // Apply signal change if it differs
+        if task.signal != original_signal {
+            self.apply_signal_change(id, task.signal).await?;
+        }
+
         Ok(())
     }
 

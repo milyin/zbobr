@@ -550,32 +550,32 @@ impl TaskSession {
 
     /// Set signal on the task, respecting priority (higher priority signals cannot be overwritten by lower).
     pub async fn set_signal(&self, new_signal: Signal) -> Result<(), ZbobrError> {
-        let current = self.get_signal().await?;
-        
-        // Only set if new signal has higher or equal priority (lower enum value)
-        if let Some(current_signal) = current
-            && new_signal > current_signal
-        {
-            // new_signal has lower priority, don't overwrite
-            return Ok(());
-        }
-        
-        self.zbobr.set_task_signal(self.task_id, Some(new_signal)).await
+        self.modify_task(move |task| {
+            // Only set if new signal has higher or equal priority (lower enum value)
+            if let Some(current_signal) = task.signal {
+                if new_signal > current_signal {
+                    // new_signal has lower priority, don't overwrite
+                    return;
+                }
+            }
+            task.signal = Some(new_signal);
+        }).await
     }
 
     /// Clear the signal on the task.
     pub async fn clear_signal(&self) -> Result<(), ZbobrError> {
-        self.zbobr.set_task_signal(self.task_id, None).await
+        self.modify_task(move |task| {
+            task.signal = None;
+        }).await
     }
 
     /// Transition task to stage based on current signal.
     pub async fn transition_by_signal(&self) -> Result<(), ZbobrError> {
-        let signal = self.get_signal().await?;
-        if let Some(sig) = signal {
-            let target_stage = sig.target_stage();
-            self.zbobr.set_task_stage(self.task_id, target_stage).await?;
-        }
-        Ok(())
+        self.modify_task(move |task| {
+            if let Some(sig) = task.signal {
+                task.stage = sig.target_stage();
+            }
+        }).await
     }
 
     /// Clone target repo and checkout specific branch (read-only, for planner).

@@ -111,11 +111,15 @@ impl Zbobr {
         id: u64,
         stage: Stage,
     ) -> Result<(), ZbobrError> {
-        self.backend.set_task_stage(id, stage).await
+        self.backend
+            .modify_task(id, Box::new(move |mut task| { task.stage = stage; task }))
+            .await
     }
 
     pub async fn set_task_signal(&self, id: u64, signal: Option<Signal>) -> Result<(), ZbobrError> {
-        self.backend.set_task_signal(id, signal).await
+        self.backend
+            .modify_task(id, Box::new(move |mut task| { task.signal = signal; task }))
+            .await
     }
 
     pub async fn list_tasks_by_stage(

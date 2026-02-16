@@ -1470,8 +1470,6 @@ mod tests {
         async fn close_task(&self, _id: u64) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn get_task_comments(&self, _id: u64) -> Result<Vec<String>, crate::ZbobrError> { unimplemented!() }
         async fn post_task_comment(&self, _id: u64, _body: &str, _role: &str, _hostname: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn set_task_stage(&self, _id: u64, _stage: crate::Stage) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn set_task_signal(&self, _id: u64, _signal: Option<crate::Signal>) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn modify_task(&self, _id: u64, _mutate: Box<dyn FnOnce(crate::Task) -> crate::Task + Send>) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn list_tasks_by_stage(&self, _stage: crate::Stage, _tool: Option<crate::Tool>) -> Result<Vec<crate::Task>, crate::ZbobrError> { unimplemented!() }
         async fn is_task_closed(&self, _id: u64) -> Result<bool, crate::ZbobrError> { unimplemented!() }

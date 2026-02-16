@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 
-use crate::{Model, Parameter, Signal, Stage, Task, Tool, ZbobrError};
+use crate::{Model, Parameter, Stage, Task, Tool, ZbobrError};
 
 // Replace characters that are unsafe or invalid in filenames with '_'.
 // Allows ASCII alphanumerics, '-', '_', and '.'.
@@ -184,12 +184,6 @@ pub trait Backend: Send + Sync {
         role: &str,
         hostname: &str,
     ) -> Result<(), ZbobrError>;
-
-    /// Set the stage on a task.
-    async fn set_task_stage(&self, id: u64, stage: Stage) -> Result<(), ZbobrError>;
-
-    /// Set or clear a signal on a task.
-    async fn set_task_signal(&self, id: u64, signal: Option<Signal>) -> Result<(), ZbobrError>;
 
     /// Read-modify-write the task atomically.
     ///
