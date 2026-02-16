@@ -61,14 +61,14 @@ impl ZbobrBackendGithubConfig {
         }
         if self.fork_owner.is_empty() {
             return Err(ZbobrError::Config(
-                "fork owner not set. Use --fork-owner NAME or set fork_owner in [backend_github] config.\n  \
+                "fork owner not set. Use --fork-owner NAME or set fork_owner in [backend.github] config.\n  \
                  This is the GitHub user or organization where target repos are forked for implementation."
                     .into(),
             ));
         }
         if self.github_token.is_empty() {
             return Err(ZbobrError::Config(
-                "GitHub token not set. Set GH_TOKEN or GITHUB_TOKEN env var, or set github_token in [backend_github] config.\n  \
+                "GitHub token not set. Set GH_TOKEN or GITHUB_TOKEN env var, or set github_token in [backend.github] config.\n  \
                  This token needs read/write access to the tasks repo and to the organization where repos are forked."
                     .into(),
             ));

@@ -44,6 +44,15 @@ pub struct TomlPrompts {
     pub merger: Option<Vec<PathBuf>>,
 }
 
+/// TOML backend configuration section.
+/// Backend-specific subsections (e.g. `github`) are deserialized as raw TOML
+/// tables so that the dispatcher crate does not depend on backend crates.
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[serde(default)]
+pub struct ZbobrBackendToml {
+    pub github: Option<toml::Table>,
+}
+
 /// Configuration loaded from a TOML file.
 /// All fields are optional — missing fields fall back to TOML or defaults.
 #[derive(Debug, Clone, serde::Deserialize, Default)]
@@ -53,12 +62,12 @@ pub struct ZbobrDispatcherToml {
     pub workspace: Option<PathBuf>,
     pub agent_github_token: Option<String>,
     pub copilot_github_token: Option<String>,
-    pub backend: Option<BackendType>,
     pub cli_tool: Option<Tool>,
     pub work_branch_prefix: Option<String>,
     pub git_user_name: Option<String>,
     pub git_user_email: Option<String>,
     pub prompts: Option<TomlPrompts>,
+    pub backend: Option<ZbobrBackendToml>,
 }
 
 impl ZbobrDispatcherToml {
@@ -168,7 +177,11 @@ impl ZbobrDispatcherConfig {
             .and_then(|t| t.workspace.clone())
             .unwrap_or(defaults.workspace);
 
-        let backend = toml.and_then(|t| t.backend).unwrap_or(defaults.backend);
+        let backend = if toml.and_then(|t| t.backend.as_ref()).and_then(|b| b.github.as_ref()).is_some() {
+            BackendType::GitHub
+        } else {
+            defaults.backend
+        };
 
         let cli_tool = toml.and_then(|t| t.cli_tool).unwrap_or(defaults.cli_tool);
 
@@ -327,6 +340,10 @@ mod tests {
     path = "/opt/prompts"
     planner = ["plan.md", "shared.md"]
     worker = ["work.md"]
+
+    [backend.github]
+    task_repo = "org/tasks"
+    fork_owner = "myuser"
     "#;
         let config: ZbobrDispatcherToml = toml::from_str(toml_str).unwrap();
         assert_eq!(config.default_model, Some(Model::Gpt5Mini));
@@ -337,6 +354,9 @@ mod tests {
             prompts.planner,
             Some(vec![PathBuf::from("plan.md"), PathBuf::from("shared.md")])
         );
+        let github = config.backend.unwrap().github.unwrap();
+        assert_eq!(github.get("task_repo").and_then(|v| v.as_str()), Some("org/tasks"));
+        assert_eq!(github.get("fork_owner").and_then(|v| v.as_str()), Some("myuser"));
     }
 
     #[test]
@@ -366,11 +386,19 @@ mod tests {
             workspace: Some(PathBuf::from("/tmp/toml-ws")),
             agent_github_token: Some("toml-agent-token".into()),
             copilot_github_token: Some("toml-copilot-token".into()),
-            backend: Some(BackendType::GitHub),
             cli_tool: Some(Tool::Claude),
             work_branch_prefix: Some("toml_fix".into()),
             git_user_name: Some("test-user".into()),
             git_user_email: Some("test@example.com".into()),
+            backend: Some(ZbobrBackendToml {
+                github: Some({
+                    let mut table = toml::Table::new();
+                    table.insert("task_repo".into(), "owner/repo".into());
+                    table.insert("fork_owner".into(), "fork-user".into());
+                    table.insert("github_token".into(), "gh-token".into());
+                    table
+                }),
+            }),
             prompts: Some(TomlPrompts {
                 path: Some(PathBuf::from("/opt/prompts")),
                 planner: Some(vec![PathBuf::from("p.md")]),

@@ -417,11 +417,18 @@ async fn main() -> anyhow::Result<()> {
     let root_toml = load_root_toml(&cli)?;
     let config = load_config(&cli, &root_toml)?;
     let config_arc = Arc::new(config.clone());
-    let backend_github_toml = root_toml.as_ref().and_then(|r| r.backend_github.as_ref());
+    let backend_github_toml: Option<zbobr_backend_github::ZbobrBackendGithubToml> = root_toml
+        .as_ref()
+        .and_then(|r| r.dispatcher.as_ref())
+        .and_then(|d| d.backend.as_ref())
+        .and_then(|b| b.github.as_ref())
+        .map(|table| table.clone().try_into())
+        .transpose()
+        .context("Failed to parse [dispatcher.backend.github] config")?;
     let backend: Arc<dyn zbobr_dispatcher::backend::Backend> = Arc::new(
         GitHubBackend::new(
             config_arc,
-            backend_github_toml,
+            backend_github_toml.as_ref(),
             cli.global.task_repo.as_deref(),
             cli.global.fork_owner.as_deref(),
         )

@@ -1,25 +1,23 @@
 use std::path::Path;
 
 use anyhow::Context;
-use zbobr_backend_github::ZbobrBackendGithubToml;
 use zbobr_dispatcher::ZbobrDispatcherToml;
 
 /// Root TOML configuration for `zbobr`.
 ///
-/// This wraps workspace-wide sections. The dispatcher-related options live
-/// under the optional `dispatcher` table, and GitHub backend options under
-/// `backend_github`. Example:
+/// The dispatcher-related options live under the `dispatcher` table.
+/// GitHub backend options are nested under `dispatcher.backend.github`.
+/// Example:
 ///
 /// [dispatcher]
-/// fork_owner = "myuser"
+/// default_model = "gpt-5-mini"
 ///
-/// [backend_github]
+/// [dispatcher.backend.github]
 /// task_repo = "owner/repo"
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default)]
 pub struct ZbobrToml {
     pub dispatcher: Option<ZbobrDispatcherToml>,
-    pub backend_github: Option<ZbobrBackendGithubToml>,
 }
 
 impl ZbobrToml {
