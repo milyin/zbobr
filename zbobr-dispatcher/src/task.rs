@@ -483,49 +483,20 @@ impl TaskSession {
     /// Cross-process conflicts are handled by backend-level three-way merge.
     pub async fn modify_task<F>(&self, mutate: F) -> Result<(), ZbobrError>
     where
-        F: FnOnce(&mut Task),
+        F: FnOnce(&mut Task) + Send + 'static,
     {
-        use crate::backend::serialize_description_full;
-
         // Acquire per-task lock to serialize concurrent modify_task calls
         let lock = self.zbobr.task_lock(self.task_id);
         let _guard = lock.lock().await;
 
-        // 1. Read current state (with etag)
-        let mut task = self.zbobr.get_task(self.task_id).await?;
-        let expected_description = task.etag.clone().unwrap_or_else(|| {
-            // Fallback: serialize current parsed fields as the "original" snapshot
-            let string_params: std::collections::HashMap<String, String> = task
-                .parameters
-                .iter()
-                .map(|(k, v)| (k.name().to_string(), v.clone()))
-                .collect();
-            serialize_description_full(&task.description, &string_params, &task.plan, &task.checklist)
-        });
-
-        // 2. Apply caller's mutation
-        mutate(&mut task);
-
-        // 3. Serialize the new body from mutated fields
-        let string_params: std::collections::HashMap<String, String> = task
-            .parameters
-            .iter()
-            .map(|(k, v)| (k.name().to_string(), v.clone()))
-            .collect();
-        let new_description = serialize_description_full(
-            &task.description,
-            &string_params,
-            &task.plan,
-            &task.checklist,
-        );
-
-        // 4. Write with conflict detection (backend handles merge + retry)
         self.zbobr
             .backend
-            .update_task_description_with_conflict_detection(
+            .modify_task(
                 self.task_id,
-                &expected_description,
-                &new_description,
+                Box::new(move |mut task| {
+                    mutate(&mut task);
+                    task
+                }),
             )
             .await
     }
@@ -533,7 +504,7 @@ impl TaskSession {
     /// Update the task description (only the description part, preserving plan/checklist/parameters).
     pub async fn update_description(&self, description: &str) -> Result<(), ZbobrError> {
         let desc = description.to_string();
-        self.modify_task(|task| {
+        self.modify_task(move |task| {
             task.description = desc;
         }).await
     }
@@ -541,7 +512,7 @@ impl TaskSession {
     /// Update the task plan (preserving description/checklist/parameters).
     pub async fn update_plan(&self, plan: &str) -> Result<(), ZbobrError> {
         let plan = plan.to_string();
-        self.modify_task(|task| {
+        self.modify_task(move |task| {
             task.plan = plan;
         }).await
     }
@@ -549,7 +520,7 @@ impl TaskSession {
     /// Update the task checklist (preserving description/plan/parameters).
     pub async fn update_checklist(&self, checklist: &[ChecklistItem]) -> Result<(), ZbobrError> {
         let items = checklist.to_vec();
-        self.modify_task(|task| {
+        self.modify_task(move |task| {
             task.checklist = items;
         }).await
     }
@@ -1072,7 +1043,7 @@ impl TaskSession {
     /// Set a task parameter value with automatic conflict detection.
     /// Parameters are stored in the visible PARAMETERS section.
     pub async fn set_parameter(&self, param: Parameter, value: Option<String>) -> Result<(), ZbobrError> {
-        self.modify_task(|task| {
+        self.modify_task(move |task| {
             if let Some(v) = value {
                 task.parameters.insert(param, v);
             } else {

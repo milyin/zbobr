@@ -554,7 +554,7 @@ pub trait CommonMcpImpl: Send + Sync {
     async fn check_checklist_item_impl(&self, id: &str, checked: bool) -> String {
         tracing::info!("[{}#{}] check_checklist_item id={} checked={}", self.role_name(), self.session().task_id(), id, checked);
         let item_id = id.to_string();
-        match self.session().modify_task(|task| {
+        match self.session().modify_task(move |task| {
             if let Some(item) = task.checklist.iter_mut().find(|item| item.id == item_id) {
                 item.checked = checked;
             }
@@ -588,7 +588,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Err(e) => return format!("Error: {e}"),
         }
 
-        match self.session().modify_task(|task| {
+        match self.session().modify_task(move |task| {
             let new_item = ChecklistItem {
                 id: item_id,
                 checked: false,
@@ -614,7 +614,7 @@ pub trait CommonMcpImpl: Send + Sync {
         tracing::info!("[{}#{}] update_checklist_item id={}", self.role_name(), self.session().task_id(), id);
         let item_id = id.to_string();
         let item_text = text.to_string();
-        match self.session().modify_task(|task| {
+        match self.session().modify_task(move |task| {
             if let Some(item) = task.checklist.iter_mut().find(|item| item.id == item_id) {
                 item.text = item_text;
             }
@@ -642,7 +642,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Err(e) => return format!("Error: {e}"),
         }
 
-        match self.session().modify_task(|task| {
+        match self.session().modify_task(move |task| {
             task.checklist.retain(|item| item.id != item_id);
         }).await {
             Ok(()) => format!("Checklist item '{}' deleted", id),
@@ -674,7 +674,7 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
     async fn post_plan_impl(&self, plan: &str) -> String {
         tracing::info!("[planner#{}] post_plan", self.session().task_id());
         let plan_text = plan.to_string();
-        match self.session().modify_task(|task| {
+        match self.session().modify_task(move |task| {
             task.plan = plan_text;
         }).await {
             Ok(()) => {
@@ -1473,7 +1473,6 @@ mod tests {
         async fn set_task_stage(&self, _id: u64, _stage: crate::Stage) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn set_task_signal(&self, _id: u64, _signal: Option<crate::Signal>) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn update_task_description(&self, _id: u64, _description: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn update_task_description_with_conflict_detection(&self, _id: u64, _expected: &str, _new: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn list_tasks_by_stage(&self, _stage: crate::Stage, _tool: Option<crate::Tool>) -> Result<Vec<crate::Task>, crate::ZbobrError> { unimplemented!() }
         async fn is_task_closed(&self, _id: u64) -> Result<bool, crate::ZbobrError> { unimplemented!() }
         async fn repo_file_exists(&self, _path: &str) -> Result<bool, crate::ZbobrError> { unimplemented!() }

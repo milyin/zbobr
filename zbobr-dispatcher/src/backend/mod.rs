@@ -437,23 +437,82 @@ pub trait Backend: Send + Sync {
     /// Set or clear a signal on a task.
     async fn set_task_signal(&self, id: u64, signal: Option<Signal>) -> Result<(), ZbobrError>;
 
-    /// Update the task description.
+    /// Low-level: write the raw serialized task body.
     async fn update_task_description(&self, id: u64, description: &str) -> Result<(), ZbobrError>;
 
-    /// Update the task description with optimistic locking to prevent concurrent update conflicts.
-    /// This method attempts to write the new description while ensuring no concurrent modifications
-    /// have occurred since the last read. If a conflict is detected, it automatically retries by
-    /// re-reading the current state and reapplying the update.
-    /// 
-    /// The `expected_description` parameter should be the description value that was read from
-    /// the task before modifications. If the current task description doesn't match this value,
-    /// a concurrent modification is detected and the update is retried.
-    async fn update_task_description_with_conflict_detection(
+    /// Read-modify-write the task atomically.
+    ///
+    /// Default implementation reads the task via [`get_task`], applies `mutate`,
+    /// serializes back, and writes with retry/conflict-detection using
+    /// [`update_task_description`].
+    ///
+    /// Takes `Task` by value and returns the modified version to avoid
+    /// reference lifetime issues with `async_trait`.
+    async fn modify_task(
         &self,
         id: u64,
-        expected_description: &str,
-        new_description: &str,
-    ) -> Result<(), ZbobrError>;
+        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
+    ) -> Result<(), ZbobrError> {
+        let task = self.get_task(id).await?;
+        let expected_description = task.etag.clone().unwrap_or_else(|| {
+            let string_params: HashMap<String, String> = task
+                .parameters
+                .iter()
+                .map(|(k, v)| (k.name().to_string(), v.clone()))
+                .collect();
+            serialize_description_full(&task.description, &string_params, &task.plan, &task.checklist)
+        });
+
+        let task = mutate(task);
+
+        let string_params: HashMap<String, String> = task
+            .parameters
+            .iter()
+            .map(|(k, v)| (k.name().to_string(), v.clone()))
+            .collect();
+        let new_description = serialize_description_full(
+            &task.description,
+            &string_params,
+            &task.plan,
+            &task.checklist,
+        );
+
+        // Write with retry and conflict detection
+        const MAX_RETRIES: u32 = 3;
+        let mut new_desc = new_description;
+        let mut expected_desc = expected_description;
+        for attempt in 1..=MAX_RETRIES {
+            match self.update_task_description(id, &new_desc).await {
+                Ok(()) => return Ok(()),
+                Err(e) if attempt >= MAX_RETRIES => return Err(e),
+                Err(_) => {}
+            }
+            // Re-read to check for concurrent modifications
+            let current_task = self.get_task(id).await?;
+            let current_body = current_task.etag.unwrap_or_else(|| {
+                let sp: HashMap<String, String> = current_task
+                    .parameters
+                    .iter()
+                    .map(|(k, v)| (k.name().to_string(), v.clone()))
+                    .collect();
+                serialize_description_full(
+                    &current_task.description,
+                    &sp,
+                    &current_task.plan,
+                    &current_task.checklist,
+                )
+            });
+            if current_body != expected_desc {
+                new_desc = merge_concurrent_description_updates(
+                    &expected_desc,
+                    &current_body,
+                    &new_desc,
+                );
+                expected_desc = current_body;
+            }
+        }
+        Ok(())
+    }
 
     /// List open tasks with a given stage, optionally filtered by tool.
     async fn list_tasks_by_stage(

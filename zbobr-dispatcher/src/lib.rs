@@ -118,14 +118,6 @@ impl Zbobr {
         self.backend.set_task_signal(id, signal).await
     }
 
-    pub async fn update_task_description(
-        &self,
-        id: u64,
-        description: &str,
-    ) -> Result<(), ZbobrError> {
-        self.backend.update_task_description(id, description).await
-    }
-
     pub async fn list_tasks_by_stage(
         &self,
         stage: Stage,
