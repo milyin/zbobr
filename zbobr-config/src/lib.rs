@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use anyhow::Context;
-use zbobr_task_backend_github::ZbobrTaskBackendGithubToml;
-use zbobr_repo_backend_github::ZbobrRepoBackendGithubToml;
 use zbobr_dispatcher::ZbobrDispatcherToml;
+use zbobr_repo_backend_github::ZbobrRepoBackendGithubToml;
+use zbobr_task_backend_github::ZbobrTaskBackendGithubToml;
 
 /// Task backend configuration section.
 /// Each backend type has its own optional subsection.

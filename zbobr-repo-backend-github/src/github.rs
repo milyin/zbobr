@@ -2,8 +2,8 @@ use std::{path::PathBuf, time::Duration};
 
 use async_trait::async_trait;
 
-use zbobr_dispatcher::backend::RepoBackend;
 use zbobr_dispatcher::ZbobrError;
+use zbobr_dispatcher::backend::RepoBackend;
 
 use crate::config::ZbobrRepoBackendGithubConfig;
 
@@ -89,7 +89,10 @@ impl GitHubRepoBackend {
             .personal_token(backend_config.github_token.clone())
             .build()
             .map_err(|e| ZbobrError::GitHub(format!("Failed to build octocrab client: {e}")))?;
-        Ok(Self { backend_config, octocrab })
+        Ok(Self {
+            backend_config,
+            octocrab,
+        })
     }
 
     async fn ensure_fork(&self, target_repo: &str) -> Result<String, ZbobrError> {
@@ -101,11 +104,13 @@ impl GitHubRepoBackend {
         let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo_name);
 
         // Check if fork already exists
-        let exists = self.retry("check fork exists", || {
-            self.octocrab.get::<RepoResponse, _, _>(format!("/repos/{fork_repo}"), None::<&()>)
-        })
-        .await
-        .is_ok();
+        let exists = self
+            .retry("check fork exists", || {
+                self.octocrab
+                    .get::<RepoResponse, _, _>(format!("/repos/{fork_repo}"), None::<&()>)
+            })
+            .await
+            .is_ok();
 
         if !exists {
             let parts: Vec<&str> = target_repo.splitn(2, '/').collect();
@@ -118,7 +123,9 @@ impl GitHubRepoBackend {
             let endpoint = format!("/repos/{}/{}/forks", parts[0], parts[1]);
             let payload = serde_json::json!({ "organization": fork_owner });
 
-            tracing::info!("Creating fork of {target_repo} under organization '{fork_owner}' using endpoint {endpoint}");
+            tracing::info!(
+                "Creating fork of {target_repo} under organization '{fork_owner}' using endpoint {endpoint}"
+            );
             tracing::debug!("Fork creation payload: {payload}");
 
             self.retry("create fork", || {
@@ -134,15 +141,13 @@ impl GitHubRepoBackend {
                     endpoint,
                     e
                 );
-                ZbobrError::GitHub(
-                    format!(
-                        "Failed to create fork of {target_repo} under '{fork_owner}': \
+                ZbobrError::GitHub(format!(
+                    "Failed to create fork of {target_repo} under '{fork_owner}': \
                          check if fork_owner is an organization you have access to, \
                          and that your GitHub token has 'repo' and 'admin:org_hook' scopes. \
                          Endpoint: {endpoint}. Error: {e}\n\
                          Debug: {error_details}",
-                    )
-                )
+                ))
             })
             .map(|_: serde_json::Value| ())?;
 
@@ -367,9 +372,13 @@ impl RepoBackend for GitHubRepoBackend {
                 .current_dir(&work_dir)
                 .output()
                 .await
-                .map_err(|e| ZbobrError::Other(format!("Failed to determine current branch: {}", e)))?;
+                .map_err(|e| {
+                    ZbobrError::Other(format!("Failed to determine current branch: {}", e))
+                })?;
             if !out.status.success() {
-                return Err(ZbobrError::Other("Failed to determine current branch".to_string()));
+                return Err(ZbobrError::Other(
+                    "Failed to determine current branch".to_string(),
+                ));
             }
             String::from_utf8_lossy(&out.stdout).trim().to_string()
         };
@@ -385,7 +394,10 @@ impl RepoBackend for GitHubRepoBackend {
             {
                 Ok(out) => {
                     if !out.stdout.is_empty() {
-                        tracing::info!("Local changes detected; removing placeholder {} and committing changes", branch_name);
+                        tracing::info!(
+                            "Local changes detected; removing placeholder {} and committing changes",
+                            branch_name
+                        );
                         let _ = tokio::process::Command::new("git")
                             .args(["rm", "-f", format!(".zbobr/{}", &branch_name).as_str()])
                             .current_dir(&work_dir)
@@ -396,7 +408,10 @@ impl RepoBackend for GitHubRepoBackend {
                             .current_dir(&work_dir)
                             .status()
                             .await;
-                        let commit_msg = format!("chore: remove placeholder {} and apply changes", &branch_name);
+                        let commit_msg = format!(
+                            "chore: remove placeholder {} and apply changes",
+                            &branch_name
+                        );
                         let commit_status = tokio::process::Command::new("git")
                             .args(["commit", "-m", &commit_msg])
                             .current_dir(&work_dir)
@@ -474,10 +489,11 @@ impl RepoBackend for GitHubRepoBackend {
             html_url: String,
         }
 
-        let response: PrResponse = self.retry("create PR", || {
-            self.octocrab.post(pr_endpoint.clone(), Some(&pr_payload))
-        })
-        .await?;
+        let response: PrResponse = self
+            .retry("create PR", || {
+                self.octocrab.post(pr_endpoint.clone(), Some(&pr_payload))
+            })
+            .await?;
 
         Ok(response.html_url)
     }
@@ -488,10 +504,9 @@ impl RepoBackend for GitHubRepoBackend {
         target_repo: &str,
         work_branch: &str,
     ) -> Result<(), ZbobrError> {
-        let repo_name = target_repo
-            .split('/')
-            .nth(1)
-            .ok_or_else(|| ZbobrError::Other(format!("Invalid target_repo format: {}", target_repo)))?;
+        let repo_name = target_repo.split('/').nth(1).ok_or_else(|| {
+            ZbobrError::Other(format!("Invalid target_repo format: {}", target_repo))
+        })?;
         let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo_name);
         let fork_url = format!("https://github.com/{fork_repo}.git");
 
@@ -511,7 +526,9 @@ impl RepoBackend for GitHubRepoBackend {
             .await?;
 
         if !remove_origin.success() {
-            return Err(ZbobrError::Other("Failed to remove origin remote".to_string()));
+            return Err(ZbobrError::Other(
+                "Failed to remove origin remote".to_string(),
+            ));
         }
 
         let add_origin = tokio::process::Command::new("git")
@@ -521,7 +538,9 @@ impl RepoBackend for GitHubRepoBackend {
             .await?;
 
         if !add_origin.success() {
-            return Err(ZbobrError::Other("Failed to add fork as origin remote".to_string()));
+            return Err(ZbobrError::Other(
+                "Failed to add fork as origin remote".to_string(),
+            ));
         }
 
         // Push the work branch to the forked repository
@@ -545,7 +564,10 @@ impl RepoBackend for GitHubRepoBackend {
     async fn sync_fork(&self, target_repo: &str, branch: &str) -> Result<(), ZbobrError> {
         let parts: Vec<&str> = target_repo.splitn(2, '/').collect();
         if parts.len() != 2 {
-            return Err(ZbobrError::Config(format!("Invalid target repo: {}", target_repo)));
+            return Err(ZbobrError::Config(format!(
+                "Invalid target repo: {}",
+                target_repo
+            )));
         }
         let upstream_owner = parts[0];
 
@@ -560,9 +582,18 @@ impl RepoBackend for GitHubRepoBackend {
 
         tracing::info!("Calling merge-upstream for {} -> {}", fork_repo, branch);
 
-        match self.octocrab.post::<serde_json::Value, serde_json::Value>(endpoint, Some(&body)).await {
+        match self
+            .octocrab
+            .post::<serde_json::Value, serde_json::Value>(endpoint, Some(&body))
+            .await
+        {
             Ok(_) => {
-                tracing::info!("Successfully synced fork {} from {}/{}", fork_repo, upstream_owner, branch);
+                tracing::info!(
+                    "Successfully synced fork {} from {}/{}",
+                    fork_repo,
+                    upstream_owner,
+                    branch
+                );
                 Ok(())
             }
             Err(e) => {
@@ -642,11 +673,13 @@ impl RepoBackend for GitHubRepoBackend {
 
     async fn validate_connectivity(&self) -> Result<(), ZbobrError> {
         let fork_owner = &self.backend_config.fork_owner;
-        let fork_owner_exists = self.retry("check fork owner", || {
-            self.octocrab.get::<serde_json::Value, _, _>(format!("/users/{fork_owner}"), None::<&()>)
-        })
-        .await
-        .is_ok();
+        let fork_owner_exists = self
+            .retry("check fork owner", || {
+                self.octocrab
+                    .get::<serde_json::Value, _, _>(format!("/users/{fork_owner}"), None::<&()>)
+            })
+            .await
+            .is_ok();
         if !fork_owner_exists {
             return Err(ZbobrError::Config(format!(
                 "fork_owner '{fork_owner}' does not exist on GitHub as a user or organization.\n  \
@@ -658,6 +691,9 @@ impl RepoBackend for GitHubRepoBackend {
     }
 
     fn debug_state(&self) -> String {
-        format!("GitHubRepoBackend(fork_owner={})", self.backend_config.fork_owner)
+        format!(
+            "GitHubRepoBackend(fork_owner={})",
+            self.backend_config.fork_owner
+        )
     }
 }

@@ -1,19 +1,17 @@
 use std::path::PathBuf;
 
 use crate::{
-    task::{Model, Tool},
     ZbobrError,
+    task::{Model, Tool},
 };
 
 /// Backend type to use.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub enum BackendType {
     #[serde(rename = "github")]
     #[default]
     GitHub,
 }
-
 
 impl std::fmt::Display for BackendType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -141,7 +139,10 @@ impl ZbobrDispatcherConfig {
         Self::build_with_env(toml, &env)
     }
 
-    fn build_with_env<E: EnvSource>(toml: Option<&ZbobrDispatcherToml>, env: &E) -> Result<Self, ZbobrError> {
+    fn build_with_env<E: EnvSource>(
+        toml: Option<&ZbobrDispatcherToml>,
+        env: &E,
+    ) -> Result<Self, ZbobrError> {
         let defaults = ZbobrDispatcherConfig::default();
 
         let default_model = toml
@@ -251,7 +252,6 @@ impl ZbobrDispatcherConfig {
         }
         Ok(())
     }
-
 }
 
 #[cfg(test)]

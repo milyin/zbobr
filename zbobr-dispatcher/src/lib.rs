@@ -8,12 +8,15 @@ pub mod tool_executor;
 
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-pub use config::{ZbobrDispatcherToml, ZbobrDispatcherConfig};
-pub use mcp::{planner_instructions, worker_instructions, reviewer_instructions, merger_instructions, PlannerMcp, WorkerMcp, ReviewerMcp, MergerMcp};
-pub use task::{Model, ChecklistItem, Parameter, Signal, Stage, Task, TaskSession, Tool};
+pub use config::{ZbobrDispatcherConfig, ZbobrDispatcherToml};
+pub use mcp::{
+    MergerMcp, PlannerMcp, ReviewerMcp, WorkerMcp, merger_instructions, planner_instructions,
+    reviewer_instructions, worker_instructions,
+};
+pub use task::{ChecklistItem, Model, Parameter, Signal, Stage, Task, TaskSession, Tool};
 pub use tool_executor::{ClaudeExecutor, CopilotExecutor, ToolExecutor};
 
-use crate::backend::{TaskBackend, RepoBackend};
+use crate::backend::{RepoBackend, TaskBackend};
 
 /// Central struct holding configuration and backend.
 #[derive(Clone)]
@@ -91,7 +94,9 @@ impl Zbobr {
             parameters.insert(Parameter::DestinationBranch, branch);
         }
 
-        self.task_backend.create_task(title, description, stage, tool, model, parameters).await
+        self.task_backend
+            .create_task(title, description, stage, tool, model, parameters)
+            .await
     }
 
     pub async fn close_task(&self, id: u64) -> Result<(), ZbobrError> {
@@ -114,19 +119,27 @@ impl Zbobr {
             .await
     }
 
-    pub async fn set_task_stage(
-        &self,
-        id: u64,
-        stage: Stage,
-    ) -> Result<(), ZbobrError> {
+    pub async fn set_task_stage(&self, id: u64, stage: Stage) -> Result<(), ZbobrError> {
         self.task_backend
-            .modify_task(id, Box::new(move |mut task| { task.stage = stage; task }))
+            .modify_task(
+                id,
+                Box::new(move |mut task| {
+                    task.stage = stage;
+                    task
+                }),
+            )
             .await
     }
 
     pub async fn set_task_signal(&self, id: u64, signal: Option<Signal>) -> Result<(), ZbobrError> {
         self.task_backend
-            .modify_task(id, Box::new(move |mut task| { task.signal = signal; task }))
+            .modify_task(
+                id,
+                Box::new(move |mut task| {
+                    task.signal = signal;
+                    task
+                }),
+            )
             .await
     }
 
@@ -206,7 +219,13 @@ impl Zbobr {
         pr_body: &str,
     ) -> Result<String, ZbobrError> {
         self.repo_backend
-            .create_pr_in_fork(repo_name, work_branch, destination_branch, pr_title, pr_body)
+            .create_pr_in_fork(
+                repo_name,
+                work_branch,
+                destination_branch,
+                pr_title,
+                pr_body,
+            )
             .await
     }
 
@@ -251,4 +270,3 @@ pub enum ZbobrError {
     #[error("{0}")]
     Other(String),
 }
-

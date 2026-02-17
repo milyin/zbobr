@@ -38,7 +38,10 @@ impl ZbobrRepoBackendGithubConfig {
             .or_else(|| toml.and_then(|t| t.github_token.clone()))
             .unwrap_or(defaults.github_token);
 
-        Self { fork_owner, github_token }
+        Self {
+            fork_owner,
+            github_token,
+        }
     }
 
     /// Validate that all required fields are set.

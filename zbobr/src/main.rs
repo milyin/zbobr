@@ -4,13 +4,13 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
-use zbobr_task_backend_github::GitHubTaskBackend;
-use zbobr_repo_backend_github::GitHubRepoBackend;
 use zbobr_config::ZbobrConfigToml;
 use zbobr_dispatcher::{
     Stage, Zbobr, ZbobrDispatcherConfig,
     task::{Model, Role, Tool},
 };
+use zbobr_repo_backend_github::GitHubRepoBackend;
+use zbobr_task_backend_github::GitHubTaskBackend;
 
 #[derive(Args, Clone)]
 #[command(next_help_heading = "Global Options")]
@@ -297,11 +297,14 @@ fn load_root_toml(cli: &Cli) -> anyhow::Result<Option<ZbobrConfigToml>> {
         Ok(Some(root))
     } else {
         let default_path = std::env::current_dir()?.join("zbobr.toml");
-        ZbobrConfigToml::load(&default_path).map_err(Into::into)
+        ZbobrConfigToml::load(&default_path)
     }
 }
 
-fn load_config(cli: &Cli, root_toml: &Option<ZbobrConfigToml>) -> anyhow::Result<ZbobrDispatcherConfig> {
+fn load_config(
+    cli: &Cli,
+    root_toml: &Option<ZbobrConfigToml>,
+) -> anyhow::Result<ZbobrDispatcherConfig> {
     // Build dispatcher config
     let dispatcher_toml = root_toml.as_ref().and_then(|r| r.dispatcher.as_ref());
     let mut config = ZbobrDispatcherConfig::build(dispatcher_toml)?;
@@ -424,18 +427,12 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|r| r.repo.as_ref())
         .and_then(|r| r.github.as_ref());
     let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = Arc::new(
-        GitHubTaskBackend::new(
-            task_backend_github_toml,
-            cli.global.task_repo.as_deref(),
-        )
-        .context("Failed to create GitHub task backend")?,
+        GitHubTaskBackend::new(task_backend_github_toml, cli.global.task_repo.as_deref())
+            .context("Failed to create GitHub task backend")?,
     );
     let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = Arc::new(
-        GitHubRepoBackend::new(
-            repo_backend_github_toml,
-            cli.global.fork_owner.as_deref(),
-        )
-        .context("Failed to create GitHub repo backend")?,
+        GitHubRepoBackend::new(repo_backend_github_toml, cli.global.fork_owner.as_deref())
+            .context("Failed to create GitHub repo backend")?,
     );
     let zbobr = Zbobr::new(config, task_backend, repo_backend);
     zbobr.validate_connectivity().await?;
@@ -595,8 +592,13 @@ async fn run_role_session(
     let server_zbobr = zbobr.clone();
     let server_role = role;
     let server_handle = tokio::spawn(async move {
-        match zbobr_dispatcher::mcp::run_role_mcp_server(server_zbobr, base_port, server_role, task_id)
-            .await
+        match zbobr_dispatcher::mcp::run_role_mcp_server(
+            server_zbobr,
+            base_port,
+            server_role,
+            task_id,
+        )
+        .await
         {
             Ok(assigned_port) => {
                 let _ = port_tx.send(assigned_port);
@@ -808,7 +810,6 @@ async fn run_manager_loop(
                 }
             }
         }
-
 
         // Check for GO_PLANNING tasks
         let planning_tasks = match zbobr

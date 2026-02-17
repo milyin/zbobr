@@ -28,7 +28,9 @@ impl Parameter {
 // -- Checklist item types --
 
 /// A single item in a task's checklist.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 pub struct ChecklistItem {
     #[schemars(description = "Unique identifier for the checklist item")]
     pub id: String,
@@ -140,15 +142,24 @@ impl std::str::FromStr for Role {
 /// Signal for task flow control (mapped to labels in GitHub backend).
 /// Ordered by priority (highest to lowest).
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 pub enum Signal {
     #[serde(rename = "stop")]
     Stop = 0,
     #[serde(rename = "go_ask")]
-    GoAsk = 1, // go ask is higher priority than done because it indicates a need for human input, 
-               // while done supposes normal completion and less urgency. So go_ask should override done
-               // if both are signalled by an agent.
+    GoAsk = 1, // go ask is higher priority than done because it indicates a need for human input,
+    // while done supposes normal completion and less urgency. So go_ask should override done
+    // if both are signalled by an agent.
     #[serde(rename = "done")]
     Done = 2,
     #[serde(rename = "go_merge")]
@@ -177,7 +188,15 @@ impl Signal {
 
     /// Returns all available signals in priority order.
     pub fn all() -> &'static [Signal] {
-        &[Signal::Stop, Signal::Done, Signal::GoAsk, Signal::GoMerge, Signal::GoReview, Signal::GoWork, Signal::GoPlan]
+        &[
+            Signal::Stop,
+            Signal::Done,
+            Signal::GoAsk,
+            Signal::GoMerge,
+            Signal::GoReview,
+            Signal::GoWork,
+            Signal::GoPlan,
+        ]
     }
 
     /// Maps signal to target stage.
@@ -216,9 +235,16 @@ impl std::str::FromStr for Signal {
 
 /// AI Tool/Agent to use.
 #[derive(
-    Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, schemars::JsonSchema,
+    Debug,
+    Clone,
+    Copy,
+    serde::Serialize,
+    serde::Deserialize,
+    PartialEq,
+    Eq,
+    schemars::JsonSchema,
+    Default,
 )]
-#[derive(Default)]
 pub enum Tool {
     #[serde(rename = "copilot")]
     #[default]
@@ -226,7 +252,6 @@ pub enum Tool {
     #[serde(rename = "claude")]
     Claude,
 }
-
 
 impl Tool {
     /// Returns all available tools.
@@ -265,9 +290,8 @@ impl std::str::FromStr for Tool {
 
 /// AI Model to use.
 #[derive(
-    Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, schemars::JsonSchema,
+    Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, schemars::JsonSchema, Default,
 )]
-#[derive(Default)]
 pub enum Model {
     #[serde(rename = "gpt-4o")]
     Gpt4o,
@@ -299,7 +323,6 @@ pub enum Model {
     #[serde(rename = "gpt-5.1-codex")]
     Gpt5_1Codex,
 }
-
 
 impl Model {
     /// Returns all available models.
@@ -506,7 +529,8 @@ impl TaskSession {
         let desc = description.to_string();
         self.modify_task(move |task| {
             task.description = desc;
-        }).await
+        })
+        .await
     }
 
     /// Update the task plan (preserving description/checklist/parameters).
@@ -514,7 +538,8 @@ impl TaskSession {
         let plan = plan.to_string();
         self.modify_task(move |task| {
             task.plan = plan;
-        }).await
+        })
+        .await
     }
 
     /// Update the task checklist (preserving description/plan/parameters).
@@ -522,7 +547,8 @@ impl TaskSession {
         let items = checklist.to_vec();
         self.modify_task(move |task| {
             task.checklist = items;
-        }).await
+        })
+        .await
     }
 
     /// Get all discussion messages on the task.
@@ -552,21 +578,23 @@ impl TaskSession {
     pub async fn set_signal(&self, new_signal: Signal) -> Result<(), ZbobrError> {
         self.modify_task(move |task| {
             // Only set if new signal has higher or equal priority (lower enum value)
-            if let Some(current_signal) = task.signal {
-                if new_signal > current_signal {
-                    // new_signal has lower priority, don't overwrite
-                    return;
-                }
+            if let Some(current_signal) = task.signal
+                && new_signal > current_signal
+            {
+                // new_signal has lower priority, don't overwrite
+                return;
             }
             task.signal = Some(new_signal);
-        }).await
+        })
+        .await
     }
 
     /// Clear the signal on the task.
     pub async fn clear_signal(&self) -> Result<(), ZbobrError> {
         self.modify_task(move |task| {
             task.signal = None;
-        }).await
+        })
+        .await
     }
 
     /// Transition task to stage based on current signal.
@@ -575,7 +603,8 @@ impl TaskSession {
             if let Some(sig) = task.signal {
                 task.stage = sig.target_stage();
             }
-        }).await
+        })
+        .await
     }
 
     /// Clone target repo and checkout specific branch (read-only, for planner).
@@ -690,18 +719,29 @@ impl TaskSession {
         let repo_name = work_dir
             .file_name()
             .and_then(|s| s.to_str())
-            .ok_or_else(|| ZbobrError::Other(format!("Could not determine repo name from path: {}", path)))?
+            .ok_or_else(|| {
+                ZbobrError::Other(format!("Could not determine repo name from path: {}", path))
+            })?
             .to_string();
 
         // Build PR metadata from task (decoupled from repo backend)
         let task = self.get_task().await?;
         let pr_title = format!("Fix #{}: {}", self.task_id, task.title);
-        let pr_body = format!("Resolves #{}\n\nImplementation for: {}", self.task_id, task.title);
+        let pr_body = format!(
+            "Resolves #{}\n\nImplementation for: {}",
+            self.task_id, task.title
+        );
 
         // Create PR using the backend (which knows the fork owner)
         let pr_url = self
             .zbobr
-            .create_pr_in_fork(&repo_name, &current_branch, destination_branch, &pr_title, &pr_body)
+            .create_pr_in_fork(
+                &repo_name,
+                &current_branch,
+                destination_branch,
+                &pr_title,
+                &pr_body,
+            )
             .await?;
         Ok(pr_url)
     }
@@ -711,14 +751,20 @@ impl TaskSession {
     /// The work repository has all remote information cleared - only pull_work and push_work know where to push.
     pub async fn push_work(&self) -> Result<(), ZbobrError> {
         // Get the destination repo (needed to find the cloned path)
-        let dest_repo = self.get_parameter(Parameter::DestinationRepository).await?
-            .ok_or_else(|| ZbobrError::Other("destination_repository parameter not set".to_string()))?;
-        
+        let dest_repo = self
+            .get_parameter(Parameter::DestinationRepository)
+            .await?
+            .ok_or_else(|| {
+                ZbobrError::Other("destination_repository parameter not set".to_string())
+            })?;
+
         // Compute the work directory: workspace/task#<id>/<repo>
-        let repo_name = dest_repo
-            .split('/')
-            .nth(1)
-            .ok_or_else(|| ZbobrError::Other(format!("Invalid destination_repository format: {}", dest_repo)))?;
+        let repo_name = dest_repo.split('/').nth(1).ok_or_else(|| {
+            ZbobrError::Other(format!(
+                "Invalid destination_repository format: {}",
+                dest_repo
+            ))
+        })?;
 
         let work_dir = self
             .zbobr
@@ -735,7 +781,9 @@ impl TaskSession {
         }
 
         // Get the work_branch name
-        let work_branch = self.get_parameter(Parameter::WorkBranch).await?
+        let work_branch = self
+            .get_parameter(Parameter::WorkBranch)
+            .await?
             .ok_or_else(|| ZbobrError::Other("work_branch parameter not set".to_string()))?;
 
         // Get current branch
@@ -753,7 +801,11 @@ impl TaskSession {
 
         // If on a different branch, stash changes
         if current_branch != work_branch {
-            tracing::info!("Stashing changes on branch '{}' before switching to '{}'", current_branch, work_branch);
+            tracing::info!(
+                "Stashing changes on branch '{}' before switching to '{}'",
+                current_branch,
+                work_branch
+            );
             let stash_status = tokio::process::Command::new("git")
                 .args(["stash"])
                 .current_dir(&work_dir)
@@ -781,7 +833,10 @@ impl TaskSession {
         }
 
         // Check for uncommitted changes before pushing
-        tracing::info!("Checking for uncommitted changes on branch '{}'", work_branch);
+        tracing::info!(
+            "Checking for uncommitted changes on branch '{}'",
+            work_branch
+        );
         let status_output = tokio::process::Command::new("git")
             .args(["status", "--porcelain"])
             .current_dir(&work_dir)
@@ -792,15 +847,14 @@ impl TaskSession {
             return Err(ZbobrError::Other("Failed to check git status".into()));
         }
 
-        let uncommitted = String::from_utf8_lossy(&status_output.stdout).trim().to_string();
+        let uncommitted = String::from_utf8_lossy(&status_output.stdout)
+            .trim()
+            .to_string();
         if !uncommitted.is_empty() {
-            return Err(ZbobrError::Other(
-                format!(
-                    "Cannot push: there are uncommitted changes on branch '{}'. Please commit all changes before pushing.\n\nUncommitted files:\n{}",
-                    work_branch,
-                    uncommitted
-                )
-            ));
+            return Err(ZbobrError::Other(format!(
+                "Cannot push: there are uncommitted changes on branch '{}'. Please commit all changes before pushing.\n\nUncommitted files:\n{}",
+                work_branch, uncommitted
+            )));
         }
 
         // Push to the configured remote (set by pull_work)
@@ -824,25 +878,37 @@ impl TaskSession {
     /// Also creates a PR from work_branch to destination_branch in the fork repo if all parameters are set.
     pub async fn pull_work(&self) -> Result<String, ZbobrError> {
         // Get required parameters
-        let dest_repo = self.get_parameter(Parameter::DestinationRepository).await?
-            .ok_or_else(|| ZbobrError::Other("destination_repository parameter not set".to_string()))?;
-        
-        let dest_branch = self.get_parameter(Parameter::DestinationBranch).await?
+        let dest_repo = self
+            .get_parameter(Parameter::DestinationRepository)
+            .await?
+            .ok_or_else(|| {
+                ZbobrError::Other("destination_repository parameter not set".to_string())
+            })?;
+
+        let dest_branch = self
+            .get_parameter(Parameter::DestinationBranch)
+            .await?
             .ok_or_else(|| ZbobrError::Other("destination_branch parameter not set".to_string()))?;
 
-        let work_branch = self.get_parameter(Parameter::WorkBranch).await?
+        let work_branch = self
+            .get_parameter(Parameter::WorkBranch)
+            .await?
             .ok_or_else(|| ZbobrError::Other("work_branch parameter not set".to_string()))?;
 
         // Clone and setup the repository with forking
         // Ensure the fork in GitHub is synchronized with the destination repository
-        tracing::info!("Synchronizing fork for {} on branch {}", dest_repo, dest_branch);
+        tracing::info!(
+            "Synchronizing fork for {} on branch {}",
+            dest_repo,
+            dest_branch
+        );
         self.zbobr.sync_fork(&dest_repo, &dest_branch).await?;
 
         let path = self
             .zbobr
             .clone_and_setup(&dest_repo, &dest_branch, self.task_id)
             .await?;
-        
+
         let path_str = path.to_string_lossy().to_string();
 
         // No tracking required: local path layout is workspace/task#<id>/<repo>
@@ -877,7 +943,12 @@ impl TaskSession {
             // Merge destination branch into work branch to pick up upstream changes.
             // Configure git user first so merge commits (if any) have valid author info.
             let config = self.zbobr.config();
-            crate::backend::configure_git_user(&path, &config.git_user_name, &config.git_user_email).await?;
+            crate::backend::configure_git_user(
+                &path,
+                &config.git_user_name,
+                &config.git_user_email,
+            )
+            .await?;
 
             tracing::info!(
                 "Merging destination branch '{}' into work branch '{}'",
@@ -902,7 +973,7 @@ impl TaskSession {
                 if has_conflicts {
                     // Don't abort the merge yet - leave it in conflict state for the merger agent
                     // The merger agent will examine the conflicts and try to resolve them
-                    
+
                     let hostname = hostname::get()
                         .ok()
                         .and_then(|h| h.into_string().ok())
@@ -925,7 +996,9 @@ impl TaskSession {
                     // Non-conflict merge failure
                     return Err(ZbobrError::Other(format!(
                         "Failed to merge '{}' into '{}': {}",
-                        dest_branch, work_branch, stderr.trim()
+                        dest_branch,
+                        work_branch,
+                        stderr.trim()
                     )));
                 }
             } else {
@@ -953,27 +1026,46 @@ impl TaskSession {
             // Create a placeholder file to ensure the branch has at least one commit
             // (GitHub PR API rejects branches with no commits between them)
             let config = self.zbobr.config();
-            crate::backend::configure_git_user(&path, &config.git_user_name, &config.git_user_email).await?;
+            crate::backend::configure_git_user(
+                &path,
+                &config.git_user_name,
+                &config.git_user_email,
+            )
+            .await?;
             crate::backend::create_placeholder_commit(&path, &work_branch).await?;
         }
 
         // Clean up remote information - remove fork if it was previously set up
         // Set up fork remote and push work branch (backend handles fork_owner internally)
-        self.zbobr.setup_fork_remote_and_push(&path, &dest_repo, &work_branch).await?;
+        self.zbobr
+            .setup_fork_remote_and_push(&path, &dest_repo, &work_branch)
+            .await?;
 
         // Create PR from work_branch to destination_branch in the fork repo
-        let repo_name = dest_repo
-            .split('/')
-            .nth(1)
-            .ok_or_else(|| ZbobrError::Other(format!("Invalid destination_repository format: {}", dest_repo)))?;
-        if let Err(e) = self.create_pr_for_work_branch(repo_name, &work_branch, &dest_branch).await {
+        let repo_name = dest_repo.split('/').nth(1).ok_or_else(|| {
+            ZbobrError::Other(format!(
+                "Invalid destination_repository format: {}",
+                dest_repo
+            ))
+        })?;
+        if let Err(e) = self
+            .create_pr_for_work_branch(repo_name, &work_branch, &dest_branch)
+            .await
+        {
             // Log the error and also notify the user via task discussion, but don't fail the pull_work
-            tracing::error!("Failed to create PR for work branch {} -> {}: {e}", work_branch, dest_branch);
+            tracing::error!(
+                "Failed to create PR for work branch {} -> {}: {e}",
+                work_branch,
+                dest_branch
+            );
             let hostname = hostname::get()
                 .ok()
                 .and_then(|h| h.into_string().ok())
                 .unwrap_or_else(|| "unknown".to_string());
-            let msg = format!("⚠️  Failed to create PR: {}. You can create it manually or continue working.", e);
+            let msg = format!(
+                "⚠️  Failed to create PR: {}. You can create it manually or continue working.",
+                e
+            );
             let _ = self.post_message(&msg, "worker", &hostname).await;
         }
 
@@ -1003,11 +1095,19 @@ impl TaskSession {
         if let Ok(Some(existing_pr)) = self.get_parameter(Parameter::PrUrl).await {
             match self.zbobr.parse_pr_to_repo_branch(&existing_pr).await {
                 Ok((_repo, _branch)) => {
-                    tracing::info!("PR already exists for task {}: {}", self.task_id, existing_pr);
+                    tracing::info!(
+                        "PR already exists for task {}: {}",
+                        self.task_id,
+                        existing_pr
+                    );
                     return Ok(());
                 }
                 Err(e) => {
-                    tracing::info!("Stored pr_url '{}' could not be verified: {}. Creating new PR.", existing_pr, e);
+                    tracing::info!(
+                        "Stored pr_url '{}' could not be verified: {}. Creating new PR.",
+                        existing_pr,
+                        e
+                    );
                 }
             }
         }
@@ -1031,7 +1131,13 @@ impl TaskSession {
 
         let pr_url = self
             .zbobr
-            .create_pr_in_fork(repo_name, work_branch, destination_branch, &pr_title, &pr_body)
+            .create_pr_in_fork(
+                repo_name,
+                work_branch,
+                destination_branch,
+                &pr_title,
+                &pr_body,
+            )
             .await?;
 
         // Store the PR URL in the task
@@ -1039,7 +1145,6 @@ impl TaskSession {
 
         Ok(())
     }
-
 
     /// Mark task as done (sets signal to Done). Stage transition will be handled by main loop.
     pub async fn mark_done(&self) -> Result<(), ZbobrError> {
@@ -1055,14 +1160,19 @@ impl TaskSession {
 
     /// Set a task parameter value with automatic conflict detection.
     /// Parameters are stored in the visible PARAMETERS section.
-    pub async fn set_parameter(&self, param: Parameter, value: Option<String>) -> Result<(), ZbobrError> {
+    pub async fn set_parameter(
+        &self,
+        param: Parameter,
+        value: Option<String>,
+    ) -> Result<(), ZbobrError> {
         self.modify_task(move |task| {
             if let Some(v) = value {
                 task.parameters.insert(param, v);
             } else {
                 task.parameters.remove(&param);
             }
-        }).await
+        })
+        .await
     }
 }
 #[cfg(test)]

@@ -37,7 +37,9 @@ pub(crate) fn serialize_parameters(params: &HashMap<String, String>) -> String {
 
 /// Parse a task description into (description, parameters, plan, checklist).
 /// Format: description | ---PARAMETERS--- | params | ---PLAN--- | plan text | ---CHECKLIST--- | checklist
-pub(crate) fn parse_description_full(full_text: &str) -> (String, HashMap<String, String>, String, Vec<ChecklistItem>) {
+pub(crate) fn parse_description_full(
+    full_text: &str,
+) -> (String, HashMap<String, String>, String, Vec<ChecklistItem>) {
     // Normalize line endings so separators match regardless of \r\n vs \n.
     let normalized = if full_text.contains("\r\n") {
         full_text.replace("\r\n", "\n")
@@ -171,9 +173,17 @@ pub(crate) fn merge_concurrent_description_updates(
 
     // Merge: prefer our changes if we made them, otherwise prefer their changes
     let merged_desc = if we_changed_desc { new_desc } else { curr_desc };
-    let merged_params = if we_changed_params { new_params } else { curr_params };
+    let merged_params = if we_changed_params {
+        new_params
+    } else {
+        curr_params
+    };
     let merged_plan = if we_changed_plan { new_plan } else { curr_plan };
-    let merged_checklist = if we_changed_checklist { new_checklist } else { curr_checklist };
+    let merged_checklist = if we_changed_checklist {
+        new_checklist
+    } else {
+        curr_checklist
+    };
 
     // Serialize back with the merged content
     serialize_description_full(

@@ -1,19 +1,19 @@
 use std::sync::Arc;
 
 use rmcp::{
+    ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
     transport::streamable_http_server::{
-        session::local::LocalSessionManager, StreamableHttpService,
+        StreamableHttpService, session::local::LocalSessionManager,
     },
-    ServerHandler,
 };
 use serde_json::Value;
 
 use crate::{
-    task::{ChecklistItem, Parameter, Role, TaskSession},
     Zbobr,
+    task::{ChecklistItem, Parameter, Role, TaskSession},
 };
 
 // Instruction shared across all role prompts explaining branch isolation rules.
@@ -27,7 +27,6 @@ fn branch_isolation_instruction() -> String {
         report_error = planner_tools::REPORT_ERROR,
     )
 }
-
 
 /// Get the current hostname, or "unknown" if it cannot be determined.
 fn get_hostname() -> String {
@@ -111,7 +110,9 @@ pub struct SetDestinationRepositoryParam {
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct SetDestinationBranchParam {
-    #[schemars(description = "Work branch postfix (the final segment after prefix/task_id) (or null to unset)")]
+    #[schemars(
+        description = "Work branch postfix (the final segment after prefix/task_id) (or null to unset)"
+    )]
     pub value: Option<String>,
 }
 
@@ -230,7 +231,7 @@ Work autonomously. Do not ask the user for anything.
 7. Design a solution. 
 8. Post a solution in the form of a text plan with `{post_plan}`. Use planning mode if available.
 "#,
-    branch_isolation = branch_isolation_instruction(),
+        branch_isolation = branch_isolation_instruction(),
         get_description = planner_tools::GET_DESCRIPTION,
         get_discussion = planner_tools::GET_DISCUSSION,
         get_plan = planner_tools::GET_PLAN,
@@ -246,7 +247,6 @@ Work autonomously. Do not ask the user for anything.
         get_param_work_branch = planner_tools::GET_PARAM_WORK_BRANCH,
     )
 }
-
 
 /// Generate hardcoded worker instructions using tool name constants.
 pub fn worker_instructions() -> String {
@@ -314,7 +314,7 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
         ask_planner = worker_tools::ASK_PLANNER,
         branch_isolation = branch_isolation_instruction(),
     );
-    
+
     instructions
 }
 
@@ -345,7 +345,7 @@ Review the implementation changes and ensure they meet coding standards and task
         get_plan = reviewer_tools::GET_PLAN,
         report_error = reviewer_tools::REPORT_ERROR,
         pull_work = reviewer_tools::PULL_WORK,
-    insert_checklist_item = reviewer_tools::INSERT_CHECKLIST_ITEM,
+        insert_checklist_item = reviewer_tools::INSERT_CHECKLIST_ITEM,
     );
 
     instructions
@@ -412,7 +412,7 @@ You have read access to the task and repository:
         report_error = merger_tools::REPORT_ERROR,
         branch_isolation = branch_isolation_instruction(),
     );
-    
+
     instructions
 }
 
@@ -485,13 +485,17 @@ fn generate_api_docs_from_router<T: Send + Sync + 'static>(
 pub trait CommonMcpImpl: Send + Sync {
     fn session(&self) -> &TaskSession;
     fn role(&self) -> Role;
-    
+
     fn role_name(&self) -> &'static str {
         self.role().as_str()
     }
-    
+
     async fn get_description_impl(&self) -> String {
-        tracing::info!("[{}#{}] get_description", self.role_name(), self.session().task_id());
+        tracing::info!(
+            "[{}#{}] get_description",
+            self.role_name(),
+            self.session().task_id()
+        );
         match self.session().get_description().await {
             Ok(desc) => desc,
             Err(e) => format!("Error: {e}"),
@@ -499,7 +503,11 @@ pub trait CommonMcpImpl: Send + Sync {
     }
 
     async fn get_discussion_impl(&self) -> String {
-        tracing::info!("[{}#{}] get_discussion", self.role_name(), self.session().task_id());
+        tracing::info!(
+            "[{}#{}] get_discussion",
+            self.role_name(),
+            self.session().task_id()
+        );
         match self.session().get_discussion().await {
             Ok(msgs) => {
                 if msgs.is_empty() {
@@ -513,17 +521,31 @@ pub trait CommonMcpImpl: Send + Sync {
     }
 
     async fn report_error_impl(&self, message: &str) -> String {
-        tracing::info!("[{}#{}] report_error", self.role_name(), self.session().task_id());
+        tracing::info!(
+            "[{}#{}] report_error",
+            self.role_name(),
+            self.session().task_id()
+        );
         let hostname = get_hostname();
 
-        if let Err(e) = self.session().post_message(message, "error", &hostname).await {
-            tracing::error!("Failed to post error message for task {}: {e}", self.session().task_id());
+        if let Err(e) = self
+            .session()
+            .post_message(message, "error", &hostname)
+            .await
+        {
+            tracing::error!(
+                "Failed to post error message for task {}: {e}",
+                self.session().task_id()
+            );
             return format!("Error posting error message: {e}");
         }
 
         // Signal to pause task processing and wait for user response
         if let Err(e) = self.session().set_signal(crate::Signal::GoAsk).await {
-            tracing::error!("Failed to set signal GoAsk for task {} after reporting error: {e}", self.session().task_id());
+            tracing::error!(
+                "Failed to set signal GoAsk for task {} after reporting error: {e}",
+                self.session().task_id()
+            );
             return format!("Error reporting error but error pausing task: {e}");
         }
 
@@ -531,7 +553,11 @@ pub trait CommonMcpImpl: Send + Sync {
     }
 
     async fn get_plan_impl(&self) -> String {
-        tracing::info!("[{}#{}] get_plan", self.role_name(), self.session().task_id());
+        tracing::info!(
+            "[{}#{}] get_plan",
+            self.role_name(),
+            self.session().task_id()
+        );
         match self.session().get_plan().await {
             Ok(plan) => plan,
             Err(e) => format!("Error: {e}"),
@@ -539,93 +565,139 @@ pub trait CommonMcpImpl: Send + Sync {
     }
 
     async fn get_checklist_impl(&self) -> String {
-        tracing::info!("[{}#{}] get_checklist", self.role_name(), self.session().task_id());
+        tracing::info!(
+            "[{}#{}] get_checklist",
+            self.role_name(),
+            self.session().task_id()
+        );
         match self.session().get_checklist().await {
-            Ok(items) => {
-                match serde_json::to_string_pretty(&items) {
-                    Ok(json) => json,
-                    Err(e) => format!("Error serializing checklist: {e}"),
-                }
-            }
+            Ok(items) => match serde_json::to_string_pretty(&items) {
+                Ok(json) => json,
+                Err(e) => format!("Error serializing checklist: {e}"),
+            },
             Err(e) => format!("Error: {e}"),
         }
     }
 
     async fn check_checklist_item_impl(&self, id: &str, checked: bool) -> String {
-        tracing::info!("[{}#{}] check_checklist_item id={} checked={}", self.role_name(), self.session().task_id(), id, checked);
+        tracing::info!(
+            "[{}#{}] check_checklist_item id={} checked={}",
+            self.role_name(),
+            self.session().task_id(),
+            id,
+            checked
+        );
         let item_id = id.to_string();
-        match self.session().modify_task(move |task| {
-            if let Some(item) = task.checklist.iter_mut().find(|item| item.id == item_id) {
-                item.checked = checked;
-            }
-        }).await {
+        match self
+            .session()
+            .modify_task(move |task| {
+                if let Some(item) = task.checklist.iter_mut().find(|item| item.id == item_id) {
+                    item.checked = checked;
+                }
+            })
+            .await
+        {
             Ok(()) => {
                 // Checklist item state updated; signal transitions are handled by
                 // the main/run loop after a role session completes. Do not set
                 // task signal here to avoid racing state transitions.
-                format!("Checklist item '{}' checked state updated to {}", id, checked)
+                format!(
+                    "Checklist item '{}' checked state updated to {}",
+                    id, checked
+                )
             }
             Err(e) => format!("Error: {e}"),
         }
     }
 
-    async fn insert_checklist_item_impl(&self, id: &str, after_id: Option<String>, text: &str) -> String {
-        tracing::info!("[{}#{}] insert_checklist_item id={} after_id={:?}", self.role_name(), self.session().task_id(), id, after_id);
+    async fn insert_checklist_item_impl(
+        &self,
+        id: &str,
+        after_id: Option<String>,
+        text: &str,
+    ) -> String {
+        tracing::info!(
+            "[{}#{}] insert_checklist_item id={} after_id={:?}",
+            self.role_name(),
+            self.session().task_id(),
+            id,
+            after_id
+        );
         let item_id = id.to_string();
         let item_text = text.to_string();
         let after = after_id.clone();
-        
+
         // Validate first by reading the task
         match self.session().get_checklist().await {
             Ok(items) => {
                 if items.iter().any(|item| item.id == item_id) {
                     return format!("Error: Checklist item with id '{}' already exists", id);
                 }
-                if let Some(ref aid) = after && !items.iter().any(|item| item.id == *aid) {
+                if let Some(ref aid) = after
+                    && !items.iter().any(|item| item.id == *aid)
+                {
                     return format!("Error: Checklist item with id '{}' not found", aid);
                 }
             }
             Err(e) => return format!("Error: {e}"),
         }
 
-        match self.session().modify_task(move |task| {
-            let new_item = ChecklistItem {
-                id: item_id,
-                checked: false,
-                text: item_text,
-            };
+        match self
+            .session()
+            .modify_task(move |task| {
+                let new_item = ChecklistItem {
+                    id: item_id,
+                    checked: false,
+                    text: item_text,
+                };
 
-            if let Some(ref after_id) = after {
-                if let Some(pos) = task.checklist.iter().position(|item| item.id == *after_id) {
-                    task.checklist.insert(pos + 1, new_item);
+                if let Some(ref after_id) = after {
+                    if let Some(pos) = task.checklist.iter().position(|item| item.id == *after_id) {
+                        task.checklist.insert(pos + 1, new_item);
+                    } else {
+                        task.checklist.push(new_item);
+                    }
                 } else {
                     task.checklist.push(new_item);
                 }
-            } else {
-                task.checklist.push(new_item);
-            }
-        }).await {
+            })
+            .await
+        {
             Ok(()) => format!("Checklist item '{}' inserted", id),
             Err(e) => format!("Error updating task: {e}"),
         }
     }
 
     async fn update_checklist_item_impl(&self, id: &str, text: &str) -> String {
-        tracing::info!("[{}#{}] update_checklist_item id={}", self.role_name(), self.session().task_id(), id);
+        tracing::info!(
+            "[{}#{}] update_checklist_item id={}",
+            self.role_name(),
+            self.session().task_id(),
+            id
+        );
         let item_id = id.to_string();
         let item_text = text.to_string();
-        match self.session().modify_task(move |task| {
-            if let Some(item) = task.checklist.iter_mut().find(|item| item.id == item_id) {
-                item.text = item_text;
-            }
-        }).await {
+        match self
+            .session()
+            .modify_task(move |task| {
+                if let Some(item) = task.checklist.iter_mut().find(|item| item.id == item_id) {
+                    item.text = item_text;
+                }
+            })
+            .await
+        {
             Ok(()) => format!("Checklist item '{}' updated", id),
             Err(e) => format!("Error updating task: {e}"),
         }
     }
 
     async fn delete_checklist_item_impl(&self, id: &str) -> String {
-        tracing::info!("[{}#{}] delete_checklist_item id={}", self.role_name(), self.session().task_id(), id);
+        tracing::info!(
+            "[{}#{}] delete_checklist_item id={}",
+            self.role_name(),
+            self.session().task_id(),
+            id
+        );
         let item_id = id.to_string();
 
         // Pre-validate: check the item exists and is not checked
@@ -633,7 +705,10 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(items) => {
                 if let Some(item) = items.iter().find(|i| i.id == item_id) {
                     if item.checked {
-                        return format!("Error: Cannot delete checked checklist item '{}'. Checked items are preserved as work history.", id);
+                        return format!(
+                            "Error: Cannot delete checked checklist item '{}'. Checked items are preserved as work history.",
+                            id
+                        );
                     }
                 } else {
                     return format!("Error: Checklist item with id '{}' not found", id);
@@ -642,9 +717,13 @@ pub trait CommonMcpImpl: Send + Sync {
             Err(e) => return format!("Error: {e}"),
         }
 
-        match self.session().modify_task(move |task| {
-            task.checklist.retain(|item| item.id != item_id);
-        }).await {
+        match self
+            .session()
+            .modify_task(move |task| {
+                task.checklist.retain(|item| item.id != item_id);
+            })
+            .await
+        {
             Ok(()) => format!("Checklist item '{}' deleted", id),
             Err(e) => format!("Error updating task: {e}"),
         }
@@ -655,7 +734,11 @@ pub trait CommonMcpImpl: Send + Sync {
 #[allow(async_fn_in_trait)]
 pub trait PlannerMcpImpl: CommonMcpImpl {
     async fn get_param_impl(&self, param: Parameter) -> String {
-        tracing::info!("[planner#{}] get_param_{}", self.session().task_id(), param.name());
+        tracing::info!(
+            "[planner#{}] get_param_{}",
+            self.session().task_id(),
+            param.name()
+        );
         match self.session().get_parameter(param).await {
             Ok(Some(value)) => value,
             Ok(None) => format!("{} is not set", param.name()),
@@ -664,7 +747,12 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
     }
 
     async fn set_param_impl(&self, param: Parameter, value: Option<String>) -> String {
-        tracing::info!("[planner#{}] set_param_{} value={:?}", self.session().task_id(), param.name(), value);
+        tracing::info!(
+            "[planner#{}] set_param_{} value={:?}",
+            self.session().task_id(),
+            param.name(),
+            value
+        );
         match self.session().set_parameter(param, value).await {
             Ok(()) => format!("{} updated", param.name()),
             Err(e) => format!("Error: {e}"),
@@ -674,13 +762,20 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
     async fn post_plan_impl(&self, plan: &str) -> String {
         tracing::info!("[planner#{}] post_plan", self.session().task_id());
         let plan_text = plan.to_string();
-        match self.session().modify_task(move |task| {
-            task.plan = plan_text;
-        }).await {
+        match self
+            .session()
+            .modify_task(move |task| {
+                task.plan = plan_text;
+            })
+            .await
+        {
             Ok(()) => {
                 // Mark plan as ready for worker to implement
                 if let Err(e) = self.session().set_signal(crate::Signal::GoWork).await {
-                    tracing::error!("Failed to set signal GoWork for task {} after posting plan: {e}", self.session().task_id());
+                    tracing::error!(
+                        "Failed to set signal GoWork for task {} after posting plan: {e}",
+                        self.session().task_id()
+                    );
                     return format!("Plan posted but error marking task ready for work: {e}");
                 }
                 "Plan posted and task ready for worker implementation".to_string()
@@ -702,7 +797,8 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
     }
 
     async fn set_param_destination_repository_impl(&self, value: Option<String>) -> String {
-        self.set_param_impl(Parameter::DestinationRepository, value).await
+        self.set_param_impl(Parameter::DestinationRepository, value)
+            .await
     }
 
     async fn get_param_destination_branch_impl(&self) -> String {
@@ -710,11 +806,16 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
     }
 
     async fn set_param_destination_branch_impl(&self, value: Option<String>) -> String {
-        self.set_param_impl(Parameter::DestinationBranch, value).await
+        self.set_param_impl(Parameter::DestinationBranch, value)
+            .await
     }
 
     async fn set_param_work_branch_postfix_impl(&self, value: Option<String>) -> String {
-        tracing::info!("[planner#{}] set_param_work_branch_postfix value={:?}", self.session().task_id(), value);
+        tracing::info!(
+            "[planner#{}] set_param_work_branch_postfix value={:?}",
+            self.session().task_id(),
+            value
+        );
         match value {
             Some(postfix) => {
                 let full = self.session().create_branch_name(&postfix);
@@ -730,14 +831,17 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
     async fn get_param_work_branch_impl(&self) -> String {
         self.get_param_impl(Parameter::WorkBranch).await
     }
-
 }
 
 /// Worker-specific MCP implementations
 #[allow(async_fn_in_trait)]
 pub trait WorkerMcpImpl: CommonMcpImpl {
     async fn get_param_impl(&self, param: Parameter) -> String {
-        tracing::info!("[worker#{}] get_param_{}", self.session().task_id(), param.name());
+        tracing::info!(
+            "[worker#{}] get_param_{}",
+            self.session().task_id(),
+            param.name()
+        );
         match self.session().get_parameter(param).await {
             Ok(Some(value)) => value,
             Ok(None) => format!("{} is not set", param.name()),
@@ -756,15 +860,25 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
     async fn ask_user_impl(&self, message: &str) -> String {
         tracing::info!("[worker#{}] ask_user", self.session().task_id());
         let hostname = get_hostname();
-        
-        if let Err(e) = self.session().post_message(message, self.role().as_str(), &hostname).await {
-            tracing::error!("Failed to post worker message for task {}: {e}", self.session().task_id());
+
+        if let Err(e) = self
+            .session()
+            .post_message(message, self.role().as_str(), &hostname)
+            .await
+        {
+            tracing::error!(
+                "Failed to post worker message for task {}: {e}",
+                self.session().task_id()
+            );
             return format!("Error posting message: {e}");
         }
-        
+
         // Signal to pause task processing and wait for user response
         if let Err(e) = self.session().set_signal(crate::Signal::GoAsk).await {
-            tracing::error!("Failed to set signal GoAsk for task {} after ask_user: {e}", self.session().task_id());
+            tracing::error!(
+                "Failed to set signal GoAsk for task {} after ask_user: {e}",
+                self.session().task_id()
+            );
             return format!("Question posted but error pausing task: {e}");
         }
         "Message posted to user - task paused pending response".to_string()
@@ -773,20 +887,29 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
     async fn ask_planner_impl(&self, message: &str) -> String {
         tracing::info!("[worker#{}] ask_planner", self.session().task_id());
         let hostname = get_hostname();
-        
-        if let Err(e) = self.session().post_message(message, self.role().as_str(), &hostname).await {
-            tracing::error!("Failed to post worker->planner message for task {}: {e}", self.session().task_id());
+
+        if let Err(e) = self
+            .session()
+            .post_message(message, self.role().as_str(), &hostname)
+            .await
+        {
+            tracing::error!(
+                "Failed to post worker->planner message for task {}: {e}",
+                self.session().task_id()
+            );
             return format!("Error posting message: {e}");
         }
-        
+
         // Pass task back to planner agent for clarification or re-planning
         if let Err(e) = self.session().set_signal(crate::Signal::GoPlan).await {
-            tracing::error!("Failed to set signal GoPlan for task {} after ask_planner: {e}", self.session().task_id());
+            tracing::error!(
+                "Failed to set signal GoPlan for task {} after ask_planner: {e}",
+                self.session().task_id()
+            );
             return format!("Message posted but error returning to planner: {e}");
         }
         "Message posted to planner - task returned for clarification".to_string()
     }
-
 
     async fn pull_work_impl(&self) -> String {
         tracing::info!("[worker#{}] pull_work", self.session().task_id());
@@ -817,7 +940,11 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
 #[allow(async_fn_in_trait)]
 pub trait ReviewerMcpImpl: CommonMcpImpl {
     async fn get_param_impl(&self, param: Parameter) -> String {
-        tracing::info!("[reviewer#{}] get_param_{}", self.session().task_id(), param.name());
+        tracing::info!(
+            "[reviewer#{}] get_param_{}",
+            self.session().task_id(),
+            param.name()
+        );
         match self.session().get_parameter(param).await {
             Ok(Some(value)) => value,
             Ok(None) => format!("{} is not set", param.name()),
@@ -847,7 +974,11 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
 #[allow(async_fn_in_trait)]
 pub trait MergerMcpImpl: CommonMcpImpl {
     async fn get_param_impl(&self, param: Parameter) -> String {
-        tracing::info!("[merger#{}] get_param_{}", self.session().task_id(), param.name());
+        tracing::info!(
+            "[merger#{}] get_param_{}",
+            self.session().task_id(),
+            param.name()
+        );
         match self.session().get_parameter(param).await {
             Ok(Some(value)) => value,
             Ok(None) => format!("{} is not set", param.name()),
@@ -882,18 +1013,28 @@ pub trait MergerMcpImpl: CommonMcpImpl {
     async fn ask_user_impl(&self, message: &str) -> String {
         tracing::info!("[merger#{}] ask_user", self.session().task_id());
         let hostname = get_hostname();
-        
-        if let Err(e) = self.session().post_message(message, self.role().as_str(), &hostname).await {
-            tracing::error!("Failed to post merger message for task {}: {e}", self.session().task_id());
+
+        if let Err(e) = self
+            .session()
+            .post_message(message, self.role().as_str(), &hostname)
+            .await
+        {
+            tracing::error!(
+                "Failed to post merger message for task {}: {e}",
+                self.session().task_id()
+            );
             return format!("Error posting message: {e}");
         }
-        
+
         // Signal to pause task processing and wait for user response
         if let Err(e) = self.session().set_signal(crate::Signal::GoAsk).await {
-            tracing::error!("Failed to set signal GoAsk for task {} after asking user: {e}", self.session().task_id());
+            tracing::error!(
+                "Failed to set signal GoAsk for task {} after asking user: {e}",
+                self.session().task_id()
+            );
             return format!("Error pausing task: {e}");
         }
-        
+
         "Message posted to user - task paused pending response".to_string()
     }
 }
@@ -908,7 +1049,7 @@ impl CommonMcpImpl for MergerMcp {
     fn session(&self) -> &TaskSession {
         &self.session
     }
-    
+
     fn role(&self) -> Role {
         Role::Merger
     }
@@ -940,17 +1081,23 @@ impl MergerMcp {
         self.report_error_impl(&params.message).await
     }
 
-    #[tool(description = "Post a message to the user and pause task processing until user responds")]
+    #[tool(
+        description = "Post a message to the user and pause task processing until user responds"
+    )]
     async fn ask_user(&self, Parameters(params): Parameters<MessageParam>) -> String {
         self.ask_user_impl(&params.message).await
     }
 
-    #[tool(description = "Your workspace currently has a merge conflict. Use this to access the repository and resolve the conflicts")]
+    #[tool(
+        description = "Your workspace currently has a merge conflict. Use this to access the repository and resolve the conflicts"
+    )]
     async fn pull_work(&self) -> String {
         self.pull_work_impl().await
     }
 
-    #[tool(description = "Push the resolved merge to the work branch in the fork. All changes must be committed before pushing.")]
+    #[tool(
+        description = "Push the resolved merge to the work branch in the fork. All changes must be committed before pushing."
+    )]
     async fn push_work(&self) -> String {
         self.push_work_impl().await
     }
@@ -972,8 +1119,7 @@ impl ServerHandler for MergerMcp {
         ServerInfo {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             instructions: Some(
-                "Merger tools: resolve merge conflicts in the work branch."
-                    .to_string(),
+                "Merger tools: resolve merge conflicts in the work branch.".to_string(),
             ),
             ..Default::default()
         }
@@ -1000,7 +1146,7 @@ impl CommonMcpImpl for PlannerMcp {
     fn session(&self) -> &TaskSession {
         &self.session
     }
-    
+
     fn role(&self) -> Role {
         Role::Planner
     }
@@ -1060,8 +1206,12 @@ impl PlannerMcp {
     }
 
     #[tool(description = "Set the destination repository URL for this task (e.g. 'owner/repo')")]
-    async fn set_param_destination_repository(&self, Parameters(params): Parameters<SetDestinationRepositoryParam>) -> String {
-        self.set_param_destination_repository_impl(params.value).await
+    async fn set_param_destination_repository(
+        &self,
+        Parameters(params): Parameters<SetDestinationRepositoryParam>,
+    ) -> String {
+        self.set_param_destination_repository_impl(params.value)
+            .await
     }
 
     #[tool(description = "Get the destination branch name for this task (read-only)")]
@@ -1070,12 +1220,20 @@ impl PlannerMcp {
     }
 
     #[tool(description = "Set the destination branch name for this task (e.g. 'main')")]
-    async fn set_param_destination_branch(&self, Parameters(params): Parameters<SetDestinationBranchParam>) -> String {
+    async fn set_param_destination_branch(
+        &self,
+        Parameters(params): Parameters<SetDestinationBranchParam>,
+    ) -> String {
         self.set_param_destination_branch_impl(params.value).await
     }
 
-    #[tool(description = "Set the work branch postfix for this task (the postfix segment, e.g. 'implement-feature')")]
-    async fn set_param_work_branch_postfix(&self, Parameters(params): Parameters<SetDestinationBranchParam>) -> String {
+    #[tool(
+        description = "Set the work branch postfix for this task (the postfix segment, e.g. 'implement-feature')"
+    )]
+    async fn set_param_work_branch_postfix(
+        &self,
+        Parameters(params): Parameters<SetDestinationBranchParam>,
+    ) -> String {
         self.set_param_work_branch_postfix_impl(params.value).await
     }
 
@@ -1118,7 +1276,7 @@ impl CommonMcpImpl for WorkerMcp {
     fn session(&self) -> &TaskSession {
         &self.session
     }
-    
+
     fn role(&self) -> Role {
         Role::Worker
     }
@@ -1150,12 +1308,16 @@ impl WorkerMcp {
         self.report_error_impl(&params.message).await
     }
 
-    #[tool(description = "Post a message to the user and pause task processing until user responds")]
+    #[tool(
+        description = "Post a message to the user and pause task processing until user responds"
+    )]
     async fn ask_user(&self, Parameters(params): Parameters<MessageParam>) -> String {
         self.ask_user_impl(&params.message).await
     }
 
-    #[tool(description = "Post a message to the planner and pass the task back for clarification or re-planning")]
+    #[tool(
+        description = "Post a message to the planner and pass the task back for clarification or re-planning"
+    )]
     async fn ask_planner(&self, Parameters(params): Parameters<MessageParam>) -> String {
         self.ask_planner_impl(&params.message).await
     }
@@ -1185,22 +1347,39 @@ impl WorkerMcp {
     }
 
     #[tool(description = "Insert a new checklist item (always created in unchecked state)")]
-    async fn insert_checklist_item(&self, Parameters(params): Parameters<InsertChecklistItemParam>) -> String {
-        self.insert_checklist_item_impl(&params.id, params.after_id.clone(), &params.text).await
+    async fn insert_checklist_item(
+        &self,
+        Parameters(params): Parameters<InsertChecklistItemParam>,
+    ) -> String {
+        self.insert_checklist_item_impl(&params.id, params.after_id.clone(), &params.text)
+            .await
     }
 
     #[tool(description = "Update a checklist item's text")]
-    async fn update_checklist_item(&self, Parameters(params): Parameters<UpdateChecklistItemParam>) -> String {
-        self.update_checklist_item_impl(&params.id, &params.text).await
+    async fn update_checklist_item(
+        &self,
+        Parameters(params): Parameters<UpdateChecklistItemParam>,
+    ) -> String {
+        self.update_checklist_item_impl(&params.id, &params.text)
+            .await
     }
 
     #[tool(description = "Check or uncheck a checklist item")]
-    async fn check_checklist_item(&self, Parameters(params): Parameters<CheckChecklistItemParam>) -> String {
-        self.check_checklist_item_impl(&params.id, params.checked).await
+    async fn check_checklist_item(
+        &self,
+        Parameters(params): Parameters<CheckChecklistItemParam>,
+    ) -> String {
+        self.check_checklist_item_impl(&params.id, params.checked)
+            .await
     }
 
-    #[tool(description = "Delete an unchecked checklist item (checked items are preserved as history)")]
-    async fn delete_checklist_item(&self, Parameters(params): Parameters<DeleteChecklistItemParam>) -> String {
+    #[tool(
+        description = "Delete an unchecked checklist item (checked items are preserved as history)"
+    )]
+    async fn delete_checklist_item(
+        &self,
+        Parameters(params): Parameters<DeleteChecklistItemParam>,
+    ) -> String {
         self.delete_checklist_item_impl(&params.id).await
     }
 
@@ -1249,7 +1428,7 @@ impl CommonMcpImpl for ReviewerMcp {
     fn session(&self) -> &TaskSession {
         &self.session
     }
-    
+
     fn role(&self) -> Role {
         Role::Reviewer
     }
@@ -1298,23 +1477,42 @@ impl ReviewerMcp {
         self.get_checklist_impl().await
     }
 
-    #[tool(description = "Insert a new checklist item for review remarks (always created in unchecked state)")]
-    async fn insert_checklist_item(&self, Parameters(params): Parameters<InsertChecklistItemParam>) -> String {
-        self.insert_checklist_item_impl(&params.id, params.after_id.clone(), &params.text).await
+    #[tool(
+        description = "Insert a new checklist item for review remarks (always created in unchecked state)"
+    )]
+    async fn insert_checklist_item(
+        &self,
+        Parameters(params): Parameters<InsertChecklistItemParam>,
+    ) -> String {
+        self.insert_checklist_item_impl(&params.id, params.after_id.clone(), &params.text)
+            .await
     }
 
     #[tool(description = "Update a checklist item's text")]
-    async fn update_checklist_item(&self, Parameters(params): Parameters<UpdateChecklistItemParam>) -> String {
-        self.update_checklist_item_impl(&params.id, &params.text).await
+    async fn update_checklist_item(
+        &self,
+        Parameters(params): Parameters<UpdateChecklistItemParam>,
+    ) -> String {
+        self.update_checklist_item_impl(&params.id, &params.text)
+            .await
     }
 
     #[tool(description = "Check or uncheck a checklist item")]
-    async fn check_checklist_item(&self, Parameters(params): Parameters<CheckChecklistItemParam>) -> String {
-        self.check_checklist_item_impl(&params.id, params.checked).await
+    async fn check_checklist_item(
+        &self,
+        Parameters(params): Parameters<CheckChecklistItemParam>,
+    ) -> String {
+        self.check_checklist_item_impl(&params.id, params.checked)
+            .await
     }
 
-    #[tool(description = "Delete an unchecked checklist item (checked items are preserved as history)")]
-    async fn delete_checklist_item(&self, Parameters(params): Parameters<DeleteChecklistItemParam>) -> String {
+    #[tool(
+        description = "Delete an unchecked checklist item (checked items are preserved as history)"
+    )]
+    async fn delete_checklist_item(
+        &self,
+        Parameters(params): Parameters<DeleteChecklistItemParam>,
+    ) -> String {
         self.delete_checklist_item_impl(&params.id).await
     }
 
@@ -1465,32 +1663,125 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::backend::TaskBackend for StubTaskBackend {
-        async fn get_task(&self, _id: u64) -> Result<crate::Task, crate::ZbobrError> { unimplemented!() }
-        async fn create_task(&self, _title: &str, _description: &str, _stage: crate::Stage, _tool: Option<crate::Tool>, _model: Option<crate::Model>, _parameters: std::collections::HashMap<crate::Parameter, String>) -> Result<u64, crate::ZbobrError> { unimplemented!() }
-        async fn close_task(&self, _id: u64) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn is_task_closed(&self, _id: u64) -> Result<bool, crate::ZbobrError> { unimplemented!() }
-        async fn modify_task(&self, _id: u64, _mutate: Box<dyn FnOnce(crate::Task) -> crate::Task + Send>) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn list_tasks_by_stage(&self, _stage: crate::Stage, _tool: Option<crate::Tool>) -> Result<Vec<crate::Task>, crate::ZbobrError> { unimplemented!() }
-        async fn get_task_comments(&self, _id: u64) -> Result<Vec<String>, crate::ZbobrError> { unimplemented!() }
-        async fn post_task_comment(&self, _id: u64, _body: &str, _role: &str, _hostname: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn setup(&self, _force: bool) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn validate_connectivity(&self) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        fn debug_state(&self) -> String { "StubTaskBackend".to_string() }
+        async fn get_task(&self, _id: u64) -> Result<crate::Task, crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn create_task(
+            &self,
+            _title: &str,
+            _description: &str,
+            _stage: crate::Stage,
+            _tool: Option<crate::Tool>,
+            _model: Option<crate::Model>,
+            _parameters: std::collections::HashMap<crate::Parameter, String>,
+        ) -> Result<u64, crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn close_task(&self, _id: u64) -> Result<(), crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn is_task_closed(&self, _id: u64) -> Result<bool, crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn modify_task(
+            &self,
+            _id: u64,
+            _mutate: Box<dyn FnOnce(crate::Task) -> crate::Task + Send>,
+        ) -> Result<(), crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn list_tasks_by_stage(
+            &self,
+            _stage: crate::Stage,
+            _tool: Option<crate::Tool>,
+        ) -> Result<Vec<crate::Task>, crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn get_task_comments(&self, _id: u64) -> Result<Vec<String>, crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn post_task_comment(
+            &self,
+            _id: u64,
+            _body: &str,
+            _role: &str,
+            _hostname: &str,
+        ) -> Result<(), crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn setup(&self, _force: bool) -> Result<(), crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn validate_connectivity(&self) -> Result<(), crate::ZbobrError> {
+            unimplemented!()
+        }
+        fn debug_state(&self) -> String {
+            "StubTaskBackend".to_string()
+        }
     }
 
     struct StubRepoBackend;
 
     #[async_trait::async_trait]
     impl crate::backend::RepoBackend for StubRepoBackend {
-        async fn clone_and_setup(&self, _repo: &str, _branch: &str, _workspace_path: &std::path::Path) -> Result<std::path::PathBuf, crate::ZbobrError> { unimplemented!() }
-        async fn clone_readonly(&self, _repo: &str, _branch: &str, _workspace_path: &std::path::Path) -> Result<std::path::PathBuf, crate::ZbobrError> { unimplemented!() }
-        async fn sync_fork(&self, _repo: &str, _branch: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn setup_fork_remote_and_push(&self, _work_dir: &std::path::Path, _target_repo: &str, _work_branch: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn push_and_create_pr(&self, _repo: &str, _workspace_path: &std::path::Path, _pr_title: &str, _pr_body: &str) -> Result<String, crate::ZbobrError> { unimplemented!() }
-        async fn create_pr_in_fork(&self, _repo_name: &str, _work_branch: &str, _dest_branch: &str, _pr_title: &str, _pr_body: &str) -> Result<String, crate::ZbobrError> { unimplemented!() }
-        async fn parse_pr_to_repo_branch(&self, _pr_ref: &str) -> Result<(String, String), crate::ZbobrError> { unimplemented!() }
-        async fn validate_connectivity(&self) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        fn debug_state(&self) -> String { "StubRepoBackend".to_string() }
+        async fn clone_and_setup(
+            &self,
+            _repo: &str,
+            _branch: &str,
+            _workspace_path: &std::path::Path,
+        ) -> Result<std::path::PathBuf, crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn clone_readonly(
+            &self,
+            _repo: &str,
+            _branch: &str,
+            _workspace_path: &std::path::Path,
+        ) -> Result<std::path::PathBuf, crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn sync_fork(&self, _repo: &str, _branch: &str) -> Result<(), crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn setup_fork_remote_and_push(
+            &self,
+            _work_dir: &std::path::Path,
+            _target_repo: &str,
+            _work_branch: &str,
+        ) -> Result<(), crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn push_and_create_pr(
+            &self,
+            _repo: &str,
+            _workspace_path: &std::path::Path,
+            _pr_title: &str,
+            _pr_body: &str,
+        ) -> Result<String, crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn create_pr_in_fork(
+            &self,
+            _repo_name: &str,
+            _work_branch: &str,
+            _dest_branch: &str,
+            _pr_title: &str,
+            _pr_body: &str,
+        ) -> Result<String, crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn parse_pr_to_repo_branch(
+            &self,
+            _pr_ref: &str,
+        ) -> Result<(String, String), crate::ZbobrError> {
+            unimplemented!()
+        }
+        async fn validate_connectivity(&self) -> Result<(), crate::ZbobrError> {
+            unimplemented!()
+        }
+        fn debug_state(&self) -> String {
+            "StubRepoBackend".to_string()
+        }
     }
 
     fn test_config() -> crate::config::ZbobrDispatcherConfig {
@@ -1514,8 +1805,10 @@ mod tests {
 
     fn test_zbobr() -> Zbobr {
         let config = test_config();
-        let task_backend: std::sync::Arc<dyn crate::backend::TaskBackend> = std::sync::Arc::new(StubTaskBackend);
-        let repo_backend: std::sync::Arc<dyn crate::backend::RepoBackend> = std::sync::Arc::new(StubRepoBackend);
+        let task_backend: std::sync::Arc<dyn crate::backend::TaskBackend> =
+            std::sync::Arc::new(StubTaskBackend);
+        let repo_backend: std::sync::Arc<dyn crate::backend::RepoBackend> =
+            std::sync::Arc::new(StubRepoBackend);
         Zbobr::new(config, task_backend, repo_backend)
     }
 
@@ -1554,5 +1847,4 @@ mod tests {
             "Exposed worker tools do not match worker_tools::ALL_TOOLS"
         );
     }
-
 }

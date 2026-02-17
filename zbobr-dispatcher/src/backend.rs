@@ -8,8 +8,7 @@ use crate::{Model, Parameter, Stage, Task, Tool, ZbobrError};
 // Replace characters that are unsafe or invalid in filenames with '_'.
 // Allows ASCII alphanumerics, '-', '_', and '.'.
 fn sanitize_filename(name: &str) -> String {
-    name
-        .chars()
+    name.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
                 c
@@ -47,7 +46,9 @@ pub async fn configure_git_user(
         .map_err(|e| ZbobrError::Other(format!("Failed to set git user.email: {}", e)))?;
 
     if !config_email_status.success() {
-        return Err(ZbobrError::Other("git config user.email failed".to_string()));
+        return Err(ZbobrError::Other(
+            "git config user.email failed".to_string(),
+        ));
     }
 
     tracing::info!(
@@ -133,7 +134,9 @@ pub async fn create_placeholder_commit(
         .map_err(|e| ZbobrError::Other(format!("Failed to run git add: {}", e)))?;
 
     if !add_status.success() {
-        return Err(ZbobrError::Other("git add for placeholder failed".to_string()));
+        return Err(ZbobrError::Other(
+            "git add for placeholder failed".to_string(),
+        ));
     }
 
     // Commit the file
@@ -146,7 +149,9 @@ pub async fn create_placeholder_commit(
         .map_err(|e| ZbobrError::Other(format!("Failed to run git commit: {}", e)))?;
 
     if !commit_status.success() {
-        return Err(ZbobrError::Other("git commit for placeholder failed".to_string()));
+        return Err(ZbobrError::Other(
+            "git commit for placeholder failed".to_string(),
+        ));
     }
 
     Ok(())
