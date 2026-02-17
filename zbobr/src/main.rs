@@ -422,14 +422,21 @@ async fn main() -> anyhow::Result<()> {
         .as_ref()
         .and_then(|r| r.task.as_ref())
         .and_then(|t| t.github.as_ref());
+    let _task_backend_fs_toml = root_toml
+        .as_ref()
+        .and_then(|r| r.task.as_ref())
+        .and_then(|t| t.fs.as_ref());
     let repo_backend_github_toml = root_toml
         .as_ref()
         .and_then(|r| r.repo.as_ref())
         .and_then(|r| r.github.as_ref());
-    let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = Arc::new(
-        GitHubTaskBackend::new(task_backend_github_toml, cli.global.task_repo.as_deref())
-            .context("Failed to create GitHub task backend")?,
-    );
+
+    let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = match config.backend {
+        zbobr_dispatcher::config::BackendType::GitHub => Arc::new(
+            GitHubTaskBackend::new(task_backend_github_toml, cli.global.task_repo.as_deref())
+                .context("Failed to create GitHub task backend")?,
+        ),
+    };
     let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = Arc::new(
         GitHubRepoBackend::new(repo_backend_github_toml, cli.global.fork_owner.as_deref())
             .context("Failed to create GitHub repo backend")?,

@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 zbobr-dispatcher = { workspace = true }
 zbobr-task-backend-github = { workspace = true }
+zbobr-task-backend-fs = { workspace = true }
 zbobr-repo-backend-github = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }

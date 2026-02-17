@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::Context;
 use zbobr_dispatcher::ZbobrDispatcherToml;
 use zbobr_repo_backend_github::ZbobrRepoBackendGithubToml;
+use zbobr_task_backend_fs::ZbobrTaskBackendFsToml;
 use zbobr_task_backend_github::ZbobrTaskBackendGithubToml;
 
 /// Task backend configuration section.
@@ -11,6 +12,7 @@ use zbobr_task_backend_github::ZbobrTaskBackendGithubToml;
 #[serde(default)]
 pub struct ZbobrTaskBackendToml {
     pub github: Option<ZbobrTaskBackendGithubToml>,
+    pub fs: Option<ZbobrTaskBackendFsToml>,
 }
 
 /// Repo backend configuration section.

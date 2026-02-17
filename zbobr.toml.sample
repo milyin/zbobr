@@ -48,6 +48,11 @@ task_repo = "{{TASK_REPO}}"
 # GitHub token for task backend (optional, uses GH_TOKEN or GITHUB_TOKEN env vars by default)
 # github_token = ""
 
+[task.fs]
+# Filesystem task backend: stores tasks as YAML files in a directory
+# Uncomment this section to use filesystem backend instead of GitHub
+# tasks_dir = "./tasks"
+
 [repo.github]
 # GitHub user or org where target repos are forked for implementation
 fork_owner = "{{FORK_OWNER}}"

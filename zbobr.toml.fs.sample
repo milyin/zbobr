@@ -1,0 +1,18 @@
+# zbobr configuration file example with filesystem task backend
+# Save this as zbobr.toml in your project root
+
+[dispatcher]
+default_model = "gpt-5-mini"
+workspaces = "./workspaces"
+git_user_name = "zbobr"
+git_user_email = "zbobr@example.com"
+work_branch_prefix = "zbobr"
+
+# Filesystem task backend configuration
+# Tasks are stored as YAML files in a configurable directory
+[task.fs]
+tasks_dir = "./tasks"
+
+# GitHub repo backend configuration (required for actual repository operations)
+[repo.github]
+fork_owner = "your-github-username"
