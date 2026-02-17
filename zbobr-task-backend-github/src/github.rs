@@ -333,9 +333,11 @@ impl GitHubTaskBackend {
             .collect())
     }
 
-    async fn create_stage(&self, title: &str, description: &str) -> Result<(), ZbobrError> {
+    async fn create_stage(&self, stage: Stage) -> Result<(), ZbobrError> {
         let (owner, repo) = self.parse_repo()?;
         let url = format!("/repos/{owner}/{repo}/milestones");
+        let title = stage.milestone_name();
+        let description = stage_description(stage);
         let body = serde_json::json!({
             "title": title,
             "description": description,
@@ -390,7 +392,7 @@ impl GitHubTaskBackend {
                 tracing::info!("Stage '{title}' already exists");
             } else {
                 tracing::info!("Creating stage '{title}'");
-                self.create_stage(title, stage_description(*stage)).await?;
+                self.create_stage(*stage).await?;
             }
         }
 
@@ -782,8 +784,8 @@ impl TaskBackend for GitHubTaskBackend {
         self.list_stages().await
     }
 
-    async fn create_stage(&self, title: &str, description: &str) -> Result<(), ZbobrError> {
-        self.create_stage(title, description).await
+    async fn create_stage(&self, stage: Stage) -> Result<(), ZbobrError> {
+        self.create_stage(stage).await
     }
 
     async fn delete_stage(&self, number: u64) -> Result<(), ZbobrError> {

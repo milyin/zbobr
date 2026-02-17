@@ -224,7 +224,7 @@ pub trait TaskBackend: Send + Sync {
     async fn list_stages(&self) -> Result<Vec<(u64, String)>, ZbobrError>;
 
     /// Create a stage.
-    async fn create_stage(&self, title: &str, description: &str) -> Result<(), ZbobrError>;
+    async fn create_stage(&self, stage: Stage) -> Result<(), ZbobrError>;
 
     /// Delete a stage by its number.
     async fn delete_stage(&self, number: u64) -> Result<(), ZbobrError>;

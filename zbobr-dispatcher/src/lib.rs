@@ -150,8 +150,8 @@ impl Zbobr {
         self.task_backend.list_stages().await
     }
 
-    pub async fn create_stage(&self, title: &str, description: &str) -> Result<(), ZbobrError> {
-        self.task_backend.create_stage(title, description).await
+    pub async fn create_stage(&self, stage: Stage) -> Result<(), ZbobrError> {
+        self.task_backend.create_stage(stage).await
     }
 
     pub async fn delete_stage(&self, number: u64) -> Result<(), ZbobrError> {

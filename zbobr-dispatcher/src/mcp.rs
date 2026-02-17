@@ -1474,7 +1474,7 @@ mod tests {
         async fn get_task_comments(&self, _id: u64) -> Result<Vec<String>, crate::ZbobrError> { unimplemented!() }
         async fn post_task_comment(&self, _id: u64, _body: &str, _role: &str, _hostname: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn list_stages(&self) -> Result<Vec<(u64, String)>, crate::ZbobrError> { unimplemented!() }
-        async fn create_stage(&self, _title: &str, _desc: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
+        async fn create_stage(&self, _stage: crate::Stage) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn delete_stage(&self, _number: u64) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn setup(&self, _force: bool) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn validate_connectivity(&self) -> Result<(), crate::ZbobrError> { unimplemented!() }
