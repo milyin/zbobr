@@ -780,18 +780,6 @@ impl TaskBackend for GitHubTaskBackend {
         Ok(())
     }
 
-    async fn list_stages(&self) -> Result<Vec<(u64, String)>, ZbobrError> {
-        self.list_stages().await
-    }
-
-    async fn create_stage(&self, stage: Stage) -> Result<(), ZbobrError> {
-        self.create_stage(stage).await
-    }
-
-    async fn delete_stage(&self, number: u64) -> Result<(), ZbobrError> {
-        self.delete_stage(number).await
-    }
-
     async fn setup(&self, force: bool) -> Result<(), ZbobrError> {
         self.setup(force).await
     }

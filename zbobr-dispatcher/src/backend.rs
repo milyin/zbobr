@@ -218,17 +218,6 @@ pub trait TaskBackend: Send + Sync {
         hostname: &str,
     ) -> Result<(), ZbobrError>;
 
-    // -- Stage administration --
-
-    /// List all stages.
-    async fn list_stages(&self) -> Result<Vec<(u64, String)>, ZbobrError>;
-
-    /// Create a stage.
-    async fn create_stage(&self, stage: Stage) -> Result<(), ZbobrError>;
-
-    /// Delete a stage by its number.
-    async fn delete_stage(&self, number: u64) -> Result<(), ZbobrError>;
-
     // -- Lifecycle --
 
     /// Initialize storage with required stages, labels, etc.

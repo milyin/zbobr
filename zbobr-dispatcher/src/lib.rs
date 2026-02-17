@@ -146,18 +146,6 @@ impl Zbobr {
         self.task_backend.setup(force).await
     }
 
-    pub async fn list_stages(&self) -> Result<Vec<(u64, String)>, ZbobrError> {
-        self.task_backend.list_stages().await
-    }
-
-    pub async fn create_stage(&self, stage: Stage) -> Result<(), ZbobrError> {
-        self.task_backend.create_stage(stage).await
-    }
-
-    pub async fn delete_stage(&self, number: u64) -> Result<(), ZbobrError> {
-        self.task_backend.delete_stage(number).await
-    }
-
     // -- Delegate to RepoBackend --
 
     pub async fn clone_and_setup(
