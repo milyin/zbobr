@@ -5,19 +5,6 @@ use async_trait::async_trait;
 
 use crate::{Model, Parameter, Stage, Task, Tool, ZbobrError};
 
-// Replace characters that are unsafe or invalid in filenames with '_'.
-// Allows ASCII alphanumerics, '-', '_', and '.'.
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
 
 /// Configure git user settings for a repository.
 /// Sets user.name and user.email at the repository level.
@@ -76,85 +63,9 @@ pub async fn create_placeholder_commit(
     work_dir: &std::path::Path,
     branch_name: &str,
 ) -> Result<(), ZbobrError> {
-    let zbobr_dir = work_dir.join(".zbobr");
-    let sanitized_branch = sanitize_filename(branch_name);
-    let placeholder_path = zbobr_dir.join(&sanitized_branch);
-
-    // Create .zbobr directory
-    tokio::fs::create_dir_all(&zbobr_dir)
+    zbobr_utility::create_placeholder_commit(work_dir, branch_name)
         .await
-        .map_err(|e| ZbobrError::Other(format!("Failed to create .zbobr directory: {}", e)))?;
-
-    // Create placeholder file. On error, emit extended diagnostics to help
-    // debug missing directories, permission issues, or odd filesystem states.
-    match tokio::fs::File::create(&placeholder_path).await {
-        Ok(_) => {}
-        Err(e) => {
-            let kind = e.kind();
-            let raw = e.raw_os_error();
-
-            // Check whether .zbobr exists and whether work_dir looks writable
-            let zbobr_exists = tokio::fs::metadata(&zbobr_dir).await.is_ok();
-            let work_dir_meta = tokio::fs::metadata(work_dir).await;
-            let work_dir_readonly = work_dir_meta
-                .as_ref()
-                .map(|m| m.permissions().readonly())
-                .unwrap_or(false);
-
-            tracing::error!(
-                error=%e,
-                kind=?kind,
-                raw_os_error=?raw,
-                placeholder_path=%placeholder_path.display(),
-                work_dir=%work_dir.display(),
-                zbobr_exists=%zbobr_exists,
-                work_dir_readonly=%work_dir_readonly,
-                "Failed to create placeholder file with extended diagnostics"
-            );
-
-            return Err(ZbobrError::Other(format!(
-                "Failed to create placeholder file: {} — attempted path: {} — work_dir: {} — .zbobr exists: {} — work_dir_readonly: {} — kind: {:?} — raw_os_error: {:?}",
-                e,
-                placeholder_path.display(),
-                work_dir.display(),
-                zbobr_exists,
-                work_dir_readonly,
-                kind,
-                raw
-            )));
-        }
-    }
-
-    // Stage the file
-    let add_status = tokio::process::Command::new("git")
-        .args(["add", &format!(".zbobr/{}", sanitized_branch)])
-        .current_dir(work_dir)
-        .status()
-        .await
-        .map_err(|e| ZbobrError::Other(format!("Failed to run git add: {}", e)))?;
-
-    if !add_status.success() {
-        return Err(ZbobrError::Other(
-            "git add for placeholder failed".to_string(),
-        ));
-    }
-
-    // Commit the file
-    let commit_msg = format!("chore: add branch placeholder {}", branch_name);
-    let commit_status = tokio::process::Command::new("git")
-        .args(["commit", "-m", &commit_msg])
-        .current_dir(work_dir)
-        .status()
-        .await
-        .map_err(|e| ZbobrError::Other(format!("Failed to run git commit: {}", e)))?;
-
-    if !commit_status.success() {
-        return Err(ZbobrError::Other(
-            "git commit for placeholder failed".to_string(),
-        ));
-    }
-
-    Ok(())
+        .map_err(|e| ZbobrError::Other(e.to_string()))
 }
 
 /// TaskBackend: stores and manages tasks, their metadata, comments, and lifecycle.

@@ -1,0 +1,14 @@
+[package]
+name = "zbobr-utility"
+version = "0.1.0"
+edition = "2024"
+description = "Small utilities shared across zbobr crates"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true }
+
+[lib]
+name = "zbobr_utility"
+path = "src/lib.rs"

@@ -1,5 +1,5 @@
 [workspace]
-members = ["zbobr-dispatcher", "zbobr-task-backend-github", "zbobr-task-backend-fs", "zbobr-repo-backend-github", "zbobr-repo-backend-fs", "zbobr-config", "zbobr"]
+members = ["zbobr-dispatcher", "zbobr-task-backend-github", "zbobr-task-backend-fs", "zbobr-repo-backend-github", "zbobr-repo-backend-fs", "zbobr-config", "zbobr-utility", "zbobr"]
 default-members = ["zbobr"]
 resolver = "2"
 
@@ -13,6 +13,7 @@ zbobr-task-backend-fs = { path = "zbobr-task-backend-fs" }
 zbobr-repo-backend-github = { path = "zbobr-repo-backend-github" }
 zbobr-repo-backend-fs = { path = "zbobr-repo-backend-fs" }
 zbobr-config = { path = "zbobr-config" }
+zbobr-utility = { path = "zbobr-utility" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
