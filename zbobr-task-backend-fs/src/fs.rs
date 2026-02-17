@@ -54,7 +54,7 @@ impl TaskFile {
 
         let parameters: Result<HashMap<Parameter, String>, String> = self
             .parameters
-            .into_iter()
+            .iter()
             .map(|(k, v)| {
                 let param = match k.as_str() {
                     "destination_repository" => Ok(Parameter::DestinationRepository),
@@ -63,23 +63,23 @@ impl TaskFile {
                     "pr_url" => Ok(Parameter::PrUrl),
                     _ => Err(format!("Unknown parameter: {}", k)),
                 }?;
-                Ok((param, v))
+                Ok((param, v.clone()))
             })
             .collect();
         let parameters = parameters.map_err(ZbobrError::Other)?;
 
         Ok(Task {
             id: self.id,
-            title: self.title,
-            description: self.description,
-            plan: self.plan,
+            title: self.title.clone(),
+            description: self.description.clone(),
+            plan: self.plan.clone(),
             discussion: vec![], // Will be loaded separately
             stage,
             tool,
             model,
             parameters,
             done: self.done,
-            checklist: self.checklist,
+            checklist: self.checklist.clone(),
             signal,
             etag: None,
         })

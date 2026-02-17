@@ -29,16 +29,16 @@ Or pass as CLI argument when supported by the zbobr coordinator.
 
 ## File Structure
 
-
 The tasks directory contains:
+
 - `{id}.yaml` - Task data files
 - `{id}.comments.yaml` - Comments for each task
 - `next_id.txt` - Counter for generating new task IDs
 
 ### Task YAML Format
 
-
 Each task file contains:
+
 - `id`: Task ID (u64)
 - `title`: Task title
 - `description`: Detailed description
@@ -69,15 +69,15 @@ let backend = FilesystemTaskBackend::new(Some(&toml_config), None)?;
 
 ## Differences from GitHub Backend
 
-
 Unlike the GitHub backend which uses:
+
 - Issues for tasks
 - Milestones for stages
 - Labels for signals/tools/models
-
 - Issue comments for discussion
 
 The filesystem backend:
+
 - Uses plain YAML files for all task data
 - Stores everything locally
 - Has no network dependencies
