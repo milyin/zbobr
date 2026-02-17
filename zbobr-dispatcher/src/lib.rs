@@ -158,19 +158,6 @@ impl Zbobr {
         self.task_backend.delete_stage(number).await
     }
 
-    pub async fn list_labels(&self) -> Result<Vec<String>, ZbobrError> {
-        self.task_backend.list_labels().await
-    }
-
-    pub async fn create_label(
-        &self,
-        name: &str,
-        color: &str,
-        description: &str,
-    ) -> Result<(), ZbobrError> {
-        self.task_backend.create_label(name, color, description).await
-    }
-
     // -- Delegate to RepoBackend --
 
     pub async fn clone_and_setup(

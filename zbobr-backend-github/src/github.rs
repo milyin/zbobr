@@ -252,6 +252,38 @@ impl GitHubTaskBackend {
         Ok(())
     }
 
+    /// List all labels in the repository.
+    async fn list_labels(&self) -> Result<Vec<String>, ZbobrError> {
+        let (owner, repo) = self.parse_repo()?;
+        let labels: Vec<octocrab::models::Label> = self.retry("list labels", || async {
+            self.octocrab.issues(owner, repo)
+                .list_labels_for_repo()
+                .per_page(100)
+                .send()
+                .await
+        })
+        .await?
+        .items;
+        Ok(labels.into_iter().map(|l| l.name).collect())
+    }
+
+    /// Create a label in the repository.
+    async fn create_label(
+        &self,
+        name: &str,
+        color: &str,
+        description: &str,
+    ) -> Result<(), ZbobrError> {
+        let (owner, repo) = self.parse_repo()?;
+        self.retry("create label", || async {
+            self.octocrab.issues(owner, repo)
+                .create_label(name, color, description)
+                .await
+        })
+        .await?;
+        Ok(())
+    }
+
     /// Update a label's color and description.
     async fn update_label(
         &self,
@@ -702,36 +734,6 @@ impl TaskBackend for GitHubTaskBackend {
         let url = format!("/repos/{owner}/{repo}/milestones/{number}");
         let _response = self.retry("delete milestone", || {
             self.octocrab._delete(url.clone(), None::<&()>)
-        })
-        .await?;
-        Ok(())
-    }
-
-    async fn list_labels(&self) -> Result<Vec<String>, ZbobrError> {
-        let (owner, repo) = self.parse_repo()?;
-        let labels: Vec<octocrab::models::Label> = self.retry("list labels", || async {
-            self.octocrab.issues(owner, repo)
-                .list_labels_for_repo()
-                .per_page(100)
-                .send()
-                .await
-        })
-        .await?
-        .items;
-        Ok(labels.into_iter().map(|l| l.name).collect())
-    }
-
-    async fn create_label(
-        &self,
-        name: &str,
-        color: &str,
-        description: &str,
-    ) -> Result<(), ZbobrError> {
-        let (owner, repo) = self.parse_repo()?;
-        self.retry("create label", || async {
-            self.octocrab.issues(owner, repo)
-                .create_label(name, color, description)
-                .await
         })
         .await?;
         Ok(())

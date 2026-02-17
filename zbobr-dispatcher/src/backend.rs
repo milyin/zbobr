@@ -218,7 +218,7 @@ pub trait TaskBackend: Send + Sync {
         hostname: &str,
     ) -> Result<(), ZbobrError>;
 
-    // -- Stage/label administration --
+    // -- Stage administration --
 
     /// List all stages.
     async fn list_stages(&self) -> Result<Vec<(u64, String)>, ZbobrError>;
@@ -228,17 +228,6 @@ pub trait TaskBackend: Send + Sync {
 
     /// Delete a stage by its number.
     async fn delete_stage(&self, number: u64) -> Result<(), ZbobrError>;
-
-    /// List all labels.
-    async fn list_labels(&self) -> Result<Vec<String>, ZbobrError>;
-
-    /// Create a label.
-    async fn create_label(
-        &self,
-        name: &str,
-        color: &str,
-        description: &str,
-    ) -> Result<(), ZbobrError>;
 
     // -- Lifecycle --
 

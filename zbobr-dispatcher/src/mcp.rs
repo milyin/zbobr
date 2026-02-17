@@ -1476,8 +1476,6 @@ mod tests {
         async fn list_stages(&self) -> Result<Vec<(u64, String)>, crate::ZbobrError> { unimplemented!() }
         async fn create_stage(&self, _title: &str, _desc: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn delete_stage(&self, _number: u64) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn list_labels(&self) -> Result<Vec<String>, crate::ZbobrError> { unimplemented!() }
-        async fn create_label(&self, _name: &str, _color: &str, _desc: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn setup(&self, _force: bool) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn validate_connectivity(&self) -> Result<(), crate::ZbobrError> { unimplemented!() }
         fn debug_state(&self) -> String { "StubTaskBackend".to_string() }
