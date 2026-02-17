@@ -246,7 +246,7 @@ pub trait RepoBackend: Send + Sync {
         &self,
         target_repo: &str,
         branch: &str,
-        task_id: u64,
+        workspace_path: &std::path::Path,
     ) -> Result<PathBuf, ZbobrError>;
 
     /// Clone a repo and checkout specific branch for read-only investigation (no fork).
@@ -254,7 +254,7 @@ pub trait RepoBackend: Send + Sync {
         &self,
         target_repo: &str,
         branch: &str,
-        task_id: u64,
+        workspace_path: &std::path::Path,
     ) -> Result<PathBuf, ZbobrError>;
 
     // -- Fork management --
@@ -277,10 +277,11 @@ pub trait RepoBackend: Send + Sync {
 
     /// Push the current branch to the fork remote and create a PR.
     /// `pr_title` and `pr_body` are provided by the caller (decoupled from task storage).
+    /// `workspace_path` is the directory containing the cloned repository.
     async fn push_and_create_pr(
         &self,
         target_repo: &str,
-        task_id: u64,
+        workspace_path: &std::path::Path,
         pr_title: &str,
         pr_body: &str,
     ) -> Result<String, ZbobrError>;

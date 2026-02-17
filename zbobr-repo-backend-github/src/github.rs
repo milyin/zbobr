@@ -1,9 +1,9 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use async_trait::async_trait;
 
 use zbobr_dispatcher::backend::RepoBackend;
-use zbobr_dispatcher::{ZbobrDispatcherConfig, ZbobrError};
+use zbobr_dispatcher::ZbobrError;
 
 use crate::config::ZbobrRepoBackendGithubConfig;
 
@@ -74,14 +74,12 @@ struct RepoResponse {
 // ============================================================================
 
 pub struct GitHubRepoBackend {
-    config: Arc<ZbobrDispatcherConfig>,
     backend_config: ZbobrRepoBackendGithubConfig,
     octocrab: octocrab::Octocrab,
 }
 
 impl GitHubRepoBackend {
     pub fn new(
-        config: Arc<ZbobrDispatcherConfig>,
         toml: Option<&crate::config::ZbobrRepoBackendGithubToml>,
         fork_owner_override: Option<&str>,
     ) -> Result<Self, ZbobrError> {
@@ -91,7 +89,7 @@ impl GitHubRepoBackend {
             .personal_token(backend_config.github_token.clone())
             .build()
             .map_err(|e| ZbobrError::GitHub(format!("Failed to build octocrab client: {e}")))?;
-        Ok(Self { config, backend_config, octocrab })
+        Ok(Self { backend_config, octocrab })
     }
 
     async fn ensure_fork(&self, target_repo: &str) -> Result<String, ZbobrError> {
@@ -162,17 +160,16 @@ impl RepoBackend for GitHubRepoBackend {
         &self,
         target_repo: &str,
         branch: &str,
-        task_id: u64,
+        workspace_path: &std::path::Path,
     ) -> Result<PathBuf, ZbobrError> {
         let repo_name = target_repo
             .split('/')
             .nth(1)
             .ok_or_else(|| ZbobrError::Config(format!("Invalid repo format: {target_repo}")))?;
 
-        let task_dir = self.config.workspace.join(format!("task#{task_id}"));
-        let work_dir = task_dir.join(repo_name);
+        let work_dir = workspace_path.join(repo_name);
 
-        tokio::fs::create_dir_all(&task_dir).await?;
+        tokio::fs::create_dir_all(workspace_path).await?;
 
         // Clone if not already present
         if !work_dir.exists() {
@@ -265,21 +262,20 @@ impl RepoBackend for GitHubRepoBackend {
         &self,
         target_repo: &str,
         branch: &str,
-        task_id: u64,
+        workspace_path: &std::path::Path,
     ) -> Result<PathBuf, ZbobrError> {
         let repo_name = target_repo
             .split('/')
             .nth(1)
             .ok_or_else(|| ZbobrError::Config(format!("Invalid repo format: {target_repo}")))?;
 
-        let task_dir = self.config.workspace.join(format!("task#{task_id}"));
-        let work_dir = task_dir.join(repo_name);
+        let work_dir = workspace_path.join(repo_name);
 
-        tokio::fs::create_dir_all(&task_dir).await?;
+        tokio::fs::create_dir_all(workspace_path).await?;
 
         if !work_dir.exists() {
             tracing::info!(
-                "Cloning {target_repo} (read-only) into {}",
+                "Cloning {target_repo} (read-only) into {},",
                 work_dir.display()
             );
             let status = tokio::process::Command::new("gh")
@@ -347,7 +343,7 @@ impl RepoBackend for GitHubRepoBackend {
     async fn push_and_create_pr(
         &self,
         target_repo: &str,
-        task_id: u64,
+        workspace_path: &std::path::Path,
         pr_title: &str,
         pr_body: &str,
     ) -> Result<String, ZbobrError> {
@@ -356,11 +352,7 @@ impl RepoBackend for GitHubRepoBackend {
             .nth(1)
             .ok_or_else(|| ZbobrError::Config(format!("Invalid repo format: {target_repo}")))?;
 
-        let work_dir = self
-            .config
-            .workspace
-            .join(format!("task#{task_id}"))
-            .join(repo_name);
+        let work_dir = workspace_path.join(repo_name);
 
         if !work_dir.exists() {
             return Err(ZbobrError::Other(format!(

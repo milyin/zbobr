@@ -415,7 +415,6 @@ async fn main() -> anyhow::Result<()> {
     let cli = parse_cli();
     let root_toml = load_root_toml(&cli)?;
     let config = load_config(&cli, &root_toml)?;
-    let config_arc = Arc::new(config.clone());
     let task_backend_github_toml = root_toml
         .as_ref()
         .and_then(|r| r.task.as_ref())
@@ -433,7 +432,6 @@ async fn main() -> anyhow::Result<()> {
     );
     let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = Arc::new(
         GitHubRepoBackend::new(
-            config_arc,
             repo_backend_github_toml,
             cli.global.fork_owner.as_deref(),
         )

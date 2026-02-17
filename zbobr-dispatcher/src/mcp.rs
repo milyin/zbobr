@@ -1482,11 +1482,11 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::backend::RepoBackend for StubRepoBackend {
-        async fn clone_and_setup(&self, _repo: &str, _branch: &str, _task_id: u64) -> Result<std::path::PathBuf, crate::ZbobrError> { unimplemented!() }
-        async fn clone_readonly(&self, _repo: &str, _branch: &str, _task_id: u64) -> Result<std::path::PathBuf, crate::ZbobrError> { unimplemented!() }
+        async fn clone_and_setup(&self, _repo: &str, _branch: &str, _workspace_path: &std::path::Path) -> Result<std::path::PathBuf, crate::ZbobrError> { unimplemented!() }
+        async fn clone_readonly(&self, _repo: &str, _branch: &str, _workspace_path: &std::path::Path) -> Result<std::path::PathBuf, crate::ZbobrError> { unimplemented!() }
         async fn sync_fork(&self, _repo: &str, _branch: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn setup_fork_remote_and_push(&self, _work_dir: &std::path::Path, _target_repo: &str, _work_branch: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn push_and_create_pr(&self, _repo: &str, _task_id: u64, _pr_title: &str, _pr_body: &str) -> Result<String, crate::ZbobrError> { unimplemented!() }
+        async fn push_and_create_pr(&self, _repo: &str, _workspace_path: &std::path::Path, _pr_title: &str, _pr_body: &str) -> Result<String, crate::ZbobrError> { unimplemented!() }
         async fn create_pr_in_fork(&self, _repo_name: &str, _work_branch: &str, _dest_branch: &str, _pr_title: &str, _pr_body: &str) -> Result<String, crate::ZbobrError> { unimplemented!() }
         async fn parse_pr_to_repo_branch(&self, _pr_ref: &str) -> Result<(String, String), crate::ZbobrError> { unimplemented!() }
         async fn validate_connectivity(&self) -> Result<(), crate::ZbobrError> { unimplemented!() }
