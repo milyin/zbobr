@@ -259,13 +259,6 @@ impl Tool {
         &[Tool::Copilot, Tool::Claude]
     }
 
-    /// Returns the appropriate executor for this tool.
-    pub fn executor(&self) -> Box<dyn crate::tool_executor::ToolExecutor> {
-        match self {
-            Tool::Copilot => Box::new(crate::tool_executor::CopilotExecutor),
-            Tool::Claude => Box::new(crate::tool_executor::ClaudeExecutor),
-        }
-    }
 }
 
 impl std::fmt::Display for Tool {

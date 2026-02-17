@@ -6,9 +6,11 @@ use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use zbobr_config::ZbobrConfigToml;
 use zbobr_dispatcher::{
-    Stage, Zbobr, ZbobrDispatcherConfig,
+    Stage, ToolExecutor, Zbobr, ZbobrDispatcherConfig,
     task::{Model, Role, Tool},
 };
+use zbobr_executor_claude::ClaudeExecutor;
+use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_repo_backend_github::GitHubRepoBackend;
 use zbobr_task_backend_github::GitHubTaskBackend;
 
@@ -630,7 +632,10 @@ async fn run_role_session(
     let cli_tool = zbobr.config().cli_tool;
     let mcp_url = format!("http://127.0.0.1:{assigned_port}/{role}/{task_id}");
 
-    let executor = cli_tool.executor();
+    let executor: Box<dyn ToolExecutor> = match cli_tool {
+        Tool::Copilot => Box::new(CopilotExecutor),
+        Tool::Claude => Box::new(ClaudeExecutor),
+    };
     let agent_token = &zbobr.config().agent_github_token;
     let copilot_token = &zbobr.config().copilot_github_token;
     let execution_result = tokio::select! {

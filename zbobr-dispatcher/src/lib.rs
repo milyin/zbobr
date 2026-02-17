@@ -14,7 +14,7 @@ pub use mcp::{
     reviewer_instructions, worker_instructions,
 };
 pub use task::{ChecklistItem, Model, Parameter, Signal, Stage, Task, TaskSession, Tool};
-pub use tool_executor::{ClaudeExecutor, CopilotExecutor, ToolExecutor};
+pub use tool_executor::ToolExecutor;
 
 use crate::backend::{RepoBackend, TaskBackend};
 

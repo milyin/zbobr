@@ -13,6 +13,8 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 zbobr-dispatcher = { workspace = true }
+zbobr-executor-copilot = { workspace = true }
+zbobr-executor-claude = { workspace = true }
 zbobr-task-backend-github = { workspace = true }
 zbobr-task-backend-fs = { workspace = true }
 zbobr-repo-backend-github = { workspace = true }
