@@ -430,6 +430,10 @@ async fn main() -> anyhow::Result<()> {
         .as_ref()
         .and_then(|r| r.repo.as_ref())
         .and_then(|r| r.github.as_ref());
+    let _repo_backend_fs_toml = root_toml
+        .as_ref()
+        .and_then(|r| r.repo.as_ref())
+        .and_then(|r| r.fs.as_ref());
 
     let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = match config.backend {
         zbobr_dispatcher::config::BackendType::GitHub => Arc::new(

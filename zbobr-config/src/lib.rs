@@ -2,6 +2,7 @@ use std::path::Path;
 
 use anyhow::Context;
 use zbobr_dispatcher::ZbobrDispatcherToml;
+use zbobr_repo_backend_fs::ZbobrRepoBackendFsToml;
 use zbobr_repo_backend_github::ZbobrRepoBackendGithubToml;
 use zbobr_task_backend_fs::ZbobrTaskBackendFsToml;
 use zbobr_task_backend_github::ZbobrTaskBackendGithubToml;
@@ -21,6 +22,7 @@ pub struct ZbobrTaskBackendToml {
 #[serde(default)]
 pub struct ZbobrRepoBackendToml {
     pub github: Option<ZbobrRepoBackendGithubToml>,
+    pub fs: Option<ZbobrRepoBackendFsToml>,
 }
 
 /// Root TOML configuration for zbobr.

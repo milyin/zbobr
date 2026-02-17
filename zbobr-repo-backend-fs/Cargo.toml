@@ -1,0 +1,12 @@
+[package]
+name = "zbobr-repo-backend-fs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+zbobr-dispatcher = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_yaml = "0.9"
+tracing = { workspace = true }
+async-trait = { workspace = true }
