@@ -490,7 +490,7 @@ impl TaskSession {
         let _guard = lock.lock().await;
 
         self.zbobr
-            .backend
+            .task_backend
             .modify_task(
                 self.task_id,
                 Box::new(move |mut task| {
@@ -693,10 +693,15 @@ impl TaskSession {
             .ok_or_else(|| ZbobrError::Other(format!("Could not determine repo name from path: {}", path)))?
             .to_string();
 
+        // Build PR metadata from task (decoupled from repo backend)
+        let task = self.get_task().await?;
+        let pr_title = format!("Fix #{}: {}", self.task_id, task.title);
+        let pr_body = format!("Resolves #{}\n\nImplementation for: {}", self.task_id, task.title);
+
         // Create PR using the backend (which knows the fork owner)
         let pr_url = self
             .zbobr
-            .create_pr_in_fork(&repo_name, &current_branch, destination_branch, self.task_id)
+            .create_pr_in_fork(&repo_name, &current_branch, destination_branch, &pr_title, &pr_body)
             .await?;
         Ok(pr_url)
     }
@@ -1016,9 +1021,17 @@ impl TaskSession {
             )));
         }
 
+        // Build PR metadata from task (decoupled from repo backend)
+        let task = self.get_task().await?;
+        let pr_title = format!("Fix #{}: {}", self.task_id, task.title);
+        let pr_body = format!(
+            "Resolves #{}\n\nImplementation for: {}",
+            self.task_id, task.title
+        );
+
         let pr_url = self
             .zbobr
-            .create_pr_in_fork(repo_name, work_branch, destination_branch, self.task_id)
+            .create_pr_in_fork(repo_name, work_branch, destination_branch, &pr_title, &pr_body)
             .await?;
 
         // Store the PR URL in the task

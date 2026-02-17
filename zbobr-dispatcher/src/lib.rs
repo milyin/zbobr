@@ -13,24 +13,30 @@ pub use mcp::{planner_instructions, worker_instructions, reviewer_instructions, 
 pub use task::{Model, ChecklistItem, Parameter, Signal, Stage, Task, TaskSession, Tool};
 pub use tool_executor::{ClaudeExecutor, CopilotExecutor, ToolExecutor};
 
-use crate::backend::Backend;
+use crate::backend::{TaskBackend, RepoBackend};
 
 /// Central struct holding configuration and backend.
 #[derive(Clone)]
 pub struct Zbobr {
     config: Arc<ZbobrDispatcherConfig>,
-    pub(crate) backend: Arc<dyn Backend>,
+    pub(crate) task_backend: Arc<dyn TaskBackend>,
+    pub(crate) repo_backend: Arc<dyn RepoBackend>,
     /// Per-task mutexes to serialize concurrent read-modify-write cycles
     /// for the same task within this process.
     task_locks: Arc<std::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 impl Zbobr {
-    /// Create a new Zbobr instance from config and a pre-built backend.
-    pub fn new(config: ZbobrDispatcherConfig, backend: Arc<dyn Backend>) -> Self {
+    /// Create a new Zbobr instance from config and pre-built backends.
+    pub fn new(
+        config: ZbobrDispatcherConfig,
+        task_backend: Arc<dyn TaskBackend>,
+        repo_backend: Arc<dyn RepoBackend>,
+    ) -> Self {
         Self {
             config: Arc::new(config),
-            backend,
+            task_backend,
+            repo_backend,
             task_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
@@ -53,15 +59,17 @@ impl Zbobr {
         TaskSession::new(self.clone(), task_id)
     }
 
-    /// Validate that the backend can reach required resources (fork owner, task repo, etc.).
+    /// Validate that both backends can reach required resources.
     pub async fn validate_connectivity(&self) -> Result<(), ZbobrError> {
-        self.backend.validate_connectivity().await
+        self.task_backend.validate_connectivity().await?;
+        self.repo_backend.validate_connectivity().await?;
+        Ok(())
     }
 
-    // -- Delegate to Backend --
+    // -- Delegate to TaskBackend --
 
     pub async fn get_task(&self, id: u64) -> Result<Task, ZbobrError> {
-        self.backend.get_task(id).await
+        self.task_backend.get_task(id).await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -82,16 +90,16 @@ impl Zbobr {
         if let Some(branch) = destination_branch {
             parameters.insert(Parameter::DestinationBranch, branch);
         }
-        
-        self.backend.create_task(title, description, stage, tool, model, parameters).await
+
+        self.task_backend.create_task(title, description, stage, tool, model, parameters).await
     }
 
     pub async fn close_task(&self, id: u64) -> Result<(), ZbobrError> {
-        self.backend.close_task(id).await
+        self.task_backend.close_task(id).await
     }
 
     pub async fn get_task_comments(&self, id: u64) -> Result<Vec<String>, ZbobrError> {
-        self.backend.get_task_comments(id).await
+        self.task_backend.get_task_comments(id).await
     }
 
     pub async fn post_task_comment(
@@ -101,7 +109,7 @@ impl Zbobr {
         role: &str,
         hostname: &str,
     ) -> Result<(), ZbobrError> {
-        self.backend
+        self.task_backend
             .post_task_comment(id, body, role, hostname)
             .await
     }
@@ -111,13 +119,13 @@ impl Zbobr {
         id: u64,
         stage: Stage,
     ) -> Result<(), ZbobrError> {
-        self.backend
+        self.task_backend
             .modify_task(id, Box::new(move |mut task| { task.stage = stage; task }))
             .await
     }
 
     pub async fn set_task_signal(&self, id: u64, signal: Option<Signal>) -> Result<(), ZbobrError> {
-        self.backend
+        self.task_backend
             .modify_task(id, Box::new(move |mut task| { task.signal = signal; task }))
             .await
     }
@@ -127,35 +135,43 @@ impl Zbobr {
         stage: Stage,
         tool: Option<Tool>,
     ) -> Result<Vec<Task>, ZbobrError> {
-        self.backend.list_tasks_by_stage(stage, tool).await
+        self.task_backend.list_tasks_by_stage(stage, tool).await
     }
 
     pub async fn is_task_closed(&self, id: u64) -> Result<bool, ZbobrError> {
-        self.backend.is_task_closed(id).await
-    }
-
-    pub async fn repo_file_exists(&self, path: &str) -> Result<bool, ZbobrError> {
-        self.backend.repo_file_exists(path).await
-    }
-
-    pub async fn create_repo_file(
-        &self,
-        path: &str,
-        content: &str,
-        commit_message: &str,
-    ) -> Result<(), ZbobrError> {
-        self.backend
-            .create_repo_file(path, content, commit_message)
-            .await
+        self.task_backend.is_task_closed(id).await
     }
 
     pub async fn setup_repository(&self, force: bool) -> Result<(), ZbobrError> {
-        self.backend.setup_repository(force).await
+        self.task_backend.setup(force).await
     }
 
-    pub async fn ensure_task_repo_exists(&self) -> Result<(), ZbobrError> {
-        self.backend.ensure_task_repo_exists().await
+    pub async fn list_stages(&self) -> Result<Vec<(u64, String)>, ZbobrError> {
+        self.task_backend.list_stages().await
     }
+
+    pub async fn create_stage(&self, title: &str, description: &str) -> Result<(), ZbobrError> {
+        self.task_backend.create_stage(title, description).await
+    }
+
+    pub async fn delete_stage(&self, number: u64) -> Result<(), ZbobrError> {
+        self.task_backend.delete_stage(number).await
+    }
+
+    pub async fn list_labels(&self) -> Result<Vec<String>, ZbobrError> {
+        self.task_backend.list_labels().await
+    }
+
+    pub async fn create_label(
+        &self,
+        name: &str,
+        color: &str,
+        description: &str,
+    ) -> Result<(), ZbobrError> {
+        self.task_backend.create_label(name, color, description).await
+    }
+
+    // -- Delegate to RepoBackend --
 
     pub async fn clone_and_setup(
         &self,
@@ -163,7 +179,7 @@ impl Zbobr {
         branch: &str,
         task_id: u64,
     ) -> Result<PathBuf, ZbobrError> {
-        self.backend
+        self.repo_backend
             .clone_and_setup(target_repo, branch, task_id)
             .await
     }
@@ -174,7 +190,7 @@ impl Zbobr {
         branch: &str,
         task_id: u64,
     ) -> Result<PathBuf, ZbobrError> {
-        self.backend
+        self.repo_backend
             .clone_readonly(target_repo, branch, task_id)
             .await
     }
@@ -188,15 +204,19 @@ impl Zbobr {
         &self,
         pr_ref: &str,
     ) -> Result<(String, String), ZbobrError> {
-        self.backend.parse_pr_to_repo_branch(pr_ref).await
+        self.repo_backend.parse_pr_to_repo_branch(pr_ref).await
     }
 
     pub async fn push_and_create_pr(
         &self,
         target_repo: &str,
         task_id: u64,
+        pr_title: &str,
+        pr_body: &str,
     ) -> Result<String, ZbobrError> {
-        self.backend.push_and_create_pr(target_repo, task_id).await
+        self.repo_backend
+            .push_and_create_pr(target_repo, task_id, pr_title, pr_body)
+            .await
     }
 
     pub async fn create_pr_in_fork(
@@ -204,10 +224,11 @@ impl Zbobr {
         repo_name: &str,
         work_branch: &str,
         destination_branch: &str,
-        task_id: u64,
+        pr_title: &str,
+        pr_body: &str,
     ) -> Result<String, ZbobrError> {
-        self.backend
-            .create_pr_in_fork(repo_name, work_branch, destination_branch, task_id)
+        self.repo_backend
+            .create_pr_in_fork(repo_name, work_branch, destination_branch, pr_title, pr_body)
             .await
     }
 
@@ -217,43 +238,24 @@ impl Zbobr {
         target_repo: &str,
         work_branch: &str,
     ) -> Result<(), ZbobrError> {
-        self.backend
+        self.repo_backend
             .setup_fork_remote_and_push(work_dir, target_repo, work_branch)
             .await
     }
 
     /// Ensure the fork is synchronized with the upstream `target_repo` on `branch`.
     pub async fn sync_fork(&self, target_repo: &str, branch: &str) -> Result<(), ZbobrError> {
-        self.backend.sync_fork(target_repo, branch).await
+        self.repo_backend.sync_fork(target_repo, branch).await
     }
 
-    pub async fn list_stages(&self) -> Result<Vec<(u64, String)>, ZbobrError> {
-        self.backend.list_stages().await
-    }
-
-    pub async fn create_stage(&self, title: &str, description: &str) -> Result<(), ZbobrError> {
-        self.backend.create_stage(title, description).await
-    }
-
-    pub async fn delete_stage(&self, number: u64) -> Result<(), ZbobrError> {
-        self.backend.delete_stage(number).await
-    }
-
-    pub async fn list_labels(&self) -> Result<Vec<String>, ZbobrError> {
-        self.backend.list_labels().await
-    }
-
-    pub async fn create_label(
-        &self,
-        name: &str,
-        color: &str,
-        description: &str,
-    ) -> Result<(), ZbobrError> {
-        self.backend.create_label(name, color, description).await
-    }
+    // -- Combined state --
 
     pub fn debug_state(&self) -> String {
-        self.backend.debug_state()
+        format!(
+            "task_backend: {}, repo_backend: {}",
+            self.task_backend.debug_state(),
+            self.repo_backend.debug_state()
+        )
     }
 }
 

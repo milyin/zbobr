@@ -62,12 +62,12 @@ pub async fn configure_git_user(
 
 /// Create a placeholder file in a branch to ensure it has at least one commit.
 /// This is used to prevent GitHub PR API from rejecting branches with no commits.
-/// 
+///
 /// Creates `.zbobr/{branch_name}` file, stages it, and commits it.
 /// Does NOT push — the caller is responsible for pushing if needed.
-/// 
+///
 /// Git user configuration should be set up before calling this function (via configure_git_user).
-/// 
+///
 /// # Arguments
 /// * `work_dir` - The repository working directory
 /// * `branch_name` - The branch name (used for file naming and commit message)
@@ -152,9 +152,16 @@ pub async fn create_placeholder_commit(
     Ok(())
 }
 
+/// TaskBackend: stores and manages tasks, their metadata, comments, and lifecycle.
+///
+/// Implementations:
+/// - GitHub: Tasks as Issues, stages as Milestones, signals/tools/models as Labels
+/// - Directory: Tasks as JSON files, stages as subdirectories
 #[allow(clippy::too_many_arguments)]
 #[async_trait]
-pub trait Backend: Send + Sync {
+pub trait TaskBackend: Send + Sync {
+    // -- Core CRUD --
+
     /// Get a task by ID.
     async fn get_task(&self, id: u64) -> Result<Task, ZbobrError>;
 
@@ -173,6 +180,32 @@ pub trait Backend: Send + Sync {
     /// Close a task.
     async fn close_task(&self, id: u64) -> Result<(), ZbobrError>;
 
+    /// Check if a task is closed.
+    async fn is_task_closed(&self, id: u64) -> Result<bool, ZbobrError>;
+
+    // -- Atomic modification --
+
+    /// Read-modify-write the task atomically.
+    ///
+    /// Takes `Task` by value and returns the modified version to avoid
+    /// reference lifetime issues with `async_trait`.
+    async fn modify_task(
+        &self,
+        id: u64,
+        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
+    ) -> Result<(), ZbobrError>;
+
+    // -- Queries --
+
+    /// List open tasks with a given stage, optionally filtered by tool.
+    async fn list_tasks_by_stage(
+        &self,
+        stage: Stage,
+        tool: Option<Tool>,
+    ) -> Result<Vec<Task>, ZbobrError>;
+
+    // -- Discussion --
+
     /// Get all comments on a task as formatted discussion.
     async fn get_task_comments(&self, id: u64) -> Result<Vec<String>, ZbobrError>;
 
@@ -185,39 +218,49 @@ pub trait Backend: Send + Sync {
         hostname: &str,
     ) -> Result<(), ZbobrError>;
 
-    /// Read-modify-write the task atomically.
-    ///
-    /// Takes `Task` by value and returns the modified version to avoid
-    /// reference lifetime issues with `async_trait`.
-    async fn modify_task(
+    // -- Stage/label administration --
+
+    /// List all stages.
+    async fn list_stages(&self) -> Result<Vec<(u64, String)>, ZbobrError>;
+
+    /// Create a stage.
+    async fn create_stage(&self, title: &str, description: &str) -> Result<(), ZbobrError>;
+
+    /// Delete a stage by its number.
+    async fn delete_stage(&self, number: u64) -> Result<(), ZbobrError>;
+
+    /// List all labels.
+    async fn list_labels(&self) -> Result<Vec<String>, ZbobrError>;
+
+    /// Create a label.
+    async fn create_label(
         &self,
-        id: u64,
-        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
+        name: &str,
+        color: &str,
+        description: &str,
     ) -> Result<(), ZbobrError>;
 
-    /// List open tasks with a given stage, optionally filtered by tool.
-    async fn list_tasks_by_stage(
-        &self,
-        stage: Stage,
-        tool: Option<Tool>,
-    ) -> Result<Vec<Task>, ZbobrError>;
+    // -- Lifecycle --
 
-    /// Check if a task is closed.
-    async fn is_task_closed(&self, id: u64) -> Result<bool, ZbobrError>;
+    /// Initialize storage with required stages, labels, etc.
+    /// If force is true, overwrites existing labels.
+    async fn setup(&self, force: bool) -> Result<(), ZbobrError>;
 
-    /// Check if a file exists in the task repo.
-    async fn repo_file_exists(&self, path: &str) -> Result<bool, ZbobrError>;
+    /// Validate connectivity to the task storage.
+    async fn validate_connectivity(&self) -> Result<(), ZbobrError>;
 
-    /// Create or update a file in the task repo.
-    async fn create_repo_file(
-        &self,
-        path: &str,
-        content: &str,
-        commit_message: &str,
-    ) -> Result<(), ZbobrError>;
+    /// Return a debug string of the backend state.
+    fn debug_state(&self) -> String;
+}
 
-    /// Ensure the task repo exists.
-    async fn ensure_task_repo_exists(&self) -> Result<(), ZbobrError>;
+/// RepoBackend: manages code repositories — cloning, forking, branching, and PRs.
+///
+/// Implementations:
+/// - GitHub: Forks via GitHub API, clones via `gh`, PRs via Pulls API
+/// - Directory: Local git repos, direct push, no fork/PR concept
+#[async_trait]
+pub trait RepoBackend: Send + Sync {
+    // -- Clone/checkout --
 
     /// Clone a repo into the workspace, checkout specific branch, set up fork remote.
     /// Returns the local path.
@@ -236,32 +279,12 @@ pub trait Backend: Send + Sync {
         task_id: u64,
     ) -> Result<PathBuf, ZbobrError>;
 
-    /// Parse PR reference (URL or owner/repo#123) to (repo, branch).
-    async fn parse_pr_to_repo_branch(&self, pr_ref: &str) -> Result<(String, String), ZbobrError>;
-
-    /// Push the current branch to the fork remote and create a PR.
-    async fn push_and_create_pr(
-        &self,
-        target_repo: &str,
-        task_id: u64,
-    ) -> Result<String, ZbobrError>;
+    // -- Fork management --
 
     /// Ensure the fork is synchronized with the upstream `target_repo` on `branch`.
     /// This performs a server-side sync (same as GitHub "Sync fork" button) and is
     /// not a local operation on the cloned copy.
     async fn sync_fork(&self, target_repo: &str, branch: &str) -> Result<(), ZbobrError>;
-
-    /// Create a PR from work_branch to destination_branch in the fork repo.
-    /// `repo_name` is just the repository name (e.g. "myrepo"), not a full "owner/repo" path.
-    /// The backend determines the fork owner internally.
-    /// Returns the PR URL on success, or empty string on stub backend.
-    async fn create_pr_in_fork(
-        &self,
-        repo_name: &str,
-        work_branch: &str,
-        destination_branch: &str,
-        task_id: u64,
-    ) -> Result<String, ZbobrError>;
 
     /// Replace origin remote with the fork URL and push a work branch.
     /// The backend determines the fork owner and constructs the fork URL internally.
@@ -272,33 +295,38 @@ pub trait Backend: Send + Sync {
         work_branch: &str,
     ) -> Result<(), ZbobrError>;
 
-    // -- Setup methods --
+    // -- PR operations --
 
-    /// List all stages (milestones) in the task repo.
-    async fn list_stages(&self) -> Result<Vec<(u64, String)>, ZbobrError>;
-
-    /// Create a stage (milestone) in the task repo.
-    async fn create_stage(&self, title: &str, description: &str) -> Result<(), ZbobrError>;
-
-    /// Delete a stage by its number.
-    async fn delete_stage(&self, number: u64) -> Result<(), ZbobrError>;
-
-    /// List all labels in the task repo.
-    async fn list_labels(&self) -> Result<Vec<String>, ZbobrError>;
-
-    /// Create a label in the task repo.
-    async fn create_label(
+    /// Push the current branch to the fork remote and create a PR.
+    /// `pr_title` and `pr_body` are provided by the caller (decoupled from task storage).
+    async fn push_and_create_pr(
         &self,
-        name: &str,
-        color: &str,
-        description: &str,
-    ) -> Result<(), ZbobrError>;
+        target_repo: &str,
+        task_id: u64,
+        pr_title: &str,
+        pr_body: &str,
+    ) -> Result<String, ZbobrError>;
 
-    /// Initialize the task repository with stages and labels.
-    /// If force is true, overwrites existing labels.
-    async fn setup_repository(&self, force: bool) -> Result<(), ZbobrError>;
+    /// Create a PR from work_branch to destination_branch in the fork repo.
+    /// `repo_name` is just the repository name (e.g. "myrepo"), not a full "owner/repo" path.
+    /// The backend determines the fork owner internally.
+    /// `pr_title` and `pr_body` are provided by the caller (decoupled from task storage).
+    /// Returns the PR URL.
+    async fn create_pr_in_fork(
+        &self,
+        repo_name: &str,
+        work_branch: &str,
+        destination_branch: &str,
+        pr_title: &str,
+        pr_body: &str,
+    ) -> Result<String, ZbobrError>;
 
-    /// Validate that the backend can reach required resources (fork owner, task repo, etc.).
+    /// Parse PR reference (URL or owner/repo#123) to (repo, branch).
+    async fn parse_pr_to_repo_branch(&self, pr_ref: &str) -> Result<(String, String), ZbobrError>;
+
+    // -- Lifecycle --
+
+    /// Validate connectivity to the repo hosting service (fork owner accessible, etc.).
     async fn validate_connectivity(&self) -> Result<(), ZbobrError>;
 
     /// Return a debug string of the backend state.

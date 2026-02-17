@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
-use zbobr_backend_github::GitHubBackend;
+use zbobr_backend_github::{GitHubTaskBackend, GitHubRepoBackend};
 use zbobr_config::ZbobrConfigToml;
 use zbobr_dispatcher::{
     Stage, Zbobr, ZbobrDispatcherConfig,
@@ -419,16 +419,24 @@ async fn main() -> anyhow::Result<()> {
         .as_ref()
         .and_then(|r| r.backend.as_ref())
         .and_then(|b| b.github.as_ref());
-    let backend: Arc<dyn zbobr_dispatcher::backend::Backend> = Arc::new(
-        GitHubBackend::new(
+    let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = Arc::new(
+        GitHubTaskBackend::new(
+            backend_github_toml,
+            cli.global.task_repo.as_deref(),
+            cli.global.fork_owner.as_deref(),
+        )
+        .context("Failed to create GitHub task backend")?,
+    );
+    let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = Arc::new(
+        GitHubRepoBackend::new(
             config_arc,
             backend_github_toml,
             cli.global.task_repo.as_deref(),
             cli.global.fork_owner.as_deref(),
         )
-        .context("Failed to create GitHub backend")?,
+        .context("Failed to create GitHub repo backend")?,
     );
-    let zbobr = Zbobr::new(config, backend);
+    let zbobr = Zbobr::new(config, task_backend, repo_backend);
     zbobr.validate_connectivity().await?;
     let prompts = resolve_prompts(&cli, zbobr.config())?;
 

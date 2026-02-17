@@ -1461,36 +1461,41 @@ mod tests {
     use super::*;
     use crate::task::{Model, Tool};
 
-    struct StubBackend;
+    struct StubTaskBackend;
 
     #[async_trait::async_trait]
-    impl crate::backend::Backend for StubBackend {
+    impl crate::backend::TaskBackend for StubTaskBackend {
         async fn get_task(&self, _id: u64) -> Result<crate::Task, crate::ZbobrError> { unimplemented!() }
         async fn create_task(&self, _title: &str, _description: &str, _stage: crate::Stage, _tool: Option<crate::Tool>, _model: Option<crate::Model>, _parameters: std::collections::HashMap<crate::Parameter, String>) -> Result<u64, crate::ZbobrError> { unimplemented!() }
         async fn close_task(&self, _id: u64) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn get_task_comments(&self, _id: u64) -> Result<Vec<String>, crate::ZbobrError> { unimplemented!() }
-        async fn post_task_comment(&self, _id: u64, _body: &str, _role: &str, _hostname: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
+        async fn is_task_closed(&self, _id: u64) -> Result<bool, crate::ZbobrError> { unimplemented!() }
         async fn modify_task(&self, _id: u64, _mutate: Box<dyn FnOnce(crate::Task) -> crate::Task + Send>) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn list_tasks_by_stage(&self, _stage: crate::Stage, _tool: Option<crate::Tool>) -> Result<Vec<crate::Task>, crate::ZbobrError> { unimplemented!() }
-        async fn is_task_closed(&self, _id: u64) -> Result<bool, crate::ZbobrError> { unimplemented!() }
-        async fn repo_file_exists(&self, _path: &str) -> Result<bool, crate::ZbobrError> { unimplemented!() }
-        async fn create_repo_file(&self, _path: &str, _content: &str, _msg: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn ensure_task_repo_exists(&self) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn clone_and_setup(&self, _repo: &str, _branch: &str, _task_id: u64) -> Result<std::path::PathBuf, crate::ZbobrError> { unimplemented!() }
-        async fn clone_readonly(&self, _repo: &str, _branch: &str, _task_id: u64) -> Result<std::path::PathBuf, crate::ZbobrError> { unimplemented!() }
-        async fn parse_pr_to_repo_branch(&self, _pr_ref: &str) -> Result<(String, String), crate::ZbobrError> { unimplemented!() }
-        async fn push_and_create_pr(&self, _repo: &str, _task_id: u64) -> Result<String, crate::ZbobrError> { unimplemented!() }
-        async fn sync_fork(&self, _repo: &str, _branch: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn create_pr_in_fork(&self, _repo_name: &str, _work_branch: &str, _dest_branch: &str, _task_id: u64) -> Result<String, crate::ZbobrError> { unimplemented!() }
-        async fn setup_fork_remote_and_push(&self, _work_dir: &std::path::Path, _target_repo: &str, _work_branch: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
+        async fn get_task_comments(&self, _id: u64) -> Result<Vec<String>, crate::ZbobrError> { unimplemented!() }
+        async fn post_task_comment(&self, _id: u64, _body: &str, _role: &str, _hostname: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn list_stages(&self) -> Result<Vec<(u64, String)>, crate::ZbobrError> { unimplemented!() }
         async fn create_stage(&self, _title: &str, _desc: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn delete_stage(&self, _number: u64) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn list_labels(&self) -> Result<Vec<String>, crate::ZbobrError> { unimplemented!() }
         async fn create_label(&self, _name: &str, _color: &str, _desc: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        async fn setup_repository(&self, _force: bool) -> Result<(), crate::ZbobrError> { unimplemented!() }
+        async fn setup(&self, _force: bool) -> Result<(), crate::ZbobrError> { unimplemented!() }
         async fn validate_connectivity(&self) -> Result<(), crate::ZbobrError> { unimplemented!() }
-        fn debug_state(&self) -> String { "StubBackend".to_string() }
+        fn debug_state(&self) -> String { "StubTaskBackend".to_string() }
+    }
+
+    struct StubRepoBackend;
+
+    #[async_trait::async_trait]
+    impl crate::backend::RepoBackend for StubRepoBackend {
+        async fn clone_and_setup(&self, _repo: &str, _branch: &str, _task_id: u64) -> Result<std::path::PathBuf, crate::ZbobrError> { unimplemented!() }
+        async fn clone_readonly(&self, _repo: &str, _branch: &str, _task_id: u64) -> Result<std::path::PathBuf, crate::ZbobrError> { unimplemented!() }
+        async fn sync_fork(&self, _repo: &str, _branch: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
+        async fn setup_fork_remote_and_push(&self, _work_dir: &std::path::Path, _target_repo: &str, _work_branch: &str) -> Result<(), crate::ZbobrError> { unimplemented!() }
+        async fn push_and_create_pr(&self, _repo: &str, _task_id: u64, _pr_title: &str, _pr_body: &str) -> Result<String, crate::ZbobrError> { unimplemented!() }
+        async fn create_pr_in_fork(&self, _repo_name: &str, _work_branch: &str, _dest_branch: &str, _pr_title: &str, _pr_body: &str) -> Result<String, crate::ZbobrError> { unimplemented!() }
+        async fn parse_pr_to_repo_branch(&self, _pr_ref: &str) -> Result<(String, String), crate::ZbobrError> { unimplemented!() }
+        async fn validate_connectivity(&self) -> Result<(), crate::ZbobrError> { unimplemented!() }
+        fn debug_state(&self) -> String { "StubRepoBackend".to_string() }
     }
 
     fn test_config() -> crate::config::ZbobrDispatcherConfig {
@@ -1514,8 +1519,9 @@ mod tests {
 
     fn test_zbobr() -> Zbobr {
         let config = test_config();
-        let backend: std::sync::Arc<dyn crate::backend::Backend> = std::sync::Arc::new(StubBackend);
-        Zbobr::new(config, backend)
+        let task_backend: std::sync::Arc<dyn crate::backend::TaskBackend> = std::sync::Arc::new(StubTaskBackend);
+        let repo_backend: std::sync::Arc<dyn crate::backend::RepoBackend> = std::sync::Arc::new(StubRepoBackend);
+        Zbobr::new(config, task_backend, repo_backend)
     }
 
     #[tokio::test]
