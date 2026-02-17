@@ -64,3 +64,8 @@ fork_owner = "{{FORK_OWNER}}"
 # Priority: GH_TOKEN > GITHUB_TOKEN > this config value.
 # Prefer env vars instead of storing in config.
 # github_token = ""
+
+[repo.fs]
+# Filesystem repo backend: clones from local git repos, stores PRs as YAML files
+# Uncomment this section to use filesystem backend instead of GitHub
+# repos_dir = "./repos"

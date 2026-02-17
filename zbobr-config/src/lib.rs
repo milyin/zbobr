@@ -35,8 +35,14 @@ pub struct ZbobrRepoBackendToml {
 /// [task.github]
 /// task_repo = "owner/repo"
 ///
+/// [task.fs]
+/// tasks_dir = "./tasks"
+///
 /// [repo.github]
 /// fork_owner = "fork-owner"
+///
+/// [repo.fs]
+/// repos_dir = "./repos"
 /// ```
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default)]

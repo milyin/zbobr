@@ -13,6 +13,7 @@ work_branch_prefix = "zbobr"
 [task.fs]
 tasks_dir = "./tasks"
 
-# GitHub repo backend configuration (required for actual repository operations)
-[repo.github]
-fork_owner = "your-github-username"
+# Filesystem repo backend configuration
+# Clones from local git repos, stores PRs as YAML files
+[repo.fs]
+repos_dir = "./repos"
