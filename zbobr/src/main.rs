@@ -26,10 +26,10 @@ struct GlobalArgs {
     #[arg(long)]
     fork_owner: Option<String>,
 
-    /// Path to workspace directory (default: ./workspace)
-    /// Can also be set via ZBOBR_WORKSPACE env var
+    /// Path to workspaces directory (default: ./workspaces); each task gets a separate subdirectory
+    /// Can also be set via ZBOBR_WORKSPACES env var
     #[arg(long)]
-    workspace: Option<PathBuf>,
+    workspaces: Option<PathBuf>,
 
     /// Path to TOML configuration file (default: zbobr.toml in cwd)
     #[arg(long, env = "ZBOBR_CONFIG")]
@@ -307,8 +307,8 @@ fn load_config(cli: &Cli, root_toml: &Option<ZbobrConfigToml>) -> anyhow::Result
     let mut config = ZbobrDispatcherConfig::build(dispatcher_toml)?;
 
     // CLI arg overrides (highest priority)
-    if let Some(ref ws) = cli.global.workspace {
-        config.workspace = ws.clone();
+    if let Some(ref ws) = cli.global.workspaces {
+        config.workspaces = ws.clone();
     }
     if let Some(ref b) = cli.global.backend {
         config.backend = b
@@ -584,8 +584,8 @@ async fn run_role_session(
         );
     }
 
-    // Create workspace dir
-    let task_dir = zbobr.config().workspace.join(format!("task#{task_id}"));
+    // Create task directory within workspaces
+    let task_dir = zbobr.config().workspaces.join(format!("task#{task_id}"));
     tokio::fs::create_dir_all(&task_dir).await?;
 
     // Create a channel to receive the actual port from the MCP server
@@ -768,7 +768,7 @@ async fn run_manager_loop(
     loop {
         // Run cleanup if interval has passed
         if last_cleanup.elapsed().as_secs() >= cleanup_interval_secs {
-            tracing::info!("Running workspace cleanup...");
+            tracing::info!("Running workspaces cleanup...");
             if let Err(e) = zbobr.cleanup_closed_tasks(false).await {
                 tracing::warn!("Cleanup failed: {e}");
             }

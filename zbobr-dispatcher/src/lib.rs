@@ -154,7 +154,7 @@ impl Zbobr {
         branch: &str,
         task_id: u64,
     ) -> Result<PathBuf, ZbobrError> {
-        let workspace_path = self.config.workspace.join(format!("task#{task_id}"));
+        let workspace_path = self.config.workspaces.join(format!("task#{task_id}"));
         self.repo_backend
             .clone_and_setup(target_repo, branch, &workspace_path)
             .await
@@ -166,7 +166,7 @@ impl Zbobr {
         branch: &str,
         task_id: u64,
     ) -> Result<PathBuf, ZbobrError> {
-        let workspace_path = self.config.workspace.join(format!("task#{task_id}"));
+        let workspace_path = self.config.workspaces.join(format!("task#{task_id}"));
         self.repo_backend
             .clone_readonly(target_repo, branch, &workspace_path)
             .await
@@ -191,7 +191,7 @@ impl Zbobr {
         pr_title: &str,
         pr_body: &str,
     ) -> Result<String, ZbobrError> {
-        let workspace_path = self.config.workspace.join(format!("task#{task_id}"));
+        let workspace_path = self.config.workspaces.join(format!("task#{task_id}"));
         self.repo_backend
             .push_and_create_pr(target_repo, &workspace_path, pr_title, pr_body)
             .await

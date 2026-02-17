@@ -2,5 +2,5 @@
 target/
 Cargo.lock
 
-# Issue workspace directories
-workspace/
+# Task workspaces directories
+workspaces/

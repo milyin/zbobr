@@ -723,7 +723,7 @@ impl TaskSession {
         let work_dir = self
             .zbobr
             .config()
-            .workspace
+            .workspaces
             .join(format!("task#{}", self.task_id))
             .join(repo_name);
 

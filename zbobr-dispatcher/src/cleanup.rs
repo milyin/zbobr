@@ -1,25 +1,25 @@
 use crate::{Zbobr, ZbobrError};
 
 impl Zbobr {
-    /// Clean up workspace directories for closed tasks.
+    /// Clean up workspaces directories for closed tasks.
     /// If dry_run is true, only logs what would happen.
     pub async fn cleanup_closed_tasks(&self, dry_run: bool) -> Result<(), ZbobrError> {
-        let workspace = &self.config.workspace;
+        let workspaces = &self.config.workspaces;
 
-        if !workspace.exists() {
+        if !workspaces.exists() {
             tracing::info!(
-                "Workspace directory does not exist: {}",
-                workspace.display()
+                "Workspaces directory does not exist: {}",
+                workspaces.display()
             );
             return Ok(());
         }
 
-        tracing::info!("Scanning workspace: {}", workspace.display());
+        tracing::info!("Scanning workspaces: {}", workspaces.display());
         if dry_run {
             tracing::info!("DRY RUN - no files will be deleted");
         }
 
-        let mut entries = tokio::fs::read_dir(workspace).await?;
+        let mut entries = tokio::fs::read_dir(workspaces).await?;
         while let Some(entry) = entries.next_entry().await? {
             let name = entry.file_name().to_string_lossy().to_string();
             if !name.starts_with("task#") {

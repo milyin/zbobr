@@ -71,8 +71,8 @@ fork_owner = "your-username"
 # Default AI model (e.g. "gpt-5-mini", "claude-sonnet-4.5")
 # default_model = "gpt-5-mini"
 
-# Workspace directory for task work dirs
-# workspace = "./workspace"
+# Workspaces directory; each task gets a separate subdirectory
+# workspaces = "./workspaces"
 
 # CLI tool: "copilot", "claude", or "stub"
 # cli_tool = "copilot"

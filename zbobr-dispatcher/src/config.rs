@@ -50,7 +50,7 @@ pub struct TomlPrompts {
 #[serde(default, deny_unknown_fields)]
 pub struct ZbobrDispatcherToml {
     pub default_model: Option<Model>,
-    pub workspace: Option<PathBuf>,
+    pub workspaces: Option<PathBuf>,
     pub agent_github_token: Option<String>,
     pub copilot_github_token: Option<String>,
     pub cli_tool: Option<Tool>,
@@ -65,8 +65,8 @@ pub struct ZbobrDispatcherToml {
 pub struct ZbobrDispatcherConfig {
     /// Default AI model to use.
     pub default_model: Model,
-    /// Workspace directory for issue work dirs.
-    pub workspace: PathBuf,
+    /// Workspaces directory; each task gets a separate subdirectory.
+    pub workspaces: PathBuf,
     /// GitHub token with read-only access for agent processes (passed as GH_TOKEN to agents).
     pub agent_github_token: String,
     /// GitHub token for Copilot CLI with Copilot's access rights (passed as COPILOT_GITHUB_TOKEN).
@@ -97,7 +97,7 @@ impl Default for ZbobrDispatcherConfig {
     fn default() -> Self {
         Self {
             default_model: Model::default(),
-            workspace: PathBuf::from("./workspace"),
+            workspaces: PathBuf::from("./workspaces"),
             agent_github_token: String::new(),
             copilot_github_token: String::new(),
             backend: BackendType::default(),
@@ -148,9 +148,9 @@ impl ZbobrDispatcherConfig {
             .and_then(|t| t.default_model.clone())
             .unwrap_or(defaults.default_model);
 
-        let workspace = toml
-            .and_then(|t| t.workspace.clone())
-            .unwrap_or(defaults.workspace);
+        let workspaces = toml
+            .and_then(|t| t.workspaces.clone())
+            .unwrap_or(defaults.workspaces);
 
         let backend = defaults.backend;
 
@@ -205,7 +205,7 @@ impl ZbobrDispatcherConfig {
 
         Ok(Self {
             default_model,
-            workspace,
+            workspaces,
             agent_github_token,
             copilot_github_token,
             backend,
@@ -302,7 +302,7 @@ mod tests {
     fn toml_config_parse_full() {
         let toml_str = r#"
     default_model = "gpt-5-mini"
-    workspace = "/tmp/workspace"
+    workspaces = "/tmp/workspaces"
     cli_tool = "claude"
     work_branch_prefix = "my_fix"
 
@@ -346,7 +346,7 @@ mod tests {
         let env = TestEnv::new(&[]);
         let toml = ZbobrDispatcherToml {
             default_model: Some(Model::Claude3Opus),
-            workspace: Some(PathBuf::from("/tmp/toml-ws")),
+            workspaces: Some(PathBuf::from("/tmp/toml-ws")),
             agent_github_token: Some("toml-agent-token".into()),
             copilot_github_token: Some("toml-copilot-token".into()),
             cli_tool: Some(Tool::Claude),
@@ -364,7 +364,7 @@ mod tests {
 
         let config = ZbobrDispatcherConfig::build_with_env(Some(&toml), &env).unwrap();
         assert_eq!(config.default_model, Model::Claude3Opus);
-        assert_eq!(config.workspace, PathBuf::from("/tmp/toml-ws"));
+        assert_eq!(config.workspaces, PathBuf::from("/tmp/toml-ws"));
         assert_eq!(config.backend, BackendType::GitHub);
         assert_eq!(config.cli_tool, Tool::Claude);
         assert_eq!(config.work_branch_prefix, "toml_fix");
@@ -386,7 +386,7 @@ mod tests {
         assert_eq!(config.backend, BackendType::GitHub);
         assert_eq!(config.cli_tool, Tool::Copilot);
         assert_eq!(config.work_branch_prefix, "zbobr_fix");
-        assert_eq!(config.workspace, PathBuf::from("./workspace"));
+        assert_eq!(config.workspaces, PathBuf::from("./workspaces"));
     }
 
     #[test]
