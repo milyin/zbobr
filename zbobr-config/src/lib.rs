@@ -1,15 +1,24 @@
 use std::path::Path;
 
 use anyhow::Context;
-use zbobr_backend_github::ZbobrBackendGithubToml;
+use zbobr_task_backend_github::ZbobrTaskBackendGithubToml;
+use zbobr_repo_backend_github::ZbobrRepoBackendGithubToml;
 use zbobr_dispatcher::ZbobrDispatcherToml;
 
-/// Backend configuration section.
+/// Task backend configuration section.
 /// Each backend type has its own optional subsection.
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default)]
-pub struct ZbobrBackendToml {
-    pub github: Option<ZbobrBackendGithubToml>,
+pub struct ZbobrTaskBackendToml {
+    pub github: Option<ZbobrTaskBackendGithubToml>,
+}
+
+/// Repo backend configuration section.
+/// Each backend type has its own optional subsection.
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[serde(default)]
+pub struct ZbobrRepoBackendToml {
+    pub github: Option<ZbobrRepoBackendGithubToml>,
 }
 
 /// Root TOML configuration for zbobr.
@@ -19,14 +28,18 @@ pub struct ZbobrBackendToml {
 /// [dispatcher]
 /// default_model = "gpt-5-mini"
 ///
-/// [backend.github]
+/// [task.github]
 /// task_repo = "owner/repo"
+///
+/// [repo.github]
+/// fork_owner = "fork-owner"
 /// ```
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default)]
 pub struct ZbobrConfigToml {
     pub dispatcher: Option<ZbobrDispatcherToml>,
-    pub backend: Option<ZbobrBackendToml>,
+    pub task: Option<ZbobrTaskBackendToml>,
+    pub repo: Option<ZbobrRepoBackendToml>,
 }
 
 impl ZbobrConfigToml {

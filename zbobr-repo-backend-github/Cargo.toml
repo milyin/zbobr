@@ -1,5 +1,5 @@
 [package]
-name = "zbobr-backend-github"
+name = "zbobr-repo-backend-github"
 version = "0.1.0"
 edition = "2024"
 

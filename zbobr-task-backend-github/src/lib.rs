@@ -1,6 +1,5 @@
 pub mod config;
 mod github;
 mod separator;
-pub use config::ZbobrBackendGithubToml;
+pub use config::ZbobrTaskBackendGithubToml;
 pub use github::GitHubTaskBackend;
-pub use github::GitHubRepoBackend;

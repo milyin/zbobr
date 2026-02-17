@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
-use zbobr_backend_github::{GitHubTaskBackend, GitHubRepoBackend};
+use zbobr_task_backend_github::GitHubTaskBackend;
+use zbobr_repo_backend_github::GitHubRepoBackend;
 use zbobr_config::ZbobrConfigToml;
 use zbobr_dispatcher::{
     Stage, Zbobr, ZbobrDispatcherConfig,
@@ -415,23 +416,25 @@ async fn main() -> anyhow::Result<()> {
     let root_toml = load_root_toml(&cli)?;
     let config = load_config(&cli, &root_toml)?;
     let config_arc = Arc::new(config.clone());
-    let backend_github_toml = root_toml
+    let task_backend_github_toml = root_toml
         .as_ref()
-        .and_then(|r| r.backend.as_ref())
-        .and_then(|b| b.github.as_ref());
+        .and_then(|r| r.task.as_ref())
+        .and_then(|t| t.github.as_ref());
+    let repo_backend_github_toml = root_toml
+        .as_ref()
+        .and_then(|r| r.repo.as_ref())
+        .and_then(|r| r.github.as_ref());
     let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = Arc::new(
         GitHubTaskBackend::new(
-            backend_github_toml,
+            task_backend_github_toml,
             cli.global.task_repo.as_deref(),
-            cli.global.fork_owner.as_deref(),
         )
         .context("Failed to create GitHub task backend")?,
     );
     let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = Arc::new(
         GitHubRepoBackend::new(
             config_arc,
-            backend_github_toml,
-            cli.global.task_repo.as_deref(),
+            repo_backend_github_toml,
             cli.global.fork_owner.as_deref(),
         )
         .context("Failed to create GitHub repo backend")?,

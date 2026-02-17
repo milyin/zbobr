@@ -41,12 +41,19 @@ git_user_email = "your.email@example.com"
 # Additional context files for worker
 # worker = ["worker.md", "common.md"]
 
-[backend_github]
-# Task project repository ("owner/repo")
+[task.github]
+# Task project repository ("owner/repo") - where tasks are tracked
 task_repo = "{{TASK_REPO}}"
 
-# GitHub user or org where target repos are forked
+# GitHub token for task backend (optional, uses GH_TOKEN or GITHUB_TOKEN env vars by default)
+# github_token = ""
+
+[repo.github]
+# GitHub user or org where target repos are forked for implementation
 fork_owner = "{{FORK_OWNER}}"
+
+# GitHub token for repo backend (optional, uses GH_TOKEN or GITHUB_TOKEN env vars by default)
+# github_token = ""
 
 # GitHub token with read/write access to tasks repo and to the fork organization.
 # Priority: GH_TOKEN > GITHUB_TOKEN > this config value.
