@@ -9,8 +9,8 @@ use zbobr_dispatcher::{
     Stage, ToolExecutor, Zbobr, ZbobrDispatcherConfig,
     task::{Model, Role, Tool},
 };
-use zbobr_executor_claude::ClaudeExecutor;
-use zbobr_executor_copilot::CopilotExecutor;
+use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
+use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
 use zbobr_repo_backend_github::GitHubRepoBackend;
 use zbobr_task_backend_github::GitHubTaskBackend;
 
@@ -437,6 +437,14 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|r| r.repo.as_ref())
         .and_then(|r| r.fs.as_ref());
 
+    let executor_toml = root_toml.as_ref().and_then(|r| r.executor.as_ref());
+    let claude_executor_config = ZbobrExecutorClaudeConfig::build(
+        executor_toml.and_then(|e| e.claude.as_ref()),
+    );
+    let copilot_executor_config = ZbobrExecutorCopilotConfig::build(
+        executor_toml.and_then(|e| e.copilot.as_ref()),
+    );
+
     let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = match config.backend {
         zbobr_dispatcher::config::BackendType::GitHub => Arc::new(
             GitHubTaskBackend::new(task_backend_github_toml, cli.global.task_repo.as_deref())
@@ -476,7 +484,7 @@ async fn main() -> anyhow::Result<()> {
                 .map(|m| m.parse::<Model>())
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            run_role_session(&zbobr, task, Role::Planner, model_enum, port, &full_prompt).await?;
+            run_role_session(&zbobr, task, Role::Planner, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config).await?;
         }
         Command::Work {
             task,
@@ -496,7 +504,7 @@ async fn main() -> anyhow::Result<()> {
                 .map(|m| m.parse::<Model>())
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            run_role_session(&zbobr, task, Role::Worker, model_enum, port, &full_prompt).await?;
+            run_role_session(&zbobr, task, Role::Worker, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config).await?;
         }
         Command::Review {
             task,
@@ -516,7 +524,7 @@ async fn main() -> anyhow::Result<()> {
                 .map(|m| m.parse::<Model>())
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            run_role_session(&zbobr, task, Role::Reviewer, model_enum, port, &full_prompt).await?;
+            run_role_session(&zbobr, task, Role::Reviewer, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config).await?;
         }
         Command::Merge {
             task,
@@ -536,7 +544,7 @@ async fn main() -> anyhow::Result<()> {
                 .map(|m| m.parse::<Model>())
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            run_role_session(&zbobr, task, Role::Merger, model_enum, port, &full_prompt).await?;
+            run_role_session(&zbobr, task, Role::Merger, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config).await?;
         }
         Command::Loop {
             interval,
@@ -556,6 +564,8 @@ async fn main() -> anyhow::Result<()> {
                 model_enum,
                 port,
                 &prompts,
+                &claude_executor_config,
+                &copilot_executor_config,
             )
             .await?;
         }
@@ -572,8 +582,14 @@ async fn run_role_session(
     model: Option<Model>,
     base_port: u16,
     prompt: &str,
+    claude_executor_config: &ZbobrExecutorClaudeConfig,
+    copilot_executor_config: &ZbobrExecutorCopilotConfig,
 ) -> anyhow::Result<()> {
-    let model = model.unwrap_or_else(|| zbobr.config().default_model.clone());
+    let cli_tool = zbobr.config().cli_tool;
+    let model = model.unwrap_or_else(|| match cli_tool {
+        Tool::Claude => claude_executor_config.default_model.clone(),
+        Tool::Copilot => copilot_executor_config.default_model.clone(),
+    });
 
     // Set stage
     let stage = match role {
@@ -629,12 +645,15 @@ async fn run_role_session(
         .context("MCP server failed to report assigned port in time")?;
 
     // Execute the tool using the ToolExecutor trait with Ctrl+C handling
-    let cli_tool = zbobr.config().cli_tool;
     let mcp_url = format!("http://127.0.0.1:{assigned_port}/{role}/{task_id}");
 
     let executor: Box<dyn ToolExecutor> = match cli_tool {
-        Tool::Copilot => Box::new(CopilotExecutor),
-        Tool::Claude => Box::new(ClaudeExecutor),
+        Tool::Copilot => Box::new(CopilotExecutor {
+            config: copilot_executor_config.clone(),
+        }),
+        Tool::Claude => Box::new(ClaudeExecutor {
+            config: claude_executor_config.clone(),
+        }),
     };
     let agent_token = &zbobr.config().agent_github_token;
     let copilot_token = &zbobr.config().copilot_github_token;
@@ -723,8 +742,14 @@ async fn run_manager_loop(
     model: Option<Model>,
     port: u16,
     prompts: &Prompts,
+    claude_executor_config: &ZbobrExecutorClaudeConfig,
+    copilot_executor_config: &ZbobrExecutorCopilotConfig,
 ) -> anyhow::Result<()> {
-    let model = model.unwrap_or_else(|| zbobr.config().default_model.clone());
+    let cli_tool = zbobr.config().cli_tool;
+    let model = model.unwrap_or_else(|| match cli_tool {
+        Tool::Claude => claude_executor_config.default_model.clone(),
+        Tool::Copilot => copilot_executor_config.default_model.clone(),
+    });
 
     // Load prompts once at loop start and append API docs
     let planner_base = load_prompts(&prompts.planner, prompts.base_path.as_ref())?;
@@ -854,6 +879,8 @@ async fn run_manager_loop(
                 Some(task_model),
                 port,
                 &planner_prompt,
+                claude_executor_config,
+                copilot_executor_config,
             )
             .await
             {
@@ -889,6 +916,8 @@ async fn run_manager_loop(
                 Some(task_model),
                 port,
                 &worker_prompt,
+                claude_executor_config,
+                copilot_executor_config,
             )
             .await
             {
@@ -924,6 +953,8 @@ async fn run_manager_loop(
                 Some(task_model),
                 port,
                 &reviewer_prompt,
+                claude_executor_config,
+                copilot_executor_config,
             )
             .await
             {
@@ -959,6 +990,8 @@ async fn run_manager_loop(
                 Some(task_model),
                 port,
                 &merger_prompt,
+                claude_executor_config,
+                copilot_executor_config,
             )
             .await
             {

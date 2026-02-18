@@ -6,8 +6,13 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use zbobr_dispatcher::tool_executor::{ToolExecutor, format_command_for_log};
 use zbobr_dispatcher::task::{Model, Role, Tool};
 
+pub mod config;
+pub use config::{ZbobrExecutorCopilotConfig, ZbobrExecutorCopilotToml};
+
 /// Executor for GitHub Copilot CLI.
-pub struct CopilotExecutor;
+pub struct CopilotExecutor {
+    pub config: ZbobrExecutorCopilotConfig,
+}
 
 #[async_trait]
 impl ToolExecutor for CopilotExecutor {

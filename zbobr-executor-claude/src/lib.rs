@@ -6,8 +6,13 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use zbobr_dispatcher::tool_executor::{ToolExecutor, format_command_for_log};
 use zbobr_dispatcher::task::{Model, Role, Tool};
 
+pub mod config;
+pub use config::{ZbobrExecutorClaudeConfig, ZbobrExecutorClaudeToml};
+
 /// Executor for Claude CLI.
-pub struct ClaudeExecutor;
+pub struct ClaudeExecutor {
+    pub config: ZbobrExecutorClaudeConfig,
+}
 
 #[async_trait]
 impl ToolExecutor for ClaudeExecutor {

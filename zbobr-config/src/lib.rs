@@ -2,6 +2,8 @@ use std::path::Path;
 
 use anyhow::Context;
 use zbobr_dispatcher::ZbobrDispatcherToml;
+use zbobr_executor_claude::ZbobrExecutorClaudeToml;
+use zbobr_executor_copilot::ZbobrExecutorCopilotToml;
 use zbobr_repo_backend_fs::ZbobrRepoBackendFsToml;
 use zbobr_repo_backend_github::ZbobrRepoBackendGithubToml;
 use zbobr_task_backend_fs::ZbobrTaskBackendFsToml;
@@ -25,6 +27,15 @@ pub struct ZbobrRepoBackendToml {
     pub fs: Option<ZbobrRepoBackendFsToml>,
 }
 
+/// Executor configuration section.
+/// Each executor type has its own optional subsection.
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[serde(default)]
+pub struct ZbobrExecutorToml {
+    pub claude: Option<ZbobrExecutorClaudeToml>,
+    pub copilot: Option<ZbobrExecutorCopilotToml>,
+}
+
 /// Root TOML configuration for zbobr.
 ///
 /// Example layout:
@@ -43,6 +54,12 @@ pub struct ZbobrRepoBackendToml {
 ///
 /// [repo.fs]
 /// repos_dir = "./repos"
+///
+/// [executor.claude]
+/// default_model = "claude-opus-4.6"
+///
+/// [executor.copilot]
+/// default_model = "gpt-5-mini"
 /// ```
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default)]
@@ -50,6 +67,7 @@ pub struct ZbobrConfigToml {
     pub dispatcher: Option<ZbobrDispatcherToml>,
     pub task: Option<ZbobrTaskBackendToml>,
     pub repo: Option<ZbobrRepoBackendToml>,
+    pub executor: Option<ZbobrExecutorToml>,
 }
 
 impl ZbobrConfigToml {
