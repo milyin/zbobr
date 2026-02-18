@@ -10,15 +10,6 @@ pub fn resolve_path(path: PathBuf, base: &Path) -> PathBuf {
     }
 }
 
-/// Resolve a relative path given as a string against a base directory.
-pub fn resolve_path_string(path: String, base: &Path) -> String {
-    let p = PathBuf::from(&path);
-    if p.is_relative() {
-        base.join(p).to_string_lossy().into_owned()
-    } else {
-        path
-    }
-}
 
 // Replace characters that are unsafe or invalid in filenames with '_'.
 // Allows ASCII alphanumerics, '-', '_', and '.'.
