@@ -139,7 +139,6 @@ mcp_tools! {
     POST_PLAN = "post_plan",
     REPORT_ERROR = "report_error",
     PULL_WORK = "pull_work",
-    GET_CHECKLIST = "get_checklist",
     GET_PARAM_DESTINATION_REPOSITORY = "get_param_destination_repository",
     SET_PARAM_DESTINATION_REPOSITORY = "set_param_destination_repository",
     SET_PARAM_DESTINATION_BRANCH = "set_param_destination_branch",
@@ -1193,11 +1192,6 @@ impl PlannerMcp {
     )]
     async fn pull_work(&self) -> String {
         self.pull_work_impl().await
-    }
-
-    #[tool(description = "Get the task checklist as a list of checkbox items")]
-    async fn get_checklist(&self) -> String {
-        self.get_checklist_impl().await
     }
 
     #[tool(description = "Get the destination repository URL for this task (read-only)")]
