@@ -440,6 +440,12 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|r| r.repo.as_ref())
         .and_then(|r| r.fs.as_ref());
 
+    let config_dir = cli
+        .global
+        .config
+        .as_ref()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+
     let executor_toml = root_toml.as_ref().and_then(|r| r.executor.as_ref());
     let claude_executor_config = ZbobrExecutorClaudeConfig::build(
         executor_toml.and_then(|e| e.claude.as_ref()),
@@ -449,6 +455,7 @@ async fn main() -> anyhow::Result<()> {
     );
     let mcp_tester_executor_config = ZbobrExecutorMcpTesterConfig::build(
         executor_toml.and_then(|e| e.mcp_tester.as_ref()),
+        config_dir.as_deref(),
     );
 
     let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = match config.backend {
@@ -679,22 +686,25 @@ async fn run_role_session(
     };
     let agent_token = &zbobr.config().agent_github_token;
     let copilot_token = &zbobr.config().copilot_github_token;
-    let execution_result = tokio::select! {
+    let (execution_interrupted, execution_error) = tokio::select! {
         result = executor.execute(task_id, role, &model, assigned_port, prompt, &task_dir, &mcp_url, agent_token, copilot_token) => {
-            if let Err(e) = result {
-                tracing::error!("Tool execution failed: {e}");
+            match result {
+                Ok(()) => (false, None),
+                Err(e) => {
+                    tracing::error!("Tool execution failed: {e}");
+                    (false, Some(e))
+                }
             }
-            false // Normal completion
         }
         _ = tokio::signal::ctrl_c() => {
             tracing::warn!("Received shutdown signal during execution");
-            true // Interrupted
+            (true, None)
         }
     };
 
     // Unlock task by moving back to PENDING - main loop will handle any signal-based transitions
     zbobr.set_task_stage(task_id, Stage::Pending).await?;
-    if execution_result {
+    if execution_interrupted {
         tracing::info!("Session interrupted for task #{task_id}, moved to PENDING");
     } else {
         tracing::info!("Session complete for task #{task_id}, moved to PENDING");
@@ -752,6 +762,11 @@ async fn run_role_session(
 
     // Shut down server
     server_handle.abort();
+
+    // Propagate executor error after cleanup
+    if let Some(e) = execution_error {
+        return Err(e);
+    }
 
     Ok(())
 }
