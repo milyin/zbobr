@@ -322,10 +322,12 @@ fn load_config(
     if let Some(ref b) = cli.global.backend {
         config.backend = b
             .parse::<zbobr_dispatcher::config::BackendType>()
-            .map_err(|e| anyhow::anyhow!(e))?;
+            .with_context(|| format!("Failed to parse backend type: {}", b))?;
     }
     if let Some(ref t) = cli.global.cli_tool {
-        config.cli_tool = t.parse::<Tool>().map_err(|e| anyhow::anyhow!(e))?;
+        config.cli_tool = t
+            .parse::<Tool>()
+            .with_context(|| format!("Unknown tool name: {}", t))?;
     }
     config.validate()?;
 
@@ -511,7 +513,7 @@ async fn main() -> anyhow::Result<()> {
             let model_enum = model
                 .map(|m| m.parse::<Model>())
                 .transpose()
-                .map_err(anyhow::Error::msg)?;
+                .context("Invalid model name")?;
             run_role_session(
                 &zbobr,
                 task,
@@ -542,7 +544,7 @@ async fn main() -> anyhow::Result<()> {
             let model_enum = model
                 .map(|m| m.parse::<Model>())
                 .transpose()
-                .map_err(anyhow::Error::msg)?;
+                .context("Invalid model name")?;
             run_role_session(
                 &zbobr,
                 task,
@@ -573,7 +575,7 @@ async fn main() -> anyhow::Result<()> {
             let model_enum = model
                 .map(|m| m.parse::<Model>())
                 .transpose()
-                .map_err(anyhow::Error::msg)?;
+                .context("Invalid model name")?;
             run_role_session(
                 &zbobr,
                 task,
@@ -604,7 +606,7 @@ async fn main() -> anyhow::Result<()> {
             let model_enum = model
                 .map(|m| m.parse::<Model>())
                 .transpose()
-                .map_err(anyhow::Error::msg)?;
+                .context("Invalid model name")?;
             run_role_session(
                 &zbobr,
                 task,
@@ -628,7 +630,7 @@ async fn main() -> anyhow::Result<()> {
             let model_enum = model
                 .map(|m| m.parse::<Model>())
                 .transpose()
-                .map_err(anyhow::Error::msg)?;
+                .context("Invalid model name")?;
             run_manager_loop(
                 &zbobr,
                 interval,

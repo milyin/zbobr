@@ -127,14 +127,14 @@ impl std::fmt::Display for Role {
 }
 
 impl std::str::FromStr for Role {
-    type Err = String;
+    type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "planner" => Ok(Role::Planner),
             "worker" => Ok(Role::Worker),
             "reviewer" => Ok(Role::Reviewer),
             "merger" => Ok(Role::Merger),
-            _ => Err(format!("Unknown role: {}", s)),
+            _ => Err(anyhow::anyhow!("Unknown role: {}", s)),
         }
     }
 }
@@ -218,7 +218,7 @@ impl std::fmt::Display for Signal {
 }
 
 impl std::str::FromStr for Signal {
-    type Err = String;
+    type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().replace('_', "").as_str() {
             "stop" => Ok(Signal::Stop),
@@ -228,7 +228,7 @@ impl std::str::FromStr for Signal {
             "goreview" | "go-review" => Ok(Signal::GoReview),
             "gowork" | "go-work" => Ok(Signal::GoWork),
             "goplan" | "go-plan" => Ok(Signal::GoPlan),
-            _ => Err(format!("Unknown signal: {}", s)),
+            _ => Err(anyhow::anyhow!("Unknown signal: {}", s)),
         }
     }
 }
@@ -273,13 +273,13 @@ impl std::fmt::Display for Tool {
 }
 
 impl std::str::FromStr for Tool {
-    type Err = String;
+    type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "copilot" => Ok(Tool::Copilot),
             "claude" => Ok(Tool::Claude),
             "mcp-tester" => Ok(Tool::McpTester),
-            _ => Err(format!("Unknown tool: {}", s)),
+            _ => Err(anyhow::anyhow!("Unknown tool: {}", s)),
         }
     }
 }
@@ -392,7 +392,7 @@ impl std::fmt::Display for Model {
 }
 
 impl std::str::FromStr for Model {
-    type Err = String;
+    type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().replace('.', "-").as_str() {
             "gpt-4o" | "gpt4o" => Ok(Model::Gpt4o),
@@ -411,7 +411,7 @@ impl std::str::FromStr for Model {
             "gpt-5.2" | "gpt-5-2" => Ok(Model::Gpt5_2),
             "gpt-5.1-codex-max" | "gpt-5-1-codex-max" => Ok(Model::Gpt5_1CodexMax),
             "gpt-5.1-codex" | "gpt-5-1-codex" => Ok(Model::Gpt5_1Codex),
-            _ => Err(format!("Unknown model: {}", s)),
+            _ => Err(anyhow::anyhow!("Unknown model: {}", s)),
         }
     }
 }

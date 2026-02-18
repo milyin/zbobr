@@ -22,12 +22,12 @@ impl std::fmt::Display for BackendType {
 }
 
 impl std::str::FromStr for BackendType {
-    type Err = String;
+    type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "github" => Ok(BackendType::GitHub),
             "fs" | "filesystem" => Ok(BackendType::Filesystem),
-            _ => Err(format!("Unknown backend: {}", s)),
+            _ => Err(anyhow::anyhow!("Unknown backend: {}", s)),
         }
     }
 }
@@ -137,10 +137,7 @@ impl ZbobrDispatcherConfig {
     /// Priority: TOML file > hardcoded defaults. Environment variables are not
     /// consulted for zbobr-specific parameters; only external GH token env vars
     /// (`COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`) are recognized.
-    pub fn build(
-        toml: Option<&ZbobrDispatcherToml>,
-        config_dir: &Path,
-    ) -> anyhow::Result<Self> {
+    pub fn build(toml: Option<&ZbobrDispatcherToml>, config_dir: &Path) -> anyhow::Result<Self> {
         let env = OsEnv;
         Self::build_with_env(toml, &env, config_dir)
     }
@@ -161,9 +158,7 @@ impl ZbobrDispatcherConfig {
             .map(|p| zbobr_utility::resolve_path(p, config_dir))
             .unwrap_or(defaults.workspaces);
 
-        let backend = toml
-            .and_then(|t| t.backend)
-            .unwrap_or(defaults.backend);
+        let backend = toml.and_then(|t| t.backend).unwrap_or(defaults.backend);
 
         let cli_tool = toml.and_then(|t| t.cli_tool).unwrap_or(defaults.cli_tool);
 
@@ -175,22 +170,38 @@ impl ZbobrDispatcherConfig {
 
         let planner_prompts = toml_prompts
             .and_then(|p| p.planner.clone())
-            .map(|v| v.into_iter().map(|p| zbobr_utility::resolve_path(p, config_dir)).collect())
+            .map(|v| {
+                v.into_iter()
+                    .map(|p| zbobr_utility::resolve_path(p, config_dir))
+                    .collect()
+            })
             .unwrap_or(defaults.planner_prompts);
 
         let worker_prompts = toml_prompts
             .and_then(|p| p.worker.clone())
-            .map(|v| v.into_iter().map(|p| zbobr_utility::resolve_path(p, config_dir)).collect())
+            .map(|v| {
+                v.into_iter()
+                    .map(|p| zbobr_utility::resolve_path(p, config_dir))
+                    .collect()
+            })
             .unwrap_or(defaults.worker_prompts);
 
         let reviewer_prompts = toml_prompts
             .and_then(|p| p.reviewer.clone())
-            .map(|v| v.into_iter().map(|p| zbobr_utility::resolve_path(p, config_dir)).collect())
+            .map(|v| {
+                v.into_iter()
+                    .map(|p| zbobr_utility::resolve_path(p, config_dir))
+                    .collect()
+            })
             .unwrap_or(defaults.reviewer_prompts);
 
         let merger_prompts = toml_prompts
             .and_then(|p| p.merger.clone())
-            .map(|v| v.into_iter().map(|p| zbobr_utility::resolve_path(p, config_dir)).collect())
+            .map(|v| {
+                v.into_iter()
+                    .map(|p| zbobr_utility::resolve_path(p, config_dir))
+                    .collect()
+            })
             .unwrap_or(defaults.merger_prompts);
 
         let prompts_path = toml_prompts

@@ -32,26 +32,11 @@ impl TaskFile {
         let stage = Stage::from_milestone_name(&self.stage)
             .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", self.stage))?;
 
-        let tool = self
-            .tool
-            .as_ref()
-            .map(|s| s.parse())
-            .transpose()
-            .map_err(|e: String| anyhow::anyhow!(e))?;
+        let tool = self.tool.as_ref().map(|s| s.parse()).transpose()?;
 
-        let model = self
-            .model
-            .as_ref()
-            .map(|s| s.parse())
-            .transpose()
-            .map_err(|e: String| anyhow::anyhow!(e))?;
+        let model = self.model.as_ref().map(|s| s.parse()).transpose()?;
 
-        let signal = self
-            .signal
-            .as_ref()
-            .map(|s| s.parse())
-            .transpose()
-            .map_err(|e: String| anyhow::anyhow!(e))?;
+        let signal = self.signal.as_ref().map(|s| s.parse()).transpose()?;
 
         let parameters: Result<HashMap<Parameter, String>, String> = self
             .parameters
