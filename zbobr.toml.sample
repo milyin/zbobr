@@ -77,3 +77,11 @@ fork_owner = "{{FORK_OWNER}}"
 [executor.copilot]
 # Default model for Copilot executor (default: "gpt-5-mini")
 # default_model = "gpt-5-mini"
+
+[executor.mcp-tester]
+# YAML scenario files for mcp-tester, one per stage.
+# Use with --cli-tool mcp-tester to validate MCP servers.
+# planning = "scenarios/planning.yml"
+# working = "scenarios/working.yml"
+# reviewing = "scenarios/reviewing.yml"
+# merging = "scenarios/merging.yml"

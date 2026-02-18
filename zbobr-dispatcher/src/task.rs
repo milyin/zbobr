@@ -251,12 +251,14 @@ pub enum Tool {
     Copilot,
     #[serde(rename = "claude")]
     Claude,
+    #[serde(rename = "mcp-tester")]
+    McpTester,
 }
 
 impl Tool {
     /// Returns all available tools.
     pub fn all() -> &'static [Tool] {
-        &[Tool::Copilot, Tool::Claude]
+        &[Tool::Copilot, Tool::Claude, Tool::McpTester]
     }
 
 }
@@ -266,6 +268,7 @@ impl std::fmt::Display for Tool {
         match self {
             Tool::Copilot => write!(f, "copilot"),
             Tool::Claude => write!(f, "claude"),
+            Tool::McpTester => write!(f, "mcp-tester"),
         }
     }
 }
@@ -276,6 +279,7 @@ impl std::str::FromStr for Tool {
         match s.to_lowercase().as_str() {
             "copilot" => Ok(Tool::Copilot),
             "claude" => Ok(Tool::Claude),
+            "mcp-tester" => Ok(Tool::McpTester),
             _ => Err(format!("Unknown tool: {}", s)),
         }
     }
@@ -361,6 +365,7 @@ impl Model {
                 Model::Claude3Opus => Some("opus"),
                 _ => None,
             },
+            Tool::McpTester => None,
         }
     }
 }

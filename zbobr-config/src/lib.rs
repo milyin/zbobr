@@ -4,6 +4,7 @@ use anyhow::Context;
 use zbobr_dispatcher::ZbobrDispatcherToml;
 use zbobr_executor_claude::ZbobrExecutorClaudeToml;
 use zbobr_executor_copilot::ZbobrExecutorCopilotToml;
+use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterToml;
 use zbobr_repo_backend_fs::ZbobrRepoBackendFsToml;
 use zbobr_repo_backend_github::ZbobrRepoBackendGithubToml;
 use zbobr_task_backend_fs::ZbobrTaskBackendFsToml;
@@ -34,6 +35,8 @@ pub struct ZbobrRepoBackendToml {
 pub struct ZbobrExecutorToml {
     pub claude: Option<ZbobrExecutorClaudeToml>,
     pub copilot: Option<ZbobrExecutorCopilotToml>,
+    #[serde(rename = "mcp-tester")]
+    pub mcp_tester: Option<ZbobrExecutorMcpTesterToml>,
 }
 
 /// Root TOML configuration for zbobr.
@@ -60,6 +63,10 @@ pub struct ZbobrExecutorToml {
 ///
 /// [executor.copilot]
 /// default_model = "gpt-5-mini"
+///
+/// [executor.mcp-tester]
+/// planning = "scenarios/planning.yml"
+/// working = "scenarios/working.yml"
 /// ```
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default)]

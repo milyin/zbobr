@@ -11,6 +11,7 @@ use zbobr_dispatcher::{
 };
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
+use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
 use zbobr_repo_backend_github::GitHubRepoBackend;
 use zbobr_task_backend_github::GitHubTaskBackend;
 
@@ -58,7 +59,7 @@ struct GlobalArgs {
     #[arg(long, env = "ZBOBR_BACKEND")]
     backend: Option<String>,
 
-    /// CLI tool to use: "copilot" or "claude"
+    /// CLI tool to use: "copilot", "claude", or "mcp-tester"
     #[arg(long, env = "ZBOBR_CLI_TOOL")]
     cli_tool: Option<String>,
 }
@@ -444,6 +445,9 @@ async fn main() -> anyhow::Result<()> {
     let copilot_executor_config = ZbobrExecutorCopilotConfig::build(
         executor_toml.and_then(|e| e.copilot.as_ref()),
     );
+    let mcp_tester_executor_config = ZbobrExecutorMcpTesterConfig::build(
+        executor_toml.and_then(|e| e.mcp_tester.as_ref()),
+    );
 
     let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = match config.backend {
         zbobr_dispatcher::config::BackendType::GitHub => Arc::new(
@@ -484,7 +488,7 @@ async fn main() -> anyhow::Result<()> {
                 .map(|m| m.parse::<Model>())
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            run_role_session(&zbobr, task, Role::Planner, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config).await?;
+            run_role_session(&zbobr, task, Role::Planner, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config, &mcp_tester_executor_config).await?;
         }
         Command::Work {
             task,
@@ -504,7 +508,7 @@ async fn main() -> anyhow::Result<()> {
                 .map(|m| m.parse::<Model>())
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            run_role_session(&zbobr, task, Role::Worker, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config).await?;
+            run_role_session(&zbobr, task, Role::Worker, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config, &mcp_tester_executor_config).await?;
         }
         Command::Review {
             task,
@@ -524,7 +528,7 @@ async fn main() -> anyhow::Result<()> {
                 .map(|m| m.parse::<Model>())
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            run_role_session(&zbobr, task, Role::Reviewer, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config).await?;
+            run_role_session(&zbobr, task, Role::Reviewer, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config, &mcp_tester_executor_config).await?;
         }
         Command::Merge {
             task,
@@ -544,7 +548,7 @@ async fn main() -> anyhow::Result<()> {
                 .map(|m| m.parse::<Model>())
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            run_role_session(&zbobr, task, Role::Merger, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config).await?;
+            run_role_session(&zbobr, task, Role::Merger, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config, &mcp_tester_executor_config).await?;
         }
         Command::Loop {
             interval,
@@ -566,6 +570,7 @@ async fn main() -> anyhow::Result<()> {
                 &prompts,
                 &claude_executor_config,
                 &copilot_executor_config,
+                &mcp_tester_executor_config,
             )
             .await?;
         }
@@ -584,11 +589,13 @@ async fn run_role_session(
     prompt: &str,
     claude_executor_config: &ZbobrExecutorClaudeConfig,
     copilot_executor_config: &ZbobrExecutorCopilotConfig,
+    mcp_tester_executor_config: &ZbobrExecutorMcpTesterConfig,
 ) -> anyhow::Result<()> {
     let cli_tool = zbobr.config().cli_tool;
     let model = model.unwrap_or_else(|| match cli_tool {
         Tool::Claude => claude_executor_config.default_model.clone(),
         Tool::Copilot => copilot_executor_config.default_model.clone(),
+        Tool::McpTester => Model::default(),
     });
 
     // Set stage
@@ -653,6 +660,9 @@ async fn run_role_session(
         }),
         Tool::Claude => Box::new(ClaudeExecutor {
             config: claude_executor_config.clone(),
+        }),
+        Tool::McpTester => Box::new(McpTesterExecutor {
+            config: mcp_tester_executor_config.clone(),
         }),
     };
     let agent_token = &zbobr.config().agent_github_token;
@@ -744,11 +754,13 @@ async fn run_manager_loop(
     prompts: &Prompts,
     claude_executor_config: &ZbobrExecutorClaudeConfig,
     copilot_executor_config: &ZbobrExecutorCopilotConfig,
+    mcp_tester_executor_config: &ZbobrExecutorMcpTesterConfig,
 ) -> anyhow::Result<()> {
     let cli_tool = zbobr.config().cli_tool;
     let model = model.unwrap_or_else(|| match cli_tool {
         Tool::Claude => claude_executor_config.default_model.clone(),
         Tool::Copilot => copilot_executor_config.default_model.clone(),
+        Tool::McpTester => Model::default(),
     });
 
     // Load prompts once at loop start and append API docs
@@ -881,6 +893,7 @@ async fn run_manager_loop(
                 &planner_prompt,
                 claude_executor_config,
                 copilot_executor_config,
+                mcp_tester_executor_config,
             )
             .await
             {
@@ -918,6 +931,7 @@ async fn run_manager_loop(
                 &worker_prompt,
                 claude_executor_config,
                 copilot_executor_config,
+                mcp_tester_executor_config,
             )
             .await
             {
@@ -955,6 +969,7 @@ async fn run_manager_loop(
                 &reviewer_prompt,
                 claude_executor_config,
                 copilot_executor_config,
+                mcp_tester_executor_config,
             )
             .await
             {
@@ -992,6 +1007,7 @@ async fn run_manager_loop(
                 &merger_prompt,
                 claude_executor_config,
                 copilot_executor_config,
+                mcp_tester_executor_config,
             )
             .await
             {

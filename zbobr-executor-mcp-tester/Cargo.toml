@@ -1,0 +1,12 @@
+[package]
+name = "zbobr-executor-mcp-tester"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+zbobr-dispatcher = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
