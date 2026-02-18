@@ -40,22 +40,21 @@ async fn planning_get_description_via_mcp_tester() {
     let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
 
     // Run: zbobr plan 1 --config <temp>/zbobr.toml
-    let output = tokio::process::Command::new(zbobr_bin)
+    // Use stderr=inherit so logs stream directly to the terminal
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+    let status = tokio::process::Command::new(zbobr_bin)
         .args(["plan", "1", "--config", config_path.to_str().unwrap()])
         .current_dir(tmp.path())
-        .env("RUST_LOG", "info")
-        .output()
+        .env("RUST_LOG", &rust_log)
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
         .await
         .expect("failed to run zbobr binary");
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
     assert!(
-        output.status.success(),
-        "zbobr plan failed with exit code {:?}\nstdout:\n{}\nstderr:\n{}",
-        output.status.code(),
-        stdout,
-        stderr,
+        status.success(),
+        "zbobr plan failed with exit code {:?}",
+        status.code(),
     );
 }
