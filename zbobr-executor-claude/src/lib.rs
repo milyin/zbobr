@@ -3,8 +3,8 @@ use std::{path::Path, process::Stdio};
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use zbobr_dispatcher::tool_executor::{ToolExecutor, format_command_for_log};
 use zbobr_dispatcher::task::{Model, Role, Tool};
+use zbobr_dispatcher::tool_executor::{ToolExecutor, format_command_for_log};
 
 pub mod config;
 pub use config::{ZbobrExecutorClaudeConfig, ZbobrExecutorClaudeToml};
@@ -112,7 +112,7 @@ impl ToolExecutor for ClaudeExecutor {
 
         if !status.success() {
             tracing::error!("claude exited with status: {status}");
-            return Err(anyhow::anyhow!("claude exited with status: {status}"));
+            anyhow::bail!("claude exited with status: {status}");
         }
 
         Ok(())

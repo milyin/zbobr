@@ -3,8 +3,8 @@ use std::{path::Path, process::Stdio};
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use zbobr_dispatcher::tool_executor::{ToolExecutor, format_command_for_log};
 use zbobr_dispatcher::task::{Model, Role, Tool};
+use zbobr_dispatcher::tool_executor::{ToolExecutor, format_command_for_log};
 
 pub mod config;
 pub use config::{ZbobrExecutorCopilotConfig, ZbobrExecutorCopilotToml};
@@ -111,7 +111,7 @@ impl ToolExecutor for CopilotExecutor {
 
         if !status.success() {
             tracing::error!("copilot exited with status: {status}");
-            return Err(anyhow::anyhow!("copilot exited with status: {status}"));
+            anyhow::bail!("copilot exited with status: {status}");
         }
 
         Ok(())

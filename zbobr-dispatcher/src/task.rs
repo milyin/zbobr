@@ -651,7 +651,7 @@ impl TaskSession {
             .await?;
 
         if !output.status.success() {
-            return Err(anyhow::anyhow!("Failed to get current branch"));
+            anyhow::bail!("Failed to get current branch");
         }
 
         let current_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -674,7 +674,7 @@ impl TaskSession {
             .await?;
 
         if !status.success() {
-            return Err(anyhow::anyhow!("Failed to push to fork"));
+            anyhow::bail!("Failed to push to fork");
         }
 
         Ok(())
@@ -769,7 +769,7 @@ impl TaskSession {
             .await?;
 
         if !output.status.success() {
-            return Err(anyhow::anyhow!("Failed to get current branch"));
+            anyhow::bail!("Failed to get current branch");
         }
 
         let current_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -816,7 +816,7 @@ impl TaskSession {
             .await?;
 
         if !status_output.status.success() {
-            return Err(anyhow::anyhow!("Failed to check git status"));
+            anyhow::bail!("Failed to check git status");
         }
 
         let uncommitted = String::from_utf8_lossy(&status_output.stdout)
@@ -839,7 +839,7 @@ impl TaskSession {
             .await?;
 
         if !status.success() {
-            return Err(anyhow::anyhow!("Failed to push work branch"));
+            anyhow::bail!("Failed to push work branch");
         }
 
         Ok(())

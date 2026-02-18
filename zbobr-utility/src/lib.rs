@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::path::{Path, PathBuf};
 
 /// Resolve a relative path against a base directory; absolute paths are returned as-is.
@@ -9,7 +9,6 @@ pub fn resolve_path(path: PathBuf, base: &Path) -> PathBuf {
         path
     }
 }
-
 
 // Replace characters that are unsafe or invalid in filenames with '_'.
 // Allows ASCII alphanumerics, '-', '_', and '.'.
@@ -56,7 +55,7 @@ pub async fn create_placeholder_commit(work_dir: &Path, branch_name: &str) -> Re
                 .map(|m| m.permissions().readonly())
                 .unwrap_or(false);
 
-            return Err(anyhow!(
+            anyhow::bail!(
                 "Failed to create placeholder file: {} — attempted path: {} — work_dir: {} — .zbobr exists: {} — work_dir_readonly: {} — kind: {:?} — raw_os_error: {:?}",
                 e,
                 placeholder_path.display(),
@@ -65,7 +64,7 @@ pub async fn create_placeholder_commit(work_dir: &Path, branch_name: &str) -> Re
                 work_dir_readonly,
                 kind,
                 raw
-            ));
+            );
         }
     }
 
@@ -78,7 +77,7 @@ pub async fn create_placeholder_commit(work_dir: &Path, branch_name: &str) -> Re
         .map_err(|e| anyhow!("Failed to run git add: {}", e))?;
 
     if !add_status.success() {
-        return Err(anyhow!("git add for placeholder failed (exit != 0)"));
+        anyhow::bail!("git add for placeholder failed (exit != 0)");
     }
 
     // Commit the file
@@ -91,7 +90,7 @@ pub async fn create_placeholder_commit(work_dir: &Path, branch_name: &str) -> Re
         .map_err(|e| anyhow!("Failed to run git commit: {}", e))?;
 
     if !commit_status.success() {
-        return Err(anyhow!("git commit for placeholder failed (exit != 0)"));
+        anyhow::bail!("git commit for placeholder failed (exit != 0)");
     }
 
     Ok(())

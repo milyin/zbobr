@@ -28,15 +28,12 @@ impl ToolExecutor for McpTesterExecutor {
         _agent_github_token: &str,
         _copilot_github_token: &str,
     ) -> anyhow::Result<()> {
-        let scenario_path = self
-            .config
-            .scenario_for_role(role)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "No scenario file configured for role {:?} in [executor.mcp-tester]",
-                    role
-                )
-            })?;
+        let scenario_path = self.config.scenario_for_role(role).ok_or_else(|| {
+            anyhow::anyhow!(
+                "No scenario file configured for role {:?} in [executor.mcp-tester]",
+                role
+            )
+        })?;
 
         tracing::info!(
             "Starting mcp-tester for task #{task_id} role {role:?} with scenario {}",
@@ -45,7 +42,10 @@ impl ToolExecutor for McpTesterExecutor {
         tracing::info!("MCP endpoint: {mcp_url}");
 
         let scenario_str = scenario_path.to_str().ok_or_else(|| {
-            anyhow::anyhow!("Scenario path is not valid UTF-8: {}", scenario_path.display())
+            anyhow::anyhow!(
+                "Scenario path is not valid UTF-8: {}",
+                scenario_path.display()
+            )
         })?;
 
         let args = ["scenario", mcp_url, scenario_str, "--detailed"];
@@ -93,7 +93,7 @@ impl ToolExecutor for McpTesterExecutor {
 
         if !status.success() {
             tracing::error!("mcp-tester exited with status: {status}");
-            return Err(anyhow::anyhow!("mcp-tester exited with status: {status}"));
+            anyhow::bail!("mcp-tester exited with status: {status}");
         }
 
         Ok(())
