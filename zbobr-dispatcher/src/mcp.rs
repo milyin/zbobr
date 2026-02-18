@@ -146,6 +146,7 @@ mcp_tools! {
     GET_PARAM_DESTINATION_REPOSITORY = "get_param_destination_repository",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
+    REPORT_RESULTS = "report_results",
 }
 
 mcp_tools! {
@@ -158,6 +159,7 @@ mcp_tools! {
     PULL_WORK = "pull_work",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
+    REPORT_RESULTS = "report_results",
 }
 
 mcp_tools! {
@@ -177,6 +179,7 @@ mcp_tools! {
     DELETE_CHECKLIST_ITEM = "delete_checklist_item",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
+    REPORT_RESULTS = "report_results",
 }
 
 mcp_tools! {
@@ -188,6 +191,7 @@ mcp_tools! {
     INSERT_CHECKLIST_ITEM = "insert_checklist_item",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
+    REPORT_RESULTS = "report_results",
 }
 
 mcp_tools! {
@@ -200,6 +204,7 @@ mcp_tools! {
     PUSH_WORK = "push_work",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
+    REPORT_RESULTS = "report_results",
 }
 
 /// Generate hardcoded preparator instructions using tool name constants.
@@ -226,11 +231,13 @@ Read the task description and set the required parameters for the implementation
     - Call `{set_param_destination_branch}` (e.g., "main", "develop")
     - Call `{set_param_work_branch_postfix}` with the work branch postfix (e.g., "implement-feature") — the full work branch will be formed from prefix, task id and this postfix
     - Use `{get_param_destination_repository}`, `{get_param_destination_branch}`, `{get_param_work_branch}` to read current values
-4. When finished, the task will move to the planning stage.
+4. Call `{report_results}` to provide a brief and concise report of your work and finish the session. This report takes part in the context for further agent calls, so it MUST be compact.
+5. When finished, the task will move to the planning stage.
 "#,
         get_description = preparator_tools::GET_DESCRIPTION,
         get_discussion = preparator_tools::GET_DISCUSSION,
         report_error = preparator_tools::REPORT_ERROR,
+        report_results = preparator_tools::REPORT_RESULTS,
         ask_user = worker_tools::ASK_USER,
         set_param_destination_repository = preparator_tools::SET_PARAM_DESTINATION_REPOSITORY,
         set_param_destination_branch = preparator_tools::SET_PARAM_DESTINATION_BRANCH,
@@ -278,6 +285,7 @@ Work autonomously. Do not ask the user for anything.
    - This context narrows the worker's scope and prevents unnecessary exploration
 7. Design a solution. 
 8. Post a solution in the form of a text plan with `{post_plan}`. Use planning mode if available.
+9. Call `{report_results}` to provide a brief and concise report of your work and finish the session. This report takes part in the context for further agent calls, so it MUST be compact.
 "#,
         branch_isolation = branch_isolation_instruction(),
         get_description = planner_tools::GET_DESCRIPTION,
@@ -285,6 +293,7 @@ Work autonomously. Do not ask the user for anything.
         get_plan = planner_tools::GET_PLAN,
         post_plan = planner_tools::POST_PLAN,
         report_error = planner_tools::REPORT_ERROR,
+        report_results = planner_tools::REPORT_RESULTS,
         ask_user = worker_tools::ASK_USER,
         pull_work = planner_tools::PULL_WORK,
         get_param_destination_branch = planner_tools::GET_PARAM_DESTINATION_BRANCH,
@@ -340,7 +349,8 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 9. Commit changes locally with clear messages (describe what the change does, why, and reference relevant checklist item)
 10. When implementation for an item is complete, mark the item done with `{check_checklist_item}`, save intermediate results with `{push_work}` (which requires all changes to be committed first), and update or insert follow-up items as needed
 11. Do not add low-level platform or tool-invocation steps (for example, `{push_work}`) into your checklist — checklist items should remain human-meaningful and task-focused
-12. If you need human clarification or intervention, call `{ask_user}` or `{ask_planner}` as appropriate; use `{report_error}` only to report technical errors"#,
+12. If you need human clarification or intervention, call `{ask_user}` or `{ask_planner}` as appropriate; use `{report_error}` only to report technical errors
+13. Call `{report_results}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact."#,
         get_description = worker_tools::GET_DESCRIPTION,
         get_discussion = worker_tools::GET_DISCUSSION,
         get_plan = worker_tools::GET_PLAN,
@@ -350,6 +360,7 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
         check_checklist_item = worker_tools::CHECK_CHECKLIST_ITEM,
         delete_checklist_item = worker_tools::DELETE_CHECKLIST_ITEM,
         report_error = worker_tools::REPORT_ERROR,
+        report_results = worker_tools::REPORT_RESULTS,
         pull_work = worker_tools::PULL_WORK,
         get_param_destination_branch = worker_tools::GET_PARAM_DESTINATION_BRANCH,
         get_param_work_branch = worker_tools::GET_PARAM_WORK_BRANCH,
@@ -384,10 +395,12 @@ Review the implementation changes and ensure they meet coding standards and task
 2. Call `{get_plan}` to see the agreed implementation
 3. Set up the repository using `{pull_work}` and inspect the changes
 #4. For each issue found, call `{insert_checklist_item}` with a clear title and description explaining the problem and suggested fix
+5. Call `{report_results}` to provide a brief and concise report of your work and finish the session. This report takes part in the context for further agent calls, so it MUST be compact.
 "#,
         get_description = reviewer_tools::GET_DESCRIPTION,
         get_plan = reviewer_tools::GET_PLAN,
         report_error = reviewer_tools::REPORT_ERROR,
+        report_results = reviewer_tools::REPORT_RESULTS,
         pull_work = reviewer_tools::PULL_WORK,
         insert_checklist_item = reviewer_tools::INSERT_CHECKLIST_ITEM,
     );
@@ -447,6 +460,7 @@ You have read access to the task and repository:
 - For conflicting edits to the same code, ask the user which version is preferred
 - Preserve the intent of both branches' changes if both changes are valid
 - Do NOT delete either branch's work without explicit user guidance
+8. Call `{report_results}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact.
 "#,
         get_description = merger_tools::GET_DESCRIPTION,
         get_discussion = merger_tools::GET_DISCUSSION,
@@ -454,6 +468,7 @@ You have read access to the task and repository:
         push_work = merger_tools::PUSH_WORK,
         ask_user = merger_tools::ASK_USER,
         report_error = merger_tools::REPORT_ERROR,
+        report_results = merger_tools::REPORT_RESULTS,
         branch_isolation = branch_isolation_instruction(),
     );
 
@@ -594,6 +609,29 @@ pub trait CommonMcpImpl: Send + Sync {
         }
 
         "Error reported to user - task paused pending response".to_string()
+    }
+
+    async fn report_results_impl(&self, message: &str) -> String {
+        tracing::info!(
+            "[{}#{}] report_results",
+            self.role_name(),
+            self.session().task_id()
+        );
+        let hostname = get_hostname();
+
+        if let Err(e) = self
+            .session()
+            .post_message(message, self.role().as_str(), &hostname)
+            .await
+        {
+            tracing::error!(
+                "Failed to post results message for task {}: {e}",
+                self.session().task_id()
+            );
+            return format!("Error posting results message: {e}");
+        }
+
+        "Results reported successfully".to_string()
     }
 
     async fn get_plan_impl(&self) -> String {
@@ -1116,6 +1154,13 @@ impl MergerMcp {
     async fn get_param_work_branch(&self) -> String {
         self.get_param_work_branch_impl().await
     }
+
+    #[tool(
+        description = "Provide a brief and concise report of your results and finish your work. These reports add up to discussion and shorten the context for further agent calls, so they MUST be compact."
+    )]
+    async fn report_results(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.report_results_impl(&params.message).await
+    }
 }
 
 #[tool_handler]
@@ -1224,6 +1269,13 @@ impl PreparatorMcp {
     async fn get_param_work_branch(&self) -> String {
         self.get_param_work_branch_impl().await
     }
+
+    #[tool(
+        description = "Provide a brief and concise report of your results and finish your work. These reports add up to discussion and shorten the context for further agent calls, so they MUST be compact."
+    )]
+    async fn report_results(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.report_results_impl(&params.message).await
+    }
 }
 
 #[tool_handler]
@@ -1317,6 +1369,13 @@ impl PlannerMcp {
     #[tool(description = "Get the work branch name for this task (read-only)")]
     async fn get_param_work_branch(&self) -> String {
         self.get_param_work_branch_impl().await
+    }
+
+    #[tool(
+        description = "Provide a brief and concise report of your results and finish your work. These reports add up to discussion and shorten the context for further agent calls, so they MUST be compact."
+    )]
+    async fn report_results(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.report_results_impl(&params.message).await
     }
 }
 
@@ -1469,6 +1528,13 @@ impl WorkerMcp {
     async fn get_param_work_branch(&self) -> String {
         self.get_param_work_branch_impl().await
     }
+
+    #[tool(
+        description = "Provide a brief and concise report of your results and finish your work. These reports add up to discussion and shorten the context for further agent calls, so they MUST be compact."
+    )]
+    async fn report_results(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.report_results_impl(&params.message).await
+    }
 }
 
 #[tool_handler]
@@ -1601,6 +1667,13 @@ impl ReviewerMcp {
     #[tool(description = "Get the work branch name for this task (read-only)")]
     async fn get_param_work_branch(&self) -> String {
         self.get_param_work_branch_impl().await
+    }
+
+    #[tool(
+        description = "Provide a brief and concise report of your results and finish your work. These reports add up to discussion and shorten the context for further agent calls, so they MUST be compact."
+    )]
+    async fn report_results(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.report_results_impl(&params.message).await
     }
 }
 
