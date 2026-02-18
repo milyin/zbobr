@@ -365,6 +365,8 @@ impl GitHubTaskBackend {
         // Create stages
         let desired_stages = [
             Stage::Pending,
+            Stage::GoPreparation,
+            Stage::Preparation,
             Stage::GoPlanning,
             Stage::Planning,
             Stage::GoWorking,
@@ -815,6 +817,10 @@ impl TaskBackend for GitHubTaskBackend {
 fn stage_description(stage: Stage) -> &'static str {
     match stage {
         Stage::Pending => "Task is under user's control, bot ignores it",
+        Stage::GoPreparation => {
+            "Task parameters must be set by preparator agent, any matching bot can take it"
+        }
+        Stage::Preparation => "Task parameters are being set, other bots ignore it",
         Stage::GoPlanning => "Task must be taken by planner agent, any matching bot can take it",
         Stage::Planning => "Task is in planning, other bots ignore it",
         Stage::GoWorking => "Task must be taken by worker agent, any matching bot can take it",

@@ -136,6 +136,20 @@ macro_rules! mcp_tools {
 }
 
 mcp_tools! {
+    preparator_tools,
+    GET_DESCRIPTION = "get_description",
+    GET_DISCUSSION = "get_discussion",
+    REPORT_ERROR = "report_error",
+    SET_PARAM_DESTINATION_REPOSITORY = "set_param_destination_repository",
+    SET_PARAM_DESTINATION_BRANCH = "set_param_destination_branch",
+    SET_PARAM_WORK_BRANCH_POSTFIX = "set_param_work_branch_postfix",
+    GET_PARAM_DESTINATION_REPOSITORY = "get_param_destination_repository",
+    GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
+    GET_PARAM_WORK_BRANCH = "get_param_work_branch",
+    FINISH_PREPARATION = "finish_preparation",
+}
+
+mcp_tools! {
     planner_tools,
     GET_DESCRIPTION = "get_description",
     GET_DISCUSSION = "get_discussion",
@@ -144,10 +158,7 @@ mcp_tools! {
     REPORT_ERROR = "report_error",
     PULL_WORK = "pull_work",
     GET_PARAM_DESTINATION_REPOSITORY = "get_param_destination_repository",
-    SET_PARAM_DESTINATION_REPOSITORY = "set_param_destination_repository",
-    SET_PARAM_DESTINATION_BRANCH = "set_param_destination_branch",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
-    SET_PARAM_WORK_BRANCH_POSTFIX = "set_param_work_branch_postfix",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
 }
 
@@ -193,6 +204,45 @@ mcp_tools! {
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
 }
 
+/// Generate hardcoded preparator instructions using tool name constants.
+pub fn preparator_instructions() -> String {
+    format!(
+        r#"# Preparator Agent
+
+Read the task description and set the required parameters for the implementation.
+
+## Access Model
+
+    You can access the internet and run local commands. Your restrictions:
+    - Use MCP `{report_error}` only to report technical errors
+    - Use `{ask_user}` to request the user's explanations related to the task
+    - For reading GitHub data: use `git` and `gh` CLI only when no MCP tool provides the needed information
+    - NEVER use git/gh for writing, pushing, or sending data to GitHub
+
+## Workflow
+
+1. Call `{get_description}` to read the user task description
+2. Call `{get_discussion}` for context and prior comments
+3. **Set task parameters** that will guide the implementation:
+    - Call `{set_param_destination_repository}` with the target GitHub repository (owner/repo format, without branch name)
+    - Call `{set_param_destination_branch}` (e.g., "main", "develop")
+    - Call `{set_param_work_branch_postfix}` with the work branch postfix (e.g., "implement-feature") — the full work branch will be formed from prefix, task id and this postfix
+    - Use `{get_param_destination_repository}`, `{get_param_destination_branch}`, `{get_param_work_branch}` to read current values
+4. When finished, the task will move to the planning stage.
+"#,
+        get_description = preparator_tools::GET_DESCRIPTION,
+        get_discussion = preparator_tools::GET_DISCUSSION,
+        report_error = preparator_tools::REPORT_ERROR,
+        ask_user = worker_tools::ASK_USER,
+        set_param_destination_repository = preparator_tools::SET_PARAM_DESTINATION_REPOSITORY,
+        set_param_destination_branch = preparator_tools::SET_PARAM_DESTINATION_BRANCH,
+        set_param_work_branch_postfix = preparator_tools::SET_PARAM_WORK_BRANCH_POSTFIX,
+        get_param_destination_repository = preparator_tools::GET_PARAM_DESTINATION_REPOSITORY,
+        get_param_destination_branch = preparator_tools::GET_PARAM_DESTINATION_BRANCH,
+        get_param_work_branch = preparator_tools::GET_PARAM_WORK_BRANCH,
+    )
+}
+
 /// Generate hardcoded planner instructions using tool name constants.
 pub fn planner_instructions() -> String {
     format!(
@@ -220,11 +270,8 @@ Work autonomously. Do not ask the user for anything.
 1. Call `{get_description}` to read the user task description
 2. Call `{get_plan}` to read an existing plan if there is one
 3. Call `{get_discussion}` for context and prior comments and questions to existing plan
-4. **Set task parameters** that will guide the implementation:
-    - Call `{set_param_destination_repository}` with the target GitHub repository (owner/repo format, without branch name)
-    - Call `{set_param_destination_branch}` (e.g., "main", "develop")
-    - Call `{set_param_work_branch_postfix}` with the work branch postfix (e.g., "implement-feature") — the full work branch will be formed from prefix, task id and this postfix
-    - Use `{get_param_destination_repository}`, `{get_param_destination_branch}`, `{get_param_work_branch}` to read current values
+4. **Task parameters** have already been set by the preparation stage:
+    - Use `{get_param_destination_repository}`, `{get_param_destination_branch}`, `{get_param_work_branch}` to read them if needed.
 5. Pull the destination repository using `{pull_work}` to investigate the codebase, understand the context, and design the plan. This also ensures the repo is cached for the worker later.
 6. Explore the codebase, identify and document the files, crates, modules, and keywords relevant to the task. These help define the scope and guide the worker:
    - List specific files that need to be modified or created
@@ -243,10 +290,7 @@ Work autonomously. Do not ask the user for anything.
         ask_user = worker_tools::ASK_USER,
         pull_work = planner_tools::PULL_WORK,
         get_param_destination_repository = planner_tools::GET_PARAM_DESTINATION_REPOSITORY,
-        set_param_destination_repository = planner_tools::SET_PARAM_DESTINATION_REPOSITORY,
         get_param_destination_branch = planner_tools::GET_PARAM_DESTINATION_BRANCH,
-        set_param_destination_branch = planner_tools::SET_PARAM_DESTINATION_BRANCH,
-        set_param_work_branch_postfix = planner_tools::SET_PARAM_WORK_BRANCH_POSTFIX,
         get_param_work_branch = planner_tools::GET_PARAM_WORK_BRANCH,
     )
 }
@@ -731,14 +775,11 @@ pub trait CommonMcpImpl: Send + Sync {
             Err(e) => format!("Error updating task: {e}"),
         }
     }
-}
 
-/// Planner-specific MCP implementations
-#[allow(async_fn_in_trait)]
-pub trait PlannerMcpImpl: CommonMcpImpl {
     async fn get_param_impl(&self, param: Parameter) -> String {
         tracing::info!(
-            "[planner#{}] get_param_{}",
+            "[{}#{}] get_param_{}",
+            self.role_name(),
             self.session().task_id(),
             param.name()
         );
@@ -751,7 +792,8 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
 
     async fn set_param_impl(&self, param: Parameter, value: Option<String>) -> String {
         tracing::info!(
-            "[planner#{}] set_param_{} value={:?}",
+            "[{}#{}] set_param_{} value={:?}",
+            self.role_name(),
             self.session().task_id(),
             param.name(),
             value
@@ -761,7 +803,55 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
             Err(e) => format!("Error: {e}"),
         }
     }
+}
 
+/// Preparator-specific MCP implementations
+#[allow(async_fn_in_trait)]
+pub trait PreparatorMcpImpl: CommonMcpImpl {
+    async fn get_param_destination_repository_impl(&self) -> String {
+        self.get_param_impl(Parameter::DestinationRepository).await
+    }
+
+    async fn set_param_destination_repository_impl(&self, value: Option<String>) -> String {
+        self.set_param_impl(Parameter::DestinationRepository, value)
+            .await
+    }
+
+    async fn get_param_destination_branch_impl(&self) -> String {
+        self.get_param_impl(Parameter::DestinationBranch).await
+    }
+
+    async fn set_param_destination_branch_impl(&self, value: Option<String>) -> String {
+        self.set_param_impl(Parameter::DestinationBranch, value)
+            .await
+    }
+
+    async fn get_param_work_branch_impl(&self) -> String {
+        self.get_param_impl(Parameter::WorkBranch).await
+    }
+
+    async fn set_param_work_branch_postfix_impl(&self, value: Option<String>) -> String {
+        let branch = value.map(|v| self.session().create_branch_name(&v));
+        self.set_param_impl(Parameter::WorkBranch, branch).await
+    }
+
+    async fn finish_preparation_impl(&self) -> String {
+        tracing::info!("[preparator#{}] finish", self.session().task_id());
+        // Signal that preparation is done and task is ready for planning
+        if let Err(e) = self.session().set_signal(crate::Signal::GoPlan).await {
+            tracing::error!(
+                "Failed to set signal GoPlan for task {} after finishing preparation: {e}",
+                self.session().task_id()
+            );
+            return format!("Preparation complete but error marking task ready for planning: {e}");
+        }
+        "Preparation complete and task ready for planning".to_string()
+    }
+}
+
+/// Planner-specific MCP implementations
+#[allow(async_fn_in_trait)]
+pub trait PlannerMcpImpl: CommonMcpImpl {
     async fn post_plan_impl(&self, plan: &str) -> String {
         tracing::info!("[planner#{}] post_plan", self.session().task_id());
         let plan_text = plan.to_string();
@@ -799,36 +889,8 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
         self.get_param_impl(Parameter::DestinationRepository).await
     }
 
-    async fn set_param_destination_repository_impl(&self, value: Option<String>) -> String {
-        self.set_param_impl(Parameter::DestinationRepository, value)
-            .await
-    }
-
     async fn get_param_destination_branch_impl(&self) -> String {
         self.get_param_impl(Parameter::DestinationBranch).await
-    }
-
-    async fn set_param_destination_branch_impl(&self, value: Option<String>) -> String {
-        self.set_param_impl(Parameter::DestinationBranch, value)
-            .await
-    }
-
-    async fn set_param_work_branch_postfix_impl(&self, value: Option<String>) -> String {
-        tracing::info!(
-            "[planner#{}] set_param_work_branch_postfix value={:?}",
-            self.session().task_id(),
-            value
-        );
-        match value {
-            Some(postfix) => {
-                let full = self.session().create_branch_name(&postfix);
-                self.set_param_impl(Parameter::WorkBranch, Some(full)).await
-            }
-            None => {
-                // Unset work branch parameter
-                self.set_param_impl(Parameter::WorkBranch, None).await
-            }
-        }
     }
 
     async fn get_param_work_branch_impl(&self) -> String {
@@ -839,19 +901,6 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
 /// Worker-specific MCP implementations
 #[allow(async_fn_in_trait)]
 pub trait WorkerMcpImpl: CommonMcpImpl {
-    async fn get_param_impl(&self, param: Parameter) -> String {
-        tracing::info!(
-            "[worker#{}] get_param_{}",
-            self.session().task_id(),
-            param.name()
-        );
-        match self.session().get_parameter(param).await {
-            Ok(Some(value)) => value,
-            Ok(None) => format!("{} is not set", param.name()),
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
     async fn get_param_destination_branch_impl(&self) -> String {
         self.get_param_impl(Parameter::DestinationBranch).await
     }
@@ -942,19 +991,6 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
 /// Reviewer-specific MCP implementations
 #[allow(async_fn_in_trait)]
 pub trait ReviewerMcpImpl: CommonMcpImpl {
-    async fn get_param_impl(&self, param: Parameter) -> String {
-        tracing::info!(
-            "[reviewer#{}] get_param_{}",
-            self.session().task_id(),
-            param.name()
-        );
-        match self.session().get_parameter(param).await {
-            Ok(Some(value)) => value,
-            Ok(None) => format!("{} is not set", param.name()),
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
     async fn get_param_destination_branch_impl(&self) -> String {
         self.get_param_impl(Parameter::DestinationBranch).await
     }
@@ -974,21 +1010,7 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
 
 // -- Merger MCP service --
 
-#[allow(async_fn_in_trait)]
 pub trait MergerMcpImpl: CommonMcpImpl {
-    async fn get_param_impl(&self, param: Parameter) -> String {
-        tracing::info!(
-            "[merger#{}] get_param_{}",
-            self.session().task_id(),
-            param.name()
-        );
-        match self.session().get_parameter(param).await {
-            Ok(Some(value)) => value,
-            Ok(None) => format!("{} is not set", param.name()),
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
     async fn get_param_destination_branch_impl(&self) -> String {
         self.get_param_impl(Parameter::DestinationBranch).await
     }
@@ -1137,6 +1159,120 @@ impl MergerMcp {
     }
 }
 
+// -- Preparator MCP service --
+
+#[derive(Clone)]
+pub struct PreparatorMcp {
+    session: TaskSession,
+    tool_router: ToolRouter<Self>,
+}
+
+impl CommonMcpImpl for PreparatorMcp {
+    fn session(&self) -> &TaskSession {
+        &self.session
+    }
+
+    fn role(&self) -> Role {
+        Role::Preparator
+    }
+}
+
+impl PreparatorMcpImpl for PreparatorMcp {}
+
+#[tool_router]
+impl PreparatorMcp {
+    pub fn new(zbobr: Zbobr, task_id: u64) -> Self {
+        Self {
+            session: zbobr.task_session(task_id),
+            tool_router: Self::tool_router(),
+        }
+    }
+
+    #[tool(description = "Get the current description for this task (read-only)")]
+    async fn get_description(&self) -> String {
+        self.get_description_impl().await
+    }
+
+    #[tool(description = "Get all discussion messages on this task")]
+    async fn get_discussion(&self) -> String {
+        self.get_discussion_impl().await
+    }
+
+    #[tool(description = "Report an error to the user and pause task processing")]
+    async fn report_error(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.report_error_impl(&params.message).await
+    }
+
+    #[tool(description = "Get the destination repository URL for this task (read-only)")]
+    async fn get_param_destination_repository(&self) -> String {
+        self.get_param_destination_repository_impl().await
+    }
+
+    #[tool(description = "Set the destination repository URL for this task (e.g. 'owner/repo')")]
+    async fn set_param_destination_repository(
+        &self,
+        Parameters(params): Parameters<SetDestinationRepositoryParam>,
+    ) -> String {
+        self.set_param_destination_repository_impl(params.value)
+            .await
+    }
+
+    #[tool(description = "Get the destination branch name for this task (read-only)")]
+    async fn get_param_destination_branch(&self) -> String {
+        self.get_param_destination_branch_impl().await
+    }
+
+    #[tool(description = "Set the destination branch name for this task (e.g. 'main')")]
+    async fn set_param_destination_branch(
+        &self,
+        Parameters(params): Parameters<SetDestinationBranchParam>,
+    ) -> String {
+        self.set_param_destination_branch_impl(params.value).await
+    }
+
+    #[tool(
+        description = "Set the work branch postfix for this task (the postfix segment, e.g. 'implement-feature')"
+    )]
+    async fn set_param_work_branch_postfix(
+        &self,
+        Parameters(params): Parameters<SetDestinationBranchParam>,
+    ) -> String {
+        self.set_param_work_branch_postfix_impl(params.value).await
+    }
+
+    #[tool(description = "Get the work branch name for this task (read-only)")]
+    async fn get_param_work_branch(&self) -> String {
+        self.get_param_work_branch_impl().await
+    }
+
+    #[tool(description = "Finish preparation and pass the task to the planning stage")]
+    async fn finish_preparation(&self) -> String {
+        self.finish_preparation_impl().await
+    }
+}
+
+#[tool_handler]
+impl ServerHandler for PreparatorMcp {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo {
+            capabilities: ServerCapabilities::builder().enable_tools().build(),
+            instructions: Some(
+                "Preparator tools: read task description and set implementation parameters."
+                    .to_string(),
+            ),
+            ..Default::default()
+        }
+    }
+}
+
+impl PreparatorMcp {
+    /// Generate API documentation for preparator tools
+    pub fn generate_api_docs() -> String {
+        let tools = Self::tool_router();
+        generate_api_docs_from_router(&tools, "Preparator")
+    }
+}
+
 // -- Planner MCP service --
 
 #[derive(Clone)]
@@ -1203,36 +1339,9 @@ impl PlannerMcp {
         self.get_param_destination_repository_impl().await
     }
 
-    #[tool(description = "Set the destination repository URL for this task (e.g. 'owner/repo')")]
-    async fn set_param_destination_repository(
-        &self,
-        Parameters(params): Parameters<SetDestinationRepositoryParam>,
-    ) -> String {
-        self.set_param_destination_repository_impl(params.value)
-            .await
-    }
-
     #[tool(description = "Get the destination branch name for this task (read-only)")]
     async fn get_param_destination_branch(&self) -> String {
         self.get_param_destination_branch_impl().await
-    }
-
-    #[tool(description = "Set the destination branch name for this task (e.g. 'main')")]
-    async fn set_param_destination_branch(
-        &self,
-        Parameters(params): Parameters<SetDestinationBranchParam>,
-    ) -> String {
-        self.set_param_destination_branch_impl(params.value).await
-    }
-
-    #[tool(
-        description = "Set the work branch postfix for this task (the postfix segment, e.g. 'implement-feature')"
-    )]
-    async fn set_param_work_branch_postfix(
-        &self,
-        Parameters(params): Parameters<SetDestinationBranchParam>,
-    ) -> String {
-        self.set_param_work_branch_postfix_impl(params.value).await
     }
 
     #[tool(description = "Get the work branch name for this task (read-only)")]
@@ -1595,6 +1704,18 @@ pub async fn run_role_mcp_server(
     let path = format!("/{}/{}", role, task_id);
 
     let router = match role {
+        Role::Preparator => {
+            tracing::info!("Creating PreparatorMcp service for task {task_id} at path {path}");
+            let svc = StreamableHttpService::new(
+                move || {
+                    tracing::debug!("Creating new PreparatorMcp instance for task {task_id}");
+                    Ok(PreparatorMcp::new(zbobr.clone(), task_id))
+                },
+                Arc::new(LocalSessionManager::default()),
+                Default::default(),
+            );
+            axum::Router::new().nest_service(&path, svc)
+        }
         Role::Planner => {
             tracing::info!("Creating PlannerMcp service for task {task_id} at path {path}");
             let svc = StreamableHttpService::new(
@@ -1783,6 +1904,7 @@ mod tests {
             copilot_github_token: "copilot-token".to_string(),
             backend: crate::config::BackendType::GitHub,
             cli_tool: Tool::Claude,
+            preparator_prompts: vec![],
             planner_prompts: vec![],
             worker_prompts: vec![],
             reviewer_prompts: vec![],
@@ -1801,6 +1923,24 @@ mod tests {
         let repo_backend: std::sync::Arc<dyn crate::backend::RepoBackend> =
             std::sync::Arc::new(StubRepoBackend);
         Zbobr::new(config, task_backend, repo_backend)
+    }
+
+    #[tokio::test]
+    async fn test_preparator_tools_consistency() {
+        let zbobr = test_zbobr();
+        let preparator = PreparatorMcp::new(zbobr, 123);
+
+        let tools = preparator.tool_router.list_all();
+        let mut tool_names: Vec<_> = tools.iter().map(|t| t.name.as_ref()).collect();
+        tool_names.sort();
+
+        let mut expected_names = preparator_tools::ALL_TOOLS.to_vec();
+        expected_names.sort();
+
+        assert_eq!(
+            tool_names, expected_names,
+            "Exposed preparator tools do not match preparator_tools::ALL_TOOLS"
+        );
     }
 
     #[tokio::test]

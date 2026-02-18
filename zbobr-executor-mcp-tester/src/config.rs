@@ -17,6 +17,7 @@ use zbobr_utility::resolve_path;
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct ZbobrExecutorMcpTesterToml {
+    pub preparation: Option<PathBuf>,
     pub planning: Option<PathBuf>,
     pub working: Option<PathBuf>,
     pub reviewing: Option<PathBuf>,
@@ -26,6 +27,7 @@ pub struct ZbobrExecutorMcpTesterToml {
 /// Resolved configuration for the mcp-tester executor.
 #[derive(Debug, Clone, Default)]
 pub struct ZbobrExecutorMcpTesterConfig {
+    pub preparation: Option<PathBuf>,
     pub planning: Option<PathBuf>,
     pub working: Option<PathBuf>,
     pub reviewing: Option<PathBuf>,
@@ -38,6 +40,7 @@ impl ZbobrExecutorMcpTesterConfig {
     pub fn build(toml: Option<&ZbobrExecutorMcpTesterToml>, config_dir: &Path) -> Self {
         match toml {
             Some(t) => Self {
+                preparation: t.preparation.clone().map(|p| resolve_path(p, config_dir)),
                 planning: t.planning.clone().map(|p| resolve_path(p, config_dir)),
                 working: t.working.clone().map(|p| resolve_path(p, config_dir)),
                 reviewing: t.reviewing.clone().map(|p| resolve_path(p, config_dir)),
@@ -50,6 +53,7 @@ impl ZbobrExecutorMcpTesterConfig {
     /// Get the scenario file path for the given role.
     pub fn scenario_for_role(&self, role: Role) -> Option<&PathBuf> {
         match role {
+            Role::Preparator => self.preparation.as_ref(),
             Role::Planner => self.planning.as_ref(),
             Role::Worker => self.working.as_ref(),
             Role::Reviewer => self.reviewing.as_ref(),

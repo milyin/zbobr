@@ -46,6 +46,8 @@ pub struct ChecklistItem {
 )]
 pub enum Stage {
     Pending,
+    GoPreparation,
+    Preparation,
     GoPlanning,
     Planning,
     GoWorking,
@@ -60,6 +62,8 @@ impl Stage {
     pub fn milestone_name(&self) -> &'static str {
         match self {
             Stage::Pending => "PENDING",
+            Stage::GoPreparation => "GO_PREPARATION",
+            Stage::Preparation => "PREPARATION",
             Stage::GoPlanning => "GO_PLANNING",
             Stage::Planning => "PLANNING",
             Stage::GoWorking => "GO_WORKING",
@@ -74,6 +78,8 @@ impl Stage {
     pub fn from_milestone_name(name: &str) -> Option<Self> {
         match name {
             "PENDING" => Some(Stage::Pending),
+            "GO_PREPARATION" => Some(Stage::GoPreparation),
+            "PREPARATION" => Some(Stage::Preparation),
             "GO_PLANNING" => Some(Stage::GoPlanning),
             "PLANNING" => Some(Stage::Planning),
             "GO_WORKING" => Some(Stage::GoWorking),
@@ -98,6 +104,8 @@ impl std::fmt::Display for Stage {
     Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub enum Role {
+    #[serde(rename = "preparator")]
+    Preparator,
     #[serde(rename = "planner")]
     Planner,
     #[serde(rename = "worker")]
@@ -112,6 +120,7 @@ impl Role {
     /// Returns the role name as a string.
     pub fn as_str(&self) -> &'static str {
         match self {
+            Role::Preparator => "preparator",
             Role::Planner => "planner",
             Role::Worker => "worker",
             Role::Reviewer => "reviewer",
@@ -130,6 +139,7 @@ impl std::str::FromStr for Role {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
+            "preparator" => Ok(Role::Preparator),
             "planner" => Ok(Role::Planner),
             "worker" => Ok(Role::Worker),
             "reviewer" => Ok(Role::Reviewer),

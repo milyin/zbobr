@@ -49,6 +49,10 @@ struct GlobalArgs {
     #[arg(long, env = "ZBOBR_PLANNER_PROMPTS", value_delimiter = ';')]
     planner_prompts: Option<Vec<PathBuf>>,
 
+    /// Semicolon-separated list of prompt files for preparator role
+    #[arg(long, env = "ZBOBR_PREPARATOR_PROMPTS", value_delimiter = ';')]
+    preparator_prompts: Option<Vec<PathBuf>>,
+
     /// Semicolon-separated list of prompt files for worker role
     #[arg(long, env = "ZBOBR_WORKER_PROMPTS", value_delimiter = ';')]
     worker_prompts: Option<Vec<PathBuf>>,
@@ -71,8 +75,8 @@ struct GlobalArgs {
     name = "zbobr",
     about = "AI-powered task dispatcher",
     long_about = "AI-powered task dispatcher that manages tasks through automated stages.\n\n\
-        Tasks flow through: PENDING -> GO_PLANNING -> PLANNING -> GO_WORKING -> WORKING -> GO_REVIEWING -> REVIEWING -> GO_MERGING -> MERGING.\n\
-        Planner roles create implementation plans, worker roles implement them\n\
+        Tasks flow through: PENDING -> GO_PREPARATION -> PREPARATION -> GO_PLANNING -> PLANNING -> GO_WORKING -> WORKING -> GO_REVIEWING -> REVIEWING -> GO_MERGING -> MERGING.\n\
+        Preparator roles set parameters, planner roles create implementation plans, worker roles implement them\n\
         by forking target repositories and creating pull requests, reviewer roles review the changes,\n\
         and merger roles resolve any merge conflicts.\n\n\
         Requires a GitHub token: set GH_TOKEN or GITHUB_TOKEN env var.\n\
@@ -114,6 +118,20 @@ enum Command {
         /// Show what would be removed without actually deleting
         #[arg(long, short = 'n')]
         dry_run: bool,
+    },
+    /// Run preparator role for a specific task (sets destination repository and branches)
+    Prepare {
+        /// Task ID
+        task: u64,
+        /// AI model to use (e.g. "gpt-5-mini", "claude-3-5-sonnet")
+        #[arg(long)]
+        model: Option<String>,
+        /// Port for the MCP server that the agent connects to
+        #[arg(long, default_value = "3000")]
+        port: u16,
+        /// Show the prompt that would be sent to the model instead of running
+        #[arg(long)]
+        show_prompt: bool,
     },
     /// Run planner role for a specific task (creates implementation plan)
     Plan {
@@ -176,6 +194,7 @@ enum Command {
 /// Resolved prompt file paths for planner, worker, and merger.
 struct Prompts {
     base_path: Option<PathBuf>,
+    preparator: Vec<PathBuf>,
     planner: Vec<PathBuf>,
     worker: Vec<PathBuf>,
     reviewer: Vec<PathBuf>,
@@ -191,6 +210,12 @@ fn resolve_prompts(cli: &Cli, config: &ZbobrDispatcherConfig) -> anyhow::Result<
         .planner_prompts
         .clone()
         .unwrap_or_else(|| config.planner_prompts.clone());
+
+    let preparator = cli
+        .global
+        .preparator_prompts
+        .clone()
+        .unwrap_or_else(|| config.preparator_prompts.clone());
 
     let worker = cli
         .global
@@ -215,6 +240,7 @@ fn resolve_prompts(cli: &Cli, config: &ZbobrDispatcherConfig) -> anyhow::Result<
 
     Ok(Prompts {
         base_path,
+        preparator,
         planner,
         worker,
         reviewer,
@@ -269,6 +295,7 @@ fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::Resul
 /// Build full prompt: hardcoded instructions + user context files + auto-generated API docs.
 fn build_full_prompt(user_context: &str, role: Role) -> String {
     let hardcoded = match role {
+        Role::Preparator => zbobr_dispatcher::preparator_instructions(),
         Role::Planner => zbobr_dispatcher::planner_instructions(),
         Role::Worker => zbobr_dispatcher::worker_instructions(),
         Role::Reviewer => zbobr_dispatcher::reviewer_instructions(),
@@ -276,6 +303,7 @@ fn build_full_prompt(user_context: &str, role: Role) -> String {
     };
 
     let api_docs = match role {
+        Role::Preparator => zbobr_dispatcher::PreparatorMcp::generate_api_docs(),
         Role::Planner => zbobr_dispatcher::PlannerMcp::generate_api_docs(),
         Role::Worker => zbobr_dispatcher::WorkerMcp::generate_api_docs(),
         Role::Reviewer => zbobr_dispatcher::ReviewerMcp::generate_api_docs(),
@@ -496,6 +524,37 @@ async fn main() -> anyhow::Result<()> {
         Command::Cleanup { dry_run } => {
             zbobr.cleanup_closed_tasks(dry_run).await?;
         }
+        Command::Prepare {
+            task,
+            model,
+            port,
+            show_prompt,
+        } => {
+            let base_prompt = load_prompts(&prompts.preparator, prompts.base_path.as_ref())?;
+            let full_prompt = build_full_prompt(&base_prompt, Role::Preparator);
+
+            if show_prompt {
+                println!("{}", full_prompt);
+                return Ok(());
+            }
+
+            let model_enum = model
+                .map(|m| m.parse::<Model>())
+                .transpose()
+                .context("Invalid model name")?;
+            run_role_session(
+                &zbobr,
+                task,
+                Role::Preparator,
+                model_enum,
+                port,
+                &full_prompt,
+                &claude_executor_config,
+                &copilot_executor_config,
+                &mcp_tester_executor_config,
+            )
+            .await?;
+        }
         Command::Plan {
             task,
             model,
@@ -671,6 +730,7 @@ async fn run_role_session(
 
     // Set stage
     let stage = match role {
+        Role::Preparator => Stage::Preparation,
         Role::Planner => Stage::Planning,
         Role::Worker => Stage::Working,
         Role::Reviewer => Stage::Reviewing,
@@ -844,10 +904,12 @@ async fn run_manager_loop(
     });
 
     // Load prompts once at loop start and append API docs
+    let preparator_base = load_prompts(&prompts.preparator, prompts.base_path.as_ref())?;
     let planner_base = load_prompts(&prompts.planner, prompts.base_path.as_ref())?;
     let worker_base = load_prompts(&prompts.worker, prompts.base_path.as_ref())?;
     let reviewer_base = load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?;
     let merger_base = load_prompts(&prompts.merger, prompts.base_path.as_ref())?;
+    let preparator_prompt = build_full_prompt(&preparator_base, Role::Preparator);
     let planner_prompt = build_full_prompt(&planner_base, Role::Planner);
     let worker_prompt = build_full_prompt(&worker_base, Role::Worker);
     let reviewer_prompt = build_full_prompt(&reviewer_base, Role::Reviewer);
@@ -860,6 +922,15 @@ async fn run_manager_loop(
     if let Some(ref base) = prompts.base_path {
         tracing::info!("Prompts base path: {}", base.display());
     }
+    tracing::info!(
+        "Preparator prompt files: {}",
+        prompts
+            .preparator
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("; ")
+    );
     tracing::info!(
         "Planner prompt files: {}",
         prompts
@@ -942,6 +1013,44 @@ async fn run_manager_loop(
                     }
                 }
             }
+        }
+
+        // Check for GO_PREPARATION tasks
+        let preparation_tasks = match zbobr
+            .list_tasks_by_stage(Stage::GoPreparation, Some(current_tool))
+            .await
+        {
+            Ok(tasks) => tasks,
+            Err(e) => {
+                tracing::error!("Failed to check GO_PREPARATION tasks: {e}");
+                vec![]
+            }
+        };
+
+        if let Some(task) = preparation_tasks.first() {
+            let task_model = task.model.clone().unwrap_or_else(|| model.clone());
+            tracing::info!(
+                "Found GO_PREPARATION task #{} (tool: {:?}, model: {}) - running preparator",
+                task.id,
+                task.tool,
+                task_model
+            );
+            if let Err(e) = run_role_session(
+                zbobr,
+                task.id,
+                Role::Preparator,
+                Some(task_model),
+                port,
+                &preparator_prompt,
+                claude_executor_config,
+                copilot_executor_config,
+                mcp_tester_executor_config,
+            )
+            .await
+            {
+                tracing::error!("Preparator session failed: {e}");
+            }
+            continue;
         }
 
         // Check for GO_PLANNING tasks
@@ -1098,13 +1207,22 @@ async fn run_manager_loop(
 
         // Log task statistics before sleeping
         tracing::info!(
-            "Task statistics for tool {:?}: GO_PLANNING={}, GO_WORKING={}, GO_REVIEWING={}, GO_MERGING={}",
+            "Task statistics for tool {:?}: GO_PREPARATION={}, GO_PLANNING={}, GO_WORKING={}, GO_REVIEWING={}, GO_MERGING={}",
             current_tool,
+            preparation_tasks.len(),
             planning_tasks.len(),
             working_tasks.len(),
             reviewing_tasks.len(),
             merging_tasks.len()
         );
+
+        if !preparation_tasks.is_empty() {
+            let summary: Vec<_> = preparation_tasks
+                .iter()
+                .map(|t| format!("#{} (tool: {:?}, model: {:?})", t.id, t.tool, t.model))
+                .collect();
+            tracing::info!("  GO_PREPARATION tasks: {}", summary.join(", "));
+        }
 
         if !planning_tasks.is_empty() {
             let summary: Vec<_> = planning_tasks

@@ -10,8 +10,8 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 pub use config::{ZbobrDispatcherConfig, ZbobrDispatcherToml};
 pub use mcp::{
-    MergerMcp, PlannerMcp, ReviewerMcp, WorkerMcp, merger_instructions, planner_instructions,
-    reviewer_instructions, worker_instructions,
+    MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, WorkerMcp, merger_instructions,
+    planner_instructions, preparator_instructions, reviewer_instructions, worker_instructions,
 };
 pub use task::{ChecklistItem, Model, Parameter, Signal, Stage, Task, TaskSession, Tool};
 pub use tool_executor::ToolExecutor;
@@ -190,10 +190,7 @@ impl Zbobr {
     /// - "https://github.com/owner/repo/pull/123"
     /// - "owner/repo#123"
     ///   Returns (repo, branch_name)
-    pub async fn parse_pr_to_repo_branch(
-        &self,
-        pr_ref: &str,
-    ) -> anyhow::Result<(String, String)> {
+    pub async fn parse_pr_to_repo_branch(&self, pr_ref: &str) -> anyhow::Result<(String, String)> {
         self.repo_backend.parse_pr_to_repo_branch(pr_ref).await
     }
 

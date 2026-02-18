@@ -37,6 +37,7 @@ impl std::str::FromStr for BackendType {
 #[serde(default, deny_unknown_fields)]
 pub struct TomlPrompts {
     pub path: Option<PathBuf>,
+    pub preparator: Option<Vec<PathBuf>>,
     pub planner: Option<Vec<PathBuf>>,
     pub worker: Option<Vec<PathBuf>>,
     pub reviewer: Option<Vec<PathBuf>>,
@@ -75,6 +76,8 @@ pub struct ZbobrDispatcherConfig {
     pub backend: BackendType,
     /// CLI tool to use.
     pub cli_tool: Tool,
+    /// Custom prompt files for preparator agent.
+    pub preparator_prompts: Vec<PathBuf>,
     /// Custom prompt files for planner agent.
     pub planner_prompts: Vec<PathBuf>,
     /// Custom prompt files for worker agent.
@@ -102,6 +105,7 @@ impl Default for ZbobrDispatcherConfig {
             copilot_github_token: String::new(),
             backend: BackendType::default(),
             cli_tool: Tool::default(),
+            preparator_prompts: vec!["prompts/preparator.md".into(), "prompts/common.md".into()],
             planner_prompts: vec!["prompts/planner.md".into(), "prompts/common.md".into()],
             worker_prompts: vec!["prompts/worker.md".into(), "prompts/common.md".into()],
             reviewer_prompts: vec!["prompts/reviewer.md".into(), "prompts/common.md".into()],
@@ -167,6 +171,15 @@ impl ZbobrDispatcherConfig {
             .unwrap_or(defaults.work_branch_prefix);
 
         let toml_prompts = toml.and_then(|t| t.prompts.as_ref());
+
+        let preparator_prompts = toml_prompts
+            .and_then(|p| p.preparator.clone())
+            .map(|v| {
+                v.into_iter()
+                    .map(|p| zbobr_utility::resolve_path(p, config_dir))
+                    .collect()
+            })
+            .unwrap_or(defaults.preparator_prompts);
 
         let planner_prompts = toml_prompts
             .and_then(|p| p.planner.clone())
@@ -238,6 +251,7 @@ impl ZbobrDispatcherConfig {
             copilot_github_token,
             backend,
             cli_tool,
+            preparator_prompts,
             planner_prompts,
             worker_prompts,
             reviewer_prompts,
@@ -386,6 +400,7 @@ mod tests {
             git_user_email: Some("test@example.com".into()),
             prompts: Some(TomlPrompts {
                 path: Some(PathBuf::from("/opt/prompts")),
+                preparator: Some(vec![PathBuf::from("pre.md")]),
                 planner: Some(vec![PathBuf::from("p.md")]),
                 worker: Some(vec![PathBuf::from("w.md")]),
                 reviewer: Some(vec![PathBuf::from("r.md")]),
@@ -402,6 +417,10 @@ mod tests {
         assert_eq!(config.cli_tool, Tool::Claude);
         assert_eq!(config.work_branch_prefix, "toml_fix");
         // Relative prompt paths resolved against config_dir
+        assert_eq!(
+            config.preparator_prompts,
+            vec![PathBuf::from("/test/config/pre.md")]
+        );
         assert_eq!(
             config.planner_prompts,
             vec![PathBuf::from("/test/config/p.md")]
