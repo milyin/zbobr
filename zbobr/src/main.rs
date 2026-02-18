@@ -12,7 +12,9 @@ use zbobr_dispatcher::{
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
+use zbobr_repo_backend_fs::FilesystemRepoBackend;
 use zbobr_repo_backend_github::GitHubRepoBackend;
+use zbobr_task_backend_fs::FilesystemTaskBackend;
 use zbobr_task_backend_github::GitHubTaskBackend;
 
 #[derive(Args, Clone)]
@@ -425,7 +427,7 @@ async fn main() -> anyhow::Result<()> {
         .as_ref()
         .and_then(|r| r.task.as_ref())
         .and_then(|t| t.github.as_ref());
-    let _task_backend_fs_toml = root_toml
+    let task_backend_fs_toml = root_toml
         .as_ref()
         .and_then(|r| r.task.as_ref())
         .and_then(|t| t.fs.as_ref());
@@ -433,7 +435,7 @@ async fn main() -> anyhow::Result<()> {
         .as_ref()
         .and_then(|r| r.repo.as_ref())
         .and_then(|r| r.github.as_ref());
-    let _repo_backend_fs_toml = root_toml
+    let repo_backend_fs_toml = root_toml
         .as_ref()
         .and_then(|r| r.repo.as_ref())
         .and_then(|r| r.fs.as_ref());
@@ -454,11 +456,21 @@ async fn main() -> anyhow::Result<()> {
             GitHubTaskBackend::new(task_backend_github_toml, cli.global.task_repo.as_deref())
                 .context("Failed to create GitHub task backend")?,
         ),
+        zbobr_dispatcher::config::BackendType::Filesystem => Arc::new(
+            FilesystemTaskBackend::new(task_backend_fs_toml, None)
+                .context("Failed to create filesystem task backend")?,
+        ),
     };
-    let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = Arc::new(
-        GitHubRepoBackend::new(repo_backend_github_toml, cli.global.fork_owner.as_deref())
-            .context("Failed to create GitHub repo backend")?,
-    );
+    let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = match config.backend {
+        zbobr_dispatcher::config::BackendType::GitHub => Arc::new(
+            GitHubRepoBackend::new(repo_backend_github_toml, cli.global.fork_owner.as_deref())
+                .context("Failed to create GitHub repo backend")?,
+        ),
+        zbobr_dispatcher::config::BackendType::Filesystem => Arc::new(
+            FilesystemRepoBackend::new(repo_backend_fs_toml, None)
+                .context("Failed to create filesystem repo backend")?,
+        ),
+    };
     let zbobr = Zbobr::new(config, task_backend, repo_backend);
     zbobr.validate_connectivity().await?;
     let prompts = resolve_prompts(&cli, zbobr.config())?;

@@ -1,0 +1,15 @@
+name: Planning Description Test
+description: Verify get_description returns the expected task description
+timeout: 30
+stop_on_failure: true
+
+steps:
+  - name: Get task description
+    operation:
+      type: tool_call
+      tool: get_description
+    assertions:
+      - type: success
+      - type: contains
+        path: result
+        value: "Implement the frobnicator module for the bar subsystem"

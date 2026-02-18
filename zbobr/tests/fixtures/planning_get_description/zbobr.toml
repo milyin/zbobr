@@ -1,0 +1,19 @@
+[dispatcher]
+cli_tool = "mcp-tester"
+workspaces = "./workspaces"
+backend = "fs"
+agent_github_token = "dummy-not-used"
+git_user_name = "test-bot"
+git_user_email = "test@example.com"
+
+[dispatcher.prompts]
+planner = []
+
+[task.fs]
+tasks_dir = "./tasks"
+
+[repo.fs]
+repos_dir = "./repos"
+
+[executor.mcp-tester]
+planning = "./scenarios/planning.yml"

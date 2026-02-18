@@ -11,12 +11,15 @@ pub enum BackendType {
     #[serde(rename = "github")]
     #[default]
     GitHub,
+    #[serde(rename = "fs")]
+    Filesystem,
 }
 
 impl std::fmt::Display for BackendType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BackendType::GitHub => write!(f, "github"),
+            BackendType::Filesystem => write!(f, "fs"),
         }
     }
 }
@@ -26,6 +29,7 @@ impl std::str::FromStr for BackendType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "github" => Ok(BackendType::GitHub),
+            "fs" | "filesystem" => Ok(BackendType::Filesystem),
             _ => Err(format!("Unknown backend: {}", s)),
         }
     }
@@ -49,6 +53,7 @@ pub struct TomlPrompts {
 pub struct ZbobrDispatcherToml {
     pub default_model: Option<Model>,
     pub workspaces: Option<PathBuf>,
+    pub backend: Option<BackendType>,
     pub agent_github_token: Option<String>,
     pub copilot_github_token: Option<String>,
     pub cli_tool: Option<Tool>,
@@ -153,7 +158,9 @@ impl ZbobrDispatcherConfig {
             .and_then(|t| t.workspaces.clone())
             .unwrap_or(defaults.workspaces);
 
-        let backend = defaults.backend;
+        let backend = toml
+            .and_then(|t| t.backend)
+            .unwrap_or(defaults.backend);
 
         let cli_tool = toml.and_then(|t| t.cli_tool).unwrap_or(defaults.cli_tool);
 
@@ -347,6 +354,7 @@ mod tests {
         let toml = ZbobrDispatcherToml {
             default_model: Some(Model::Claude3Opus),
             workspaces: Some(PathBuf::from("/tmp/toml-ws")),
+            backend: None,
             agent_github_token: Some("toml-agent-token".into()),
             copilot_github_token: Some("toml-copilot-token".into()),
             cli_tool: Some(Tool::Claude),
@@ -395,8 +403,17 @@ mod tests {
             "github".parse::<BackendType>().unwrap(),
             BackendType::GitHub
         );
+        assert_eq!(
+            "fs".parse::<BackendType>().unwrap(),
+            BackendType::Filesystem
+        );
+        assert_eq!(
+            "filesystem".parse::<BackendType>().unwrap(),
+            BackendType::Filesystem
+        );
         assert!("stub".parse::<BackendType>().is_err());
         assert!("invalid".parse::<BackendType>().is_err());
         assert_eq!(BackendType::GitHub.to_string(), "github");
+        assert_eq!(BackendType::Filesystem.to_string(), "fs");
     }
 }
