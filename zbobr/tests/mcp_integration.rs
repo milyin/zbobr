@@ -1,5 +1,4 @@
 use std::path::Path;
-
 use tempfile::TempDir;
 
 /// Recursively copy a directory tree.
@@ -18,8 +17,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn planning_get_description_via_mcp_tester() {
+async fn run_mcp_test(command: &str, task_id: u64) {
     // Check that mcp-tester is installed; skip gracefully if not
     let mcp_check = tokio::process::Command::new("mcp-tester")
         .arg("--version")
@@ -30,20 +28,23 @@ async fn planning_get_description_via_mcp_tester() {
         return;
     }
 
-    // Copy static fixture to a temp directory (zbobr modifies the environment)
-    let fixture_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/planning_get_description");
+    // Copy static fixture to a temp directory
+    let fixture_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp_dummy");
     let tmp = TempDir::new().expect("failed to create temp dir");
     copy_dir_all(&fixture_dir, tmp.path()).expect("failed to copy fixture");
 
     let config_path = tmp.path().join("zbobr.toml");
     let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
 
-    // Run: zbobr plan 1 --config <temp>/zbobr.toml
-    // Use stderr=inherit so logs stream directly to the terminal
+    // Run: zbobr <command> <task_id> --config <temp>/zbobr.toml
     let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
     let status = tokio::process::Command::new(zbobr_bin)
-        .args(["plan", "1", "--config", config_path.to_str().unwrap()])
+        .args([
+            command,
+            &task_id.to_string(),
+            "--config",
+            config_path.to_str().unwrap(),
+        ])
         .current_dir(tmp.path())
         .env("RUST_LOG", &rust_log)
         .stdout(std::process::Stdio::inherit())
@@ -54,7 +55,33 @@ async fn planning_get_description_via_mcp_tester() {
 
     assert!(
         status.success(),
-        "zbobr plan failed with exit code {:?}",
+        "zbobr {} failed with exit code {:?}",
+        command,
         status.code(),
     );
+}
+
+#[tokio::test]
+async fn preparator_get_description_via_mcp_tester() {
+    run_mcp_test("prepare", 1).await;
+}
+
+#[tokio::test]
+async fn planner_get_description_via_mcp_tester() {
+    run_mcp_test("plan", 1).await;
+}
+
+#[tokio::test]
+async fn worker_get_description_via_mcp_tester() {
+    run_mcp_test("work", 1).await;
+}
+
+#[tokio::test]
+async fn reviewer_get_description_via_mcp_tester() {
+    run_mcp_test("review", 1).await;
+}
+
+#[tokio::test]
+async fn merger_get_description_via_mcp_tester() {
+    run_mcp_test("merge", 1).await;
 }

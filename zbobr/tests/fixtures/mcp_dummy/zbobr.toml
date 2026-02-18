@@ -7,7 +7,11 @@ git_user_name = "test-bot"
 git_user_email = "test@example.com"
 
 [dispatcher.prompts]
+preparator = []
 planner = []
+worker = []
+reviewer = []
+merger = []
 
 [task.fs]
 tasks_dir = "./tasks"
@@ -16,4 +20,8 @@ tasks_dir = "./tasks"
 repos_dir = "./repos"
 
 [executor.mcp-tester]
-planning = "./scenarios/planning.yml"
+preparation = "./scenarios/dummy.yml"
+planning = "./scenarios/dummy.yml"
+working = "./scenarios/dummy.yml"
+reviewing = "./scenarios/dummy.yml"
+merging = "./scenarios/dummy.yml"

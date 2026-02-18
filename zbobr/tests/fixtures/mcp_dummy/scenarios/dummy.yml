@@ -1,4 +1,4 @@
-name: Planning Description Test
+name: Dummy MCP Test
 description: Verify get_description returns the expected task description
 timeout: 30
 stop_on_failure: true
@@ -12,4 +12,4 @@ steps:
       - type: success
       - type: contains
         path: result
-        value: "Implement the frobnicator module for the bar subsystem"
+        value: "Dummy task description"
