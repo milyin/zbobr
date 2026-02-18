@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use zbobr_dispatcher::ZbobrError;
 use zbobr_utility::resolve_path;
 
 /// TOML configuration for the filesystem repo backend.
@@ -49,7 +48,7 @@ impl ZbobrRepoBackendFsConfig {
     }
 
     /// Validate that all required fields are set.
-    pub(crate) fn validate(&self) -> Result<(), ZbobrError> {
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
         // repos_dir can be any path — we'll create it if needed
         Ok(())
     }

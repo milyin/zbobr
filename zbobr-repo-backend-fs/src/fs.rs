@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 
 use crate::config::ZbobrRepoBackendFsConfig;
-use zbobr_dispatcher::ZbobrError;
 use zbobr_dispatcher::backend::RepoBackend;
 
 /// Serializable PR structure for YAML storage.
@@ -34,20 +34,17 @@ impl FilesystemRepoBackend {
         toml: Option<&crate::config::ZbobrRepoBackendFsToml>,
         repos_dir_override: Option<&str>,
         config_dir: &std::path::Path,
-    ) -> Result<Self, ZbobrError> {
+    ) -> anyhow::Result<Self> {
         let config = ZbobrRepoBackendFsConfig::build(toml, repos_dir_override, config_dir);
         config.validate()?;
         Ok(Self { config })
     }
 
     /// Extract a short repo name from a local path (last path component).
-    fn repo_name_from_path(target_repo: &str) -> Result<String, ZbobrError> {
+    fn repo_name_from_path(target_repo: &str) -> anyhow::Result<String> {
         let path = Path::new(target_repo);
         let name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
-            ZbobrError::Config(format!(
-                "Cannot extract repo name from path: {}",
-                target_repo
-            ))
+            anyhow::anyhow!("Cannot extract repo name from path: {}", target_repo)
         })?;
         Ok(name.to_string())
     }
@@ -58,11 +55,11 @@ impl FilesystemRepoBackend {
     }
 
     /// Read and increment the next PR ID counter for a repo.
-    async fn get_next_pr_id(&self, repo_name: &str) -> Result<u64, ZbobrError> {
+    async fn get_next_pr_id(&self, repo_name: &str) -> anyhow::Result<u64> {
         let prs_dir = self.prs_dir(repo_name);
         fs::create_dir_all(&prs_dir)
             .await
-            .map_err(|e| ZbobrError::Other(format!("Failed to create prs directory: {}", e)))?;
+            .context("Failed to create prs directory")?;
 
         let path = prs_dir.join("next_pr_id.txt");
 
@@ -74,7 +71,7 @@ impl FilesystemRepoBackend {
         let next_id = current_id + 1;
         fs::write(&path, next_id.to_string())
             .await
-            .map_err(|e| ZbobrError::Other(format!("Failed to write next PR ID: {}", e)))?;
+            .context("Failed to write next PR ID")?;
 
         Ok(current_id)
     }
@@ -88,7 +85,7 @@ impl FilesystemRepoBackend {
         base_branch: &str,
         title: &str,
         body: &str,
-    ) -> Result<String, ZbobrError> {
+    ) -> anyhow::Result<String> {
         let pr_id = self.get_next_pr_id(repo_name).await?;
         let prs_dir = self.prs_dir(repo_name);
         let pr_path = prs_dir.join(format!("{}.yaml", pr_id));
@@ -103,12 +100,11 @@ impl FilesystemRepoBackend {
             created_at: chrono_now(),
         };
 
-        let yaml = serde_yaml::to_string(&pr_file)
-            .map_err(|e| ZbobrError::Other(format!("Failed to serialize PR: {}", e)))?;
+        let yaml = serde_yaml::to_string(&pr_file).context("Failed to serialize PR")?;
 
         fs::write(&pr_path, yaml)
             .await
-            .map_err(|e| ZbobrError::Other(format!("Failed to write PR file: {}", e)))?;
+            .context("Failed to write PR file")?;
 
         tracing::info!("Created PR #{} at {}", pr_id, pr_path.display());
 
@@ -116,18 +112,16 @@ impl FilesystemRepoBackend {
     }
 
     /// Get the current branch name in a git working directory.
-    async fn current_branch(work_dir: &Path) -> Result<String, ZbobrError> {
+    async fn current_branch(work_dir: &Path) -> anyhow::Result<String> {
         let out = tokio::process::Command::new("git")
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
             .current_dir(work_dir)
             .output()
             .await
-            .map_err(|e| ZbobrError::Other(format!("Failed to determine current branch: {}", e)))?;
+            .context("Failed to determine current branch")?;
 
         if !out.status.success() {
-            return Err(ZbobrError::Other(
-                "Failed to determine current branch".to_string(),
-            ));
+            anyhow::bail!("Failed to determine current branch");
         }
 
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
@@ -150,7 +144,7 @@ impl RepoBackend for FilesystemRepoBackend {
         target_repo: &str,
         branch: &str,
         workspace_path: &Path,
-    ) -> Result<PathBuf, ZbobrError> {
+    ) -> anyhow::Result<PathBuf> {
         let repo_name = Self::repo_name_from_path(target_repo)?;
         let work_dir = workspace_path.join(&repo_name);
 
@@ -170,10 +164,7 @@ impl RepoBackend for FilesystemRepoBackend {
                 .status()
                 .await?;
             if !status.success() {
-                return Err(ZbobrError::Other(format!(
-                    "Failed to clone {}",
-                    target_repo
-                )));
+                anyhow::bail!("Failed to clone {}", target_repo);
             }
         } else {
             tracing::info!("Updating {} in {}", target_repo, work_dir.display());
@@ -204,10 +195,7 @@ impl RepoBackend for FilesystemRepoBackend {
                 .status()
                 .await?;
             if !checkout_remote_status.success() {
-                return Err(ZbobrError::Other(format!(
-                    "Failed to checkout branch {}",
-                    branch
-                )));
+                anyhow::bail!("Failed to checkout branch {}", branch);
             }
         }
 
@@ -219,14 +207,14 @@ impl RepoBackend for FilesystemRepoBackend {
         target_repo: &str,
         branch: &str,
         workspace_path: &Path,
-    ) -> Result<PathBuf, ZbobrError> {
+    ) -> anyhow::Result<PathBuf> {
         // In FS mode, clone_readonly is identical to clone_and_setup
         // (no fork concept to skip)
         self.clone_and_setup(target_repo, branch, workspace_path)
             .await
     }
 
-    async fn sync_fork(&self, _target_repo: &str, _branch: &str) -> Result<(), ZbobrError> {
+    async fn sync_fork(&self, _target_repo: &str, _branch: &str) -> anyhow::Result<()> {
         // No-op for filesystem backend — there is no remote fork to sync
         tracing::debug!("sync_fork is a no-op for filesystem backend");
         Ok(())
@@ -237,7 +225,7 @@ impl RepoBackend for FilesystemRepoBackend {
         work_dir: &Path,
         _target_repo: &str,
         work_branch: &str,
-    ) -> Result<(), ZbobrError> {
+    ) -> anyhow::Result<()> {
         // In FS mode, origin already points to the local source repo.
         // Just push the work branch.
         tracing::info!("Pushing work branch '{}' to origin", work_branch);
@@ -248,10 +236,7 @@ impl RepoBackend for FilesystemRepoBackend {
             .await?;
 
         if !push_status.success() {
-            return Err(ZbobrError::Other(format!(
-                "Failed to push work branch '{}' to origin",
-                work_branch
-            )));
+            anyhow::bail!("Failed to push work branch '{}' to origin", work_branch);
         }
 
         Ok(())
@@ -263,15 +248,12 @@ impl RepoBackend for FilesystemRepoBackend {
         workspace_path: &Path,
         pr_title: &str,
         pr_body: &str,
-    ) -> Result<String, ZbobrError> {
+    ) -> anyhow::Result<String> {
         let repo_name = Self::repo_name_from_path(target_repo)?;
         let work_dir = workspace_path.join(&repo_name);
 
         if !work_dir.exists() {
-            return Err(ZbobrError::Other(format!(
-                "Work directory does not exist: {}",
-                work_dir.display()
-            )));
+            anyhow::bail!("Work directory does not exist: {}", work_dir.display());
         }
 
         let branch_name = Self::current_branch(&work_dir).await?;
@@ -284,7 +266,7 @@ impl RepoBackend for FilesystemRepoBackend {
             .status()
             .await?;
         if !status.success() {
-            return Err(ZbobrError::Other("Failed to push to origin".into()));
+            anyhow::bail!("Failed to push to origin");
         }
 
         // Determine the base branch (default branch of origin)
@@ -311,7 +293,7 @@ impl RepoBackend for FilesystemRepoBackend {
         destination_branch: &str,
         pr_title: &str,
         pr_body: &str,
-    ) -> Result<String, ZbobrError> {
+    ) -> anyhow::Result<String> {
         // In FS mode, "fork" is just the local clone. Create the PR YAML.
         // repo_name here is just the short name (not a full path), so we store
         // the repo field as the repo_name — callers can correlate.
@@ -326,39 +308,36 @@ impl RepoBackend for FilesystemRepoBackend {
         .await
     }
 
-    async fn parse_pr_to_repo_branch(&self, pr_ref: &str) -> Result<(String, String), ZbobrError> {
+    async fn parse_pr_to_repo_branch(&self, pr_ref: &str) -> anyhow::Result<(String, String)> {
         // pr_ref is a path to a PR YAML file
-        let content = fs::read_to_string(pr_ref).await.map_err(|e| {
-            ZbobrError::Other(format!("Failed to read PR file '{}': {}", pr_ref, e))
-        })?;
+        let content = fs::read_to_string(pr_ref)
+            .await
+            .with_context(|| format!("Failed to read PR file '{}'", pr_ref))?;
 
-        let pr_file: PrFile = serde_yaml::from_str(&content).map_err(|e| {
-            ZbobrError::Other(format!("Failed to parse PR file '{}': {}", pr_ref, e))
-        })?;
+        let pr_file: PrFile = serde_yaml::from_str(&content)
+            .with_context(|| format!("Failed to parse PR file '{}'", pr_ref))?;
 
         Ok((pr_file.repo, pr_file.head_branch))
     }
 
-    async fn validate_connectivity(&self) -> Result<(), ZbobrError> {
+    async fn validate_connectivity(&self) -> anyhow::Result<()> {
         // Check that we can write to repos_dir
         fs::create_dir_all(&self.config.repos_dir)
             .await
-            .map_err(|e| {
-                ZbobrError::Config(format!(
-                    "Cannot access repos directory '{}': {}",
-                    self.config.repos_dir.display(),
-                    e
-                ))
+            .with_context(|| {
+                format!(
+                    "Cannot access repos directory '{}'",
+                    self.config.repos_dir.display()
+                )
             })?;
 
         // Try to write a test file
         let test_path = self.config.repos_dir.join(".test");
-        fs::write(&test_path, "test").await.map_err(|e| {
-            ZbobrError::Config(format!(
-                "Cannot write to repos directory '{}': {}",
-                self.config.repos_dir.display(),
-                e
-            ))
+        fs::write(&test_path, "test").await.with_context(|| {
+            format!(
+                "Cannot write to repos directory '{}'",
+                self.config.repos_dir.display()
+            )
         })?;
 
         // Clean up
@@ -378,18 +357,16 @@ impl RepoBackend for FilesystemRepoBackend {
 
 impl FilesystemRepoBackend {
     /// Get the default branch of origin remote.
-    async fn default_branch(work_dir: &Path) -> Result<String, ZbobrError> {
+    async fn default_branch(work_dir: &Path) -> anyhow::Result<String> {
         let out = tokio::process::Command::new("git")
             .args(["symbolic-ref", "refs/remotes/origin/HEAD", "--short"])
             .current_dir(work_dir)
             .output()
             .await
-            .map_err(|e| ZbobrError::Other(format!("Failed to determine default branch: {}", e)))?;
+            .context("Failed to determine default branch")?;
 
         if !out.status.success() {
-            return Err(ZbobrError::Other(
-                "Failed to determine default branch".to_string(),
-            ));
+            anyhow::bail!("Failed to determine default branch");
         }
 
         let full_ref = String::from_utf8_lossy(&out.stdout).trim().to_string();

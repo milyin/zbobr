@@ -1,5 +1,3 @@
-use zbobr_dispatcher::ZbobrError;
-
 /// TOML configuration for the GitHub task backend.
 /// All fields are optional — missing fields fall back to defaults.
 #[derive(Debug, Clone, serde::Deserialize, Default)]
@@ -45,32 +43,30 @@ impl ZbobrTaskBackendGithubConfig {
     }
 
     /// Validate that all required fields are set.
-    pub(crate) fn validate(&self) -> Result<(), ZbobrError> {
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
         if self.task_repo.is_empty() {
-            return Err(ZbobrError::Config(
+            anyhow::bail!(
                 "task repo not set. Use --task-repo owner/repo or set task_repo in the config file.\n  \
                  This is the GitHub repository whose issues the dispatcher processes."
-                    .into(),
-            ));
+            );
         }
         if self.github_token.is_empty() {
-            return Err(ZbobrError::Config(
+            anyhow::bail!(
                 "GitHub token not set. Set GH_TOKEN or GITHUB_TOKEN env var, or set github_token in [task.github] config.\n  \
                  This token needs read/write access to the tasks repo."
-                    .into(),
-            ));
+            );
         }
         Ok(())
     }
 
     /// Parse "owner/repo" into (owner, repo).
-    pub(crate) fn parse_repo(&self) -> Result<(&str, &str), ZbobrError> {
+    pub(crate) fn parse_repo(&self) -> anyhow::Result<(&str, &str)> {
         let parts: Vec<&str> = self.task_repo.splitn(2, '/').collect();
         if parts.len() != 2 {
-            return Err(ZbobrError::Config(format!(
+            anyhow::bail!(
                 "Invalid task_repo format '{}', expected 'owner/repo'",
                 self.task_repo
-            )));
+            );
         }
         Ok((parts[0], parts[1]))
     }

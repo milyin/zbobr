@@ -454,12 +454,10 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|r| r.fs.as_ref());
 
     let executor_toml = root_toml.as_ref().and_then(|r| r.executor.as_ref());
-    let claude_executor_config = ZbobrExecutorClaudeConfig::build(
-        executor_toml.and_then(|e| e.claude.as_ref()),
-    );
-    let copilot_executor_config = ZbobrExecutorCopilotConfig::build(
-        executor_toml.and_then(|e| e.copilot.as_ref()),
-    );
+    let claude_executor_config =
+        ZbobrExecutorClaudeConfig::build(executor_toml.and_then(|e| e.claude.as_ref()));
+    let copilot_executor_config =
+        ZbobrExecutorCopilotConfig::build(executor_toml.and_then(|e| e.copilot.as_ref()));
     let mcp_tester_executor_config = ZbobrExecutorMcpTesterConfig::build(
         executor_toml.and_then(|e| e.mcp_tester.as_ref()),
         &config_dir,
@@ -514,7 +512,18 @@ async fn main() -> anyhow::Result<()> {
                 .map(|m| m.parse::<Model>())
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            run_role_session(&zbobr, task, Role::Planner, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config, &mcp_tester_executor_config).await?;
+            run_role_session(
+                &zbobr,
+                task,
+                Role::Planner,
+                model_enum,
+                port,
+                &full_prompt,
+                &claude_executor_config,
+                &copilot_executor_config,
+                &mcp_tester_executor_config,
+            )
+            .await?;
         }
         Command::Work {
             task,
@@ -534,7 +543,18 @@ async fn main() -> anyhow::Result<()> {
                 .map(|m| m.parse::<Model>())
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            run_role_session(&zbobr, task, Role::Worker, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config, &mcp_tester_executor_config).await?;
+            run_role_session(
+                &zbobr,
+                task,
+                Role::Worker,
+                model_enum,
+                port,
+                &full_prompt,
+                &claude_executor_config,
+                &copilot_executor_config,
+                &mcp_tester_executor_config,
+            )
+            .await?;
         }
         Command::Review {
             task,
@@ -554,7 +574,18 @@ async fn main() -> anyhow::Result<()> {
                 .map(|m| m.parse::<Model>())
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            run_role_session(&zbobr, task, Role::Reviewer, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config, &mcp_tester_executor_config).await?;
+            run_role_session(
+                &zbobr,
+                task,
+                Role::Reviewer,
+                model_enum,
+                port,
+                &full_prompt,
+                &claude_executor_config,
+                &copilot_executor_config,
+                &mcp_tester_executor_config,
+            )
+            .await?;
         }
         Command::Merge {
             task,
@@ -574,7 +605,18 @@ async fn main() -> anyhow::Result<()> {
                 .map(|m| m.parse::<Model>())
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            run_role_session(&zbobr, task, Role::Merger, model_enum, port, &full_prompt, &claude_executor_config, &copilot_executor_config, &mcp_tester_executor_config).await?;
+            run_role_session(
+                &zbobr,
+                task,
+                Role::Merger,
+                model_enum,
+                port,
+                &full_prompt,
+                &claude_executor_config,
+                &copilot_executor_config,
+                &mcp_tester_executor_config,
+            )
+            .await?;
         }
         Command::Loop {
             interval,
@@ -606,6 +648,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// Start MCP server, invoke CLI tool (copilot/claude/stub), and handle stage transitions.
+#[allow(clippy::too_many_arguments)]
 async fn run_role_session(
     zbobr: &Zbobr,
     task_id: u64,
@@ -779,6 +822,7 @@ async fn run_role_session(
 }
 
 /// Main manager loop: polls for tasks and spawns sessions.
+#[allow(clippy::too_many_arguments)]
 async fn run_manager_loop(
     zbobr: &Zbobr,
     interval_secs: u64,

@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 
 use crate::config::ZbobrTaskBackendFsConfig;
 use zbobr_dispatcher::backend::TaskBackend;
-use zbobr_dispatcher::{ChecklistItem, Model, Parameter, Stage, Task, Tool, ZbobrError};
+use zbobr_dispatcher::{ChecklistItem, Model, Parameter, Stage, Task, Tool};
 
 /// Serializable task structure for YAML storage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,30 +28,30 @@ struct TaskFile {
 }
 
 impl TaskFile {
-    fn to_task(&self) -> Result<Task, ZbobrError> {
+    fn to_task(&self) -> anyhow::Result<Task> {
         let stage = Stage::from_milestone_name(&self.stage)
-            .ok_or_else(|| ZbobrError::Other(format!("Invalid stage: {}", self.stage)))?;
+            .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", self.stage))?;
 
         let tool = self
             .tool
             .as_ref()
             .map(|s| s.parse())
             .transpose()
-            .map_err(|e: String| ZbobrError::Other(e))?;
+            .map_err(|e: String| anyhow::anyhow!(e))?;
 
         let model = self
             .model
             .as_ref()
             .map(|s| s.parse())
             .transpose()
-            .map_err(|e: String| ZbobrError::Other(e))?;
+            .map_err(|e: String| anyhow::anyhow!(e))?;
 
         let signal = self
             .signal
             .as_ref()
             .map(|s| s.parse())
             .transpose()
-            .map_err(|e: String| ZbobrError::Other(e))?;
+            .map_err(|e: String| anyhow::anyhow!(e))?;
 
         let parameters: Result<HashMap<Parameter, String>, String> = self
             .parameters
@@ -66,7 +67,7 @@ impl TaskFile {
                 Ok((param, v.clone()))
             })
             .collect();
-        let parameters = parameters.map_err(ZbobrError::Other)?;
+        let parameters = parameters.map_err(|e| anyhow::anyhow!(e))?;
 
         Ok(Task {
             id: self.id,
@@ -123,7 +124,7 @@ impl FilesystemTaskBackend {
         toml: Option<&crate::config::ZbobrTaskBackendFsToml>,
         tasks_dir_override: Option<&str>,
         config_dir: &std::path::Path,
-    ) -> Result<Self, ZbobrError> {
+    ) -> anyhow::Result<Self> {
         let config = ZbobrTaskBackendFsConfig::build(toml, tasks_dir_override, config_dir);
         config.validate()?;
         Ok(Self { config })
@@ -145,13 +146,13 @@ impl FilesystemTaskBackend {
     }
 
     /// Read and increment the next task ID counter.
-    async fn get_next_id(&self) -> Result<u64, ZbobrError> {
+    async fn get_next_id(&self) -> anyhow::Result<u64> {
         let path = self.next_id_path();
 
         // Ensure the tasks directory exists
         fs::create_dir_all(&self.config.tasks_dir)
             .await
-            .map_err(|e| ZbobrError::Other(format!("Failed to create tasks directory: {}", e)))?;
+            .context("Failed to create tasks directory")?;
 
         // Read current ID or start at 1
         let current_id = match fs::read_to_string(&path).await {
@@ -163,47 +164,44 @@ impl FilesystemTaskBackend {
         let next_id = current_id + 1;
         fs::write(&path, next_id.to_string())
             .await
-            .map_err(|e| ZbobrError::Other(format!("Failed to write next ID: {}", e)))?;
+            .context("Failed to write next ID")?;
 
         Ok(current_id)
     }
 
     /// Read a task file from disk.
-    async fn read_task_file(&self, id: u64) -> Result<TaskFile, ZbobrError> {
+    async fn read_task_file(&self, id: u64) -> anyhow::Result<TaskFile> {
         let path = self.task_path(id);
         let content = fs::read_to_string(&path)
             .await
-            .map_err(|e| ZbobrError::Other(format!("Failed to read task file {}: {}", id, e)))?;
+            .with_context(|| format!("Failed to read task file {}", id))?;
 
-        serde_yaml::from_str(&content)
-            .map_err(|e| ZbobrError::Other(format!("Failed to parse task file {}: {}", id, e)))
+        serde_yaml::from_str(&content).with_context(|| format!("Failed to parse task file {}", id))
     }
 
     /// Write a task file to disk.
-    async fn write_task_file(&self, task_file: &TaskFile) -> Result<(), ZbobrError> {
+    async fn write_task_file(&self, task_file: &TaskFile) -> anyhow::Result<()> {
         let path = self.task_path(task_file.id);
 
         // Ensure directory exists
         fs::create_dir_all(&self.config.tasks_dir)
             .await
-            .map_err(|e| ZbobrError::Other(format!("Failed to create tasks directory: {}", e)))?;
+            .context("Failed to create tasks directory")?;
 
-        let yaml = serde_yaml::to_string(task_file)
-            .map_err(|e| ZbobrError::Other(format!("Failed to serialize task: {}", e)))?;
+        let yaml = serde_yaml::to_string(task_file).context("Failed to serialize task")?;
 
         fs::write(&path, yaml)
             .await
-            .map_err(|e| ZbobrError::Other(format!("Failed to write task file: {}", e)))
+            .context("Failed to write task file")
     }
 
     /// Read comments from disk.
-    async fn read_comments(&self, id: u64) -> Result<Vec<String>, ZbobrError> {
+    async fn read_comments(&self, id: u64) -> anyhow::Result<Vec<String>> {
         let path = self.comments_path(id);
         match fs::read_to_string(&path).await {
             Ok(content) => {
-                let comments_file: CommentsFile = serde_yaml::from_str(&content).map_err(|e| {
-                    ZbobrError::Other(format!("Failed to parse comments file: {}", e))
-                })?;
+                let comments_file: CommentsFile =
+                    serde_yaml::from_str(&content).context("Failed to parse comments file")?;
                 Ok(comments_file.comments)
             }
             Err(_) => Ok(vec![]), // No comments file yet
@@ -211,20 +209,19 @@ impl FilesystemTaskBackend {
     }
 
     /// Write comments to disk.
-    async fn write_comments(&self, id: u64, comments: Vec<String>) -> Result<(), ZbobrError> {
+    async fn write_comments(&self, id: u64, comments: Vec<String>) -> anyhow::Result<()> {
         let path = self.comments_path(id);
 
         let comments_file = CommentsFile { comments };
-        let yaml = serde_yaml::to_string(&comments_file)
-            .map_err(|e| ZbobrError::Other(format!("Failed to serialize comments: {}", e)))?;
+        let yaml = serde_yaml::to_string(&comments_file).context("Failed to serialize comments")?;
 
         fs::write(&path, yaml)
             .await
-            .map_err(|e| ZbobrError::Other(format!("Failed to write comments file: {}", e)))
+            .context("Failed to write comments file")
     }
 
     /// List all task files in the directory.
-    async fn list_task_files(&self) -> Result<Vec<u64>, ZbobrError> {
+    async fn list_task_files(&self) -> anyhow::Result<Vec<u64>> {
         let mut task_ids = Vec::new();
 
         // Check if directory exists
@@ -234,12 +231,12 @@ impl FilesystemTaskBackend {
 
         let mut entries = fs::read_dir(&self.config.tasks_dir)
             .await
-            .map_err(|e| ZbobrError::Other(format!("Failed to read tasks directory: {}", e)))?;
+            .context("Failed to read tasks directory")?;
 
         while let Some(entry) = entries
             .next_entry()
             .await
-            .map_err(|e| ZbobrError::Other(format!("Failed to read directory entry: {}", e)))?
+            .context("Failed to read directory entry")?
         {
             let path = entry.path();
             if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
@@ -260,7 +257,7 @@ impl FilesystemTaskBackend {
 
 #[async_trait]
 impl TaskBackend for FilesystemTaskBackend {
-    async fn get_task(&self, id: u64) -> Result<Task, ZbobrError> {
+    async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
         let task_file = self.read_task_file(id).await?;
         let mut task = task_file.to_task()?;
 
@@ -278,7 +275,7 @@ impl TaskBackend for FilesystemTaskBackend {
         tool: Option<Tool>,
         model: Option<Model>,
         parameters: HashMap<Parameter, String>,
-    ) -> Result<u64, ZbobrError> {
+    ) -> anyhow::Result<u64> {
         let id = self.get_next_id().await?;
 
         let task = Task {
@@ -304,7 +301,7 @@ impl TaskBackend for FilesystemTaskBackend {
         Ok(id)
     }
 
-    async fn close_task(&self, id: u64) -> Result<(), ZbobrError> {
+    async fn close_task(&self, id: u64) -> anyhow::Result<()> {
         let mut task_file = self.read_task_file(id).await?;
         task_file.closed = true;
         self.write_task_file(&task_file).await?;
@@ -313,7 +310,7 @@ impl TaskBackend for FilesystemTaskBackend {
         Ok(())
     }
 
-    async fn is_task_closed(&self, id: u64) -> Result<bool, ZbobrError> {
+    async fn is_task_closed(&self, id: u64) -> anyhow::Result<bool> {
         let task_file = self.read_task_file(id).await?;
         Ok(task_file.closed)
     }
@@ -322,7 +319,7 @@ impl TaskBackend for FilesystemTaskBackend {
         &self,
         id: u64,
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-    ) -> Result<(), ZbobrError> {
+    ) -> anyhow::Result<()> {
         // Read current task
         let task = self.get_task(id).await?;
         let was_closed = self.is_task_closed(id).await?;
@@ -342,7 +339,7 @@ impl TaskBackend for FilesystemTaskBackend {
         &self,
         stage: Stage,
         tool: Option<Tool>,
-    ) -> Result<Vec<Task>, ZbobrError> {
+    ) -> anyhow::Result<Vec<Task>> {
         let task_ids = self.list_task_files().await?;
         let mut matching_tasks = Vec::new();
 
@@ -384,7 +381,7 @@ impl TaskBackend for FilesystemTaskBackend {
         Ok(matching_tasks)
     }
 
-    async fn get_task_comments(&self, id: u64) -> Result<Vec<String>, ZbobrError> {
+    async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<String>> {
         self.read_comments(id).await
     }
 
@@ -394,7 +391,7 @@ impl TaskBackend for FilesystemTaskBackend {
         body: &str,
         role: &str,
         hostname: &str,
-    ) -> Result<(), ZbobrError> {
+    ) -> anyhow::Result<()> {
         let mut comments = self.read_comments(id).await?;
         let formatted_comment = format!("[{}@{}] {}", role, hostname, body);
         comments.push(formatted_comment);
@@ -404,11 +401,11 @@ impl TaskBackend for FilesystemTaskBackend {
         Ok(())
     }
 
-    async fn setup(&self, _force: bool) -> Result<(), ZbobrError> {
+    async fn setup(&self, _force: bool) -> anyhow::Result<()> {
         // Create the tasks directory if it doesn't exist
         fs::create_dir_all(&self.config.tasks_dir)
             .await
-            .map_err(|e| ZbobrError::Other(format!("Failed to create tasks directory: {}", e)))?;
+            .context("Failed to create tasks directory")?;
 
         tracing::info!(
             "Filesystem backend setup complete: {}",
@@ -417,26 +414,24 @@ impl TaskBackend for FilesystemTaskBackend {
         Ok(())
     }
 
-    async fn validate_connectivity(&self) -> Result<(), ZbobrError> {
+    async fn validate_connectivity(&self) -> anyhow::Result<()> {
         // Check if we can write to the tasks directory
         fs::create_dir_all(&self.config.tasks_dir)
             .await
-            .map_err(|e| {
-                ZbobrError::Config(format!(
-                    "Cannot access tasks directory '{}': {}",
-                    self.config.tasks_dir.display(),
-                    e
-                ))
+            .with_context(|| {
+                format!(
+                    "Cannot access tasks directory '{}'",
+                    self.config.tasks_dir.display()
+                )
             })?;
 
         // Try to write a test file
         let test_path = self.config.tasks_dir.join(".test");
-        fs::write(&test_path, "test").await.map_err(|e| {
-            ZbobrError::Config(format!(
-                "Cannot write to tasks directory '{}': {}",
-                self.config.tasks_dir.display(),
-                e
-            ))
+        fs::write(&test_path, "test").await.with_context(|| {
+            format!(
+                "Cannot write to tasks directory '{}'",
+                self.config.tasks_dir.display()
+            )
         })?;
 
         // Clean up test file

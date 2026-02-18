@@ -1,5 +1,3 @@
-use zbobr_dispatcher::ZbobrError;
-
 /// TOML configuration for the GitHub repo backend.
 /// All fields are optional — missing fields fall back to defaults.
 #[derive(Debug, Clone, serde::Deserialize, Default)]
@@ -45,20 +43,18 @@ impl ZbobrRepoBackendGithubConfig {
     }
 
     /// Validate that all required fields are set.
-    pub(crate) fn validate(&self) -> Result<(), ZbobrError> {
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
         if self.fork_owner.is_empty() {
-            return Err(ZbobrError::Config(
+            anyhow::bail!(
                 "fork owner not set. Use --fork-owner NAME or set fork_owner in [repo.github] config.\n  \
                  This is the GitHub user or organization where target repos are forked for implementation."
-                    .into(),
-            ));
+            );
         }
         if self.github_token.is_empty() {
-            return Err(ZbobrError::Config(
+            anyhow::bail!(
                 "GitHub token not set. Set GH_TOKEN or GITHUB_TOKEN env var, or set github_token in [repo.github] config.\n  \
                  This token needs read/write access to the organization where repos are forked."
-                    .into(),
-            ));
+            );
         }
         Ok(())
     }

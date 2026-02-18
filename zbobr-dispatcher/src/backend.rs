@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use anyhow::Context;
 use async_trait::async_trait;
 
-use crate::{Model, Parameter, Stage, Task, Tool, ZbobrError};
+use crate::{Model, Parameter, Stage, Task, Tool};
 
 
 /// Configure git user settings for a repository.
@@ -12,17 +13,17 @@ pub async fn configure_git_user(
     work_dir: &std::path::Path,
     git_user_name: &str,
     git_user_email: &str,
-) -> Result<(), ZbobrError> {
+) -> anyhow::Result<()> {
     // Set git user configuration for this repository
     let config_user_status = tokio::process::Command::new("git")
         .args(["config", "--local", "user.name", git_user_name])
         .current_dir(work_dir)
         .status()
         .await
-        .map_err(|e| ZbobrError::Other(format!("Failed to set git user.name: {}", e)))?;
+        .context("Failed to set git user.name")?;
 
     if !config_user_status.success() {
-        return Err(ZbobrError::Other("git config user.name failed".to_string()));
+        anyhow::bail!("git config user.name failed");
     }
 
     let config_email_status = tokio::process::Command::new("git")
@@ -30,12 +31,10 @@ pub async fn configure_git_user(
         .current_dir(work_dir)
         .status()
         .await
-        .map_err(|e| ZbobrError::Other(format!("Failed to set git user.email: {}", e)))?;
+        .context("Failed to set git user.email")?;
 
     if !config_email_status.success() {
-        return Err(ZbobrError::Other(
-            "git config user.email failed".to_string(),
-        ));
+        anyhow::bail!("git config user.email failed");
     }
 
     tracing::info!(
@@ -62,10 +61,8 @@ pub async fn configure_git_user(
 pub async fn create_placeholder_commit(
     work_dir: &std::path::Path,
     branch_name: &str,
-) -> Result<(), ZbobrError> {
-    zbobr_utility::create_placeholder_commit(work_dir, branch_name)
-        .await
-        .map_err(|e| ZbobrError::Other(e.to_string()))
+) -> anyhow::Result<()> {
+    zbobr_utility::create_placeholder_commit(work_dir, branch_name).await
 }
 
 /// TaskBackend: stores and manages tasks, their metadata, comments, and lifecycle.
@@ -79,7 +76,7 @@ pub trait TaskBackend: Send + Sync {
     // -- Core CRUD --
 
     /// Get a task by ID.
-    async fn get_task(&self, id: u64) -> Result<Task, ZbobrError>;
+    async fn get_task(&self, id: u64) -> anyhow::Result<Task>;
 
     /// Create a new task. Returns the task ID.
     #[allow(clippy::too_many_arguments)]
@@ -91,13 +88,13 @@ pub trait TaskBackend: Send + Sync {
         tool: Option<Tool>,
         model: Option<Model>,
         parameters: HashMap<Parameter, String>,
-    ) -> Result<u64, ZbobrError>;
+    ) -> anyhow::Result<u64>;
 
     /// Close a task.
-    async fn close_task(&self, id: u64) -> Result<(), ZbobrError>;
+    async fn close_task(&self, id: u64) -> anyhow::Result<()>;
 
     /// Check if a task is closed.
-    async fn is_task_closed(&self, id: u64) -> Result<bool, ZbobrError>;
+    async fn is_task_closed(&self, id: u64) -> anyhow::Result<bool>;
 
     // -- Atomic modification --
 
@@ -109,7 +106,7 @@ pub trait TaskBackend: Send + Sync {
         &self,
         id: u64,
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-    ) -> Result<(), ZbobrError>;
+    ) -> anyhow::Result<()>;
 
     // -- Queries --
 
@@ -118,12 +115,12 @@ pub trait TaskBackend: Send + Sync {
         &self,
         stage: Stage,
         tool: Option<Tool>,
-    ) -> Result<Vec<Task>, ZbobrError>;
+    ) -> anyhow::Result<Vec<Task>>;
 
     // -- Discussion --
 
     /// Get all comments on a task as formatted discussion.
-    async fn get_task_comments(&self, id: u64) -> Result<Vec<String>, ZbobrError>;
+    async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<String>>;
 
     /// Post a comment on a task with role and hostname metadata.
     async fn post_task_comment(
@@ -132,16 +129,16 @@ pub trait TaskBackend: Send + Sync {
         body: &str,
         role: &str,
         hostname: &str,
-    ) -> Result<(), ZbobrError>;
+    ) -> anyhow::Result<()>;
 
     // -- Lifecycle --
 
     /// Initialize storage with required stages, labels, etc.
     /// If force is true, overwrites existing labels.
-    async fn setup(&self, force: bool) -> Result<(), ZbobrError>;
+    async fn setup(&self, force: bool) -> anyhow::Result<()>;
 
     /// Validate connectivity to the task storage.
-    async fn validate_connectivity(&self) -> Result<(), ZbobrError>;
+    async fn validate_connectivity(&self) -> anyhow::Result<()>;
 
     /// Return a debug string of the backend state.
     fn debug_state(&self) -> String;
@@ -163,7 +160,7 @@ pub trait RepoBackend: Send + Sync {
         target_repo: &str,
         branch: &str,
         workspace_path: &std::path::Path,
-    ) -> Result<PathBuf, ZbobrError>;
+    ) -> anyhow::Result<PathBuf>;
 
     /// Clone a repo and checkout specific branch for read-only investigation (no fork).
     async fn clone_readonly(
@@ -171,14 +168,14 @@ pub trait RepoBackend: Send + Sync {
         target_repo: &str,
         branch: &str,
         workspace_path: &std::path::Path,
-    ) -> Result<PathBuf, ZbobrError>;
+    ) -> anyhow::Result<PathBuf>;
 
     // -- Fork management --
 
     /// Ensure the fork is synchronized with the upstream `target_repo` on `branch`.
     /// This performs a server-side sync (same as GitHub "Sync fork" button) and is
     /// not a local operation on the cloned copy.
-    async fn sync_fork(&self, target_repo: &str, branch: &str) -> Result<(), ZbobrError>;
+    async fn sync_fork(&self, target_repo: &str, branch: &str) -> anyhow::Result<()>;
 
     /// Replace origin remote with the fork URL and push a work branch.
     /// The backend determines the fork owner and constructs the fork URL internally.
@@ -187,7 +184,7 @@ pub trait RepoBackend: Send + Sync {
         work_dir: &std::path::Path,
         target_repo: &str,
         work_branch: &str,
-    ) -> Result<(), ZbobrError>;
+    ) -> anyhow::Result<()>;
 
     // -- PR operations --
 
@@ -200,7 +197,7 @@ pub trait RepoBackend: Send + Sync {
         workspace_path: &std::path::Path,
         pr_title: &str,
         pr_body: &str,
-    ) -> Result<String, ZbobrError>;
+    ) -> anyhow::Result<String>;
 
     /// Create a PR from work_branch to destination_branch in the fork repo.
     /// `repo_name` is just the repository name (e.g. "myrepo"), not a full "owner/repo" path.
@@ -214,15 +211,15 @@ pub trait RepoBackend: Send + Sync {
         destination_branch: &str,
         pr_title: &str,
         pr_body: &str,
-    ) -> Result<String, ZbobrError>;
+    ) -> anyhow::Result<String>;
 
     /// Parse PR reference (URL or owner/repo#123) to (repo, branch).
-    async fn parse_pr_to_repo_branch(&self, pr_ref: &str) -> Result<(String, String), ZbobrError>;
+    async fn parse_pr_to_repo_branch(&self, pr_ref: &str) -> anyhow::Result<(String, String)>;
 
     // -- Lifecycle --
 
     /// Validate connectivity to the repo hosting service (fork owner accessible, etc.).
-    async fn validate_connectivity(&self) -> Result<(), ZbobrError>;
+    async fn validate_connectivity(&self) -> anyhow::Result<()>;
 
     /// Return a debug string of the backend state.
     fn debug_state(&self) -> String;

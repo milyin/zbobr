@@ -1,9 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::{
-    ZbobrError,
-    task::{Model, Tool},
-};
+use crate::task::{Model, Tool};
 
 /// Backend type to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
@@ -143,7 +140,7 @@ impl ZbobrDispatcherConfig {
     pub fn build(
         toml: Option<&ZbobrDispatcherToml>,
         config_dir: &Path,
-    ) -> Result<Self, ZbobrError> {
+    ) -> anyhow::Result<Self> {
         let env = OsEnv;
         Self::build_with_env(toml, &env, config_dir)
     }
@@ -152,7 +149,7 @@ impl ZbobrDispatcherConfig {
         toml: Option<&ZbobrDispatcherToml>,
         env: &E,
         config_dir: &Path,
-    ) -> Result<Self, ZbobrError> {
+    ) -> anyhow::Result<Self> {
         let defaults = ZbobrDispatcherConfig::default();
 
         let default_model = toml
@@ -242,34 +239,31 @@ impl ZbobrDispatcherConfig {
     }
 
     /// Load configuration from environment variables only (backward compat).
-    pub fn from_env() -> Result<Self, ZbobrError> {
+    pub fn from_env() -> anyhow::Result<Self> {
         let cwd = std::env::current_dir()
-            .map_err(|e| ZbobrError::Config(format!("Cannot get current directory: {e}")))?;
+            .map_err(|e| anyhow::anyhow!("Cannot get current directory: {e}"))?;
         Self::build(None, &cwd)
     }
 
     /// Validate that all required fields are set.
-    pub fn validate(&self) -> Result<(), ZbobrError> {
+    pub fn validate(&self) -> anyhow::Result<()> {
         if self.agent_github_token.is_empty() {
-            return Err(ZbobrError::Config(
+            anyhow::bail!(
                 "agent GitHub token not set. Set agent_github_token in the config file or via CLI.\n  \
                  This must be a token with read-only access for agent processes."
-                    .into(),
-            ));
+            );
         }
         if self.git_user_name.is_empty() {
-            return Err(ZbobrError::Config(
+            anyhow::bail!(
                 "git user name not set. Use --git-user-name NAME or set git_user_name in the config file.\n  \
                  This is used for git commits made by the tool."
-                    .into(),
-            ));
+            );
         }
         if self.git_user_email.is_empty() {
-            return Err(ZbobrError::Config(
+            anyhow::bail!(
                 "git user email not set. Use --git-user-email EMAIL or set git_user_email in the config file.\n  \
                  This is used for git commits made by the tool."
-                    .into(),
-            ));
+            );
         }
         Ok(())
     }

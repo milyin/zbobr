@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 zbobr-dispatcher = { workspace = true }
+anyhow = { workspace = true }
 zbobr-utility = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

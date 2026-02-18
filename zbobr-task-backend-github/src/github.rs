@@ -7,22 +7,23 @@ use crate::separator::{
 use async_trait::async_trait;
 
 use zbobr_dispatcher::backend::TaskBackend;
-use zbobr_dispatcher::{Model, Parameter, Signal, Stage, Task, Tool, ZbobrError};
+use zbobr_dispatcher::{Model, Parameter, Signal, Stage, Task, Tool};
 
 use crate::config::ZbobrTaskBackendGithubConfig;
 
-/// Convert an octocrab error into a ZbobrError with detailed information.
-fn octocrab_to_zbobr_error(e: octocrab::Error) -> ZbobrError {
-    let error_msg = match e {
+/// Convert an octocrab error into an anyhow::Error with detailed information.
+fn octocrab_to_anyhow(e: octocrab::Error) -> anyhow::Error {
+    match e {
         octocrab::Error::GitHub { source, .. } => {
-            format!(
+            anyhow::anyhow!(
                 "GitHub API error: {} (status: {}) -- details: {:?}",
-                source.message, source.status_code, source
+                source.message,
+                source.status_code,
+                source
             )
         }
-        other => format!("GitHub API error: {:?}", other),
-    };
-    ZbobrError::GitHub(error_msg)
+        other => anyhow::anyhow!("GitHub API error: {:?}", other),
+    }
 }
 
 fn is_transient_octocrab_error(error: &octocrab::Error) -> bool {
@@ -32,40 +33,30 @@ fn is_transient_octocrab_error(error: &octocrab::Error) -> bool {
     }
 }
 
-/// Generates a `retry` method on a struct that has an `octocrab` field.
-/// The method retries transient GitHub API errors up to 3 times.
-/// Closures capture `self.octocrab` from the surrounding scope (zero-arg).
-macro_rules! impl_retry {
-    ($type:ty) => {
-        impl $type {
-            async fn retry<T, F, Fut>(&self, op_name: &str, mut f: F) -> Result<T, ZbobrError>
-            where
-                F: FnMut() -> Fut,
-                Fut: std::future::Future<Output = Result<T, octocrab::Error>>,
-            {
-                let mut attempt = 0u64;
-                loop {
-                    attempt += 1;
-                    match f().await {
-                        Ok(value) => return Ok(value),
-                        Err(e) => {
-                            if attempt < 3 && is_transient_octocrab_error(&e) {
-                                tracing::warn!(
-                                    "Transient GitHub error during {op_name} (attempt {attempt}/3): {e}"
-                                );
-                                tokio::time::sleep(Duration::from_millis(250 * attempt)).await;
-                                continue;
-                            }
-                            return Err(octocrab_to_zbobr_error(e));
-                        }
-                    }
+/// Retry a GitHub API operation up to 3 times on transient errors.
+async fn retry_github<T, F, Fut>(op_name: &str, mut f: F) -> anyhow::Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, octocrab::Error>>,
+{
+    let mut attempt = 0u64;
+    loop {
+        attempt += 1;
+        match f().await {
+            Ok(value) => return Ok(value),
+            Err(e) => {
+                if attempt < 3 && is_transient_octocrab_error(&e) {
+                    tracing::warn!(
+                        "Transient GitHub error during {op_name} (attempt {attempt}/3): {e}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(250 * attempt)).await;
+                    continue;
                 }
+                return Err(octocrab_to_anyhow(e));
             }
         }
-    };
+    }
 }
-
-impl_retry!(GitHubTaskBackend);
 
 // -- Shared response types --
 
@@ -126,13 +117,13 @@ impl GitHubTaskBackend {
     pub fn new(
         toml: Option<&crate::config::ZbobrTaskBackendGithubToml>,
         task_repo_override: Option<&str>,
-    ) -> Result<Self, ZbobrError> {
+    ) -> anyhow::Result<Self> {
         let backend_config = ZbobrTaskBackendGithubConfig::build(toml, task_repo_override);
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(backend_config.github_token.clone())
             .build()
-            .map_err(|e| ZbobrError::GitHub(format!("Failed to build octocrab client: {e}")))?;
+            .map_err(|e| anyhow::anyhow!("Failed to build octocrab client: {e}"))?;
         Ok(Self {
             backend_config,
             octocrab,
@@ -151,22 +142,22 @@ impl GitHubTaskBackend {
             .and_then(|name| name.parse().ok())
     }
 
-    fn parse_repo(&self) -> Result<(&str, &str), ZbobrError> {
+    fn parse_repo(&self) -> anyhow::Result<(&str, &str)> {
         self.backend_config.parse_repo()
     }
 
-    async fn find_stage_number(&self, stage: Stage) -> Result<Option<u64>, ZbobrError> {
+    async fn find_stage_number(&self, stage: Stage) -> anyhow::Result<Option<u64>> {
         let title = stage.milestone_name();
         let stages = self.list_stages().await?;
         Ok(stages.into_iter().find(|(_, t)| t == title).map(|(n, _)| n))
     }
 
     /// Low-level: write the raw serialized task body.
-    async fn update_task_description(&self, id: u64, description: &str) -> Result<(), ZbobrError> {
+    async fn update_task_description(&self, id: u64, description: &str) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
         let url = format!("/repos/{owner}/{repo}/issues/{id}");
         let body = serde_json::json!({ "body": description });
-        self.retry("update issue body", || {
+        retry_github("update issue body", || {
             self.octocrab.patch(url.clone(), Some(&body))
         })
         .await
@@ -175,16 +166,16 @@ impl GitHubTaskBackend {
     }
 
     /// Apply a stage change on a GitHub issue (update milestone).
-    async fn apply_stage_change(&self, id: u64, stage: Stage) -> Result<(), ZbobrError> {
+    async fn apply_stage_change(&self, id: u64, stage: Stage) -> anyhow::Result<()> {
         let stage_number = self
             .find_stage_number(stage)
             .await?
-            .ok_or_else(|| ZbobrError::GitHub(format!("Milestone '{}' not found", stage)))?;
+            .ok_or_else(|| anyhow::anyhow!("Milestone '{}' not found", stage))?;
 
         let (owner, repo) = self.parse_repo()?;
         let url = format!("/repos/{owner}/{repo}/issues/{id}");
         let body = serde_json::json!({ "milestone": stage_number });
-        self.retry("set issue milestone", || {
+        retry_github("set issue milestone", || {
             self.octocrab.patch(url.clone(), Some(&body))
         })
         .await
@@ -193,27 +184,26 @@ impl GitHubTaskBackend {
     }
 
     /// Apply a signal change on a GitHub issue (remove old signal labels, add new one).
-    async fn apply_signal_change(&self, id: u64, signal: Option<Signal>) -> Result<(), ZbobrError> {
+    async fn apply_signal_change(&self, id: u64, signal: Option<Signal>) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
         // Remove all existing signal labels
         for sig in Signal::all() {
             let label = Self::signal_to_label(*sig);
-            let _ = self
-                .retry("remove signal label", || async {
-                    self.octocrab
-                        .issues(owner, repo)
-                        .remove_label(id, &label)
-                        .await
-                })
-                .await;
+            let _ = retry_github("remove signal label", || async {
+                self.octocrab
+                    .issues(owner, repo)
+                    .remove_label(id, &label)
+                    .await
+            })
+            .await;
         }
 
         // Add new signal label if provided
         if let Some(sig) = signal {
             let label = Self::signal_to_label(sig);
             let labels: Vec<String> = vec![label];
-            self.retry("add signal label", || async {
+            retry_github("add signal label", || async {
                 self.octocrab
                     .issues(owner, repo)
                     .add_labels(id, &labels)
@@ -226,31 +216,25 @@ impl GitHubTaskBackend {
     }
 
     /// List all labels in the repository.
-    async fn list_labels(&self) -> Result<Vec<String>, ZbobrError> {
+    async fn list_labels(&self) -> anyhow::Result<Vec<String>> {
         let (owner, repo) = self.parse_repo()?;
-        let labels: Vec<octocrab::models::Label> = self
-            .retry("list labels", || async {
-                self.octocrab
-                    .issues(owner, repo)
-                    .list_labels_for_repo()
-                    .per_page(100)
-                    .send()
-                    .await
-            })
-            .await?
-            .items;
+        let labels: Vec<octocrab::models::Label> = retry_github("list labels", || async {
+            self.octocrab
+                .issues(owner, repo)
+                .list_labels_for_repo()
+                .per_page(100)
+                .send()
+                .await
+        })
+        .await?
+        .items;
         Ok(labels.into_iter().map(|l| l.name).collect())
     }
 
     /// Create a label in the repository.
-    async fn create_label(
-        &self,
-        name: &str,
-        color: &str,
-        description: &str,
-    ) -> Result<(), ZbobrError> {
+    async fn create_label(&self, name: &str, color: &str, description: &str) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
-        self.retry("create label", || async {
+        retry_github("create label", || async {
             self.octocrab
                 .issues(owner, repo)
                 .create_label(name, color, description)
@@ -261,19 +245,14 @@ impl GitHubTaskBackend {
     }
 
     /// Update a label's color and description.
-    async fn update_label(
-        &self,
-        name: &str,
-        color: &str,
-        description: &str,
-    ) -> Result<(), ZbobrError> {
+    async fn update_label(&self, name: &str, color: &str, description: &str) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
         let url = format!("/repos/{owner}/{repo}/labels/{name}");
         let body = serde_json::json!({
             "color": color,
             "description": description,
         });
-        self.retry("update label", || {
+        retry_github("update label", || {
             self.octocrab.patch(url.clone(), Some(&body))
         })
         .await
@@ -282,15 +261,14 @@ impl GitHubTaskBackend {
     }
 
     /// Ensure the task repo exists (used internally by setup).
-    async fn ensure_task_repo_exists(&self) -> Result<(), ZbobrError> {
+    async fn ensure_task_repo_exists(&self) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
-        let exists = self
-            .retry("check task repo exists", || {
-                self.octocrab
-                    .get::<RepoResponse, _, _>(format!("/repos/{owner}/{repo}"), None::<&()>)
-            })
-            .await
-            .is_ok();
+        let exists = retry_github("check task repo exists", || {
+            self.octocrab
+                .get::<RepoResponse, _, _>(format!("/repos/{owner}/{repo}"), None::<&()>)
+        })
+        .await
+        .is_ok();
 
         if !exists {
             tracing::info!("Task repo {owner}/{repo} does not exist, creating...");
@@ -301,11 +279,10 @@ impl GitHubTaskBackend {
                 "private": true,
                 "auto_init": false,
             });
-            let result = self
-                .retry("create org repo", || async {
-                    self.octocrab.post(org_url.clone(), Some(&org_body)).await
-                })
-                .await;
+            let result = retry_github("create org repo", || async {
+                self.octocrab.post(org_url.clone(), Some(&org_body)).await
+            })
+            .await;
 
             match result {
                 Ok(_v) => {
@@ -320,7 +297,7 @@ impl GitHubTaskBackend {
                         "private": true,
                         "auto_init": false,
                     });
-                    self.retry("create user repo", || async {
+                    retry_github("create user repo", || async {
                         self.octocrab.post(user_url.clone(), Some(&user_body)).await
                     })
                     .await
@@ -334,21 +311,20 @@ impl GitHubTaskBackend {
         Ok(())
     }
 
-    async fn list_stages(&self) -> Result<Vec<(u64, String)>, ZbobrError> {
+    async fn list_stages(&self) -> anyhow::Result<Vec<(u64, String)>> {
         let (owner, repo) = self.parse_repo()?;
-        let milestones: Vec<MilestoneResponse> = self
-            .retry("list milestones", || {
-                self.octocrab
-                    .get(format!("/repos/{owner}/{repo}/milestones"), None::<&()>)
-            })
-            .await?;
+        let milestones: Vec<MilestoneResponse> = retry_github("list milestones", || {
+            self.octocrab
+                .get(format!("/repos/{owner}/{repo}/milestones"), None::<&()>)
+        })
+        .await?;
         Ok(milestones
             .into_iter()
             .map(|m| (m.number, m.title))
             .collect())
     }
 
-    async fn create_stage(&self, stage: Stage) -> Result<(), ZbobrError> {
+    async fn create_stage(&self, stage: Stage) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
         let url = format!("/repos/{owner}/{repo}/milestones");
         let title = stage.milestone_name();
@@ -358,7 +334,7 @@ impl GitHubTaskBackend {
             "description": description,
             "state": "open"
         });
-        self.retry("create milestone", || {
+        retry_github("create milestone", || {
             self.octocrab.post(url.clone(), Some(&body))
         })
         .await
@@ -366,18 +342,17 @@ impl GitHubTaskBackend {
         Ok(())
     }
 
-    async fn delete_stage(&self, number: u64) -> Result<(), ZbobrError> {
+    async fn delete_stage(&self, number: u64) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
         let url = format!("/repos/{owner}/{repo}/milestones/{number}");
-        let _response = self
-            .retry("delete milestone", || {
-                self.octocrab._delete(url.clone(), None::<&()>)
-            })
-            .await?;
+        let _response = retry_github("delete milestone", || {
+            self.octocrab._delete(url.clone(), None::<&()>)
+        })
+        .await?;
         Ok(())
     }
 
-    async fn setup(&self, force: bool) -> Result<(), ZbobrError> {
+    async fn setup(&self, force: bool) -> anyhow::Result<()> {
         tracing::info!(
             "Setting up GitHub repo: {} (force: {})",
             self.backend_config.task_repo,
@@ -558,14 +533,13 @@ impl GitHubTaskBackend {
 
 #[async_trait]
 impl TaskBackend for GitHubTaskBackend {
-    async fn get_task(&self, id: u64) -> Result<Task, ZbobrError> {
+    async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
         let (owner, repo) = self.parse_repo()?;
-        let issue: IssueResponse = self
-            .retry("get issue", || {
-                self.octocrab
-                    .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
-            })
-            .await?;
+        let issue: IssueResponse = retry_github("get issue", || {
+            self.octocrab
+                .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
+        })
+        .await?;
 
         Ok(Self::issue_to_task(issue))
     }
@@ -578,7 +552,7 @@ impl TaskBackend for GitHubTaskBackend {
         tool: Option<Tool>,
         model: Option<Model>,
         parameters: HashMap<Parameter, String>,
-    ) -> Result<u64, ZbobrError> {
+    ) -> anyhow::Result<u64> {
         let (owner, repo) = self.parse_repo()?;
         let mut params_text: HashMap<String, String> = HashMap::new();
         if let Some(v) = parameters.get(&Parameter::DestinationRepository) {
@@ -608,30 +582,29 @@ impl TaskBackend for GitHubTaskBackend {
             labels.push(format!("model:{}", m));
         }
 
-        let issue = self
-            .retry("create issue", || async {
-                let issues = self.octocrab.issues(owner, repo);
-                let mut builder = issues.create(title).body(body.clone());
+        let issue = retry_github("create issue", || async {
+            let issues = self.octocrab.issues(owner, repo);
+            let mut builder = issues.create(title).body(body.clone());
 
-                if let Some(n) = stage_number {
-                    builder = builder.milestone(n);
-                }
+            if let Some(n) = stage_number {
+                builder = builder.milestone(n);
+            }
 
-                if !labels.is_empty() {
-                    builder = builder.labels(labels.clone());
-                }
+            if !labels.is_empty() {
+                builder = builder.labels(labels.clone());
+            }
 
-                builder.send().await
-            })
-            .await?;
+            builder.send().await
+        })
+        .await?;
         Ok(issue.number)
     }
 
-    async fn close_task(&self, id: u64) -> Result<(), ZbobrError> {
+    async fn close_task(&self, id: u64) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
         let url = format!("/repos/{owner}/{repo}/issues/{id}");
         let body = serde_json::json!({ "state": "closed" });
-        self.retry("close issue", || {
+        retry_github("close issue", || {
             self.octocrab.patch(url.clone(), Some(&body))
         })
         .await
@@ -639,14 +612,13 @@ impl TaskBackend for GitHubTaskBackend {
         Ok(())
     }
 
-    async fn is_task_closed(&self, id: u64) -> Result<bool, ZbobrError> {
+    async fn is_task_closed(&self, id: u64) -> anyhow::Result<bool> {
         let (owner, repo) = self.backend_config.parse_repo()?;
-        let issue: IssueResponse = self
-            .retry("get issue state", || {
-                self.octocrab
-                    .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
-            })
-            .await?;
+        let issue: IssueResponse = retry_github("get issue state", || {
+            self.octocrab
+                .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
+        })
+        .await?;
         Ok(issue.state == "closed")
     }
 
@@ -654,7 +626,7 @@ impl TaskBackend for GitHubTaskBackend {
         &self,
         id: u64,
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-    ) -> Result<(), ZbobrError> {
+    ) -> anyhow::Result<()> {
         let task = self.get_task(id).await?;
         let original_stage = task.stage;
         let original_signal = task.signal;
@@ -735,7 +707,7 @@ impl TaskBackend for GitHubTaskBackend {
         &self,
         stage: Stage,
         tool: Option<Tool>,
-    ) -> Result<Vec<Task>, ZbobrError> {
+    ) -> anyhow::Result<Vec<Task>> {
         let stage_number = match self.find_stage_number(stage).await? {
             Some(n) => n,
             None => return Ok(vec![]),
@@ -747,12 +719,11 @@ impl TaskBackend for GitHubTaskBackend {
             ("state", "open".to_string()),
         ];
 
-        let issues: Vec<IssueResponse> = self
-            .retry("list issues", || {
-                self.octocrab
-                    .get(format!("/repos/{owner}/{repo}/issues"), Some(&params))
-            })
-            .await?;
+        let issues: Vec<IssueResponse> = retry_github("list issues", || {
+            self.octocrab
+                .get(format!("/repos/{owner}/{repo}/issues"), Some(&params))
+        })
+        .await?;
 
         let mut tasks = Vec::new();
         for issue in issues {
@@ -773,16 +744,15 @@ impl TaskBackend for GitHubTaskBackend {
         Ok(tasks)
     }
 
-    async fn get_task_comments(&self, id: u64) -> Result<Vec<String>, ZbobrError> {
+    async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<String>> {
         let (owner, repo) = self.parse_repo()?;
-        let comments: Vec<CommentResponse> = self
-            .retry("list issue comments", || {
-                self.octocrab.get(
-                    format!("/repos/{owner}/{repo}/issues/{id}/comments"),
-                    None::<&()>,
-                )
-            })
-            .await?;
+        let comments: Vec<CommentResponse> = retry_github("list issue comments", || {
+            self.octocrab.get(
+                format!("/repos/{owner}/{repo}/issues/{id}/comments"),
+                None::<&()>,
+            )
+        })
+        .await?;
 
         Ok(comments
             .into_iter()
@@ -800,10 +770,10 @@ impl TaskBackend for GitHubTaskBackend {
         body: &str,
         role: &str,
         hostname: &str,
-    ) -> Result<(), ZbobrError> {
+    ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
         let formatted_body = format!("**[{role}@{hostname}]**\n\n{body}");
-        self.retry("create issue comment", || async {
+        retry_github("create issue comment", || async {
             self.octocrab
                 .issues(owner, repo)
                 .create_comment(id, &formatted_body)
@@ -813,25 +783,24 @@ impl TaskBackend for GitHubTaskBackend {
         Ok(())
     }
 
-    async fn setup(&self, force: bool) -> Result<(), ZbobrError> {
+    async fn setup(&self, force: bool) -> anyhow::Result<()> {
         self.setup(force).await
     }
 
-    async fn validate_connectivity(&self) -> Result<(), ZbobrError> {
+    async fn validate_connectivity(&self) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
-        let task_repo_exists = self
-            .retry("check task repo", || {
-                self.octocrab
-                    .get::<RepoResponse, _, _>(format!("/repos/{owner}/{repo}"), None::<&()>)
-            })
-            .await
-            .is_ok();
+        let task_repo_exists = retry_github("check task repo", || {
+            self.octocrab
+                .get::<RepoResponse, _, _>(format!("/repos/{owner}/{repo}"), None::<&()>)
+        })
+        .await
+        .is_ok();
         if !task_repo_exists {
-            return Err(ZbobrError::Config(format!(
+            anyhow::bail!(
                 "task_repo '{owner}/{repo}' is not accessible on GitHub.\n  \
                  Check your task_repo setting and ensure the repository exists \
                  and your token has access to it."
-            )));
+            );
         }
 
         Ok(())

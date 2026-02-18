@@ -1551,24 +1551,20 @@ impl ReviewerMcp {
 
 /// Find an available port starting from the given base port.
 /// Tries ports incrementally until one is available.
-async fn find_available_port(base_port: u16) -> Result<u16, crate::ZbobrError> {
+async fn find_available_port(base_port: u16) -> anyhow::Result<u16> {
     for port in base_port..=base_port + 100 {
         match tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await {
             Ok(_) => return Ok(port),
             Err(_) => continue,
         }
     }
-    Err(crate::ZbobrError::Other(format!(
+    anyhow::bail!(
         "Could not find available port in range {base_port}..{}",
         base_port + 100
-    )))
+    )
 }
 
-async fn serve_mcp(
-    base_port: u16,
-    path: &str,
-    router: axum::Router,
-) -> Result<u16, crate::ZbobrError> {
+async fn serve_mcp(base_port: u16, path: &str, router: axum::Router) -> anyhow::Result<u16> {
     // Find an available port starting from base_port
     let port = find_available_port(base_port).await?;
 
@@ -1597,7 +1593,7 @@ pub async fn run_role_mcp_server(
     base_port: u16,
     role: Role,
     task_id: u64,
-) -> Result<u16, crate::ZbobrError> {
+) -> anyhow::Result<u16> {
     let path = format!("/{}/{}", role, task_id);
 
     let router = match role {
@@ -1663,7 +1659,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::backend::TaskBackend for StubTaskBackend {
-        async fn get_task(&self, _id: u64) -> Result<crate::Task, crate::ZbobrError> {
+        async fn get_task(&self, _id: u64) -> anyhow::Result<crate::Task> {
             unimplemented!()
         }
         async fn create_task(
@@ -1674,30 +1670,30 @@ mod tests {
             _tool: Option<crate::Tool>,
             _model: Option<crate::Model>,
             _parameters: std::collections::HashMap<crate::Parameter, String>,
-        ) -> Result<u64, crate::ZbobrError> {
+        ) -> anyhow::Result<u64> {
             unimplemented!()
         }
-        async fn close_task(&self, _id: u64) -> Result<(), crate::ZbobrError> {
+        async fn close_task(&self, _id: u64) -> anyhow::Result<()> {
             unimplemented!()
         }
-        async fn is_task_closed(&self, _id: u64) -> Result<bool, crate::ZbobrError> {
+        async fn is_task_closed(&self, _id: u64) -> anyhow::Result<bool> {
             unimplemented!()
         }
         async fn modify_task(
             &self,
             _id: u64,
             _mutate: Box<dyn FnOnce(crate::Task) -> crate::Task + Send>,
-        ) -> Result<(), crate::ZbobrError> {
+        ) -> anyhow::Result<()> {
             unimplemented!()
         }
         async fn list_tasks_by_stage(
             &self,
             _stage: crate::Stage,
             _tool: Option<crate::Tool>,
-        ) -> Result<Vec<crate::Task>, crate::ZbobrError> {
+        ) -> anyhow::Result<Vec<crate::Task>> {
             unimplemented!()
         }
-        async fn get_task_comments(&self, _id: u64) -> Result<Vec<String>, crate::ZbobrError> {
+        async fn get_task_comments(&self, _id: u64) -> anyhow::Result<Vec<String>> {
             unimplemented!()
         }
         async fn post_task_comment(
@@ -1706,13 +1702,13 @@ mod tests {
             _body: &str,
             _role: &str,
             _hostname: &str,
-        ) -> Result<(), crate::ZbobrError> {
+        ) -> anyhow::Result<()> {
             unimplemented!()
         }
-        async fn setup(&self, _force: bool) -> Result<(), crate::ZbobrError> {
+        async fn setup(&self, _force: bool) -> anyhow::Result<()> {
             unimplemented!()
         }
-        async fn validate_connectivity(&self) -> Result<(), crate::ZbobrError> {
+        async fn validate_connectivity(&self) -> anyhow::Result<()> {
             unimplemented!()
         }
         fn debug_state(&self) -> String {
@@ -1729,7 +1725,7 @@ mod tests {
             _repo: &str,
             _branch: &str,
             _workspace_path: &std::path::Path,
-        ) -> Result<std::path::PathBuf, crate::ZbobrError> {
+        ) -> anyhow::Result<std::path::PathBuf> {
             unimplemented!()
         }
         async fn clone_readonly(
@@ -1737,10 +1733,10 @@ mod tests {
             _repo: &str,
             _branch: &str,
             _workspace_path: &std::path::Path,
-        ) -> Result<std::path::PathBuf, crate::ZbobrError> {
+        ) -> anyhow::Result<std::path::PathBuf> {
             unimplemented!()
         }
-        async fn sync_fork(&self, _repo: &str, _branch: &str) -> Result<(), crate::ZbobrError> {
+        async fn sync_fork(&self, _repo: &str, _branch: &str) -> anyhow::Result<()> {
             unimplemented!()
         }
         async fn setup_fork_remote_and_push(
@@ -1748,7 +1744,7 @@ mod tests {
             _work_dir: &std::path::Path,
             _target_repo: &str,
             _work_branch: &str,
-        ) -> Result<(), crate::ZbobrError> {
+        ) -> anyhow::Result<()> {
             unimplemented!()
         }
         async fn push_and_create_pr(
@@ -1757,7 +1753,7 @@ mod tests {
             _workspace_path: &std::path::Path,
             _pr_title: &str,
             _pr_body: &str,
-        ) -> Result<String, crate::ZbobrError> {
+        ) -> anyhow::Result<String> {
             unimplemented!()
         }
         async fn create_pr_in_fork(
@@ -1767,16 +1763,13 @@ mod tests {
             _dest_branch: &str,
             _pr_title: &str,
             _pr_body: &str,
-        ) -> Result<String, crate::ZbobrError> {
+        ) -> anyhow::Result<String> {
             unimplemented!()
         }
-        async fn parse_pr_to_repo_branch(
-            &self,
-            _pr_ref: &str,
-        ) -> Result<(String, String), crate::ZbobrError> {
+        async fn parse_pr_to_repo_branch(&self, _pr_ref: &str) -> anyhow::Result<(String, String)> {
             unimplemented!()
         }
-        async fn validate_connectivity(&self) -> Result<(), crate::ZbobrError> {
+        async fn validate_connectivity(&self) -> anyhow::Result<()> {
             unimplemented!()
         }
         fn debug_state(&self) -> String {

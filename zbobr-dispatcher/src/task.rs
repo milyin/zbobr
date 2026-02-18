@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{Zbobr, ZbobrError};
+use crate::Zbobr;
 
 // -- Parameter names enum --
 
@@ -260,7 +260,6 @@ impl Tool {
     pub fn all() -> &'static [Tool] {
         &[Tool::Copilot, Tool::Claude, Tool::McpTester]
     }
-
 }
 
 impl std::fmt::Display for Tool {
@@ -475,22 +474,22 @@ impl TaskSession {
     }
 
     /// Read the full task state.
-    pub async fn get_task(&self) -> Result<Task, ZbobrError> {
+    pub async fn get_task(&self) -> anyhow::Result<Task> {
         self.zbobr.get_task(self.task_id).await
     }
 
     /// Get the current task description.
-    pub async fn get_description(&self) -> Result<String, ZbobrError> {
+    pub async fn get_description(&self) -> anyhow::Result<String> {
         Ok(self.get_task().await?.description)
     }
 
     /// Get the current task plan.
-    pub async fn get_plan(&self) -> Result<String, ZbobrError> {
+    pub async fn get_plan(&self) -> anyhow::Result<String> {
         Ok(self.get_task().await?.plan)
     }
 
     /// Get the current task checklist.
-    pub async fn get_checklist(&self) -> Result<Vec<ChecklistItem>, ZbobrError> {
+    pub async fn get_checklist(&self) -> anyhow::Result<Vec<ChecklistItem>> {
         Ok(self.get_task().await?.checklist)
     }
 
@@ -502,7 +501,7 @@ impl TaskSession {
     /// Concurrent `modify_task` calls on the same task are serialized by an in-process
     /// per-task mutex, so concurrent MCP tool calls cannot overwrite each other's changes.
     /// Cross-process conflicts are handled by backend-level three-way merge.
-    pub async fn modify_task<F>(&self, mutate: F) -> Result<(), ZbobrError>
+    pub async fn modify_task<F>(&self, mutate: F) -> anyhow::Result<()>
     where
         F: FnOnce(&mut Task) + Send + 'static,
     {
@@ -523,7 +522,7 @@ impl TaskSession {
     }
 
     /// Update the task description (only the description part, preserving plan/checklist/parameters).
-    pub async fn update_description(&self, description: &str) -> Result<(), ZbobrError> {
+    pub async fn update_description(&self, description: &str) -> anyhow::Result<()> {
         let desc = description.to_string();
         self.modify_task(move |task| {
             task.description = desc;
@@ -532,7 +531,7 @@ impl TaskSession {
     }
 
     /// Update the task plan (preserving description/checklist/parameters).
-    pub async fn update_plan(&self, plan: &str) -> Result<(), ZbobrError> {
+    pub async fn update_plan(&self, plan: &str) -> anyhow::Result<()> {
         let plan = plan.to_string();
         self.modify_task(move |task| {
             task.plan = plan;
@@ -541,7 +540,7 @@ impl TaskSession {
     }
 
     /// Update the task checklist (preserving description/plan/parameters).
-    pub async fn update_checklist(&self, checklist: &[ChecklistItem]) -> Result<(), ZbobrError> {
+    pub async fn update_checklist(&self, checklist: &[ChecklistItem]) -> anyhow::Result<()> {
         let items = checklist.to_vec();
         self.modify_task(move |task| {
             task.checklist = items;
@@ -550,30 +549,25 @@ impl TaskSession {
     }
 
     /// Get all discussion messages on the task.
-    pub async fn get_discussion(&self) -> Result<Vec<String>, ZbobrError> {
+    pub async fn get_discussion(&self) -> anyhow::Result<Vec<String>> {
         self.zbobr.get_task_comments(self.task_id).await
     }
 
     /// Post a message to the task discussion with role and hostname metadata.
-    pub async fn post_message(
-        &self,
-        msg: &str,
-        role: &str,
-        hostname: &str,
-    ) -> Result<(), ZbobrError> {
+    pub async fn post_message(&self, msg: &str, role: &str, hostname: &str) -> anyhow::Result<()> {
         self.zbobr
             .post_task_comment(self.task_id, msg, role, hostname)
             .await
     }
 
     /// Get the current signal on the task.
-    pub async fn get_signal(&self) -> Result<Option<Signal>, ZbobrError> {
+    pub async fn get_signal(&self) -> anyhow::Result<Option<Signal>> {
         let task = self.zbobr.get_task(self.task_id).await?;
         Ok(task.signal)
     }
 
     /// Set signal on the task, respecting priority (higher priority signals cannot be overwritten by lower).
-    pub async fn set_signal(&self, new_signal: Signal) -> Result<(), ZbobrError> {
+    pub async fn set_signal(&self, new_signal: Signal) -> anyhow::Result<()> {
         self.modify_task(move |task| {
             // Only set if new signal has higher or equal priority (lower enum value)
             if let Some(current_signal) = task.signal
@@ -588,7 +582,7 @@ impl TaskSession {
     }
 
     /// Clear the signal on the task.
-    pub async fn clear_signal(&self) -> Result<(), ZbobrError> {
+    pub async fn clear_signal(&self) -> anyhow::Result<()> {
         self.modify_task(move |task| {
             task.signal = None;
         })
@@ -596,7 +590,7 @@ impl TaskSession {
     }
 
     /// Transition task to stage based on current signal.
-    pub async fn transition_by_signal(&self) -> Result<(), ZbobrError> {
+    pub async fn transition_by_signal(&self) -> anyhow::Result<()> {
         self.modify_task(move |task| {
             if let Some(sig) = task.signal {
                 task.stage = sig.target_stage();
@@ -610,7 +604,7 @@ impl TaskSession {
         &self,
         repo: &str,
         branch: &str,
-    ) -> Result<String, ZbobrError> {
+    ) -> anyhow::Result<String> {
         let path = self
             .zbobr
             .clone_readonly(repo, branch, self.task_id)
@@ -620,7 +614,7 @@ impl TaskSession {
     }
 
     /// Fork target repo, clone locally, checkout specific branch (for worker).
-    pub async fn request_branch(&self, repo: &str, branch: &str) -> Result<String, ZbobrError> {
+    pub async fn request_branch(&self, repo: &str, branch: &str) -> anyhow::Result<String> {
         let path = self
             .zbobr
             .clone_and_setup(repo, branch, self.task_id)
@@ -631,11 +625,7 @@ impl TaskSession {
 
     /// Helper: Clone repo and checkout branch from PR.
     /// PR format: "https://github.com/owner/repo/pull/123" or "owner/repo#123"
-    pub async fn request_branch_by_pr(
-        &self,
-        pr: &str,
-        readonly: bool,
-    ) -> Result<String, ZbobrError> {
+    pub async fn request_branch_by_pr(&self, pr: &str, readonly: bool) -> anyhow::Result<String> {
         let (repo, branch) = self.zbobr.parse_pr_to_repo_branch(pr).await?;
         if readonly {
             self.request_branch_readonly(&repo, &branch).await
@@ -646,14 +636,11 @@ impl TaskSession {
 
     /// Push the current branch to the fork remote.
     /// Validates that the current branch has the correct task prefix.
-    pub async fn push_branch(&self, path: &str) -> Result<(), ZbobrError> {
+    pub async fn push_branch(&self, path: &str) -> anyhow::Result<()> {
         let work_dir = std::path::PathBuf::from(path);
 
         if !work_dir.exists() {
-            return Err(ZbobrError::Other(format!(
-                "Work directory does not exist: {}",
-                work_dir.display()
-            )));
+            anyhow::bail!("Work directory does not exist: {}", work_dir.display());
         }
 
         // Get current branch name
@@ -664,18 +651,18 @@ impl TaskSession {
             .await?;
 
         if !output.status.success() {
-            return Err(ZbobrError::Other("Failed to get current branch".into()));
+            return Err(anyhow::anyhow!("Failed to get current branch"));
         }
 
         let current_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
         if !self.validate_branch_prefix(&current_branch) {
-            return Err(ZbobrError::Other(format!(
+            anyhow::bail!(
                 "Branch '{}' does not match expected prefix '{}/{}/'. Use create_branch_name to generate a valid branch name.",
                 current_branch,
                 self.zbobr.config().work_branch_prefix,
                 self.task_id
-            )));
+            );
         }
 
         // Push to fork
@@ -687,7 +674,7 @@ impl TaskSession {
             .await?;
 
         if !status.success() {
-            return Err(ZbobrError::Other("Failed to push to fork".into()));
+            return Err(anyhow::anyhow!("Failed to push to fork"));
         }
 
         Ok(())
@@ -699,7 +686,7 @@ impl TaskSession {
         &self,
         path: &str,
         destination_branch: &str,
-    ) -> Result<String, ZbobrError> {
+    ) -> anyhow::Result<String> {
         // First push the branch
         self.push_branch(path).await?;
 
@@ -717,9 +704,7 @@ impl TaskSession {
         let repo_name = work_dir
             .file_name()
             .and_then(|s| s.to_str())
-            .ok_or_else(|| {
-                ZbobrError::Other(format!("Could not determine repo name from path: {}", path))
-            })?
+            .ok_or_else(|| anyhow::anyhow!("Could not determine repo name from path: {}", path))?
             .to_string();
 
         // Build PR metadata from task (decoupled from repo backend)
@@ -747,21 +732,16 @@ impl TaskSession {
     /// Push the work_branch in the cloned repository. Stashes local changes if a different branch is selected.
     /// Rejects the push if there are uncommitted changes - all work must be committed before pushing.
     /// The work repository has all remote information cleared - only pull_work and push_work know where to push.
-    pub async fn push_work(&self) -> Result<(), ZbobrError> {
+    pub async fn push_work(&self) -> anyhow::Result<()> {
         // Get the destination repo (needed to find the cloned path)
         let dest_repo = self
             .get_parameter(Parameter::DestinationRepository)
             .await?
-            .ok_or_else(|| {
-                ZbobrError::Other("destination_repository parameter not set".to_string())
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("destination_repository parameter not set"))?;
 
         // Compute the work directory: workspace/task#<id>/<repo>
         let repo_name = dest_repo.split('/').nth(1).ok_or_else(|| {
-            ZbobrError::Other(format!(
-                "Invalid destination_repository format: {}",
-                dest_repo
-            ))
+            anyhow::anyhow!("Invalid destination_repository format: {}", dest_repo)
         })?;
 
         let work_dir = self
@@ -772,17 +752,14 @@ impl TaskSession {
             .join(repo_name);
 
         if !work_dir.exists() {
-            return Err(ZbobrError::Other(format!(
-                "Work directory does not exist: {}",
-                work_dir.display()
-            )));
+            anyhow::bail!("Work directory does not exist: {}", work_dir.display());
         }
 
         // Get the work_branch name
         let work_branch = self
             .get_parameter(Parameter::WorkBranch)
             .await?
-            .ok_or_else(|| ZbobrError::Other("work_branch parameter not set".to_string()))?;
+            .ok_or_else(|| anyhow::anyhow!("work_branch parameter not set"))?;
 
         // Get current branch
         let output = tokio::process::Command::new("git")
@@ -792,7 +769,7 @@ impl TaskSession {
             .await?;
 
         if !output.status.success() {
-            return Err(ZbobrError::Other("Failed to get current branch".into()));
+            return Err(anyhow::anyhow!("Failed to get current branch"));
         }
 
         let current_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -823,10 +800,7 @@ impl TaskSession {
                 .await?;
 
             if !checkout_status.success() {
-                return Err(ZbobrError::Other(format!(
-                    "Failed to checkout branch '{}'",
-                    work_branch
-                )));
+                anyhow::bail!("Failed to checkout branch '{}'", work_branch);
             }
         }
 
@@ -842,17 +816,18 @@ impl TaskSession {
             .await?;
 
         if !status_output.status.success() {
-            return Err(ZbobrError::Other("Failed to check git status".into()));
+            return Err(anyhow::anyhow!("Failed to check git status"));
         }
 
         let uncommitted = String::from_utf8_lossy(&status_output.stdout)
             .trim()
             .to_string();
         if !uncommitted.is_empty() {
-            return Err(ZbobrError::Other(format!(
+            anyhow::bail!(
                 "Cannot push: there are uncommitted changes on branch '{}'. Please commit all changes before pushing.\n\nUncommitted files:\n{}",
-                work_branch, uncommitted
-            )));
+                work_branch,
+                uncommitted
+            );
         }
 
         // Push to the configured remote (set by pull_work)
@@ -864,7 +839,7 @@ impl TaskSession {
             .await?;
 
         if !status.success() {
-            return Err(ZbobrError::Other("Failed to push work branch".into()));
+            return Err(anyhow::anyhow!("Failed to push work branch"));
         }
 
         Ok(())
@@ -874,24 +849,22 @@ impl TaskSession {
     /// Cleans up remote information - only pull_work and push_work know where to push/pull.
     /// Stashes local changes if a different branch is selected as current.
     /// Also creates a PR from work_branch to destination_branch in the fork repo if all parameters are set.
-    pub async fn pull_work(&self) -> Result<String, ZbobrError> {
+    pub async fn pull_work(&self) -> anyhow::Result<String> {
         // Get required parameters
         let dest_repo = self
             .get_parameter(Parameter::DestinationRepository)
             .await?
-            .ok_or_else(|| {
-                ZbobrError::Other("destination_repository parameter not set".to_string())
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("destination_repository parameter not set"))?;
 
         let dest_branch = self
             .get_parameter(Parameter::DestinationBranch)
             .await?
-            .ok_or_else(|| ZbobrError::Other("destination_branch parameter not set".to_string()))?;
+            .ok_or_else(|| anyhow::anyhow!("destination_branch parameter not set"))?;
 
         let work_branch = self
             .get_parameter(Parameter::WorkBranch)
             .await?
-            .ok_or_else(|| ZbobrError::Other("work_branch parameter not set".to_string()))?;
+            .ok_or_else(|| anyhow::anyhow!("work_branch parameter not set"))?;
 
         // Clone and setup the repository with forking
         // Ensure the fork in GitHub is synchronized with the destination repository
@@ -932,10 +905,7 @@ impl TaskSession {
                 .await?;
 
             if !checkout_status.success() {
-                return Err(ZbobrError::Other(format!(
-                    "Failed to checkout existing work branch '{}'",
-                    work_branch
-                )));
+                anyhow::bail!("Failed to checkout existing work branch '{}'", work_branch);
             }
 
             // Merge destination branch into work branch to pick up upstream changes.
@@ -992,12 +962,12 @@ impl TaskSession {
                     );
                 } else {
                     // Non-conflict merge failure
-                    return Err(ZbobrError::Other(format!(
+                    anyhow::bail!(
                         "Failed to merge '{}' into '{}': {}",
                         dest_branch,
                         work_branch,
                         stderr.trim()
-                    )));
+                    );
                 }
             } else {
                 tracing::info!(
@@ -1015,10 +985,7 @@ impl TaskSession {
                 .await?;
 
             if !create_branch.success() {
-                return Err(ZbobrError::Other(format!(
-                    "Failed to create work branch '{}'",
-                    work_branch
-                )));
+                anyhow::bail!("Failed to create work branch '{}'", work_branch);
             }
 
             // Create a placeholder file to ensure the branch has at least one commit
@@ -1041,10 +1008,7 @@ impl TaskSession {
 
         // Create PR from work_branch to destination_branch in the fork repo
         let repo_name = dest_repo.split('/').nth(1).ok_or_else(|| {
-            ZbobrError::Other(format!(
-                "Invalid destination_repository format: {}",
-                dest_repo
-            ))
+            anyhow::anyhow!("Invalid destination_repository format: {}", dest_repo)
         })?;
         if let Err(e) = self
             .create_pr_for_work_branch(repo_name, &work_branch, &dest_branch)
@@ -1080,7 +1044,7 @@ impl TaskSession {
         repo_name: &str,
         work_branch: &str,
         destination_branch: &str,
-    ) -> Result<(), ZbobrError> {
+    ) -> anyhow::Result<()> {
         tracing::info!(
             "Creating PR for repo '{}' from {} to {}",
             repo_name,
@@ -1113,10 +1077,10 @@ impl TaskSession {
         // (e.g. owner/repo/branch) which is invalid for the Pulls API head field.
         let slash_count = work_branch.chars().filter(|c| *c == '/').count();
         if slash_count >= 2 {
-            return Err(ZbobrError::Other(format!(
+            anyhow::bail!(
                 "work_branch has invalid format '{}'. Use a branch name like 'feature/x' or 'owner:branch', not 'owner/repo/branch'.",
                 work_branch
-            )));
+            );
         }
 
         // Build PR metadata from task (decoupled from repo backend)
@@ -1145,13 +1109,13 @@ impl TaskSession {
     }
 
     /// Mark task as done (sets signal to Done). Stage transition will be handled by main loop.
-    pub async fn mark_done(&self) -> Result<(), ZbobrError> {
+    pub async fn mark_done(&self) -> anyhow::Result<()> {
         self.set_signal(Signal::Done).await?;
         Ok(())
     }
 
     /// Get a task parameter value. Parameters are stored in the task's parameters HashMap.
-    pub async fn get_parameter(&self, param: Parameter) -> Result<Option<String>, ZbobrError> {
+    pub async fn get_parameter(&self, param: Parameter) -> anyhow::Result<Option<String>> {
         let task = self.zbobr.get_task(self.task_id).await?;
         Ok(task.parameters.get(&param).cloned())
     }
@@ -1162,7 +1126,7 @@ impl TaskSession {
         &self,
         param: Parameter,
         value: Option<String>,
-    ) -> Result<(), ZbobrError> {
+    ) -> anyhow::Result<()> {
         self.modify_task(move |task| {
             if let Some(v) = value {
                 task.parameters.insert(param, v);

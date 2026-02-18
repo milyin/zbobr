@@ -24,23 +24,12 @@ pub struct ZbobrExecutorMcpTesterToml {
 }
 
 /// Resolved configuration for the mcp-tester executor.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ZbobrExecutorMcpTesterConfig {
     pub planning: Option<PathBuf>,
     pub working: Option<PathBuf>,
     pub reviewing: Option<PathBuf>,
     pub merging: Option<PathBuf>,
-}
-
-impl Default for ZbobrExecutorMcpTesterConfig {
-    fn default() -> Self {
-        Self {
-            planning: None,
-            working: None,
-            reviewing: None,
-            merging: None,
-        }
-    }
 }
 
 impl ZbobrExecutorMcpTesterConfig {
