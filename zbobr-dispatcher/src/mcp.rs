@@ -156,7 +156,6 @@ mcp_tools! {
     POST_PLAN = "post_plan",
     REPORT_ERROR = "report_error",
     PULL_WORK = "pull_work",
-    GET_PARAM_DESTINATION_REPOSITORY = "get_param_destination_repository",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
 }
@@ -270,7 +269,7 @@ Work autonomously. Do not ask the user for anything.
 2. Call `{get_plan}` to read an existing plan if there is one
 3. Call `{get_discussion}` for context and prior comments and questions to existing plan
 4. **Task parameters** have already been set by the preparation stage:
-    - Use `{get_param_destination_repository}`, `{get_param_destination_branch}`, `{get_param_work_branch}` to read them if needed.
+    - Use `{get_param_destination_branch}`, `{get_param_work_branch}` to read branch names if needed.
 5. Pull the destination repository using `{pull_work}` to investigate the codebase, understand the context, and design the plan. This also ensures the repo is cached for the worker later.
 6. Explore the codebase, identify and document the files, crates, modules, and keywords relevant to the task. These help define the scope and guide the worker:
    - List specific files that need to be modified or created
@@ -288,7 +287,6 @@ Work autonomously. Do not ask the user for anything.
         report_error = planner_tools::REPORT_ERROR,
         ask_user = worker_tools::ASK_USER,
         pull_work = planner_tools::PULL_WORK,
-        get_param_destination_repository = planner_tools::GET_PARAM_DESTINATION_REPOSITORY,
         get_param_destination_branch = planner_tools::GET_PARAM_DESTINATION_BRANCH,
         get_param_work_branch = planner_tools::GET_PARAM_WORK_BRANCH,
     )
@@ -871,10 +869,6 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
         }
     }
 
-    async fn get_param_destination_repository_impl(&self) -> String {
-        self.get_param_impl(Parameter::DestinationRepository).await
-    }
-
     async fn get_param_destination_branch_impl(&self) -> String {
         self.get_param_impl(Parameter::DestinationBranch).await
     }
@@ -1313,11 +1307,6 @@ impl PlannerMcp {
     )]
     async fn pull_work(&self) -> String {
         self.pull_work_impl().await
-    }
-
-    #[tool(description = "Get the destination repository URL for this task (read-only)")]
-    async fn get_param_destination_repository(&self) -> String {
-        self.get_param_destination_repository_impl().await
     }
 
     #[tool(description = "Get the destination branch name for this task (read-only)")]
