@@ -830,6 +830,7 @@ async fn run_role_session(
                 let has_unchecked = items.iter().any(|i| !i.checked);
                 use zbobr_dispatcher::Signal;
                 let next_signal = match role {
+                    Role::Preparator => Signal::GoPlan,
                     Role::Worker => {
                         if has_unchecked {
                             Signal::GoWork
@@ -855,9 +856,11 @@ async fn run_role_session(
                     }
                 };
 
-                // Only set signal for Worker/Reviewer/Merger logic above
-                if matches!(role, Role::Worker | Role::Reviewer | Role::Merger)
-                    && let Err(e) = session.set_signal(next_signal).await
+                // Only set signal for Preparator/Worker/Reviewer/Merger logic above
+                if matches!(
+                    role,
+                    Role::Preparator | Role::Worker | Role::Reviewer | Role::Merger
+                ) && let Err(e) = session.set_signal(next_signal).await
                 {
                     tracing::error!(
                         "Failed to set follow-up signal for task {} after session: {e}",

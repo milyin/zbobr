@@ -146,7 +146,6 @@ mcp_tools! {
     GET_PARAM_DESTINATION_REPOSITORY = "get_param_destination_repository",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
-    FINISH_PREPARATION = "finish_preparation",
 }
 
 mcp_tools! {
@@ -834,19 +833,6 @@ pub trait PreparatorMcpImpl: CommonMcpImpl {
         let branch = value.map(|v| self.session().create_branch_name(&v));
         self.set_param_impl(Parameter::WorkBranch, branch).await
     }
-
-    async fn finish_preparation_impl(&self) -> String {
-        tracing::info!("[preparator#{}] finish", self.session().task_id());
-        // Signal that preparation is done and task is ready for planning
-        if let Err(e) = self.session().set_signal(crate::Signal::GoPlan).await {
-            tracing::error!(
-                "Failed to set signal GoPlan for task {} after finishing preparation: {e}",
-                self.session().task_id()
-            );
-            return format!("Preparation complete but error marking task ready for planning: {e}");
-        }
-        "Preparation complete and task ready for planning".to_string()
-    }
 }
 
 /// Planner-specific MCP implementations
@@ -1243,11 +1229,6 @@ impl PreparatorMcp {
     #[tool(description = "Get the work branch name for this task (read-only)")]
     async fn get_param_work_branch(&self) -> String {
         self.get_param_work_branch_impl().await
-    }
-
-    #[tool(description = "Finish preparation and pass the task to the planning stage")]
-    async fn finish_preparation(&self) -> String {
-        self.finish_preparation_impl().await
     }
 }
 
