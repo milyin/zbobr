@@ -1,5 +1,24 @@
 use anyhow::{anyhow, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Resolve a relative path against a base directory; absolute paths are returned as-is.
+pub fn resolve_path(path: PathBuf, base: &Path) -> PathBuf {
+    if path.is_relative() {
+        base.join(path)
+    } else {
+        path
+    }
+}
+
+/// Resolve a relative path given as a string against a base directory.
+pub fn resolve_path_string(path: String, base: &Path) -> String {
+    let p = PathBuf::from(&path);
+    if p.is_relative() {
+        base.join(p).to_string_lossy().into_owned()
+    } else {
+        path
+    }
+}
 
 // Replace characters that are unsafe or invalid in filenames with '_'.
 // Allows ASCII alphanumerics, '-', '_', and '.'.

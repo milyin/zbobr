@@ -122,8 +122,9 @@ impl FilesystemTaskBackend {
     pub fn new(
         toml: Option<&crate::config::ZbobrTaskBackendFsToml>,
         tasks_dir_override: Option<&str>,
+        config_dir: &std::path::Path,
     ) -> Result<Self, ZbobrError> {
-        let config = ZbobrTaskBackendFsConfig::build(toml, tasks_dir_override);
+        let config = ZbobrTaskBackendFsConfig::build(toml, tasks_dir_override, config_dir);
         config.validate()?;
         Ok(Self { config })
     }

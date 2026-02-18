@@ -70,7 +70,7 @@ pub async fn create_test_setup() -> TestSetup {
     .await;
 
     // 7. Create backend
-    let backend = FilesystemRepoBackend::new(None, Some(repos_dir.to_str().unwrap()))
+    let backend = FilesystemRepoBackend::new(None, Some(repos_dir.to_str().unwrap()), base)
         .expect("failed to create fs backend");
 
     TestSetup {

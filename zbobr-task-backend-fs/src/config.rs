@@ -1,5 +1,6 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use zbobr_dispatcher::ZbobrError;
+use zbobr_utility::resolve_path_string;
 
 /// TOML configuration for the filesystem task backend.
 /// All fields are optional — missing fields fall back to defaults.
@@ -26,15 +27,20 @@ impl Default for ZbobrTaskBackendFsConfig {
 
 impl ZbobrTaskBackendFsConfig {
     /// Build configuration by layering: defaults < env < TOML < overrides.
+    /// Relative paths from TOML are resolved against `config_dir`.
     pub(crate) fn build(
         toml: Option<&ZbobrTaskBackendFsToml>,
         tasks_dir_override: Option<&str>,
+        config_dir: &Path,
     ) -> Self {
         let defaults = Self::default();
 
         let tasks_dir = tasks_dir_override
             .map(PathBuf::from)
-            .or_else(|| toml.and_then(|t| t.tasks_dir.clone()).map(PathBuf::from))
+            .or_else(|| {
+                toml.and_then(|t| t.tasks_dir.clone())
+                    .map(|s| PathBuf::from(resolve_path_string(s, config_dir)))
+            })
             .or_else(|| std::env::var("ZBOBR_TASKS_DIR").ok().map(PathBuf::from))
             .unwrap_or(defaults.tasks_dir);
 

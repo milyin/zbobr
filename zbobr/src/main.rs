@@ -1,5 +1,5 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -309,10 +309,11 @@ fn load_root_toml(cli: &Cli) -> anyhow::Result<Option<ZbobrConfigToml>> {
 fn load_config(
     cli: &Cli,
     root_toml: &Option<ZbobrConfigToml>,
+    config_dir: &Path,
 ) -> anyhow::Result<ZbobrDispatcherConfig> {
     // Build dispatcher config
     let dispatcher_toml = root_toml.as_ref().and_then(|r| r.dispatcher.as_ref());
-    let mut config = ZbobrDispatcherConfig::build(dispatcher_toml)?;
+    let mut config = ZbobrDispatcherConfig::build(dispatcher_toml, config_dir)?;
 
     // CLI arg overrides (highest priority)
     if let Some(ref ws) = cli.global.workspaces {
@@ -422,7 +423,19 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = parse_cli();
     let root_toml = load_root_toml(&cli)?;
-    let config = load_config(&cli, &root_toml)?;
+
+    // Compute the directory containing the config file.
+    // All relative paths in zbobr.toml are resolved relative to this directory.
+    let config_dir = match cli.global.config {
+        Some(ref path) => std::fs::canonicalize(path)
+            .with_context(|| format!("Cannot resolve config path: {}", path.display()))?
+            .parent()
+            .expect("config file must have a parent directory")
+            .to_path_buf(),
+        None => std::env::current_dir()?,
+    };
+
+    let config = load_config(&cli, &root_toml, &config_dir)?;
     let task_backend_github_toml = root_toml
         .as_ref()
         .and_then(|r| r.task.as_ref())
@@ -440,12 +453,6 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|r| r.repo.as_ref())
         .and_then(|r| r.fs.as_ref());
 
-    let config_dir = cli
-        .global
-        .config
-        .as_ref()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
-
     let executor_toml = root_toml.as_ref().and_then(|r| r.executor.as_ref());
     let claude_executor_config = ZbobrExecutorClaudeConfig::build(
         executor_toml.and_then(|e| e.claude.as_ref()),
@@ -455,7 +462,7 @@ async fn main() -> anyhow::Result<()> {
     );
     let mcp_tester_executor_config = ZbobrExecutorMcpTesterConfig::build(
         executor_toml.and_then(|e| e.mcp_tester.as_ref()),
-        config_dir.as_deref(),
+        &config_dir,
     );
 
     let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = match config.backend {
@@ -464,7 +471,7 @@ async fn main() -> anyhow::Result<()> {
                 .context("Failed to create GitHub task backend")?,
         ),
         zbobr_dispatcher::config::BackendType::Filesystem => Arc::new(
-            FilesystemTaskBackend::new(task_backend_fs_toml, None)
+            FilesystemTaskBackend::new(task_backend_fs_toml, None, &config_dir)
                 .context("Failed to create filesystem task backend")?,
         ),
     };
@@ -474,7 +481,7 @@ async fn main() -> anyhow::Result<()> {
                 .context("Failed to create GitHub repo backend")?,
         ),
         zbobr_dispatcher::config::BackendType::Filesystem => Arc::new(
-            FilesystemRepoBackend::new(repo_backend_fs_toml, None)
+            FilesystemRepoBackend::new(repo_backend_fs_toml, None, &config_dir)
                 .context("Failed to create filesystem repo backend")?,
         ),
     };

@@ -1,6 +1,7 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use zbobr_dispatcher::ZbobrError;
+use zbobr_utility::resolve_path_string;
 
 /// TOML configuration for the filesystem repo backend.
 /// All fields are optional — missing fields fall back to defaults.
@@ -27,15 +28,20 @@ impl Default for ZbobrRepoBackendFsConfig {
 
 impl ZbobrRepoBackendFsConfig {
     /// Build configuration by layering: defaults < env < TOML < overrides.
+    /// Relative paths from TOML are resolved against `config_dir`.
     pub(crate) fn build(
         toml: Option<&ZbobrRepoBackendFsToml>,
         repos_dir_override: Option<&str>,
+        config_dir: &Path,
     ) -> Self {
         let defaults = Self::default();
 
         let repos_dir = repos_dir_override
             .map(PathBuf::from)
-            .or_else(|| toml.and_then(|t| t.repos_dir.clone()).map(PathBuf::from))
+            .or_else(|| {
+                toml.and_then(|t| t.repos_dir.clone())
+                    .map(|s| PathBuf::from(resolve_path_string(s, config_dir)))
+            })
             .or_else(|| std::env::var("ZBOBR_REPOS_DIR").ok().map(PathBuf::from))
             .unwrap_or(defaults.repos_dir);
 

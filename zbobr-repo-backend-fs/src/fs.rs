@@ -33,8 +33,9 @@ impl FilesystemRepoBackend {
     pub fn new(
         toml: Option<&crate::config::ZbobrRepoBackendFsToml>,
         repos_dir_override: Option<&str>,
+        config_dir: &std::path::Path,
     ) -> Result<Self, ZbobrError> {
-        let config = ZbobrRepoBackendFsConfig::build(toml, repos_dir_override);
+        let config = ZbobrRepoBackendFsConfig::build(toml, repos_dir_override, config_dir);
         config.validate()?;
         Ok(Self { config })
     }

@@ -16,7 +16,7 @@ pub fn create_test_setup() -> TestSetup {
     let tmp = TempDir::new().expect("failed to create temp dir");
     let tasks_dir = tmp.path().join("tasks");
 
-    let backend = FilesystemTaskBackend::new(None, Some(tasks_dir.to_str().unwrap()))
+    let backend = FilesystemTaskBackend::new(None, Some(tasks_dir.to_str().unwrap()), tmp.path())
         .expect("failed to create fs backend");
 
     TestSetup {
