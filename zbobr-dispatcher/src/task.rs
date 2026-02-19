@@ -25,6 +25,25 @@ impl Parameter {
     }
 }
 
+/// Robustly extract the repository name from a string (which could be a URL, local path, or owner/repo).
+pub fn extract_repo_name(repo_ref: &str) -> Option<String> {
+    let repo_ref = repo_ref.trim_end_matches(".git");
+    let repo_ref = repo_ref.trim_end_matches('/');
+
+    // Handle GitHub URLs or similar: https://github.com/owner/repo
+    if repo_ref.contains("://") || repo_ref.starts_with("git@") {
+        return repo_ref.split('/').last().map(|s| s.to_string());
+    }
+
+    // Handle local paths: /path/to/repo or ./repo
+    if repo_ref.contains('/') {
+        return repo_ref.split('/').last().map(|s| s.to_string());
+    }
+
+    // Fallback: just return the string if it doesn't contain slashes (already a repo name)
+    Some(repo_ref.to_string())
+}
+
 // -- Checklist item types --
 
 /// A single item in a task's checklist.
@@ -750,7 +769,7 @@ impl TaskSession {
             .ok_or_else(|| anyhow::anyhow!("destination_repository parameter not set"))?;
 
         // Compute the work directory: workspace/task#<id>/<repo>
-        let repo_name = dest_repo.split('/').nth(1).ok_or_else(|| {
+        let repo_name = extract_repo_name(&dest_repo).ok_or_else(|| {
             anyhow::anyhow!("Invalid destination_repository format: {}", dest_repo)
         })?;
 
@@ -1017,11 +1036,11 @@ impl TaskSession {
             .await?;
 
         // Create PR from work_branch to destination_branch in the fork repo
-        let repo_name = dest_repo.split('/').nth(1).ok_or_else(|| {
+        let repo_name = extract_repo_name(&dest_repo).ok_or_else(|| {
             anyhow::anyhow!("Invalid destination_repository format: {}", dest_repo)
         })?;
         if let Err(e) = self
-            .create_pr_for_work_branch(repo_name, &work_branch, &dest_branch)
+            .create_pr_for_work_branch(&repo_name, &work_branch, &dest_branch)
             .await
         {
             // Log the error and also notify the user via task discussion, but don't fail the pull_work

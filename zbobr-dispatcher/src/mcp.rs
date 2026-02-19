@@ -56,7 +56,7 @@ pub struct MessageParam {
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct RepoParam {
-    #[schemars(description = "Target repository in owner/name format")]
+    #[schemars(description = "Target repository (full git URL, local path, or owner/repo)")]
     pub repo: String,
 }
 
@@ -108,7 +108,9 @@ pub struct DeleteChecklistItemParam {
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct SetDestinationRepositoryParam {
-    #[schemars(description = "Destination repository in owner/name format (or null to unset)")]
+    #[schemars(
+        description = "Destination repository (full git URL, local path, or owner/repo format) (or null to unset)"
+    )]
     pub value: Option<String>,
 }
 
@@ -227,7 +229,7 @@ Read the task description and set the required parameters for the implementation
 1. Call `{get_description}` to read the user task description
 2. Call `{get_discussion}` for context and prior comments
 3. **Set task parameters** that will guide the implementation:
-    - Call `{set_param_destination_repository}` with the target GitHub repository (owner/repo format, without branch name)
+    - Call `{set_param_destination_repository}` with the target repository (full git URL, local path, or owner/repo format)
     - Call `{set_param_destination_branch}` (e.g., "main", "develop")
     - Call `{set_param_work_branch_postfix}` with the work branch postfix (e.g., "implement-feature") — the full work branch will be formed from prefix, task id and this postfix
     - Use `{get_param_destination_repository}`, `{get_param_destination_branch}`, `{get_param_work_branch}` to read current values
@@ -1233,7 +1235,9 @@ impl PreparatorMcp {
         self.get_param_destination_repository_impl().await
     }
 
-    #[tool(description = "Set the destination repository URL for this task (e.g. 'owner/repo')")]
+    #[tool(
+        description = "Set the destination repository for this task (full git URL, local path, or 'owner/repo')"
+    )]
     async fn set_param_destination_repository(
         &self,
         Parameters(params): Parameters<SetDestinationRepositoryParam>,

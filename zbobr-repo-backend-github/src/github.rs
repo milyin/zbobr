@@ -60,6 +60,46 @@ struct RepoResponse {
     full_name: String,
 }
 
+#[derive(Debug)]
+struct GitHubRepo {
+    owner: String,
+    name: String,
+    full_name: String,
+}
+
+fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
+    // Standardize: remove trailing .git and /
+    let repo_ref = repo_ref.trim_end_matches(".git").trim_end_matches('/');
+
+    let full_name = if repo_ref.contains("://") {
+        // extract owner/repo from URL
+        let parts: Vec<&str> = repo_ref.split('/').collect();
+        if parts.len() < 2 {
+            anyhow::bail!("Invalid GitHub URL: {}", repo_ref);
+        }
+        format!("{}/{}", parts[parts.len() - 2], parts[parts.len() - 1])
+    } else if repo_ref.contains(':') {
+        // git@github.com:owner/repo
+        repo_ref.split(':').last().unwrap_or("").to_string()
+    } else {
+        repo_ref.to_string()
+    };
+
+    let parts: Vec<&str> = full_name.split('/').collect();
+    if parts.len() != 2 {
+        anyhow::bail!(
+            "Invalid GitHub repository format: {}. Expected 'owner/repo' or a GitHub URL.",
+            repo_ref
+        );
+    }
+
+    Ok(GitHubRepo {
+        owner: parts[0].to_string(),
+        name: parts[1].to_string(),
+        full_name,
+    })
+}
+
 // ============================================================================
 // GitHubRepoBackend
 // ============================================================================
@@ -87,12 +127,8 @@ impl GitHubRepoBackend {
     }
 
     async fn ensure_fork(&self, target_repo: &str) -> anyhow::Result<String> {
-        let repo_name = target_repo
-            .split('/')
-            .nth(1)
-            .ok_or_else(|| anyhow::anyhow!("Invalid repo format: {target_repo}"))?;
-
-        let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo_name);
+        let repo = parse_github_repo(target_repo)?;
+        let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo.name);
 
         // Check if fork already exists
         let exists = retry_github("check fork exists", || {
@@ -103,12 +139,9 @@ impl GitHubRepoBackend {
         .is_ok();
 
         if !exists {
-            let parts: Vec<&str> = target_repo.splitn(2, '/').collect();
-            if parts.len() != 2 {
-                anyhow::bail!("Invalid target repo: {target_repo}");
-            }
+            let repo = parse_github_repo(target_repo)?;
             let fork_owner = &self.backend_config.fork_owner;
-            let endpoint = format!("/repos/{}/{}/forks", parts[0], parts[1]);
+            let endpoint = format!("/repos/{}/forks", repo.full_name);
             let payload = serde_json::json!({ "organization": fork_owner });
 
             tracing::info!(
@@ -155,10 +188,8 @@ impl RepoBackend for GitHubRepoBackend {
         branch: &str,
         workspace_path: &std::path::Path,
     ) -> anyhow::Result<PathBuf> {
-        let repo_name = target_repo
-            .split('/')
-            .nth(1)
-            .ok_or_else(|| anyhow::anyhow!("Invalid repo format: {target_repo}"))?;
+        let repo = parse_github_repo(target_repo)?;
+        let repo_name = &repo.name;
 
         let work_dir = workspace_path.join(repo_name);
 
@@ -255,10 +286,8 @@ impl RepoBackend for GitHubRepoBackend {
         branch: &str,
         workspace_path: &std::path::Path,
     ) -> anyhow::Result<PathBuf> {
-        let repo_name = target_repo
-            .split('/')
-            .nth(1)
-            .ok_or_else(|| anyhow::anyhow!("Invalid repo format: {target_repo}"))?;
+        let repo = parse_github_repo(target_repo)?;
+        let repo_name = &repo.name;
 
         let work_dir = workspace_path.join(repo_name);
 
@@ -336,12 +365,8 @@ impl RepoBackend for GitHubRepoBackend {
         pr_title: &str,
         pr_body: &str,
     ) -> anyhow::Result<String> {
-        let repo_name = target_repo
-            .split('/')
-            .nth(1)
-            .ok_or_else(|| anyhow::anyhow!("Invalid repo format: {target_repo}"))?;
-
-        let work_dir = workspace_path.join(repo_name);
+        let repo = parse_github_repo(target_repo)?;
+        let work_dir = workspace_path.join(&repo.name);
 
         if !work_dir.exists() {
             anyhow::bail!("Work directory does not exist: {}", work_dir.display());
@@ -425,7 +450,7 @@ impl RepoBackend for GitHubRepoBackend {
             html_url: String,
         }
 
-        let pr_endpoint = format!("/repos/{target_repo}/pulls");
+        let pr_endpoint = format!("/repos/{}/pulls", repo.full_name);
         let response: PrResponse = self
             .octocrab
             .post(pr_endpoint, Some(&pr_payload))
@@ -480,11 +505,8 @@ impl RepoBackend for GitHubRepoBackend {
         target_repo: &str,
         work_branch: &str,
     ) -> anyhow::Result<()> {
-        let repo_name = target_repo
-            .split('/')
-            .nth(1)
-            .ok_or_else(|| anyhow::anyhow!("Invalid target_repo format: {}", target_repo))?;
-        let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo_name);
+        let repo = parse_github_repo(target_repo)?;
+        let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo.name);
         let fork_url = format!("https://github.com/{fork_repo}.git");
 
         // Remove old "fork" remote (ignore error if it doesn't exist)
@@ -532,19 +554,14 @@ impl RepoBackend for GitHubRepoBackend {
     }
 
     async fn sync_fork(&self, target_repo: &str, branch: &str) -> anyhow::Result<()> {
-        let parts: Vec<&str> = target_repo.splitn(2, '/').collect();
-        if parts.len() != 2 {
-            anyhow::bail!("Invalid target repo: {}", target_repo);
-        }
-        let upstream_owner = parts[0];
-
+        let repo = parse_github_repo(target_repo)?;
         let fork_repo = self.ensure_fork(target_repo).await?;
 
         let endpoint = format!("/repos/{}/merge-upstream", fork_repo);
         let body = serde_json::json!({
             "branch": branch,
-            "upstream": format!("{}:{}", upstream_owner, branch),
-            "commit_message": format!("Sync fork {} from {}/{}", fork_repo, upstream_owner, branch),
+            "upstream": format!("{}:{}", repo.owner, branch),
+            "commit_message": format!("Sync fork {} from {}/{}", fork_repo, repo.owner, branch),
         });
 
         tracing::info!("Calling merge-upstream for {} -> {}", fork_repo, branch);
@@ -558,7 +575,7 @@ impl RepoBackend for GitHubRepoBackend {
                 tracing::info!(
                     "Successfully synced fork {} from {}/{}",
                     fork_repo,
-                    upstream_owner,
+                    repo.owner,
                     branch
                 );
                 Ok(())
