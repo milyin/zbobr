@@ -20,7 +20,7 @@ tasks_dir = "./tasks"
 repos_dir = "./repos"
 
 [executor.mcp-tester]
-preparation = "./scenarios/dummy.yml"
+preparation = "./scenarios/preparator_comprehensive.yml"
 planning = "./scenarios/dummy.yml"
 working = "./scenarios/dummy.yml"
 reviewing = "./scenarios/dummy.yml"

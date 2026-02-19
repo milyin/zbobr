@@ -1,0 +1,103 @@
+name: Preparator Comprehensive Test
+description: Verify all PREPARATION MCP functions
+timeout: 60
+stop_on_failure: true
+
+steps:
+  - name: Get task description
+    operation:
+      type: tool_call
+      tool: get_description
+    assertions:
+      - type: success
+      - type: contains
+        path: result
+        value: "Dummy task description"
+
+  - name: Get task discussion
+    operation:
+      type: tool_call
+      tool: get_discussion
+    assertions:
+      - type: success
+      - type: contains
+        path: result
+        value: "No messages yet."
+
+  - name: Set destination repository
+    operation:
+      type: tool_call
+      tool: set_param_destination_repository
+      arguments:
+        value: "owner/repo"
+    assertions:
+      - type: success
+
+  - name: Get destination repository
+    operation:
+      type: tool_call
+      tool: get_param_destination_repository
+    assertions:
+      - type: success
+      - type: equals
+        path: result
+        value: "owner/repo"
+
+  - name: Set destination branch
+    operation:
+      type: tool_call
+      tool: set_param_destination_branch
+      arguments:
+        value: "main"
+    assertions:
+      - type: success
+
+  - name: Get destination branch
+    operation:
+      type: tool_call
+      tool: get_param_destination_branch
+    assertions:
+      - type: success
+      - type: equals
+        path: result
+        value: "main"
+
+  - name: Set work branch postfix
+    operation:
+      type: tool_call
+      tool: set_param_work_branch_postfix
+      arguments:
+        value: "fix-all-the-bugs"
+    assertions:
+      - type: success
+
+  - name: Get work branch
+    operation:
+      type: tool_call
+      tool: get_param_work_branch
+    assertions:
+      - type: success
+      - type: equals
+        path: result
+        value: "zbobr_fix-1-fix-all-the-bugs"
+
+  - name: Report error
+    operation:
+      type: tool_call
+      tool: report_error
+      arguments:
+        message: "Something went wrong."
+    assertions:
+      - type: success
+      - type: contains
+        path: result
+        value: "Error reported to user"
+
+  - name: Report results
+    operation:
+      type: tool_call
+      tool: report_results
+      arguments:
+        message: "Preparation complete."
+    assertions:
+      - type: success

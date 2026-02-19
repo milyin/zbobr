@@ -62,7 +62,7 @@ async fn run_mcp_test(command: &str, task_id: u64) {
 }
 
 #[tokio::test]
-async fn preparator_get_description_via_mcp_tester() {
+async fn preparator_thorough_test_via_mcp_tester() {
     run_mcp_test("prepare", 1).await;
 }
 
