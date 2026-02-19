@@ -62,9 +62,19 @@ struct RepoResponse {
 
 #[derive(Debug)]
 struct GitHubRepo {
-    owner: String,
-    name: String,
     full_name: String,
+}
+
+impl GitHubRepo {
+    /// Returns the owner part of the repository (before the '/').
+    fn owner(&self) -> &str {
+        self.full_name.split('/').next().unwrap_or("")
+    }
+
+    /// Returns the name part of the repository (after the '/').
+    fn name(&self) -> &str {
+        self.full_name.split('/').nth(1).unwrap_or("")
+    }
 }
 
 fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
@@ -80,7 +90,7 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
         format!("{}/{}", parts[parts.len() - 2], parts[parts.len() - 1])
     } else if repo_ref.contains(':') {
         // git@github.com:owner/repo
-        repo_ref.split(':').last().unwrap_or("").to_string()
+        repo_ref.rsplit(':').next().unwrap_or("").to_string()
     } else {
         repo_ref.to_string()
     };
@@ -93,11 +103,7 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
         );
     }
 
-    Ok(GitHubRepo {
-        owner: parts[0].to_string(),
-        name: parts[1].to_string(),
-        full_name,
-    })
+    Ok(GitHubRepo { full_name })
 }
 
 // ============================================================================
@@ -128,7 +134,7 @@ impl GitHubRepoBackend {
 
     async fn ensure_fork(&self, target_repo: &str) -> anyhow::Result<String> {
         let repo = parse_github_repo(target_repo)?;
-        let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo.name);
+        let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo.name());
 
         // Check if fork already exists
         let exists = retry_github("check fork exists", || {
@@ -189,7 +195,7 @@ impl RepoBackend for GitHubRepoBackend {
         workspace_path: &std::path::Path,
     ) -> anyhow::Result<PathBuf> {
         let repo = parse_github_repo(target_repo)?;
-        let repo_name = &repo.name;
+        let repo_name = repo.name();
 
         let work_dir = workspace_path.join(repo_name);
 
@@ -287,7 +293,7 @@ impl RepoBackend for GitHubRepoBackend {
         workspace_path: &std::path::Path,
     ) -> anyhow::Result<PathBuf> {
         let repo = parse_github_repo(target_repo)?;
-        let repo_name = &repo.name;
+        let repo_name = repo.name();
 
         let work_dir = workspace_path.join(repo_name);
 
@@ -366,7 +372,7 @@ impl RepoBackend for GitHubRepoBackend {
         pr_body: &str,
     ) -> anyhow::Result<String> {
         let repo = parse_github_repo(target_repo)?;
-        let work_dir = workspace_path.join(&repo.name);
+        let work_dir = workspace_path.join(repo.name());
 
         if !work_dir.exists() {
             anyhow::bail!("Work directory does not exist: {}", work_dir.display());
@@ -506,7 +512,7 @@ impl RepoBackend for GitHubRepoBackend {
         work_branch: &str,
     ) -> anyhow::Result<()> {
         let repo = parse_github_repo(target_repo)?;
-        let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo.name);
+        let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo.name());
         let fork_url = format!("https://github.com/{fork_repo}.git");
 
         // Remove old "fork" remote (ignore error if it doesn't exist)
@@ -560,8 +566,8 @@ impl RepoBackend for GitHubRepoBackend {
         let endpoint = format!("/repos/{}/merge-upstream", fork_repo);
         let body = serde_json::json!({
             "branch": branch,
-            "upstream": format!("{}:{}", repo.owner, branch),
-            "commit_message": format!("Sync fork {} from {}/{}", fork_repo, repo.owner, branch),
+            "upstream": format!("{}:{}", repo.owner(), branch),
+            "commit_message": format!("Sync fork {} from {}/{}", fork_repo, repo.owner(), branch),
         });
 
         tracing::info!("Calling merge-upstream for {} -> {}", fork_repo, branch);
@@ -575,7 +581,7 @@ impl RepoBackend for GitHubRepoBackend {
                 tracing::info!(
                     "Successfully synced fork {} from {}/{}",
                     fork_repo,
-                    repo.owner,
+                    repo.owner(),
                     branch
                 );
                 Ok(())
