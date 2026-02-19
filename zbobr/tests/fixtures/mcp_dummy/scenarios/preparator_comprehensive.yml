@@ -93,6 +93,16 @@ steps:
         path: result
         value: "Error reported to user"
 
+  - name: Verify error in discussion
+    operation:
+      type: tool_call
+      tool: get_discussion
+    assertions:
+      - type: success
+      - type: contains
+        path: result
+        value: "Something went wrong."
+
   - name: Report results
     operation:
       type: tool_call
@@ -101,3 +111,13 @@ steps:
         message: "Preparation complete."
     assertions:
       - type: success
+
+  - name: Verify results in discussion
+    operation:
+      type: tool_call
+      tool: get_discussion
+    assertions:
+      - type: success
+      - type: contains
+        path: result
+        value: "Preparation complete."
