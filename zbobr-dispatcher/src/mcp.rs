@@ -26,9 +26,9 @@ fn branch_isolation_instruction() -> String {
         for reference only. Do NOT fetch or use any other branches. Do NOT look at branches 
         other than the work and destination branches. If you need temporary or experimental branches, 
         prefix their names with the work branch name to avoid interfering with other agents.",
+        pull_work = planner_tools::PULL_WORK,
         get_param_destination_branch = planner_tools::GET_PARAM_DESTINATION_BRANCH,
         get_param_work_branch = planner_tools::GET_PARAM_WORK_BRANCH,
-        pull_work = planner_tools::PULL_WORK,
     )
 }
 
@@ -236,17 +236,17 @@ Read the task description and set the required parameters for the implementation
 4. Call `{report_results}` to provide a brief and concise report of your work and finish the session. This report takes part in the context for further agent calls, so it MUST be compact.
 5. When finished, the task will move to the planning stage.
 "#,
+        report_error = preparator_tools::REPORT_ERROR,
+        ask_user = worker_tools::ASK_USER,
         get_description = preparator_tools::GET_DESCRIPTION,
         get_discussion = preparator_tools::GET_DISCUSSION,
-        report_error = preparator_tools::REPORT_ERROR,
-        report_results = preparator_tools::REPORT_RESULTS,
-        ask_user = worker_tools::ASK_USER,
         set_param_destination_repository = preparator_tools::SET_PARAM_DESTINATION_REPOSITORY,
         set_param_destination_branch = preparator_tools::SET_PARAM_DESTINATION_BRANCH,
         set_param_work_branch_postfix = preparator_tools::SET_PARAM_WORK_BRANCH_POSTFIX,
         get_param_destination_repository = preparator_tools::GET_PARAM_DESTINATION_REPOSITORY,
         get_param_destination_branch = preparator_tools::GET_PARAM_DESTINATION_BRANCH,
         get_param_work_branch = preparator_tools::GET_PARAM_WORK_BRANCH,
+        report_results = preparator_tools::REPORT_RESULTS,
     )
 }
 
@@ -289,17 +289,17 @@ Work autonomously. Do not ask the user for anything.
 8. Post a solution in the form of a text plan with `{post_plan}`. Use planning mode if available.
 9. Call `{report_results}` to provide a brief and concise report of your work and finish the session. This report takes part in the context for further agent calls, so it MUST be compact.
 "#,
-        branch_isolation = branch_isolation_instruction(),
-        get_description = planner_tools::GET_DESCRIPTION,
-        get_discussion = planner_tools::GET_DISCUSSION,
-        get_plan = planner_tools::GET_PLAN,
+        pull_work = planner_tools::PULL_WORK,
         post_plan = planner_tools::POST_PLAN,
         report_error = planner_tools::REPORT_ERROR,
-        report_results = planner_tools::REPORT_RESULTS,
         ask_user = worker_tools::ASK_USER,
-        pull_work = planner_tools::PULL_WORK,
+        branch_isolation = branch_isolation_instruction(),
+        get_description = planner_tools::GET_DESCRIPTION,
+        get_plan = planner_tools::GET_PLAN,
+        get_discussion = planner_tools::GET_DISCUSSION,
         get_param_destination_branch = planner_tools::GET_PARAM_DESTINATION_BRANCH,
         get_param_work_branch = planner_tools::GET_PARAM_WORK_BRANCH,
+        report_results = planner_tools::REPORT_RESULTS,
     )
 }
 
@@ -396,7 +396,7 @@ Review the implementation changes and ensure they meet coding standards and task
 1. Call `{get_description}` to understand the task requirements
 2. Call `{get_plan}` to see the agreed implementation
 3. Set up the repository using `{pull_work}` and inspect the changes
-#4. For each issue found, call `{insert_checklist_item}` with a clear title and description explaining the problem and suggested fix
+4. For each issue found, call `{insert_checklist_item}` with a clear title and description explaining the problem and suggested fix
 5. Call `{report_results}` to provide a brief and concise report of your work and finish the session. This report takes part in the context for further agent calls, so it MUST be compact.
 "#,
         get_description = reviewer_tools::GET_DESCRIPTION,

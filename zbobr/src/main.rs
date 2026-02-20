@@ -68,6 +68,26 @@ struct GlobalArgs {
     /// CLI tool to use: "copilot", "claude", or "mcp-tester"
     #[arg(long, env = "ZBOBR_CLI_TOOL")]
     cli_tool: Option<String>,
+
+    /// Path to MCP tester scenario file for preparator role
+    #[arg(long, env = "ZBOBR_EXECUTOR_MCP_TESTER_PREPARATION")]
+    executor_mcp_tester_preparation: Option<PathBuf>,
+
+    /// Path to MCP tester scenario file for planner role
+    #[arg(long, env = "ZBOBR_EXECUTOR_MCP_TESTER_PLANNING")]
+    executor_mcp_tester_planning: Option<PathBuf>,
+
+    /// Path to MCP tester scenario file for worker role
+    #[arg(long, env = "ZBOBR_EXECUTOR_MCP_TESTER_WORKING")]
+    executor_mcp_tester_working: Option<PathBuf>,
+
+    /// Path to MCP tester scenario file for reviewer role
+    #[arg(long, env = "ZBOBR_EXECUTOR_MCP_TESTER_REVIEWING")]
+    executor_mcp_tester_reviewing: Option<PathBuf>,
+
+    /// Path to MCP tester scenario file for merger role
+    #[arg(long, env = "ZBOBR_EXECUTOR_MCP_TESTER_MERGING")]
+    executor_mcp_tester_merging: Option<PathBuf>,
 }
 
 #[derive(Parser)]
@@ -488,10 +508,27 @@ async fn main() -> anyhow::Result<()> {
         ZbobrExecutorClaudeConfig::build(executor_toml.and_then(|e| e.claude.as_ref()));
     let copilot_executor_config =
         ZbobrExecutorCopilotConfig::build(executor_toml.and_then(|e| e.copilot.as_ref()));
-    let mcp_tester_executor_config = ZbobrExecutorMcpTesterConfig::build(
+    let mut mcp_tester_executor_config = ZbobrExecutorMcpTesterConfig::build(
         executor_toml.and_then(|e| e.mcp_tester.as_ref()),
         &config_dir,
     );
+
+    // Override with CLI arguments if provided
+    if let Some(path) = &cli.global.executor_mcp_tester_preparation {
+        mcp_tester_executor_config.preparation = Some(path.clone());
+    }
+    if let Some(path) = &cli.global.executor_mcp_tester_planning {
+        mcp_tester_executor_config.planning = Some(path.clone());
+    }
+    if let Some(path) = &cli.global.executor_mcp_tester_working {
+        mcp_tester_executor_config.working = Some(path.clone());
+    }
+    if let Some(path) = &cli.global.executor_mcp_tester_reviewing {
+        mcp_tester_executor_config.reviewing = Some(path.clone());
+    }
+    if let Some(path) = &cli.global.executor_mcp_tester_merging {
+        mcp_tester_executor_config.merging = Some(path.clone());
+    }
 
     let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = match config.backend {
         zbobr_dispatcher::config::BackendType::GitHub => Arc::new(

@@ -35,3 +35,5 @@ rustls = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+zbobr-task-backend-fs = { workspace = true }
+zbobr-dispatcher = { workspace = true }
