@@ -1,121 +1,14 @@
 use std::path::Path;
 use tempfile::TempDir;
+
+mod mcp_tester_scenarios;
+use mcp_tester_scenarios::{dummy_scenario, preparator_comprehensive_scenario};
+
 use zbobr_dispatcher::mcp::preparator_tools::{
     GET_DESCRIPTION, GET_DISCUSSION, SET_PARAM_DESTINATION_REPOSITORY,
     GET_PARAM_DESTINATION_REPOSITORY, SET_PARAM_DESTINATION_BRANCH,
     GET_PARAM_DESTINATION_BRANCH, SET_PARAM_WORK_BRANCH_POSTFIX, GET_PARAM_WORK_BRANCH,
 };
-
-/// Inline scenario YAML for simple testing (dummy get_description test)
-fn dummy_scenario() -> String {
-    format!(
-        r#"name: Dummy MCP Test
-description: Verify get_description returns the expected task description
-timeout: 30
-stop_on_failure: true
-
-steps:
-  - name: Get task description
-    operation:
-      type: tool_call
-      tool: {GET_DESCRIPTION}
-    assertions:
-      - type: success
-      - type: contains
-        path: result
-        value: "Dummy task description"
-"#,
-    )
-}
-
-/// Inline scenario YAML for comprehensive preparator testing
-fn preparator_comprehensive_scenario() -> String {
-    format!(
-        r#"name: Preparator Comprehensive Test
-description: Verify all PREPARATION MCP functions
-timeout: 60
-stop_on_failure: true
-
-steps:
-  - name: Get task description
-    operation:
-      type: tool_call
-      tool: {GET_DESCRIPTION}
-    assertions:
-      - type: success
-      - type: contains
-        path: result
-        value: "Dummy task description"
-
-  - name: Get task discussion
-    operation:
-      type: tool_call
-      tool: {GET_DISCUSSION}
-    assertions:
-      - type: success
-      - type: contains
-        path: result
-        value: "No messages yet."
-
-  - name: Set destination repository
-    operation:
-      type: tool_call
-      tool: {SET_PARAM_DESTINATION_REPOSITORY}
-      arguments:
-        value: "owner/repo"
-    assertions:
-      - type: success
-
-  - name: Get destination repository
-    operation:
-      type: tool_call
-      tool: {GET_PARAM_DESTINATION_REPOSITORY}
-    assertions:
-      - type: success
-      - type: equals
-        path: result
-        value: "owner/repo"
-
-  - name: Set destination branch
-    operation:
-      type: tool_call
-      tool: {SET_PARAM_DESTINATION_BRANCH}
-      arguments:
-        value: "main"
-    assertions:
-      - type: success
-
-  - name: Get destination branch
-    operation:
-      type: tool_call
-      tool: {GET_PARAM_DESTINATION_BRANCH}
-    assertions:
-      - type: success
-      - type: equals
-        path: result
-        value: "main"
-
-  - name: Set work branch
-    operation:
-      type: tool_call
-      tool: {SET_PARAM_WORK_BRANCH_POSTFIX}
-      arguments:
-        value: "test"
-    assertions:
-      - type: success
-
-  - name: Get work branch
-    operation:
-      type: tool_call
-      tool: {GET_PARAM_WORK_BRANCH}
-    assertions:
-      - type: success
-      - type: contains
-        path: result
-        value: "test"
-"#,
-    )
-}
 
 /// Minimal TOML configuration for testing
 fn create_test_config(tasks_dir: &Path, workspaces_dir: &Path) -> String {
