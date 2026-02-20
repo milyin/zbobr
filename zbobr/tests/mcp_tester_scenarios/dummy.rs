@@ -1,4 +1,4 @@
-use zbobr_dispatcher::mcp::preparator_tools::{GET_DESCRIPTION};
+use zbobr_dispatcher::mcp::preparator_tools::GET_DESCRIPTION;
 
 /// Inline scenario YAML for simple testing (dummy get_description test)
 pub fn dummy_scenario() -> String {

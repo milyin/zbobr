@@ -221,7 +221,10 @@ pub(crate) fn generate_api_docs_from_router<T: Send + Sync + 'static>(
                 for (name, prop_val) in properties {
                     let required_arr = schema.get("required").and_then(|v: &Value| v.as_array());
                     let required = required_arr
-                        .map(|arr| { arr.iter().any(|v: &Value| v.as_str() == Some(name.as_str())) })
+                        .map(|arr| {
+                            arr.iter()
+                                .any(|v: &Value| v.as_str() == Some(name.as_str()))
+                        })
                         .unwrap_or(false);
                     let desc = match prop_val.get("description") {
                         Some(v) => v.as_str().unwrap_or(""),
@@ -268,7 +271,11 @@ pub(crate) async fn find_available_port(base_port: u16) -> anyhow::Result<u16> {
     )
 }
 
-pub(crate) async fn serve_mcp(base_port: u16, path: &str, router: axum::Router) -> anyhow::Result<u16> {
+pub(crate) async fn serve_mcp(
+    base_port: u16,
+    path: &str,
+    router: axum::Router,
+) -> anyhow::Result<u16> {
     // Find an available port starting from base_port
     let port = find_available_port(base_port).await?;
 
@@ -310,7 +317,10 @@ pub async fn run_role_mcp_server(
             let svc = StreamableHttpService::new(
                 move || {
                     tracing::debug!("Creating new PreparatorMcp instance for task {task_id}");
-                    Ok(super::preparator::PreparatorMcp::new(zbobr.clone(), task_id))
+                    Ok(super::preparator::PreparatorMcp::new(
+                        zbobr.clone(),
+                        task_id,
+                    ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
                 Default::default(),

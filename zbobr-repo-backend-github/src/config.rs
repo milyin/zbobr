@@ -1,10 +1,15 @@
-/// TOML configuration for the GitHub repo backend.
-/// All fields are optional — missing fields fall back to defaults.
-#[derive(Debug, Clone, serde::Deserialize, Default)]
-#[serde(default, deny_unknown_fields)]
-pub struct ZbobrRepoBackendGithubToml {
-    pub fork_owner: Option<String>,
-    pub github_token: Option<String>,
+use zbobr_utility::config_struct;
+
+config_struct! {
+    /// Configuration for the GitHub repo backend.
+    pub struct ZbobrRepoBackendGithub {
+        /// Owner for forks (GitHub user or org).
+        #[arg(long)]
+        pub fork_owner: String,
+        /// GitHub token with read/write access to fork org.
+        #[arg(long = "repo-github-token", env = "ZBOBR_REPO_GITHUB_TOKEN", id = "repo_github_token")]
+        pub github_token: String,
+    }
 }
 
 /// Resolved configuration for the GitHub repo backend.
@@ -17,24 +22,16 @@ pub(crate) struct ZbobrRepoBackendGithubConfig {
 }
 
 impl ZbobrRepoBackendGithubConfig {
-    /// Build configuration by layering: defaults < env < TOML < overrides.
+    /// Build configuration by layering: defaults < TOML < args.
     pub(crate) fn build(
-        toml: Option<&ZbobrRepoBackendGithubToml>,
-        fork_owner_override: Option<&str>,
+        toml: Option<ZbobrRepoBackendGithubToml>,
+        args: ZbobrRepoBackendGithubArgs,
     ) -> Self {
         let defaults = Self::default();
+        let merged = toml.unwrap_or_default().merge_with_args(args);
 
-        let fork_owner = fork_owner_override
-            .map(String::from)
-            .or_else(|| toml.and_then(|t| t.fork_owner.clone()))
-            .unwrap_or(defaults.fork_owner);
-
-        // github_token: GH_TOKEN > GITHUB_TOKEN > TOML
-        let github_token = std::env::var("GH_TOKEN")
-            .ok()
-            .or_else(|| std::env::var("GITHUB_TOKEN").ok())
-            .or_else(|| toml.and_then(|t| t.github_token.clone()))
-            .unwrap_or(defaults.github_token);
+        let fork_owner = merged.fork_owner.unwrap_or(defaults.fork_owner);
+        let github_token = merged.github_token.unwrap_or(defaults.github_token);
 
         Self {
             fork_owner,
@@ -52,7 +49,7 @@ impl ZbobrRepoBackendGithubConfig {
         }
         if self.github_token.is_empty() {
             anyhow::bail!(
-                "GitHub token not set. Set GH_TOKEN or GITHUB_TOKEN env var, or set github_token in [repo.github] config.\n  \
+                "GitHub token not set. Set github_token in [repo.github] config or use --github-token.\n  \
                  This token needs read/write access to the organization where repos are forked."
             );
         }

@@ -1,4 +1,6 @@
-use crate::mcp::common::{preparator_tools, planner_tools, worker_tools, reviewer_tools, merger_tools};
+use crate::mcp::common::{
+    merger_tools, planner_tools, preparator_tools, reviewer_tools, worker_tools,
+};
 
 /// Generate hardcoded preparator instructions using tool name constants.
 pub fn preparator_instructions() -> String {
@@ -182,7 +184,8 @@ Review the implementation changes and ensure they meet coding standards and task
 /// Generate hardcoded merger instructions using tool name constants.
 pub fn merger_instructions() -> String {
     use merger_tools::{
-        ASK_USER, GET_DESCRIPTION, GET_DISCUSSION, PULL_WORK, PUSH_WORK, REPORT_ERROR, REPORT_RESULTS,
+        ASK_USER, GET_DESCRIPTION, GET_DISCUSSION, PULL_WORK, PUSH_WORK, REPORT_ERROR,
+        REPORT_RESULTS,
     };
     let branch_isolation = crate::mcp::common::branch_isolation_instruction();
     let instructions = format!(

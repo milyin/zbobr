@@ -48,7 +48,10 @@ impl PlannerMcp {
     }
 
     #[tool(description = "Report an error to the user and pause task processing")]
-    async fn report_error(&self, Parameters(params): Parameters<crate::mcp::common::MessageParam>) -> String {
+    async fn report_error(
+        &self,
+        Parameters(params): Parameters<crate::mcp::common::MessageParam>,
+    ) -> String {
         self.report_error_impl(&params.message).await
     }
 
@@ -82,7 +85,10 @@ impl PlannerMcp {
     #[tool(
         description = "Provide a brief and concise report of your results and finish your work. These reports add up to discussion and shorten the context for further agent calls, so they MUST be compact."
     )]
-    async fn report_results(&self, Parameters(params): Parameters<crate::mcp::common::MessageParam>) -> String {
+    async fn report_results(
+        &self,
+        Parameters(params): Parameters<crate::mcp::common::MessageParam>,
+    ) -> String {
         self.report_results_impl(&params.message).await
     }
 }

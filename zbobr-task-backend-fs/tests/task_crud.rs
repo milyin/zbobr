@@ -11,10 +11,7 @@ async fn create_read_modify_task() {
 
     // -- Create a task with all optional fields populated --
     let mut params = HashMap::new();
-    params.insert(
-        Parameter::DestinationRepository,
-        "owner/repo".to_string(),
-    );
+    params.insert(Parameter::DestinationRepository, "owner/repo".to_string());
     params.insert(Parameter::DestinationBranch, "main".to_string());
 
     let id = backend
@@ -86,7 +83,10 @@ async fn create_read_modify_task() {
         .expect("modify_task failed");
 
     // -- Re-read and verify modifications persisted --
-    let task = backend.get_task(id).await.expect("get_task after modify failed");
+    let task = backend
+        .get_task(id)
+        .await
+        .expect("get_task after modify failed");
 
     assert_eq!(task.title, "Updated title");
     assert_eq!(task.description, "Updated description");
@@ -112,11 +112,21 @@ async fn create_read_modify_task() {
     );
 
     // -- Close the task and verify --
-    assert!(!backend.is_task_closed(id).await.expect("is_task_closed failed"));
+    assert!(
+        !backend
+            .is_task_closed(id)
+            .await
+            .expect("is_task_closed failed")
+    );
 
     backend.close_task(id).await.expect("close_task failed");
 
-    assert!(backend.is_task_closed(id).await.expect("is_task_closed after close failed"));
+    assert!(
+        backend
+            .is_task_closed(id)
+            .await
+            .expect("is_task_closed after close failed")
+    );
 
     // Closed tasks should not appear in list_tasks_by_stage
     let working_tasks = backend

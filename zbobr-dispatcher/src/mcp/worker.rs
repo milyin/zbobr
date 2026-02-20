@@ -6,7 +6,10 @@ use rmcp::{
 };
 
 use crate::Zbobr;
-use crate::mcp::common::{MessageParam, InsertChecklistItemParam, UpdateChecklistItemParam, CheckChecklistItemParam, DeleteChecklistItemParam};
+use crate::mcp::common::{
+    CheckChecklistItemParam, DeleteChecklistItemParam, InsertChecklistItemParam, MessageParam,
+    UpdateChecklistItemParam,
+};
 use crate::mcp::traits::{CommonMcpImpl, WorkerMcpImpl};
 use crate::task::TaskSession;
 
@@ -151,7 +154,8 @@ impl ServerHandler for WorkerMcp {
         ServerInfo {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             instructions: Some(
-                "Worker tools: implement task according to plan, submit work, mark done.".to_string(),
+                "Worker tools: implement task according to plan, submit work, mark done."
+                    .to_string(),
             ),
             ..Default::default()
         }

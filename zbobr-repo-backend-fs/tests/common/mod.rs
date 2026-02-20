@@ -43,7 +43,11 @@ pub async fn create_test_setup() -> TestSetup {
     // 2. Clone bare repo into staging area
     git_command_status(
         &base,
-        &["clone", bare_repo.to_str().unwrap(), staging.to_str().unwrap()],
+        &[
+            "clone",
+            bare_repo.to_str().unwrap(),
+            staging.to_str().unwrap(),
+        ],
     )
     .await;
 
@@ -63,11 +67,7 @@ pub async fn create_test_setup() -> TestSetup {
     git_command_status(&staging, &["push", "-u", "origin", "main"]).await;
 
     // 6. Set bare repo HEAD to point to main
-    git_command_status(
-        &bare_repo,
-        &["symbolic-ref", "HEAD", "refs/heads/main"],
-    )
-    .await;
+    git_command_status(&bare_repo, &["symbolic-ref", "HEAD", "refs/heads/main"]).await;
 
     // 7. Create backend
     let backend = FilesystemRepoBackend::new(None, Some(repos_dir.to_str().unwrap()), base)

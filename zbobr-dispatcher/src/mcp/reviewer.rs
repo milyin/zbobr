@@ -6,7 +6,10 @@ use rmcp::{
 };
 
 use crate::Zbobr;
-use crate::mcp::common::{InsertChecklistItemParam, UpdateChecklistItemParam, CheckChecklistItemParam, DeleteChecklistItemParam};
+use crate::mcp::common::{
+    CheckChecklistItemParam, DeleteChecklistItemParam, InsertChecklistItemParam,
+    UpdateChecklistItemParam,
+};
 use crate::mcp::traits::{CommonMcpImpl, ReviewerMcpImpl};
 use crate::task::TaskSession;
 
@@ -48,7 +51,10 @@ impl ReviewerMcp {
     }
 
     #[tool(description = "Report an error to the user and pause task processing")]
-    async fn report_error(&self, Parameters(params): Parameters<crate::mcp::common::MessageParam>) -> String {
+    async fn report_error(
+        &self,
+        Parameters(params): Parameters<crate::mcp::common::MessageParam>,
+    ) -> String {
         self.report_error_impl(&params.message).await
     }
 
@@ -121,7 +127,10 @@ impl ReviewerMcp {
     #[tool(
         description = "Provide a brief and concise report of your results and finish your work. These reports add up to discussion and shorten the context for further agent calls, so they MUST be compact."
     )]
-    async fn report_results(&self, Parameters(params): Parameters<crate::mcp::common::MessageParam>) -> String {
+    async fn report_results(
+        &self,
+        Parameters(params): Parameters<crate::mcp::common::MessageParam>,
+    ) -> String {
         self.report_results_impl(&params.message).await
     }
 }
@@ -132,7 +141,8 @@ impl ServerHandler for ReviewerMcp {
         ServerInfo {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             instructions: Some(
-                "Reviewer tools: review implementation changes, add review remarks to checklist.".to_string(),
+                "Reviewer tools: review implementation changes, add review remarks to checklist."
+                    .to_string(),
             ),
             ..Default::default()
         }

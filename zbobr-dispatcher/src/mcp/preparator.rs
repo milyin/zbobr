@@ -110,7 +110,8 @@ impl ServerHandler for PreparatorMcp {
         ServerInfo {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             instructions: Some(
-                "Preparator tools: read task description and set implementation parameters.".to_string(),
+                "Preparator tools: read task description and set implementation parameters."
+                    .to_string(),
             ),
             ..Default::default()
         }

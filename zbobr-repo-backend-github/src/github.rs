@@ -117,10 +117,10 @@ pub struct GitHubRepoBackend {
 
 impl GitHubRepoBackend {
     pub fn new(
-        toml: Option<&crate::config::ZbobrRepoBackendGithubToml>,
-        fork_owner_override: Option<&str>,
+        toml: Option<crate::config::ZbobrRepoBackendGithubToml>,
+        args: crate::config::ZbobrRepoBackendGithubArgs,
     ) -> anyhow::Result<Self> {
-        let backend_config = ZbobrRepoBackendGithubConfig::build(toml, fork_owner_override);
+        let backend_config = ZbobrRepoBackendGithubConfig::build(toml, args);
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(backend_config.github_token.clone())

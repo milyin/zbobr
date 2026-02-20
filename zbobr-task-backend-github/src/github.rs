@@ -115,10 +115,10 @@ pub struct GitHubTaskBackend {
 
 impl GitHubTaskBackend {
     pub fn new(
-        toml: Option<&crate::config::ZbobrTaskBackendGithubToml>,
-        task_repo_override: Option<&str>,
+        toml: Option<crate::config::ZbobrTaskBackendGithubToml>,
+        args: crate::config::ZbobrTaskBackendGithubArgs,
     ) -> anyhow::Result<Self> {
-        let backend_config = ZbobrTaskBackendGithubConfig::build(toml, task_repo_override);
+        let backend_config = ZbobrTaskBackendGithubConfig::build(toml, args);
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(backend_config.github_token.clone())

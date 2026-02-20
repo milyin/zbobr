@@ -1,6 +1,8 @@
 use anyhow::{Result, anyhow};
 use std::path::{Path, PathBuf};
 
+pub mod macros;
+
 /// Resolve a relative path against a base directory; absolute paths are returned as-is.
 pub fn resolve_path(path: PathBuf, base: &Path) -> PathBuf {
     if path.is_relative() {

@@ -13,23 +13,18 @@ use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
 use zbobr_repo_backend_fs::FilesystemRepoBackend;
-use zbobr_repo_backend_github::GitHubRepoBackend;
+use zbobr_repo_backend_github::{GitHubRepoBackend, ZbobrRepoBackendGithubArgs};
 use zbobr_task_backend_fs::FilesystemTaskBackend;
-use zbobr_task_backend_github::GitHubTaskBackend;
+use zbobr_task_backend_github::{GitHubTaskBackend, ZbobrTaskBackendGithubArgs};
 
 #[derive(Args, Clone)]
 #[command(next_help_heading = "Global Options")]
 struct GlobalArgs {
-    /// Task repository with tasks to orchestrate, in "owner/repo" format
-    /// (e.g. "YoroolGui/copilot-zenoh"). Can also be set via ZBOBR_TASK_REPO env var
-    #[arg(long)]
-    task_repo: Option<String>,
+    #[command(flatten)]
+    task_github: ZbobrTaskBackendGithubArgs,
 
-    /// GitHub user or organization where target repos are forked for implementation
-    /// (e.g. "YoroolGui"). Workers fork repos here to create PRs.
-    /// Can also be set via ZBOBR_FORK_OWNER env var
-    #[arg(long)]
-    fork_owner: Option<String>,
+    #[command(flatten)]
+    repo_github: ZbobrRepoBackendGithubArgs,
 
     /// Path to workspaces directory (default: ./workspaces); each task gets a separate subdirectory
     /// Can also be set via ZBOBR_WORKSPACES env var
@@ -532,8 +527,11 @@ async fn main() -> anyhow::Result<()> {
 
     let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = match config.backend {
         zbobr_dispatcher::config::BackendType::GitHub => Arc::new(
-            GitHubTaskBackend::new(task_backend_github_toml, cli.global.task_repo.as_deref())
-                .context("Failed to create GitHub task backend")?,
+            GitHubTaskBackend::new(
+                task_backend_github_toml.cloned(),
+                cli.global.task_github.clone(),
+            )
+            .context("Failed to create GitHub task backend")?,
         ),
         zbobr_dispatcher::config::BackendType::Filesystem => Arc::new(
             FilesystemTaskBackend::new(task_backend_fs_toml, None, &config_dir)
@@ -542,8 +540,11 @@ async fn main() -> anyhow::Result<()> {
     };
     let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = match config.backend {
         zbobr_dispatcher::config::BackendType::GitHub => Arc::new(
-            GitHubRepoBackend::new(repo_backend_github_toml, cli.global.fork_owner.as_deref())
-                .context("Failed to create GitHub repo backend")?,
+            GitHubRepoBackend::new(
+                repo_backend_github_toml.cloned(),
+                cli.global.repo_github.clone(),
+            )
+            .context("Failed to create GitHub repo backend")?,
         ),
         zbobr_dispatcher::config::BackendType::Filesystem => Arc::new(
             FilesystemRepoBackend::new(repo_backend_fs_toml, None, &config_dir)

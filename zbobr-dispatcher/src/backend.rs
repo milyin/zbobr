@@ -6,7 +6,6 @@ use async_trait::async_trait;
 
 use crate::{Model, Parameter, Stage, Task, Tool};
 
-
 /// Configure git user settings for a repository.
 /// Sets user.name and user.email at the repository level.
 pub async fn configure_git_user(

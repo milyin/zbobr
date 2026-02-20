@@ -2,9 +2,7 @@ mod common;
 
 use std::path::Path;
 
-use common::{
-    create_test_setup, create_work_branch, git_command, source_repo_str, workspace_path,
-};
+use common::{create_test_setup, create_work_branch, git_command, source_repo_str, workspace_path};
 
 /// Deserialize PR YAML files in test assertions (mirrors the private `PrFile`).
 #[derive(Debug, serde::Deserialize)]
@@ -190,7 +188,13 @@ async fn test_create_pr_in_fork() {
 
     let pr_path = setup
         .backend
-        .create_pr_in_fork("myrepo", "feature-branch", "main", "My PR Title", "My PR body")
+        .create_pr_in_fork(
+            "myrepo",
+            "feature-branch",
+            "main",
+            "My PR Title",
+            "My PR body",
+        )
         .await
         .expect("create_pr_in_fork should succeed");
 
@@ -308,7 +312,11 @@ async fn test_pr_id_auto_increment() {
     assert!(pr_path_2.ends_with("2.yaml"), "second PR should be 2.yaml");
 
     // Verify next_pr_id.txt
-    let next_id_path = setup.repos_dir.join("prs").join("myrepo").join("next_pr_id.txt");
+    let next_id_path = setup
+        .repos_dir
+        .join("prs")
+        .join("myrepo")
+        .join("next_pr_id.txt");
     let next_id = tokio::fs::read_to_string(&next_id_path)
         .await
         .expect("read next_pr_id.txt");
@@ -341,8 +349,14 @@ async fn test_pr_id_separate_repos() {
     assert_eq!(prb.id, 1, "repo-b PR should get id 1");
 
     // Files should be in separate directories
-    assert!(pr_a.contains("/repo-a/"), "PR A path should contain /repo-a/");
-    assert!(pr_b.contains("/repo-b/"), "PR B path should contain /repo-b/");
+    assert!(
+        pr_a.contains("/repo-a/"),
+        "PR A path should contain /repo-a/"
+    );
+    assert!(
+        pr_b.contains("/repo-b/"),
+        "PR B path should contain /repo-b/"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +370,12 @@ async fn test_push_and_create_pr_no_work_dir() {
 
     let result = setup
         .backend
-        .push_and_create_pr(&src, Path::new("/tmp/nonexistent_zbobr_test"), "title", "body")
+        .push_and_create_pr(
+            &src,
+            Path::new("/tmp/nonexistent_zbobr_test"),
+            "title",
+            "body",
+        )
         .await;
 
     assert!(result.is_err(), "should fail when work dir does not exist");
@@ -424,8 +443,11 @@ async fn test_full_workflow() {
     assert_eq!(branch, "zbobr-42-feature");
 
     // Step 6: Verify branch exists in bare repo
-    let branches =
-        git_command(&setup.source_repo, &["branch", "--list", "zbobr-42-feature"]).await;
+    let branches = git_command(
+        &setup.source_repo,
+        &["branch", "--list", "zbobr-42-feature"],
+    )
+    .await;
     assert!(
         branches.contains("zbobr-42-feature"),
         "feature branch should exist in bare repo"
