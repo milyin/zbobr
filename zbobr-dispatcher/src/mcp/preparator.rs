@@ -1,0 +1,126 @@
+use rmcp::{
+    ServerHandler,
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    model::{ServerCapabilities, ServerInfo},
+    tool, tool_handler, tool_router,
+};
+
+use crate::Zbobr;
+use crate::mcp::common::{MessageParam, SetDestinationBranchParam, SetDestinationRepositoryParam};
+use crate::mcp::traits::{CommonMcpImpl, PreparatorMcpImpl};
+use crate::task::TaskSession;
+
+#[derive(Clone)]
+pub struct PreparatorMcp {
+    session: TaskSession,
+    tool_router: ToolRouter<Self>,
+}
+
+impl CommonMcpImpl for PreparatorMcp {
+    fn session(&self) -> &TaskSession {
+        &self.session
+    }
+
+    fn role(&self) -> crate::task::Role {
+        crate::task::Role::Preparator
+    }
+}
+
+impl PreparatorMcpImpl for PreparatorMcp {}
+
+#[tool_router]
+impl PreparatorMcp {
+    pub fn new(zbobr: Zbobr, task_id: u64) -> Self {
+        Self {
+            session: zbobr.task_session(task_id),
+            tool_router: Self::tool_router(),
+        }
+    }
+
+    #[tool(description = "Get the current description for this task (read-only)")]
+    async fn get_description(&self) -> String {
+        self.get_description_impl().await
+    }
+
+    #[tool(description = "Get all discussion messages on this task")]
+    async fn get_discussion(&self) -> String {
+        self.get_discussion_impl().await
+    }
+
+    #[tool(description = "Report an error to the user and pause task processing")]
+    async fn report_error(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.report_error_impl(&params.message).await
+    }
+
+    #[tool(description = "Get the destination repository URL for this task (read-only)")]
+    async fn get_param_destination_repository(&self) -> String {
+        self.get_param_destination_repository_impl().await
+    }
+
+    #[tool(
+        description = "Set the destination repository for this task (full git URL, local path, or 'owner/repo')"
+    )]
+    async fn set_param_destination_repository(
+        &self,
+        Parameters(params): Parameters<SetDestinationRepositoryParam>,
+    ) -> String {
+        self.set_param_destination_repository_impl(params.value)
+            .await
+    }
+
+    #[tool(description = "Get the destination branch name for this task (read-only)")]
+    async fn get_param_destination_branch(&self) -> String {
+        self.get_param_destination_branch_impl().await
+    }
+
+    #[tool(description = "Set the destination branch name for this task (e.g. 'main')")]
+    async fn set_param_destination_branch(
+        &self,
+        Parameters(params): Parameters<SetDestinationBranchParam>,
+    ) -> String {
+        self.set_param_destination_branch_impl(params.value).await
+    }
+
+    #[tool(
+        description = "Set the work branch postfix for this task (the postfix segment, e.g. 'implement-feature')"
+    )]
+    async fn set_param_work_branch_postfix(
+        &self,
+        Parameters(params): Parameters<SetDestinationBranchParam>,
+    ) -> String {
+        self.set_param_work_branch_postfix_impl(params.value).await
+    }
+
+    #[tool(description = "Get the work branch name for this task (read-only)")]
+    async fn get_param_work_branch(&self) -> String {
+        self.get_param_work_branch_impl().await
+    }
+
+    #[tool(
+        description = "Provide a brief and concise report of your results and finish your work. These reports add up to discussion and shorten the context for further agent calls, so they MUST be compact."
+    )]
+    async fn report_results(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.report_results_impl(&params.message).await
+    }
+}
+
+#[tool_handler]
+impl ServerHandler for PreparatorMcp {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo {
+            capabilities: ServerCapabilities::builder().enable_tools().build(),
+            instructions: Some(
+                "Preparator tools: read task description and set implementation parameters.".to_string(),
+            ),
+            ..Default::default()
+        }
+    }
+}
+
+impl PreparatorMcp {
+    /// Generate API documentation for preparator tools
+    pub fn generate_api_docs() -> String {
+        let tools = Self::tool_router();
+        crate::mcp::common::generate_api_docs_from_router(&tools, "Preparator")
+    }
+}
