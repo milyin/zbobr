@@ -6,6 +6,14 @@ pub mod mcp {
     pub mod traits;
     pub mod instructions;
 
+    // Re-export commonly used tool name modules from `common` so they are
+    // available as `zbobr_dispatcher::mcp::<role>_tools` for tests and callers.
+    pub use common::preparator_tools;
+    pub use common::planner_tools;
+    pub use common::worker_tools;
+    pub use common::reviewer_tools;
+    pub use common::merger_tools;
+
     pub mod preparator;
     pub mod planner;
     pub mod worker;

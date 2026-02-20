@@ -32,12 +32,12 @@ pub fn extract_repo_name(repo_ref: &str) -> Option<String> {
 
     // Handle GitHub URLs or similar: https://github.com/owner/repo
     if repo_ref.contains("://") || repo_ref.starts_with("git@") {
-        return repo_ref.split('/').last().map(|s| s.to_string());
+        return repo_ref.split('/').next_back().map(|s| s.to_string());
     }
 
     // Handle local paths: /path/to/repo or ./repo
     if repo_ref.contains('/') {
-        return repo_ref.split('/').last().map(|s| s.to_string());
+        return repo_ref.split('/').next_back().map(|s| s.to_string());
     }
 
     // Fallback: just return the string if it doesn't contain slashes (already a repo name)

@@ -491,6 +491,7 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
 
 // -- Merger MCP service --
 
+#[allow(async_fn_in_trait)]
 pub trait MergerMcpImpl: CommonMcpImpl {
     async fn get_param_destination_branch_impl(&self) -> String {
         self.get_param_impl(Parameter::DestinationBranch).await
