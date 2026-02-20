@@ -2,6 +2,7 @@ use anyhow::{Result, anyhow};
 use std::path::{Path, PathBuf};
 
 pub mod macros;
+pub use macros::config_struct;
 
 /// Resolve a relative path against a base directory; absolute paths are returned as-is.
 pub fn resolve_path(path: PathBuf, base: &Path) -> PathBuf {

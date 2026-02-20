@@ -1,5 +1,5 @@
 [workspace]
-members = ["zbobr-dispatcher", "zbobr-executor-copilot", "zbobr-executor-claude", "zbobr-executor-mcp-tester", "zbobr-task-backend-github", "zbobr-task-backend-fs", "zbobr-repo-backend-github", "zbobr-repo-backend-fs", "zbobr-config", "zbobr-utility", "zbobr"]
+members = ["zbobr-dispatcher", "zbobr-executor-copilot", "zbobr-executor-claude", "zbobr-executor-mcp-tester", "zbobr-task-backend-github", "zbobr-task-backend-fs", "zbobr-repo-backend-github", "zbobr-repo-backend-fs", "zbobr-config", "zbobr-macros", "zbobr-utility", "zbobr"]
 default-members = ["zbobr"]
 resolver = "2"
 
@@ -17,6 +17,7 @@ zbobr-executor-copilot = { path = "zbobr-executor-copilot" }
 zbobr-executor-claude = { path = "zbobr-executor-claude" }
 zbobr-executor-mcp-tester = { path = "zbobr-executor-mcp-tester" }
 zbobr-utility = { path = "zbobr-utility" }
+zbobr-macros = { path = "zbobr-macros" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -1283,3 +1283,19 @@ async fn run_manager_loop(
     tracing::info!("Manager loop terminated gracefully");
     Ok(())
 }
+
+// Unit tests below
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Constructing the clap command panics when there are duplicate argument
+    /// names.  The original bug involved multiple `default_model` fields being
+    /// flattened into `GlobalArgs` (dispatcher + executor configs).
+    #[test]
+    fn cli_command_builds_without_duplicates() {
+        // clap validation runs during command construction; any duplicates
+        // will trigger a panic and therefore fail this test.
+        let _ = Cli::command();
+    }
+}

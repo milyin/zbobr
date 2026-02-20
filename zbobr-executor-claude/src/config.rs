@@ -3,7 +3,11 @@ use zbobr_utility::config_struct;
 
 config_struct! {
     pub struct ZbobrExecutorClaude {
-        #[arg(long, help = "Default AI model for Claude executor")]
+        /// Default AI model for Claude executor.
+        #[arg(
+            env = "ZBOBR_EXECUTOR_CLAUDE_DEFAULT_MODEL",
+            help = "Default AI model for Claude executor",
+        )]
         pub default_model: Model,
     }
 }
