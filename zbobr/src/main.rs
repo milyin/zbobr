@@ -22,35 +22,67 @@ use zbobr_task_backend_fs::{FilesystemTaskBackend, ZbobrTaskBackendFsArgs};
 use zbobr_task_backend_github::{GitHubTaskBackend, ZbobrTaskBackendGithubArgs};
 
 #[derive(Args, Clone)]
-#[command(next_help_heading = "Global Options")]
 struct GlobalArgs {
-    #[command(flatten)]
+    #[command(
+        flatten,
+        next_help_heading = "Task storage backends: control where zbobr discovers tasks.\n[task.github] GitHub issues as the task source"
+    )]
     task_github: ZbobrTaskBackendGithubArgs,
 
-    #[command(flatten)]
+    #[command(
+        flatten,
+        next_help_heading = "[task.fs] Filesystem task backend (YAML files in tasks/)"
+    )]
     task_fs: ZbobrTaskBackendFsArgs,
 
-    #[command(flatten)]
+    #[command(
+        flatten,
+        next_help_heading = "[repo.github] GitHub repo backend (fork + push via API)"
+    )]
     repo_github: ZbobrRepoBackendGithubArgs,
 
-    #[command(flatten)]
+    #[command(
+        flatten,
+        next_help_heading = "[repo.fs] Filesystem repo backend (operate on local clones)"
+    )]
     repo_fs: ZbobrRepoBackendFsArgs,
 
-    #[command(flatten)]
-    executor_mcp_tester: ZbobrExecutorMcpTesterArgs,
-
-    #[command(flatten)]
+    #[command(
+        flatten,
+        next_help_heading = "[executor.claude] Claude-specific defaults"
+    )]
     executor_claude: ZbobrExecutorClaudeArgs,
 
-    #[command(flatten)]
+    #[command(
+        flatten,
+        next_help_heading = "[executor.copilot] GitHub Copilot executor defaults"
+    )]
     executor_copilot: ZbobrExecutorCopilotArgs,
 
-    #[command(flatten)]
+    #[command(
+        flatten,
+        next_help_heading = "[executor.mcp-tester] MCP tester scenarios for validating MCP servers"
+    )]
+    executor_mcp_tester: ZbobrExecutorMcpTesterArgs,
+
+    #[command(
+        flatten,
+        next_help_heading = "[dispatcher] Dispatcher runtime: workspaces, prompts, tokens"
+    )]
     dispatcher: ZbobrDispatcherArgs,
 
+    #[command(
+        flatten,
+        next_help_heading = "[config] Meta options and config file overrides"
+    )]
+    config: ConfigFileArg,
+}
+
+#[derive(Args, Clone)]
+struct ConfigFileArg {
     /// Path to TOML configuration file (default: zbobr.toml in cwd)
-    #[arg(long, env = "ZBOBR_CONFIG")]
-    config: Option<PathBuf>,
+    #[arg(long = "config", env = "ZBOBR_CONFIG")]
+    pub path: Option<PathBuf>,
 }
 
 #[derive(Parser)]
@@ -312,7 +344,7 @@ fn build_full_prompt(user_context: &str, role: Role) -> String {
 /// If --config is specified, load that file (error if missing).
 /// Otherwise, try zbobr.toml in cwd (silently skip if missing).
 fn load_root_toml(cli: &Cli) -> anyhow::Result<Option<ZbobrConfigToml>> {
-    if let Some(ref path) = cli.global.config {
+    if let Some(ref path) = cli.global.config.path {
         let root = ZbobrConfigToml::load(path)?
             .ok_or_else(|| anyhow::anyhow!("Config file not found: {}", path.display()))?;
         Ok(Some(root))
@@ -444,7 +476,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Compute the directory containing the config file.
     // All relative paths in zbobr.toml are resolved relative to this directory.
-    let config_dir = match cli.global.config {
+    let config_dir = match cli.global.config.path {
         Some(ref path) => std::fs::canonicalize(path)
             .with_context(|| format!("Cannot resolve config path: {}", path.display()))?
             .parent()
