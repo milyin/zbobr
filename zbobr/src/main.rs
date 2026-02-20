@@ -4,78 +4,28 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
-use zbobr_config::ZbobrConfigToml;
+use zbobr_config::{ZbobrConfigArgs, ZbobrConfigToml};
 use zbobr_dispatcher::{
-    Stage, ToolExecutor, Zbobr, ZbobrDispatcherArgs, ZbobrDispatcherConfig,
-    task::{Model, Role, Tool},
+    Stage, ToolExecutor, Zbobr, ZbobrDispatcherConfig, task::{Model, Role, Tool},
 };
-use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeConfig};
-use zbobr_executor_copilot::{
-    CopilotExecutor, ZbobrExecutorCopilotArgs, ZbobrExecutorCopilotConfig,
-};
-use zbobr_executor_mcp_tester::{
-    McpTesterExecutor, ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterConfig,
-};
-use zbobr_repo_backend_fs::{FilesystemRepoBackend, ZbobrRepoBackendFsArgs};
-use zbobr_repo_backend_github::{GitHubRepoBackend, ZbobrRepoBackendGithubArgs};
-use zbobr_task_backend_fs::{FilesystemTaskBackend, ZbobrTaskBackendFsArgs};
-use zbobr_task_backend_github::{GitHubTaskBackend, ZbobrTaskBackendGithubArgs};
+use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
+use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
+use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
+use zbobr_repo_backend_fs::FilesystemRepoBackend;
+use zbobr_repo_backend_github::GitHubRepoBackend;
+use zbobr_task_backend_fs::FilesystemTaskBackend;
+use zbobr_task_backend_github::GitHubTaskBackend;
 
 #[derive(Args, Clone)]
 struct GlobalArgs {
     #[command(
         flatten,
-        next_help_heading = "Task storage backends: control where zbobr discovers tasks.\n[task.github] GitHub issues as the task source"
-    )]
-    task_github: ZbobrTaskBackendGithubArgs,
-
-    #[command(
-        flatten,
-        next_help_heading = "[task.fs] Filesystem task backend (YAML files in tasks/)"
-    )]
-    task_fs: ZbobrTaskBackendFsArgs,
-
-    #[command(
-        flatten,
-        next_help_heading = "[repo.github] GitHub repo backend (fork + push via API)"
-    )]
-    repo_github: ZbobrRepoBackendGithubArgs,
-
-    #[command(
-        flatten,
-        next_help_heading = "[repo.fs] Filesystem repo backend (operate on local clones)"
-    )]
-    repo_fs: ZbobrRepoBackendFsArgs,
-
-    #[command(
-        flatten,
-        next_help_heading = "[executor.claude] Claude-specific defaults"
-    )]
-    executor_claude: ZbobrExecutorClaudeArgs,
-
-    #[command(
-        flatten,
-        next_help_heading = "[executor.copilot] GitHub Copilot executor defaults"
-    )]
-    executor_copilot: ZbobrExecutorCopilotArgs,
-
-    #[command(
-        flatten,
-        next_help_heading = "[executor.mcp-tester] MCP tester scenarios for validating MCP servers"
-    )]
-    executor_mcp_tester: ZbobrExecutorMcpTesterArgs,
-
-    #[command(
-        flatten,
-        next_help_heading = "[dispatcher] Dispatcher runtime: workspaces, prompts, tokens"
-    )]
-    dispatcher: ZbobrDispatcherArgs,
-
-    #[command(
-        flatten,
         next_help_heading = "[config] Meta options and config file overrides"
     )]
-    config: ConfigFileArg,
+    config_file: ConfigFileArg,
+
+    #[command(flatten)]
+    settings: ZbobrConfigArgs,
 }
 
 #[derive(Args, Clone)]
@@ -222,6 +172,7 @@ fn resolve_prompts(cli: &Cli, config: &ZbobrDispatcherConfig) -> anyhow::Result<
     // Use CLI args if provided, otherwise use config (which came from TOML/env/defaults)
     let planner = cli
         .global
+        .settings
         .dispatcher
         .planner_prompts
         .clone()
@@ -229,6 +180,7 @@ fn resolve_prompts(cli: &Cli, config: &ZbobrDispatcherConfig) -> anyhow::Result<
 
     let preparator = cli
         .global
+        .settings
         .dispatcher
         .preparator_prompts
         .clone()
@@ -236,6 +188,7 @@ fn resolve_prompts(cli: &Cli, config: &ZbobrDispatcherConfig) -> anyhow::Result<
 
     let worker = cli
         .global
+        .settings
         .dispatcher
         .worker_prompts
         .clone()
@@ -243,6 +196,7 @@ fn resolve_prompts(cli: &Cli, config: &ZbobrDispatcherConfig) -> anyhow::Result<
 
     let reviewer = cli
         .global
+        .settings
         .dispatcher
         .reviewer_prompts
         .clone()
@@ -253,6 +207,7 @@ fn resolve_prompts(cli: &Cli, config: &ZbobrDispatcherConfig) -> anyhow::Result<
     // CLI prompts_path > config.prompts_path (which came from TOML/env)
     let base_path = cli
         .global
+        .settings
         .dispatcher
         .prompts_path
         .clone()
@@ -344,7 +299,7 @@ fn build_full_prompt(user_context: &str, role: Role) -> String {
 /// If --config is specified, load that file (error if missing).
 /// Otherwise, try zbobr.toml in cwd (silently skip if missing).
 fn load_root_toml(cli: &Cli) -> anyhow::Result<Option<ZbobrConfigToml>> {
-    if let Some(ref path) = cli.global.config.path {
+    if let Some(ref path) = cli.global.config_file.path {
         let root = ZbobrConfigToml::load(path)?
             .ok_or_else(|| anyhow::anyhow!("Config file not found: {}", path.display()))?;
         Ok(Some(root))
@@ -363,18 +318,18 @@ fn load_config(
     let dispatcher_toml = root_toml.as_ref().and_then(|r| r.dispatcher.as_ref());
     let mut config = ZbobrDispatcherConfig::build(
         dispatcher_toml.cloned(),
-        cli.global.dispatcher.clone(),
+        cli.global.settings.dispatcher.clone(),
         config_dir,
     )?;
 
     // CLI arg overrides (highest priority)
-    if let Some(ref ws) = cli.global.dispatcher.workspaces {
+    if let Some(ref ws) = cli.global.settings.dispatcher.workspaces {
         config.workspaces = ws.clone();
     }
-    if let Some(ref b) = cli.global.dispatcher.backend {
+    if let Some(ref b) = cli.global.settings.dispatcher.backend {
         config.backend = *b;
     }
-    if let Some(ref t) = cli.global.dispatcher.cli_tool {
+    if let Some(ref t) = cli.global.settings.dispatcher.cli_tool {
         config.cli_tool = *t;
     }
     config.validate()?;
@@ -476,7 +431,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Compute the directory containing the config file.
     // All relative paths in zbobr.toml are resolved relative to this directory.
-    let config_dir = match cli.global.config.path {
+    let config_dir = match cli.global.config_file.path {
         Some(ref path) => std::fs::canonicalize(path)
             .with_context(|| format!("Cannot resolve config path: {}", path.display()))?
             .parent()
@@ -506,15 +461,15 @@ async fn main() -> anyhow::Result<()> {
     let executor_toml = root_toml.as_ref().and_then(|r| r.executor.as_ref());
     let claude_executor_config = ZbobrExecutorClaudeConfig::build(
         executor_toml.and_then(|e| e.claude.clone()),
-        cli.global.executor_claude.clone(),
+        cli.global.settings.executor.claude.clone(),
     );
     let copilot_executor_config = ZbobrExecutorCopilotConfig::build(
         executor_toml.and_then(|e| e.copilot.clone()),
-        cli.global.executor_copilot.clone(),
+        cli.global.settings.executor.copilot.clone(),
     );
     let mcp_tester_executor_config = ZbobrExecutorMcpTesterConfig::build(
         executor_toml.and_then(|e| e.mcp_tester.clone()),
-        cli.global.executor_mcp_tester.clone(),
+        cli.global.settings.executor.mcp_tester.clone(),
         &config_dir,
     );
 
@@ -522,14 +477,14 @@ async fn main() -> anyhow::Result<()> {
         zbobr_dispatcher::config::BackendType::GitHub => Arc::new(
             GitHubTaskBackend::new(
                 task_backend_github_toml.cloned(),
-                cli.global.task_github.clone(),
+                cli.global.settings.task.github.clone(),
             )
             .context("Failed to create GitHub task backend")?,
         ),
         zbobr_dispatcher::config::BackendType::Filesystem => Arc::new(
             FilesystemTaskBackend::new(
                 task_backend_fs_toml.cloned(),
-                cli.global.task_fs.clone(),
+                cli.global.settings.task.fs.clone(),
                 &config_dir,
             )
             .context("Failed to create filesystem task backend")?,
@@ -539,14 +494,14 @@ async fn main() -> anyhow::Result<()> {
         zbobr_dispatcher::config::BackendType::GitHub => Arc::new(
             GitHubRepoBackend::new(
                 repo_backend_github_toml.cloned(),
-                cli.global.repo_github.clone(),
+                cli.global.settings.repo.github.clone(),
             )
             .context("Failed to create GitHub repo backend")?,
         ),
         zbobr_dispatcher::config::BackendType::Filesystem => Arc::new(
             FilesystemRepoBackend::new(
                 repo_backend_fs_toml.cloned(),
-                cli.global.repo_fs.clone(),
+                cli.global.settings.repo.fs.clone(),
                 &config_dir,
             )
             .context("Failed to create filesystem repo backend")?,

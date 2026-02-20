@@ -1,80 +1,142 @@
 use std::path::Path;
 
 use anyhow::Context;
-use zbobr_dispatcher::ZbobrDispatcherToml;
-use zbobr_executor_claude::ZbobrExecutorClaudeToml;
-use zbobr_executor_copilot::ZbobrExecutorCopilotToml;
-use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterToml;
-use zbobr_repo_backend_fs::ZbobrRepoBackendFsToml;
-use zbobr_repo_backend_github::ZbobrRepoBackendGithubToml;
-use zbobr_task_backend_fs::ZbobrTaskBackendFsToml;
-use zbobr_task_backend_github::ZbobrTaskBackendGithubToml;
+use zbobr_dispatcher::{ZbobrDispatcherArgs, ZbobrDispatcherToml};
+use zbobr_executor_claude::{ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeToml};
+use zbobr_executor_copilot::{ZbobrExecutorCopilotArgs, ZbobrExecutorCopilotToml};
+use zbobr_executor_mcp_tester::{
+    ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterToml,
+};
+use zbobr_repo_backend_fs::{ZbobrRepoBackendFsArgs, ZbobrRepoBackendFsToml};
+use zbobr_repo_backend_github::{
+    ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubToml,
+};
+use zbobr_task_backend_fs::{ZbobrTaskBackendFsArgs, ZbobrTaskBackendFsToml};
+use zbobr_task_backend_github::{ZbobrTaskBackendGithubArgs, ZbobrTaskBackendGithubToml};
+use zbobr_utility::config_struct;
 
-/// Task backend configuration section.
-/// Each backend type has its own optional subsection.
-#[derive(Debug, Clone, serde::Deserialize, Default)]
-#[serde(default)]
-pub struct ZbobrTaskBackendToml {
-    pub github: Option<ZbobrTaskBackendGithubToml>,
-    pub fs: Option<ZbobrTaskBackendFsToml>,
+config_struct! {
+    /// Task backend configuration section.
+    pub struct ZbobrTaskBackend {
+        /// GitHub issues as the task source
+        #[config(
+            nested,
+            heading_prefix = "task-github",
+            args_type = ZbobrTaskBackendGithubArgs,
+            toml_type = ZbobrTaskBackendGithubToml,
+            help_heading = "GitHub issues as the task source",
+        )]
+        pub github: ZbobrTaskBackendGithubArgs,
+        /// Filesystem task backend (YAML files in tasks/)
+        #[config(
+            nested,
+            heading_prefix = "task-fs",
+            args_type = ZbobrTaskBackendFsArgs,
+            toml_type = ZbobrTaskBackendFsToml,
+            help_heading = "Filesystem task backend (YAML files in tasks/)",
+        )]
+        pub fs: ZbobrTaskBackendFsArgs,
+    }
 }
 
-/// Repo backend configuration section.
-/// Each backend type has its own optional subsection.
-#[derive(Debug, Clone, serde::Deserialize, Default)]
-#[serde(default)]
-pub struct ZbobrRepoBackendToml {
-    pub github: Option<ZbobrRepoBackendGithubToml>,
-    pub fs: Option<ZbobrRepoBackendFsToml>,
+config_struct! {
+    /// Repo backend configuration section.
+    pub struct ZbobrRepoBackend {
+        /// GitHub repo backend (fork + push via API)
+        #[config(
+            nested,
+            heading_prefix = "repo-github",
+            args_type = ZbobrRepoBackendGithubArgs,
+            toml_type = ZbobrRepoBackendGithubToml,
+            help_heading = "GitHub repo backend (fork + push via API)",
+        )]
+        pub github: ZbobrRepoBackendGithubArgs,
+        /// Filesystem repo backend (operate on local clones)
+        #[config(
+            nested,
+            heading_prefix = "repo-fs",
+            args_type = ZbobrRepoBackendFsArgs,
+            toml_type = ZbobrRepoBackendFsToml,
+            help_heading = "Filesystem repo backend (operate on local clones)",
+        )]
+        pub fs: ZbobrRepoBackendFsArgs,
+    }
 }
 
-/// Executor configuration section.
-/// Each executor type has its own optional subsection.
-#[derive(Debug, Clone, serde::Deserialize, Default)]
-#[serde(default)]
-pub struct ZbobrExecutorToml {
-    pub claude: Option<ZbobrExecutorClaudeToml>,
-    pub copilot: Option<ZbobrExecutorCopilotToml>,
-    #[serde(rename = "mcp-tester")]
-    pub mcp_tester: Option<ZbobrExecutorMcpTesterToml>,
+config_struct! {
+    /// Executor configuration section.
+    pub struct ZbobrExecutor {
+        /// Claude-specific defaults
+        #[config(
+            nested,
+            heading_prefix = "executor-claude",
+            args_type = ZbobrExecutorClaudeArgs,
+            toml_type = ZbobrExecutorClaudeToml,
+            help_heading = "Claude-specific defaults",
+        )]
+        pub claude: ZbobrExecutorClaudeArgs,
+        /// GitHub Copilot executor defaults
+        #[config(
+            nested,
+            heading_prefix = "executor-copilot",
+            args_type = ZbobrExecutorCopilotArgs,
+            toml_type = ZbobrExecutorCopilotToml,
+            help_heading = "GitHub Copilot executor defaults",
+        )]
+        pub copilot: ZbobrExecutorCopilotArgs,
+        /// MCP tester scenarios for validating MCP servers
+        #[config(
+            nested,
+            heading_prefix = "executor-mcp-tester",
+            args_type = ZbobrExecutorMcpTesterArgs,
+            toml_type = ZbobrExecutorMcpTesterToml,
+            toml_rename = "mcp-tester",
+            help_heading = "MCP tester scenarios for validating MCP servers",
+        )]
+        pub mcp_tester: ZbobrExecutorMcpTesterArgs,
+    }
 }
 
-/// Root TOML configuration for zbobr.
-///
-/// Example layout:
-/// ```toml
-/// [dispatcher]
-/// default_model = "gpt-5-mini"
-///
-/// [task.github]
-/// task_repo = "owner/repo"
-///
-/// [task.fs]
-/// tasks_dir = "./tasks"
-///
-/// [repo.github]
-/// fork_owner = "fork-owner"
-///
-/// [repo.fs]
-/// repos_dir = "./repos"
-///
-/// [executor.claude]
-/// default_model = "claude-opus-4.6"
-///
-/// [executor.copilot]
-/// default_model = "gpt-5-mini"
-///
-/// [executor.mcp-tester]
-/// planning = "scenarios/planning.yml"
-/// working = "scenarios/working.yml"
-/// ```
-#[derive(Debug, Clone, serde::Deserialize, Default)]
-#[serde(default)]
-pub struct ZbobrConfigToml {
-    pub dispatcher: Option<ZbobrDispatcherToml>,
-    pub task: Option<ZbobrTaskBackendToml>,
-    pub repo: Option<ZbobrRepoBackendToml>,
-    pub executor: Option<ZbobrExecutorToml>,
+config_struct! {
+    /// Root configuration for zbobr.
+    pub struct ZbobrConfig {
+        /// Dispatcher runtime: workspaces, prompts, tokens
+        #[config(
+            nested,
+            heading_prefix = "dispatcher",
+            args_type = ZbobrDispatcherArgs,
+            toml_type = ZbobrDispatcherToml,
+            help_heading = "Dispatcher runtime: workspaces, prompts, tokens",
+        )]
+        pub dispatcher: ZbobrDispatcherArgs,
+        /// Task storage backends: control where zbobr discovers tasks.
+        #[config(
+            nested,
+            heading_prefix = "task",
+            args_type = ZbobrTaskBackendArgs,
+            toml_type = ZbobrTaskBackendToml,
+            help_heading = "Task storage backends: control where zbobr discovers tasks.",
+        )]
+        pub task: ZbobrTaskBackendArgs,
+        /// Repo backends: where zbobr clones and pushes code.
+        #[config(
+            nested,
+            heading_prefix = "repo",
+            args_type = ZbobrRepoBackendArgs,
+            toml_type = ZbobrRepoBackendToml,
+            help_heading = "Repo backends: where zbobr clones and pushes code.",
+        )]
+        pub repo: ZbobrRepoBackendArgs,
+        /// Executor defaults and scenarios.
+        #[config(
+            nested,
+            heading_prefix = "executor",
+            args_type = ZbobrExecutorArgs,
+            toml_type = ZbobrExecutorToml,
+            help_heading = "Executor defaults and scenarios.",
+        )]
+        pub executor: ZbobrExecutorArgs,
+    }
 }
 
 impl ZbobrConfigToml {
