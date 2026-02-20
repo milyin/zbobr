@@ -1,9 +1,20 @@
 use std::path::{Path, PathBuf};
 
 use crate::task::{Model, Tool};
+use zbobr_utility::config_struct;
 
 /// Backend type to use.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    Default,
+    clap::ValueEnum,
+)]
 pub enum BackendType {
     #[serde(rename = "github")]
     #[default]
@@ -32,6 +43,41 @@ impl std::str::FromStr for BackendType {
     }
 }
 
+config_struct! {
+    pub struct ZbobrDispatcher {
+        #[arg(long, help = "Default AI model to use")]
+        pub default_model: Model,
+        #[arg(long, help = "Workspaces directory; each task gets a separate subdirectory")]
+        pub workspaces: PathBuf,
+        #[arg(long, help = "Backend to use")]
+        pub backend: BackendType,
+        #[arg(long, help = "GitHub token with read-only access for agent processes")]
+        pub agent_github_token: String,
+        #[arg(long, help = "GitHub token for Copilot CLI with Copilot's access rights")]
+        pub copilot_github_token: String,
+        #[arg(long, help = "CLI tool to use")]
+        pub cli_tool: Tool,
+        #[arg(long, help = "Prefix for work branches")]
+        pub work_branch_prefix: String,
+        #[arg(long, help = "Git user name for commits made by the tool")]
+        pub git_user_name: String,
+        #[arg(long, help = "Git user email for commits made by the tool")]
+        pub git_user_email: String,
+        #[arg(long, help = "Base directory for resolving prompt file paths")]
+        pub prompts_path: PathBuf,
+        #[arg(long, help = "Custom prompt files for preparator agent")]
+        pub preparator_prompts: Vec<PathBuf>,
+        #[arg(long, help = "Custom prompt files for planner agent")]
+        pub planner_prompts: Vec<PathBuf>,
+        #[arg(long, help = "Custom prompt files for worker agent")]
+        pub worker_prompts: Vec<PathBuf>,
+        #[arg(long, help = "Custom prompt files for reviewer agent")]
+        pub reviewer_prompts: Vec<PathBuf>,
+        #[arg(long, help = "Custom prompt files for merger agent")]
+        pub merger_prompts: Vec<PathBuf>,
+    }
+}
+
 /// TOML prompts configuration section.
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
@@ -42,23 +88,6 @@ pub struct TomlPrompts {
     pub worker: Option<Vec<PathBuf>>,
     pub reviewer: Option<Vec<PathBuf>>,
     pub merger: Option<Vec<PathBuf>>,
-}
-
-/// Configuration loaded from a TOML file.
-/// All fields are optional — missing fields fall back to TOML or defaults.
-#[derive(Debug, Clone, serde::Deserialize, Default)]
-#[serde(default, deny_unknown_fields)]
-pub struct ZbobrDispatcherToml {
-    pub default_model: Option<Model>,
-    pub workspaces: Option<PathBuf>,
-    pub backend: Option<BackendType>,
-    pub agent_github_token: Option<String>,
-    pub copilot_github_token: Option<String>,
-    pub cli_tool: Option<Tool>,
-    pub work_branch_prefix: Option<String>,
-    pub git_user_name: Option<String>,
-    pub git_user_email: Option<String>,
-    pub prompts: Option<TomlPrompts>,
 }
 
 /// Configuration for the zbobr dispatcher.
@@ -141,39 +170,41 @@ impl ZbobrDispatcherConfig {
     /// Priority: TOML file > hardcoded defaults. Environment variables are not
     /// consulted for zbobr-specific parameters; only external GH token env vars
     /// (`COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`) are recognized.
-    pub fn build(toml: Option<&ZbobrDispatcherToml>, config_dir: &Path) -> anyhow::Result<Self> {
+    pub fn build(
+        toml: Option<ZbobrDispatcherToml>,
+        args: ZbobrDispatcherArgs,
+        config_dir: &Path,
+    ) -> anyhow::Result<Self> {
         let env = OsEnv;
-        Self::build_with_env(toml, &env, config_dir)
+        Self::build_with_env(toml, args, &env, config_dir)
     }
 
     fn build_with_env<E: EnvSource>(
-        toml: Option<&ZbobrDispatcherToml>,
+        toml: Option<ZbobrDispatcherToml>,
+        args: ZbobrDispatcherArgs,
         env: &E,
         config_dir: &Path,
     ) -> anyhow::Result<Self> {
         let defaults = ZbobrDispatcherConfig::default();
+        let merged = toml.unwrap_or_default().merge_with_args(args);
 
-        let default_model = toml
-            .and_then(|t| t.default_model.clone())
-            .unwrap_or(defaults.default_model);
+        let default_model = merged.default_model.unwrap_or(defaults.default_model);
 
-        let workspaces = toml
-            .and_then(|t| t.workspaces.clone())
+        let workspaces = merged
+            .workspaces
             .map(|p| zbobr_utility::resolve_path(p, config_dir))
             .unwrap_or(defaults.workspaces);
 
-        let backend = toml.and_then(|t| t.backend).unwrap_or(defaults.backend);
+        let backend = merged.backend.unwrap_or(defaults.backend);
 
-        let cli_tool = toml.and_then(|t| t.cli_tool).unwrap_or(defaults.cli_tool);
+        let cli_tool = merged.cli_tool.unwrap_or(defaults.cli_tool);
 
-        let work_branch_prefix = toml
-            .and_then(|t| t.work_branch_prefix.clone())
+        let work_branch_prefix = merged
+            .work_branch_prefix
             .unwrap_or(defaults.work_branch_prefix);
 
-        let toml_prompts = toml.and_then(|t| t.prompts.as_ref());
-
-        let preparator_prompts = toml_prompts
-            .and_then(|p| p.preparator.clone())
+        let preparator_prompts = merged
+            .preparator_prompts
             .map(|v| {
                 v.into_iter()
                     .map(|p| zbobr_utility::resolve_path(p, config_dir))
@@ -181,8 +212,8 @@ impl ZbobrDispatcherConfig {
             })
             .unwrap_or(defaults.preparator_prompts);
 
-        let planner_prompts = toml_prompts
-            .and_then(|p| p.planner.clone())
+        let planner_prompts = merged
+            .planner_prompts
             .map(|v| {
                 v.into_iter()
                     .map(|p| zbobr_utility::resolve_path(p, config_dir))
@@ -190,8 +221,8 @@ impl ZbobrDispatcherConfig {
             })
             .unwrap_or(defaults.planner_prompts);
 
-        let worker_prompts = toml_prompts
-            .and_then(|p| p.worker.clone())
+        let worker_prompts = merged
+            .worker_prompts
             .map(|v| {
                 v.into_iter()
                     .map(|p| zbobr_utility::resolve_path(p, config_dir))
@@ -199,8 +230,8 @@ impl ZbobrDispatcherConfig {
             })
             .unwrap_or(defaults.worker_prompts);
 
-        let reviewer_prompts = toml_prompts
-            .and_then(|p| p.reviewer.clone())
+        let reviewer_prompts = merged
+            .reviewer_prompts
             .map(|v| {
                 v.into_iter()
                     .map(|p| zbobr_utility::resolve_path(p, config_dir))
@@ -208,8 +239,8 @@ impl ZbobrDispatcherConfig {
             })
             .unwrap_or(defaults.reviewer_prompts);
 
-        let merger_prompts = toml_prompts
-            .and_then(|p| p.merger.clone())
+        let merger_prompts = merged
+            .merger_prompts
             .map(|v| {
                 v.into_iter()
                     .map(|p| zbobr_utility::resolve_path(p, config_dir))
@@ -217,8 +248,8 @@ impl ZbobrDispatcherConfig {
             })
             .unwrap_or(defaults.merger_prompts);
 
-        let prompts_path = toml_prompts
-            .and_then(|p| p.path.clone())
+        let prompts_path = merged
+            .prompts_path
             .map(|p| zbobr_utility::resolve_path(p, config_dir));
 
         // Token resolution with proper priority
@@ -228,21 +259,15 @@ impl ZbobrDispatcherConfig {
             .var("COPILOT_GITHUB_TOKEN")
             .or_else(|| env.var("GH_TOKEN"))
             .or_else(|| env.var("GITHUB_TOKEN"))
-            .or_else(|| toml.and_then(|t| t.copilot_github_token.clone()))
+            .or_else(|| merged.copilot_github_token.clone())
             .unwrap_or_default();
 
         // Agent token: only from TOML/CLI (do not read zbobr-specific env vars)
-        let agent_github_token = toml
-            .and_then(|t| t.agent_github_token.clone())
-            .unwrap_or_default();
+        let agent_github_token = merged.agent_github_token.unwrap_or_default();
 
-        let git_user_name = toml
-            .and_then(|t| t.git_user_name.clone())
-            .unwrap_or_default();
+        let git_user_name = merged.git_user_name.unwrap_or_default();
 
-        let git_user_email = toml
-            .and_then(|t| t.git_user_email.clone())
-            .unwrap_or_default();
+        let git_user_email = merged.git_user_email.unwrap_or_default();
 
         Ok(Self {
             default_model,
@@ -267,7 +292,7 @@ impl ZbobrDispatcherConfig {
     pub fn from_env() -> anyhow::Result<Self> {
         let cwd = std::env::current_dir()
             .map_err(|e| anyhow::anyhow!("Cannot get current directory: {e}"))?;
-        Self::build(None, &cwd)
+        Self::build(None, ZbobrDispatcherArgs::default(), &cwd)
     }
 
     /// Validate that all required fields are set.
@@ -327,8 +352,13 @@ mod tests {
     fn build_with_env_missing_required() {
         let env = TestEnv::new(&[]);
 
-        let config = ZbobrDispatcherConfig::build_with_env(None, &env, &test_config_dir())
-            .expect("build should succeed");
+        let config = ZbobrDispatcherConfig::build_with_env(
+            None,
+            ZbobrDispatcherArgs::default(),
+            &env,
+            &test_config_dir(),
+        )
+        .expect("build should succeed");
         // validate() should fail because agent_github_token is missing
         assert!(config.validate().is_err());
     }
@@ -349,19 +379,16 @@ mod tests {
     workspaces = "/tmp/workspaces"
     cli_tool = "claude"
     work_branch_prefix = "my_fix"
-
-    [prompts]
-    path = "/opt/prompts"
-    planner = ["plan.md", "shared.md"]
-    worker = ["work.md"]
+    prompts_path = "/opt/prompts"
+    planner_prompts = ["plan.md", "shared.md"]
+    worker_prompts = ["work.md"]
     "#;
         let config: ZbobrDispatcherToml = toml::from_str(toml_str).unwrap();
         assert_eq!(config.default_model, Some(Model::Gpt5Mini));
         assert_eq!(config.cli_tool, Some(Tool::Claude));
-        let prompts = config.prompts.unwrap();
-        assert_eq!(prompts.path, Some(PathBuf::from("/opt/prompts")));
+        assert_eq!(config.prompts_path, Some(PathBuf::from("/opt/prompts")));
         assert_eq!(
-            prompts.planner,
+            config.planner_prompts,
             Some(vec![PathBuf::from("plan.md"), PathBuf::from("shared.md")])
         );
     }
@@ -398,18 +425,21 @@ mod tests {
             work_branch_prefix: Some("toml_fix".into()),
             git_user_name: Some("test-user".into()),
             git_user_email: Some("test@example.com".into()),
-            prompts: Some(TomlPrompts {
-                path: Some(PathBuf::from("/opt/prompts")),
-                preparator: Some(vec![PathBuf::from("pre.md")]),
-                planner: Some(vec![PathBuf::from("p.md")]),
-                worker: Some(vec![PathBuf::from("w.md")]),
-                reviewer: Some(vec![PathBuf::from("r.md")]),
-                merger: Some(vec![PathBuf::from("m.md")]),
-            }),
+            prompts_path: Some(PathBuf::from("/opt/prompts")),
+            preparator_prompts: Some(vec![PathBuf::from("pre.md")]),
+            planner_prompts: Some(vec![PathBuf::from("p.md")]),
+            worker_prompts: Some(vec![PathBuf::from("w.md")]),
+            reviewer_prompts: Some(vec![PathBuf::from("r.md")]),
+            merger_prompts: Some(vec![PathBuf::from("m.md")]),
         };
 
-        let config =
-            ZbobrDispatcherConfig::build_with_env(Some(&toml), &env, &test_config_dir()).unwrap();
+        let config = ZbobrDispatcherConfig::build_with_env(
+            Some(toml),
+            ZbobrDispatcherArgs::default(),
+            &env,
+            &test_config_dir(),
+        )
+        .unwrap();
         assert_eq!(config.default_model, Model::Claude3Opus);
         // Absolute path stays absolute
         assert_eq!(config.workspaces, PathBuf::from("/tmp/toml-ws"));
@@ -444,7 +474,13 @@ mod tests {
     #[test]
     fn build_defaults_without_toml() {
         let env = TestEnv::new(&[]);
-        let config = ZbobrDispatcherConfig::build_with_env(None, &env, &test_config_dir()).unwrap();
+        let config = ZbobrDispatcherConfig::build_with_env(
+            None,
+            ZbobrDispatcherArgs::default(),
+            &env,
+            &test_config_dir(),
+        )
+        .unwrap();
         assert_eq!(config.default_model, Model::Gpt5Mini);
         assert_eq!(config.backend, BackendType::GitHub);
         assert_eq!(config.cli_tool, Tool::Copilot);

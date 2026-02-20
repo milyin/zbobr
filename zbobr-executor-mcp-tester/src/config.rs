@@ -1,27 +1,22 @@
 use std::path::{Path, PathBuf};
 
 use zbobr_dispatcher::task::Role;
-use zbobr_utility::resolve_path;
+use zbobr_utility::{config_struct, resolve_path};
 
-/// TOML configuration for the mcp-tester executor.
-/// Maps each role to a YAML scenario file path.
-///
-/// Example:
-/// ```toml
-/// [executor.mcp-tester]
-/// planning = "scenarios/planning.yml"
-/// working = "scenarios/working.yml"
-/// reviewing = "scenarios/reviewing.yml"
-/// merging = "scenarios/merging.yml"
-/// ```
-#[derive(Debug, Clone, serde::Deserialize, Default)]
-#[serde(default, deny_unknown_fields)]
-pub struct ZbobrExecutorMcpTesterToml {
-    pub preparation: Option<PathBuf>,
-    pub planning: Option<PathBuf>,
-    pub working: Option<PathBuf>,
-    pub reviewing: Option<PathBuf>,
-    pub merging: Option<PathBuf>,
+config_struct! {
+    /// Configuration for the mcp-tester executor.
+    pub struct ZbobrExecutorMcpTester {
+        #[arg(long = "executor-mcp-tester-preparation", env = "ZBOBR_EXECUTOR_MCP_TESTER_PREPARATION")]
+        pub preparation: PathBuf,
+        #[arg(long = "executor-mcp-tester-planning", env = "ZBOBR_EXECUTOR_MCP_TESTER_PLANNING")]
+        pub planning: PathBuf,
+        #[arg(long = "executor-mcp-tester-working", env = "ZBOBR_EXECUTOR_MCP_TESTER_WORKING")]
+        pub working: PathBuf,
+        #[arg(long = "executor-mcp-tester-reviewing", env = "ZBOBR_EXECUTOR_MCP_TESTER_REVIEWING")]
+        pub reviewing: PathBuf,
+        #[arg(long = "executor-mcp-tester-merging", env = "ZBOBR_EXECUTOR_MCP_TESTER_MERGING")]
+        pub merging: PathBuf,
+    }
 }
 
 /// Resolved configuration for the mcp-tester executor.
@@ -35,18 +30,20 @@ pub struct ZbobrExecutorMcpTesterConfig {
 }
 
 impl ZbobrExecutorMcpTesterConfig {
-    /// Build configuration by layering: defaults < TOML.
+    /// Build configuration by layering: defaults < TOML < args.
     /// Relative scenario paths are resolved against `config_dir`.
-    pub fn build(toml: Option<&ZbobrExecutorMcpTesterToml>, config_dir: &Path) -> Self {
-        match toml {
-            Some(t) => Self {
-                preparation: t.preparation.clone().map(|p| resolve_path(p, config_dir)),
-                planning: t.planning.clone().map(|p| resolve_path(p, config_dir)),
-                working: t.working.clone().map(|p| resolve_path(p, config_dir)),
-                reviewing: t.reviewing.clone().map(|p| resolve_path(p, config_dir)),
-                merging: t.merging.clone().map(|p| resolve_path(p, config_dir)),
-            },
-            None => Self::default(),
+    pub fn build(
+        toml: Option<ZbobrExecutorMcpTesterToml>,
+        args: ZbobrExecutorMcpTesterArgs,
+        config_dir: &Path,
+    ) -> Self {
+        let merged = toml.unwrap_or_default().merge_with_args(args);
+        Self {
+            preparation: merged.preparation.map(|p| resolve_path(p, config_dir)),
+            planning: merged.planning.map(|p| resolve_path(p, config_dir)),
+            working: merged.working.map(|p| resolve_path(p, config_dir)),
+            reviewing: merged.reviewing.map(|p| resolve_path(p, config_dir)),
+            merging: merged.merging.map(|p| resolve_path(p, config_dir)),
         }
     }
 

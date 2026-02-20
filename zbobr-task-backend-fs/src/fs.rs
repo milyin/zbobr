@@ -106,11 +106,11 @@ pub struct FilesystemTaskBackend {
 
 impl FilesystemTaskBackend {
     pub fn new(
-        toml: Option<&crate::config::ZbobrTaskBackendFsToml>,
-        tasks_dir_override: Option<&str>,
+        toml: Option<crate::config::ZbobrTaskBackendFsToml>,
+        args: crate::config::ZbobrTaskBackendFsArgs,
         config_dir: &std::path::Path,
     ) -> anyhow::Result<Self> {
-        let config = ZbobrTaskBackendFsConfig::build(toml, tasks_dir_override, config_dir);
+        let config = ZbobrTaskBackendFsConfig::build(toml, args, config_dir);
         config.validate()?;
         Ok(Self { config })
     }

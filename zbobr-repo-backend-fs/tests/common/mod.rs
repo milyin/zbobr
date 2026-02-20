@@ -70,8 +70,14 @@ pub async fn create_test_setup() -> TestSetup {
     git_command_status(&bare_repo, &["symbolic-ref", "HEAD", "refs/heads/main"]).await;
 
     // 7. Create backend
-    let backend = FilesystemRepoBackend::new(None, Some(repos_dir.to_str().unwrap()), base)
-        .expect("failed to create fs backend");
+    let backend = FilesystemRepoBackend::new(
+        None,
+        zbobr_repo_backend_fs::ZbobrRepoBackendFsArgs {
+            repos_dir: Some(repos_dir.to_path_buf()),
+        },
+        base,
+    )
+    .expect("failed to create fs backend");
 
     TestSetup {
         _tmp: tmp,

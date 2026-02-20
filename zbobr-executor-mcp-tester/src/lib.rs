@@ -7,7 +7,9 @@ use zbobr_dispatcher::task::{Model, Role};
 use zbobr_dispatcher::tool_executor::{ToolExecutor, format_command_for_log};
 
 pub mod config;
-pub use config::{ZbobrExecutorMcpTesterConfig, ZbobrExecutorMcpTesterToml};
+pub use config::{
+    ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterConfig, ZbobrExecutorMcpTesterToml,
+};
 
 /// Executor that runs mcp-tester to validate MCP servers per stage.
 pub struct McpTesterExecutor {

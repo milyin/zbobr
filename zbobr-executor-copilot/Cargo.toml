@@ -11,3 +11,6 @@ serde_json = { workspace = true }
 async-trait = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+paste.workspace = true
+zbobr-utility = { version = "0.1.0", path = "../zbobr-utility" }

@@ -7,7 +7,7 @@ use zbobr_dispatcher::task::{Model, Role, Tool};
 use zbobr_dispatcher::tool_executor::{ToolExecutor, format_command_for_log};
 
 pub mod config;
-pub use config::{ZbobrExecutorClaudeConfig, ZbobrExecutorClaudeToml};
+pub use config::{ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeConfig, ZbobrExecutorClaudeToml};
 
 /// Executor for Claude CLI.
 pub struct ClaudeExecutor {

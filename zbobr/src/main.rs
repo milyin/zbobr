@@ -6,15 +6,19 @@ use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use zbobr_config::ZbobrConfigToml;
 use zbobr_dispatcher::{
-    Stage, ToolExecutor, Zbobr, ZbobrDispatcherConfig,
+    Stage, ToolExecutor, Zbobr, ZbobrDispatcherArgs, ZbobrDispatcherConfig,
     task::{Model, Role, Tool},
 };
-use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
-use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
-use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
-use zbobr_repo_backend_fs::FilesystemRepoBackend;
+use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeConfig};
+use zbobr_executor_copilot::{
+    CopilotExecutor, ZbobrExecutorCopilotArgs, ZbobrExecutorCopilotConfig,
+};
+use zbobr_executor_mcp_tester::{
+    McpTesterExecutor, ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterConfig,
+};
+use zbobr_repo_backend_fs::{FilesystemRepoBackend, ZbobrRepoBackendFsArgs};
 use zbobr_repo_backend_github::{GitHubRepoBackend, ZbobrRepoBackendGithubArgs};
-use zbobr_task_backend_fs::FilesystemTaskBackend;
+use zbobr_task_backend_fs::{FilesystemTaskBackend, ZbobrTaskBackendFsArgs};
 use zbobr_task_backend_github::{GitHubTaskBackend, ZbobrTaskBackendGithubArgs};
 
 #[derive(Args, Clone)]
@@ -24,65 +28,29 @@ struct GlobalArgs {
     task_github: ZbobrTaskBackendGithubArgs,
 
     #[command(flatten)]
+    task_fs: ZbobrTaskBackendFsArgs,
+
+    #[command(flatten)]
     repo_github: ZbobrRepoBackendGithubArgs,
 
-    /// Path to workspaces directory (default: ./workspaces); each task gets a separate subdirectory
-    /// Can also be set via ZBOBR_WORKSPACES env var
-    #[arg(long)]
-    workspaces: Option<PathBuf>,
+    #[command(flatten)]
+    repo_fs: ZbobrRepoBackendFsArgs,
+
+    #[command(flatten)]
+    executor_mcp_tester: ZbobrExecutorMcpTesterArgs,
+
+    #[command(flatten)]
+    executor_claude: ZbobrExecutorClaudeArgs,
+
+    #[command(flatten)]
+    executor_copilot: ZbobrExecutorCopilotArgs,
+
+    #[command(flatten)]
+    dispatcher: ZbobrDispatcherArgs,
 
     /// Path to TOML configuration file (default: zbobr.toml in cwd)
     #[arg(long, env = "ZBOBR_CONFIG")]
     config: Option<PathBuf>,
-
-    /// Base directory for prompt files (prompt paths are resolved relative to this)
-    /// Can also be set via ZBOBR_PROMPTS_PATH env var
-    #[arg(long, env = "ZBOBR_PROMPTS_PATH")]
-    prompts_path: Option<PathBuf>,
-
-    /// Semicolon-separated list of prompt files for planner role
-    #[arg(long, env = "ZBOBR_PLANNER_PROMPTS", value_delimiter = ';')]
-    planner_prompts: Option<Vec<PathBuf>>,
-
-    /// Semicolon-separated list of prompt files for preparator role
-    #[arg(long, env = "ZBOBR_PREPARATOR_PROMPTS", value_delimiter = ';')]
-    preparator_prompts: Option<Vec<PathBuf>>,
-
-    /// Semicolon-separated list of prompt files for worker role
-    #[arg(long, env = "ZBOBR_WORKER_PROMPTS", value_delimiter = ';')]
-    worker_prompts: Option<Vec<PathBuf>>,
-
-    /// Semicolon-separated list of prompt files for reviewer role
-    #[arg(long, env = "ZBOBR_REVIEWER_PROMPTS", value_delimiter = ';')]
-    reviewer_prompts: Option<Vec<PathBuf>>,
-
-    /// Backend to use: "github" (default)
-    #[arg(long, env = "ZBOBR_BACKEND")]
-    backend: Option<String>,
-
-    /// CLI tool to use: "copilot", "claude", or "mcp-tester"
-    #[arg(long, env = "ZBOBR_CLI_TOOL")]
-    cli_tool: Option<String>,
-
-    /// Path to MCP tester scenario file for preparator role
-    #[arg(long, env = "ZBOBR_EXECUTOR_MCP_TESTER_PREPARATION")]
-    executor_mcp_tester_preparation: Option<PathBuf>,
-
-    /// Path to MCP tester scenario file for planner role
-    #[arg(long, env = "ZBOBR_EXECUTOR_MCP_TESTER_PLANNING")]
-    executor_mcp_tester_planning: Option<PathBuf>,
-
-    /// Path to MCP tester scenario file for worker role
-    #[arg(long, env = "ZBOBR_EXECUTOR_MCP_TESTER_WORKING")]
-    executor_mcp_tester_working: Option<PathBuf>,
-
-    /// Path to MCP tester scenario file for reviewer role
-    #[arg(long, env = "ZBOBR_EXECUTOR_MCP_TESTER_REVIEWING")]
-    executor_mcp_tester_reviewing: Option<PathBuf>,
-
-    /// Path to MCP tester scenario file for merger role
-    #[arg(long, env = "ZBOBR_EXECUTOR_MCP_TESTER_MERGING")]
-    executor_mcp_tester_merging: Option<PathBuf>,
 }
 
 #[derive(Parser)]
@@ -222,24 +190,28 @@ fn resolve_prompts(cli: &Cli, config: &ZbobrDispatcherConfig) -> anyhow::Result<
     // Use CLI args if provided, otherwise use config (which came from TOML/env/defaults)
     let planner = cli
         .global
+        .dispatcher
         .planner_prompts
         .clone()
         .unwrap_or_else(|| config.planner_prompts.clone());
 
     let preparator = cli
         .global
+        .dispatcher
         .preparator_prompts
         .clone()
         .unwrap_or_else(|| config.preparator_prompts.clone());
 
     let worker = cli
         .global
+        .dispatcher
         .worker_prompts
         .clone()
         .unwrap_or_else(|| config.worker_prompts.clone());
 
     let reviewer = cli
         .global
+        .dispatcher
         .reviewer_prompts
         .clone()
         .unwrap_or_else(|| config.reviewer_prompts.clone());
@@ -249,6 +221,7 @@ fn resolve_prompts(cli: &Cli, config: &ZbobrDispatcherConfig) -> anyhow::Result<
     // CLI prompts_path > config.prompts_path (which came from TOML/env)
     let base_path = cli
         .global
+        .dispatcher
         .prompts_path
         .clone()
         .or_else(|| config.prompts_path.clone());
@@ -356,21 +329,21 @@ fn load_config(
 ) -> anyhow::Result<ZbobrDispatcherConfig> {
     // Build dispatcher config
     let dispatcher_toml = root_toml.as_ref().and_then(|r| r.dispatcher.as_ref());
-    let mut config = ZbobrDispatcherConfig::build(dispatcher_toml, config_dir)?;
+    let mut config = ZbobrDispatcherConfig::build(
+        dispatcher_toml.cloned(),
+        cli.global.dispatcher.clone(),
+        config_dir,
+    )?;
 
     // CLI arg overrides (highest priority)
-    if let Some(ref ws) = cli.global.workspaces {
+    if let Some(ref ws) = cli.global.dispatcher.workspaces {
         config.workspaces = ws.clone();
     }
-    if let Some(ref b) = cli.global.backend {
-        config.backend = b
-            .parse::<zbobr_dispatcher::config::BackendType>()
-            .with_context(|| format!("Failed to parse backend type: {}", b))?;
+    if let Some(ref b) = cli.global.dispatcher.backend {
+        config.backend = *b;
     }
-    if let Some(ref t) = cli.global.cli_tool {
-        config.cli_tool = t
-            .parse::<Tool>()
-            .with_context(|| format!("Unknown tool name: {}", t))?;
+    if let Some(ref t) = cli.global.dispatcher.cli_tool {
+        config.cli_tool = *t;
     }
     config.validate()?;
 
@@ -499,31 +472,19 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|r| r.fs.as_ref());
 
     let executor_toml = root_toml.as_ref().and_then(|r| r.executor.as_ref());
-    let claude_executor_config =
-        ZbobrExecutorClaudeConfig::build(executor_toml.and_then(|e| e.claude.as_ref()));
-    let copilot_executor_config =
-        ZbobrExecutorCopilotConfig::build(executor_toml.and_then(|e| e.copilot.as_ref()));
-    let mut mcp_tester_executor_config = ZbobrExecutorMcpTesterConfig::build(
-        executor_toml.and_then(|e| e.mcp_tester.as_ref()),
+    let claude_executor_config = ZbobrExecutorClaudeConfig::build(
+        executor_toml.and_then(|e| e.claude.clone()),
+        cli.global.executor_claude.clone(),
+    );
+    let copilot_executor_config = ZbobrExecutorCopilotConfig::build(
+        executor_toml.and_then(|e| e.copilot.clone()),
+        cli.global.executor_copilot.clone(),
+    );
+    let mcp_tester_executor_config = ZbobrExecutorMcpTesterConfig::build(
+        executor_toml.and_then(|e| e.mcp_tester.clone()),
+        cli.global.executor_mcp_tester.clone(),
         &config_dir,
     );
-
-    // Override with CLI arguments if provided
-    if let Some(path) = &cli.global.executor_mcp_tester_preparation {
-        mcp_tester_executor_config.preparation = Some(path.clone());
-    }
-    if let Some(path) = &cli.global.executor_mcp_tester_planning {
-        mcp_tester_executor_config.planning = Some(path.clone());
-    }
-    if let Some(path) = &cli.global.executor_mcp_tester_working {
-        mcp_tester_executor_config.working = Some(path.clone());
-    }
-    if let Some(path) = &cli.global.executor_mcp_tester_reviewing {
-        mcp_tester_executor_config.reviewing = Some(path.clone());
-    }
-    if let Some(path) = &cli.global.executor_mcp_tester_merging {
-        mcp_tester_executor_config.merging = Some(path.clone());
-    }
 
     let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = match config.backend {
         zbobr_dispatcher::config::BackendType::GitHub => Arc::new(
@@ -534,8 +495,12 @@ async fn main() -> anyhow::Result<()> {
             .context("Failed to create GitHub task backend")?,
         ),
         zbobr_dispatcher::config::BackendType::Filesystem => Arc::new(
-            FilesystemTaskBackend::new(task_backend_fs_toml, None, &config_dir)
-                .context("Failed to create filesystem task backend")?,
+            FilesystemTaskBackend::new(
+                task_backend_fs_toml.cloned(),
+                cli.global.task_fs.clone(),
+                &config_dir,
+            )
+            .context("Failed to create filesystem task backend")?,
         ),
     };
     let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = match config.backend {
@@ -547,8 +512,12 @@ async fn main() -> anyhow::Result<()> {
             .context("Failed to create GitHub repo backend")?,
         ),
         zbobr_dispatcher::config::BackendType::Filesystem => Arc::new(
-            FilesystemRepoBackend::new(repo_backend_fs_toml, None, &config_dir)
-                .context("Failed to create filesystem repo backend")?,
+            FilesystemRepoBackend::new(
+                repo_backend_fs_toml.cloned(),
+                cli.global.repo_fs.clone(),
+                &config_dir,
+            )
+            .context("Failed to create filesystem repo backend")?,
         ),
     };
     let zbobr = Zbobr::new(config, task_backend, repo_backend);

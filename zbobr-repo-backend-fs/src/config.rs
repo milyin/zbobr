@@ -1,13 +1,13 @@
 use std::path::{Path, PathBuf};
 
-use zbobr_utility::resolve_path;
+use zbobr_utility::{config_struct, resolve_path};
 
-/// TOML configuration for the filesystem repo backend.
-/// All fields are optional — missing fields fall back to defaults.
-#[derive(Debug, Clone, serde::Deserialize, Default)]
-#[serde(default, deny_unknown_fields)]
-pub struct ZbobrRepoBackendFsToml {
-    pub repos_dir: Option<PathBuf>,
+config_struct! {
+    /// Configuration for the filesystem repo backend.
+    pub struct ZbobrRepoBackendFs {
+        #[arg(long, env = "ZBOBR_REPOS_DIR")]
+        pub repos_dir: PathBuf,
+    }
 }
 
 /// Resolved configuration for the filesystem repo backend.
@@ -26,22 +26,19 @@ impl Default for ZbobrRepoBackendFsConfig {
 }
 
 impl ZbobrRepoBackendFsConfig {
-    /// Build configuration by layering: defaults < env < TOML < overrides.
+    /// Build configuration by layering: defaults < TOML < args.
     /// Relative paths from TOML are resolved against `config_dir`.
     pub(crate) fn build(
-        toml: Option<&ZbobrRepoBackendFsToml>,
-        repos_dir_override: Option<&str>,
+        toml: Option<ZbobrRepoBackendFsToml>,
+        args: ZbobrRepoBackendFsArgs,
         config_dir: &Path,
     ) -> Self {
         let defaults = Self::default();
+        let merged = toml.unwrap_or_default().merge_with_args(args);
 
-        let repos_dir = repos_dir_override
-            .map(PathBuf::from)
-            .or_else(|| {
-                toml.and_then(|t| t.repos_dir.clone())
-                    .map(|p| resolve_path(p, config_dir))
-            })
-            .or_else(|| std::env::var("ZBOBR_REPOS_DIR").ok().map(PathBuf::from))
+        let repos_dir = merged
+            .repos_dir
+            .map(|p| resolve_path(p, config_dir))
             .unwrap_or(defaults.repos_dir);
 
         Self { repos_dir }

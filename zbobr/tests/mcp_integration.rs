@@ -89,8 +89,12 @@ async fn run_mcp_test(command: &str) {
         use zbobr_dispatcher::backend::TaskBackend;
         use zbobr_task_backend_fs::FilesystemTaskBackend;
 
-        let backend = FilesystemTaskBackend::new(None, None, &tasks_dir)
-            .expect("failed to create task backend");
+        let backend = FilesystemTaskBackend::new(
+            None,
+            zbobr_task_backend_fs::ZbobrTaskBackendFsArgs::default(),
+            &tasks_dir,
+        )
+        .expect("failed to create task backend");
 
         tokio::runtime::Handle::current().block_on(async {
             backend

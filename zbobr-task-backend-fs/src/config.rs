@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
-use zbobr_utility::resolve_path;
+use zbobr_utility::{config_struct, resolve_path};
 
-/// TOML configuration for the filesystem task backend.
-/// All fields are optional — missing fields fall back to defaults.
-#[derive(Debug, Clone, serde::Deserialize, Default)]
-#[serde(default, deny_unknown_fields)]
-pub struct ZbobrTaskBackendFsToml {
-    pub tasks_dir: Option<PathBuf>,
+config_struct! {
+    /// Configuration for the filesystem task backend.
+    pub struct ZbobrTaskBackendFs {
+        #[arg(long, env = "ZBOBR_TASKS_DIR")]
+        pub tasks_dir: PathBuf,
+    }
 }
 
 /// Resolved configuration for the filesystem task backend.
@@ -25,22 +25,19 @@ impl Default for ZbobrTaskBackendFsConfig {
 }
 
 impl ZbobrTaskBackendFsConfig {
-    /// Build configuration by layering: defaults < env < TOML < overrides.
+    /// Build configuration by layering: defaults < TOML < args.
     /// Relative paths from TOML are resolved against `config_dir`.
     pub(crate) fn build(
-        toml: Option<&ZbobrTaskBackendFsToml>,
-        tasks_dir_override: Option<&str>,
+        toml: Option<ZbobrTaskBackendFsToml>,
+        args: ZbobrTaskBackendFsArgs,
         config_dir: &Path,
     ) -> Self {
         let defaults = Self::default();
+        let merged = toml.unwrap_or_default().merge_with_args(args);
 
-        let tasks_dir = tasks_dir_override
-            .map(PathBuf::from)
-            .or_else(|| {
-                toml.and_then(|t| t.tasks_dir.clone())
-                    .map(|p| resolve_path(p, config_dir))
-            })
-            .or_else(|| std::env::var("ZBOBR_TASKS_DIR").ok().map(PathBuf::from))
+        let tasks_dir = merged
+            .tasks_dir
+            .map(|p| resolve_path(p, config_dir))
             .unwrap_or(defaults.tasks_dir);
 
         Self { tasks_dir }

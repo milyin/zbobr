@@ -8,7 +8,7 @@ pub mod tool_executor;
 
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-pub use config::{ZbobrDispatcherConfig, ZbobrDispatcherToml};
+pub use config::{ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml};
 pub use mcp::{
     MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, WorkerMcp, merger_instructions,
     planner_instructions, preparator_instructions, reviewer_instructions, worker_instructions,

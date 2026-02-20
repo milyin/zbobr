@@ -1,11 +1,11 @@
 use zbobr_dispatcher::task::Model;
+use zbobr_utility::config_struct;
 
-/// TOML configuration for the Copilot executor.
-/// All fields are optional — missing fields fall back to defaults.
-#[derive(Debug, Clone, serde::Deserialize, Default)]
-#[serde(default, deny_unknown_fields)]
-pub struct ZbobrExecutorCopilotToml {
-    pub default_model: Option<Model>,
+config_struct! {
+    pub struct ZbobrExecutorCopilot {
+        #[arg(long, help = "Default AI model for Copilot executor")]
+        pub default_model: Model,
+    }
 }
 
 /// Resolved configuration for the Copilot executor.
@@ -24,13 +24,12 @@ impl Default for ZbobrExecutorCopilotConfig {
 }
 
 impl ZbobrExecutorCopilotConfig {
-    /// Build configuration by layering: defaults < TOML.
-    pub fn build(toml: Option<&ZbobrExecutorCopilotToml>) -> Self {
+    /// Build configuration by layering: defaults < TOML < CLI args.
+    pub fn build(toml: Option<ZbobrExecutorCopilotToml>, args: ZbobrExecutorCopilotArgs) -> Self {
         let defaults = Self::default();
+        let merged = toml.unwrap_or_default().merge_with_args(args);
 
-        let default_model = toml
-            .and_then(|t| t.default_model.clone())
-            .unwrap_or(defaults.default_model);
+        let default_model = merged.default_model.unwrap_or(defaults.default_model);
 
         Self { default_model }
     }

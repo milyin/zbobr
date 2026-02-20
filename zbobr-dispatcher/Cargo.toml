@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-zbobr-utility = { workspace = true }
+zbobr-utility = { version = "0.1.0", path = "../zbobr-utility" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -15,6 +15,8 @@ axum = { workspace = true }
 schemars = { workspace = true }
 anyhow = { workspace = true }
 hostname = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+paste.workspace = true
 
 [dev-dependencies]
 toml = { workspace = true }

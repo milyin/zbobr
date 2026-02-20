@@ -31,11 +31,11 @@ pub struct FilesystemRepoBackend {
 
 impl FilesystemRepoBackend {
     pub fn new(
-        toml: Option<&crate::config::ZbobrRepoBackendFsToml>,
-        repos_dir_override: Option<&str>,
+        toml: Option<crate::config::ZbobrRepoBackendFsToml>,
+        args: crate::config::ZbobrRepoBackendFsArgs,
         config_dir: &std::path::Path,
     ) -> anyhow::Result<Self> {
-        let config = ZbobrRepoBackendFsConfig::build(toml, repos_dir_override, config_dir);
+        let config = ZbobrRepoBackendFsConfig::build(toml, args, config_dir);
         config.validate()?;
         Ok(Self { config })
     }
