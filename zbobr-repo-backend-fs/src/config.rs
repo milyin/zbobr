@@ -10,13 +10,7 @@ pub struct ZbobrRepoBackendFs {
 }
 
 /// Resolved configuration for the filesystem repo backend.
-#[derive(Debug, Clone)]
-pub(crate) struct ZbobrRepoBackendFsRuntimeConfig {
-    /// Base directory for repo operations and PR storage.
-    pub(crate) repos_dir: PathBuf,
-}
-
-impl Default for ZbobrRepoBackendFsRuntimeConfig {
+impl Default for ZbobrRepoBackendFsConfig {
     fn default() -> Self {
         Self {
             repos_dir: PathBuf::from("./repos"),
@@ -24,7 +18,7 @@ impl Default for ZbobrRepoBackendFsRuntimeConfig {
     }
 }
 
-impl ZbobrRepoBackendFsRuntimeConfig {
+impl ZbobrRepoBackendFsConfig {
     /// Build configuration by layering: defaults < TOML < args.
     /// Relative paths from TOML are resolved against `config_dir`.
     pub(crate) fn build(

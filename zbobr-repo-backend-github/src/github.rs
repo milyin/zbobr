@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use zbobr_dispatcher::backend::RepoBackend;
 
-use crate::config::ZbobrRepoBackendGithubRuntimeConfig;
+use crate::config::ZbobrRepoBackendGithubConfig;
 
 /// Convert an octocrab error into an anyhow::Error with detailed information.
 fn octocrab_to_anyhow(e: octocrab::Error) -> anyhow::Error {
@@ -111,7 +111,7 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
 // ============================================================================
 
 pub struct GitHubRepoBackend {
-    backend_config: ZbobrRepoBackendGithubRuntimeConfig,
+    backend_config: ZbobrRepoBackendGithubConfig,
     octocrab: octocrab::Octocrab,
 }
 
@@ -120,7 +120,7 @@ impl GitHubRepoBackend {
         toml: Option<crate::config::ZbobrRepoBackendGithubToml>,
         args: crate::config::ZbobrRepoBackendGithubArgs,
     ) -> anyhow::Result<Self> {
-        let backend_config = ZbobrRepoBackendGithubRuntimeConfig::build(toml, args);
+        let backend_config = ZbobrRepoBackendGithubConfig::build(toml, args);
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(backend_config.github_token.clone())

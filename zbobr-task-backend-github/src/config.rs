@@ -12,15 +12,16 @@ pub struct ZbobrTaskBackendGithub {
 }
 
 /// Resolved configuration for the GitHub task backend.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ZbobrTaskBackendGithubRuntimeConfig {
-    /// Task project repository ("Org/repo").
-    pub(crate) task_repo: String,
-    /// GitHub token with read/write access to tasks repo.
-    pub(crate) github_token: String,
+impl Default for ZbobrTaskBackendGithubConfig {
+    fn default() -> Self {
+        Self {
+            task_repo: String::new(),
+            github_token: String::new(),
+        }
+    }
 }
 
-impl ZbobrTaskBackendGithubRuntimeConfig {
+impl ZbobrTaskBackendGithubConfig {
     /// Build configuration by layering: defaults < TOML < args.
     pub(crate) fn build(
         toml: Option<ZbobrTaskBackendGithubToml>,

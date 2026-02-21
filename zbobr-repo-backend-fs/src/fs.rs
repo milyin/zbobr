@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 
-use crate::config::ZbobrRepoBackendFsRuntimeConfig;
+use crate::config::ZbobrRepoBackendFsConfig;
 use zbobr_dispatcher::backend::RepoBackend;
 
 /// Serializable PR structure for YAML storage.
@@ -26,7 +26,7 @@ struct PrFile {
 /// - "Forking" is done by `git clone` from the local path.
 /// - PRs are stored as YAML files under `{repos_dir}/prs/{repo_name}/`.
 pub struct FilesystemRepoBackend {
-    config: ZbobrRepoBackendFsRuntimeConfig,
+    config: ZbobrRepoBackendFsConfig,
 }
 
 impl FilesystemRepoBackend {
@@ -35,7 +35,7 @@ impl FilesystemRepoBackend {
         args: crate::config::ZbobrRepoBackendFsArgs,
         config_dir: &std::path::Path,
     ) -> anyhow::Result<Self> {
-        let config = ZbobrRepoBackendFsRuntimeConfig::build(toml, args, config_dir);
+        let config = ZbobrRepoBackendFsConfig::build(toml, args, config_dir);
         config.validate()?;
         Ok(Self { config })
     }

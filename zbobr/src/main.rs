@@ -8,9 +8,9 @@ use zbobr_config::{ZbobrConfigArgs, ZbobrConfigToml};
 use zbobr_dispatcher::{
     Stage, ToolExecutor, Zbobr, ZbobrDispatcherConfig, task::{Model, Role, Tool},
 };
-use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeRuntimeConfig};
-use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotRuntimeConfig};
-use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterRuntimeConfig};
+use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
+use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
+use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
 use zbobr_repo_backend_fs::FilesystemRepoBackend;
 use zbobr_repo_backend_github::GitHubRepoBackend;
 use zbobr_task_backend_fs::FilesystemTaskBackend;
@@ -459,15 +459,15 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|r| r.fs.as_ref());
 
     let executor_toml = root_toml.as_ref().and_then(|r| r.executor.as_ref());
-    let claude_executor_config = ZbobrExecutorClaudeRuntimeConfig::build(
+    let claude_executor_config = ZbobrExecutorClaudeConfig::build(
         executor_toml.and_then(|e| e.claude.clone()),
         cli.global.settings.executor.claude.clone(),
     );
-    let copilot_executor_config = ZbobrExecutorCopilotRuntimeConfig::build(
+    let copilot_executor_config = ZbobrExecutorCopilotConfig::build(
         executor_toml.and_then(|e| e.copilot.clone()),
         cli.global.settings.executor.copilot.clone(),
     );
-    let mcp_tester_executor_config = ZbobrExecutorMcpTesterRuntimeConfig::build(
+    let mcp_tester_executor_config = ZbobrExecutorMcpTesterConfig::build(
         executor_toml.and_then(|e| e.mcp_tester.clone()),
         cli.global.settings.executor.mcp_tester.clone(),
         &config_dir,
@@ -711,9 +711,9 @@ async fn run_role_session(
     model: Option<Model>,
     base_port: u16,
     prompt: &str,
-    claude_executor_config: &ZbobrExecutorClaudeRuntimeConfig,
-    copilot_executor_config: &ZbobrExecutorCopilotRuntimeConfig,
-    mcp_tester_executor_config: &ZbobrExecutorMcpTesterRuntimeConfig,
+    claude_executor_config: &ZbobrExecutorClaudeConfig,
+    copilot_executor_config: &ZbobrExecutorCopilotConfig,
+    mcp_tester_executor_config: &ZbobrExecutorMcpTesterConfig,
 ) -> anyhow::Result<()> {
     let cli_tool = zbobr.config().cli_tool;
     let model = model.unwrap_or_else(|| match cli_tool {
@@ -889,9 +889,9 @@ async fn run_manager_loop(
     model: Option<Model>,
     port: u16,
     prompts: &Prompts,
-    claude_executor_config: &ZbobrExecutorClaudeRuntimeConfig,
-    copilot_executor_config: &ZbobrExecutorCopilotRuntimeConfig,
-    mcp_tester_executor_config: &ZbobrExecutorMcpTesterRuntimeConfig,
+    claude_executor_config: &ZbobrExecutorClaudeConfig,
+    copilot_executor_config: &ZbobrExecutorCopilotConfig,
+    mcp_tester_executor_config: &ZbobrExecutorMcpTesterConfig,
 ) -> anyhow::Result<()> {
     let cli_tool = zbobr.config().cli_tool;
     let model = model.unwrap_or_else(|| match cli_tool {

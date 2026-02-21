@@ -11,14 +11,16 @@ pub struct ZbobrExecutorCopilot {
     pub default_model: Model,
 }
 
-/// Runtime/resolved configuration for the Copilot executor.
-#[derive(Debug, Clone)]
-pub struct ZbobrExecutorCopilotRuntimeConfig {
-    /// Default AI model for Copilot executor.
-    pub default_model: Model,
+/// Resolved configuration for the Copilot executor.
+impl Clone for ZbobrExecutorCopilotConfig {
+    fn clone(&self) -> Self {
+        Self {
+            default_model: self.default_model.clone(),
+        }
+    }
 }
 
-impl Default for ZbobrExecutorCopilotRuntimeConfig {
+impl Default for ZbobrExecutorCopilotConfig {
     fn default() -> Self {
         Self {
             default_model: Model::Gpt5Mini,
@@ -26,7 +28,7 @@ impl Default for ZbobrExecutorCopilotRuntimeConfig {
     }
 }
 
-impl ZbobrExecutorCopilotRuntimeConfig {
+impl ZbobrExecutorCopilotConfig {
     /// Build configuration by layering: defaults < TOML < CLI args.
     pub fn build(toml: Option<ZbobrExecutorCopilotToml>, args: ZbobrExecutorCopilotArgs) -> Self {
         let defaults = Self::default();
