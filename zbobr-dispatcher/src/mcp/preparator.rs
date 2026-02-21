@@ -129,3 +129,18 @@ impl PreparatorMcp {
         crate::mcp::common::generate_api_docs_from_router(&tools, "Preparator")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn tools_match_common_list() {
+        let tools = PreparatorMcp::tool_router().list_all();
+        let mut names: Vec<_> = tools.iter().map(|t| t.name.as_ref()).collect();
+        names.sort();
+        let mut expected = crate::mcp::preparator_tools::ALL_TOOLS.to_vec();
+        expected.sort();
+        assert_eq!(names, expected, "preparator tool router diverged from common list");
+    }
+}

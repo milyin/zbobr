@@ -28,10 +28,6 @@ git_user_email = "your.email@example.com"
 # Prefer ZBOBR_AGENT_GH_TOKEN env var instead of storing here.
 # agent_github_token = ""
 
-# GitHub token for Copilot CLI with Copilot's access rights (passed as COPILOT_GITHUB_TOKEN).
-# Priority: ZBOBR_COPILOT_GITHUB_TOKEN > COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN > $(gh auth token)
-# Prefer env vars instead of storing in config.
-# copilot_github_token = ""
 
 [dispatcher.prompts]
 # Base directory for additional prompt files (appended after built-in instructions)
@@ -77,6 +73,11 @@ fork_owner = "{{FORK_OWNER}}"
 [executor.copilot]
 # Default model for Copilot executor (default: "gpt-5-mini")
 # default_model = "gpt-5-mini"
+
+# GitHub token for Copilot CLI with Copilot's access rights (passed as COPILOT_GITHUB_TOKEN).
+# Priority: ZBOBR_COPILOT_GITHUB_TOKEN > COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN > $(gh auth token)
+# Prefer env vars instead of storing in config.
+# copilot_github_token = ""
 
 [executor.mcp-tester]
 # YAML scenario files for mcp-tester, one per stage.

@@ -173,3 +173,18 @@ impl WorkerMcp {
         crate::mcp::common::generate_api_docs_from_router(&tools, "Worker")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn tools_match_common_list() {
+        let tools = WorkerMcp::tool_router().list_all();
+        let mut names: Vec<_> = tools.iter().map(|t| t.name.as_ref()).collect();
+        names.sort();
+        let mut expected = crate::mcp::worker_tools::ALL_TOOLS.to_vec();
+        expected.sort();
+        assert_eq!(names, expected, "worker tool router diverged from common list");
+    }
+}

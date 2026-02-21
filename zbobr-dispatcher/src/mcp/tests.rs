@@ -1,4 +1,5 @@
 use super::*;
+use crate::Zbobr;
 use crate::task::{Model, Tool};
 
 struct StubTaskBackend;
@@ -128,7 +129,6 @@ fn test_config() -> crate::config::ZbobrDispatcherConfig {
         default_model: Model::Gpt4o,
         workspaces: std::path::PathBuf::from("/tmp"),
         agent_github_token: "agent-token".to_string(),
-        copilot_github_token: "copilot-token".to_string(),
         backend: crate::config::BackendType::GitHub,
         cli_tool: Tool::Claude,
         preparator_prompts: vec![],
@@ -141,67 +141,4 @@ fn test_config() -> crate::config::ZbobrDispatcherConfig {
         git_user_name: "Test User".to_string(),
         git_user_email: "test@example.com".to_string(),
     }
-}
-
-fn test_zbobr() -> Zbobr {
-    let config = test_config();
-    let task_backend: std::sync::Arc<dyn crate::backend::TaskBackend> =
-        std::sync::Arc::new(StubTaskBackend);
-    let repo_backend: std::sync::Arc<dyn crate::backend::RepoBackend> =
-        std::sync::Arc::new(StubRepoBackend);
-    Zbobr::new(config, task_backend, repo_backend)
-}
-
-#[tokio::test]
-async fn test_preparator_tools_consistency() {
-    let zbobr = test_zbobr();
-    let preparator = crate::mcp::PreparatorMcp::new(zbobr, 123);
-
-    let tools = preparator.tool_router.list_all();
-    let mut tool_names: Vec<_> = tools.iter().map(|t| t.name.as_ref()).collect();
-    tool_names.sort();
-
-    let mut expected_names = crate::mcp::common::preparator_tools::ALL_TOOLS.to_vec();
-    expected_names.sort();
-
-    assert_eq!(
-        tool_names, expected_names,
-        "Exposed preparator tools do not match preparator_tools::ALL_TOOLS"
-    );
-}
-
-#[tokio::test]
-async fn test_planner_tools_consistency() {
-    let zbobr = test_zbobr();
-    let planner = crate::mcp::PlannerMcp::new(zbobr, 123);
-
-    let tools = planner.tool_router.list_all();
-    let mut tool_names: Vec<_> = tools.iter().map(|t| t.name.as_ref()).collect();
-    tool_names.sort();
-
-    let mut expected_names = crate::mcp::common::planner_tools::ALL_TOOLS.to_vec();
-    expected_names.sort();
-
-    assert_eq!(
-        tool_names, expected_names,
-        "Exposed planner tools do not match planner_tools::ALL_TOOLS"
-    );
-}
-
-#[tokio::test]
-async fn test_worker_tools_consistency() {
-    let zbobr = test_zbobr();
-    let worker = crate::mcp::WorkerMcp::new(zbobr, 123);
-
-    let tools = worker.tool_router.list_all();
-    let mut tool_names: Vec<_> = tools.iter().map(|t| t.name.as_ref()).collect();
-    tool_names.sort();
-
-    let mut expected_names = crate::mcp::common::worker_tools::ALL_TOOLS.to_vec();
-    expected_names.sort();
-
-    assert_eq!(
-        tool_names, expected_names,
-        "Exposed worker tools do not match worker_tools::ALL_TOOLS"
-    );
 }

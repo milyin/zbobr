@@ -26,3 +26,7 @@ pub use planner::PlannerMcp;
 pub use preparator::PreparatorMcp;
 pub use reviewer::ReviewerMcp;
 pub use worker::WorkerMcp;
+
+// tests live in separate file
+#[cfg(test)]
+mod tests;

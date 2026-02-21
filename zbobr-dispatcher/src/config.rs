@@ -66,8 +66,8 @@ pub struct ZbobrDispatcherConfig {
     pub workspaces: PathBuf,
     /// GitHub token with read-only access for agent processes (passed as GH_TOKEN to agents).
     pub agent_github_token: String,
-    /// GitHub token for Copilot CLI with Copilot's access rights (passed as COPILOT_GITHUB_TOKEN).
-    pub copilot_github_token: String,
+    // NOTE: `copilot_github_token` has been moved to the Copilot executor
+    // configuration; the dispatcher no longer tracks this value.
     /// Backend to use.
     pub backend: BackendType,
     /// CLI tool to use.
@@ -98,7 +98,6 @@ impl Default for ZbobrDispatcherConfig {
             default_model: Model::default(),
             workspaces: PathBuf::from("./workspaces"),
             agent_github_token: String::new(),
-            copilot_github_token: String::new(),
             backend: BackendType::default(),
             cli_tool: Tool::default(),
             preparator_prompts: vec!["prompts/preparator.md".into(), "prompts/common.md".into()],
@@ -221,14 +220,6 @@ impl ZbobrDispatcherConfig {
 
         // Token resolution with proper priority
 
-        // COPILOT_GITHUB_TOKEN: check external vars then TOML
-        let copilot_github_token = env
-            .var("COPILOT_GITHUB_TOKEN")
-            .or_else(|| env.var("GH_TOKEN"))
-            .or_else(|| env.var("GITHUB_TOKEN"))
-            .or_else(|| merged.copilot_github_token.clone())
-            .unwrap_or_default();
-
         // Agent token: only from TOML/CLI (do not read zbobr-specific env vars)
         let agent_github_token = merged.agent_github_token.unwrap_or_default();
 
@@ -240,7 +231,6 @@ impl ZbobrDispatcherConfig {
             default_model,
             workspaces,
             agent_github_token,
-            copilot_github_token,
             backend,
             cli_tool,
             preparator_prompts,
@@ -388,7 +378,6 @@ mod tests {
             workspaces: Some(PathBuf::from("/tmp/toml-ws")),
             backend: None,
             agent_github_token: Some("toml-agent-token".into()),
-            copilot_github_token: Some("toml-copilot-token".into()),
             cli_tool: Some(Tool::Claude),
             work_branch_prefix: Some("toml_fix".into()),
             git_user_name: Some("test-user".into()),
@@ -434,7 +423,6 @@ mod tests {
         // Absolute prompts_path stays absolute
         assert_eq!(config.prompts_path, Some(PathBuf::from("/opt/prompts")));
         assert_eq!(config.agent_github_token, "toml-agent-token");
-        assert_eq!(config.copilot_github_token, "toml-copilot-token");
         assert_eq!(config.git_user_name, "test-user");
         assert_eq!(config.git_user_email, "test@example.com");
     }

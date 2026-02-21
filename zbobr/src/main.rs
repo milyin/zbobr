@@ -794,7 +794,11 @@ async fn run_role_session(
         }),
     };
     let agent_token = &zbobr.config().agent_github_token;
-    let copilot_token = &zbobr.config().copilot_github_token;
+    // copilot token belongs to the executor config now; only relevant for Copilot tool
+    let copilot_token = match cli_tool {
+        Tool::Copilot => &copilot_executor_config.copilot_github_token,
+        _ => "",
+    };
     let (execution_interrupted, execution_error) = tokio::select! {
         result = executor.execute(task_id, role, &model, assigned_port, prompt, &task_dir, &mcp_url, agent_token, copilot_token) => {
             match result {

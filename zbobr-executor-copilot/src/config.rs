@@ -7,6 +7,9 @@ pub struct ZbobrExecutorCopilot {
     /// Default AI model for Copilot executor.
     #[arg(help = "Default AI model for Copilot executor")]
     pub default_model: Model,
+    /// GitHub token used by Copilot CLI (passed as COPILOT_GITHUB_TOKEN).
+    #[arg(help = "GitHub token for Copilot CLI (COPILOT_GITHUB_TOKEN)")]
+    pub copilot_github_token: String,
 }
 
 impl ZbobrExecutorCopilotConfig {
@@ -17,6 +20,50 @@ impl ZbobrExecutorCopilotConfig {
 
         let default_model = merged.default_model.unwrap_or(defaults.default_model);
 
-        Self { default_model }
+        // token precedence: environment variables override TOML/CLI
+        let copilot_github_token = std::env::var("COPILOT_GITHUB_TOKEN")
+            .or_else(|_| std::env::var("GH_TOKEN"))
+            .or_else(|_| std::env::var("GITHUB_TOKEN"))
+            .unwrap_or_else(|_| merged.copilot_github_token.unwrap_or(defaults.copilot_github_token.clone()));
+
+        Self {
+            default_model,
+            copilot_github_token,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+
+    #[test]
+    fn build_uses_default_model_and_empty_token() {
+        let cfg = ZbobrExecutorCopilotConfig::build(None, ZbobrExecutorCopilotArgs::default());
+        assert_eq!(cfg.default_model, Model::default());
+        assert!(cfg.copilot_github_token.is_empty());
+    }
+
+    #[test]
+    fn build_prefers_env_var_over_toml() {
+        // set a temporary env var
+        env::set_var("COPILOT_GITHUB_TOKEN", "from-env");
+        let toml = ZbobrExecutorCopilotToml {
+            default_model: None,
+            copilot_github_token: Some("from-toml".into()),
+        };
+        let cfg = ZbobrExecutorCopilotConfig::build(Some(toml), ZbobrExecutorCopilotArgs::default());
+        assert_eq!(cfg.copilot_github_token, "from-env");
+        env::remove_var("COPILOT_GITHUB_TOKEN");
+    }
+
+    #[test]
+    fn build_falls_back_to_gh_token_env() {
+        env::remove_var("COPILOT_GITHUB_TOKEN");
+        env::set_var("GH_TOKEN", "gh-env");
+        let cfg = ZbobrExecutorCopilotConfig::build(None, ZbobrExecutorCopilotArgs::default());
+        assert_eq!(cfg.copilot_github_token, "gh-env");
+        env::remove_var("GH_TOKEN");
     }
 }
