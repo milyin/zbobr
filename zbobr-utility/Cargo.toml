@@ -7,6 +7,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = { workspace = true }
+clap = { workspace = true }
 tokio = { workspace = true }
 zbobr-macros = { workspace = true }
 

@@ -78,14 +78,18 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
         .map(|base| format_ident!("{}Args", base));
 
     let mut toml_fields = Vec::new();
+    // Only leaf fields appear in the Derived struct (no flatten for nested).
     let mut derived_args_fields = Vec::new();
     let mut plain_args_fields = Vec::new();
     let mut merge_fields = Vec::new();
     let mut has_override_checks = Vec::new();
     let mut base_fields = Vec::new();
-    let mut namespace_steps = Vec::new();
-    let mut args_copy_fields = Vec::new();
-    let mut args_update_fields = Vec::new();
+    // Steps that build the struct in PrefixedArgs::from_matches_prefixed (one per field).
+    let mut prefixed_from_steps: Vec<TokenStream2> = Vec::new();
+    // (heading_prefix_lit, nested_args_ty) pairs used in augment_args_prefixed.
+    let mut nested_augment_entries: Vec<(TokenStream2, TokenStream2)> = Vec::new();
+    // All field idents in declaration order — used in the Ok(Self { ... }) constructor.
+    let mut plain_field_idents: Vec<TokenStream2> = Vec::new();
     let mut into_config_setup = Vec::new();
     let mut into_config_required = Vec::new();
     let mut into_config_fields = Vec::new();
@@ -104,6 +108,8 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             #(#other_attrs)*
             #field_vis #field_ident: #field_ty,
         });
+        // Track every field ident for the Ok(Self { ... }) constructor.
+        plain_field_idents.push(quote!(#field_ident));
         // Reuse doc/other attributes on both structs.
         let args_attrs = other_attrs.clone();
         let mut serde_attrs: Vec<TokenStream2> = Vec::new();
@@ -152,8 +158,8 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 .help_heading
                 .clone()
                 .or_else(|| doc_help.clone());
-            let heading = format_help_heading(&heading_prefix_value, heading_text.as_deref());
-            let heading_lit = LitStr::new(&heading, Span::call_site());
+            let _heading = format_help_heading(&heading_prefix_value, heading_text.as_deref());
+            let _ = _heading; // was used for next_help_heading; the PrefixedArgs impl uses prefix-derived headings instead
 
             if !config_meta.skip_toml {
                 toml_fields.push(quote! {
@@ -179,31 +185,29 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 });
             }
 
-            derived_args_fields.push(quote! {
-                #(#args_attrs)*
-                #[command(flatten, next_help_heading = #heading_lit)]
-                #field_vis #field_ident: #nested_args_ty,
-            });
+            // Nested fields are NOT added to derived_args_fields; they are
+            // handled separately in the PrefixedArgs impl below.
 
             plain_args_fields.push(quote! {
                 #(#args_attrs)*
                 #field_vis #field_ident: #nested_args_ty,
             });
 
-            args_copy_fields.push(quote! { #field_ident: parsed.#field_ident });
-            args_update_fields.push(quote! { self.#field_ident = parsed.#field_ident; });
-
             has_override_checks.push(quote! {
                 self.#field_ident.has_overrides()
             });
 
-            namespace_steps.push(quote! {
-                let nested_prefix = if prefix.is_empty() {
-                    format!("{}.", #heading_prefix_lit)
-                } else {
-                    format!("{}{}.", prefix, #heading_prefix_lit)
+            nested_augment_entries.push((quote!(#heading_prefix_lit), quote!(#nested_args_ty)));
+
+            prefixed_from_steps.push(quote! {
+                let #field_ident = {
+                    let nested_prefix = if prefix.is_empty() {
+                        format!("{}.", #heading_prefix_lit)
+                    } else {
+                        format!("{}{}.", prefix, #heading_prefix_lit)
+                    };
+                    <#nested_args_ty as ::zbobr_utility::PrefixedArgs>::from_matches_prefixed(__matches, &nested_prefix)?
                 };
-                cmd = <#nested_args_ty>::namespace_command(cmd, &nested_prefix);
             });
 
             if !config_meta.skip_toml {
@@ -289,46 +293,39 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 #field_vis #field_ident: Option<#value_ty>,
             });
 
-            args_copy_fields.push(quote! { #field_ident: parsed.#field_ident });
-            args_update_fields.push(quote! { self.#field_ident = parsed.#field_ident; });
-
             has_override_checks.push(quote! {
                 self.#field_ident.is_some()
             });
 
-            namespace_steps.push(quote! {
-                let lookup_id = #arg_target_id_lit;
-                let desired_id = if prefix.is_empty() {
-                    #arg_target_id_lit.to_string()
-                } else {
-                    format!("{}{}", prefix, #arg_target_id_lit)
-                };
-                let mut desired_long = desired_id.replace('.', "-");
-                desired_long = desired_long.replace('_', "-");
-
-                // Find the actual id in the built Command (may differ if clap rewrites it).
-                let existing = {
-                    let mut iter = cmd.get_arguments();
-                    iter
-                        .find(|a| a.get_id().as_str() == lookup_id || a.get_long() == Some(#arg_name_lit))
-                        .map(|a| a.get_id().as_str().to_string())
-                };
-
-                if let Some(existing) = existing {
-                    let desired_id_static: &'static str = Box::leak(desired_id.into_boxed_str());
-                    let desired_long_static: &'static str = Box::leak(desired_long.into_boxed_str());
-                    let existing_static: &'static str = Box::leak(existing.into_boxed_str());
-                    cmd = cmd.mut_arg(existing_static, |a| {
-                        let mut arg = a
-                            .id(::clap::Id::from(desired_id_static))
-                            .long(desired_long_static);
-                        if let Some(heading) = heading_label {
-                            arg = arg.help_heading(Some(heading));
-                        }
-                        arg
-                    });
+            // Generate the from_matches_prefixed step for this leaf field.
+            // Detect whether value_ty is Vec<T> and use get_many in that case.
+            let base_is_option_for_from = option_inner_type(&field_ty);
+            let value_ty_for_from = base_is_option_for_from.clone().unwrap_or(field_ty.clone());
+            let from_step = if let Some(elem_ty) = vec_inner_type(&value_ty_for_from) {
+                quote! {
+                    let #field_ident = {
+                        let __id = if prefix.is_empty() {
+                            #arg_target_id_lit.to_string()
+                        } else {
+                            format!("{}{}", prefix, #arg_target_id_lit)
+                        };
+                        __matches.get_many::<#elem_ty>(&__id)
+                            .map(|v| v.cloned().collect::<::std::vec::Vec<_>>())
+                    };
                 }
-            });
+            } else {
+                quote! {
+                    let #field_ident = {
+                        let __id = if prefix.is_empty() {
+                            #arg_target_id_lit.to_string()
+                        } else {
+                            format!("{}{}", prefix, #arg_target_id_lit)
+                        };
+                        __matches.get_one::<#value_ty_for_from>(&__id).cloned()
+                    };
+                }
+            };
+            prefixed_from_steps.push(from_step);
 
             if !config_meta.skip_toml {
                 into_config_setup.push(quote! {
@@ -365,6 +362,11 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
 
     // alias from original name if the struct was renamed
     let alias_orig_decl = alias_orig_decl;
+
+    // Split the nested augment pairs into two parallel Vecs so quote! can
+    // repeat them together in the generated PrefixedArgs impl.
+    let (nested_augment_prefixes, nested_augment_tys): (Vec<_>, Vec<_>) =
+        nested_augment_entries.into_iter().unzip();
 
     let tokens = quote! {
         #(#attrs)*
@@ -407,49 +409,90 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             pub fn has_overrides(&self) -> bool {
                 false #( || #has_override_checks )*
             }
+        }
 
-            pub fn namespace_command(mut cmd: clap::Command, prefix: &str) -> clap::Command {
-                let heading_label: Option<&'static str> = if prefix.is_empty() {
-                    None
-                } else {
-                    Some(Box::leak(
-                        format!("[{}]", prefix.trim_end_matches('.')).into_boxed_str(),
-                    ))
-                };
-                #( #namespace_steps )*
-                let group_name = stringify!(#derived_args_ident);
-                cmd = cmd.mut_group(group_name, |_g| ::clap::ArgGroup::new(group_name));
+        impl #impl_generics ::zbobr_utility::PrefixedArgs for #args_ident #ty_generics #where_clause {
+            fn augment_args_prefixed(mut cmd: ::clap::Command, prefix: &str) -> ::clap::Command {
+                // Build a temporary sub-command from the derived (leaf-only) struct to
+                // obtain correctly-typed clap::Arg definitions.  We then rename every
+                // arg's id and --long form to include the supplied prefix.
+                let __tmp = <#derived_args_ident as ::clap::Args>::augment_args(
+                    ::clap::Command::new("__prefixed_tmp")
+                );
+                let __tmp_args: ::std::vec::Vec<::clap::Arg> =
+                    __tmp.get_arguments().cloned().collect();
+                for __arg in &__tmp_args {
+                    let __base_id = __arg.get_id().as_str();
+                    let __new_id: ::std::string::String = if prefix.is_empty() {
+                        __base_id.to_string()
+                    } else {
+                        format!("{}{}", prefix, __base_id)
+                    };
+                    let __new_long = __new_id.replace('.', "-");
+                    let __heading: ::std::option::Option<&'static str> = if prefix.is_empty() {
+                        ::std::option::Option::None
+                    } else {
+                        ::std::option::Option::Some(::std::boxed::Box::leak(
+                            format!("[{}]", prefix.trim_end_matches('.')).into_boxed_str(),
+                        ))
+                    };
+                    let __id_s: &'static str =
+                        ::std::boxed::Box::leak(__new_id.into_boxed_str());
+                    let __long_s: &'static str =
+                        ::std::boxed::Box::leak(__new_long.into_boxed_str());
+                    let __new_arg = __arg.clone().id(__id_s).long(__long_s);
+                    let __new_arg = match __heading {
+                        ::std::option::Option::Some(__h) => __new_arg.help_heading(::std::option::Option::Some(__h)),
+                        ::std::option::Option::None => __new_arg,
+                    };
+                    cmd = cmd.arg(__new_arg);
+                }
+                // Recurse into nested structs.
+                #(
+                    {
+                        let __nested_prefix = if prefix.is_empty() {
+                            format!("{}.", #nested_augment_prefixes)
+                        } else {
+                            format!("{}{}.", prefix, #nested_augment_prefixes)
+                        };
+                        cmd = <#nested_augment_tys as ::zbobr_utility::PrefixedArgs>::augment_args_prefixed(cmd, &__nested_prefix);
+                    }
+                )*
                 cmd
+            }
+
+            fn from_matches_prefixed(
+                __matches: &::clap::ArgMatches,
+                prefix: &str,
+            ) -> ::clap::error::Result<Self> {
+                #( #prefixed_from_steps )*
+                ::std::result::Result::Ok(Self {
+                    #(#plain_field_idents,)*
+                })
             }
         }
 
         impl #impl_generics ::clap::FromArgMatches for #args_ident #ty_generics #where_clause {
             fn from_arg_matches(matches: &::clap::ArgMatches) -> ::clap::error::Result<Self> {
-                let parsed = <#derived_args_ident as ::clap::FromArgMatches>::from_arg_matches(matches)?;
-                Ok(Self {
-                    #(#args_copy_fields,)*
-                })
+                <Self as ::zbobr_utility::PrefixedArgs>::from_matches_prefixed(matches, "")
             }
 
             fn update_from_arg_matches(
                 &mut self,
                 matches: &::clap::ArgMatches,
             ) -> ::clap::error::Result<()> {
-                let mut parsed = <#derived_args_ident as ::clap::FromArgMatches>::from_arg_matches(matches)?;
-                #(#args_update_fields;)*
+                *self = <Self as ::zbobr_utility::PrefixedArgs>::from_matches_prefixed(matches, "")?;
                 Ok(())
             }
         }
 
         impl #impl_generics ::clap::Args for #args_ident #ty_generics #where_clause {
             fn augment_args(cmd: ::clap::Command) -> ::clap::Command {
-                let cmd = <#derived_args_ident as ::clap::Args>::augment_args(cmd);
-                Self::namespace_command(cmd, "")
+                <Self as ::zbobr_utility::PrefixedArgs>::augment_args_prefixed(cmd, "")
             }
 
             fn augment_args_for_update(cmd: ::clap::Command) -> ::clap::Command {
-                let cmd = <#derived_args_ident as ::clap::Args>::augment_args_for_update(cmd);
-                Self::namespace_command(cmd, "")
+                <Self as ::zbobr_utility::PrefixedArgs>::augment_args_prefixed(cmd, "")
             }
         }
 
@@ -649,6 +692,22 @@ fn option_inner_type(ty: &Type) -> Option<Type> {
     if let Type::Path(type_path) = ty {
         if let Some(last) = type_path.path.segments.last() {
             if last.ident == "Option" {
+                if let syn::PathArguments::AngleBracketed(args) = &last.arguments {
+                    if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
+                        return Some(inner_ty.clone());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// If `ty` is `Vec<T>`, return `Some(T)`; otherwise `None`.
+fn vec_inner_type(ty: &Type) -> Option<Type> {
+    if let Type::Path(type_path) = ty {
+        if let Some(last) = type_path.path.segments.last() {
+            if last.ident == "Vec" {
                 if let syn::PathArguments::AngleBracketed(args) = &last.arguments {
                     if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
                         return Some(inner_ty.clone());
