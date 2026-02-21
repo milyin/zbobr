@@ -2,7 +2,8 @@ use std::path::{Path, PathBuf};
 
 use zbobr_utility::config_struct;
 
-use crate::task::{Model, Tool};
+use crate::task::Tool;
+
 
 /// Backend type to use.
 #[derive(
@@ -60,8 +61,6 @@ pub struct TomlPrompts {
 #[derive(Clone)]
 #[config_struct]
 pub struct ZbobrDispatcherConfig {
-    /// Default AI model to use.
-    pub default_model: Model,
     /// Workspaces directory; each task gets a separate subdirectory.
     pub workspaces: PathBuf,
     /// GitHub token with read-only access for agent processes (passed as GH_TOKEN to agents).
@@ -95,7 +94,6 @@ pub struct ZbobrDispatcherConfig {
 impl Default for ZbobrDispatcherConfig {
     fn default() -> Self {
         Self {
-            default_model: Model::default(),
             workspaces: PathBuf::from("./workspaces"),
             agent_github_token: String::new(),
             backend: BackendType::default(),
@@ -148,13 +146,11 @@ impl ZbobrDispatcherConfig {
     fn build_with_env<E: EnvSource>(
         toml: Option<ZbobrDispatcherToml>,
         args: ZbobrDispatcherArgs,
-        env: &E,
+        _env: &E,
         config_dir: &Path,
     ) -> anyhow::Result<Self> {
         let defaults = ZbobrDispatcherConfig::default();
         let merged = toml.unwrap_or_default().merge_with_args(args);
-
-        let default_model = merged.default_model.unwrap_or(defaults.default_model);
 
         let workspaces = merged
             .workspaces
@@ -228,7 +224,6 @@ impl ZbobrDispatcherConfig {
         let git_user_email = merged.git_user_email.unwrap_or_default();
 
         Ok(Self {
-            default_model,
             workspaces,
             agent_github_token,
             backend,
@@ -323,17 +318,15 @@ mod tests {
 
     #[test]
     fn toml_config_parse_minimal() {
-        let toml_str = r#"
-    default_model = "gpt-5-mini"
-    "#;
+        let toml_str = r#""#;
         let config: ZbobrDispatcherToml = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.default_model, Some(Model::Gpt5Mini));
+        // empty toml yields no fields set
+        assert!(config.workspaces.is_none());
     }
 
     #[test]
     fn toml_config_parse_full() {
         let toml_str = r#"
-    default_model = "gpt-5-mini"
     workspaces = "/tmp/workspaces"
     cli_tool = "claude"
     work_branch_prefix = "my_fix"
@@ -342,7 +335,6 @@ mod tests {
     worker_prompts = ["work.md"]
     "#;
         let config: ZbobrDispatcherToml = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.default_model, Some(Model::Gpt5Mini));
         assert_eq!(config.cli_tool, Some(Tool::Claude));
         assert_eq!(config.prompts_path, Some(PathBuf::from("/opt/prompts")));
         assert_eq!(
@@ -374,7 +366,6 @@ mod tests {
     fn build_with_toml() {
         let env = TestEnv::new(&[]);
         let toml = ZbobrDispatcherToml {
-            default_model: Some(Model::Claude3Opus),
             workspaces: Some(PathBuf::from("/tmp/toml-ws")),
             backend: None,
             agent_github_token: Some("toml-agent-token".into()),
@@ -397,7 +388,6 @@ mod tests {
             &test_config_dir(),
         )
         .unwrap();
-        assert_eq!(config.default_model, Model::Claude3Opus);
         // Absolute path stays absolute
         assert_eq!(config.workspaces, PathBuf::from("/tmp/toml-ws"));
         assert_eq!(config.backend, BackendType::GitHub);
@@ -437,7 +427,6 @@ mod tests {
             &test_config_dir(),
         )
         .unwrap();
-        assert_eq!(config.default_model, Model::Gpt5Mini);
         assert_eq!(config.backend, BackendType::GitHub);
         assert_eq!(config.cli_tool, Tool::Copilot);
         assert_eq!(config.work_branch_prefix, "zbobr_fix");

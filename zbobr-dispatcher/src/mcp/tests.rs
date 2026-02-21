@@ -126,7 +126,6 @@ impl crate::backend::RepoBackend for StubRepoBackend {
 
 fn test_config() -> crate::config::ZbobrDispatcherConfig {
     crate::config::ZbobrDispatcherConfig {
-        default_model: Model::Gpt4o,
         workspaces: std::path::PathBuf::from("/tmp"),
         agent_github_token: "agent-token".to_string(),
         backend: crate::config::BackendType::GitHub,

@@ -2,7 +2,6 @@
 # Save this as zbobr.toml in your project root
 
 [dispatcher]
-default_model = "gpt-5-mini"
 workspaces = "./workspaces"
 git_user_name = "zbobr"
 git_user_email = "zbobr@example.com"
