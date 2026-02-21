@@ -47,12 +47,17 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
 
     let toml_ident = format_ident!("{}Toml", ident);
     let args_ident = format_ident!("{}Args", ident);
+    let derived_args_ident = format_ident!("{}ArgsDerived", ident);
 
     let mut toml_fields = Vec::new();
-    let mut args_fields = Vec::new();
+    let mut derived_args_fields = Vec::new();
+    let mut plain_args_fields = Vec::new();
     let mut merge_fields = Vec::new();
     let mut has_override_checks = Vec::new();
     let mut base_fields = Vec::new();
+    let mut namespace_steps = Vec::new();
+    let mut args_copy_fields = Vec::new();
+    let mut args_update_fields = Vec::new();
 
     for field in fields_named {
         let field_ident = field.ident.clone().ok_or_else(|| {
@@ -77,6 +82,7 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
 
         let field_snake = field_ident.to_string().to_snake_case();
         let field_kebab = field_snake.replace('_', "-");
+        let field_kebab_lit = LitStr::new(&field_kebab, Span::call_site());
 
         let is_nested = config_meta.nested;
 
@@ -126,14 +132,31 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 });
             }
 
-            args_fields.push(quote! {
+            derived_args_fields.push(quote! {
                 #(#args_attrs)*
                 #[command(flatten, next_help_heading = #heading_lit)]
                 #field_vis #field_ident: #nested_args_ty,
             });
 
+            plain_args_fields.push(quote! {
+                #(#args_attrs)*
+                #field_vis #field_ident: #nested_args_ty,
+            });
+
+            args_copy_fields.push(quote! { #field_ident: parsed.#field_ident });
+            args_update_fields.push(quote! { self.#field_ident = parsed.#field_ident; });
+
             has_override_checks.push(quote! {
                 self.#field_ident.has_overrides()
+            });
+
+            namespace_steps.push(quote! {
+                let nested_prefix = if prefix.is_empty() {
+                    format!("{}.", #field_kebab_lit)
+                } else {
+                    format!("{}{}.", prefix, #field_kebab_lit)
+                };
+                cmd = <#nested_args_ty>::namespace_command(cmd, &nested_prefix);
             });
         } else {
             let arg_name_value = config_meta
@@ -141,6 +164,10 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 .clone()
                 .unwrap_or_else(|| field_kebab.clone());
             let arg_name_lit = LitStr::new(&arg_name_value, Span::call_site());
+            let arg_target_id = meta_string_value(&arg_metas, "id")
+                .or_else(|| meta_string_value(&arg_metas, "name"))
+                .unwrap_or_else(|| arg_name_value.clone());
+            let arg_target_id_lit = LitStr::new(&arg_target_id, Span::call_site());
             let has_custom_long = arg_metas.iter().any(|m| is_arg_meta(m, "long"));
             let has_custom_name = arg_metas.iter().any(|m| is_arg_meta(m, "name"));
             let has_custom_help = arg_metas.iter().any(|m| is_arg_meta(m, "help"));
@@ -178,14 +205,50 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 });
             }
 
-            args_fields.push(quote! {
+            derived_args_fields.push(quote! {
                 #(#args_attrs)*
                 #arg_attr
                 #field_vis #field_ident: Option<#field_ty>,
             });
 
+            plain_args_fields.push(quote! {
+                #(#args_attrs)*
+                #field_vis #field_ident: Option<#field_ty>,
+            });
+
+            args_copy_fields.push(quote! { #field_ident: parsed.#field_ident });
+            args_update_fields.push(quote! { self.#field_ident = parsed.#field_ident; });
+
             has_override_checks.push(quote! {
                 self.#field_ident.is_some()
+            });
+
+            namespace_steps.push(quote! {
+                let lookup_id = #arg_target_id_lit;
+                let desired_id = if prefix.is_empty() {
+                    #arg_target_id_lit.to_string()
+                } else {
+                    format!("{}{}", prefix, #arg_target_id_lit)
+                };
+                let desired_long = desired_id.replace('.', "-");
+
+                // Find the actual id in the built Command (may differ if clap rewrites it).
+                let existing = {
+                    let mut iter = cmd.get_arguments();
+                    iter
+                        .find(|a| a.get_id().as_str() == lookup_id || a.get_long() == Some(#arg_name_lit))
+                        .map(|a| a.get_id().as_str().to_string())
+                };
+
+                if let Some(existing) = existing {
+                    let desired_id_static: &'static str = Box::leak(desired_id.into_boxed_str());
+                    let desired_long_static: &'static str = Box::leak(desired_long.into_boxed_str());
+                    let existing_static: &'static str = Box::leak(existing.into_boxed_str());
+                    cmd = cmd.mut_arg(existing_static, |a| {
+                        a.id(::clap::Id::from(desired_id_static))
+                            .long(desired_long_static)
+                    });
+                }
             });
         }
     }
@@ -203,10 +266,15 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             #(#toml_fields)*
         }
 
-        #(#attrs)*
         #[derive(Debug, Clone, ::clap::Args, Default)]
+        struct #derived_args_ident #generics #where_clause {
+            #(#derived_args_fields)*
+        }
+
+        #(#attrs)*
+        #[derive(Debug, Clone, Default)]
         #vis struct #args_ident #generics #where_clause {
-            #(#args_fields)*
+            #(#plain_args_fields)*
         }
 
         impl #impl_generics #toml_ident #ty_generics #where_clause {
@@ -221,7 +289,45 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             pub fn has_overrides(&self) -> bool {
                 false #( || #has_override_checks )*
             }
+
+            pub fn namespace_command(mut cmd: clap::Command, prefix: &str) -> clap::Command {
+                #( #namespace_steps )*
+                let group_name = stringify!(#derived_args_ident);
+                cmd = cmd.mut_group(group_name, |_g| ::clap::ArgGroup::new(group_name));
+                cmd
+            }
         }
+
+        impl #impl_generics ::clap::FromArgMatches for #args_ident #ty_generics #where_clause {
+            fn from_arg_matches(matches: &::clap::ArgMatches) -> ::clap::error::Result<Self> {
+                let parsed = <#derived_args_ident as ::clap::FromArgMatches>::from_arg_matches(matches)?;
+                Ok(Self {
+                    #(#args_copy_fields,)*
+                })
+            }
+
+            fn update_from_arg_matches(
+                &mut self,
+                matches: &::clap::ArgMatches,
+            ) -> ::clap::error::Result<()> {
+                let mut parsed = <#derived_args_ident as ::clap::FromArgMatches>::from_arg_matches(matches)?;
+                #(#args_update_fields;)*
+                Ok(())
+            }
+        }
+
+        impl #impl_generics ::clap::Args for #args_ident #ty_generics #where_clause {
+            fn augment_args(cmd: ::clap::Command) -> ::clap::Command {
+                let cmd = <#derived_args_ident as ::clap::Args>::augment_args(cmd);
+                Self::namespace_command(cmd, "")
+            }
+
+            fn augment_args_for_update(cmd: ::clap::Command) -> ::clap::Command {
+                let cmd = <#derived_args_ident as ::clap::Args>::augment_args_for_update(cmd);
+                Self::namespace_command(cmd, "")
+            }
+        }
+
     };
 
     Ok(tokens)
@@ -324,6 +430,19 @@ fn is_arg_meta(meta: &Meta, key: &str) -> bool {
         Meta::NameValue(name_value) => name_value.path.is_ident(key),
         Meta::List(list) => list.path.is_ident(key),
     }
+}
+
+fn meta_string_value(metas: &[Meta], key: &str) -> Option<String> {
+    for meta in metas {
+        if let Meta::NameValue(name_value) = meta {
+            if name_value.path.is_ident(key) {
+                if let syn::Expr::Lit(syn::ExprLit { lit: Lit::Str(lit), .. }) = &name_value.value {
+                    return Some(lit.value());
+                }
+            }
+        }
+    }
+    None
 }
 
 fn type_with_suffix(ty: &Type, suffix: &str) -> syn::Result<TypePath> {
