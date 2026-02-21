@@ -120,7 +120,7 @@ impl GitHubTaskBackend {
         let backend_config = ZbobrTaskBackendGithubConfig::build(toml, args);
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
-            .personal_token(backend_config.github_token.clone())
+            .personal_token(backend_config.token.clone())
             .build()
             .map_err(|e| anyhow::anyhow!("Failed to build octocrab client: {e}"))?;
         Ok(Self {

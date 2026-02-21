@@ -8,12 +8,8 @@ pub struct ZbobrRepoBackendGithub {
     #[arg(long)]
     pub fork_owner: String,
     /// GitHub token with read/write access to fork org.
-    #[arg(
-        long = "repo-github-token",
-        env = "ZBOBR_REPO_GITHUB_TOKEN",
-        id = "repo_github_token"
-    )]
-    pub github_token: String,
+    #[arg(long, env = "ZBOBR_REPO_GITHUB_TOKEN")]
+    pub token: String,
 }
 
 impl ZbobrRepoBackendGithubConfig {
@@ -26,11 +22,11 @@ impl ZbobrRepoBackendGithubConfig {
         let merged = toml.unwrap_or_default().merge_with_args(args);
 
         let fork_owner = merged.fork_owner.unwrap_or(defaults.fork_owner);
-        let github_token = merged.github_token.unwrap_or(defaults.github_token);
+        let token = merged.token.unwrap_or(defaults.token);
 
         Self {
             fork_owner,
-            github_token,
+            token,
         }
     }
 
@@ -42,9 +38,9 @@ impl ZbobrRepoBackendGithubConfig {
                  This is the GitHub user or organization where target repos are forked for implementation."
             );
         }
-        if self.github_token.is_empty() {
+        if self.token.is_empty() {
             anyhow::bail!(
-                "GitHub token not set. Set github_token in [repo.github] config or use --repo-github-repo-github-token.\n  \
+                "GitHub token not set. Set token in [repo.github] config or use --repo-github-token.\n  \
                  This token needs read/write access to the organization where repos are forked."
             );
         }

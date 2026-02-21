@@ -111,18 +111,6 @@ impl Default for ZbobrDispatcherConfig {
     }
 }
 
-trait EnvSource {
-    fn var(&self, key: &str) -> Option<String>;
-}
-
-struct OsEnv;
-
-impl EnvSource for OsEnv {
-    fn var(&self, key: &str) -> Option<String> {
-        std::env::var(key).ok()
-    }
-}
-
 // Note: zbobr-specific env helpers were removed — configuration now comes
 // from TOML/CLI or explicit external GH env vars. `EnvSource` provides an
 // abstraction for reading environment variables in tests.
@@ -137,16 +125,6 @@ impl ZbobrDispatcherConfig {
     pub fn build(
         toml: Option<ZbobrDispatcherToml>,
         args: ZbobrDispatcherArgs,
-        config_dir: &Path,
-    ) -> anyhow::Result<Self> {
-        let env = OsEnv;
-        Self::build_with_env(toml, args, &env, config_dir)
-    }
-
-    fn build_with_env<E: EnvSource>(
-        toml: Option<ZbobrDispatcherToml>,
-        args: ZbobrDispatcherArgs,
-        _env: &E,
         config_dir: &Path,
     ) -> anyhow::Result<Self> {
         let defaults = ZbobrDispatcherConfig::default();
@@ -288,12 +266,6 @@ mod tests {
                 map.insert((*key).to_string(), (*value).to_string());
             }
             Self { vars: map }
-        }
-    }
-
-    impl EnvSource for TestEnv {
-        fn var(&self, key: &str) -> Option<String> {
-            self.vars.get(key).cloned()
         }
     }
 

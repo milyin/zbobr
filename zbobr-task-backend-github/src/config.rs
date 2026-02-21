@@ -8,12 +8,8 @@ pub struct ZbobrTaskBackendGithub {
     #[arg(long)]
     pub task_repo: String,
     /// GitHub token with read/write access to tasks repo.
-    #[arg(
-        long = "task-github-token",
-        env = "ZBOBR_TASK_GITHUB_TOKEN",
-        id = "task_github_token"
-    )]
-    pub github_token: String,
+    #[arg(long, env = "ZBOBR_TASK_GITHUB_TOKEN")]
+    pub token: String,
 }
 
 impl ZbobrTaskBackendGithubConfig {
@@ -26,11 +22,11 @@ impl ZbobrTaskBackendGithubConfig {
         let merged = toml.unwrap_or_default().merge_with_args(args);
 
         let task_repo = merged.task_repo.unwrap_or(defaults.task_repo);
-        let github_token = merged.github_token.unwrap_or(defaults.github_token);
+        let token = merged.token.unwrap_or(defaults.token);
 
         Self {
             task_repo,
-            github_token,
+            token,
         }
     }
 
@@ -42,9 +38,9 @@ impl ZbobrTaskBackendGithubConfig {
                  This is the GitHub repository whose issues the dispatcher processes."
             );
         }
-        if self.github_token.is_empty() {
+        if self.token.is_empty() {
             anyhow::bail!(
-                "GitHub token not set. Set github_token in [tasks.github] config or use --tasks-github-task-github-token.\n  \
+                "GitHub token not set. Set token in [tasks.github] config or use --tasks-github-task-github-token.\n  \
                  This token needs read/write access to the tasks repo."
             );
         }
