@@ -43,40 +43,6 @@ impl std::str::FromStr for BackendType {
     }
 }
 
-#[config_struct]
-pub struct ZbobrDispatcher {
-    #[arg(long, help = "Default AI model to use")]
-    pub default_model: Model,
-    #[arg(long, help = "Workspaces directory; each task gets a separate subdirectory")]
-    pub workspaces: PathBuf,
-    #[arg(long, help = "Backend to use")]
-    pub backend: BackendType,
-    #[arg(long, help = "GitHub token with read-only access for agent processes")]
-    pub agent_github_token: String,
-    #[arg(long, help = "GitHub token for Copilot CLI with Copilot's access rights")]
-    pub copilot_github_token: String,
-    #[arg(long, help = "CLI tool to use")]
-    pub cli_tool: Tool,
-    #[arg(long, help = "Prefix for work branches")]
-    pub work_branch_prefix: String,
-    #[arg(long, help = "Git user name for commits made by the tool")]
-    pub git_user_name: String,
-    #[arg(long, help = "Git user email for commits made by the tool")]
-    pub git_user_email: String,
-    #[arg(long, help = "Base directory for resolving prompt file paths")]
-    pub prompts_path: PathBuf,
-    #[arg(long, help = "Custom prompt files for preparator agent")]
-    pub preparator_prompts: Vec<PathBuf>,
-    #[arg(long, help = "Custom prompt files for planner agent")]
-    pub planner_prompts: Vec<PathBuf>,
-    #[arg(long, help = "Custom prompt files for worker agent")]
-    pub worker_prompts: Vec<PathBuf>,
-    #[arg(long, help = "Custom prompt files for reviewer agent")]
-    pub reviewer_prompts: Vec<PathBuf>,
-    #[arg(long, help = "Custom prompt files for merger agent")]
-    pub merger_prompts: Vec<PathBuf>,
-}
-
 /// TOML prompts configuration section.
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
@@ -90,7 +56,7 @@ pub struct TomlPrompts {
 }
 
 /// Configuration for the zbobr dispatcher.
-#[derive(Debug, Clone)]
+#[config_struct]
 pub struct ZbobrDispatcherConfig {
     /// Default AI model to use.
     pub default_model: Model,
