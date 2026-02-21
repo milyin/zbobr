@@ -5,10 +5,14 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 
-use crate::Zbobr;
-use crate::mcp::common::MessageParam;
-use crate::mcp::traits::{CommonMcpImpl, MergerMcpImpl};
-use crate::task::TaskSession;
+use crate::{
+    Zbobr,
+    mcp::{
+        common::MessageParam,
+        traits::{CommonMcpImpl, MergerMcpImpl},
+    },
+    task::TaskSession,
+};
 
 #[derive(Clone)]
 pub struct MergerMcp {

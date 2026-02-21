@@ -7,7 +7,11 @@ pub struct ZbobrRepoBackendGithub {
     #[arg(long)]
     pub fork_owner: String,
     /// GitHub token with read/write access to fork org.
-    #[arg(long = "repo-github-token", env = "ZBOBR_REPO_GITHUB_TOKEN", id = "repo_github_token")]
+    #[arg(
+        long = "repo-github-token",
+        env = "ZBOBR_REPO_GITHUB_TOKEN",
+        id = "repo_github_token"
+    )]
     pub github_token: String,
 }
 

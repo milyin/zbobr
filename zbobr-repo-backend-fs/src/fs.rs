@@ -4,9 +4,9 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
+use zbobr_dispatcher::backend::RepoBackend;
 
 use crate::config::ZbobrRepoBackendFsConfig;
-use zbobr_dispatcher::backend::RepoBackend;
 
 /// Serializable PR structure for YAML storage.
 #[derive(Debug, Clone, Serialize, Deserialize)]

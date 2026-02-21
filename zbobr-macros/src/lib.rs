@@ -1,11 +1,10 @@
 use heck::ToSnakeCase;
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::{format_ident, quote, ToTokens};
-use syn::punctuated::Punctuated;
+use quote::{ToTokens, format_ident, quote};
 use syn::{
-    parse_macro_input, Attribute, Fields, GenericArgument, ItemStruct, Lit, LitStr, Meta, Token,
-    Type, TypePath,
+    Attribute, Fields, GenericArgument, ItemStruct, Lit, LitStr, Meta, Token, Type, TypePath,
+    parse_macro_input, punctuated::Punctuated,
 };
 
 #[proc_macro_attribute]
@@ -50,7 +49,7 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             return Err(syn::Error::new_spanned(
                 ident,
                 "config_struct only supports structs with named fields",
-            ))
+            ));
         }
     };
 
@@ -68,9 +67,15 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
     };
 
     let ident_str = ident.to_string();
-    let alias_base = ident_str.strip_suffix("Config").map(|s| format_ident!("{}", s));
-    let alias_toml_ident = alias_base.as_ref().map(|base| format_ident!("{}Toml", base));
-    let alias_args_ident = alias_base.as_ref().map(|base| format_ident!("{}Args", base));
+    let alias_base = ident_str
+        .strip_suffix("Config")
+        .map(|s| format_ident!("{}", s));
+    let alias_toml_ident = alias_base
+        .as_ref()
+        .map(|base| format_ident!("{}Toml", base));
+    let alias_args_ident = alias_base
+        .as_ref()
+        .map(|base| format_ident!("{}Args", base));
 
     let mut toml_fields = Vec::new();
     let mut derived_args_fields = Vec::new();
@@ -86,9 +91,10 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
     let mut into_config_fields = Vec::new();
 
     for field in fields_named {
-        let field_ident = field.ident.clone().ok_or_else(|| {
-            syn::Error::new_spanned(&field, "config_struct fields must be named")
-        })?;
+        let field_ident = field
+            .ident
+            .clone()
+            .ok_or_else(|| syn::Error::new_spanned(&field, "config_struct fields must be named"))?;
         let field_vis = field.vis.clone();
         let field_ty = field.ty.clone();
 
@@ -493,7 +499,9 @@ fn parse_config_meta(attr: &Attribute, config: &mut FieldConfig) -> syn::Result<
             Meta::Path(path) if path.is_ident("nested") => config.nested = true,
             Meta::Path(path) if path.is_ident("skip_toml") => config.skip_toml = true,
             Meta::NameValue(name_value) if name_value.path.is_ident("help_heading") => {
-                if let syn::Expr::Lit(syn::ExprLit { lit: Lit::Str(lit), .. }) = name_value.value
+                if let syn::Expr::Lit(syn::ExprLit {
+                    lit: Lit::Str(lit), ..
+                }) = name_value.value
                 {
                     config.help_heading = Some(lit.value());
                 } else {
@@ -504,7 +512,9 @@ fn parse_config_meta(attr: &Attribute, config: &mut FieldConfig) -> syn::Result<
                 }
             }
             Meta::NameValue(name_value) if name_value.path.is_ident("heading_prefix") => {
-                if let syn::Expr::Lit(syn::ExprLit { lit: Lit::Str(lit), .. }) = name_value.value
+                if let syn::Expr::Lit(syn::ExprLit {
+                    lit: Lit::Str(lit), ..
+                }) = name_value.value
                 {
                     config.heading_prefix = Some(lit.value());
                 } else {
@@ -523,7 +533,9 @@ fn parse_config_meta(attr: &Attribute, config: &mut FieldConfig) -> syn::Result<
                 config.nested_toml_ty = Some(parsed);
             }
             Meta::NameValue(name_value) if name_value.path.is_ident("toml_rename") => {
-                if let syn::Expr::Lit(syn::ExprLit { lit: Lit::Str(lit), .. }) = name_value.value
+                if let syn::Expr::Lit(syn::ExprLit {
+                    lit: Lit::Str(lit), ..
+                }) = name_value.value
                 {
                     config.toml_rename = Some(lit.value());
                 } else {
@@ -537,7 +549,7 @@ fn parse_config_meta(attr: &Attribute, config: &mut FieldConfig) -> syn::Result<
                 return Err(syn::Error::new_spanned(
                     meta,
                     "Unsupported #[config(...)] attribute",
-                ))
+                ));
             }
         }
     }
@@ -556,7 +568,10 @@ fn meta_string_value(metas: &[Meta], key: &str) -> Option<String> {
     for meta in metas {
         if let Meta::NameValue(name_value) = meta {
             if name_value.path.is_ident(key) {
-                if let syn::Expr::Lit(syn::ExprLit { lit: Lit::Str(lit), .. }) = &name_value.value {
+                if let syn::Expr::Lit(syn::ExprLit {
+                    lit: Lit::Str(lit), ..
+                }) = &name_value.value
+                {
                     return Some(lit.value());
                 }
             }

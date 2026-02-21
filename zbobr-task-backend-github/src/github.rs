@@ -1,15 +1,14 @@
 use std::{collections::HashMap, time::Duration};
 
-use crate::separator::{
-    merge_concurrent_description_updates, parse_description_full, serialize_description_full,
-};
-
 use async_trait::async_trait;
+use zbobr_dispatcher::{Model, Parameter, Signal, Stage, Task, Tool, backend::TaskBackend};
 
-use zbobr_dispatcher::backend::TaskBackend;
-use zbobr_dispatcher::{Model, Parameter, Signal, Stage, Task, Tool};
-
-use crate::config::ZbobrTaskBackendGithubConfig;
+use crate::{
+    config::ZbobrTaskBackendGithubConfig,
+    separator::{
+        merge_concurrent_description_updates, parse_description_full, serialize_description_full,
+    },
+};
 
 /// Convert an octocrab error into an anyhow::Error with detailed information.
 fn octocrab_to_anyhow(e: octocrab::Error) -> anyhow::Error {

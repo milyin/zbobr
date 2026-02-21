@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+
 use zbobr_utility::{config_struct, resolve_path};
 
 #[config_struct]

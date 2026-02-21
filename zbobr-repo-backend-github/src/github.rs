@@ -2,7 +2,6 @@ use std::{path::PathBuf, time::Duration};
 
 use anyhow::Context;
 use async_trait::async_trait;
-
 use zbobr_dispatcher::backend::RepoBackend;
 
 use crate::config::ZbobrRepoBackendGithubConfig;

@@ -1,5 +1,7 @@
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use tempfile::TempDir;
 use zbobr_dispatcher::backend::RepoBackend;

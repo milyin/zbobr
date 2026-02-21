@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use crate::task::{Model, Tool};
 use zbobr_utility::config_struct;
+
+use crate::task::{Model, Tool};
 
 /// Backend type to use.
 #[derive(
@@ -286,8 +287,9 @@ impl ZbobrDispatcherConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashMap;
+
+    use super::*;
 
     struct TestEnv {
         vars: HashMap<String, String>,

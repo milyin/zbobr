@@ -5,13 +5,17 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 
-use crate::Zbobr;
-use crate::mcp::common::{
-    CheckChecklistItemParam, DeleteChecklistItemParam, InsertChecklistItemParam, MessageParam,
-    UpdateChecklistItemParam,
+use crate::{
+    Zbobr,
+    mcp::{
+        common::{
+            CheckChecklistItemParam, DeleteChecklistItemParam, InsertChecklistItemParam,
+            MessageParam, UpdateChecklistItemParam,
+        },
+        traits::{CommonMcpImpl, WorkerMcpImpl},
+    },
+    task::TaskSession,
 };
-use crate::mcp::traits::{CommonMcpImpl, WorkerMcpImpl};
-use crate::task::TaskSession;
 
 #[derive(Clone)]
 pub struct WorkerMcp {

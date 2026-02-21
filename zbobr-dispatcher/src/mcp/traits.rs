@@ -1,6 +1,7 @@
-use crate::task::{ChecklistItem, Parameter, Role, TaskSession};
-
-use crate::mcp::common::get_hostname;
+use crate::{
+    mcp::common::get_hostname,
+    task::{ChecklistItem, Parameter, Role, TaskSession},
+};
 
 /// Common trait for MCP services (Planner, Worker) - shared implementations
 #[allow(async_fn_in_trait)]

@@ -1,45 +1,30 @@
 use std::path::Path;
 
 use anyhow::Context;
-use zbobr_dispatcher::config::{
-    ZbobrDispatcherConfigArgs,
-    ZbobrDispatcherConfigToml,
+use zbobr_dispatcher::{
+    ZbobrDispatcherConfig,
+    config::{ZbobrDispatcherConfigArgs, ZbobrDispatcherConfigToml},
 };
-use zbobr_dispatcher::ZbobrDispatcherConfig;
 use zbobr_executor_claude::{
-    config::ZbobrExecutorClaude,
-    ZbobrExecutorClaudeArgs,
-    ZbobrExecutorClaudeToml,
+    ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeToml, config::ZbobrExecutorClaude,
 };
 use zbobr_executor_copilot::{
-    config::ZbobrExecutorCopilot,
-    ZbobrExecutorCopilotArgs,
-    ZbobrExecutorCopilotToml,
+    ZbobrExecutorCopilotArgs, ZbobrExecutorCopilotToml, config::ZbobrExecutorCopilot,
 };
 use zbobr_executor_mcp_tester::{
-    config::ZbobrExecutorMcpTester,
-    ZbobrExecutorMcpTesterArgs,
-    ZbobrExecutorMcpTesterToml,
+    ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterToml, config::ZbobrExecutorMcpTester,
 };
 use zbobr_repo_backend_fs::{
-    config::ZbobrRepoBackendFs,
-    ZbobrRepoBackendFsArgs,
-    ZbobrRepoBackendFsToml,
+    ZbobrRepoBackendFsArgs, ZbobrRepoBackendFsToml, config::ZbobrRepoBackendFs,
 };
 use zbobr_repo_backend_github::{
-    config::ZbobrRepoBackendGithub,
-    ZbobrRepoBackendGithubArgs,
-    ZbobrRepoBackendGithubToml,
+    ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubToml, config::ZbobrRepoBackendGithub,
 };
 use zbobr_task_backend_fs::{
-    config::ZbobrTaskBackendFs,
-    ZbobrTaskBackendFsArgs,
-    ZbobrTaskBackendFsToml,
+    ZbobrTaskBackendFsArgs, ZbobrTaskBackendFsToml, config::ZbobrTaskBackendFs,
 };
 use zbobr_task_backend_github::{
-    config::ZbobrTaskBackendGithub,
-    ZbobrTaskBackendGithubArgs,
-    ZbobrTaskBackendGithubToml,
+    ZbobrTaskBackendGithubArgs, ZbobrTaskBackendGithubToml, config::ZbobrTaskBackendGithub,
 };
 use zbobr_utility::config_struct;
 

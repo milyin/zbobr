@@ -1,4 +1,5 @@
 use std::path::Path;
+
 use tempfile::TempDir;
 
 mod mcp_tester_scenarios;
@@ -85,8 +86,8 @@ async fn run_mcp_test(command: &str) {
     // (We need to create it synchronously before spawning the async process)
     let task_id = {
         use std::collections::HashMap;
-        use zbobr_dispatcher::Stage;
-        use zbobr_dispatcher::backend::TaskBackend;
+
+        use zbobr_dispatcher::{Stage, backend::TaskBackend};
         use zbobr_task_backend_fs::FilesystemTaskBackend;
 
         let backend = FilesystemTaskBackend::new(

@@ -1,12 +1,15 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use zbobr_config::{ZbobrConfigArgs, ZbobrConfigToml};
 use zbobr_dispatcher::{
-    Stage, ToolExecutor, Zbobr, ZbobrDispatcherConfig, task::{Model, Role, Tool},
+    Stage, ToolExecutor, Zbobr, ZbobrDispatcherConfig,
+    task::{Model, Role, Tool},
 };
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};

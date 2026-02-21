@@ -5,10 +5,14 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 
-use crate::Zbobr;
-use crate::mcp::common::{MessageParam, SetDestinationBranchParam, SetDestinationRepositoryParam};
-use crate::mcp::traits::{CommonMcpImpl, PreparatorMcpImpl};
-use crate::task::TaskSession;
+use crate::{
+    Zbobr,
+    mcp::{
+        common::{MessageParam, SetDestinationBranchParam, SetDestinationRepositoryParam},
+        traits::{CommonMcpImpl, PreparatorMcpImpl},
+    },
+    task::TaskSession,
+};
 
 #[derive(Clone)]
 pub struct PreparatorMcp {

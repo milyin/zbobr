@@ -1,14 +1,12 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
+use zbobr_dispatcher::{ChecklistItem, Model, Parameter, Stage, Task, Tool, backend::TaskBackend};
 
 use crate::config::ZbobrTaskBackendFsConfig;
-use zbobr_dispatcher::backend::TaskBackend;
-use zbobr_dispatcher::{ChecklistItem, Model, Parameter, Stage, Task, Tool};
 
 /// Serializable task structure for YAML storage.
 #[derive(Debug, Clone, Serialize, Deserialize)]

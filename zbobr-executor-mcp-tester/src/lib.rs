@@ -2,9 +2,10 @@ use std::{path::Path, process::Stdio};
 
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
-
-use zbobr_dispatcher::task::{Model, Role};
-use zbobr_dispatcher::tool_executor::{ToolExecutor, format_command_for_log};
+use zbobr_dispatcher::{
+    task::{Model, Role},
+    tool_executor::{ToolExecutor, format_command_for_log},
+};
 
 pub mod config;
 pub use config::{

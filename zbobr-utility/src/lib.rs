@@ -1,5 +1,6 @@
-use anyhow::{Result, anyhow};
 use std::path::{Path, PathBuf};
+
+use anyhow::{Result, anyhow};
 
 pub mod macros;
 pub use macros::config_struct;
