@@ -446,11 +446,11 @@ async fn main() -> anyhow::Result<()> {
     let config = load_config(&cli, &root_toml, &config_dir)?;
     let task_backend_github_toml = root_toml
         .as_ref()
-        .and_then(|r| r.task.as_ref())
+        .and_then(|r| r.tasks.as_ref())
         .and_then(|t| t.github.as_ref());
     let task_backend_fs_toml = root_toml
         .as_ref()
-        .and_then(|r| r.task.as_ref())
+        .and_then(|r| r.tasks.as_ref())
         .and_then(|t| t.fs.as_ref());
     let repo_backend_github_toml = root_toml
         .as_ref()
@@ -480,14 +480,14 @@ async fn main() -> anyhow::Result<()> {
         zbobr_dispatcher::config::BackendType::GitHub => Arc::new(
             GitHubTaskBackend::new(
                 task_backend_github_toml.cloned(),
-                cli.global.settings.task.github.clone(),
+                cli.global.settings.tasks.github.clone(),
             )
             .context("Failed to create GitHub task backend")?,
         ),
         zbobr_dispatcher::config::BackendType::Filesystem => Arc::new(
             FilesystemTaskBackend::new(
                 task_backend_fs_toml.cloned(),
-                cli.global.settings.task.fs.clone(),
+                cli.global.settings.tasks.fs.clone(),
                 &config_dir,
             )
             .context("Failed to create filesystem task backend")?,

@@ -7,25 +7,15 @@ use zbobr_utility::{config_struct, resolve_path};
 #[config_struct]
 /// Configuration for the mcp-tester executor.
 pub struct ZbobrExecutorMcpTester {
-    #[arg(
-        long = "executor-mcp-tester-preparation",
-    )]
+    #[arg(long = "executor-mcp-tester-preparation")]
     pub preparation: Option<PathBuf>,
-    #[arg(
-        long = "executor-mcp-tester-planning",
-    )]
+    #[arg(long = "executor-mcp-tester-planning")]
     pub planning: Option<PathBuf>,
-    #[arg(
-        long = "executor-mcp-tester-working",
-    )]
+    #[arg(long = "executor-mcp-tester-working")]
     pub working: Option<PathBuf>,
-    #[arg(
-        long = "executor-mcp-tester-reviewing",
-    )]
+    #[arg(long = "executor-mcp-tester-reviewing")]
     pub reviewing: Option<PathBuf>,
-    #[arg(
-        long = "executor-mcp-tester-merging",
-    )]
+    #[arg(long = "executor-mcp-tester-merging")]
     pub merging: Option<PathBuf>,
 }
 

@@ -5,9 +5,7 @@ use zbobr_utility::config_struct;
 #[config_struct]
 pub struct ZbobrExecutorCopilot {
     /// Default AI model for Copilot executor.
-    #[arg(
-        help = "Default AI model for Copilot executor"
-    )]
+    #[arg(help = "Default AI model for Copilot executor")]
     pub default_model: Model,
 }
 
