@@ -15,7 +15,7 @@ Filesystem-based backend for zbobr task storage. This backend stores tasks as YA
 Configure the filesystem backend in your `zbobr.toml`:
 
 ```toml
-[task.fs]
+[tasks.fs]
 tasks_dir = "./tasks"  # Optional: defaults to "./tasks"
 ```
 

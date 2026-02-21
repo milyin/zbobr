@@ -75,7 +75,12 @@ pub struct ZbobrConfig {
     #[config(nested)]
     pub dispatcher: ZbobrDispatcherConfig,
     /// Task storage backends: control where zbobr discovers tasks.
-    #[config(nested)]
+    #[config(
+        nested,
+        heading_prefix = "tasks",
+        toml_rename = "tasks",
+        toml_alias = "task"
+    )]
     pub task: ZbobrTaskBackendConfig,
     /// Repo backends: where zbobr clones and pushes code.
     #[config(nested)]

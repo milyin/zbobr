@@ -41,14 +41,14 @@ git_user_email = "your.email@example.com"
 # Additional context files for worker
 # worker = ["worker.md", "common.md"]
 
-[task.github]
+[tasks.github]
 # Task project repository ("owner/repo") - where tasks are tracked
 task_repo = "{{TASK_REPO}}"
 
 # GitHub token for task backend (optional, uses GH_TOKEN or GITHUB_TOKEN env vars by default)
 # github_token = ""
 
-[task.fs]
+[tasks.fs]
 # Filesystem task backend: stores tasks as YAML files in a directory
 # Uncomment this section to use filesystem backend instead of GitHub
 # tasks_dir = "./tasks"

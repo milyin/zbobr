@@ -10,7 +10,7 @@ work_branch_prefix = "zbobr"
 
 # Filesystem task backend configuration
 # Tasks are stored as YAML files in a configurable directory
-[task.fs]
+[tasks.fs]
 tasks_dir = "./tasks"
 
 # Filesystem repo backend configuration

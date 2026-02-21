@@ -17,17 +17,17 @@ The dispatcher is domain-agnostic and can manage any set of repositories through
    - Universal automation system that processes issues through stages
    - Contains planner/worker agents and the `zbobr` CLI binary
 
-2. **Task Project** (`--task-repo`)
+2. **Task Project** (`--tasks-github-task-repo`)
    - A GitHub repository whose issues the dispatcher manages
    - Example: `YoroolGui/copilot-zenoh`
    - Contains: target repository list, project-specific guidance, and `zbobr.toml` config
-   - Created via `zbobr setup --task-repo owner/repo --fork-owner owner`
+   - Created via `zbobr setup --tasks-github-task-repo owner/repo --repo-github-fork-owner owner`
 
-3. **Fork Owner** (`--fork-owner`)
+3. **Fork Owner** (`--repo-github-fork-owner`)
    - The GitHub user or organization where target repos are forked for implementation
    - Worker agents fork repos under this account, create feature branches, and open PRs back to the original
    - Can be a personal account (e.g., `milyin`) or an organization (e.g., `YoroolGui`)
-   - Configured in task project's `zbobr.toml` file or via `--fork-owner` CLI flag
+   - Configured in task project's `zbobr.toml` file or via `--repo-github-fork-owner` CLI flag
 
 ## Installation
 
@@ -68,7 +68,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 export GH_TOKEN=$(gh auth token)
 
 # Example: Set up Zenoh task project
-zbobr setup --task-repo YoroolGui/copilot-zenoh --fork-owner YoroolGui
+zbobr setup --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-owner YoroolGui
 ```
 
 This will:
@@ -78,7 +78,7 @@ This will:
 **Launch the dispatcher:**
 ```bash
 # Run the manager loop (polls every 60 seconds)
-zbobr loop --task-repo YoroolGui/copilot-zenoh --fork-owner YoroolGui
+zbobr loop --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-owner YoroolGui
 ```
 
 **Using zbobr.toml (from task project):**
@@ -104,7 +104,7 @@ Notes on TOML layout:
    task_repo = "owner/repo"
 Note: legacy top-level dispatcher-only TOML files are no longer supported; use the root `zbobr.toml` with a `[dispatcher]` table.
 
-This is the recommended approach for task-project workflows, as it eliminates the need to manually specify `--task-repo` and `--fork-owner` flags.
+This is the recommended approach for task-project workflows, as it eliminates the need to manually specify `--tasks-github-task-repo` and `--repo-github-fork-owner` flags.
 
 ## How It Works
 
@@ -165,17 +165,17 @@ YoroolGui/copilot-zenoh/ (Task Project - created by zbobr setup)
 
 ```bash
 # Create task project for Apache Kafka ecosystem
-zbobr setup --task-repo myorg/copilot-kafka --fork-owner myorg
+zbobr setup --tasks-github-task-repo myorg/copilot-kafka --repo-github-fork-owner myorg
 
 # Force-update existing labels
-zbobr setup --task-repo myorg/copilot-kafka --fork-owner myorg --force
+zbobr setup --tasks-github-task-repo myorg/copilot-kafka --repo-github-fork-owner myorg --force
 ```
 
 ### Run the manager loop
 
 ```bash
 # Poll for issues every 30 seconds, clean up every 10 minutes
-zbobr loop --task-repo YoroolGui/copilot-zenoh --fork-owner YoroolGui \
+zbobr loop --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-owner YoroolGui \
   --interval 30 --cleanup-interval 600
 ```
 
@@ -183,10 +183,10 @@ zbobr loop --task-repo YoroolGui/copilot-zenoh --fork-owner YoroolGui \
 
 ```bash
 # Run planner on issue #42 (creates implementation plan)
-zbobr plan 42 --task-repo YoroolGui/copilot-zenoh --fork-owner YoroolGui
+zbobr plan 42 --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-owner YoroolGui
 
 # Run worker on issue #42 (implements the plan, creates PR)
-zbobr work 42 --task-repo YoroolGui/copilot-zenoh --fork-owner YoroolGui
+zbobr work 42 --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-owner YoroolGui
 ```
 
 ## Configuration

@@ -38,13 +38,13 @@ impl ZbobrRepoBackendGithubConfig {
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
         if self.fork_owner.is_empty() {
             anyhow::bail!(
-                "fork owner not set. Use --fork-owner NAME or set fork_owner in [repo.github] config.\n  \
+                "fork owner not set. Use --repo-github-fork-owner NAME or set fork_owner in [repo.github] config.\n  \
                  This is the GitHub user or organization where target repos are forked for implementation."
             );
         }
         if self.github_token.is_empty() {
             anyhow::bail!(
-                "GitHub token not set. Set github_token in [repo.github] config or use --github-token.\n  \
+                "GitHub token not set. Set github_token in [repo.github] config or use --repo-github-repo-github-token.\n  \
                  This token needs read/write access to the organization where repos are forked."
             );
         }

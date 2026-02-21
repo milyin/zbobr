@@ -106,15 +106,32 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
         });
         // Reuse doc/other attributes on both structs.
         let args_attrs = other_attrs.clone();
-        let rename_attr = config_meta
-            .toml_rename
-            .as_ref()
-            .map(|name| quote!(#[serde(rename = #name)]));
-        let rename_attr_tokens = rename_attr.clone().unwrap_or_else(TokenStream2::new);
+        let mut serde_attrs: Vec<TokenStream2> = Vec::new();
+        if let Some(name) = config_meta.toml_rename.as_ref() {
+            let lit = LitStr::new(name, Span::call_site());
+            serde_attrs.push(quote!(rename = #lit));
+        }
+        for alias in &config_meta.toml_aliases {
+            let lit = LitStr::new(alias, Span::call_site());
+            serde_attrs.push(quote!(alias = #lit));
+        }
+        let rename_attr_tokens = if serde_attrs.is_empty() {
+            TokenStream2::new()
+        } else {
+            quote!(#[serde(#(#serde_attrs),*)])
+        };
 
         let field_snake = field_ident.to_string().to_snake_case();
         let field_kebab = field_snake.replace('_', "-");
-        let field_kebab_lit = LitStr::new(&field_kebab, Span::call_site());
+        let heading_prefix_value = config_meta
+            .heading_prefix
+            .clone()
+            .unwrap_or_else(|| field_kebab.clone());
+        let heading_prefix_lit = config_meta
+            .heading_prefix
+            .as_ref()
+            .map(|value| LitStr::new(value, Span::call_site()))
+            .unwrap_or_else(|| LitStr::new(&field_kebab, Span::call_site()));
 
         let is_nested = config_meta.nested;
 
@@ -131,16 +148,11 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 .clone()
                 .unwrap_or(type_with_suffix(suffix_target_ty, "Args")?);
 
-            let heading_prefix = config_meta
-                .heading_prefix
-                .clone()
-                .unwrap_or_else(|| field_kebab.clone());
-
             let heading_text = config_meta
                 .help_heading
                 .clone()
                 .or_else(|| doc_help.clone());
-            let heading = format_help_heading(&heading_prefix, heading_text.as_deref());
+            let heading = format_help_heading(&heading_prefix_value, heading_text.as_deref());
             let heading_lit = LitStr::new(&heading, Span::call_site());
 
             if !config_meta.skip_toml {
@@ -187,9 +199,9 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
 
             namespace_steps.push(quote! {
                 let nested_prefix = if prefix.is_empty() {
-                    format!("{}.", #field_kebab_lit)
+                    format!("{}.", #heading_prefix_lit)
                 } else {
-                    format!("{}{}.", prefix, #field_kebab_lit)
+                    format!("{}{}.", prefix, #heading_prefix_lit)
                 };
                 cmd = <#nested_args_ty>::namespace_command(cmd, &nested_prefix);
             });
@@ -291,7 +303,8 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 } else {
                     format!("{}{}", prefix, #arg_target_id_lit)
                 };
-                let desired_long = desired_id.replace('.', "-");
+                let mut desired_long = desired_id.replace('.', "-");
+                desired_long = desired_long.replace('_', "-");
 
                 // Find the actual id in the built Command (may differ if clap rewrites it).
                 let existing = {
@@ -306,8 +319,13 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                     let desired_long_static: &'static str = Box::leak(desired_long.into_boxed_str());
                     let existing_static: &'static str = Box::leak(existing.into_boxed_str());
                     cmd = cmd.mut_arg(existing_static, |a| {
-                        a.id(::clap::Id::from(desired_id_static))
-                            .long(desired_long_static)
+                        let mut arg = a
+                            .id(::clap::Id::from(desired_id_static))
+                            .long(desired_long_static);
+                        if let Some(heading) = heading_label {
+                            arg = arg.help_heading(Some(heading));
+                        }
+                        arg
                     });
                 }
             });
@@ -391,6 +409,13 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             }
 
             pub fn namespace_command(mut cmd: clap::Command, prefix: &str) -> clap::Command {
+                let heading_label: Option<&'static str> = if prefix.is_empty() {
+                    None
+                } else {
+                    Some(Box::leak(
+                        format!("[{}]", prefix.trim_end_matches('.')).into_boxed_str(),
+                    ))
+                };
                 #( #namespace_steps )*
                 let group_name = stringify!(#derived_args_ident);
                 cmd = cmd.mut_group(group_name, |_g| ::clap::ArgGroup::new(group_name));
@@ -468,6 +493,7 @@ struct FieldConfig {
     nested_toml_ty: Option<TypePath>,
     heading_prefix: Option<String>,
     toml_rename: Option<String>,
+    toml_aliases: Vec<String>,
 }
 
 fn partition_field_attrs(
@@ -542,6 +568,19 @@ fn parse_config_meta(attr: &Attribute, config: &mut FieldConfig) -> syn::Result<
                     return Err(syn::Error::new_spanned(
                         name_value,
                         "toml_rename must be a string literal",
+                    ));
+                }
+            }
+            Meta::NameValue(name_value) if name_value.path.is_ident("toml_alias") => {
+                if let syn::Expr::Lit(syn::ExprLit {
+                    lit: Lit::Str(lit), ..
+                }) = name_value.value
+                {
+                    config.toml_aliases.push(lit.value());
+                } else {
+                    return Err(syn::Error::new_spanned(
+                        name_value,
+                        "toml_alias must be a string literal",
                     ));
                 }
             }
@@ -653,9 +692,7 @@ fn doc_comment(attrs: &[Attribute]) -> Option<String> {
 }
 
 fn format_help_heading(prefix_kebab: &str, description: Option<&str>) -> String {
+    let _ = description;
     let prefix = prefix_kebab.replace('-', ".");
-    match description {
-        Some(desc) if !desc.trim().is_empty() => format!("[{prefix}] {desc}"),
-        _ => format!("[{prefix}]"),
-    }
+    format!("[{prefix}]")
 }

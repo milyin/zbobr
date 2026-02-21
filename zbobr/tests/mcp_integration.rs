@@ -23,7 +23,7 @@ worker = []
 reviewer = []
 merger = []
 
-[task.fs]
+[tasks.fs]
 tasks_dir = "{tasks}"
 
 [repo.fs]
