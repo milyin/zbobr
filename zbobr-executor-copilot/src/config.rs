@@ -5,10 +5,8 @@ use zbobr_utility::config_struct;
 #[config_struct]
 pub struct ZbobrExecutorCopilot {
     /// Default AI model for Copilot executor.
-    #[arg(help = "Default AI model for Copilot executor")]
     pub default_model: Model,
     /// GitHub token used by Copilot CLI (passed as COPILOT_GITHUB_TOKEN).
-    #[arg(help = "GitHub token for Copilot CLI (COPILOT_GITHUB_TOKEN)")]
     pub copilot_github_token: String,
 }
 
