@@ -1,63 +1,81 @@
+use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
+use zbobr_dispatcher::Stage;
 
 mod mcp_tester_scenarios;
-use mcp_tester_scenarios::{dummy_scenario, preparator_comprehensive_scenario};
+use mcp_tester_scenarios::{
+    assert_false_scenario, planner_comprehensive_scenario, preparator_comprehensive_scenario,
+};
 
+/// All paths and shared state for one test run.
+struct TestEnv {
+    /// Keeps the temporary directory alive for the duration of the test.
+    _tmp: TempDir,
+    tmp_path: PathBuf,
+    tasks_dir: PathBuf,
+    scenarios_dir: PathBuf,
+    workspaces_dir: PathBuf,
+    /// Path of the pre-written assert-false sentinel scenario.
+    assert_false_path: PathBuf,
+    /// ID of the task created during setup (reused across stages).
+    task_id: u64,
+}
 
-async fn run_mcp_test(command: &str) {
-    // Build and pass configuration via command-line flags rather than a TOML file.
-    // Arguments with empty values are skipped so tests can selectively include flags.
-    // Check that mcp-tester is installed; skip gracefully if not
+/// Return `(cli_subcommand, executor_flag_suffix)` for the given stage.
+///
+/// `executor_flag_suffix` is the part after `--executor-mcp-tester-` in the
+/// CLI flag, matching the field names in `ZbobrExecutorMcpTesterConfig`.
+fn stage_meta(stage: Stage) -> (&'static str, &'static str) {
+    match stage {
+        Stage::Preparation => ("prepare", "preparation"),
+        Stage::Planning => ("plan", "planning"),
+        Stage::Working => ("work", "working"),
+        Stage::Reviewing => ("review", "reviewing"),
+        Stage::Merging => ("merge", "merging"),
+        other => panic!("stage_meta: unsupported stage {other:?}"),
+    }
+}
+
+/// Create the shared directory layout and task, writing the assert-false
+/// sentinel scenario file.  Returns `None` when `mcp-tester` is not
+/// installed so the caller can skip gracefully.
+async fn setup_test_env() -> Option<TestEnv> {
     let mcp_check = tokio::process::Command::new("mcp-tester")
         .arg("--version")
         .output()
         .await;
     if mcp_check.is_err() || !mcp_check.unwrap().status.success() {
         eprintln!("Skipping test: mcp-tester not installed (cargo install mcp-tester)");
-        return;
+        return None;
     }
 
-    // Create temp directory for the entire test setup
     let tmp = TempDir::new().expect("failed to create temp dir");
-    let tmp_path = tmp.path();
+    let tmp_path = tmp.path().to_path_buf();
 
-
-    // Create subdirectories
     let tasks_dir = tmp_path.join("tasks");
     let scenarios_dir = tmp_path.join("scenarios");
     let workspaces_dir = tmp_path.join("workspaces");
 
-    tokio::fs::create_dir_all(&tasks_dir)
-        .await
-        .expect("failed to create tasks directory");
-    tokio::fs::create_dir_all(&scenarios_dir)
-        .await
-        .expect("failed to create scenarios directory");
-    tokio::fs::create_dir_all(&workspaces_dir)
-        .await
-        .expect("failed to create workspaces directory");
+    for dir in [&tasks_dir, &scenarios_dir, &workspaces_dir] {
+        tokio::fs::create_dir_all(dir)
+            .await
+            .expect("failed to create directory");
+    }
 
-    // Write scenario files
-    let dummy_path = scenarios_dir.join("dummy.yml");
-    let preparator_path = scenarios_dir.join("preparator_comprehensive.yml");
-
-    tokio::fs::write(&dummy_path, dummy_scenario())
+    // Write the permanent sentinel scenario once.
+    let assert_false_path = scenarios_dir.join("assert_false.yml");
+    tokio::fs::write(&assert_false_path, assert_false_scenario())
         .await
-        .expect("failed to write dummy scenario");
-    tokio::fs::write(&preparator_path, preparator_comprehensive_scenario())
-        .await
-        .expect("failed to write preparator scenario");
+        .expect("failed to write assert_false scenario");
 
-
-    // Create task using the filesystem backend. we can await directly
+    // Create the shared task using the filesystem backend.
     let task_id = {
         use std::collections::HashMap;
 
         use zbobr_dispatcher::{Stage, backend::TaskBackend};
         use zbobr_task_backend_fs::{FilesystemTaskBackend, ZbobrTaskBackendFsArgs};
 
-        // pass the temporary directory explicitly so we don't pollute the repo
         let backend = FilesystemTaskBackend::new(
             None,
             ZbobrTaskBackendFsArgs {
@@ -80,77 +98,79 @@ async fn run_mcp_test(command: &str) {
             .expect("failed to create task")
     };
 
+    Some(TestEnv {
+        _tmp: tmp,
+        tmp_path,
+        tasks_dir,
+        scenarios_dir,
+        workspaces_dir,
+        assert_false_path,
+        task_id,
+    })
+}
+
+/// Run the zbobr CLI for the given stage using the provided scenario YAML.
+///
+/// The scenario is passed to the executor slot that corresponds to `stage`;
+/// all other slots receive the assert-false sentinel so that any accidental
+/// routing to a wrong stage causes an immediate test failure.
+async fn run_stage_test(env: &TestEnv, stage: Stage, scenario: String) {
+    let (command, flag_suffix) = stage_meta(stage);
+
+    // Write the stage-specific scenario to a dedicated file.
+    let scenario_path = env.scenarios_dir.join(format!("{command}.yml"));
+    tokio::fs::write(&scenario_path, scenario)
+        .await
+        .expect("failed to write stage scenario");
+
+    let af: &Path = &env.assert_false_path;
+
+    // Map every executor slot: the active stage gets the real scenario; all
+    // others get the assert-false sentinel.
+    let all_slots: &[(&str, &Path)] = &[
+        ("preparation", if flag_suffix == "preparation" { &scenario_path } else { af }),
+        ("planning",    if flag_suffix == "planning"    { &scenario_path } else { af }),
+        ("working",     if flag_suffix == "working"     { &scenario_path } else { af }),
+        ("reviewing",   if flag_suffix == "reviewing"   { &scenario_path } else { af }),
+        ("merging",     if flag_suffix == "merging"     { &scenario_path } else { af }),
+    ];
+
     let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
 
-    // Build command-line arguments (ignore empty values).
-    // Global options must appear *before* the subcommand; the task ID follows the
-    // command itself. Executor flags are also global, so we add them early as
-    // well.
-    let mut args = Vec::new();
-
-    // helper closure pushes flag+value only if value is non-empty
-    let mut push_arg = |flag: &str, val: &str| {
-        if !val.is_empty() {
-            args.push(flag.to_string());
-            args.push(val.to_string());
-        }
+    let mut args: Vec<String> = Vec::new();
+    let mut push = |flag: &str, val: &str| {
+        args.push(flag.to_string());
+        args.push(val.to_string());
     };
 
-    push_arg("--dispatcher-workspaces", &workspaces_dir.to_string_lossy());
-    push_arg("--tasks-fs-tasks-dir", &tasks_dir.to_string_lossy());
-    push_arg("--dispatcher-backend", "filesystem");
-    push_arg("--dispatcher-cli-tool", "mcp-tester");
-    push_arg("--dispatcher-agent-github-token", "dummy-not-used");
-    push_arg("--dispatcher-git-user-name", "test-bot");
-    push_arg("--dispatcher-git-user-email", "test@example.com");
+    push("--dispatcher-workspaces",         &env.workspaces_dir.to_string_lossy());
+    push("--tasks-fs-tasks-dir",            &env.tasks_dir.to_string_lossy());
+    push("--dispatcher-backend",            "filesystem");
+    push("--dispatcher-cli-tool",           "mcp-tester");
+    push("--dispatcher-agent-github-token", "dummy-not-used");
+    push("--dispatcher-git-user-name",      "test-bot");
+    push("--dispatcher-git-user-email",     "test@example.com");
 
-    // Add executor scenario file paths - map roles to scenario files
-    let (prep_scenario, planning_scenario, working_scenario, reviewing_scenario, merging_scenario) =
-        match command {
-            "prepare" => (
-                preparator_path.clone(),
-                dummy_path.clone(),
-                dummy_path.clone(),
-                dummy_path.clone(),
-                dummy_path.clone(),
-            ),
-            _ => (
-                preparator_path.clone(),
-                dummy_path.clone(),
-                dummy_path.clone(),
-                dummy_path.clone(),
-                dummy_path.clone(),
-            ),
-        };
+    for (slot, path) in all_slots {
+        push(
+            &format!("--executor-mcp-tester-{slot}"),
+            &path.to_string_lossy(),
+        );
+    }
 
-    // executor scenarios (also global)
-    push_arg("--executor-mcp-tester-preparation", &prep_scenario.to_string_lossy());
-    push_arg("--executor-mcp-tester-planning", &planning_scenario.to_string_lossy());
-    push_arg("--executor-mcp-tester-working", &working_scenario.to_string_lossy());
-    push_arg("--executor-mcp-tester-reviewing", &reviewing_scenario.to_string_lossy());
-    push_arg("--executor-mcp-tester-merging", &merging_scenario.to_string_lossy());
-
-    // finally add the command and task id
     args.push(command.to_string());
-    args.push(task_id.to_string());
+    args.push(env.task_id.to_string());
 
-
-    // Run zbobr binary.  Recent CLI refactor removed the ability to override
-    // paths via environment variables, so rely solely on the command-line
-    // flags we already constructed.  The earlier part of this function uses a
-    // temporary filesystem backend to create the task, so everything should stay
-    // within `tmp_path` and the repo directory remains untouched.
     let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
     let status = tokio::process::Command::new(zbobr_bin)
         .args(&args)
-        .current_dir(tmp_path)
+        .current_dir(&env.tmp_path)
         .env("RUST_LOG", &rust_log)
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .status()
         .await
         .expect("failed to run zbobr binary");
-
 
     assert!(
         status.success(),
@@ -160,27 +180,18 @@ async fn run_mcp_test(command: &str) {
     );
 }
 
+/// Integration test covering the Preparation and Planning stages.
+///
+/// Both stages share a single task so that parameters written by the
+/// preparator (destination_branch, work_branch) are readable by the planner.
+/// The Planning scenario exercises all planner tools except `pull_work` (git
+/// setup is deferred to a future iteration).
 #[tokio::test]
-async fn preparator_thorough_test_via_mcp_tester() {
-    run_mcp_test("prepare").await;
-}
+async fn test_preparation_and_planning() {
+    let Some(env) = setup_test_env().await else {
+        return;
+    };
 
-#[tokio::test]
-async fn planner_get_description_via_mcp_tester() {
-    run_mcp_test("plan").await;
-}
-
-#[tokio::test]
-async fn worker_get_description_via_mcp_tester() {
-    run_mcp_test("work").await;
-}
-
-#[tokio::test]
-async fn reviewer_get_description_via_mcp_tester() {
-    run_mcp_test("review").await;
-}
-
-#[tokio::test]
-async fn merger_get_description_via_mcp_tester() {
-    run_mcp_test("merge").await;
+    run_stage_test(&env, Stage::Preparation, preparator_comprehensive_scenario()).await;
+    run_stage_test(&env, Stage::Planning, planner_comprehensive_scenario()).await;
 }
