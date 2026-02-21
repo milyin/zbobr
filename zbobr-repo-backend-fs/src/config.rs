@@ -6,7 +6,7 @@ use zbobr_utility::{config_struct, resolve_path};
 #[config_struct]
 /// Configuration for the filesystem repo backend.
 pub struct ZbobrRepoBackendFs {
-    #[arg(long, env = "ZBOBR_REPOS_DIR")]
+    #[arg(long)]
     pub repos_dir: PathBuf,
 }
 

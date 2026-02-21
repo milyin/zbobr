@@ -9,27 +9,22 @@ use zbobr_utility::{config_struct, resolve_path};
 pub struct ZbobrExecutorMcpTester {
     #[arg(
         long = "executor-mcp-tester-preparation",
-        env = "ZBOBR_EXECUTOR_MCP_TESTER_PREPARATION"
     )]
     pub preparation: Option<PathBuf>,
     #[arg(
         long = "executor-mcp-tester-planning",
-        env = "ZBOBR_EXECUTOR_MCP_TESTER_PLANNING"
     )]
     pub planning: Option<PathBuf>,
     #[arg(
         long = "executor-mcp-tester-working",
-        env = "ZBOBR_EXECUTOR_MCP_TESTER_WORKING"
     )]
     pub working: Option<PathBuf>,
     #[arg(
         long = "executor-mcp-tester-reviewing",
-        env = "ZBOBR_EXECUTOR_MCP_TESTER_REVIEWING"
     )]
     pub reviewing: Option<PathBuf>,
     #[arg(
         long = "executor-mcp-tester-merging",
-        env = "ZBOBR_EXECUTOR_MCP_TESTER_MERGING"
     )]
     pub merging: Option<PathBuf>,
 }

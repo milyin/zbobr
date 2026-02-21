@@ -34,7 +34,7 @@ struct GlobalArgs {
 #[derive(Args, Clone)]
 struct ConfigFileArg {
     /// Path to TOML configuration file (default: zbobr.toml in cwd)
-    #[arg(long = "config", env = "ZBOBR_CONFIG")]
+    #[arg(long = "config")]
     pub path: Option<PathBuf>,
 }
 

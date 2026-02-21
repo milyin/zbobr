@@ -6,7 +6,7 @@ use zbobr_utility::{config_struct, resolve_path};
 #[config_struct]
 /// Configuration for the filesystem task backend.
 pub struct ZbobrTaskBackendFs {
-    #[arg(long, env = "ZBOBR_TASKS_DIR")]
+    #[arg(long)]
     pub tasks_dir: PathBuf,
 }
 
