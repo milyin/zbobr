@@ -4,8 +4,8 @@ use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote, ToTokens};
 use syn::punctuated::Punctuated;
 use syn::{
-    parse_macro_input, Attribute, Fields, Ident, ItemStruct, Lit, LitStr, Meta, Token, Type,
-    TypePath,
+    parse_macro_input, Attribute, Fields, GenericArgument, ItemStruct, Lit, LitStr, Meta, Token,
+    Type, TypePath,
 };
 
 #[proc_macro_attribute]
@@ -49,6 +49,11 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
     let args_ident = format_ident!("{}Args", ident);
     let derived_args_ident = format_ident!("{}ArgsDerived", ident);
 
+    let ident_str = ident.to_string();
+    let alias_base = ident_str.strip_suffix("Config").map(|s| format_ident!("{}", s));
+    let alias_toml_ident = alias_base.as_ref().map(|base| format_ident!("{}Toml", base));
+    let alias_args_ident = alias_base.as_ref().map(|base| format_ident!("{}Args", base));
+
     let mut toml_fields = Vec::new();
     let mut derived_args_fields = Vec::new();
     let mut plain_args_fields = Vec::new();
@@ -58,6 +63,9 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
     let mut namespace_steps = Vec::new();
     let mut args_copy_fields = Vec::new();
     let mut args_update_fields = Vec::new();
+    let mut into_config_setup = Vec::new();
+    let mut into_config_required = Vec::new();
+    let mut into_config_fields = Vec::new();
 
     for field in fields_named {
         let field_ident = field.ident.clone().ok_or_else(|| {
@@ -87,14 +95,17 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
         let is_nested = config_meta.nested;
 
         if is_nested {
+            let base_is_option = option_inner_type(&field_ty);
+            let suffix_target_ty = base_is_option.as_ref().unwrap_or(&field_ty);
+
             let nested_toml_ty = config_meta
                 .nested_toml_ty
                 .clone()
-                .unwrap_or(type_with_suffix(&field_ty, "Toml")?);
+                .unwrap_or(type_with_suffix(suffix_target_ty, "Toml")?);
             let nested_args_ty = config_meta
                 .nested_args_ty
                 .clone()
-                .unwrap_or(type_with_suffix(&field_ty, "Args")?);
+                .unwrap_or(type_with_suffix(suffix_target_ty, "Args")?);
 
             let heading_prefix = config_meta
                 .heading_prefix
@@ -158,6 +169,29 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 };
                 cmd = <#nested_args_ty>::namespace_command(cmd, &nested_prefix);
             });
+
+            if !config_meta.skip_toml {
+                into_config_setup.push(quote! {
+                    let #field_ident = self.#field_ident
+                        .map(|value| value.try_into_config())
+                        .transpose()?;
+                });
+
+                let init_expr = if base_is_option.is_some() {
+                    quote!(#field_ident)
+                } else {
+                    into_config_required.push(quote! {
+                        if #field_ident.is_none() {
+                            missing_fields.push(stringify!(#field_ident));
+                        }
+                    });
+                    quote!(#field_ident.unwrap())
+                };
+
+                into_config_fields.push(quote! {
+                    #field_ident: #init_expr
+                });
+            }
         } else {
             let arg_name_value = config_meta
                 .heading_prefix
@@ -193,11 +227,14 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 #[arg( #(#arg_entries),* )]
             };
 
+            let base_is_option = option_inner_type(&field_ty);
+            let value_ty = base_is_option.clone().unwrap_or(field_ty.clone());
+
             if !config_meta.skip_toml {
                 toml_fields.push(quote! {
                     #rename_attr_tokens
                     #(#other_attrs)*
-                    #field_vis #field_ident: Option<#field_ty>,
+                    #field_vis #field_ident: Option<#value_ty>,
                 });
 
                 merge_fields.push(quote! {
@@ -208,12 +245,12 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             derived_args_fields.push(quote! {
                 #(#args_attrs)*
                 #arg_attr
-                #field_vis #field_ident: Option<#field_ty>,
+                #field_vis #field_ident: Option<#value_ty>,
             });
 
             plain_args_fields.push(quote! {
                 #(#args_attrs)*
-                #field_vis #field_ident: Option<#field_ty>,
+                #field_vis #field_ident: Option<#value_ty>,
             });
 
             args_copy_fields.push(quote! { #field_ident: parsed.#field_ident });
@@ -250,8 +287,39 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                     });
                 }
             });
+
+            if !config_meta.skip_toml {
+                into_config_setup.push(quote! {
+                    let #field_ident = self.#field_ident;
+                });
+
+                let init_expr = if base_is_option.is_some() {
+                    quote!(#field_ident)
+                } else {
+                    into_config_required.push(quote! {
+                        if #field_ident.is_none() {
+                            missing_fields.push(stringify!(#field_ident));
+                        }
+                    });
+                    quote!(#field_ident.unwrap())
+                };
+
+                into_config_fields.push(quote! {
+                    #field_ident: #init_expr
+                });
+            }
         }
     }
+
+    let alias_toml_decl = alias_toml_ident
+        .as_ref()
+        .map(|alias| quote! { #vis type #alias #ty_generics = #toml_ident #ty_generics; })
+        .unwrap_or_else(TokenStream2::new);
+
+    let alias_args_decl = alias_args_ident
+        .as_ref()
+        .map(|alias| quote! { #vis type #alias #ty_generics = #args_ident #ty_generics; })
+        .unwrap_or_else(TokenStream2::new);
 
     let tokens = quote! {
         #(#attrs)*
@@ -266,6 +334,8 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             #(#toml_fields)*
         }
 
+        #alias_toml_decl
+
         #[derive(Debug, Clone, ::clap::Args, Default)]
         struct #derived_args_ident #generics #where_clause {
             #(#derived_args_fields)*
@@ -276,6 +346,8 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
         #vis struct #args_ident #generics #where_clause {
             #(#plain_args_fields)*
         }
+
+        #alias_args_decl
 
         impl #impl_generics #toml_ident #ty_generics #where_clause {
             pub fn merge_with_args(self, args: #args_ident #ty_generics) -> Self {
@@ -325,6 +397,32 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             fn augment_args_for_update(cmd: ::clap::Command) -> ::clap::Command {
                 let cmd = <#derived_args_ident as ::clap::Args>::augment_args_for_update(cmd);
                 Self::namespace_command(cmd, "")
+            }
+        }
+
+        impl #impl_generics #toml_ident #ty_generics #where_clause {
+            pub fn try_into_config(self) -> anyhow::Result<#ident #ty_generics> {
+                let mut missing_fields: Vec<&str> = Vec::new();
+                #( #into_config_setup )*
+                #( #into_config_required )*
+
+                if !missing_fields.is_empty() {
+                    anyhow::bail!("Missing required config fields: {}", missing_fields.join(", "));
+                }
+
+                Ok(#ident {
+                    #(#into_config_fields,)*
+                })
+            }
+        }
+
+        impl #impl_generics #ident #ty_generics #where_clause {
+            pub fn from_sources(
+                toml: Option<#toml_ident #ty_generics>,
+                args: #args_ident #ty_generics,
+            ) -> anyhow::Result<Self> {
+                let merged = toml.unwrap_or_default().merge_with_args(args);
+                merged.try_into_config()
             }
         }
 
@@ -469,6 +567,21 @@ fn parse_type_path(expr: &syn::Expr, label: &str) -> syn::Result<TypePath> {
             format!("{label} must be a type path"),
         ))
     }
+}
+
+fn option_inner_type(ty: &Type) -> Option<Type> {
+    if let Type::Path(type_path) = ty {
+        if let Some(last) = type_path.path.segments.last() {
+            if last.ident == "Option" {
+                if let syn::PathArguments::AngleBracketed(args) = &last.arguments {
+                    if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
+                        return Some(inner_ty.clone());
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn doc_comment(attrs: &[Attribute]) -> Option<String> {
