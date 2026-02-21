@@ -45,8 +45,6 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
         }
     };
 
-    let (_, prefix_kebab) = struct_prefixes(&ident);
-
     let toml_ident = format_ident!("{}Toml", ident);
     let args_ident = format_ident!("{}Args", ident);
 
@@ -95,7 +93,7 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             let heading_prefix = config_meta
                 .heading_prefix
                 .clone()
-                .unwrap_or_else(|| format!("{}-{}", prefix_kebab, field_kebab));
+                .unwrap_or_else(|| field_kebab.clone());
 
             let heading_text = config_meta
                 .help_heading
@@ -141,7 +139,7 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             let arg_name_value = config_meta
                 .heading_prefix
                 .clone()
-                .unwrap_or_else(|| format!("{}-{}", prefix_kebab, field_kebab));
+                .unwrap_or_else(|| field_kebab.clone());
             let arg_name_lit = LitStr::new(&arg_name_value, Span::call_site());
             let has_custom_long = arg_metas.iter().any(|m| is_arg_meta(m, "long"));
             let has_custom_name = arg_metas.iter().any(|m| is_arg_meta(m, "name"));
@@ -326,27 +324,6 @@ fn is_arg_meta(meta: &Meta, key: &str) -> bool {
         Meta::NameValue(name_value) => name_value.path.is_ident(key),
         Meta::List(list) => list.path.is_ident(key),
     }
-}
-
-fn struct_prefixes(ident: &Ident) -> (String, String) {
-    let mut snake = ident.to_string().to_snake_case();
-    if let Some(stripped) = snake.strip_prefix("zbobr_") {
-        snake = stripped.to_string();
-    }
-    snake = snake.replace("_backend", "");
-    while snake.contains("__") {
-        snake = snake.replace("__", "_");
-    }
-    if let Some(stripped) = snake.strip_prefix('_') {
-        if !stripped.is_empty() {
-            snake = stripped.to_string();
-        }
-    }
-    if snake.is_empty() {
-        snake = "config".to_string();
-    }
-    let kebab = snake.replace('_', "-");
-    (snake, kebab)
 }
 
 fn type_with_suffix(ty: &Type, suffix: &str) -> syn::Result<TypePath> {
