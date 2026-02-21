@@ -37,4 +37,4 @@ rustls = { workspace = true }
 tempfile = { workspace = true }
 zbobr-task-backend-fs = { workspace = true }
 zbobr-dispatcher = { workspace = true }
-serial_test = "0.5"
+

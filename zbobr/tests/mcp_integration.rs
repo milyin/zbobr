@@ -1,6 +1,5 @@
 
 use tempfile::TempDir;
-use serial_test::serial;
 
 mod mcp_tester_scenarios;
 use mcp_tester_scenarios::{dummy_scenario, preparator_comprehensive_scenario};
@@ -162,31 +161,26 @@ async fn run_mcp_test(command: &str) {
 }
 
 #[tokio::test]
-#[serial]
 async fn preparator_thorough_test_via_mcp_tester() {
     run_mcp_test("prepare").await;
 }
 
 #[tokio::test]
-#[serial]
 async fn planner_get_description_via_mcp_tester() {
     run_mcp_test("plan").await;
 }
 
 #[tokio::test]
-#[serial]
 async fn worker_get_description_via_mcp_tester() {
     run_mcp_test("work").await;
 }
 
 #[tokio::test]
-#[serial]
 async fn reviewer_get_description_via_mcp_tester() {
     run_mcp_test("review").await;
 }
 
 #[tokio::test]
-#[serial]
 async fn merger_get_description_via_mcp_tester() {
     run_mcp_test("merge").await;
 }

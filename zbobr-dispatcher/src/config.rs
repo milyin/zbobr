@@ -251,23 +251,8 @@ impl ZbobrDispatcherConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
 
     use super::*;
-
-    struct TestEnv {
-        vars: HashMap<String, String>,
-    }
-
-    impl TestEnv {
-        fn new(vars: &[(&str, &str)]) -> Self {
-            let mut map = HashMap::new();
-            for (key, value) in vars {
-                map.insert((*key).to_string(), (*value).to_string());
-            }
-            Self { vars: map }
-        }
-    }
 
     fn test_config_dir() -> PathBuf {
         PathBuf::from("/test/config")
@@ -275,12 +260,9 @@ mod tests {
 
     #[test]
     fn build_with_env_missing_required() {
-        let env = TestEnv::new(&[]);
-
-        let config = ZbobrDispatcherConfig::build_with_env(
+        let config = ZbobrDispatcherConfig::build(
             None,
             ZbobrDispatcherArgs::default(),
-            &env,
             &test_config_dir(),
         )
         .expect("build should succeed");
@@ -336,7 +318,6 @@ mod tests {
 
     #[test]
     fn build_with_toml() {
-        let env = TestEnv::new(&[]);
         let toml = ZbobrDispatcherToml {
             workspaces: Some(PathBuf::from("/tmp/toml-ws")),
             backend: None,
@@ -353,10 +334,9 @@ mod tests {
             merger_prompts: Some(vec![PathBuf::from("m.md")]),
         };
 
-        let config = ZbobrDispatcherConfig::build_with_env(
+        let config = ZbobrDispatcherConfig::build(
             Some(toml),
             ZbobrDispatcherArgs::default(),
-            &env,
             &test_config_dir(),
         )
         .unwrap();
@@ -391,11 +371,9 @@ mod tests {
 
     #[test]
     fn build_defaults_without_toml() {
-        let env = TestEnv::new(&[]);
-        let config = ZbobrDispatcherConfig::build_with_env(
+        let config = ZbobrDispatcherConfig::build(
             None,
             ZbobrDispatcherArgs::default(),
-            &env,
             &test_config_dir(),
         )
         .unwrap();

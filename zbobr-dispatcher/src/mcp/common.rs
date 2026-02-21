@@ -256,12 +256,25 @@ pub(crate) fn generate_api_docs_from_router<T: Send + Sync + 'static>(
     doc
 }
 
-/// Find an available port starting from the given base port.
-/// Tries ports incrementally until one is available.
-pub(crate) async fn find_available_port(base_port: u16) -> anyhow::Result<u16> {
+/// Bind to an available port starting from the given base port.
+///
+/// The old `find_available_port` implementation closed the listener immediately
+/// after opening it, which raced with concurrent tests: if two processes both
+/// scanned the same candidate port, the first might drop the listener before the
+/// second tried to bind and then both would use the same port.  Returning the
+/// actual listener guarantees the socket remains reserved until the server is
+/// started.
+///
+/// The returned tuple contains the port number and the bound `TcpListener`.
+pub(crate) async fn bind_available_port(
+    base_port: u16,
+) -> anyhow::Result<(u16, tokio::net::TcpListener)> {
     for port in base_port..=base_port + 100 {
         match tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await {
-            Ok(_) => return Ok(port),
+            Ok(listener) => {
+                let actual = listener.local_addr()?.port();
+                return Ok((actual, listener));
+            }
             Err(_) => continue,
         }
     }
@@ -276,10 +289,10 @@ pub(crate) async fn serve_mcp(
     path: &str,
     router: axum::Router,
 ) -> anyhow::Result<u16> {
-    // Find an available port starting from base_port
-    let port = find_available_port(base_port).await?;
-
-    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await?;
+    // Bind the listener up front to avoid a check-then-bind race when tests run
+    // concurrently.  `bind_available_port` returns both the port and the
+    // already-bound listener.
+    let (port, listener) = bind_available_port(base_port).await?;
     tracing::info!("MCP server listening on http://127.0.0.1:{port}{path}");
 
     // Spawn the actual server in a background task
@@ -295,6 +308,37 @@ pub(crate) async fn serve_mcp(
     });
 
     Ok(port)
+}
+
+
+// --- tests ---------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    // exercise port binder under concurrent load – each spawned task should
+    // return a distinct port and hold onto the listener until the end of the
+    // test, preventing races where two callers pick the same port.
+    #[tokio::test]
+    async fn bind_available_port_concurrent() {
+        const BASE: u16 = 9000;
+
+        let handles: Vec<_> = (0..10)
+            .map(|_| tokio::spawn(async move { bind_available_port(BASE).await }))
+            .collect();
+
+        let mut entries = Vec::new();
+        for h in handles {
+            let (port, listener) = h.await.expect("task panicked").unwrap();
+            entries.push((port, listener));
+        }
+
+        let ports: HashSet<_> = entries.iter().map(|(p, _)| *p).collect();
+        assert_eq!(ports.len(), entries.len(), "ports must all be unique");
+        // listeners are dropped when `entries` goes out of scope
+    }
 }
 
 /// Run the MCP HTTP server scoped to a role (planner or worker) and task.
