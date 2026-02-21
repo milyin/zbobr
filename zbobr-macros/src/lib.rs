@@ -80,7 +80,7 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
         let field_snake = field_ident.to_string().to_snake_case();
         let field_kebab = field_snake.replace('_', "-");
 
-        let is_nested = config_meta.nested || infer_nested_from_type(&field_ty);
+        let is_nested = config_meta.nested;
 
         if is_nested {
             let nested_toml_ty = config_meta
@@ -347,15 +347,6 @@ fn struct_prefixes(ident: &Ident) -> (String, String) {
     }
     let kebab = snake.replace('_', "-");
     (snake, kebab)
-}
-
-fn infer_nested_from_type(ty: &Type) -> bool {
-    if let Type::Path(TypePath { path, .. }) = ty {
-        if let Some(ident) = path.segments.last().map(|s| s.ident.to_string()) {
-            return ident.ends_with("Args") || ident.ends_with("Toml");
-        }
-    }
-    false
 }
 
 fn type_with_suffix(ty: &Type, suffix: &str) -> syn::Result<TypePath> {
