@@ -1,5 +1,6 @@
 use zbobr_utility::config_struct;
 
+#[derive(Clone, Default)]
 #[config_struct]
 /// Configuration for the GitHub task backend.
 pub struct ZbobrTaskBackendGithub {
@@ -13,16 +14,6 @@ pub struct ZbobrTaskBackendGithub {
         id = "task_github_token"
     )]
     pub github_token: String,
-}
-
-/// Resolved configuration for the GitHub task backend.
-impl Default for ZbobrTaskBackendGithubConfig {
-    fn default() -> Self {
-        Self {
-            task_repo: String::new(),
-            github_token: String::new(),
-        }
-    }
 }
 
 impl ZbobrTaskBackendGithubConfig {

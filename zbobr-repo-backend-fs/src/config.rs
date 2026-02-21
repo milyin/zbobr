@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use zbobr_utility::{config_struct, resolve_path};
 
+#[derive(Clone)]
 #[config_struct]
 /// Configuration for the filesystem repo backend.
 pub struct ZbobrRepoBackendFs {

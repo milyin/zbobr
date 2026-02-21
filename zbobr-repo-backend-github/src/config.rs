@@ -1,5 +1,6 @@
 use zbobr_utility::config_struct;
 
+#[derive(Clone, Default)]
 #[config_struct]
 /// Configuration for the GitHub repo backend.
 pub struct ZbobrRepoBackendGithub {
@@ -13,16 +14,6 @@ pub struct ZbobrRepoBackendGithub {
         id = "repo_github_token"
     )]
     pub github_token: String,
-}
-
-/// Resolved configuration for the GitHub repo backend.
-impl Default for ZbobrRepoBackendGithubConfig {
-    fn default() -> Self {
-        Self {
-            fork_owner: String::new(),
-            github_token: String::new(),
-        }
-    }
 }
 
 impl ZbobrRepoBackendGithubConfig {

@@ -1,6 +1,7 @@
 use zbobr_dispatcher::task::Model;
 use zbobr_utility::config_struct;
 
+#[derive(Clone, Default)]
 #[config_struct]
 pub struct ZbobrExecutorCopilot {
     /// Default AI model for Copilot executor.
@@ -9,23 +10,6 @@ pub struct ZbobrExecutorCopilot {
         help = "Default AI model for Copilot executor"
     )]
     pub default_model: Model,
-}
-
-/// Resolved configuration for the Copilot executor.
-impl Clone for ZbobrExecutorCopilotConfig {
-    fn clone(&self) -> Self {
-        Self {
-            default_model: self.default_model.clone(),
-        }
-    }
-}
-
-impl Default for ZbobrExecutorCopilotConfig {
-    fn default() -> Self {
-        Self {
-            default_model: Model::Gpt5Mini,
-        }
-    }
 }
 
 impl ZbobrExecutorCopilotConfig {

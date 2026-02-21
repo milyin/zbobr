@@ -57,6 +57,7 @@ pub struct TomlPrompts {
 }
 
 /// Configuration for the zbobr dispatcher.
+#[derive(Clone)]
 #[config_struct]
 pub struct ZbobrDispatcherConfig {
     /// Default AI model to use.

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use zbobr_dispatcher::task::Role;
 use zbobr_utility::{config_struct, resolve_path};
 
+#[derive(Clone, Default)]
 #[config_struct]
 /// Configuration for the mcp-tester executor.
 pub struct ZbobrExecutorMcpTester {
@@ -31,19 +32,6 @@ pub struct ZbobrExecutorMcpTester {
         env = "ZBOBR_EXECUTOR_MCP_TESTER_MERGING"
     )]
     pub merging: Option<PathBuf>,
-}
-
-/// Resolved configuration for the mcp-tester executor.
-impl Clone for ZbobrExecutorMcpTesterConfig {
-    fn clone(&self) -> Self {
-        Self {
-            preparation: self.preparation.clone(),
-            planning: self.planning.clone(),
-            working: self.working.clone(),
-            reviewing: self.reviewing.clone(),
-            merging: self.merging.clone(),
-        }
-    }
 }
 
 impl ZbobrExecutorMcpTesterConfig {

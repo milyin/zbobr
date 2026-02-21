@@ -28,6 +28,7 @@ use zbobr_task_backend_github::{
 };
 use zbobr_utility::config_struct;
 
+#[derive(Clone)]
 #[config_struct]
 /// Task backend configuration section.
 pub struct ZbobrTaskBackendConfig {
@@ -39,6 +40,7 @@ pub struct ZbobrTaskBackendConfig {
     pub fs: ZbobrTaskBackendFs,
 }
 
+#[derive(Clone)]
 #[config_struct]
 /// Repo backend configuration section.
 pub struct ZbobrRepoBackendConfig {
@@ -50,6 +52,7 @@ pub struct ZbobrRepoBackendConfig {
     pub fs: ZbobrRepoBackendFs,
 }
 
+#[derive(Clone)]
 #[config_struct]
 /// Executor configuration section.
 pub struct ZbobrExecutorConfig {
@@ -64,6 +67,7 @@ pub struct ZbobrExecutorConfig {
     pub mcp_tester: ZbobrExecutorMcpTester,
 }
 
+#[derive(Clone)]
 #[config_struct]
 /// Root configuration for zbobr.
 pub struct ZbobrConfig {
