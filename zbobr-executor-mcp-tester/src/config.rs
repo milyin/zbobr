@@ -3,20 +3,19 @@ use std::path::{Path, PathBuf};
 use zbobr_dispatcher::task::Role;
 use zbobr_utility::{config_struct, resolve_path};
 
-config_struct! {
-    /// Configuration for the mcp-tester executor.
-    pub struct ZbobrExecutorMcpTester {
-        #[arg(long = "executor-mcp-tester-preparation", env = "ZBOBR_EXECUTOR_MCP_TESTER_PREPARATION")]
-        pub preparation: PathBuf,
-        #[arg(long = "executor-mcp-tester-planning", env = "ZBOBR_EXECUTOR_MCP_TESTER_PLANNING")]
-        pub planning: PathBuf,
-        #[arg(long = "executor-mcp-tester-working", env = "ZBOBR_EXECUTOR_MCP_TESTER_WORKING")]
-        pub working: PathBuf,
-        #[arg(long = "executor-mcp-tester-reviewing", env = "ZBOBR_EXECUTOR_MCP_TESTER_REVIEWING")]
-        pub reviewing: PathBuf,
-        #[arg(long = "executor-mcp-tester-merging", env = "ZBOBR_EXECUTOR_MCP_TESTER_MERGING")]
-        pub merging: PathBuf,
-    }
+#[config_struct]
+/// Configuration for the mcp-tester executor.
+pub struct ZbobrExecutorMcpTester {
+    #[arg(long = "executor-mcp-tester-preparation", env = "ZBOBR_EXECUTOR_MCP_TESTER_PREPARATION")]
+    pub preparation: PathBuf,
+    #[arg(long = "executor-mcp-tester-planning", env = "ZBOBR_EXECUTOR_MCP_TESTER_PLANNING")]
+    pub planning: PathBuf,
+    #[arg(long = "executor-mcp-tester-working", env = "ZBOBR_EXECUTOR_MCP_TESTER_WORKING")]
+    pub working: PathBuf,
+    #[arg(long = "executor-mcp-tester-reviewing", env = "ZBOBR_EXECUTOR_MCP_TESTER_REVIEWING")]
+    pub reviewing: PathBuf,
+    #[arg(long = "executor-mcp-tester-merging", env = "ZBOBR_EXECUTOR_MCP_TESTER_MERGING")]
+    pub merging: PathBuf,
 }
 
 /// Resolved configuration for the mcp-tester executor.

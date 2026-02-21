@@ -8,10 +8,16 @@ use syn::{
     TypePath,
 };
 
-#[proc_macro]
-pub fn config_struct(input: TokenStream) -> TokenStream {
-    let item = parse_macro_input!(input as ItemStruct);
-    match expand_config_struct(item) {
+#[proc_macro_attribute]
+pub fn config_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
+    if !attr.is_empty() {
+        return syn::Error::new(Span::call_site(), "config_struct does not take arguments")
+            .to_compile_error()
+            .into();
+    }
+
+    let parsed = parse_macro_input!(item as ItemStruct);
+    match expand_config_struct(parsed) {
         Ok(tokens) => tokens.into(),
         Err(err) => err.to_compile_error().into(),
     }
@@ -23,15 +29,18 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
         vis,
         ident,
         fields,
+        generics,
         ..
     } = item;
+
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let fields_named = match fields {
         Fields::Named(named) => named.named,
         _ => {
             return Err(syn::Error::new_spanned(
                 ident,
-                "config_struct! only supports structs with named fields",
+                "config_struct only supports structs with named fields",
             ))
         }
     };
@@ -45,15 +54,21 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
     let mut args_fields = Vec::new();
     let mut merge_fields = Vec::new();
     let mut has_override_checks = Vec::new();
+    let mut base_fields = Vec::new();
 
     for field in fields_named {
         let field_ident = field.ident.clone().ok_or_else(|| {
-            syn::Error::new_spanned(&field, "config_struct! fields must be named")
+            syn::Error::new_spanned(&field, "config_struct fields must be named")
         })?;
         let field_vis = field.vis.clone();
         let field_ty = field.ty.clone();
 
         let (other_attrs, arg_metas, config_meta) = partition_field_attrs(&field.attrs)?;
+        let doc_help = doc_comment(&other_attrs);
+        base_fields.push(quote! {
+            #(#other_attrs)*
+            #field_vis #field_ident: #field_ty,
+        });
         // Reuse doc/other attributes on both structs.
         let args_attrs = other_attrs.clone();
         let rename_attr = config_meta
@@ -65,7 +80,9 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
         let field_snake = field_ident.to_string().to_snake_case();
         let field_kebab = field_snake.replace('_', "-");
 
-        if config_meta.nested {
+        let is_nested = config_meta.nested || infer_nested_from_type(&field_ty);
+
+        if is_nested {
             let nested_toml_ty = config_meta
                 .nested_toml_ty
                 .clone()
@@ -78,16 +95,12 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             let heading_prefix = config_meta
                 .heading_prefix
                 .clone()
-                .or_else(|| {
-                    let source_ty = Type::Path(nested_args_ty.clone());
-                    type_prefixes(&source_ty).ok().map(|(_, kebab)| kebab)
-                })
-                .unwrap_or_else(|| prefix_kebab.clone());
+                .unwrap_or_else(|| format!("{}-{}", prefix_kebab, field_kebab));
 
             let heading_text = config_meta
                 .help_heading
                 .clone()
-                .or_else(|| doc_comment(&other_attrs));
+                .or_else(|| doc_help.clone());
             let heading = format_help_heading(&heading_prefix, heading_text.as_deref());
             let heading_lit = LitStr::new(&heading, Span::call_site());
 
@@ -125,16 +138,29 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 self.#field_ident.has_overrides()
             });
         } else {
-            let arg_long_value = format!("{}-{}", prefix_kebab, field_kebab);
-            let arg_long_lit = LitStr::new(&arg_long_value, Span::call_site());
+            let arg_name_value = config_meta
+                .heading_prefix
+                .clone()
+                .unwrap_or_else(|| format!("{}-{}", prefix_kebab, field_kebab));
+            let arg_name_lit = LitStr::new(&arg_name_value, Span::call_site());
+            let has_custom_long = arg_metas.iter().any(|m| is_arg_meta(m, "long"));
+            let has_custom_name = arg_metas.iter().any(|m| is_arg_meta(m, "name"));
+            let has_custom_help = arg_metas.iter().any(|m| is_arg_meta(m, "help"));
 
             let mut arg_entries: Vec<TokenStream2> = Vec::new();
-            arg_entries.push(quote!(name = #arg_long_lit));
-            arg_entries.push(quote!(long = #arg_long_lit));
-            for meta in arg_metas {
-                if should_skip_arg_meta(&meta) {
-                    continue;
+            if !has_custom_name {
+                arg_entries.push(quote!(name = #arg_name_lit));
+            }
+            if !has_custom_long {
+                arg_entries.push(quote!(long = #arg_name_lit));
+            }
+            if let Some(help) = doc_help.clone() {
+                if !has_custom_help {
+                    let help_lit = LitStr::new(&help, Span::call_site());
+                    arg_entries.push(quote!(help = #help_lit));
                 }
+            }
+            for meta in arg_metas {
                 arg_entries.push(quote!(#meta));
             }
 
@@ -168,27 +194,32 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
 
     let tokens = quote! {
         #(#attrs)*
+        #vis struct #ident #generics #where_clause {
+            #(#base_fields)*
+        }
+
+        #(#attrs)*
         #[derive(Debug, Clone, ::serde::Deserialize, Default)]
         #[serde(default, deny_unknown_fields)]
-        #vis struct #toml_ident {
+        #vis struct #toml_ident #generics #where_clause {
             #(#toml_fields)*
         }
 
         #(#attrs)*
         #[derive(Debug, Clone, ::clap::Args, Default)]
-        #vis struct #args_ident {
+        #vis struct #args_ident #generics #where_clause {
             #(#args_fields)*
         }
 
-        impl #toml_ident {
-            pub fn merge_with_args(self, args: #args_ident) -> Self {
+        impl #impl_generics #toml_ident #ty_generics #where_clause {
+            pub fn merge_with_args(self, args: #args_ident #ty_generics) -> Self {
                 Self {
                     #(#merge_fields)*
                 }
             }
         }
 
-        impl #args_ident {
+        impl #impl_generics #args_ident #ty_generics #where_clause {
             pub fn has_overrides(&self) -> bool {
                 false #( || #has_override_checks )*
             }
@@ -289,13 +320,11 @@ fn parse_config_meta(attr: &Attribute, config: &mut FieldConfig) -> syn::Result<
     Ok(())
 }
 
-fn should_skip_arg_meta(meta: &Meta) -> bool {
+fn is_arg_meta(meta: &Meta, key: &str) -> bool {
     match meta {
-        Meta::Path(path) => path.is_ident("long") || path.is_ident("name"),
-        Meta::NameValue(name_value) => {
-            name_value.path.is_ident("long") || name_value.path.is_ident("name")
-        }
-        Meta::List(list) => list.path.is_ident("long") || list.path.is_ident("name"),
+        Meta::Path(path) => path.is_ident(key),
+        Meta::NameValue(name_value) => name_value.path.is_ident(key),
+        Meta::List(list) => list.path.is_ident(key),
     }
 }
 
@@ -320,13 +349,13 @@ fn struct_prefixes(ident: &Ident) -> (String, String) {
     (snake, kebab)
 }
 
-fn type_prefixes(ty: &Type) -> syn::Result<(String, String)> {
+fn infer_nested_from_type(ty: &Type) -> bool {
     if let Type::Path(TypePath { path, .. }) = ty {
-        if let Some(ident) = path.segments.last().map(|s| &s.ident) {
-            return Ok(struct_prefixes(ident));
+        if let Some(ident) = path.segments.last().map(|s| s.ident.to_string()) {
+            return ident.ends_with("Args") || ident.ends_with("Toml");
         }
     }
-    Err(syn::Error::new_spanned(ty, "config_struct! only supports named type paths"))
+    false
 }
 
 fn type_with_suffix(ty: &Type, suffix: &str) -> syn::Result<TypePath> {
@@ -339,7 +368,7 @@ fn type_with_suffix(ty: &Type, suffix: &str) -> syn::Result<TypePath> {
     }
     Err(syn::Error::new_spanned(
         ty,
-        "config_struct! fields must use a path type to derive nested names",
+        "config_struct fields must use a path type to derive nested names",
     ))
 }
 

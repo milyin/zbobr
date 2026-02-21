@@ -2,12 +2,11 @@ use std::path::{Path, PathBuf};
 
 use zbobr_utility::{config_struct, resolve_path};
 
-config_struct! {
-    /// Configuration for the filesystem repo backend.
-    pub struct ZbobrRepoBackendFs {
-        #[arg(long, env = "ZBOBR_REPOS_DIR")]
-        pub repos_dir: PathBuf,
-    }
+#[config_struct]
+/// Configuration for the filesystem repo backend.
+pub struct ZbobrRepoBackendFs {
+    #[arg(long, env = "ZBOBR_REPOS_DIR")]
+    pub repos_dir: PathBuf,
 }
 
 /// Resolved configuration for the filesystem repo backend.

@@ -1,12 +1,11 @@
 use std::path::{Path, PathBuf};
 use zbobr_utility::{config_struct, resolve_path};
 
-config_struct! {
-    /// Configuration for the filesystem task backend.
-    pub struct ZbobrTaskBackendFs {
-        #[arg(long, env = "ZBOBR_TASKS_DIR")]
-        pub tasks_dir: PathBuf,
-    }
+#[config_struct]
+/// Configuration for the filesystem task backend.
+pub struct ZbobrTaskBackendFs {
+    #[arg(long, env = "ZBOBR_TASKS_DIR")]
+    pub tasks_dir: PathBuf,
 }
 
 /// Resolved configuration for the filesystem task backend.

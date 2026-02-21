@@ -1,15 +1,14 @@
 use zbobr_utility::config_struct;
 
-config_struct! {
-    /// Configuration for the GitHub repo backend.
-    pub struct ZbobrRepoBackendGithub {
-        /// Owner for forks (GitHub user or org).
-        #[arg(long)]
-        pub fork_owner: String,
-        /// GitHub token with read/write access to fork org.
-        #[arg(long = "repo-github-token", env = "ZBOBR_REPO_GITHUB_TOKEN", id = "repo_github_token")]
-        pub github_token: String,
-    }
+#[config_struct]
+/// Configuration for the GitHub repo backend.
+pub struct ZbobrRepoBackendGithub {
+    /// Owner for forks (GitHub user or org).
+    #[arg(long)]
+    pub fork_owner: String,
+    /// GitHub token with read/write access to fork org.
+    #[arg(long = "repo-github-token", env = "ZBOBR_REPO_GITHUB_TOKEN", id = "repo_github_token")]
+    pub github_token: String,
 }
 
 /// Resolved configuration for the GitHub repo backend.
