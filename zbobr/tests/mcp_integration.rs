@@ -1,40 +1,13 @@
-use std::path::Path;
 
 use tempfile::TempDir;
 
 mod mcp_tester_scenarios;
 use mcp_tester_scenarios::{dummy_scenario, preparator_comprehensive_scenario};
 
-/// Minimal TOML configuration for testing
-fn create_test_config(tasks_dir: &Path, workspaces_dir: &Path) -> String {
-    format!(
-        r#"[dispatcher]
-cli_tool = "mcp-tester"
-workspaces = "{workspaces}"
-backend = "fs"
-agent_github_token = "dummy-not-used"
-git_user_name = "test-bot"
-git_user_email = "test@example.com"
-
-[dispatcher.prompts]
-preparator = []
-planner = []
-worker = []
-reviewer = []
-merger = []
-
-[tasks.fs]
-tasks_dir = "{tasks}"
-
-[repo.fs]
-repos_dir = "./repos"
-"#,
-        tasks = tasks_dir.display(),
-        workspaces = workspaces_dir.display(),
-    )
-}
 
 async fn run_mcp_test(command: &str) {
+    // Build and pass configuration via command-line flags rather than a TOML file.
+    // Arguments with empty values are skipped so tests can selectively include flags.
     // Check that mcp-tester is installed; skip gracefully if not
     let mcp_check = tokio::process::Command::new("mcp-tester")
         .arg("--version")
@@ -75,15 +48,8 @@ async fn run_mcp_test(command: &str) {
         .await
         .expect("failed to write preparator scenario");
 
-    // Create minimal configuration file
-    let config_path = tmp_path.join("zbobr.toml");
-    let config_content = create_test_config(&tasks_dir, &workspaces_dir);
-    tokio::fs::write(&config_path, config_content)
-        .await
-        .expect("failed to write config file");
 
-    // Create task using the filesystem backend via a synchronous call
-    // (We need to create it synchronously before spawning the async process)
+    // Create task using the filesystem backend. we can await directly
     let task_id = {
         use std::collections::HashMap;
 
@@ -97,30 +63,39 @@ async fn run_mcp_test(command: &str) {
         )
         .expect("failed to create task backend");
 
-        tokio::runtime::Handle::current().block_on(async {
-            backend
-                .create_task(
-                    "Dummy Task",
-                    "Dummy task description",
-                    Stage::Preparation,
-                    None,
-                    None,
-                    HashMap::new(),
-                )
-                .await
-                .expect("failed to create task")
-        })
+        backend
+            .create_task(
+                "Dummy Task",
+                "Dummy task description",
+                Stage::Preparation,
+                None,
+                None,
+                HashMap::new(),
+            )
+            .await
+            .expect("failed to create task")
     };
 
     let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
 
-    // Build command-line arguments
-    let mut args = vec![
-        command.to_string(),
-        task_id.to_string(),
-        "--config".to_string(),
-        config_path.to_string_lossy().to_string(),
-    ];
+    // Build command-line arguments (ignore empty values)
+    let mut args = vec![command.to_string(), task_id.to_string()];
+
+    // helper closure pushes flag+value only if value is non-empty
+    let mut push_arg = |flag: &str, val: &str| {
+        if !val.is_empty() {
+            args.push(flag.to_string());
+            args.push(val.to_string());
+        }
+    };
+
+    push_arg("--dispatcher-workspaces", &workspaces_dir.to_string_lossy());
+    push_arg("--tasks-fs-tasks-dir", &tasks_dir.to_string_lossy());
+    push_arg("--dispatcher-backend", "filesystem");
+    push_arg("--dispatcher-cli-tool", "mcp-tester");
+    push_arg("--dispatcher-agent-github-token", "dummy-not-used");
+    push_arg("--dispatcher-git-user-name", "test-bot");
+    push_arg("--dispatcher-git-user-email", "test@example.com");
 
     // Add executor scenario file paths - map roles to scenario files
     let (prep_scenario, planning_scenario, working_scenario, reviewing_scenario, merging_scenario) =
