@@ -27,11 +27,20 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
     let ItemStruct {
         attrs,
         vis,
-        ident,
+        mut ident,
         fields,
         generics,
         ..
     } = item;
+
+    // for consistency we want configuration structs to end in "Config";
+    // if the user didn't include that suffix we append it and create a
+    // type alias from the original name back to the new one for
+    // compatibility.
+    let orig_ident = ident.clone();
+    if !orig_ident.to_string().ends_with("Config") {
+        ident = format_ident!("{}Config", orig_ident);
+    }
 
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
@@ -48,6 +57,15 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
     let toml_ident = format_ident!("{}Toml", ident);
     let args_ident = format_ident!("{}Args", ident);
     let derived_args_ident = format_ident!("{}ArgsDerived", ident);
+
+    // if we renamed the struct we expose an alias from the original name
+    // back to the config name so code using the old identifier continues to
+    // compile.
+    let alias_orig_decl = if orig_ident != ident {
+        quote! { pub type #orig_ident #ty_generics = #ident #ty_generics; }
+    } else {
+        TokenStream2::new()
+    };
 
     let ident_str = ident.to_string();
     let alias_base = ident_str.strip_suffix("Config").map(|s| format_ident!("{}", s));
@@ -321,12 +339,16 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
         .map(|alias| quote! { #vis type #alias #ty_generics = #args_ident #ty_generics; })
         .unwrap_or_else(TokenStream2::new);
 
+    // alias from original name if the struct was renamed
+    let alias_orig_decl = alias_orig_decl;
+
     let tokens = quote! {
         #(#attrs)*
         #vis struct #ident #generics #where_clause {
             #(#base_fields)*
         }
 
+        #alias_orig_decl
         #(#attrs)*
         #[derive(Debug, Clone, ::serde::Deserialize, Default)]
         #[serde(default, deny_unknown_fields)]

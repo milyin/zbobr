@@ -10,12 +10,12 @@ pub struct ZbobrTaskBackendFs {
 
 /// Resolved configuration for the filesystem task backend.
 #[derive(Debug, Clone)]
-pub(crate) struct ZbobrTaskBackendFsConfig {
+pub(crate) struct ZbobrTaskBackendFsRuntimeConfig {
     /// Directory where tasks are stored as YAML files.
     pub(crate) tasks_dir: PathBuf,
 }
 
-impl Default for ZbobrTaskBackendFsConfig {
+impl Default for ZbobrTaskBackendFsRuntimeConfig {
     fn default() -> Self {
         Self {
             tasks_dir: PathBuf::from("./tasks"),
@@ -23,7 +23,7 @@ impl Default for ZbobrTaskBackendFsConfig {
     }
 }
 
-impl ZbobrTaskBackendFsConfig {
+impl ZbobrTaskBackendFsRuntimeConfig {
     /// Build configuration by layering: defaults < TOML < args.
     /// Relative paths from TOML are resolved against `config_dir`.
     pub(crate) fn build(

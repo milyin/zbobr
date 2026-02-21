@@ -18,9 +18,9 @@ pub struct ZbobrExecutorMcpTester {
     pub merging: PathBuf,
 }
 
-/// Resolved configuration for the mcp-tester executor.
+/// Runtime/resolved configuration for the mcp-tester executor.
 #[derive(Debug, Clone, Default)]
-pub struct ZbobrExecutorMcpTesterConfig {
+pub struct ZbobrExecutorMcpTesterRuntimeConfig {
     pub preparation: Option<PathBuf>,
     pub planning: Option<PathBuf>,
     pub working: Option<PathBuf>,
@@ -28,7 +28,7 @@ pub struct ZbobrExecutorMcpTesterConfig {
     pub merging: Option<PathBuf>,
 }
 
-impl ZbobrExecutorMcpTesterConfig {
+impl ZbobrExecutorMcpTesterRuntimeConfig {
     /// Build configuration by layering: defaults < TOML < args.
     /// Relative scenario paths are resolved against `config_dir`.
     pub fn build(

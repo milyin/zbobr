@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 
-use crate::config::ZbobrTaskBackendFsConfig;
+use crate::config::ZbobrTaskBackendFsRuntimeConfig;
 use zbobr_dispatcher::backend::TaskBackend;
 use zbobr_dispatcher::{ChecklistItem, Model, Parameter, Stage, Task, Tool};
 
@@ -101,7 +101,7 @@ struct CommentsFile {
 
 /// Filesystem-based task backend.
 pub struct FilesystemTaskBackend {
-    config: ZbobrTaskBackendFsConfig,
+    config: ZbobrTaskBackendFsRuntimeConfig,
 }
 
 impl FilesystemTaskBackend {
@@ -110,7 +110,7 @@ impl FilesystemTaskBackend {
         args: crate::config::ZbobrTaskBackendFsArgs,
         config_dir: &std::path::Path,
     ) -> anyhow::Result<Self> {
-        let config = ZbobrTaskBackendFsConfig::build(toml, args, config_dir);
+        let config = ZbobrTaskBackendFsRuntimeConfig::build(toml, args, config_dir);
         config.validate()?;
         Ok(Self { config })
     }

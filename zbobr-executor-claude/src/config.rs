@@ -11,14 +11,14 @@ pub struct ZbobrExecutorClaude {
     pub default_model: Model,
 }
 
-/// Resolved configuration for the Claude executor.
+/// Runtime/resolved configuration for the Claude executor.
 #[derive(Debug, Clone)]
-pub struct ZbobrExecutorClaudeConfig {
+pub struct ZbobrExecutorClaudeRuntimeConfig {
     /// Default AI model for Claude executor.
     pub default_model: Model,
 }
 
-impl Default for ZbobrExecutorClaudeConfig {
+impl Default for ZbobrExecutorClaudeRuntimeConfig {
     fn default() -> Self {
         Self {
             default_model: Model::ClaudeOpus4_6,
@@ -26,7 +26,7 @@ impl Default for ZbobrExecutorClaudeConfig {
     }
 }
 
-impl ZbobrExecutorClaudeConfig {
+impl ZbobrExecutorClaudeRuntimeConfig {
     /// Build configuration by layering: defaults < TOML < CLI args.
     pub fn build(toml: Option<ZbobrExecutorClaudeToml>, args: ZbobrExecutorClaudeArgs) -> Self {
         let defaults = Self::default();

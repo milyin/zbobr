@@ -7,11 +7,11 @@ use zbobr_dispatcher::task::{Model, Role, Tool};
 use zbobr_dispatcher::tool_executor::{ToolExecutor, format_command_for_log};
 
 pub mod config;
-pub use config::{ZbobrExecutorCopilotArgs, ZbobrExecutorCopilotConfig, ZbobrExecutorCopilotToml};
+pub use config::{ZbobrExecutorCopilotArgs, ZbobrExecutorCopilotRuntimeConfig, ZbobrExecutorCopilotToml};
 
 /// Executor for GitHub Copilot CLI.
 pub struct CopilotExecutor {
-    pub config: ZbobrExecutorCopilotConfig,
+    pub config: ZbobrExecutorCopilotRuntimeConfig,
 }
 
 #[async_trait]

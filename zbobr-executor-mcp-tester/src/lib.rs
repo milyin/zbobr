@@ -8,12 +8,12 @@ use zbobr_dispatcher::tool_executor::{ToolExecutor, format_command_for_log};
 
 pub mod config;
 pub use config::{
-    ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterConfig, ZbobrExecutorMcpTesterToml,
+    ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterRuntimeConfig, ZbobrExecutorMcpTesterToml,
 };
 
 /// Executor that runs mcp-tester to validate MCP servers per stage.
 pub struct McpTesterExecutor {
-    pub config: ZbobrExecutorMcpTesterConfig,
+    pub config: ZbobrExecutorMcpTesterRuntimeConfig,
 }
 
 #[async_trait]

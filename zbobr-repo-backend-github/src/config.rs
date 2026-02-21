@@ -11,16 +11,16 @@ pub struct ZbobrRepoBackendGithub {
     pub github_token: String,
 }
 
-/// Resolved configuration for the GitHub repo backend.
+/// Runtime/resolved configuration for the GitHub repo backend.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ZbobrRepoBackendGithubConfig {
+pub(crate) struct ZbobrRepoBackendGithubRuntimeConfig {
     /// Owner for forks (GitHub user or org).
     pub(crate) fork_owner: String,
     /// GitHub token with read/write access to fork org.
     pub(crate) github_token: String,
 }
 
-impl ZbobrRepoBackendGithubConfig {
+impl ZbobrRepoBackendGithubRuntimeConfig {
     /// Build configuration by layering: defaults < TOML < args.
     pub(crate) fn build(
         toml: Option<ZbobrRepoBackendGithubToml>,
