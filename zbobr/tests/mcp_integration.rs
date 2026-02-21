@@ -1,5 +1,6 @@
 
 use tempfile::TempDir;
+use serial_test::serial;
 
 mod mcp_tester_scenarios;
 use mcp_tester_scenarios::{dummy_scenario, preparator_comprehensive_scenario};
@@ -21,6 +22,7 @@ async fn run_mcp_test(command: &str) {
     // Create temp directory for the entire test setup
     let tmp = TempDir::new().expect("failed to create temp dir");
     let tmp_path = tmp.path();
+
 
     // Create subdirectories
     let tasks_dir = tmp_path.join("tasks");
@@ -54,11 +56,14 @@ async fn run_mcp_test(command: &str) {
         use std::collections::HashMap;
 
         use zbobr_dispatcher::{Stage, backend::TaskBackend};
-        use zbobr_task_backend_fs::FilesystemTaskBackend;
+        use zbobr_task_backend_fs::{FilesystemTaskBackend, ZbobrTaskBackendFsArgs};
 
+        // pass the temporary directory explicitly so we don't pollute the repo
         let backend = FilesystemTaskBackend::new(
             None,
-            zbobr_task_backend_fs::ZbobrTaskBackendFsArgs::default(),
+            ZbobrTaskBackendFsArgs {
+                tasks_dir: Some(tasks_dir.clone()),
+            },
             &tasks_dir,
         )
         .expect("failed to create task backend");
@@ -78,8 +83,11 @@ async fn run_mcp_test(command: &str) {
 
     let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
 
-    // Build command-line arguments (ignore empty values)
-    let mut args = vec![command.to_string(), task_id.to_string()];
+    // Build command-line arguments (ignore empty values).
+    // Global options must appear *before* the subcommand; the task ID follows the
+    // command itself. Executor flags are also global, so we add them early as
+    // well.
+    let mut args = Vec::new();
 
     // helper closure pushes flag+value only if value is non-empty
     let mut push_arg = |flag: &str, val: &str| {
@@ -116,18 +124,23 @@ async fn run_mcp_test(command: &str) {
             ),
         };
 
-    args.push("--executor-mcp-tester-preparation".to_string());
-    args.push(prep_scenario.to_string_lossy().to_string());
-    args.push("--executor-mcp-tester-planning".to_string());
-    args.push(planning_scenario.to_string_lossy().to_string());
-    args.push("--executor-mcp-tester-working".to_string());
-    args.push(working_scenario.to_string_lossy().to_string());
-    args.push("--executor-mcp-tester-reviewing".to_string());
-    args.push(reviewing_scenario.to_string_lossy().to_string());
-    args.push("--executor-mcp-tester-merging".to_string());
-    args.push(merging_scenario.to_string_lossy().to_string());
+    // executor scenarios (also global)
+    push_arg("--executor-mcp-tester-preparation", &prep_scenario.to_string_lossy());
+    push_arg("--executor-mcp-tester-planning", &planning_scenario.to_string_lossy());
+    push_arg("--executor-mcp-tester-working", &working_scenario.to_string_lossy());
+    push_arg("--executor-mcp-tester-reviewing", &reviewing_scenario.to_string_lossy());
+    push_arg("--executor-mcp-tester-merging", &merging_scenario.to_string_lossy());
 
-    // Run zbobr binary
+    // finally add the command and task id
+    args.push(command.to_string());
+    args.push(task_id.to_string());
+
+
+    // Run zbobr binary.  Recent CLI refactor removed the ability to override
+    // paths via environment variables, so rely solely on the command-line
+    // flags we already constructed.  The earlier part of this function uses a
+    // temporary filesystem backend to create the task, so everything should stay
+    // within `tmp_path` and the repo directory remains untouched.
     let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
     let status = tokio::process::Command::new(zbobr_bin)
         .args(&args)
@@ -139,6 +152,7 @@ async fn run_mcp_test(command: &str) {
         .await
         .expect("failed to run zbobr binary");
 
+
     assert!(
         status.success(),
         "zbobr {} failed with exit code {:?}",
@@ -147,32 +161,32 @@ async fn run_mcp_test(command: &str) {
     );
 }
 
-#[ignore = "Ignored during comand line refactoring to avoind intereference. To be re-enabled once CLI refactoring is complete."]
 #[tokio::test]
+#[serial]
 async fn preparator_thorough_test_via_mcp_tester() {
     run_mcp_test("prepare").await;
 }
 
-#[ignore = "Ignored during comand line refactoring to avoind intereference. To be re-enabled once CLI refactoring is complete."]
 #[tokio::test]
+#[serial]
 async fn planner_get_description_via_mcp_tester() {
     run_mcp_test("plan").await;
 }
 
-#[ignore = "Ignored during comand line refactoring to avoind intereference. To be re-enabled once CLI refactoring is complete."]
 #[tokio::test]
+#[serial]
 async fn worker_get_description_via_mcp_tester() {
     run_mcp_test("work").await;
 }
 
-#[ignore = "Ignored during comand line refactoring to avoind intereference. To be re-enabled once CLI refactoring is complete."]
 #[tokio::test]
+#[serial]
 async fn reviewer_get_description_via_mcp_tester() {
     run_mcp_test("review").await;
 }
 
-#[ignore = "Ignored during comand line refactoring to avoind intereference. To be re-enabled once CLI refactoring is complete."]
 #[tokio::test]
+#[serial]
 async fn merger_get_description_via_mcp_tester() {
     run_mcp_test("merge").await;
 }
