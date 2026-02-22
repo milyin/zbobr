@@ -105,6 +105,41 @@ async fn run_zbobr(
     );
 }
 
+/// Like `run_zbobr` but captures and returns stdout as a `String`.  Useful for
+/// commands that print data (for example the task creation command which
+/// reports the new ID).
+async fn run_zbobr_capture(
+    tmp_path: &Path,
+    tasks_dir: &Path,
+    workspaces_dir: &Path,
+    command: &str,
+    mut command_args: Vec<String>,
+) -> String {
+    let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+
+    let mut args = make_zbobr_config_args(tasks_dir, workspaces_dir);
+    args.push(command.to_string());
+    args.append(&mut command_args);
+
+    let output = tokio::process::Command::new(zbobr_bin)
+        .args(&args)
+        .current_dir(tmp_path)
+        .env("RUST_LOG", &rust_log)
+        .output()
+        .await
+        .expect("failed to run zbobr");
+
+    assert!(
+        output.status.success(),
+        "zbobr {} failed with exit code {:?}",
+        command,
+        output.status.code(),
+    );
+
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
 /// Run `zbobr setup` to initialise the tasks and workspaces directories.
 async fn run_zbobr_setup(
     tmp_path: &std::path::Path,
@@ -117,6 +152,12 @@ async fn run_zbobr_setup(
 /// Create the shared directory layout and task, writing the assert-false
 /// sentinel scenario file.  Returns `None` when `mcp-tester` is not
 /// installed so the caller can skip gracefully.
+///
+/// **Important:** this integration test uses *only* the command‑line
+/// interface to create and manipulate tasks.  It must not instantiate or
+/// call backend implementations directly so that the same test works with any
+/// backend (filesystem, GitHub, etc.).  Keeping the test CLI‑only ensures it
+/// exercises the public API which is what downstream users rely on.
 async fn setup_test_env() -> Option<TestEnv> {
     let mcp_check = tokio::process::Command::new("mcp-tester")
         .arg("--version")
@@ -148,33 +189,35 @@ async fn setup_test_env() -> Option<TestEnv> {
         .await
         .expect("failed to write assert_false scenario");
 
-    // Create the shared task using the filesystem backend.
+    // Create the shared task via the CLI rather than touching a backend
+    // directly.  This keeps the test backend‑agnostic, which is the whole
+    // point of exercising the public interface.
     let task_id = {
-        use std::collections::HashMap;
-
-        use zbobr_dispatcher::{Stage, backend::TaskBackend};
-        use zbobr_task_backend_fs::{FilesystemTaskBackend, ZbobrTaskBackendFsArgs};
-
-        let backend = FilesystemTaskBackend::new(
-            None,
-            ZbobrTaskBackendFsArgs {
-                tasks_dir: Some(tasks_dir.clone()),
-            },
+        // leverage a helper that captures stdout so we can parse the numeric ID
+        let output = run_zbobr_capture(
+            &tmp_path,
             &tasks_dir,
+            &workspaces_dir,
+            "task",
+            vec![
+                "create".to_string(),
+                "--title".to_string(),
+                "Dummy Task".to_string(),
+                "--description".to_string(),
+                "Dummy task description".to_string(),
+                "--stage".to_string(),
+                "preparation".to_string(),
+            ],
         )
-        .expect("failed to create task backend");
+        .await;
 
-        backend
-            .create_task(
-                "Dummy Task",
-                "Dummy task description",
-                Stage::Preparation,
-                None,
-                None,
-                HashMap::new(),
-            )
-            .await
-            .expect("failed to create task")
+        // output should be like "Created task #123"; parse the number.
+        let line = output.lines().next().unwrap_or_default();
+        line
+            .trim()
+            .strip_prefix("Created task #")
+            .and_then(|s| s.parse::<u64>().ok())
+            .expect("failed to parse task id from zbobr output")
     };
 
     Some(TestEnv {
