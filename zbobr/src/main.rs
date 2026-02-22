@@ -87,6 +87,69 @@ enum Command {
         #[arg(long, short = 'n')]
         dry_run: bool,
     },
+
+    /// Manage tasks (create, show, update, delete) and run role sessions
+    Task {
+        #[command(subcommand)]
+        subcommand: TaskSubcommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum TaskSubcommand {
+    /// Create a new task
+    Create {
+        /// Task title
+        title: String,
+        /// Task description
+        #[arg(long, default_value = "")]
+        description: String,
+        /// Initial stage (PENDING, GO_PREPARATION, etc.; default: PENDING)
+        #[arg(long, default_value = "PENDING")]
+        stage: String,
+        /// AI tool to assign (copilot, claude, mcp-tester)
+        #[arg(long)]
+        tool: Option<String>,
+        /// AI model to assign (e.g. "claude-3-5-sonnet")
+        #[arg(long)]
+        model: Option<String>,
+        /// Destination repository in owner/repo format
+        #[arg(long)]
+        dest_repo: Option<String>,
+        /// Destination branch
+        #[arg(long)]
+        dest_branch: Option<String>,
+    },
+    /// Show a task by ID
+    Show {
+        /// Task ID
+        id: u64,
+    },
+    /// Update fields of an existing task
+    Update {
+        /// Task ID
+        id: u64,
+        /// New title
+        #[arg(long)]
+        title: Option<String>,
+        /// New description
+        #[arg(long)]
+        description: Option<String>,
+        /// New stage (PENDING, GO_PREPARATION, etc.)
+        #[arg(long)]
+        stage: Option<String>,
+        /// New AI tool (copilot, claude, mcp-tester)
+        #[arg(long)]
+        tool: Option<String>,
+        /// New AI model
+        #[arg(long)]
+        model: Option<String>,
+    },
+    /// Delete (close) a task by ID
+    Delete {
+        /// Task ID
+        id: u64,
+    },
     /// Run preparator role for a specific task (sets destination repository and branches)
     Prepare {
         /// Task ID
@@ -156,68 +219,6 @@ enum Command {
         /// Show the prompt that would be sent to the model instead of running
         #[arg(long)]
         show_prompt: bool,
-    },
-    /// Manage tasks (create, show, update, delete)
-    Task {
-        #[command(subcommand)]
-        subcommand: TaskSubcommand,
-    },
-}
-
-#[derive(Subcommand)]
-enum TaskSubcommand {
-    /// Create a new task
-    Create {
-        /// Task title
-        title: String,
-        /// Task description
-        #[arg(long, default_value = "")]
-        description: String,
-        /// Initial stage (PENDING, GO_PREPARATION, etc.; default: PENDING)
-        #[arg(long, default_value = "PENDING")]
-        stage: String,
-        /// AI tool to assign (copilot, claude, mcp-tester)
-        #[arg(long)]
-        tool: Option<String>,
-        /// AI model to assign (e.g. "claude-3-5-sonnet")
-        #[arg(long)]
-        model: Option<String>,
-        /// Destination repository in owner/repo format
-        #[arg(long)]
-        dest_repo: Option<String>,
-        /// Destination branch
-        #[arg(long)]
-        dest_branch: Option<String>,
-    },
-    /// Show a task by ID
-    Show {
-        /// Task ID
-        id: u64,
-    },
-    /// Update fields of an existing task
-    Update {
-        /// Task ID
-        id: u64,
-        /// New title
-        #[arg(long)]
-        title: Option<String>,
-        /// New description
-        #[arg(long)]
-        description: Option<String>,
-        /// New stage (PENDING, GO_PREPARATION, etc.)
-        #[arg(long)]
-        stage: Option<String>,
-        /// New AI tool (copilot, claude, mcp-tester)
-        #[arg(long)]
-        tool: Option<String>,
-        /// New AI model
-        #[arg(long)]
-        model: Option<String>,
-    },
-    /// Delete (close) a task by ID
-    Delete {
-        /// Task ID
-        id: u64,
     },
 }
 
@@ -365,9 +366,25 @@ fn print_task(task: &zbobr_dispatcher::Task) {
     println!("ID:          {}", task.id);
     println!("Title:       {}", task.title);
     println!("Stage:       {}", task.stage);
-    println!("Tool:        {}", task.tool.map(|t| t.to_string()).unwrap_or_else(|| "(none)".to_string()));
-    println!("Model:       {}", task.model.as_ref().map(|m| m.to_string()).unwrap_or_else(|| "(none)".to_string()));
-    println!("Signal:      {}", task.signal.map(|s| s.to_string()).unwrap_or_else(|| "(none)".to_string()));
+    println!(
+        "Tool:        {}",
+        task.tool
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| "(none)".to_string())
+    );
+    println!(
+        "Model:       {}",
+        task.model
+            .as_ref()
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| "(none)".to_string())
+    );
+    println!(
+        "Signal:      {}",
+        task.signal
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "(none)".to_string())
+    );
     println!("Done:        {}", task.done);
     if !task.parameters.is_empty() {
         println!("Parameters:");
@@ -616,242 +633,248 @@ async fn main() -> anyhow::Result<()> {
         Command::Cleanup { dry_run } => {
             zbobr.cleanup_closed_tasks(dry_run).await?;
         }
-        Command::Prepare {
-            task,
-            model,
-            port,
-            show_prompt,
-        } => {
-            let base_prompt = load_prompts(&prompts.preparator, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Preparator);
-
-            if show_prompt {
-                println!("{}", full_prompt);
-                return Ok(());
+        Command::Task { subcommand } => match subcommand {
+            TaskSubcommand::Create {
+                title,
+                description,
+                stage,
+                tool,
+                model,
+                dest_repo,
+                dest_branch,
+            } => {
+                let stage = Stage::from_milestone_name(&stage.to_uppercase())
+                    .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", stage))?;
+                let tool = tool
+                    .map(|t| t.parse::<zbobr_dispatcher::Tool>())
+                    .transpose()
+                    .context("Invalid tool")?;
+                let model = model
+                    .map(|m| m.parse::<Model>())
+                    .transpose()
+                    .context("Invalid model")?;
+                let id = zbobr
+                    .create_task(
+                        &title,
+                        &description,
+                        stage,
+                        tool,
+                        model,
+                        dest_repo,
+                        dest_branch,
+                    )
+                    .await?;
+                println!("Created task #{}", id);
             }
-
-            let model_enum = model
-                .map(|m| m.parse::<Model>())
-                .transpose()
-                .context("Invalid model name")?;
-            run_role_session(
-                &zbobr,
-                task,
-                Role::Preparator,
-                model_enum,
-                port,
-                &full_prompt,
-                &claude_executor_config,
-                &copilot_executor_config,
-                &mcp_tester_executor_config,
-            )
-            .await?;
-        }
-        Command::Plan {
-            task,
-            model,
-            port,
-            show_prompt,
-        } => {
-            let base_prompt = load_prompts(&prompts.planner, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Planner);
-
-            if show_prompt {
-                println!("{}", full_prompt);
-                return Ok(());
+            TaskSubcommand::Show { id } => {
+                let task = zbobr.get_task(id).await?;
+                print_task(&task);
             }
-
-            let model_enum = model
-                .map(|m| m.parse::<Model>())
-                .transpose()
-                .context("Invalid model name")?;
-            run_role_session(
-                &zbobr,
-                task,
-                Role::Planner,
-                model_enum,
-                port,
-                &full_prompt,
-                &claude_executor_config,
-                &copilot_executor_config,
-                &mcp_tester_executor_config,
-            )
-            .await?;
-        }
-        Command::Work {
-            task,
-            model,
-            port,
-            show_prompt,
-        } => {
-            let base_prompt = load_prompts(&prompts.worker, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Worker);
-
-            if show_prompt {
-                println!("{}", full_prompt);
-                return Ok(());
+            TaskSubcommand::Update {
+                id,
+                title,
+                description,
+                stage,
+                tool,
+                model,
+            } => {
+                let stage = stage
+                    .map(|s| {
+                        Stage::from_milestone_name(&s.to_uppercase())
+                            .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", s))
+                    })
+                    .transpose()?;
+                let tool = tool
+                    .map(|t| t.parse::<zbobr_dispatcher::Tool>().context("Invalid tool"))
+                    .transpose()?;
+                let model = model
+                    .map(|m| m.parse::<Model>().context("Invalid model"))
+                    .transpose()?;
+                zbobr
+                    .modify_task(
+                        id,
+                        Box::new(move |mut task| {
+                            if let Some(t) = title {
+                                task.title = t;
+                            }
+                            if let Some(d) = description {
+                                task.description = d;
+                            }
+                            if let Some(s) = stage {
+                                task.stage = s;
+                            }
+                            if let Some(to) = tool {
+                                task.tool = Some(to);
+                            }
+                            if let Some(m) = model {
+                                task.model = Some(m);
+                            }
+                            task
+                        }),
+                    )
+                    .await?;
+                println!("Updated task #{}", id);
             }
-
-            let model_enum = model
-                .map(|m| m.parse::<Model>())
-                .transpose()
-                .context("Invalid model name")?;
-            run_role_session(
-                &zbobr,
-                task,
-                Role::Worker,
-                model_enum,
-                port,
-                &full_prompt,
-                &claude_executor_config,
-                &copilot_executor_config,
-                &mcp_tester_executor_config,
-            )
-            .await?;
-        }
-        Command::Review {
-            task,
-            model,
-            port,
-            show_prompt,
-        } => {
-            let base_prompt = load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Reviewer);
-
-            if show_prompt {
-                println!("{}", full_prompt);
-                return Ok(());
+            TaskSubcommand::Delete { id } => {
+                zbobr.close_task(id).await?;
+                println!("Deleted task #{}", id);
             }
-
-            let model_enum = model
-                .map(|m| m.parse::<Model>())
-                .transpose()
-                .context("Invalid model name")?;
-            run_role_session(
-                &zbobr,
+            TaskSubcommand::Prepare {
                 task,
-                Role::Reviewer,
-                model_enum,
+                model,
                 port,
-                &full_prompt,
-                &claude_executor_config,
-                &copilot_executor_config,
-                &mcp_tester_executor_config,
-            )
-            .await?;
-        }
-        Command::Merge {
-            task,
-            model,
-            port,
-            show_prompt,
-        } => {
-            let base_prompt = load_prompts(&prompts.merger, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Merger);
+                show_prompt,
+            } => {
+                let base_prompt = load_prompts(&prompts.preparator, prompts.base_path.as_ref())?;
+                let full_prompt = build_full_prompt(&base_prompt, Role::Preparator);
 
-            if show_prompt {
-                println!("{}", full_prompt);
-                return Ok(());
-            }
-
-            let model_enum = model
-                .map(|m| m.parse::<Model>())
-                .transpose()
-                .context("Invalid model name")?;
-            run_role_session(
-                &zbobr,
-                task,
-                Role::Merger,
-                model_enum,
-                port,
-                &full_prompt,
-                &claude_executor_config,
-                &copilot_executor_config,
-                &mcp_tester_executor_config,
-            )
-            .await?;
-        }
-        Command::Task { subcommand } => {
-            match subcommand {
-                TaskSubcommand::Create {
-                    title,
-                    description,
-                    stage,
-                    tool,
-                    model,
-                    dest_repo,
-                    dest_branch,
-                } => {
-                    let stage = Stage::from_milestone_name(&stage.to_uppercase())
-                        .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", stage))?;
-                    let tool = tool
-                        .map(|t| t.parse::<zbobr_dispatcher::Tool>())
-                        .transpose()
-                        .context("Invalid tool")?;
-                    let model = model
-                        .map(|m| m.parse::<Model>())
-                        .transpose()
-                        .context("Invalid model")?;
-                    let id = zbobr
-                        .create_task(&title, &description, stage, tool, model, dest_repo, dest_branch)
-                        .await?;
-                    println!("Created task #{}", id);
+                if show_prompt {
+                    println!("{}", full_prompt);
+                    return Ok(());
                 }
-                TaskSubcommand::Show { id } => {
-                    let task = zbobr.get_task(id).await?;
-                    print_task(&task);
-                }
-                TaskSubcommand::Update {
-                    id,
-                    title,
-                    description,
-                    stage,
-                    tool,
-                    model,
-                } => {
-                    let stage = stage
-                        .map(|s| {
-                            Stage::from_milestone_name(&s.to_uppercase())
-                                .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", s))
-                        })
-                        .transpose()?;
-                    let tool = tool
-                        .map(|t| t.parse::<zbobr_dispatcher::Tool>().context("Invalid tool"))
-                        .transpose()?;
-                    let model = model
-                        .map(|m| m.parse::<Model>().context("Invalid model"))
-                        .transpose()?;
-                    zbobr
-                        .modify_task(
-                            id,
-                            Box::new(move |mut task| {
-                                if let Some(t) = title {
-                                    task.title = t;
-                                }
-                                if let Some(d) = description {
-                                    task.description = d;
-                                }
-                                if let Some(s) = stage {
-                                    task.stage = s;
-                                }
-                                if let Some(to) = tool {
-                                    task.tool = Some(to);
-                                }
-                                if let Some(m) = model {
-                                    task.model = Some(m);
-                                }
-                                task
-                            }),
-                        )
-                        .await?;
-                    println!("Updated task #{}", id);
-                }
-                TaskSubcommand::Delete { id } => {
-                    zbobr.close_task(id).await?;
-                    println!("Deleted task #{}", id);
-                }
+
+                let model_enum = model
+                    .map(|m| m.parse::<Model>())
+                    .transpose()
+                    .context("Invalid model name")?;
+                run_role_session(
+                    &zbobr,
+                    task,
+                    Role::Preparator,
+                    model_enum,
+                    port,
+                    &full_prompt,
+                    &claude_executor_config,
+                    &copilot_executor_config,
+                    &mcp_tester_executor_config,
+                )
+                .await?;
             }
-        }
+            TaskSubcommand::Plan {
+                task,
+                model,
+                port,
+                show_prompt,
+            } => {
+                let base_prompt = load_prompts(&prompts.planner, prompts.base_path.as_ref())?;
+                let full_prompt = build_full_prompt(&base_prompt, Role::Planner);
+
+                if show_prompt {
+                    println!("{}", full_prompt);
+                    return Ok(());
+                }
+
+                let model_enum = model
+                    .map(|m| m.parse::<Model>())
+                    .transpose()
+                    .context("Invalid model name")?;
+                run_role_session(
+                    &zbobr,
+                    task,
+                    Role::Planner,
+                    model_enum,
+                    port,
+                    &full_prompt,
+                    &claude_executor_config,
+                    &copilot_executor_config,
+                    &mcp_tester_executor_config,
+                )
+                .await?;
+            }
+            TaskSubcommand::Work {
+                task,
+                model,
+                port,
+                show_prompt,
+            } => {
+                let base_prompt = load_prompts(&prompts.worker, prompts.base_path.as_ref())?;
+                let full_prompt = build_full_prompt(&base_prompt, Role::Worker);
+
+                if show_prompt {
+                    println!("{}", full_prompt);
+                    return Ok(());
+                }
+
+                let model_enum = model
+                    .map(|m| m.parse::<Model>())
+                    .transpose()
+                    .context("Invalid model name")?;
+                run_role_session(
+                    &zbobr,
+                    task,
+                    Role::Worker,
+                    model_enum,
+                    port,
+                    &full_prompt,
+                    &claude_executor_config,
+                    &copilot_executor_config,
+                    &mcp_tester_executor_config,
+                )
+                .await?;
+            }
+            TaskSubcommand::Review {
+                task,
+                model,
+                port,
+                show_prompt,
+            } => {
+                let base_prompt = load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?;
+                let full_prompt = build_full_prompt(&base_prompt, Role::Reviewer);
+
+                if show_prompt {
+                    println!("{}", full_prompt);
+                    return Ok(());
+                }
+
+                let model_enum = model
+                    .map(|m| m.parse::<Model>())
+                    .transpose()
+                    .context("Invalid model name")?;
+                run_role_session(
+                    &zbobr,
+                    task,
+                    Role::Reviewer,
+                    model_enum,
+                    port,
+                    &full_prompt,
+                    &claude_executor_config,
+                    &copilot_executor_config,
+                    &mcp_tester_executor_config,
+                )
+                .await?;
+            }
+            TaskSubcommand::Merge {
+                task,
+                model,
+                port,
+                show_prompt,
+            } => {
+                let base_prompt = load_prompts(&prompts.merger, prompts.base_path.as_ref())?;
+                let full_prompt = build_full_prompt(&base_prompt, Role::Merger);
+
+                if show_prompt {
+                    println!("{}", full_prompt);
+                    return Ok(());
+                }
+
+                let model_enum = model
+                    .map(|m| m.parse::<Model>())
+                    .transpose()
+                    .context("Invalid model name")?;
+                run_role_session(
+                    &zbobr,
+                    task,
+                    Role::Merger,
+                    model_enum,
+                    port,
+                    &full_prompt,
+                    &claude_executor_config,
+                    &copilot_executor_config,
+                    &mcp_tester_executor_config,
+                )
+                .await?;
+            }
+        },
         Command::Loop {
             interval,
             cleanup_interval,

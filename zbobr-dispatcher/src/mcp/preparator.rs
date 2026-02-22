@@ -141,6 +141,9 @@ mod tests {
         names.sort();
         let mut expected = crate::mcp::preparator_tools::ALL_TOOLS.to_vec();
         expected.sort();
-        assert_eq!(names, expected, "preparator tool router diverged from common list");
+        assert_eq!(
+            names, expected,
+            "preparator tool router diverged from common list"
+        );
     }
 }

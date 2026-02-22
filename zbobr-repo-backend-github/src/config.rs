@@ -24,10 +24,7 @@ impl ZbobrRepoBackendGithubConfig {
         let fork_owner = merged.fork_owner.unwrap_or(defaults.fork_owner);
         let token = merged.token.unwrap_or(defaults.token);
 
-        Self {
-            fork_owner,
-            token,
-        }
+        Self { fork_owner, token }
     }
 
     /// Validate that all required fields are set.

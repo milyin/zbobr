@@ -24,10 +24,7 @@ impl ZbobrTaskBackendGithubConfig {
         let task_repo = merged.task_repo.unwrap_or(defaults.task_repo);
         let token = merged.token.unwrap_or(defaults.token);
 
-        Self {
-            task_repo,
-            token,
-        }
+        Self { task_repo, token }
     }
 
     /// Validate that all required fields are set.

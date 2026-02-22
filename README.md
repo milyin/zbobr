@@ -92,8 +92,8 @@ cd copilot-zenoh
 
 # Run zbobr commands (automatically uses zbobr.toml config)
 zbobr loop                # Start the dispatcher loop
-zbobr plan 42            # Run planner on issue #42
-zbobr work 42            # Run worker on issue #42
+zbobr task plan 42        # Run planner on issue #42
+zbobr task work 42        # Run worker on issue #42
 ```
 
 Notes on TOML layout:
@@ -183,10 +183,10 @@ zbobr loop --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-o
 
 ```bash
 # Run planner on issue #42 (creates implementation plan)
-zbobr plan 42 --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-owner YoroolGui
+zbobr task plan 42 --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-owner YoroolGui
 
 # Run worker on issue #42 (implements the plan, creates PR)
-zbobr work 42 --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-owner YoroolGui
+zbobr task work 42 --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-owner YoroolGui
 ```
 
 ## Configuration

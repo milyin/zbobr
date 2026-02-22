@@ -129,6 +129,9 @@ mod tests {
         names.sort();
         let mut expected = crate::mcp::planner_tools::ALL_TOOLS.to_vec();
         expected.sort();
-        assert_eq!(names, expected, "planner tool router diverged from common list");
+        assert_eq!(
+            names, expected,
+            "planner tool router diverged from common list"
+        );
     }
 }

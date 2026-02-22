@@ -22,7 +22,10 @@ struct TestEnv {
     task_id: u64,
 }
 
-/// Return `(cli_subcommand, executor_flag_suffix)` for the given stage.
+/// Return `(subcommand, executor_flag_suffix)` for the given stage.
+///
+/// `subcommand` is the name of the nested task subcommand that runs a role
+/// session (e.g. "prepare").
 ///
 /// `executor_flag_suffix` is the part after `--executor-mcp-tester-` in the
 /// CLI flag, matching the field names in `ZbobrExecutorMcpTesterConfig`.
@@ -66,8 +69,10 @@ fn make_zbobr_config_args(tasks_dir: &Path, workspaces_dir: &Path) -> Vec<String
 /// flags plus a specific command and any additional arguments.
 ///
 /// This centralises the binary lookup, environment setup and execution so
-/// callers only need to provide the subcommand (`setup`, `prepare`, etc.) and
-/// whatever command‑specific flags follow it.
+/// callers only need to provide the top‑level command (e.g. `"setup"` or
+/// `"task"`) and whatever command‑specific flags follow it.  For role
+/// sessions the caller will push the secondary subcommand name onto
+/// `command_args`.
 async fn run_zbobr(
     tmp_path: &Path,
     tasks_dir: &Path,
@@ -202,11 +207,46 @@ async fn run_stage_test(env: &TestEnv, stage: Stage, scenario: String) {
     // Map every executor slot: the active stage gets the real scenario; all
     // others get the assert-false sentinel.
     let all_slots: &[(&str, &Path)] = &[
-        ("preparation", if flag_suffix == "preparation" { &scenario_path } else { af }),
-        ("planning",    if flag_suffix == "planning"    { &scenario_path } else { af }),
-        ("working",     if flag_suffix == "working"     { &scenario_path } else { af }),
-        ("reviewing",   if flag_suffix == "reviewing"   { &scenario_path } else { af }),
-        ("merging",     if flag_suffix == "merging"     { &scenario_path } else { af }),
+        (
+            "preparation",
+            if flag_suffix == "preparation" {
+                &scenario_path
+            } else {
+                af
+            },
+        ),
+        (
+            "planning",
+            if flag_suffix == "planning" {
+                &scenario_path
+            } else {
+                af
+            },
+        ),
+        (
+            "working",
+            if flag_suffix == "working" {
+                &scenario_path
+            } else {
+                af
+            },
+        ),
+        (
+            "reviewing",
+            if flag_suffix == "reviewing" {
+                &scenario_path
+            } else {
+                af
+            },
+        ),
+        (
+            "merging",
+            if flag_suffix == "merging" {
+                &scenario_path
+            } else {
+                af
+            },
+        ),
     ];
 
     // build the command-specific arguments: executor slots followed
@@ -219,7 +259,17 @@ async fn run_stage_test(env: &TestEnv, stage: Stage, scenario: String) {
     }
     cmd_args.push(env.task_id.to_string());
 
-    run_zbobr(&env.tmp_path, &env.tasks_dir, &env.workspaces_dir, command, cmd_args).await;
+    // the CLI now expects `zbobr task <subcommand> ...`
+    let mut full_args = vec![command.to_string()];
+    full_args.extend(cmd_args);
+    run_zbobr(
+        &env.tmp_path,
+        &env.tasks_dir,
+        &env.workspaces_dir,
+        "task",
+        full_args,
+    )
+    .await;
 }
 
 /// Integration test covering the Preparation and Planning stages.
@@ -234,6 +284,11 @@ async fn test_preparation_and_planning() {
         return;
     };
 
-    run_stage_test(&env, Stage::Preparation, preparator_comprehensive_scenario()).await;
+    run_stage_test(
+        &env,
+        Stage::Preparation,
+        preparator_comprehensive_scenario(),
+    )
+    .await;
     run_stage_test(&env, Stage::Planning, planner_comprehensive_scenario()).await;
 }

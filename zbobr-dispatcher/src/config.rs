@@ -4,7 +4,6 @@ use zbobr_utility::config_struct;
 
 use crate::task::Tool;
 
-
 /// Backend type to use.
 #[derive(
     Debug,
@@ -260,12 +259,9 @@ mod tests {
 
     #[test]
     fn build_with_env_missing_required() {
-        let config = ZbobrDispatcherConfig::build(
-            None,
-            ZbobrDispatcherArgs::default(),
-            &test_config_dir(),
-        )
-        .expect("build should succeed");
+        let config =
+            ZbobrDispatcherConfig::build(None, ZbobrDispatcherArgs::default(), &test_config_dir())
+                .expect("build should succeed");
         // validate() should fail because agent_github_token is missing
         assert!(config.validate().is_err());
     }
@@ -371,12 +367,9 @@ mod tests {
 
     #[test]
     fn build_defaults_without_toml() {
-        let config = ZbobrDispatcherConfig::build(
-            None,
-            ZbobrDispatcherArgs::default(),
-            &test_config_dir(),
-        )
-        .unwrap();
+        let config =
+            ZbobrDispatcherConfig::build(None, ZbobrDispatcherArgs::default(), &test_config_dir())
+                .unwrap();
         assert_eq!(config.backend, BackendType::GitHub);
         assert_eq!(config.cli_tool, Tool::Copilot);
         assert_eq!(config.work_branch_prefix, "zbobr_fix");

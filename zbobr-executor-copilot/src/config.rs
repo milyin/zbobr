@@ -22,7 +22,11 @@ impl ZbobrExecutorCopilotConfig {
         let copilot_github_token = std::env::var("COPILOT_GITHUB_TOKEN")
             .or_else(|_| std::env::var("GH_TOKEN"))
             .or_else(|_| std::env::var("GITHUB_TOKEN"))
-            .unwrap_or_else(|_| merged.copilot_github_token.unwrap_or(defaults.copilot_github_token.clone()));
+            .unwrap_or_else(|_| {
+                merged
+                    .copilot_github_token
+                    .unwrap_or(defaults.copilot_github_token.clone())
+            });
 
         Self {
             default_model,
@@ -51,7 +55,8 @@ mod tests {
             default_model: None,
             copilot_github_token: Some("from-toml".into()),
         };
-        let cfg = ZbobrExecutorCopilotConfig::build(Some(toml), ZbobrExecutorCopilotArgs::default());
+        let cfg =
+            ZbobrExecutorCopilotConfig::build(Some(toml), ZbobrExecutorCopilotArgs::default());
         assert_eq!(cfg.copilot_github_token, "from-env");
         env::remove_var("COPILOT_GITHUB_TOKEN");
     }

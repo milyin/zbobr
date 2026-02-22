@@ -185,6 +185,9 @@ mod tests {
         names.sort();
         let mut expected = crate::mcp::worker_tools::ALL_TOOLS.to_vec();
         expected.sort();
-        assert_eq!(names, expected, "worker tool router diverged from common list");
+        assert_eq!(
+            names, expected,
+            "worker tool router diverged from common list"
+        );
     }
 }
