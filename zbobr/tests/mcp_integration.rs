@@ -202,7 +202,7 @@ async fn setup_test_env() -> Option<TestEnv> {
             "task",
             &[
                 "create",
-                "--title",
+                // title is now a positional argument rather than a flag
                 "Dummy Task",
                 "--description",
                 "Dummy task description",
@@ -213,7 +213,13 @@ async fn setup_test_env() -> Option<TestEnv> {
         .await;
 
         // output should be like "Created task #123"; parse the number.
-        let line = output.lines().next().unwrap_or_default();
+        // `tracing` info logs are written to stdout, so the first line may not be
+        // the one we care about.  Find the line that actually starts with our
+        // expected prefix.
+        let line = output
+            .lines()
+            .find(|l| l.trim().starts_with("Created task #"))
+            .unwrap_or_default();
         line.trim()
             .strip_prefix("Created task #")
             .and_then(|s| s.parse::<u64>().ok())
