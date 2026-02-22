@@ -155,6 +155,14 @@ impl Zbobr {
         self.task_backend.is_task_closed(id).await
     }
 
+    pub async fn modify_task(
+        &self,
+        id: u64,
+        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
+    ) -> anyhow::Result<()> {
+        self.task_backend.modify_task(id, mutate).await
+    }
+
     pub async fn setup_repository(&self, force: bool) -> anyhow::Result<()> {
         tokio::fs::create_dir_all(&self.config.workspaces)
             .await

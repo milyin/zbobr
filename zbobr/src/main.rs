@@ -157,6 +157,68 @@ enum Command {
         #[arg(long)]
         show_prompt: bool,
     },
+    /// Manage tasks (create, show, update, delete)
+    Task {
+        #[command(subcommand)]
+        subcommand: TaskSubcommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum TaskSubcommand {
+    /// Create a new task
+    Create {
+        /// Task title
+        title: String,
+        /// Task description
+        #[arg(long, default_value = "")]
+        description: String,
+        /// Initial stage (PENDING, GO_PREPARATION, etc.; default: PENDING)
+        #[arg(long, default_value = "PENDING")]
+        stage: String,
+        /// AI tool to assign (copilot, claude, mcp-tester)
+        #[arg(long)]
+        tool: Option<String>,
+        /// AI model to assign (e.g. "claude-3-5-sonnet")
+        #[arg(long)]
+        model: Option<String>,
+        /// Destination repository in owner/repo format
+        #[arg(long)]
+        dest_repo: Option<String>,
+        /// Destination branch
+        #[arg(long)]
+        dest_branch: Option<String>,
+    },
+    /// Show a task by ID
+    Show {
+        /// Task ID
+        id: u64,
+    },
+    /// Update fields of an existing task
+    Update {
+        /// Task ID
+        id: u64,
+        /// New title
+        #[arg(long)]
+        title: Option<String>,
+        /// New description
+        #[arg(long)]
+        description: Option<String>,
+        /// New stage (PENDING, GO_PREPARATION, etc.)
+        #[arg(long)]
+        stage: Option<String>,
+        /// New AI tool (copilot, claude, mcp-tester)
+        #[arg(long)]
+        tool: Option<String>,
+        /// New AI model
+        #[arg(long)]
+        model: Option<String>,
+    },
+    /// Delete (close) a task by ID
+    Delete {
+        /// Task ID
+        id: u64,
+    },
 }
 
 /// Resolved prompt file paths for planner, worker, and merger.
@@ -295,6 +357,39 @@ fn build_full_prompt(user_context: &str, role: Role) -> String {
             "{}\n\n---\n\n{}\n\n---\n\n{}",
             hardcoded, user_context, api_docs
         )
+    }
+}
+
+/// Print a task to stdout in a human-readable format.
+fn print_task(task: &zbobr_dispatcher::Task) {
+    println!("ID:          {}", task.id);
+    println!("Title:       {}", task.title);
+    println!("Stage:       {}", task.stage);
+    println!("Tool:        {}", task.tool.map(|t| t.to_string()).unwrap_or_else(|| "(none)".to_string()));
+    println!("Model:       {}", task.model.as_ref().map(|m| m.to_string()).unwrap_or_else(|| "(none)".to_string()));
+    println!("Signal:      {}", task.signal.map(|s| s.to_string()).unwrap_or_else(|| "(none)".to_string()));
+    println!("Done:        {}", task.done);
+    if !task.parameters.is_empty() {
+        println!("Parameters:");
+        for (k, v) in &task.parameters {
+            println!("  {}: {}", k.name(), v);
+        }
+    }
+    if !task.description.is_empty() {
+        println!("Description:\n{}", task.description);
+    }
+    if !task.plan.is_empty() {
+        println!("Plan:\n{}", task.plan);
+    }
+    if !task.checklist.is_empty() {
+        println!("Checklist:");
+        for item in &task.checklist {
+            let mark = if item.checked { "[x]" } else { "[ ]" };
+            println!("  {} {}", mark, item.text);
+        }
+    }
+    if !task.discussion.is_empty() {
+        println!("Discussion ({} comment(s))", task.discussion.len());
     }
 }
 
@@ -675,6 +770,87 @@ async fn main() -> anyhow::Result<()> {
                 &mcp_tester_executor_config,
             )
             .await?;
+        }
+        Command::Task { subcommand } => {
+            match subcommand {
+                TaskSubcommand::Create {
+                    title,
+                    description,
+                    stage,
+                    tool,
+                    model,
+                    dest_repo,
+                    dest_branch,
+                } => {
+                    let stage = Stage::from_milestone_name(&stage.to_uppercase())
+                        .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", stage))?;
+                    let tool = tool
+                        .map(|t| t.parse::<zbobr_dispatcher::Tool>())
+                        .transpose()
+                        .context("Invalid tool")?;
+                    let model = model
+                        .map(|m| m.parse::<Model>())
+                        .transpose()
+                        .context("Invalid model")?;
+                    let id = zbobr
+                        .create_task(&title, &description, stage, tool, model, dest_repo, dest_branch)
+                        .await?;
+                    println!("Created task #{}", id);
+                }
+                TaskSubcommand::Show { id } => {
+                    let task = zbobr.get_task(id).await?;
+                    print_task(&task);
+                }
+                TaskSubcommand::Update {
+                    id,
+                    title,
+                    description,
+                    stage,
+                    tool,
+                    model,
+                } => {
+                    let stage = stage
+                        .map(|s| {
+                            Stage::from_milestone_name(&s.to_uppercase())
+                                .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", s))
+                        })
+                        .transpose()?;
+                    let tool = tool
+                        .map(|t| t.parse::<zbobr_dispatcher::Tool>().context("Invalid tool"))
+                        .transpose()?;
+                    let model = model
+                        .map(|m| m.parse::<Model>().context("Invalid model"))
+                        .transpose()?;
+                    zbobr
+                        .modify_task(
+                            id,
+                            Box::new(move |mut task| {
+                                if let Some(t) = title {
+                                    task.title = t;
+                                }
+                                if let Some(d) = description {
+                                    task.description = d;
+                                }
+                                if let Some(s) = stage {
+                                    task.stage = s;
+                                }
+                                if let Some(to) = tool {
+                                    task.tool = Some(to);
+                                }
+                                if let Some(m) = model {
+                                    task.model = Some(m);
+                                }
+                                task
+                            }),
+                        )
+                        .await?;
+                    println!("Updated task #{}", id);
+                }
+                TaskSubcommand::Delete { id } => {
+                    zbobr.close_task(id).await?;
+                    println!("Deleted task #{}", id);
+                }
+            }
         }
         Command::Loop {
             interval,
