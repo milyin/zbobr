@@ -78,14 +78,15 @@ async fn run_zbobr(
     tasks_dir: &Path,
     workspaces_dir: &Path,
     command: &str,
-    mut command_args: Vec<String>,
+    command_args: &[&str],
 ) {
     let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
     let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
 
     let mut args = make_zbobr_config_args(tasks_dir, workspaces_dir);
     args.push(command.to_string());
-    args.append(&mut command_args);
+    // convert the slice of &str to owned Strings and extend the argument list
+    args.extend(command_args.iter().map(|s| s.to_string()));
 
     let status = tokio::process::Command::new(zbobr_bin)
         .args(&args)
@@ -113,14 +114,14 @@ async fn run_zbobr_capture(
     tasks_dir: &Path,
     workspaces_dir: &Path,
     command: &str,
-    mut command_args: Vec<String>,
+    command_args: &[&str],
 ) -> String {
     let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
     let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
 
     let mut args = make_zbobr_config_args(tasks_dir, workspaces_dir);
     args.push(command.to_string());
-    args.append(&mut command_args);
+    args.extend(command_args.iter().map(|s| s.to_string()));
 
     let output = tokio::process::Command::new(zbobr_bin)
         .args(&args)
@@ -146,7 +147,7 @@ async fn run_zbobr_setup(
     tasks_dir: &std::path::Path,
     workspaces_dir: &std::path::Path,
 ) {
-    run_zbobr(tmp_path, tasks_dir, workspaces_dir, "setup", Vec::new()).await;
+    run_zbobr(tmp_path, tasks_dir, workspaces_dir, "setup", &[]).await;
 }
 
 /// Create the shared directory layout and task, writing the assert-false
@@ -199,14 +200,14 @@ async fn setup_test_env() -> Option<TestEnv> {
             &tasks_dir,
             &workspaces_dir,
             "task",
-            vec![
-                "create".to_string(),
-                "--title".to_string(),
-                "Dummy Task".to_string(),
-                "--description".to_string(),
-                "Dummy task description".to_string(),
-                "--stage".to_string(),
-                "preparation".to_string(),
+            &[
+                "create",
+                "--title",
+                "Dummy Task",
+                "--description",
+                "Dummy task description",
+                "--stage",
+                "preparation",
             ],
         )
         .await;
@@ -303,14 +304,20 @@ async fn run_stage_test(env: &TestEnv, stage: Stage, scenario: String) {
     cmd_args.push(env.task_id.to_string());
 
     // the CLI now expects `zbobr task <subcommand> ...`
-    let mut full_args = vec![command.to_string()];
-    full_args.extend(cmd_args);
+    // convert the dynamically constructed `cmd_args` (which are owned
+    // strings) into a temporary vector of string slices for the helper call.
+    let mut full_args_vec = Vec::with_capacity(1 + cmd_args.len());
+    full_args_vec.push(command);
+    for arg in &cmd_args {
+        full_args_vec.push(arg.as_str());
+    }
+
     run_zbobr(
         &env.tmp_path,
         &env.tasks_dir,
         &env.workspaces_dir,
         "task",
-        full_args,
+        &full_args_vec,
     )
     .await;
 }
