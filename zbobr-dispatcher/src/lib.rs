@@ -156,6 +156,19 @@ impl Zbobr {
     }
 
     pub async fn setup_repository(&self, force: bool) -> anyhow::Result<()> {
+        tokio::fs::create_dir_all(&self.config.workspaces)
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to create workspaces directory '{}': {}",
+                    self.config.workspaces.display(),
+                    e
+                )
+            })?;
+        tracing::info!(
+            "Workspaces directory ready: {}",
+            self.config.workspaces.display()
+        );
         self.task_backend.setup(force).await
     }
 

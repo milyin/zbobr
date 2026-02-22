@@ -37,6 +37,36 @@ fn stage_meta(stage: Stage) -> (&'static str, &'static str) {
     }
 }
 
+/// Run `zbobr setup` to initialise the tasks and workspaces directories.
+async fn run_zbobr_setup(
+    tmp_path: &std::path::Path,
+    tasks_dir: &std::path::Path,
+    workspaces_dir: &std::path::Path,
+) {
+    let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+    let status = tokio::process::Command::new(zbobr_bin)
+        .args([
+            "--dispatcher-workspaces",         &workspaces_dir.to_string_lossy(),
+            "--tasks-fs-tasks-dir",            &tasks_dir.to_string_lossy(),
+            "--dispatcher-backend",            "filesystem",
+            "--dispatcher-cli-tool",           "mcp-tester",
+            "--dispatcher-agent-github-token", "dummy-not-used",
+            "--dispatcher-git-user-name",      "test-bot",
+            "--dispatcher-git-user-email",     "test@example.com",
+            "setup",
+        ])
+        .current_dir(tmp_path)
+        .env("RUST_LOG", &rust_log)
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .await
+        .expect("failed to run zbobr setup");
+
+    assert!(status.success(), "zbobr setup failed");
+}
+
 /// Create the shared directory layout and task, writing the assert-false
 /// sentinel scenario file.  Returns `None` when `mcp-tester` is not
 /// installed so the caller can skip gracefully.
@@ -57,11 +87,13 @@ async fn setup_test_env() -> Option<TestEnv> {
     let scenarios_dir = tmp_path.join("scenarios");
     let workspaces_dir = tmp_path.join("workspaces");
 
-    for dir in [&tasks_dir, &scenarios_dir, &workspaces_dir] {
-        tokio::fs::create_dir_all(dir)
-            .await
-            .expect("failed to create directory");
-    }
+    // Use zbobr setup command to create tasks and workspaces directories.
+    run_zbobr_setup(&tmp_path, &tasks_dir, &workspaces_dir).await;
+
+    // Create the scenarios directory (test-specific, not managed by zbobr).
+    tokio::fs::create_dir_all(&scenarios_dir)
+        .await
+        .expect("failed to create scenarios directory");
 
     // Write the permanent sentinel scenario once.
     let assert_false_path = scenarios_dir.join("assert_false.yml");
