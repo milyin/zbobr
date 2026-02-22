@@ -120,6 +120,15 @@ enum TaskSubcommand {
         #[arg(long)]
         dest_branch: Option<String>,
     },
+    /// List existing tasks (optionally filter by stage or tool)
+    List {
+        /// Only show tasks in this stage (PENDING, GO_PREPARATION, etc.)
+        #[arg(long)]
+        stage: Option<String>,
+        /// Only show tasks assigned to this tool (copilot, claude, mcp-tester)
+        #[arg(long)]
+        tool: Option<String>,
+    },
     /// Show a task by ID
     Show {
         /// Task ID
@@ -665,6 +674,56 @@ async fn main() -> anyhow::Result<()> {
                     )
                     .await?;
                 println!("Created task #{}", id);
+            }
+            TaskSubcommand::List { stage, tool } => {
+                let stage_filter: Option<Stage> = if let Some(s) = stage {
+                    Some(
+                        Stage::from_milestone_name(&s.to_uppercase())
+                            .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", s))?,
+                    )
+                } else {
+                    None
+                };
+                let tool_filter: Option<zbobr_dispatcher::Tool> = if let Some(t) = tool {
+                    Some(t.parse::<zbobr_dispatcher::Tool>()?)
+                } else {
+                    None
+                };
+
+                let mut tasks = Vec::new();
+                if let Some(stage) = stage_filter {
+                    tasks = zbobr.list_tasks_by_stage(stage, tool_filter).await?;
+                } else {
+                    // iterate all stages if no specific stage provided
+                    let all_stages = [
+                        Stage::Pending,
+                        Stage::GoPreparation,
+                        Stage::Preparation,
+                        Stage::GoPlanning,
+                        Stage::Planning,
+                        Stage::GoWorking,
+                        Stage::Working,
+                        Stage::GoReviewing,
+                        Stage::Reviewing,
+                        Stage::GoMerging,
+                        Stage::Merging,
+                    ];
+                    for st in all_stages {
+                        let mut ts = zbobr.list_tasks_by_stage(st, tool_filter).await?;
+                        tasks.append(&mut ts);
+                    }
+                    // sort by ID for deterministic order
+                    tasks.sort_by_key(|t| t.id);
+                }
+
+                if tasks.is_empty() {
+                    println!("No tasks found");
+                } else {
+                    for task in &tasks {
+                        print_task(task);
+                        println!("---");
+                    }
+                }
             }
             TaskSubcommand::Show { id } => {
                 let task = zbobr.get_task(id).await?;
@@ -1490,5 +1549,45 @@ mod tests {
         // clap validation runs during command construction; any duplicates
         // will trigger a panic and therefore fail this test.
         let _ = Cli::command();
+    }
+
+    #[test]
+    fn task_list_parsing() {
+        let cli = Cli::parse_from([
+            "zbobr",
+            "task",
+            "list",
+            "--stage",
+            "pending",
+            "--tool",
+            "claude",
+        ]);
+        if let Command::Task { subcommand } = cli.command {
+            match subcommand {
+                TaskSubcommand::List { stage, tool } => {
+                    assert_eq!(stage.as_deref(), Some("pending"));
+                    assert_eq!(tool.as_deref(), Some("claude"));
+                }
+                _ => panic!("expected List subcommand"),
+            }
+        } else {
+            panic!("expected Task command");
+        }
+    }
+
+    #[test]
+    fn task_list_empty_filters() {
+        let cli = Cli::parse_from(["zbobr", "task", "list"]);
+        if let Command::Task { subcommand } = cli.command {
+            match subcommand {
+                TaskSubcommand::List { stage, tool } => {
+                    assert!(stage.is_none());
+                    assert!(tool.is_none());
+                }
+                _ => panic!("expected List subcommand"),
+            }
+        } else {
+            panic!("expected Task command");
+        }
     }
 }

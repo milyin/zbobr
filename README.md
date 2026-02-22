@@ -92,6 +92,9 @@ cd copilot-zenoh
 
 # Run zbobr commands (automatically uses zbobr.toml config)
 zbobr loop                # Start the dispatcher loop
+zbobr task list           # Show all tasks
+zbobr task list --stage PENDING   # Filter tasks by stage
+zbobr task list --tool copilot   # Filter tasks by tool
 zbobr task plan 42        # Run planner on issue #42
 zbobr task work 42        # Run worker on issue #42
 ```
