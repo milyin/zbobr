@@ -314,8 +314,9 @@ pub(crate) async fn serve_mcp(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashSet;
+
+    use super::*;
 
     // exercise port binder under concurrent load – each spawned task should
     // return a distinct port and hold onto the listener until the end of the

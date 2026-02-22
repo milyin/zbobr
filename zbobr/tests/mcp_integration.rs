@@ -214,8 +214,7 @@ async fn setup_test_env() -> Option<TestEnv> {
 
         // output should be like "Created task #123"; parse the number.
         let line = output.lines().next().unwrap_or_default();
-        line
-            .trim()
+        line.trim()
             .strip_prefix("Created task #")
             .and_then(|s| s.parse::<u64>().ok())
             .expect("failed to parse task id from zbobr output")
@@ -303,14 +302,13 @@ async fn run_stage_test(env: &TestEnv, stage: Stage, scenario: String) {
     }
     cmd_args.push(env.task_id.to_string());
 
-    // the CLI now expects `zbobr task <subcommand> ...`
-    // convert the dynamically constructed `cmd_args` (which are owned
-    // strings) into a temporary vector of string slices for the helper call.
-    let mut full_args_vec = Vec::with_capacity(1 + cmd_args.len());
-    full_args_vec.push(command);
-    for arg in &cmd_args {
-        full_args_vec.push(arg.as_str());
-    }
+    // the CLI now expects `zbobr task <subcommand> ...`.
+    // convert the dynamically constructed `cmd_args` (owned strings) into
+    // a temporary vector of string slices for the helper call. We can
+    // build the vector in one go using an iterator and `map`.
+    let full_args_vec: Vec<&str> = std::iter::once(command)
+        .chain(cmd_args.iter().map(|s| s.as_str()))
+        .collect();
 
     run_zbobr(
         &env.tmp_path,

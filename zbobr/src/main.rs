@@ -1554,13 +1554,7 @@ mod tests {
     #[test]
     fn task_list_parsing() {
         let cli = Cli::parse_from([
-            "zbobr",
-            "task",
-            "list",
-            "--stage",
-            "pending",
-            "--tool",
-            "claude",
+            "zbobr", "task", "list", "--stage", "pending", "--tool", "claude",
         ]);
         if let Command::Task { subcommand } = cli.command {
             match subcommand {

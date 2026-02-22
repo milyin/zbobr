@@ -1,6 +1,8 @@
 use super::*;
-use crate::Zbobr;
-use crate::task::{Model, Tool};
+use crate::{
+    Zbobr,
+    task::{Model, Tool},
+};
 
 struct StubTaskBackend;
 

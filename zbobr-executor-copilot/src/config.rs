@@ -37,8 +37,9 @@ impl ZbobrExecutorCopilotConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::env;
+
+    use super::*;
 
     #[test]
     fn build_uses_default_model_and_empty_token() {
