@@ -37,34 +37,76 @@ fn stage_meta(stage: Stage) -> (&'static str, &'static str) {
     }
 }
 
-/// Run `zbobr setup` to initialise the tasks and workspaces directories.
-async fn run_zbobr_setup(
-    tmp_path: &std::path::Path,
-    tasks_dir: &std::path::Path,
-    workspaces_dir: &std::path::Path,
+/// Construct the common command-line arguments used by tests.
+///
+/// Every `zbobr` invocation in this module needs the same set of configuration
+/// flags (paths for the dispatcher, the cli tool, git user information, etc.).
+/// This helper builds and returns that list so callers can append the stage-
+/// specific pieces (`setup`, executor flags, task ID, …) without repeating
+/// themselves.
+fn make_zbobr_config_args(tasks_dir: &Path, workspaces_dir: &Path) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut push = |flag: &str, val: &str| {
+        args.push(flag.to_string());
+        args.push(val.to_string());
+    };
+
+    push("--dispatcher-workspaces", &workspaces_dir.to_string_lossy());
+    push("--tasks-fs-tasks-dir", &tasks_dir.to_string_lossy());
+    push("--dispatcher-backend", "filesystem");
+    push("--dispatcher-cli-tool", "mcp-tester");
+    push("--dispatcher-agent-github-token", "dummy-not-used");
+    push("--dispatcher-git-user-name", "test-bot");
+    push("--dispatcher-git-user-email", "test@example.com");
+
+    args
+}
+
+/// Execute the `zbobr` binary using the standard test configuration
+/// flags plus a specific command and any additional arguments.
+///
+/// This centralises the binary lookup, environment setup and execution so
+/// callers only need to provide the subcommand (`setup`, `prepare`, etc.) and
+/// whatever command‑specific flags follow it.
+async fn run_zbobr(
+    tmp_path: &Path,
+    tasks_dir: &Path,
+    workspaces_dir: &Path,
+    command: &str,
+    mut command_args: Vec<String>,
 ) {
     let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
     let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+
+    let mut args = make_zbobr_config_args(tasks_dir, workspaces_dir);
+    args.push(command.to_string());
+    args.append(&mut command_args);
+
     let status = tokio::process::Command::new(zbobr_bin)
-        .args([
-            "--dispatcher-workspaces",         &workspaces_dir.to_string_lossy(),
-            "--tasks-fs-tasks-dir",            &tasks_dir.to_string_lossy(),
-            "--dispatcher-backend",            "filesystem",
-            "--dispatcher-cli-tool",           "mcp-tester",
-            "--dispatcher-agent-github-token", "dummy-not-used",
-            "--dispatcher-git-user-name",      "test-bot",
-            "--dispatcher-git-user-email",     "test@example.com",
-            "setup",
-        ])
+        .args(&args)
         .current_dir(tmp_path)
         .env("RUST_LOG", &rust_log)
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .status()
         .await
-        .expect("failed to run zbobr setup");
+        .expect("failed to run zbobr");
 
-    assert!(status.success(), "zbobr setup failed");
+    assert!(
+        status.success(),
+        "zbobr {} failed with exit code {:?}",
+        command,
+        status.code(),
+    );
+}
+
+/// Run `zbobr setup` to initialise the tasks and workspaces directories.
+async fn run_zbobr_setup(
+    tmp_path: &std::path::Path,
+    tasks_dir: &std::path::Path,
+    workspaces_dir: &std::path::Path,
+) {
+    run_zbobr(tmp_path, tasks_dir, workspaces_dir, "setup", Vec::new()).await;
 }
 
 /// Create the shared directory layout and task, writing the assert-false
@@ -167,49 +209,17 @@ async fn run_stage_test(env: &TestEnv, stage: Stage, scenario: String) {
         ("merging",     if flag_suffix == "merging"     { &scenario_path } else { af }),
     ];
 
-    let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
-
-    let mut args: Vec<String> = Vec::new();
-    let mut push = |flag: &str, val: &str| {
-        args.push(flag.to_string());
-        args.push(val.to_string());
-    };
-
-    push("--dispatcher-workspaces",         &env.workspaces_dir.to_string_lossy());
-    push("--tasks-fs-tasks-dir",            &env.tasks_dir.to_string_lossy());
-    push("--dispatcher-backend",            "filesystem");
-    push("--dispatcher-cli-tool",           "mcp-tester");
-    push("--dispatcher-agent-github-token", "dummy-not-used");
-    push("--dispatcher-git-user-name",      "test-bot");
-    push("--dispatcher-git-user-email",     "test@example.com");
-
+    // build the command-specific arguments: executor slots followed
+    // by the task id.  `run_zbobr` will take care of the common flags and
+    // actual execution.
+    let mut cmd_args = Vec::new();
     for (slot, path) in all_slots {
-        push(
-            &format!("--executor-mcp-tester-{slot}"),
-            &path.to_string_lossy(),
-        );
+        cmd_args.push(format!("--executor-mcp-tester-{slot}"));
+        cmd_args.push(path.to_string_lossy().to_string());
     }
+    cmd_args.push(env.task_id.to_string());
 
-    args.push(command.to_string());
-    args.push(env.task_id.to_string());
-
-    let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
-    let status = tokio::process::Command::new(zbobr_bin)
-        .args(&args)
-        .current_dir(&env.tmp_path)
-        .env("RUST_LOG", &rust_log)
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .status()
-        .await
-        .expect("failed to run zbobr binary");
-
-    assert!(
-        status.success(),
-        "zbobr {} failed with exit code {:?}",
-        command,
-        status.code(),
-    );
+    run_zbobr(&env.tmp_path, &env.tasks_dir, &env.workspaces_dir, command, cmd_args).await;
 }
 
 /// Integration test covering the Preparation and Planning stages.
