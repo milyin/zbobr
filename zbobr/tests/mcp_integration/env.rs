@@ -210,6 +210,15 @@ impl IntegrationTestEnv {
         )
         .await
     }
+
+    /// Create a scenario file and return its path.
+    pub async fn create_scenario(&self, name: &str, content: &str) -> String {
+        let scenarios_dir = self.base_path.join("scenarios");
+        tokio::fs::create_dir_all(&scenarios_dir).await.expect("failed to create scenarios directory");
+        let scenario_path = scenarios_dir.join(format!("{name}.yml"));
+        tokio::fs::write(&scenario_path, content).await.expect("failed to write scenario");
+        scenario_path.to_string_lossy().to_string()
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -165,6 +165,9 @@ enum TaskSubcommand {
         /// Pass `--work-branch` without a value to delete the parameter.
         #[arg(long, num_args = 0..=1)]
         work_branch: Option<Option<String>>,
+        /// New signal (go_preparation, go_planning, etc.)
+        #[arg(long)]
+        signal: Option<String>,
     },
     /// Delete (close) a task by ID
     Delete {
@@ -251,6 +254,21 @@ enum TaskSubcommand {
         /// Port for the MCP server when role execution is needed
         #[arg(long, default_value = "3000")]
         port: u16,
+        /// MCP tester scenario file for preparation role
+        #[arg(long)]
+        executor_mcp_tester_preparation: Option<PathBuf>,
+        /// MCP tester scenario file for planning role
+        #[arg(long)]
+        executor_mcp_tester_planning: Option<PathBuf>,
+        /// MCP tester scenario file for working role
+        #[arg(long)]
+        executor_mcp_tester_working: Option<PathBuf>,
+        /// MCP tester scenario file for reviewing role
+        #[arg(long)]
+        executor_mcp_tester_reviewing: Option<PathBuf>,
+        /// MCP tester scenario file for merging role
+        #[arg(long)]
+        executor_mcp_tester_merging: Option<PathBuf>,
     },
 }
 
@@ -760,6 +778,7 @@ async fn main() -> anyhow::Result<()> {
                 dest_repo,
                 dest_branch,
                 work_branch,
+                signal,
             } => {
                 let stage = stage
                     .map(|s| {
@@ -772,6 +791,9 @@ async fn main() -> anyhow::Result<()> {
                     .transpose()?;
                 let model = model
                     .map(|m| m.parse::<Model>().context("Invalid model"))
+                    .transpose()?;
+                let signal = signal
+                    .map(|s| s.parse::<zbobr_dispatcher::Signal>().context("Invalid signal"))
                     .transpose()?;
                 zbobr
                     .modify_task(
@@ -791,6 +813,9 @@ async fn main() -> anyhow::Result<()> {
                             }
                             if let Some(m) = model {
                                 task.model = Some(m);
+                            }
+                            if let Some(s) = signal {
+                                task.signal = Some(s);
                             }
                             if let Some(repo) = dest_repo {
                                 match repo {
@@ -987,12 +1012,40 @@ async fn main() -> anyhow::Result<()> {
                 )
                 .await?;
             }
-            TaskSubcommand::Process { task, model, port } => {
+            TaskSubcommand::Process {
+                task,
+                model,
+                port,
+                executor_mcp_tester_preparation,
+                executor_mcp_tester_planning,
+                executor_mcp_tester_working,
+                executor_mcp_tester_reviewing,
+                executor_mcp_tester_merging,
+            } => {
                 let model_enum = model
                     .map(|m| m.parse::<Model>())
                     .transpose()
                     .context("Invalid model name")?;
                 let task_obj = zbobr.get_task(task).await?;
+                let mcp_tester_config_override = if executor_mcp_tester_preparation.is_some()
+                    || executor_mcp_tester_planning.is_some()
+                    || executor_mcp_tester_working.is_some()
+                    || executor_mcp_tester_reviewing.is_some()
+                    || executor_mcp_tester_merging.is_some()
+                {
+                    Some(ZbobrExecutorMcpTesterConfig {
+                        preparation: executor_mcp_tester_preparation,
+                        planning: executor_mcp_tester_planning,
+                        working: executor_mcp_tester_working,
+                        reviewing: executor_mcp_tester_reviewing,
+                        merging: executor_mcp_tester_merging,
+                    })
+                } else {
+                    None
+                };
+                let effective_mcp_tester_config = mcp_tester_config_override
+                    .as_ref()
+                    .unwrap_or(&mcp_tester_executor_config);
                 process_task_by_stage(
                     &zbobr,
                     &task_obj,
@@ -1001,7 +1054,7 @@ async fn main() -> anyhow::Result<()> {
                     &prompts,
                     &claude_executor_config,
                     &copilot_executor_config,
-                    &mcp_tester_executor_config,
+                    effective_mcp_tester_config,
                 )
                 .await?;
             }
@@ -1191,7 +1244,7 @@ async fn run_role_session(
                 if matches!(
                     role,
                     Role::Preparator | Role::Worker | Role::Reviewer | Role::Merger
-                ) && let Err(e) = session.set_signal(next_signal).await
+                ) && zbobr.get_task(task_id).await.unwrap().signal.is_none() && let Err(e) = session.set_signal(next_signal).await
                 {
                     tracing::error!(
                         "Failed to set follow-up signal for task {} after session: {e}",
@@ -1594,7 +1647,16 @@ mod tests {
 
         if let Command::Task { subcommand } = cli.command {
             match subcommand {
-                TaskSubcommand::Process { task, model, port } => {
+                TaskSubcommand::Process {
+                    task,
+                    model,
+                    port,
+                    executor_mcp_tester_preparation: _,
+                    executor_mcp_tester_planning: _,
+                    executor_mcp_tester_working: _,
+                    executor_mcp_tester_reviewing: _,
+                    executor_mcp_tester_merging: _,
+                } => {
                     assert_eq!(task, 42);
                     assert_eq!(model.as_deref(), Some("gpt-5-mini"));
                     assert_eq!(port, 3000);

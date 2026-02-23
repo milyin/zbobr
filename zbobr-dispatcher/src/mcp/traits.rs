@@ -98,6 +98,38 @@ pub trait CommonMcpImpl: Send + Sync {
         "Results reported successfully".to_string()
     }
 
+    async fn ask_user_impl(&self, message: &str) -> String {
+        tracing::info!(
+            "[{}#{}] ask_user",
+            self.role_name(),
+            self.session().task_id()
+        );
+        let hostname = get_hostname();
+
+        if let Err(e) = self
+            .session()
+            .post_message(message, self.role().as_str(), &hostname)
+            .await
+        {
+            tracing::error!(
+                "Failed to post ask_user message for task {}: {e}",
+                self.session().task_id()
+            );
+            return format!("Error posting ask_user message: {e}");
+        }
+
+        // Signal to pause task processing and wait for user response
+        if let Err(e) = self.session().set_signal(crate::Signal::GoAsk).await {
+            tracing::error!(
+                "Failed to set signal GoAsk for task {} after asking user: {e}",
+                self.session().task_id()
+            );
+            return format!("Error asking user but error pausing task: {e}");
+        }
+
+        "User asked for guidance".to_string()
+    }
+
     async fn get_plan_impl(&self) -> String {
         tracing::info!(
             "[{}#{}] get_plan",
@@ -391,33 +423,6 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
         self.get_param_impl(Parameter::WorkBranch).await
     }
 
-    async fn ask_user_impl(&self, message: &str) -> String {
-        tracing::info!("[worker#{}] ask_user", self.session().task_id());
-        let hostname = get_hostname();
-
-        if let Err(e) = self
-            .session()
-            .post_message(message, self.role().as_str(), &hostname)
-            .await
-        {
-            tracing::error!(
-                "Failed to post worker message for task {}: {e}",
-                self.session().task_id()
-            );
-            return format!("Error posting message: {e}");
-        }
-
-        // Signal to pause task processing and wait for user response
-        if let Err(e) = self.session().set_signal(crate::Signal::GoAsk).await {
-            tracing::error!(
-                "Failed to set signal GoAsk for task {} after ask_user: {e}",
-                self.session().task_id()
-            );
-            return format!("Question posted but error pausing task: {e}");
-        }
-        "Message posted to user - task paused pending response".to_string()
-    }
-
     async fn ask_planner_impl(&self, message: &str) -> String {
         tracing::info!("[worker#{}] ask_planner", self.session().task_id());
         let hostname = get_hostname();
@@ -516,33 +521,5 @@ pub trait MergerMcpImpl: CommonMcpImpl {
             Ok(()) => "Merged conflicts pushed successfully".to_string(),
             Err(e) => format!("Error: {e}"),
         }
-    }
-
-    async fn ask_user_impl(&self, message: &str) -> String {
-        tracing::info!("[merger#{}] ask_user", self.session().task_id());
-        let hostname = get_hostname();
-
-        if let Err(e) = self
-            .session()
-            .post_message(message, self.role().as_str(), &hostname)
-            .await
-        {
-            tracing::error!(
-                "Failed to post merger message for task {}: {e}",
-                self.session().task_id()
-            );
-            return format!("Error posting message: {e}");
-        }
-
-        // Signal to pause task processing and wait for user response
-        if let Err(e) = self.session().set_signal(crate::Signal::GoAsk).await {
-            tracing::error!(
-                "Failed to set signal GoAsk for task {} after asking user: {e}",
-                self.session().task_id()
-            );
-            return format!("Error pausing task: {e}");
-        }
-
-        "Message posted to user - task paused pending response".to_string()
     }
 }
