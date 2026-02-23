@@ -1,0 +1,218 @@
+use std::path::{Path, PathBuf};
+
+use tempfile::TempDir;
+
+/// All paths and shared state for one test run.
+///
+/// Stored in a separate module so other integration tests can import it if
+/// needed.  Most of the helpers in the original file lived here and were
+/// purely concerned with configuration or running the CLI.
+pub struct TestEnv {
+    /// Keeps the temporary directory alive for the duration of the test.
+    pub _tmp: TempDir,
+    pub tmp_path: PathBuf,
+    pub tasks_dir: PathBuf,
+    pub scenarios_dir: PathBuf,
+    pub workspaces_dir: PathBuf,
+    /// Path of the pre-written assert-false sentinel scenario.
+    pub assert_false_path: PathBuf,
+    /// ID of the task created during setup (reused across stages).
+    pub task_id: u64,
+}
+
+/// Construct the common command-line arguments used by tests.
+///
+/// Every `zbobr` invocation in this module needs the same set of configuration
+/// flags (paths for the dispatcher, the cli tool, git user information, etc.).
+/// This helper builds and returns that list so callers can append the stage-
+/// specific pieces (`setup`, executor flags, task ID, …) without repeating
+/// themselves.
+pub fn make_zbobr_config_args(tasks_dir: &Path, workspaces_dir: &Path) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut push = |flag: &str, val: &str| {
+        args.push(flag.to_string());
+        args.push(val.to_string());
+    };
+
+    push("--dispatcher-workspaces", &workspaces_dir.to_string_lossy());
+    push("--tasks-fs-tasks-dir", &tasks_dir.to_string_lossy());
+    push("--dispatcher-backend", "filesystem");
+    push("--dispatcher-cli-tool", "mcp-tester");
+    push("--dispatcher-agent-github-token", "dummy-not-used");
+    push("--dispatcher-git-user-name", "test-bot");
+    push("--dispatcher-git-user-email", "test@example.com");
+
+    args
+}
+
+/// Execute the `zbobr` binary using the standard test configuration
+/// flags plus a specific command and any additional arguments.
+///
+/// This centralises the binary lookup, environment setup and execution so
+/// callers only need to provide the top‑level command (e.g. `"setup"` or
+/// `"task"`) and whatever command‑specific flags follow it.  For role
+/// sessions the caller will push the secondary subcommand name onto
+/// `command_args`.
+pub async fn run_zbobr(
+    tmp_path: &Path,
+    tasks_dir: &Path,
+    workspaces_dir: &Path,
+    command: &str,
+    command_args: &[&str],
+) {
+    let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+
+    let mut args = make_zbobr_config_args(tasks_dir, workspaces_dir);
+    args.push(command.to_string());
+    // convert the slice of &str to owned Strings and extend the argument list
+    args.extend(command_args.iter().map(|s| s.to_string()));
+
+    let status = tokio::process::Command::new(zbobr_bin)
+        .args(&args)
+        .current_dir(tmp_path)
+        .env("RUST_LOG", &rust_log)
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .await
+        .expect("failed to run zbobr");
+
+    assert!(
+        status.success(),
+        "zbobr {} failed with exit code {:?}",
+        command,
+        status.code(),
+    );
+}
+
+/// Like `run_zbobr` but captures and returns stdout as a `String`.  Useful for
+/// commands that print data (for example the task creation command which
+/// reports the new ID).
+pub async fn run_zbobr_capture(
+    tmp_path: &Path,
+    tasks_dir: &Path,
+    workspaces_dir: &Path,
+    command: &str,
+    command_args: &[&str],
+) -> String {
+    let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+
+    let mut args = make_zbobr_config_args(tasks_dir, workspaces_dir);
+    args.push(command.to_string());
+    args.extend(command_args.iter().map(|s| s.to_string()));
+
+    let output = tokio::process::Command::new(zbobr_bin)
+        .args(&args)
+        .current_dir(tmp_path)
+        .env("RUST_LOG", &rust_log)
+        .output()
+        .await
+        .expect("failed to run zbobr");
+
+    assert!(
+        output.status.success(),
+        "zbobr {} failed with exit code {:?}",
+        command,
+        output.status.code(),
+    );
+
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+/// Run `zbobr setup` to initialise the tasks and workspaces directories.
+pub async fn run_zbobr_setup(
+    tmp_path: &std::path::Path,
+    tasks_dir: &std::path::Path,
+    workspaces_dir: &std::path::Path,
+) {
+    run_zbobr(tmp_path, tasks_dir, workspaces_dir, "setup", &[]).await;
+}
+
+/// Create the shared directory layout and task, writing the assert-false
+/// sentinel scenario file.  Returns `None` when `mcp-tester` is not
+/// installed so the caller can skip gracefully.
+///
+/// **Important:** this integration test uses *only* the command‑line
+/// interface to create and manipulate tasks.  It must not instantiate or
+/// call backend implementations directly so that the same test works with any
+/// backend (filesystem, GitHub, etc.).  Keeping the test CLI‑only ensures it
+/// exercises the public API which is what downstream users rely on.
+pub async fn setup_test_env() -> Option<TestEnv> {
+    let mcp_check = tokio::process::Command::new("mcp-tester")
+        .arg("--version")
+        .output()
+        .await;
+    if mcp_check.is_err() || !mcp_check.unwrap().status.success() {
+        eprintln!("Skipping test: mcp-tester not installed (cargo install mcp-tester)");
+        return None;
+    }
+
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let tmp_path = tmp.path().to_path_buf();
+
+    let tasks_dir = tmp_path.join("tasks");
+    let scenarios_dir = tmp_path.join("scenarios");
+    let workspaces_dir = tmp_path.join("workspaces");
+
+    // Use zbobr setup command to create tasks and workspaces directories.
+    run_zbobr_setup(&tmp_path, &tasks_dir, &workspaces_dir).await;
+
+    // Create the scenarios directory (test-specific, not managed by zbobr).
+    tokio::fs::create_dir_all(&scenarios_dir)
+        .await
+        .expect("failed to create scenarios directory");
+
+    // Write the permanent sentinel scenario once.
+    let assert_false_path = scenarios_dir.join("assert_false.yml");
+    tokio::fs::write(&assert_false_path, super::mcp_tester_scenarios::assert_false_scenario().as_bytes())
+        .await
+        .expect("failed to write assert_false scenario");
+
+    // Create the shared task via the CLI rather than touching a backend
+    // directly.  This keeps the test backend‑agnostic, which is the whole
+    // point of exercising the public interface.
+    let task_id = {
+        // leverage a helper that captures stdout so we can parse the numeric ID
+        let output = run_zbobr_capture(
+            &tmp_path,
+            &tasks_dir,
+            &workspaces_dir,
+            "task",
+            &[
+                "create",
+                // title is now a positional argument rather than a flag
+                "Dummy Task",
+                "--description",
+                "Dummy task description",
+                "--stage",
+                "preparation",
+            ],
+        )
+        .await;
+
+        // output should be like "Created task #123"; parse the number.
+        // `tracing` info logs are written to stdout, so the first line may not be
+        // the one we care about.  Find the line that actually starts with our
+        // expected prefix.
+        let line = output
+            .lines()
+            .find(|l| l.trim().starts_with("Created task #"))
+            .unwrap_or_default();
+        line.trim()
+            .strip_prefix("Created task #")
+            .and_then(|s| s.parse::<u64>().ok())
+            .expect("failed to parse task id from zbobr output")
+    };
+
+    Some(TestEnv {
+        _tmp: tmp,
+        tmp_path,
+        tasks_dir,
+        scenarios_dir,
+        workspaces_dir,
+        assert_false_path,
+        task_id,
+    })
+}
