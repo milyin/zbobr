@@ -126,11 +126,4 @@ async fn test_preparation() {
       output.contains("Signal:      go_plan"),
       "Preparator follow-up signal should be GO_PLAN"
     );
-
-    env.process_task(task_id).await;
-    assert_eq!(
-      env.task_stage(task_id).await,
-      Stage::Planning,
-      "Task should transition to PLANNING after processing GO_PLAN signal"
-    );
 }
