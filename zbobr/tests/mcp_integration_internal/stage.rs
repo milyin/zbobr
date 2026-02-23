@@ -1,21 +1,36 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use zbobr_dispatcher::Stage;
 
-use super::env::{TestEnv, run_zbobr, run_zbobr_capture};
-
+use super::env::IntegrationTestEnv;
 use super::mcp_tester_scenarios::{
+    assert_false_scenario,
     planner_comprehensive_scenario,
     preparator_comprehensive_scenario,
 };
 
+/// Scenario content for the preparation stage.
+pub struct PreparationScenario(pub String);
+
+/// Scenario content for the planning stage.
+pub struct PlanningScenario(pub String);
+
+/// Create a preparation scenario for the given repository path.
+pub fn preparation_scenario(repo_path: &str) -> PreparationScenario {
+    PreparationScenario(preparator_comprehensive_scenario(repo_path))
+}
+
+/// Create a planning scenario.
+pub fn planning_scenario() -> PlanningScenario {
+    PlanningScenario(planner_comprehensive_scenario())
+}
+
+// ---------------------------------------------------------------------------
+// Stage metadata
+// ---------------------------------------------------------------------------
+
 /// Return `(subcommand, executor_flag_suffix)` for the given stage.
-///
-/// `subcommand` is the name of the nested task subcommand that runs a role
-/// session (e.g. "prepare").
-///
-/// `executor_flag_suffix` is the part after `--executor-mcp-tester-` in the
-/// CLI flag, matching the field names in `ZbobrExecutorMcpTesterConfig`.
 pub fn stage_meta(stage: Stage) -> (&'static str, &'static str) {
     match stage {
         Stage::Preparation => ("prepare", "preparation"),
@@ -27,256 +42,144 @@ pub fn stage_meta(stage: Stage) -> (&'static str, &'static str) {
     }
 }
 
-/// Run the zbobr CLI for the given stage using the provided scenario YAML.
-///
-/// The scenario is passed to the executor slot that corresponds to `stage`;
-/// all other slots receive the assert-false sentinel so that any accidental
-/// routing to a wrong stage causes an immediate test failure.
-pub async fn run_stage_test(env: &TestEnv, stage: Stage, scenario: String) {
-    let (command, flag_suffix) = stage_meta(stage);
+// ---------------------------------------------------------------------------
+// Stage runner
+// ---------------------------------------------------------------------------
 
-    // Write the stage-specific scenario to a dedicated file.
-    let scenario_path = env.scenarios_dir.join(format!("{command}.yml"));
-    tokio::fs::write(&scenario_path, scenario)
-        .await
-        .expect("failed to write stage scenario");
+/// Global counter used to give every `run_stage_test` invocation a unique
+/// scratch directory, avoiding collisions when tests run in parallel.
+static SCENARIO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-    let af: &Path = &env.assert_false_path;
+impl IntegrationTestEnv {
+    /// Run the zbobr CLI for the given stage using the provided scenario YAML.
+    ///
+    /// A unique scratch directory is created under `self.base_path/scenarios/`
+    /// for each invocation; all unused stage slots receive an assert-false
+    /// sentinel so accidental mis-routing causes an immediate test failure.
+    pub async fn run_stage_test(&self, task_id: u64, stage: Stage, scenario: String) {
+        let (command, flag_suffix) = stage_meta(stage);
 
-    // Map every executor slot: the active stage gets the real scenario; all
-    // others get the assert-false sentinel.
-    let all_slots: &[(&str, &Path)] = &[
-        (
-            "preparation",
-            if flag_suffix == "preparation" {
-                &scenario_path
-            } else {
-                af
-            },
-        ),
-        (
-            "planning",
-            if flag_suffix == "planning" {
-                &scenario_path
-            } else {
-                af
-            },
-        ),
-        (
-            "working",
-            if flag_suffix == "working" {
-                &scenario_path
-            } else {
-                af
-            },
-        ),
-        (
-            "reviewing",
-            if flag_suffix == "reviewing" {
-                &scenario_path
-            } else {
-                af
-            },
-        ),
-        (
-            "merging",
-            if flag_suffix == "merging" {
-                &scenario_path
-            } else {
-                af
-            },
-        ),
-    ];
+        let idx = SCENARIO_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let scenarios_dir = self
+            .base_path
+            .join("scenarios")
+            .join(format!("{flag_suffix}_{idx}"));
+        tokio::fs::create_dir_all(&scenarios_dir)
+            .await
+            .expect("failed to create scenarios directory");
 
-    // build the command-specific arguments: executor slots followed
-    // by the task id.  `run_zbobr` will take care of the common flags and
-    // actual execution.
-    let mut cmd_args = Vec::new();
-    for (slot, path) in all_slots {
-        cmd_args.push(format!("--executor-mcp-tester-{slot}"));
-        cmd_args.push(path.to_string_lossy().to_string());
-    }
-    cmd_args.push(env.task_id.to_string());
+        let scenario_path = scenarios_dir.join(format!("{command}.yml"));
+        tokio::fs::write(&scenario_path, scenario)
+            .await
+            .expect("failed to write stage scenario");
 
-    // the CLI now expects `zbobr task <subcommand> ...`.
-    // convert the dynamically constructed `cmd_args` (owned strings) into
-    // a temporary vector of string slices for the helper call. We can
-    // build the vector in one go using an iterator and `map`.
-    let full_args_vec: Vec<&str> = std::iter::once(command)
-        .chain(cmd_args.iter().map(|s| s.as_str()))
-        .collect();
+        let assert_false_content = assert_false_scenario();
+        let af_path = scenarios_dir.join("assert_false.yml");
+        tokio::fs::write(&af_path, assert_false_content.as_bytes())
+            .await
+            .expect("failed to write assert_false scenario");
+        let af = &af_path;
 
-    run_zbobr(
-        &env.tmp_path,
-        &env.tasks_dir,
-        &env.workspaces_dir,
-        "task",
-        &full_args_vec,
-    )
-    .await;
-}
+        let all_slots: &[(&str, &PathBuf)] = &[
+            ("preparation", if flag_suffix == "preparation" { &scenario_path } else { af }),
+            ("planning",    if flag_suffix == "planning"    { &scenario_path } else { af }),
+            ("working",     if flag_suffix == "working"     { &scenario_path } else { af }),
+            ("reviewing",   if flag_suffix == "reviewing"   { &scenario_path } else { af }),
+            ("merging",     if flag_suffix == "merging"     { &scenario_path } else { af }),
+        ];
 
-/// Integration test covering the Preparation and Planning stages.
-///
-/// Both stages share a single task so that parameters written by the
-/// preparator (destination_branch, work_branch) are readable by the planner.
-/// The Planning scenario exercises all planner tools including `pull_work`.
-/// Create a minimal git repository used by the preparation stage.
-/// Returns the path string that should be passed to the preparator scenario.
-pub async fn create_test_repo(env: &TestEnv) -> String {
-    let repo_dir = env.tmp_path.join("test_repo");
-    tokio::fs::create_dir_all(&repo_dir).await.unwrap();
-
-    // Initialize git repo and configure user
-    let status = tokio::process::Command::new("git")
-        .arg("init")
-        .current_dir(&repo_dir)
-        .status()
-        .await
-        .unwrap();
-    assert!(status.success());
-
-    tokio::process::Command::new("git")
-        .args(["config", "user.name", "test-bot"])
-        .current_dir(&repo_dir)
-        .status()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["config", "user.email", "test@example.com"])
-        .current_dir(&repo_dir)
-        .status()
-        .await
-        .unwrap();
-
-    // initial commit and rename branch to main
-    tokio::fs::write(repo_dir.join("README.md"), "test repo")
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["add", "README.md"])
-        .current_dir(&repo_dir)
-        .status()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["commit", "-m", "Initial commit"])
-        .current_dir(&repo_dir)
-        .status()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["branch", "-M", "main"])
-        .current_dir(&repo_dir)
-        .status()
-        .await
-        .unwrap();
-
-    repo_dir.to_string_lossy().to_string()
-}
-
-/// Run the preparation stage against `repo_path`.
-pub async fn test_preparation(env: &TestEnv, repo_path: &str) {
-    run_stage_test(
-        env,
-        Stage::Preparation,
-        preparator_comprehensive_scenario(repo_path),
-    )
-    .await;
-}
-
-/// Run the planning stage for the shared task.
-pub async fn test_planning(env: &TestEnv) {
-    run_stage_test(env, Stage::Planning, planner_comprehensive_scenario()).await;
-}
-
-/// After planning has run, examine the resulting task and verify that the
-/// planner populated PULL_WORK_RETURN_VALUE correctly, turned it into a
-/// working clone and set up branches as expected.
-pub async fn verify_planning(env: &TestEnv) {
-    // Read the task using zbobr task show and extract PULL_WORK_RETURN_VALUE
-    let output = run_zbobr_capture(
-        &env.tmp_path,
-        &env.tasks_dir,
-        &env.workspaces_dir,
-        "task",
-        &["show", &env.task_id.to_string()],
-    )
-    .await;
-
-    // Find the line with PULL_WORK_RETURN_VALUE=xxxx
-    let mut pull_work_return_value = None;
-    for line in output.lines() {
-        if let Some(idx) = line.find("PULL_WORK_RETURN_VALUE=") {
-            let val = line[idx + "PULL_WORK_RETURN_VALUE=".len()..].trim();
-            // The value might have a trailing quote from the YAML list item
-            let val = val.trim_end_matches('\'');
-            pull_work_return_value = Some(val.to_string());
-            break;
+        let mut cmd_args = Vec::new();
+        for (slot, path) in all_slots {
+            cmd_args.push(format!("--executor-mcp-tester-{slot}"));
+            cmd_args.push(path.to_string_lossy().to_string());
         }
+        cmd_args.push(task_id.to_string());
+
+        let full_args_vec: Vec<&str> = std::iter::once(command)
+            .chain(cmd_args.iter().map(|s| s.as_str()))
+            .collect();
+
+        self.run_zbobr("task", &full_args_vec).await;
     }
-    let pull_work_return_value =
-        pull_work_return_value.expect("PULL_WORK_RETURN_VALUE not found in task output");
 
-    // Parse the JSON to extract the actual path
-    let parsed: serde_json::Value = serde_json::from_str(&pull_work_return_value)
-        .expect("Failed to parse PULL_WORK_RETURN_VALUE as JSON");
-    let path_str = parsed
-        .get("result")
-        .and_then(|v| v.as_str())
-        .expect("result field not found or not a string");
+    /// Run the preparation stage for `task_id`.
+    pub async fn run_preparation(&self, scenario: PreparationScenario, task_id: u64) {
+        self.run_stage_test(task_id, Stage::Preparation, scenario.0).await;
+    }
 
-    // Validate the path
-    let cloned_repo_path = PathBuf::from(path_str);
+    /// Run the planning stage for `task_id`.
+    pub async fn run_planning(&self, scenario: PlanningScenario, task_id: u64) {
+        self.run_stage_test(task_id, Stage::Planning, scenario.0).await;
+    }
 
-    // this is a path and this path exists and it's inside the workspaces_dir
-    assert!(cloned_repo_path.exists(), "Cloned repo path does not exist");
-    assert!(
-        cloned_repo_path.starts_with(&env.workspaces_dir),
-        "Cloned repo path is not inside workspaces_dir"
-    );
+    /// After planning, verify that `PULL_WORK_RETURN_VALUE` is populated and that
+    /// the expected branches exist in the cloned workspace repository.
+    pub async fn verify_planning(&self, task_id: u64) {
+        let output = self.show_task(task_id).await;
 
-    // the path contains the git repository
-    assert!(
-        cloned_repo_path.join(".git").exists(),
-        "Cloned repo is not a git repository"
-    );
+        let mut pull_work_return_value = None;
+        for line in output.lines() {
+            if let Some(idx) = line.find("PULL_WORK_RETURN_VALUE=") {
+                let val = line[idx + "PULL_WORK_RETURN_VALUE=".len()..].trim();
+                let val = val.trim_end_matches('\'');
+                pull_work_return_value = Some(val.to_string());
+                break;
+            }
+        }
+        let pull_work_return_value =
+            pull_work_return_value.expect("PULL_WORK_RETURN_VALUE not found in task output");
 
-    // that there are branches named accordingly to PARAM_WORK_BRANCH and PARAM_DESTINATION_BRANCH in this repository
-    // The preparator set destination branch to "main" and work branch postfix to "test"
-    // The actual work branch name will be something like "zbobr_fix-1-test"
-    let branches_output = tokio::process::Command::new("git")
-        .arg("branch")
-        .current_dir(&cloned_repo_path)
-        .output()
-        .await
-        .unwrap();
-    let branches_str = String::from_utf8_lossy(&branches_output.stdout);
+        let parsed: serde_json::Value = serde_json::from_str(&pull_work_return_value)
+            .expect("Failed to parse PULL_WORK_RETURN_VALUE as JSON");
+        let path_str = parsed
+            .get("result")
+            .and_then(|v| v.as_str())
+            .expect("result field not found or not a string");
 
-    assert!(
-        branches_str.contains("main"),
-        "Destination branch 'main' not found in cloned repo"
-    );
+        let cloned_repo_path = std::path::PathBuf::from(path_str);
 
-    let expected_work_branch = format!("zbobr_fix-{}-test", env.task_id);
-    assert!(
-        branches_str.contains(&expected_work_branch),
-        "Work branch '{}' not found in cloned repo",
-        expected_work_branch
-    );
+        assert!(cloned_repo_path.exists(), "Cloned repo path does not exist");
+        assert!(
+            cloned_repo_path.starts_with(&self.workspaces_dir),
+            "Cloned repo path is not inside workspaces_dir"
+        );
+        assert!(
+            cloned_repo_path.join(".git").exists(),
+            "Cloned repo is not a git repository"
+        );
 
-    // that the PARAM_WORK_BRANCH is current
-    let current_branch_output = tokio::process::Command::new("git")
-        .args(["branch", "--show-current"])
-        .current_dir(&cloned_repo_path)
-        .output()
-        .await
-        .unwrap();
-    let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
-        .trim()
-        .to_string();
-    assert_eq!(
-        current_branch, expected_work_branch,
-        "Current branch is not the work branch"
-    );
+        let branches_output = tokio::process::Command::new("git")
+            .arg("branch")
+            .current_dir(&cloned_repo_path)
+            .output()
+            .await
+            .unwrap();
+        let branches_str = String::from_utf8_lossy(&branches_output.stdout);
+
+        assert!(
+            branches_str.contains("main"),
+            "Destination branch 'main' not found in cloned repo"
+        );
+
+        let expected_work_branch = format!("zbobr_fix-{task_id}-test");
+        assert!(
+            branches_str.contains(&expected_work_branch),
+            "Work branch '{expected_work_branch}' not found in cloned repo"
+        );
+
+        let current_branch_output = tokio::process::Command::new("git")
+            .args(["branch", "--show-current"])
+            .current_dir(&cloned_repo_path)
+            .output()
+            .await
+            .unwrap();
+        let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
+            .trim()
+            .to_string();
+        assert_eq!(
+            current_branch, expected_work_branch,
+            "Current branch is not the work branch"
+        );
+    }
 }
+
