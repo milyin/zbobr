@@ -5,7 +5,7 @@ use zbobr_dispatcher::mcp::preparator_tools::{
 };
 
 /// Inline scenario YAML for comprehensive preparator testing
-pub fn preparator_comprehensive_scenario() -> String {
+pub fn preparator_comprehensive_scenario(repo_path: &str) -> String {
     format!(
         r#"name: Preparator Comprehensive Test
 description: Verify all PREPARATION MCP functions
@@ -38,7 +38,7 @@ steps:
       type: tool_call
       tool: {SET_PARAM_DESTINATION_REPOSITORY}
       arguments:
-        value: "owner/repo"
+        value: "{repo_path}"
     assertions:
       - type: success
 
@@ -50,7 +50,7 @@ steps:
       - type: success
       - type: equals
         path: result
-        value: "owner/repo"
+        value: "{repo_path}"
 
   - name: Set destination branch
     operation:

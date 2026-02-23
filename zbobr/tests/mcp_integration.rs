@@ -5,8 +5,7 @@ use zbobr_dispatcher::Stage;
 
 mod mcp_tester_scenarios;
 use mcp_tester_scenarios::{
-    assert_false_scenario, planner_comprehensive_scenario, planner_pull_work_scenario,
-    preparator_comprehensive_scenario, preparator_pull_work_scenario,
+    assert_false_scenario, planner_comprehensive_scenario, preparator_comprehensive_scenario,
 };
 
 /// All paths and shared state for one test run.
@@ -331,25 +330,9 @@ async fn run_stage_test(env: &TestEnv, stage: Stage, scenario: String) {
 ///
 /// Both stages share a single task so that parameters written by the
 /// preparator (destination_branch, work_branch) are readable by the planner.
-/// The Planning scenario exercises all planner tools except `pull_work` (git
-/// setup is deferred to a future iteration).
+/// The Planning scenario exercises all planner tools including `pull_work`.
 #[tokio::test]
 async fn test_preparation_and_planning() {
-    let Some(env) = setup_test_env().await else {
-        return;
-    };
-
-    run_stage_test(
-        &env,
-        Stage::Preparation,
-        preparator_comprehensive_scenario(),
-    )
-    .await;
-    run_stage_test(&env, Stage::Planning, planner_comprehensive_scenario()).await;
-}
-
-#[tokio::test]
-async fn test_pull_work() {
     let Some(env) = setup_test_env().await else {
         return;
     };
@@ -403,19 +386,17 @@ async fn test_pull_work() {
         .await
         .unwrap();
 
-    // 2. Set the path to it with SET_PARAM_DESTINATION_REPOSITORY in the preparator
     let repo_path_str = repo_dir.to_string_lossy().to_string();
+
     run_stage_test(
         &env,
         Stage::Preparation,
-        preparator_pull_work_scenario(&repo_path_str),
+        preparator_comprehensive_scenario(&repo_path_str),
     )
     .await;
+    run_stage_test(&env, Stage::Planning, planner_comprehensive_scenario()).await;
 
-    // 3. Call PULL_WORK from planner tools and report the value
-    run_stage_test(&env, Stage::Planning, planner_pull_work_scenario()).await;
-
-    // 4. Read the task using zbobr task show and extract PULL_WORK_RETURN_VALUE
+    // Read the task using zbobr task show and extract PULL_WORK_RETURN_VALUE
     let output = run_zbobr_capture(
         &env.tmp_path,
         &env.tasks_dir,
@@ -442,22 +423,22 @@ async fn test_pull_work() {
     let parsed: serde_json::Value = serde_json::from_str(&pull_work_return_value).expect("Failed to parse PULL_WORK_RETURN_VALUE as JSON");
     let path_str = parsed.get("result").and_then(|v| v.as_str()).expect("result field not found or not a string");
 
-    // 5. Validate the path
+    // Validate the path
     let cloned_repo_path = PathBuf::from(path_str);
     
-    // 5.1) this is a path and this path exists and it's inside the workspaces_dir/task_dir
+    // this is a path and this path exists and it's inside the workspaces_dir/task_dir
     assert!(cloned_repo_path.exists(), "Cloned repo path does not exist");
     assert!(
         cloned_repo_path.starts_with(&env.workspaces_dir),
         "Cloned repo path is not inside workspaces_dir"
     );
 
-    // 5.2) the path contains the git repository
+    // the path contains the git repository
     assert!(cloned_repo_path.join(".git").exists(), "Cloned repo is not a git repository");
 
-    // 5.3) that there are branches named accordingly to PARAM_WORK_BRANCH and PARAM_DESTINATION_BRANCH in this repository
-    // The preparator set destination branch to "main" and work branch postfix to "test-feature"
-    // The actual work branch name will be something like "zbobr/123-test-feature"
+    // that there are branches named accordingly to PARAM_WORK_BRANCH and PARAM_DESTINATION_BRANCH in this repository
+    // The preparator set destination branch to "main" and work branch postfix to "test"
+    // The actual work branch name will be something like "zbobr_fix-1-test"
     let branches_output = tokio::process::Command::new("git")
         .arg("branch")
         .current_dir(&cloned_repo_path)
@@ -468,14 +449,14 @@ async fn test_pull_work() {
     
     assert!(branches_str.contains("main"), "Destination branch 'main' not found in cloned repo");
     
-    let expected_work_branch = format!("zbobr_fix-{}-test-feature", env.task_id);
+    let expected_work_branch = format!("zbobr_fix-{}-test", env.task_id);
     assert!(
         branches_str.contains(&expected_work_branch),
         "Work branch '{}' not found in cloned repo",
         expected_work_branch
     );
 
-    // 5.4) that the PARAM_WORK_BRANCH is current
+    // that the PARAM_WORK_BRANCH is current
     let current_branch_output = tokio::process::Command::new("git")
         .args(&["branch", "--show-current"])
         .current_dir(&cloned_repo_path)
@@ -488,3 +469,5 @@ async fn test_pull_work() {
         "Current branch is not the work branch"
     );
 }
+
+
