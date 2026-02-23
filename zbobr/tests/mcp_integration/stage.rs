@@ -68,6 +68,7 @@ impl IntegrationTestEnv {
     }
 
     /// Run the preparation stage for `task_id` using raw scenario YAML.
+    #[allow(dead_code)]
     pub async fn run_preparation(&self, scenario: String, task_id: u64) {
         self.run_stage_test(task_id, Stage::Preparation, scenario).await;
     }

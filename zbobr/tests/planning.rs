@@ -2,58 +2,10 @@ mod mcp_integration;
 
 use mcp_integration::IntegrationTestEnv;
 use zbobr_dispatcher::Stage;
-use zbobr_dispatcher::mcp::preparator_tools::{
-    SET_PARAM_DESTINATION_REPOSITORY,
-    SET_PARAM_DESTINATION_BRANCH,
-    SET_PARAM_WORK_BRANCH_POSTFIX,
-};
 
-/// Minimal preparator scenario used only to supply the planner with the
-/// configuration it requires.  The full comprehensive preparator script is
-/// unnecessary here; we only set the destination repository, destination
-/// branch and work-branch postfix.
-fn minimal_preparation_scenario(repo_path: &str) -> String {
-    format!(
-        r#"name: Minimal Preparator for Planning
-description: Only set the params needed by the planning test
-timeout: 30
-stop_on_failure: true
-
-steps:
-- name: Set destination repository
-  operation:
-    type: tool_call
-    tool: {SET_PARAM_DESTINATION_REPOSITORY}
-    arguments:
-      value: "{repo_path}"
-  assertions:
-    - type: success
-
-- name: Set destination branch
-  operation:
-    type: tool_call
-    tool: {SET_PARAM_DESTINATION_BRANCH}
-    arguments:
-      value: "main"
-  assertions:
-    - type: success
-
-- name: Set work branch
-  operation:
-    type: tool_call
-    tool: {SET_PARAM_WORK_BRANCH_POSTFIX}
-    arguments:
-      value: "test"
-  assertions:
-    - type: success
-"#,
-        repo_path = repo_path
-    )
-}
-
-/// Planner scenario similar to the previous comprehensive script.  The test
-/// depends on the preparator having set the expected parameters; this script
-/// exercises the full planning toolchain including a `pull_work` call.
+/// Planner scenario similar to the previous comprehensive script. The test
+/// pre-populates the expected task parameters and exercises the full planning
+/// toolchain including a `pull_work` call.
 fn planning_scenario() -> String {
     // For brevity we re-use the same YAML that was previously defined in the
     // shared helper; duplicating it here keeps the tests independent.
@@ -112,7 +64,7 @@ steps:
       path: result
       value: "analyse the codebase"
 
-- name: Get destination branch (set by preparator)
+- name: Get destination branch (set via task update)
   operation:
     type: tool_call
     tool: {GET_PARAM_DESTINATION_BRANCH}
@@ -122,7 +74,7 @@ steps:
       path: result
       value: "main"
 
-- name: Get work branch (set by preparator)
+- name: Get work branch (set via task update)
   operation:
     type: tool_call
     tool: {GET_PARAM_WORK_BRANCH}
@@ -163,17 +115,29 @@ async fn test_planning() {
         .create_task("Dummy Task", "Dummy task description", Stage::Preparation)
         .await;
 
-    // run a minimal preparator to populate the task parameters used by the
-    // planner script
-    env.run_preparation(minimal_preparation_scenario(&repo_path.to_string_lossy()), task_id)
-        .await;
+    let work_branch = format!("zbobr_fix-{task_id}-test");
+    let task_id_str = task_id.to_string();
+    let repo_path_str = repo_path.to_string_lossy().to_string();
+    env.run_zbobr(
+      "task",
+      &[
+        "update",
+        &task_id_str,
+        "--dest-repo",
+        &repo_path_str,
+        "--dest-branch",
+        "main",
+        "--work-branch",
+        &work_branch,
+      ],
+    )
+    .await;
 
     // run the planning stage itself
     env.run_planning(planning_scenario(), task_id).await;
 
-    // now verify the clone and branches as before; this logic used to live in
-    // the shared environment but is specific to the planning test so we bring
-    // it up here.
+    // verify clone path and branches; this logic is specific to this planning
+    // test so it remains local.
     let output = env.show_task(task_id).await;
 
     let mut pull_work_return_value = None;
@@ -220,7 +184,7 @@ async fn test_planning() {
         "Destination branch 'main' not found in cloned repo"
     );
 
-    let expected_work_branch = format!("zbobr_fix-{task_id}-test");
+    let expected_work_branch = work_branch;
     assert!(
         branches_str.contains(&expected_work_branch),
         "Work branch '{expected_work_branch}' not found in cloned repo"

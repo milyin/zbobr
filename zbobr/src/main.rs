@@ -9,7 +9,7 @@ use clap::{Args, CommandFactory, Parser, Subcommand};
 use zbobr_config::{ZbobrConfigArgs, ZbobrConfigToml};
 use zbobr_dispatcher::{
     Stage, ToolExecutor, Zbobr, ZbobrDispatcherConfig,
-    task::{Model, Role, Tool},
+    task::{Model, Parameter, Role, Tool},
 };
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
@@ -153,6 +153,18 @@ enum TaskSubcommand {
         /// New AI model
         #[arg(long)]
         model: Option<String>,
+        /// New destination repository in owner/repo format.
+        /// Pass `--dest-repo` without a value to delete the parameter.
+        #[arg(long, num_args = 0..=1)]
+        dest_repo: Option<Option<String>>,
+        /// New destination branch.
+        /// Pass `--dest-branch` without a value to delete the parameter.
+        #[arg(long, num_args = 0..=1)]
+        dest_branch: Option<Option<String>>,
+        /// New work branch.
+        /// Pass `--work-branch` without a value to delete the parameter.
+        #[arg(long, num_args = 0..=1)]
+        work_branch: Option<Option<String>>,
     },
     /// Delete (close) a task by ID
     Delete {
@@ -739,6 +751,9 @@ async fn main() -> anyhow::Result<()> {
                 stage,
                 tool,
                 model,
+                dest_repo,
+                dest_branch,
+                work_branch,
             } => {
                 let stage = stage
                     .map(|s| {
@@ -770,6 +785,36 @@ async fn main() -> anyhow::Result<()> {
                             }
                             if let Some(m) = model {
                                 task.model = Some(m);
+                            }
+                            if let Some(repo) = dest_repo {
+                                match repo {
+                                    Some(repo) => {
+                                        task.parameters.insert(Parameter::DestinationRepository, repo);
+                                    }
+                                    None => {
+                                        task.parameters.remove(&Parameter::DestinationRepository);
+                                    }
+                                }
+                            }
+                            if let Some(branch) = dest_branch {
+                                match branch {
+                                    Some(branch) => {
+                                        task.parameters.insert(Parameter::DestinationBranch, branch);
+                                    }
+                                    None => {
+                                        task.parameters.remove(&Parameter::DestinationBranch);
+                                    }
+                                }
+                            }
+                            if let Some(branch) = work_branch {
+                                match branch {
+                                    Some(branch) => {
+                                        task.parameters.insert(Parameter::WorkBranch, branch);
+                                    }
+                                    None => {
+                                        task.parameters.remove(&Parameter::WorkBranch);
+                                    }
+                                }
                             }
                             task
                         }),
@@ -1582,6 +1627,71 @@ mod tests {
                     assert!(tool.is_none());
                 }
                 _ => panic!("expected List subcommand"),
+            }
+        } else {
+            panic!("expected Task command");
+        }
+    }
+
+    #[test]
+    fn task_update_parameter_set_parsing() {
+        let cli = Cli::parse_from([
+            "zbobr",
+            "task",
+            "update",
+            "1",
+            "--dest-repo",
+            "owner/repo",
+            "--dest-branch",
+            "main",
+            "--work-branch",
+            "zbobr_fix-1-test",
+        ]);
+
+        if let Command::Task { subcommand } = cli.command {
+            match subcommand {
+                TaskSubcommand::Update {
+                    dest_repo,
+                    dest_branch,
+                    work_branch,
+                    ..
+                } => {
+                    assert_eq!(dest_repo, Some(Some("owner/repo".to_string())));
+                    assert_eq!(dest_branch, Some(Some("main".to_string())));
+                    assert_eq!(work_branch, Some(Some("zbobr_fix-1-test".to_string())));
+                }
+                _ => panic!("expected Update subcommand"),
+            }
+        } else {
+            panic!("expected Task command");
+        }
+    }
+
+    #[test]
+    fn task_update_parameter_delete_parsing() {
+        let cli = Cli::parse_from([
+            "zbobr",
+            "task",
+            "update",
+            "1",
+            "--dest-repo",
+            "--dest-branch",
+            "--work-branch",
+        ]);
+
+        if let Command::Task { subcommand } = cli.command {
+            match subcommand {
+                TaskSubcommand::Update {
+                    dest_repo,
+                    dest_branch,
+                    work_branch,
+                    ..
+                } => {
+                    assert_eq!(dest_repo, Some(None));
+                    assert_eq!(dest_branch, Some(None));
+                    assert_eq!(work_branch, Some(None));
+                }
+                _ => panic!("expected Update subcommand"),
             }
         } else {
             panic!("expected Task command");
