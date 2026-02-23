@@ -331,8 +331,6 @@ async fn run_stage_test(env: &TestEnv, stage: Stage, scenario: String) {
 /// Both stages share a single task so that parameters written by the
 /// preparator (destination_branch, work_branch) are readable by the planner.
 /// The Planning scenario exercises all planner tools including `pull_work`.
-// helper utilities for breaking the big test into high-level pieces
-
 /// Create a minimal git repository used by the preparation stage.
 /// Returns the path string that should be passed to the preparator scenario.
 async fn create_test_repo(env: &TestEnv) -> String {
@@ -349,13 +347,13 @@ async fn create_test_repo(env: &TestEnv) -> String {
     assert!(status.success());
 
     tokio::process::Command::new("git")
-        .args(&["config", "user.name", "test-bot"])
+        .args(["config", "user.name", "test-bot"])
         .current_dir(&repo_dir)
         .status()
         .await
         .unwrap();
     tokio::process::Command::new("git")
-        .args(&["config", "user.email", "test@example.com"])
+        .args(["config", "user.email", "test@example.com"])
         .current_dir(&repo_dir)
         .status()
         .await
@@ -364,19 +362,19 @@ async fn create_test_repo(env: &TestEnv) -> String {
     // initial commit and rename branch to main
     tokio::fs::write(repo_dir.join("README.md"), "test repo").await.unwrap();
     tokio::process::Command::new("git")
-        .args(&["add", "README.md"])
+        .args(["add", "README.md"])
         .current_dir(&repo_dir)
         .status()
         .await
         .unwrap();
     tokio::process::Command::new("git")
-        .args(&["commit", "-m", "Initial commit"])
+        .args(["commit", "-m", "Initial commit"])
         .current_dir(&repo_dir)
         .status()
         .await
         .unwrap();
     tokio::process::Command::new("git")
-        .args(&["branch", "-M", "main"])
+        .args(["branch", "-M", "main"])
         .current_dir(&repo_dir)
         .status()
         .await
@@ -466,7 +464,7 @@ async fn verify_planning(env: &TestEnv) {
 
     // that the PARAM_WORK_BRANCH is current
     let current_branch_output = tokio::process::Command::new("git")
-        .args(&["branch", "--show-current"])
+        .args(["branch", "--show-current"])
         .current_dir(&cloned_repo_path)
         .output()
         .await

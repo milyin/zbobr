@@ -9,6 +9,5 @@ mod planner_comprehensive;
 mod preparator_comprehensive;
 
 pub use assert_false::assert_false_scenario;
-pub use dummy::dummy_scenario;
 pub use planner_comprehensive::planner_comprehensive_scenario;
 pub use preparator_comprehensive::preparator_comprehensive_scenario;

@@ -1,6 +1,7 @@
 use zbobr_dispatcher::mcp::preparator_tools::GET_DESCRIPTION;
 
 /// Inline scenario YAML for simple testing (dummy get_description test)
+#[allow(dead_code)]
 pub fn dummy_scenario() -> String {
     format!(
         r#"name: Dummy MCP Test
