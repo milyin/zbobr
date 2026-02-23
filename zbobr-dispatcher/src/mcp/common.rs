@@ -310,37 +310,6 @@ pub(crate) async fn serve_mcp(
     Ok(port)
 }
 
-// --- tests ---------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use std::collections::HashSet;
-
-    use super::*;
-
-    // exercise port binder under concurrent load – each spawned task should
-    // return a distinct port and hold onto the listener until the end of the
-    // test, preventing races where two callers pick the same port.
-    #[tokio::test]
-    async fn bind_available_port_concurrent() {
-        const BASE: u16 = 9000;
-
-        let handles: Vec<_> = (0..10)
-            .map(|_| tokio::spawn(async move { bind_available_port(BASE).await }))
-            .collect();
-
-        let mut entries = Vec::new();
-        for h in handles {
-            let (port, listener) = h.await.expect("task panicked").unwrap();
-            entries.push((port, listener));
-        }
-
-        let ports: HashSet<_> = entries.iter().map(|(p, _)| *p).collect();
-        assert_eq!(ports.len(), entries.len(), "ports must all be unique");
-        // listeners are dropped when `entries` goes out of scope
-    }
-}
-
 /// Run the MCP HTTP server scoped to a role (planner or worker) and task.
 /// Returns the actual port that was assigned (spawns server in background).
 pub async fn run_role_mcp_server(
@@ -423,3 +392,33 @@ pub async fn run_role_mcp_server(
 
     serve_mcp(base_port, &path, router).await
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+
+    // exercise port binder under concurrent load – each spawned task should
+    // return a distinct port and hold onto the listener until the end of the
+    // test, preventing races where two callers pick the same port.
+    #[tokio::test]
+    async fn bind_available_port_concurrent() {
+        const BASE: u16 = 9000;
+
+        let handles: Vec<_> = (0..10)
+            .map(|_| tokio::spawn(async move { bind_available_port(BASE).await }))
+            .collect();
+
+        let mut entries = Vec::new();
+        for h in handles {
+            let (port, listener) = h.await.expect("task panicked").unwrap();
+            entries.push((port, listener));
+        }
+
+        let ports: HashSet<_> = entries.iter().map(|(p, _)| *p).collect();
+        assert_eq!(ports.len(), entries.len(), "ports must all be unique");
+        // listeners are dropped when `entries` goes out of scope
+    }
+}
+

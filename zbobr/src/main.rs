@@ -415,7 +415,10 @@ fn print_task(task: &zbobr_dispatcher::Task) {
         }
     }
     if !task.discussion.is_empty() {
-        println!("Discussion ({} comment(s))", task.discussion.len());
+        println!("Discussion ({} comment(s)):", task.discussion.len());
+        for (i, msg) in task.discussion.iter().enumerate() {
+            println!("  [{}] {}", i + 1, msg);
+        }
     }
 }
 
