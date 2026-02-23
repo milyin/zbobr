@@ -61,6 +61,15 @@ impl IntegrationTestEnv {
             Err(_) => std::env::temp_dir().join("zbobr_integration_env"),
         };
 
+        // remove any leftover state from prior runs so tests start with a clean
+        // environment.  This is particularly helpful when the integration suite
+        // is re‑invoked repeatedly during development.
+        if base_path.exists() {
+            tokio::fs::remove_dir_all(&base_path)
+                .await
+                .expect("failed to clean previous integration env");
+        }
+
         let tasks_dir = base_path.join("tasks");
         let workspaces_dir = base_path.join("workspaces");
 
