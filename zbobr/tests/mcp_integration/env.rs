@@ -123,6 +123,7 @@ impl IntegrationTestEnv {
     }
 
     /// Show a task and return its raw text output.
+    #[allow(dead_code)]
     pub async fn show_task(&self, task_id: u64) -> String {
         self.run_zbobr_capture("task", &["show", &task_id.to_string()])
             .await
