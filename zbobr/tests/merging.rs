@@ -243,3 +243,179 @@ async fn test_merging() {
         "Merger should set signal to GO_ASK when asking user"
     );
 }
+
+#[tokio::test]
+async fn test_merging_with_real_conflict() {
+    let Some(env) = IntegrationTestEnv::get().await else {
+        return;
+    };
+
+    let repo_path = env.create_git_repo("repo_merging_conflict").await;
+    let repo_path_str = repo_path.to_string_lossy().to_string();
+
+    // Set up the repository with conflicting changes
+    // Create a file with initial content on main
+    tokio::fs::write(repo_path.join("conflict_file.txt"), "line1\nline2\nline3\n").await.unwrap();
+    let git_add = tokio::process::Command::new("git")
+        .args(["add", "conflict_file.txt"])
+        .current_dir(&repo_path)
+        .status()
+        .await
+        .unwrap();
+    assert!(git_add.success());
+    let git_commit = tokio::process::Command::new("git")
+        .args(["commit", "-m", "Initial commit with conflict_file.txt"])
+        .current_dir(&repo_path)
+        .status()
+        .await
+        .unwrap();
+    assert!(git_commit.success());
+
+    // Create work branch and modify the file
+    let work_branch = "work_branch_conflict";
+    let git_branch = tokio::process::Command::new("git")
+        .args(["checkout", "-b", work_branch])
+        .current_dir(&repo_path)
+        .status()
+        .await
+        .unwrap();
+    assert!(git_branch.success());
+    tokio::fs::write(repo_path.join("conflict_file.txt"), "line1\nline2 work\nline3\n").await.unwrap();
+    let git_add_work = tokio::process::Command::new("git")
+        .args(["add", "conflict_file.txt"])
+        .current_dir(&repo_path)
+        .status()
+        .await
+        .unwrap();
+    assert!(git_add_work.success());
+    let git_commit_work = tokio::process::Command::new("git")
+        .args(["commit", "-m", "Work changes on conflict_file.txt"])
+        .current_dir(&repo_path)
+        .status()
+        .await
+        .unwrap();
+    assert!(git_commit_work.success());
+
+    // Switch back to main and make conflicting changes
+    let git_checkout_main = tokio::process::Command::new("git")
+        .args(["checkout", "main"])
+        .current_dir(&repo_path)
+        .status()
+        .await
+        .unwrap();
+    assert!(git_checkout_main.success());
+    tokio::fs::write(repo_path.join("conflict_file.txt"), "line1\nline2 main\nline3\n").await.unwrap();
+    let git_add_main = tokio::process::Command::new("git")
+        .args(["add", "conflict_file.txt"])
+        .current_dir(&repo_path)
+        .status()
+        .await
+        .unwrap();
+    assert!(git_add_main.success());
+    let git_commit_main = tokio::process::Command::new("git")
+        .args(["commit", "-m", "Main changes on conflict_file.txt"])
+        .current_dir(&repo_path)
+        .status()
+        .await
+        .unwrap();
+    assert!(git_commit_main.success());
+
+    // Now create a task for merging
+    let task_id = env
+        .create_task("Task with merge conflict", "Test merging with real conflicts", Stage::Merging)
+        .await;
+    env.update_task_branches(task_id, &repo_path_str, "main", work_branch).await;
+
+    // Create a scenario that handles conflicts
+    let conflict_scenario = format!(
+        r#"name: Merger Conflict Resolution Test
+description: Test handling of real merge conflicts
+timeout: 60
+stop_on_failure: true
+
+steps:
+- name: Get task description
+  operation:
+    type: tool_call
+    tool: {GET_DESCRIPTION}
+  assertions:
+    - type: success
+
+- name: Pull work (should encounter conflicts)
+  operation:
+    type: tool_call
+    tool: {PULL_WORK}
+  store_result: pull_work_result
+  assertions:
+    - type: success
+
+- name: Check for merge conflicts
+  operation:
+    type: tool_call
+    tool: {REPORT_RESULTS}
+    arguments:
+      message: "Detected merge conflicts in conflict_file.txt. Resolving by choosing work changes."
+  assertions:
+    - type: success
+"#,
+        GET_DESCRIPTION = zbobr_dispatcher::mcp::merger_tools::GET_DESCRIPTION,
+        PULL_WORK = zbobr_dispatcher::mcp::merger_tools::PULL_WORK,
+        REPORT_RESULTS = zbobr_dispatcher::mcp::merger_tools::REPORT_RESULTS,
+    );
+
+    let scenario_path = env.create_scenario("merging_conflict", &conflict_scenario).await;
+
+    // Run the merging stage
+    env.run_stage(task_id, Stage::Merging, conflict_scenario).await;
+
+    // Check that the merger was called and handled the conflict
+    let output = env.show_task(task_id).await;
+    assert!(
+        output.contains("Detected merge conflicts"),
+        "Merger should have detected and reported conflicts"
+    );
+    assert!(
+        output.contains("Signal:      go_work"),
+        "Merger should signal go_work after resolving conflicts"
+    );
+
+    // Verify the cloned repo has the resolved state
+    let mut pull_work_path = None;
+    for line in output.lines() {
+        if let Some(idx) = line.find("PULL_WORK_RETURN_VALUE=") {
+            let val = line[idx + "PULL_WORK_RETURN_VALUE=".len()..].trim();
+            let val = val.trim_end_matches('\'');
+            let parsed: serde_json::Value = serde_json::from_str(&val).unwrap();
+            let path_str = parsed.get("result").unwrap().as_str().unwrap();
+            pull_work_path = Some(std::path::PathBuf::from(path_str));
+            break;
+        }
+    }
+    let pull_work_path = pull_work_path.expect("PULL_WORK_RETURN_VALUE not found");
+
+    // Check that the conflict was resolved (work branch should be checked out)
+    let current_branch_output = tokio::process::Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(&pull_work_path)
+        .output()
+        .await
+        .unwrap();
+    let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
+        .trim()
+        .to_string();
+    assert_eq!(current_branch, work_branch, "Should be on work branch");
+
+    // Check that the conflict was detected (file should have conflict markers)
+    let content = tokio::fs::read_to_string(pull_work_path.join("conflict_file.txt")).await.unwrap();
+    assert!(
+        content.contains("<<<<<<< HEAD") || content.contains("=======") || content.contains(">>>>>>> main"),
+        "File should contain merge conflict markers. Content: {}",
+        content
+    );
+
+    // And the task should have run the merger
+    assert!(
+        output.contains("Merger Conflict Resolution Test"),
+        "Merger scenario should have been executed"
+    );
+}
