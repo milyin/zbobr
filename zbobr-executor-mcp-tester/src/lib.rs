@@ -102,3 +102,39 @@ impl ToolExecutor for McpTesterExecutor {
         Ok(())
     }
 }
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use zbobr_dispatcher::task::{Model, Role};
+
+    #[tokio::test]
+    async fn execute_without_scenario_fails() {
+        // Build an empty configuration (no scenarios provided).
+        let config = ZbobrExecutorMcpTesterConfig::default();
+        let executor = McpTesterExecutor { config };
+
+        let result = executor
+            .execute(
+                42,
+                Role::Preparator,
+                &Model::default(),
+                0,
+                "",
+                Path::new("."),
+                "http://example.com",
+                "",
+                "",
+            )
+            .await;
+
+        assert!(result.is_err(), "expected error when scenario missing");
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("No scenario file configured"));
+    }
+}

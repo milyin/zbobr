@@ -1,36 +1,8 @@
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use zbobr_dispatcher::Stage;
 
 use super::env::IntegrationTestEnv;
-
-// sentinel scenario helper --------------------------------------------------
-
-/// A simple scenario that always fails when executed.  It's written to every
-/// unused executor slot during stage tests so that any unexpected routing of a
-/// stage command into the wrong slot triggers an immediate failure.  The body
-/// is basically copied from the old `mcp_tester_scenarios` module.
-fn assert_false_scenario() -> String {
-    use zbobr_dispatcher::mcp::preparator_tools::GET_DESCRIPTION;
-
-    format!(
-        r#"name: Assert False - must not run
-description: Sentinel scenario – always fails on execution
-timeout: 30
-stop_on_failure: true
-
-steps:
-  - name: This stage must not execute
-    operation:
-      type: tool_call
-      tool: {GET_DESCRIPTION}
-    assertions:
-      - type: equals
-        path: result
-        value: \"ASSERT_FALSE: this scenario must never be reached\""#,
-    )
-}
 
 // ---------------------------------------------------------------------------
 // Stage metadata
@@ -60,8 +32,11 @@ impl IntegrationTestEnv {
     /// Run the zbobr CLI for the given stage using the provided scenario YAML.
     ///
     /// A unique scratch directory is created under `self.base_path/scenarios/`
-    /// for each invocation; all unused stage slots receive an assert-false
-    /// sentinel so accidental mis-routing causes an immediate test failure.
+    /// for each invocation.  Only the slot corresponding to `stage` is
+    /// configured; the mcp-tester executor will error if the dispatcher ever
+    /// tries to invoke a role that wasn't explicitly given a scenario.  This
+    /// simplifies the test harness by removing the old "assert false" sentinel
+    /// YAML.
     pub async fn run_stage_test(&self, task_id: u64, stage: Stage, scenario: String) {
         let (command, flag_suffix) = stage_meta(stage);
 
@@ -79,26 +54,10 @@ impl IntegrationTestEnv {
             .await
             .expect("failed to write stage scenario");
 
-        let assert_false_content = assert_false_scenario();
-        let af_path = scenarios_dir.join("assert_false.yml");
-        tokio::fs::write(&af_path, assert_false_content.as_bytes())
-            .await
-            .expect("failed to write assert_false scenario");
-        let af = &af_path;
-
-        let all_slots: &[(&str, &PathBuf)] = &[
-            ("preparation", if flag_suffix == "preparation" { &scenario_path } else { af }),
-            ("planning",    if flag_suffix == "planning"    { &scenario_path } else { af }),
-            ("working",     if flag_suffix == "working"     { &scenario_path } else { af }),
-            ("reviewing",   if flag_suffix == "reviewing"   { &scenario_path } else { af }),
-            ("merging",     if flag_suffix == "merging"     { &scenario_path } else { af }),
-        ];
-
+        // only pass the scenario for the current stage; other slots are omitted
         let mut cmd_args = Vec::new();
-        for (slot, path) in all_slots {
-            cmd_args.push(format!("--executor-mcp-tester-{slot}"));
-            cmd_args.push(path.to_string_lossy().to_string());
-        }
+        cmd_args.push(format!("--executor-mcp-tester-{flag_suffix}"));
+        cmd_args.push(scenario_path.to_string_lossy().to_string());
         cmd_args.push(task_id.to_string());
 
         let full_args_vec: Vec<&str> = std::iter::once(command)
