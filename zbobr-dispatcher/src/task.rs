@@ -61,19 +61,14 @@ pub struct ChecklistItem {
 
 /// Workflow stage (maps to GitHub milestones internally).
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub enum Stage {
     Pending,
-    GoPreparation,
     Preparation,
-    GoPlanning,
     Planning,
-    GoWorking,
     Working,
-    GoReviewing,
     Reviewing,
-    GoMerging,
     Merging,
 }
 
@@ -81,15 +76,10 @@ impl Stage {
     pub fn milestone_name(&self) -> &'static str {
         match self {
             Stage::Pending => "PENDING",
-            Stage::GoPreparation => "GO_PREPARATION",
             Stage::Preparation => "PREPARATION",
-            Stage::GoPlanning => "GO_PLANNING",
             Stage::Planning => "PLANNING",
-            Stage::GoWorking => "GO_WORKING",
             Stage::Working => "WORKING",
-            Stage::GoReviewing => "GO_REVIEWING",
             Stage::Reviewing => "REVIEWING",
-            Stage::GoMerging => "GO_MERGING",
             Stage::Merging => "MERGING",
         }
     }
@@ -97,15 +87,10 @@ impl Stage {
     pub fn from_milestone_name(name: &str) -> Option<Self> {
         match name {
             "PENDING" => Some(Stage::Pending),
-            "GO_PREPARATION" => Some(Stage::GoPreparation),
             "PREPARATION" => Some(Stage::Preparation),
-            "GO_PLANNING" => Some(Stage::GoPlanning),
             "PLANNING" => Some(Stage::Planning),
-            "GO_WORKING" => Some(Stage::GoWorking),
             "WORKING" => Some(Stage::Working),
-            "GO_REVIEWING" => Some(Stage::GoReviewing),
             "REVIEWING" => Some(Stage::Reviewing),
-            "GO_MERGING" => Some(Stage::GoMerging),
             "MERGING" => Some(Stage::Merging),
             _ => None,
         }
@@ -199,6 +184,8 @@ pub enum Signal {
     GoWork = 5,
     #[serde(rename = "go_plan")]
     GoPlan = 6,
+    #[serde(rename = "go_prepare")]
+    GoPrepare = 7,
 }
 
 impl Signal {
@@ -212,6 +199,7 @@ impl Signal {
             Signal::GoReview => "go_review",
             Signal::GoWork => "go_work",
             Signal::GoPlan => "go_plan",
+            Signal::GoPrepare => "go_prepare",
         }
     }
 
@@ -225,6 +213,7 @@ impl Signal {
             Signal::GoReview,
             Signal::GoWork,
             Signal::GoPlan,
+            Signal::GoPrepare,
         ]
     }
 
@@ -232,10 +221,23 @@ impl Signal {
     pub fn target_stage(&self) -> Stage {
         match self {
             Signal::Stop | Signal::Done | Signal::GoAsk => Stage::Pending,
-            Signal::GoMerge => Stage::GoMerging,
-            Signal::GoReview => Stage::GoReviewing,
-            Signal::GoWork => Stage::GoWorking,
-            Signal::GoPlan => Stage::GoPlanning,
+            Signal::GoMerge => Stage::Merging,
+            Signal::GoReview => Stage::Reviewing,
+            Signal::GoWork => Stage::Working,
+            Signal::GoPlan => Stage::Planning,
+            Signal::GoPrepare => Stage::Preparation,
+        }
+    }
+
+    /// Maps signal to role for session execution.
+    pub fn target_role(&self) -> Option<Role> {
+        match self {
+            Signal::GoMerge => Some(Role::Merger),
+            Signal::GoReview => Some(Role::Reviewer),
+            Signal::GoWork => Some(Role::Worker),
+            Signal::GoPlan => Some(Role::Planner),
+            Signal::GoPrepare => Some(Role::Preparator),
+            _ => None,
         }
     }
 }
@@ -257,6 +259,7 @@ impl std::str::FromStr for Signal {
             "goreview" | "go-review" => Ok(Signal::GoReview),
             "gowork" | "go-work" => Ok(Signal::GoWork),
             "goplan" | "go-plan" => Ok(Signal::GoPlan),
+            "goprepare" | "go-prepare" => Ok(Signal::GoPrepare),
             _ => Err(anyhow::anyhow!("Unknown signal: {}", s)),
         }
     }
@@ -1173,12 +1176,11 @@ mod tests {
     #[test]
     fn stage_milestone_names() {
         assert_eq!(Stage::Pending.milestone_name(), "PENDING");
-        assert_eq!(Stage::GoPlanning.milestone_name(), "GO_PLANNING");
         assert_eq!(Stage::Planning.milestone_name(), "PLANNING");
-        assert_eq!(Stage::GoWorking.milestone_name(), "GO_WORKING");
         assert_eq!(Stage::Working.milestone_name(), "WORKING");
-        assert_eq!(Stage::GoReviewing.milestone_name(), "GO_REVIEWING");
         assert_eq!(Stage::Reviewing.milestone_name(), "REVIEWING");
+        assert_eq!(Stage::Preparation.milestone_name(), "PREPARATION");
+        assert_eq!(Stage::Merging.milestone_name(), "MERGING");
     }
 
     #[test]
@@ -1190,7 +1192,7 @@ mod tests {
 
     #[test]
     fn stage_roundtrip_serde() {
-        let stage = Stage::GoPlanning;
+        let stage = Stage::Planning;
         let json = serde_json::to_string(&stage).unwrap();
         let back: Stage = serde_json::from_str(&json).unwrap();
         assert_eq!(back, stage);

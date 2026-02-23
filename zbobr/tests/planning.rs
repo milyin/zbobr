@@ -145,8 +145,8 @@ async fn test_planning() {
     env.process_task(task_id).await;
     assert_eq!(
       env.task_stage(task_id).await,
-      Stage::GoWorking,
-      "Task should transition to GO_WORKING after processing GO_WORK signal"
+      Stage::Working,
+      "Task should transition to WORKING after processing GO_WORK signal"
     );
 
     // verify clone path and branches; this logic is specific to this planning

@@ -130,7 +130,7 @@ async fn test_preparation() {
     env.process_task(task_id).await;
     assert_eq!(
       env.task_stage(task_id).await,
-      Stage::GoPlanning,
-      "Task should transition to GO_PLANNING after processing GO_PLAN signal"
+      Stage::Planning,
+      "Task should transition to PLANNING after processing GO_PLAN signal"
     );
 }

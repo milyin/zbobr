@@ -723,15 +723,10 @@ async fn main() -> anyhow::Result<()> {
                     // iterate all stages if no specific stage provided
                     let all_stages = [
                         Stage::Pending,
-                        Stage::GoPreparation,
                         Stage::Preparation,
-                        Stage::GoPlanning,
                         Stage::Planning,
-                        Stage::GoWorking,
                         Stage::Working,
-                        Stage::GoReviewing,
                         Stage::Reviewing,
-                        Stage::GoMerging,
                         Stage::Merging,
                     ];
                     for st in all_stages {
@@ -1236,107 +1231,37 @@ async fn process_task_by_stage(
     match task.stage {
         Stage::Pending => {
             if let Some(signal) = task.signal {
-                let target_stage = signal.target_stage();
-                if target_stage != Stage::Pending {
-                    zbobr.set_task_stage(task.id, target_stage).await?;
-                    println!(
-                        "Task #{} transitioned from PENDING to {} (signal: {})",
-                        task.id, target_stage, signal
-                    );
+                if let Some(role) = signal.target_role() {
+                    let base_prompt = match role {
+                        Role::Preparator => load_prompts(&prompts.preparator, prompts.base_path.as_ref())?,
+                        Role::Planner => load_prompts(&prompts.planner, prompts.base_path.as_ref())?,
+                        Role::Worker => load_prompts(&prompts.worker, prompts.base_path.as_ref())?,
+                        Role::Reviewer => load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?,
+                        Role::Merger => load_prompts(&prompts.merger, prompts.base_path.as_ref())?,
+                    };
+                    let full_prompt = build_full_prompt(&base_prompt, role);
+                    let task_model = task.model.clone().or(model);
+                    run_role_session(
+                        zbobr,
+                        task.id,
+                        role,
+                        task_model,
+                        port,
+                        &full_prompt,
+                        claude_executor_config,
+                        copilot_executor_config,
+                        mcp_tester_executor_config,
+                    )
+                    .await?;
                 } else {
                     println!(
-                        "Task #{} is PENDING with signal {} (no stage transition)",
+                        "Task #{} is PENDING with signal {} (no role to run)",
                         task.id, signal
                     );
                 }
             } else {
                 println!("Task #{} is PENDING with no signal", task.id);
             }
-        }
-        Stage::GoPreparation => {
-            let base_prompt = load_prompts(&prompts.preparator, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Preparator);
-            let task_model = task.model.clone().or(model);
-            run_role_session(
-                zbobr,
-                task.id,
-                Role::Preparator,
-                task_model,
-                port,
-                &full_prompt,
-                claude_executor_config,
-                copilot_executor_config,
-                mcp_tester_executor_config,
-            )
-            .await?;
-        }
-        Stage::GoPlanning => {
-            let base_prompt = load_prompts(&prompts.planner, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Planner);
-            let task_model = task.model.clone().or(model);
-            run_role_session(
-                zbobr,
-                task.id,
-                Role::Planner,
-                task_model,
-                port,
-                &full_prompt,
-                claude_executor_config,
-                copilot_executor_config,
-                mcp_tester_executor_config,
-            )
-            .await?;
-        }
-        Stage::GoWorking => {
-            let base_prompt = load_prompts(&prompts.worker, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Worker);
-            let task_model = task.model.clone().or(model);
-            run_role_session(
-                zbobr,
-                task.id,
-                Role::Worker,
-                task_model,
-                port,
-                &full_prompt,
-                claude_executor_config,
-                copilot_executor_config,
-                mcp_tester_executor_config,
-            )
-            .await?;
-        }
-        Stage::GoReviewing => {
-            let base_prompt = load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Reviewer);
-            let task_model = task.model.clone().or(model);
-            run_role_session(
-                zbobr,
-                task.id,
-                Role::Reviewer,
-                task_model,
-                port,
-                &full_prompt,
-                claude_executor_config,
-                copilot_executor_config,
-                mcp_tester_executor_config,
-            )
-            .await?;
-        }
-        Stage::GoMerging => {
-            let base_prompt = load_prompts(&prompts.merger, prompts.base_path.as_ref())?;
-            let full_prompt = build_full_prompt(&base_prompt, Role::Merger);
-            let task_model = task.model.clone().or(model);
-            run_role_session(
-                zbobr,
-                task.id,
-                Role::Merger,
-                task_model,
-                port,
-                &full_prompt,
-                claude_executor_config,
-                copilot_executor_config,
-                mcp_tester_executor_config,
-            )
-            .await?;
         }
         Stage::Preparation | Stage::Planning | Stage::Working | Stage::Reviewing | Stage::Merging => {
             println!(
@@ -1450,9 +1375,7 @@ async fn run_manager_loop(
         // Check for processable tasks using tool-based filtering
         let current_tool = zbobr.config().cli_tool;
 
-        // First, check PENDING tasks for signals and transition them.
-        // Note: Only PENDING tasks are checked - tasks already in GO_PLANNING or GO_WORKING
-        // stages are locked and should not be transitioned by this logic.
+        // Check for PENDING tasks with signals and run sessions directly
         let pending_tasks = match zbobr
             .list_tasks_by_stage(Stage::Pending, Some(current_tool))
             .await
@@ -1464,263 +1387,74 @@ async fn run_manager_loop(
             }
         };
 
+        let mut session_run = false;
         for task in pending_tasks {
             if let Some(signal) = task.signal {
-                let target_stage = signal.target_stage();
-                if target_stage != Stage::Pending {
+                if let Some(role) = signal.target_role() {
+                    let task_model = task.model.clone().unwrap_or_else(|| model.clone());
+                    let prompt = match role {
+                        Role::Preparator => &preparator_prompt,
+                        Role::Planner => &planner_prompt,
+                        Role::Worker => &worker_prompt,
+                        Role::Reviewer => &reviewer_prompt,
+                        Role::Merger => &merger_prompt,
+                    };
                     tracing::info!(
-                        "Task #{} has signal {:?}, transitioning from PENDING to {}",
+                        "Found PENDING task #{} with signal {:?} (tool: {:?}, model: {}) - running {:?}",
                         task.id,
                         signal,
-                        target_stage
+                        task.tool,
+                        task_model,
+                        role
                     );
-                    if let Err(e) = zbobr.set_task_stage(task.id, target_stage).await {
-                        tracing::error!("Failed to transition task #{}: {e}", task.id);
+                    if let Err(e) = run_role_session(
+                        zbobr,
+                        task.id,
+                        role,
+                        Some(task_model),
+                        port,
+                        prompt,
+                        claude_executor_config,
+                        copilot_executor_config,
+                        mcp_tester_executor_config,
+                    )
+                    .await
+                    {
+                        tracing::error!("{:?} session failed: {e}", role);
                     }
+                    session_run = true;
+                    break; // Only run one session per loop iteration
                 }
             }
         }
 
-        // Check for GO_PREPARATION tasks
-        let preparation_tasks = match zbobr
-            .list_tasks_by_stage(Stage::GoPreparation, Some(current_tool))
-            .await
-        {
-            Ok(tasks) => tasks,
-            Err(e) => {
-                tracing::error!("Failed to check GO_PREPARATION tasks: {e}");
-                vec![]
-            }
-        };
-
-        if let Some(task) = preparation_tasks.first() {
-            let task_model = task.model.clone().unwrap_or_else(|| model.clone());
-            tracing::info!(
-                "Found GO_PREPARATION task #{} (tool: {:?}, model: {}) - running preparator",
-                task.id,
-                task.tool,
-                task_model
-            );
-            if let Err(e) = run_role_session(
-                zbobr,
-                task.id,
-                Role::Preparator,
-                Some(task_model),
-                port,
-                &preparator_prompt,
-                claude_executor_config,
-                copilot_executor_config,
-                mcp_tester_executor_config,
-            )
-            .await
-            {
-                tracing::error!("Preparator session failed: {e}");
-            }
-            continue;
-        }
-
-        // Check for GO_PLANNING tasks
-        let planning_tasks = match zbobr
-            .list_tasks_by_stage(Stage::GoPlanning, Some(current_tool))
-            .await
-        {
-            Ok(tasks) => tasks,
-            Err(e) => {
-                tracing::error!("Failed to check GO_PLANNING tasks: {e}");
-                vec![]
-            }
-        };
-
-        if let Some(task) = planning_tasks.first() {
-            let task_model = task.model.clone().unwrap_or_else(|| model.clone());
-            tracing::info!(
-                "Found GO_PLANNING task #{} (tool: {:?}, model: {}) - running planner",
-                task.id,
-                task.tool,
-                task_model
-            );
-            if let Err(e) = run_role_session(
-                zbobr,
-                task.id,
-                Role::Planner,
-                Some(task_model),
-                port,
-                &planner_prompt,
-                claude_executor_config,
-                copilot_executor_config,
-                mcp_tester_executor_config,
-            )
-            .await
-            {
-                tracing::error!("Planner session failed: {e}");
-            }
-            continue;
-        }
-
-        // Check for GO_WORKING tasks
-        let working_tasks = match zbobr
-            .list_tasks_by_stage(Stage::GoWorking, Some(current_tool))
-            .await
-        {
-            Ok(tasks) => tasks,
-            Err(e) => {
-                tracing::error!("Failed to check GO_WORKING tasks: {e}");
-                vec![]
-            }
-        };
-
-        if let Some(task) = working_tasks.first() {
-            let task_model = task.model.clone().unwrap_or_else(|| model.clone());
-            tracing::info!(
-                "Found GO_WORKING task #{} (tool: {:?}, model: {}) - running worker",
-                task.id,
-                task.tool,
-                task_model
-            );
-            if let Err(e) = run_role_session(
-                zbobr,
-                task.id,
-                Role::Worker,
-                Some(task_model),
-                port,
-                &worker_prompt,
-                claude_executor_config,
-                copilot_executor_config,
-                mcp_tester_executor_config,
-            )
-            .await
-            {
-                tracing::error!("Worker session failed: {e}");
-            }
-            continue;
-        }
-
-        // Check for GO_REVIEWING tasks
-        let reviewing_tasks = match zbobr
-            .list_tasks_by_stage(Stage::GoReviewing, Some(current_tool))
-            .await
-        {
-            Ok(tasks) => tasks,
-            Err(e) => {
-                tracing::error!("Failed to check GO_REVIEWING tasks: {e}");
-                vec![]
-            }
-        };
-
-        if let Some(task) = reviewing_tasks.first() {
-            let task_model = task.model.clone().unwrap_or_else(|| model.clone());
-            tracing::info!(
-                "Found GO_REVIEWING task #{} (tool: {:?}, model: {}) - running reviewer",
-                task.id,
-                task.tool,
-                task_model
-            );
-            if let Err(e) = run_role_session(
-                zbobr,
-                task.id,
-                Role::Reviewer,
-                Some(task_model),
-                port,
-                &reviewer_prompt,
-                claude_executor_config,
-                copilot_executor_config,
-                mcp_tester_executor_config,
-            )
-            .await
-            {
-                tracing::error!("Reviewer session failed: {e}");
-            }
-            continue;
-        }
-
-        // Check for GO_MERGING tasks
-        let merging_tasks = match zbobr
-            .list_tasks_by_stage(Stage::GoMerging, Some(current_tool))
-            .await
-        {
-            Ok(tasks) => tasks,
-            Err(e) => {
-                tracing::error!("Failed to check GO_MERGING tasks: {e}");
-                vec![]
-            }
-        };
-
-        if let Some(task) = merging_tasks.first() {
-            let task_model = task.model.clone().unwrap_or_else(|| model.clone());
-            tracing::info!(
-                "Found GO_MERGING task #{} (tool: {:?}, model: {}) - running merger",
-                task.id,
-                task.tool,
-                task_model
-            );
-            if let Err(e) = run_role_session(
-                zbobr,
-                task.id,
-                Role::Merger,
-                Some(task_model),
-                port,
-                &merger_prompt,
-                claude_executor_config,
-                copilot_executor_config,
-                mcp_tester_executor_config,
-            )
-            .await
-            {
-                tracing::error!("Merger session failed: {e}");
-            }
+        if session_run {
             continue;
         }
 
         // Log task statistics before sleeping
+        // Count tasks in active stages
+        let active_stages = [
+            Stage::Preparation,
+            Stage::Planning,
+            Stage::Working,
+            Stage::Reviewing,
+            Stage::Merging,
+        ];
+        let mut active_counts = std::collections::HashMap::new();
+        for stage in &active_stages {
+            let count = zbobr.list_tasks_by_stage(*stage, Some(current_tool)).await.unwrap_or_default().len();
+            active_counts.insert(stage, count);
+        }
         tracing::info!(
-            "Task statistics for tool {:?}: GO_PREPARATION={}, GO_PLANNING={}, GO_WORKING={}, GO_REVIEWING={}, GO_MERGING={}",
+            "Task statistics for tool {:?}: PREPARATION={}, PLANNING={}, WORKING={}, REVIEWING={}, MERGING={}",
             current_tool,
-            preparation_tasks.len(),
-            planning_tasks.len(),
-            working_tasks.len(),
-            reviewing_tasks.len(),
-            merging_tasks.len()
+            active_counts[&Stage::Preparation],
+            active_counts[&Stage::Planning],
+            active_counts[&Stage::Working],
+            active_counts[&Stage::Reviewing],
+            active_counts[&Stage::Merging]
         );
-
-        if !preparation_tasks.is_empty() {
-            let summary: Vec<_> = preparation_tasks
-                .iter()
-                .map(|t| format!("#{} (tool: {:?}, model: {:?})", t.id, t.tool, t.model))
-                .collect();
-            tracing::info!("  GO_PREPARATION tasks: {}", summary.join(", "));
-        }
-
-        if !planning_tasks.is_empty() {
-            let summary: Vec<_> = planning_tasks
-                .iter()
-                .map(|t| format!("#{} (tool: {:?}, model: {:?})", t.id, t.tool, t.model))
-                .collect();
-            tracing::info!("  GO_PLANNING tasks: {}", summary.join(", "));
-        }
-
-        if !working_tasks.is_empty() {
-            let summary: Vec<_> = working_tasks
-                .iter()
-                .map(|t| format!("#{} (tool: {:?}, model: {:?})", t.id, t.tool, t.model))
-                .collect();
-            tracing::info!("  GO_WORKING tasks: {}", summary.join(", "));
-        }
-
-        if !reviewing_tasks.is_empty() {
-            let summary: Vec<_> = reviewing_tasks
-                .iter()
-                .map(|t| format!("#{} (tool: {:?}, model: {:?})", t.id, t.tool, t.model))
-                .collect();
-            tracing::info!("  GO_REVIEWING tasks: {}", summary.join(", "));
-        }
-
-        if !merging_tasks.is_empty() {
-            let summary: Vec<_> = merging_tasks
-                .iter()
-                .map(|t| format!("#{} (tool: {:?}, model: {:?})", t.id, t.tool, t.model))
-                .collect();
-            tracing::info!("  GO_MERGING tasks: {}", summary.join(", "));
-        }
 
         tracing::info!("No processable tasks. Sleeping {interval_secs}s...");
 

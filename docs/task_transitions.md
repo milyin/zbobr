@@ -17,9 +17,6 @@ manager, and the tests.
 - **Signal** – an intent to move a task to a different stage.  Signals are
   carried alongside the task and translated to a target stage by
   `Signal::target_stage()` (also in `zbobr-dispatcher/src/task.rs`).
-- **Go‑stage** – any stage whose name begins with `GO_`; these are “pending
-  work” stages that cause the manager loop to launch a role session.  They are
-  always followed by an active session stage (e.g. `GO_MERGING` → `MERGING`).
 
 Both stages and signals are defined by the dispatcher crate; the CLI and the
 MCP servers simply act on them.
@@ -38,10 +35,11 @@ reflected in the table below.
 | `Stop`        | `stop`      | `PENDING`     | user command (`zbobr task signal stop`), tests |
 | `Done`        | `done`      | `PENDING`     | user command, task-completion path in run_role_session |
 | `GoAsk`       | `go_ask`    | `PENDING`     | used internally by some helpers, rarely seen |
-| `GoMerge`     | `go_merge`  | `GO_MERGING`  | dispatcher merge‑conflict logic (see §4)    |
-| `GoReview`    | `go_review` | `GO_REVIEWING`| explicit CLI signal or follow-up from worker/merger/reviewer sessions |
-| `GoWork`      | `go_work`   | `GO_WORKING`  | CLI, post‑session rules (worker/reviewer/merger) |
-| `GoPlan`      | `go_plan`   | `GO_PLANNING` | preparator finish, CLI commands      |
+| `GoPrepare`   | `go_prepare`| `PREPARATION` | initial task creation or user command |
+| `GoPlan`      | `go_plan`   | `PLANNING`    | preparator finish, CLI commands      |
+| `GoWork`      | `go_work`   | `WORKING`     | CLI, post‑session rules (worker/reviewer/merger) |
+| `GoReview`    | `go_review` | `REVIEWING`   | explicit CLI signal or follow-up from worker/merger sessions |
+| `GoMerge`     | `go_merge`  | `MERGING`     | dispatcher merge‑conflict logic (see §4)    |
 
 The string forms are used when serialising the signal to JSON / GitHub label
 and when parsing command-line input (`FromStr` impl).  A signal is typically
@@ -56,16 +54,15 @@ result of a condition (see §4 below).
 The manager loop in `zbobr/src/main.rs` contains the only location where a
 `PENDING` task is actually moved to another stage.  On each polling iteration
 it calls `list_tasks_by_stage(Stage::Pending, Some(current_tool))` and then,
-for each task, looks at `task.signal`.  If the signal’s `target_stage()` is
-not `PENDING`, the task is updated via `zbobr.set_task_stage(task.id,
-target_stage).await?` and the transition is logged.
+for each task, looks at `task.signal`.  If the signal’s `target_role()` returns
+Some(role), the task runs a session for that role immediately.
 
 This means that:
 
 1. A task does not move until both (a) it is in `PENDING` and (b) its signal
-   has been set.
-2. Signals do **not** take effect while a task is in an active or go stage.
-   They are only evaluated once the stage returns to `PENDING`.
+   has been set to a role-triggering signal.
+2. Signals take effect immediately when the manager loop finds them; there
+   is no separate transition step.
 
 Conditions that set the signal are therefore the primary mechanism for driving
 state changes; the manual commands (`task signal …`) and automatic code paths
@@ -73,47 +70,26 @@ are described elsewhere in this document.
 
 ---
 
-## 3. go‑stage execution
+## 3. active stages and follow‑up signals
 
-Once a `PENDING` task has been moved to a go‑stage, the manager loop handles it
-before touching any other pending tasks.  The relevant code is the sequence of
-`if let Some(task) = …` checks starting around line 1616 in `zbobr/src/main.rs`.
-For each go‑stage the behaviour is identical except for the role and prompt:
-
-```rust
-let tasks = zbobr.list_tasks_by_stage(Stage::GoXxx, Some(current_tool)).await?;
-if let Some(task) = tasks.first() {
-    let task_model = task.model.clone().unwrap_or_else(|| model.clone());
-    tracing::info!("Found GO_XXX task #{} …", task.id);
-    run_role_session(... Role::Yyy …).await?;
-    continue;
-}
-```
-
-| Go-stage        | session role | code location        |
-|-----------------|--------------|----------------------|
-| `GO_PREPARATION`| `Preparator` | around line 1602     |
-| `GO_PLANNING`   | `Planner`    | around line 1610     |
-| `GO_WORKING`    | `Worker`     | around line 1614     |
-| `GO_REVIEWING`  | `Reviewer`   | around line 1626     |
-| `GO_MERGING`    | `Merger`     | around line 1636     |
-
-A go‑stage may be entered by:
-
-- a user signal (`task signal go_work`),
-- the follow-up logic at the end of a role session (§5), or
-- an automatic signal set by the dispatcher (§4).
-
-Once the session completes `run_role_session` resets the task back to
-`PENDING` before applying any follow-up signal.
-
----
-
-## 4. active stages and follow‑up signals
-
-The five non‑`GO_…` stages are *active* session stages.  When a role session
+The five non‑`PENDING` stages are *active* session stages.  When a role session
 is started, `run_role_session` sets the task’s stage to the corresponding
 active stage:
+
+```rust
+let stage = match role {
+    Role::Preparator => Stage::Preparation,
+    Role::Planner    => Stage::Planning,
+    Role::Worker     => Stage::Working,
+    Role::Reviewer   => Stage::Reviewing,
+    Role::Merger     => Stage::Merging,
+};
+zbobr.set_task_stage(task_id, stage).await?;
+```
+
+The task remains in that stage until the external tool (Copilot/Claude/…) has
+finished its session or the process is interrupted.  Upon normal completion the
+session code fetches the checklist items and computes the “next signal”:
 
 ```rust
 let stage = match role {
@@ -143,7 +119,7 @@ if matches!(role, Role::Preparator | Role::Worker | Role::Reviewer | Role::Merge
    && let Err(e) = session.set_signal(next_signal).await { … }
 ```
 
-| role       | follow-up signal rule (see table in §5) |
+| role       | follow-up signal rule (see table in §4) |
 |------------|------------------------------------------|
 | preparator | always `go_plan`                          |
 | planner    | none (planner does not set a signal)      |
@@ -152,11 +128,11 @@ if matches!(role, Role::Preparator | Role::Worker | Role::Reviewer | Role::Merge
 | merger     | always `go_work` (resume work after conflict)              |
 
 The signal is stored; the next time the task returns to `PENDING` the manager
-loop will read it and perform the stage transition described in §2.
+loop will read it and perform the session described in §2.
 
 ---
 
-## 5. automatic / conditional transitions
+## 4. automatic / conditional transitions
 
 Most signals are created explicitly, but a small number are generated by
 internal conditions rather than by a human command.  Currently the only such
@@ -175,11 +151,10 @@ if has_conflicts {
 ```
 
 The effect is to ensure that tasks with unresolved merge conflicts are picked
-up by the merger role.  The same signal → stage mechanism described in §2
-applies, so the task will move from `PENDING` to `GO_MERGING` on the next
-manager iteration.  Integration tests in `zbobr/tests/merging.rs` exercise this
-path by creating a repo, inducing a conflict, and verifying that the
-`GoMerge` signal appears.
+up by the merger role.  The same signal → session mechanism described in §2
+applies, so the task will run a merger session on the next manager iteration.
+Integration tests in `zbobr/tests/merging.rs` exercise this path by creating a
+repo, inducing a conflict, and verifying that the `GoMerge` signal appears.
 
 Additional conditional signals can be added using the same pattern: detect the
 condition in dispatcher code, call `set_signal(...)`, and optionally post a
@@ -189,22 +164,16 @@ is active it will take effect later.
 
 ---
 
-## 6. diagrams (Mermaid)
+## 5. diagrams (Mermaid)
 
 ```mermaid
 stateDiagram-v2
     [*] --> PENDING
-    PENDING --> GO_PREPARATION : signal=go_plan (preparator)
-    PENDING --> GO_PLANNING    : signal=go_plan
-    PENDING --> GO_WORKING     : signal=go_work
-    PENDING --> GO_REVIEWING   : signal=go_review
-    PENDING --> GO_MERGING     : signal=go_merge (automatic or manual)
-
-    GO_PREPARATION --> PREPARATION
-    GO_PLANNING    --> PLANNING
-    GO_WORKING     --> WORKING
-    GO_REVIEWING   --> REVIEWING
-    GO_MERGING     --> MERGING
+    PENDING --> PREPARATION : signal=go_prepare
+    PENDING --> PLANNING    : signal=go_plan
+    PENDING --> WORKING     : signal=go_work
+    PENDING --> REVIEWING   : signal=go_review
+    PENDING --> MERGING     : signal=go_merge (automatic or manual)
 
     PREPARATION --> PENDING : end session
     PLANNING    --> PENDING : end session
@@ -222,20 +191,19 @@ stateDiagram-v2
 
 ---
 
-## 7. adding or modifying transitions
+## 6. adding or modifying transitions
 
 Any change to the transition machinery must be coordinated across four
 locations:
 
 1. **`zbobr-dispatcher/src/task.rs`** – update the `Stage` or `Signal` enum and
-   adjust `Signal::target_stage` and its `FromStr`/`Display` impls; add tests
+   adjust `Signal::target_stage` and `Signal::target_role`; add tests
    in `zbobr-dispatcher` if needed.
-2. **`zbobr/src/main.rs`** – modify the manager loop (e.g. add a new
-   `if let Some(task) = …GO_NEW…` block) and the follow‑up signal policy in
-   `run_role_session` if the role should set one.
+2. **`zbobr/src/main.rs`** – modify the manager loop signal handling and the
+   follow‑up signal policy in `run_role_session` if the role should set one.
 3. **this document** – update the appropriate table(s) and narrative sections.
 4. **integration tests** – add or update tests under `zbobr/tests/` that
-   exercise the new transition and verify both the signal and resulting stage.
+   exercise the new transition and verify both the signal and resulting session.
 
 Failing to update any of these places often results in silent no-ops or
 inconsistent behaviour.

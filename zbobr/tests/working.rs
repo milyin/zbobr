@@ -205,8 +205,8 @@ async fn test_working() {
     env.process_task(task_id).await;
     assert_eq!(
       env.task_stage(task_id).await,
-      Stage::GoReviewing,
-      "Task should transition to GO_REVIEWING after processing GO_REVIEW signal"
+      Stage::Reviewing,
+      "Task should transition to REVIEWING after processing GO_REVIEW signal"
     );
 
     let mut pull_work_return_value = None;
