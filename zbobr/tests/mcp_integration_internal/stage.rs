@@ -4,27 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use zbobr_dispatcher::Stage;
 
 use super::env::IntegrationTestEnv;
-use super::mcp_tester_scenarios::{
-    assert_false_scenario,
-    planner_comprehensive_scenario,
-    preparator_comprehensive_scenario,
-};
-
-/// Scenario content for the preparation stage.
-pub struct PreparationScenario(pub String);
-
-/// Scenario content for the planning stage.
-pub struct PlanningScenario(pub String);
-
-/// Create a preparation scenario for the given repository path.
-pub fn preparation_scenario(repo_path: &str) -> PreparationScenario {
-    PreparationScenario(preparator_comprehensive_scenario(repo_path))
-}
-
-/// Create a planning scenario.
-pub fn planning_scenario() -> PlanningScenario {
-    PlanningScenario(planner_comprehensive_scenario())
-}
+use super::mcp_tester_scenarios::assert_false_scenario;
 
 // ---------------------------------------------------------------------------
 // Stage metadata
@@ -102,84 +82,15 @@ impl IntegrationTestEnv {
         self.run_zbobr("task", &full_args_vec).await;
     }
 
-    /// Run the preparation stage for `task_id`.
-    pub async fn run_preparation(&self, scenario: PreparationScenario, task_id: u64) {
-        self.run_stage_test(task_id, Stage::Preparation, scenario.0).await;
+    /// Run the preparation stage for `task_id` using raw scenario YAML.
+    pub async fn run_preparation(&self, scenario: String, task_id: u64) {
+        self.run_stage_test(task_id, Stage::Preparation, scenario).await;
     }
 
-    /// Run the planning stage for `task_id`.
-    pub async fn run_planning(&self, scenario: PlanningScenario, task_id: u64) {
-        self.run_stage_test(task_id, Stage::Planning, scenario.0).await;
-    }
-
-    /// After planning, verify that `PULL_WORK_RETURN_VALUE` is populated and that
-    /// the expected branches exist in the cloned workspace repository.
-    pub async fn verify_planning(&self, task_id: u64) {
-        let output = self.show_task(task_id).await;
-
-        let mut pull_work_return_value = None;
-        for line in output.lines() {
-            if let Some(idx) = line.find("PULL_WORK_RETURN_VALUE=") {
-                let val = line[idx + "PULL_WORK_RETURN_VALUE=".len()..].trim();
-                let val = val.trim_end_matches('\'');
-                pull_work_return_value = Some(val.to_string());
-                break;
-            }
-        }
-        let pull_work_return_value =
-            pull_work_return_value.expect("PULL_WORK_RETURN_VALUE not found in task output");
-
-        let parsed: serde_json::Value = serde_json::from_str(&pull_work_return_value)
-            .expect("Failed to parse PULL_WORK_RETURN_VALUE as JSON");
-        let path_str = parsed
-            .get("result")
-            .and_then(|v| v.as_str())
-            .expect("result field not found or not a string");
-
-        let cloned_repo_path = std::path::PathBuf::from(path_str);
-
-        assert!(cloned_repo_path.exists(), "Cloned repo path does not exist");
-        assert!(
-            cloned_repo_path.starts_with(&self.workspaces_dir),
-            "Cloned repo path is not inside workspaces_dir"
-        );
-        assert!(
-            cloned_repo_path.join(".git").exists(),
-            "Cloned repo is not a git repository"
-        );
-
-        let branches_output = tokio::process::Command::new("git")
-            .arg("branch")
-            .current_dir(&cloned_repo_path)
-            .output()
-            .await
-            .unwrap();
-        let branches_str = String::from_utf8_lossy(&branches_output.stdout);
-
-        assert!(
-            branches_str.contains("main"),
-            "Destination branch 'main' not found in cloned repo"
-        );
-
-        let expected_work_branch = format!("zbobr_fix-{task_id}-test");
-        assert!(
-            branches_str.contains(&expected_work_branch),
-            "Work branch '{expected_work_branch}' not found in cloned repo"
-        );
-
-        let current_branch_output = tokio::process::Command::new("git")
-            .args(["branch", "--show-current"])
-            .current_dir(&cloned_repo_path)
-            .output()
-            .await
-            .unwrap();
-        let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
-            .trim()
-            .to_string();
-        assert_eq!(
-            current_branch, expected_work_branch,
-            "Current branch is not the work branch"
-        );
+    /// Run the planning stage for `task_id` using raw scenario YAML.
+    pub async fn run_planning(&self, scenario: String, task_id: u64) {
+        self.run_stage_test(task_id, Stage::Planning, scenario).await;
     }
 }
+
 
