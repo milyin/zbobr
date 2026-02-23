@@ -1,6 +1,6 @@
-mod mcp_integration_internal;
+mod mcp_integration;
 
-use mcp_integration_internal::IntegrationTestEnv;
+use mcp_integration::IntegrationTestEnv;
 use zbobr_dispatcher::Stage;
 use zbobr_dispatcher::mcp::preparator_tools::{
     SET_PARAM_DESTINATION_REPOSITORY,
