@@ -4,7 +4,33 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use zbobr_dispatcher::Stage;
 
 use super::env::IntegrationTestEnv;
-use super::mcp_tester_scenarios::assert_false_scenario;
+
+// sentinel scenario helper --------------------------------------------------
+
+/// A simple scenario that always fails when executed.  It's written to every
+/// unused executor slot during stage tests so that any unexpected routing of a
+/// stage command into the wrong slot triggers an immediate failure.  The body
+/// is basically copied from the old `mcp_tester_scenarios` module.
+fn assert_false_scenario() -> String {
+    use zbobr_dispatcher::mcp::preparator_tools::GET_DESCRIPTION;
+
+    format!(
+        r#"name: Assert False - must not run
+description: Sentinel scenario – always fails on execution
+timeout: 30
+stop_on_failure: true
+
+steps:
+  - name: This stage must not execute
+    operation:
+      type: tool_call
+      tool: {GET_DESCRIPTION}
+    assertions:
+      - type: equals
+        path: result
+        value: \"ASSERT_FALSE: this scenario must never be reached\""#,
+    )
+}
 
 // ---------------------------------------------------------------------------
 // Stage metadata
