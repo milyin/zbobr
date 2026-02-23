@@ -120,4 +120,17 @@ async fn test_preparation() {
     // run the preparator stage with the comprehensive scenario defined above
     env.run_stage(task_id, Stage::Preparation, preparation_scenario(&repo_path.to_string_lossy()))
         .await;
+
+    let output = env.show_task(task_id).await;
+    assert!(
+      output.contains("Signal:      go_plan"),
+      "Preparator follow-up signal should be GO_PLAN"
+    );
+
+    env.process_task(task_id).await;
+    assert_eq!(
+      env.task_stage(task_id).await,
+      Stage::GoPlanning,
+      "Task should transition to GO_PLANNING after processing GO_PLAN signal"
+    );
 }

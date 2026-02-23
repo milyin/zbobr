@@ -202,6 +202,13 @@ async fn test_working() {
         "Expected checked checklist item was not found"
     );
 
+    env.process_task(task_id).await;
+    assert_eq!(
+      env.task_stage(task_id).await,
+      Stage::GoReviewing,
+      "Task should transition to GO_REVIEWING after processing GO_REVIEW signal"
+    );
+
     let mut pull_work_return_value = None;
     for line in output.lines() {
         if let Some(idx) = line.find("PULL_WORK_RETURN_VALUE=") {

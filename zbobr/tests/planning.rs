@@ -136,6 +136,19 @@ async fn test_planning() {
     // run the planning stage itself
     env.run_stage(task_id, Stage::Planning, planning_scenario()).await;
 
+    let output = env.show_task(task_id).await;
+    assert!(
+      output.contains("Signal:      go_work"),
+      "Planner follow-up signal should be GO_WORK after posting plan"
+    );
+
+    env.process_task(task_id).await;
+    assert_eq!(
+      env.task_stage(task_id).await,
+      Stage::GoWorking,
+      "Task should transition to GO_WORKING after processing GO_WORK signal"
+    );
+
     // verify clone path and branches; this logic is specific to this planning
     // test so it remains local.
     let output = env.show_task(task_id).await;

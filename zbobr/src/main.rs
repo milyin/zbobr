@@ -241,6 +241,17 @@ enum TaskSubcommand {
         #[arg(long)]
         show_prompt: bool,
     },
+    /// Process a task according to its current stage (single-step)
+    Process {
+        /// Task ID
+        task: u64,
+        /// AI model override to use when role execution is needed
+        #[arg(long)]
+        model: Option<String>,
+        /// Port for the MCP server when role execution is needed
+        #[arg(long, default_value = "3000")]
+        port: u16,
+    },
 }
 
 /// Resolved prompt file paths for planner, worker, and merger.
@@ -981,6 +992,24 @@ async fn main() -> anyhow::Result<()> {
                 )
                 .await?;
             }
+            TaskSubcommand::Process { task, model, port } => {
+                let model_enum = model
+                    .map(|m| m.parse::<Model>())
+                    .transpose()
+                    .context("Invalid model name")?;
+                let task_obj = zbobr.get_task(task).await?;
+                process_task_by_stage(
+                    &zbobr,
+                    &task_obj,
+                    model_enum,
+                    port,
+                    &prompts,
+                    &claude_executor_config,
+                    &copilot_executor_config,
+                    &mcp_tester_executor_config,
+                )
+                .await?;
+            }
         },
         Command::Loop {
             interval,
@@ -1188,6 +1217,133 @@ async fn run_role_session(
     // Propagate executor error after cleanup
     if let Some(e) = execution_error {
         return Err(e);
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn process_task_by_stage(
+    zbobr: &Zbobr,
+    task: &zbobr_dispatcher::Task,
+    model: Option<Model>,
+    port: u16,
+    prompts: &Prompts,
+    claude_executor_config: &ZbobrExecutorClaudeConfig,
+    copilot_executor_config: &ZbobrExecutorCopilotConfig,
+    mcp_tester_executor_config: &ZbobrExecutorMcpTesterConfig,
+) -> anyhow::Result<()> {
+    match task.stage {
+        Stage::Pending => {
+            if let Some(signal) = task.signal {
+                let target_stage = signal.target_stage();
+                if target_stage != Stage::Pending {
+                    zbobr.set_task_stage(task.id, target_stage).await?;
+                    println!(
+                        "Task #{} transitioned from PENDING to {} (signal: {})",
+                        task.id, target_stage, signal
+                    );
+                } else {
+                    println!(
+                        "Task #{} is PENDING with signal {} (no stage transition)",
+                        task.id, signal
+                    );
+                }
+            } else {
+                println!("Task #{} is PENDING with no signal", task.id);
+            }
+        }
+        Stage::GoPreparation => {
+            let base_prompt = load_prompts(&prompts.preparator, prompts.base_path.as_ref())?;
+            let full_prompt = build_full_prompt(&base_prompt, Role::Preparator);
+            let task_model = task.model.clone().or(model);
+            run_role_session(
+                zbobr,
+                task.id,
+                Role::Preparator,
+                task_model,
+                port,
+                &full_prompt,
+                claude_executor_config,
+                copilot_executor_config,
+                mcp_tester_executor_config,
+            )
+            .await?;
+        }
+        Stage::GoPlanning => {
+            let base_prompt = load_prompts(&prompts.planner, prompts.base_path.as_ref())?;
+            let full_prompt = build_full_prompt(&base_prompt, Role::Planner);
+            let task_model = task.model.clone().or(model);
+            run_role_session(
+                zbobr,
+                task.id,
+                Role::Planner,
+                task_model,
+                port,
+                &full_prompt,
+                claude_executor_config,
+                copilot_executor_config,
+                mcp_tester_executor_config,
+            )
+            .await?;
+        }
+        Stage::GoWorking => {
+            let base_prompt = load_prompts(&prompts.worker, prompts.base_path.as_ref())?;
+            let full_prompt = build_full_prompt(&base_prompt, Role::Worker);
+            let task_model = task.model.clone().or(model);
+            run_role_session(
+                zbobr,
+                task.id,
+                Role::Worker,
+                task_model,
+                port,
+                &full_prompt,
+                claude_executor_config,
+                copilot_executor_config,
+                mcp_tester_executor_config,
+            )
+            .await?;
+        }
+        Stage::GoReviewing => {
+            let base_prompt = load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?;
+            let full_prompt = build_full_prompt(&base_prompt, Role::Reviewer);
+            let task_model = task.model.clone().or(model);
+            run_role_session(
+                zbobr,
+                task.id,
+                Role::Reviewer,
+                task_model,
+                port,
+                &full_prompt,
+                claude_executor_config,
+                copilot_executor_config,
+                mcp_tester_executor_config,
+            )
+            .await?;
+        }
+        Stage::GoMerging => {
+            let base_prompt = load_prompts(&prompts.merger, prompts.base_path.as_ref())?;
+            let full_prompt = build_full_prompt(&base_prompt, Role::Merger);
+            let task_model = task.model.clone().or(model);
+            run_role_session(
+                zbobr,
+                task.id,
+                Role::Merger,
+                task_model,
+                port,
+                &full_prompt,
+                claude_executor_config,
+                copilot_executor_config,
+                mcp_tester_executor_config,
+            )
+            .await?;
+        }
+        Stage::Preparation | Stage::Planning | Stage::Working | Stage::Reviewing | Stage::Merging => {
+            println!(
+                "Task #{} is currently in active stage {} and cannot be processed by `task process`",
+                task.id, task.stage
+            );
+        }
     }
 
     Ok(())
@@ -1692,6 +1848,24 @@ mod tests {
                     assert_eq!(work_branch, Some(None));
                 }
                 _ => panic!("expected Update subcommand"),
+            }
+        } else {
+            panic!("expected Task command");
+        }
+    }
+
+    #[test]
+    fn task_process_parsing() {
+        let cli = Cli::parse_from(["zbobr", "task", "process", "42", "--model", "gpt-5-mini"]);
+
+        if let Command::Task { subcommand } = cli.command {
+            match subcommand {
+                TaskSubcommand::Process { task, model, port } => {
+                    assert_eq!(task, 42);
+                    assert_eq!(model.as_deref(), Some("gpt-5-mini"));
+                    assert_eq!(port, 3000);
+                }
+                _ => panic!("expected Process subcommand"),
             }
         } else {
             panic!("expected Task command");

@@ -129,6 +129,29 @@ impl IntegrationTestEnv {
             .await
     }
 
+    /// Process a task according to its current stage.
+    pub async fn process_task(&self, task_id: u64) {
+        let task_id_str = task_id.to_string();
+        self.run_zbobr("task", &["process", &task_id_str]).await;
+    }
+
+    /// Read a task's current stage from CLI output.
+    pub async fn task_stage(&self, task_id: u64) -> Stage {
+        let output = self.show_task(task_id).await;
+        let stage_line = output
+            .lines()
+            .find(|l| l.trim_start().starts_with("Stage:"))
+            .unwrap_or_else(|| panic!("Stage line not found in output: {output}"));
+        let stage_value = stage_line
+            .split(':')
+            .nth(1)
+            .map(str::trim)
+            .unwrap_or_else(|| panic!("Malformed stage line: {stage_line}"));
+
+        Stage::from_milestone_name(stage_value)
+            .unwrap_or_else(|| panic!("Unknown stage '{stage_value}' in output: {output}"))
+    }
+
     // -----------------------------------------------------------------------
     // Git utilities
     // -----------------------------------------------------------------------

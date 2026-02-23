@@ -122,6 +122,13 @@ async fn test_merging() {
         "Merger follow-up signal should be GO_WORK after merge resolution"
     );
 
+    env.process_task(task_id).await;
+    assert_eq!(
+      env.task_stage(task_id).await,
+      Stage::GoWorking,
+      "Task should transition to GO_WORKING after processing GO_WORK signal"
+    );
+
     let mut pull_work_return_value = None;
     for line in output.lines() {
         if let Some(idx) = line.find("PULL_WORK_RETURN_VALUE=") {
