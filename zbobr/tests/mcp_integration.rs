@@ -331,17 +331,15 @@ async fn run_stage_test(env: &TestEnv, stage: Stage, scenario: String) {
 /// Both stages share a single task so that parameters written by the
 /// preparator (destination_branch, work_branch) are readable by the planner.
 /// The Planning scenario exercises all planner tools including `pull_work`.
-#[tokio::test]
-async fn test_preparation_and_planning() {
-    let Some(env) = setup_test_env().await else {
-        return;
-    };
+// helper utilities for breaking the big test into high-level pieces
 
-    // 1. Create a test repository in a separate directory
+/// Create a minimal git repository used by the preparation stage.
+/// Returns the path string that should be passed to the preparator scenario.
+async fn create_test_repo(env: &TestEnv) -> String {
     let repo_dir = env.tmp_path.join("test_repo");
     tokio::fs::create_dir_all(&repo_dir).await.unwrap();
-    
-    // Initialize git repo
+
+    // Initialize git repo and configure user
     let status = tokio::process::Command::new("git")
         .arg("init")
         .current_dir(&repo_dir)
@@ -350,7 +348,6 @@ async fn test_preparation_and_planning() {
         .unwrap();
     assert!(status.success());
 
-    // Configure git user for the test repo
     tokio::process::Command::new("git")
         .args(&["config", "user.name", "test-bot"])
         .current_dir(&repo_dir)
@@ -364,7 +361,7 @@ async fn test_preparation_and_planning() {
         .await
         .unwrap();
 
-    // Create an initial commit so we have a 'main' branch
+    // initial commit and rename branch to main
     tokio::fs::write(repo_dir.join("README.md"), "test repo").await.unwrap();
     tokio::process::Command::new("git")
         .args(&["add", "README.md"])
@@ -378,7 +375,6 @@ async fn test_preparation_and_planning() {
         .status()
         .await
         .unwrap();
-    // Ensure the branch is named 'main'
     tokio::process::Command::new("git")
         .args(&["branch", "-M", "main"])
         .current_dir(&repo_dir)
@@ -386,16 +382,28 @@ async fn test_preparation_and_planning() {
         .await
         .unwrap();
 
-    let repo_path_str = repo_dir.to_string_lossy().to_string();
+    repo_dir.to_string_lossy().to_string()
+}
 
+/// Run the preparation stage against `repo_path`.
+async fn test_preparation(env: &TestEnv, repo_path: &str) {
     run_stage_test(
-        &env,
+        env,
         Stage::Preparation,
-        preparator_comprehensive_scenario(&repo_path_str),
+        preparator_comprehensive_scenario(repo_path),
     )
     .await;
-    run_stage_test(&env, Stage::Planning, planner_comprehensive_scenario()).await;
+}
 
+/// Run the planning stage for the shared task.
+async fn test_planning(env: &TestEnv) {
+    run_stage_test(env, Stage::Planning, planner_comprehensive_scenario()).await;
+}
+
+/// After planning has run, examine the resulting task and verify that the
+/// planner populated PULL_WORK_RETURN_VALUE correctly, turned it into a
+/// working clone and set up branches as expected.
+async fn verify_planning(env: &TestEnv) {
     // Read the task using zbobr task show and extract PULL_WORK_RETURN_VALUE
     let output = run_zbobr_capture(
         &env.tmp_path,
@@ -418,14 +426,14 @@ async fn test_preparation_and_planning() {
         }
     }
     let pull_work_return_value = pull_work_return_value.expect("PULL_WORK_RETURN_VALUE not found in task output");
-    
+
     // Parse the JSON to extract the actual path
     let parsed: serde_json::Value = serde_json::from_str(&pull_work_return_value).expect("Failed to parse PULL_WORK_RETURN_VALUE as JSON");
     let path_str = parsed.get("result").and_then(|v| v.as_str()).expect("result field not found or not a string");
 
     // Validate the path
     let cloned_repo_path = PathBuf::from(path_str);
-    
+
     // this is a path and this path exists and it's inside the workspaces_dir/task_dir
     assert!(cloned_repo_path.exists(), "Cloned repo path does not exist");
     assert!(
@@ -446,9 +454,9 @@ async fn test_preparation_and_planning() {
         .await
         .unwrap();
     let branches_str = String::from_utf8_lossy(&branches_output.stdout);
-    
+
     assert!(branches_str.contains("main"), "Destination branch 'main' not found in cloned repo");
-    
+
     let expected_work_branch = format!("zbobr_fix-{}-test", env.task_id);
     assert!(
         branches_str.contains(&expected_work_branch),
@@ -468,6 +476,19 @@ async fn test_preparation_and_planning() {
         current_branch, expected_work_branch,
         "Current branch is not the work branch"
     );
+}
+
+#[tokio::test]
+async fn test_preparation_and_planning() {
+    let Some(env) = setup_test_env().await else {
+        return;
+    };
+
+    // high-level orchestration only; details live in helper functions above
+    let repo_path = create_test_repo(&env).await;
+    test_preparation(&env, &repo_path).await;
+    test_planning(&env).await;
+    verify_planning(&env).await;
 }
 
 
