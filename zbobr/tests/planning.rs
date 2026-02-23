@@ -134,7 +134,7 @@ async fn test_planning() {
     .await;
 
     // run the planning stage itself
-    env.run_planning(planning_scenario(), task_id).await;
+    env.run_stage(task_id, Stage::Planning, planning_scenario()).await;
 
     // verify clone path and branches; this logic is specific to this planning
     // test so it remains local.

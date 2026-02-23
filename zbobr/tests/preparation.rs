@@ -118,6 +118,6 @@ async fn test_preparation() {
         .await;
 
     // run the preparator stage with the comprehensive scenario defined above
-    env.run_preparation(preparation_scenario(&repo_path.to_string_lossy()), task_id)
+    env.run_stage(task_id, Stage::Preparation, preparation_scenario(&repo_path.to_string_lossy()))
         .await;
 }

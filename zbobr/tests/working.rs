@@ -186,7 +186,7 @@ async fn test_working() {
     )
     .await;
 
-    env.run_working(working_scenario(), task_id).await;
+    env.run_stage(task_id, Stage::Working, working_scenario()).await;
 
     let output = env.show_task(task_id).await;
     assert!(

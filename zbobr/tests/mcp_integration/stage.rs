@@ -24,7 +24,7 @@ pub fn stage_meta(stage: Stage) -> (&'static str, &'static str) {
 // Stage runner
 // ---------------------------------------------------------------------------
 
-/// Global counter used to give every `run_stage_test` invocation a unique
+/// Global counter used to give every `run_stage` invocation a unique
 /// scratch directory, avoiding collisions when tests run in parallel.
 static SCENARIO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -37,7 +37,7 @@ impl IntegrationTestEnv {
     /// tries to invoke a role that wasn't explicitly given a scenario.  This
     /// simplifies the test harness by removing the old "assert false" sentinel
     /// YAML.
-    pub async fn run_stage_test(&self, task_id: u64, stage: Stage, scenario: String) {
+    pub async fn run_stage(&self, task_id: u64, stage: Stage, scenario: String) {
         let (command, flag_suffix) = stage_meta(stage);
 
         let idx = SCENARIO_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -65,24 +65,6 @@ impl IntegrationTestEnv {
             .collect();
 
         self.run_zbobr("task", &full_args_vec).await;
-    }
-
-    /// Run the preparation stage for `task_id` using raw scenario YAML.
-    #[allow(dead_code)]
-    pub async fn run_preparation(&self, scenario: String, task_id: u64) {
-        self.run_stage_test(task_id, Stage::Preparation, scenario).await;
-    }
-
-    /// Run the planning stage for `task_id` using raw scenario YAML.
-    #[allow(dead_code)]
-    pub async fn run_planning(&self, scenario: String, task_id: u64) {
-        self.run_stage_test(task_id, Stage::Planning, scenario).await;
-    }
-
-    /// Run the working stage for `task_id` using raw scenario YAML.
-    #[allow(dead_code)]
-    pub async fn run_working(&self, scenario: String, task_id: u64) {
-        self.run_stage_test(task_id, Stage::Working, scenario).await;
     }
 }
 
