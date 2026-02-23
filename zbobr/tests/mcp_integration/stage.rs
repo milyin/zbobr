@@ -78,6 +78,12 @@ impl IntegrationTestEnv {
     pub async fn run_planning(&self, scenario: String, task_id: u64) {
         self.run_stage_test(task_id, Stage::Planning, scenario).await;
     }
+
+    /// Run the working stage for `task_id` using raw scenario YAML.
+    #[allow(dead_code)]
+    pub async fn run_working(&self, scenario: String, task_id: u64) {
+        self.run_stage_test(task_id, Stage::Working, scenario).await;
+    }
 }
 
 
