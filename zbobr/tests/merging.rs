@@ -120,20 +120,7 @@ async fn test_merging() {
         .await;
     let work_branch_report = format!("zbobr_fix-{task_id_report}-test");
     let task_id_str_report = task_id_report.to_string();
-    env.run_zbobr(
-        "task",
-        &[
-            "update",
-            &task_id_str_report,
-            "--dest-repo",
-            &repo_path_str,
-            "--dest-branch",
-            "main",
-            "--work-branch",
-            &work_branch_report,
-        ],
-    )
-    .await;
+    env.update_task_branches(task_id_report, &repo_path_str, "main", &work_branch_report).await;
 
     // Test report ending explicit
     env.run_stage(task_id_report, Stage::Merging, scenario_report.clone()).await;
@@ -229,20 +216,7 @@ async fn test_merging() {
         .await;
     let work_branch_ask = format!("zbobr_fix-{task_id_ask}-test");
     let task_id_str_ask = task_id_ask.to_string();
-    env.run_zbobr(
-        "task",
-        &[
-            "update",
-            &task_id_str_ask,
-            "--dest-repo",
-            &repo_path_str,
-            "--dest-branch",
-            "main",
-            "--work-branch",
-            &work_branch_ask,
-        ],
-    )
-    .await;
+    env.update_task_branches(task_id_ask, &repo_path_str, "main", &work_branch_ask).await;
 
     // Test ask ending explicit
     env.run_stage(task_id_ask, Stage::Merging, scenario_ask.clone()).await;

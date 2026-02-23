@@ -110,20 +110,7 @@ async fn test_reviewing() {
     let work_branch = format!("zbobr_fix-{task_id}-test");
     let task_id_str = task_id.to_string();
     let repo_path_str = repo_path.to_string_lossy().to_string();
-    env.run_zbobr(
-        "task",
-        &[
-            "update",
-            &task_id_str,
-            "--dest-repo",
-            &repo_path_str,
-            "--dest-branch",
-            "main",
-            "--work-branch",
-            &work_branch,
-        ],
-    )
-    .await;
+    env.update_task_branches(task_id, &repo_path_str, "main", &work_branch).await;
 
     env.run_stage(task_id, Stage::Reviewing, reviewing_scenario())
         .await;

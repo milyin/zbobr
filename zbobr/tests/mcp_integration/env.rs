@@ -135,6 +135,25 @@ impl IntegrationTestEnv {
         self.run_zbobr("task", &["process", &task_id_str]).await;
     }
 
+    /// Update a task's repository and branch information.
+    pub async fn update_task_branches(&self, task_id: u64, dest_repo: &str, dest_branch: &str, work_branch: &str) {
+        let task_id_str = task_id.to_string();
+        self.run_zbobr(
+            "task",
+            &[
+                "update",
+                &task_id_str,
+                "--dest-repo",
+                dest_repo,
+                "--dest-branch",
+                dest_branch,
+                "--work-branch",
+                work_branch,
+            ],
+        )
+        .await;
+    }
+
     /// Read a task's current stage from CLI output.
     pub async fn task_stage(&self, task_id: u64) -> Stage {
         let output = self.show_task(task_id).await;
