@@ -1,19 +1,9 @@
-mod env;
-mod stage;
+pub mod env;
+pub mod stage;
 mod mcp_tester_scenarios;
 
-use env::*;
-use stage::*;
-
-#[tokio::test]
-async fn test_preparation_and_planning() {
-    let Some(env) = setup_test_env().await else {
-        return;
-    };
-
-    // high-level orchestration only; details live in helper functions above
-    let repo_path = create_test_repo(&env).await;
-    test_preparation(&env, &repo_path).await;
-    test_planning(&env).await;
-    verify_planning(&env).await;
-}
+// re-export the most common helpers so the outer test module can import them
+#[cfg(test)]
+pub use env::*;
+#[cfg(test)]
+pub use stage::*;
