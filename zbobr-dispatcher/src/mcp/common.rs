@@ -421,4 +421,3 @@ mod tests {
         // listeners are dropped when `entries` goes out of scope
     }
 }
-

@@ -360,7 +360,9 @@ async fn create_test_repo(env: &TestEnv) -> String {
         .unwrap();
 
     // initial commit and rename branch to main
-    tokio::fs::write(repo_dir.join("README.md"), "test repo").await.unwrap();
+    tokio::fs::write(repo_dir.join("README.md"), "test repo")
+        .await
+        .unwrap();
     tokio::process::Command::new("git")
         .args(["add", "README.md"])
         .current_dir(&repo_dir)
@@ -423,11 +425,16 @@ async fn verify_planning(env: &TestEnv) {
             break;
         }
     }
-    let pull_work_return_value = pull_work_return_value.expect("PULL_WORK_RETURN_VALUE not found in task output");
+    let pull_work_return_value =
+        pull_work_return_value.expect("PULL_WORK_RETURN_VALUE not found in task output");
 
     // Parse the JSON to extract the actual path
-    let parsed: serde_json::Value = serde_json::from_str(&pull_work_return_value).expect("Failed to parse PULL_WORK_RETURN_VALUE as JSON");
-    let path_str = parsed.get("result").and_then(|v| v.as_str()).expect("result field not found or not a string");
+    let parsed: serde_json::Value = serde_json::from_str(&pull_work_return_value)
+        .expect("Failed to parse PULL_WORK_RETURN_VALUE as JSON");
+    let path_str = parsed
+        .get("result")
+        .and_then(|v| v.as_str())
+        .expect("result field not found or not a string");
 
     // Validate the path
     let cloned_repo_path = PathBuf::from(path_str);
@@ -440,7 +447,10 @@ async fn verify_planning(env: &TestEnv) {
     );
 
     // the path contains the git repository
-    assert!(cloned_repo_path.join(".git").exists(), "Cloned repo is not a git repository");
+    assert!(
+        cloned_repo_path.join(".git").exists(),
+        "Cloned repo is not a git repository"
+    );
 
     // that there are branches named accordingly to PARAM_WORK_BRANCH and PARAM_DESTINATION_BRANCH in this repository
     // The preparator set destination branch to "main" and work branch postfix to "test"
@@ -453,7 +463,10 @@ async fn verify_planning(env: &TestEnv) {
         .unwrap();
     let branches_str = String::from_utf8_lossy(&branches_output.stdout);
 
-    assert!(branches_str.contains("main"), "Destination branch 'main' not found in cloned repo");
+    assert!(
+        branches_str.contains("main"),
+        "Destination branch 'main' not found in cloned repo"
+    );
 
     let expected_work_branch = format!("zbobr_fix-{}-test", env.task_id);
     assert!(
@@ -469,7 +482,9 @@ async fn verify_planning(env: &TestEnv) {
         .output()
         .await
         .unwrap();
-    let current_branch = String::from_utf8_lossy(&current_branch_output.stdout).trim().to_string();
+    let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
+        .trim()
+        .to_string();
     assert_eq!(
         current_branch, expected_work_branch,
         "Current branch is not the work branch"
@@ -488,5 +503,3 @@ async fn test_preparation_and_planning() {
     test_planning(&env).await;
     verify_planning(&env).await;
 }
-
-
