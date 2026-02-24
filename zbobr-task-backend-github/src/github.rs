@@ -1,7 +1,7 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::{HashMap, HashSet}, time::Duration};
 
 use async_trait::async_trait;
-use zbobr_dispatcher::{Model, Parameter, Signal, Stage, Task, Tool, backend::TaskBackend};
+use zbobr_dispatcher::{Model, Parameter, Signal, Stage, Task, Tool, task::Flavor, backend::TaskBackend};
 
 use crate::{
     config::ZbobrTaskBackendGithubConfig,
@@ -141,6 +141,18 @@ impl GitHubTaskBackend {
             .and_then(|name| name.parse().ok())
     }
 
+    /// Convert a Flavor to its GitHub label representation.
+    fn flavor_to_label(flavor: Flavor) -> String {
+        format!("flavor:{}", flavor.name())
+    }
+
+    /// Parse a GitHub label string back to a Flavor.
+    fn label_to_flavor(label: &str) -> Option<Flavor> {
+        label
+            .strip_prefix("flavor:")
+            .and_then(|name| name.parse().ok())
+    }
+
     fn parse_repo(&self) -> anyhow::Result<(&str, &str)> {
         self.backend_config.parse_repo()
     }
@@ -203,6 +215,37 @@ impl GitHubTaskBackend {
             let label = Self::signal_to_label(sig);
             let labels: Vec<String> = vec![label];
             retry_github("add signal label", || async {
+                self.octocrab
+                    .issues(owner, repo)
+                    .add_labels(id, &labels)
+                    .await
+            })
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Apply flavor changes on a GitHub issue (remove old flavor labels, add new ones).
+    async fn apply_flavor_change(&self, id: u64, flavors: &HashSet<Flavor>) -> anyhow::Result<()> {
+        let (owner, repo) = self.parse_repo()?;
+
+        // Remove all existing flavor labels
+        for flavor in [Flavor::Conflict, Flavor::Stop] {
+            let label = Self::flavor_to_label(flavor);
+            let _ = retry_github("remove flavor label", || async {
+                self.octocrab
+                    .issues(owner, repo)
+                    .remove_label(id, &label)
+                    .await
+            })
+            .await;
+        }
+
+        // Add new flavor labels
+        let labels: Vec<String> = flavors.iter().map(|f| Self::flavor_to_label(*f)).collect();
+        if !labels.is_empty() {
+            retry_github("add flavor labels", || async {
                 self.octocrab
                     .issues(owner, repo)
                     .add_labels(id, &labels)
@@ -398,6 +441,7 @@ impl GitHubTaskBackend {
         const SIGNAL_LABEL_COLOR: &str = "5319e7";
         const TOOL_LABEL_COLOR: &str = "d4c5f9";
         const MODEL_LABEL_COLOR: &str = "bfd4f2";
+        const FLAVOR_LABEL_COLOR: &str = "f9d0c4";
 
         for signal in Signal::all() {
             let signal_label = Self::signal_to_label(*signal);
@@ -444,6 +488,22 @@ impl GitHubTaskBackend {
                     .await?;
             } else {
                 tracing::info!("Label '{model_label}' already exists");
+            }
+        }
+
+        for flavor in [Flavor::Conflict, Flavor::Stop] {
+            let flavor_label = Self::flavor_to_label(flavor);
+            let flavor_desc = format!("Flavor: {}", flavor.name());
+            if !existing_labels.contains(&flavor_label) {
+                tracing::info!("Creating label '{flavor_label}'");
+                self.create_label(&flavor_label, FLAVOR_LABEL_COLOR, &flavor_desc)
+                    .await?;
+            } else if force {
+                tracing::info!("Updating label '{flavor_label}' (force)");
+                self.update_label(&flavor_label, FLAVOR_LABEL_COLOR, &flavor_desc)
+                    .await?;
+            } else {
+                tracing::info!("Label '{flavor_label}' already exists");
             }
         }
 
@@ -497,9 +557,6 @@ impl GitHubTaskBackend {
         if let Some(url) = params_map.get(Parameter::PrUrl.name()) {
             parameters.insert(Parameter::PrUrl, url.clone());
         }
-        if let Some(sig) = params_map.get(Parameter::ResumeSignal.name()) {
-            parameters.insert(Parameter::ResumeSignal, sig.clone());
-        }
 
         let done = issue
             .labels
@@ -511,6 +568,12 @@ impl GitHubTaskBackend {
             .iter()
             .filter_map(|l| Self::label_to_signal(&l.name))
             .min();
+
+        let flavors = issue
+            .labels
+            .iter()
+            .filter_map(|l| Self::label_to_flavor(&l.name))
+            .collect();
 
         Task {
             id: issue.number,
@@ -525,6 +588,7 @@ impl GitHubTaskBackend {
             done,
             checklist,
             signal,
+            flavors,
             etag: Some(body),
         }
     }
@@ -629,6 +693,7 @@ impl TaskBackend for GitHubTaskBackend {
         let task = self.get_task(id).await?;
         let original_stage = task.stage;
         let original_signal = task.signal;
+        let original_flavors = task.flavors.clone();
         let expected_description = task.etag.clone().unwrap_or_else(|| {
             let string_params: HashMap<String, String> = task
                 .parameters
@@ -697,6 +762,11 @@ impl TaskBackend for GitHubTaskBackend {
         // Apply signal change if it differs
         if task.signal != original_signal {
             self.apply_signal_change(id, task.signal).await?;
+        }
+
+        // Apply flavor change if it differs
+        if task.flavors != original_flavors {
+            self.apply_flavor_change(id, &task.flavors).await?;
         }
 
         Ok(())

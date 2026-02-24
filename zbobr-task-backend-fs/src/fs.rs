@@ -1,10 +1,10 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::{HashMap, HashSet}, path::PathBuf};
 
 use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use zbobr_dispatcher::{ChecklistItem, Model, Parameter, Stage, Task, Tool, backend::TaskBackend};
+use zbobr_dispatcher::{ChecklistItem, Model, Parameter, Stage, Task, Tool, task::Flavor, backend::TaskBackend};
 
 use crate::config::ZbobrTaskBackendFsConfig;
 
@@ -22,6 +22,7 @@ struct TaskFile {
     done: bool,
     checklist: Vec<ChecklistItem>,
     signal: Option<String>,
+    flavors: Vec<String>,
     closed: bool,
 }
 
@@ -36,6 +37,12 @@ impl TaskFile {
 
         let signal = self.signal.as_ref().map(|s| s.parse()).transpose()?;
 
+        let flavors: HashSet<Flavor> = self
+            .flavors
+            .iter()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+
         let parameters: Result<HashMap<Parameter, String>, String> = self
             .parameters
             .iter()
@@ -45,7 +52,6 @@ impl TaskFile {
                     "destination_branch" => Ok(Parameter::DestinationBranch),
                     "work_branch" => Ok(Parameter::WorkBranch),
                     "pr_url" => Ok(Parameter::PrUrl),
-                    "resume_signal" => Ok(Parameter::ResumeSignal),
                     _ => Err(format!("Unknown parameter: {}", k)),
                 }?;
                 Ok((param, v.clone()))
@@ -66,6 +72,7 @@ impl TaskFile {
             done: self.done,
             checklist: self.checklist.clone(),
             signal,
+            flavors,
             etag: None,
         })
     }
@@ -87,6 +94,7 @@ impl TaskFile {
             done: task.done,
             checklist: task.checklist.clone(),
             signal: task.signal.map(|s| s.name().to_string()),
+            flavors: task.flavors.iter().map(|f| f.name().to_string()).collect(),
             closed,
         }
     }
@@ -275,6 +283,7 @@ impl TaskBackend for FilesystemTaskBackend {
             done: false,
             checklist: vec![],
             signal: None,
+            flavors: HashSet::new(),
             etag: None,
         };
 

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::Zbobr;
 
@@ -11,7 +11,6 @@ pub enum Parameter {
     DestinationBranch,
     WorkBranch,
     PrUrl,
-    ResumeSignal,
 }
 
 impl Parameter {
@@ -22,7 +21,6 @@ impl Parameter {
             Parameter::DestinationBranch => "destination_branch",
             Parameter::WorkBranch => "work_branch",
             Parameter::PrUrl => "pr_url",
-            Parameter::ResumeSignal => "resume_signal",
         }
     }
 }
@@ -170,8 +168,6 @@ impl std::str::FromStr for Role {
     schemars::JsonSchema,
 )]
 pub enum Signal {
-    #[serde(rename = "stop")]
-    Stop = 0,
     #[serde(rename = "go_ask")]
     GoAsk = 1, // go ask is higher priority than done because it indicates a need for human input,
     // while done supposes normal completion and less urgency. So go_ask should override done
@@ -194,7 +190,6 @@ impl Signal {
     /// Returns the plain signal name.
     pub fn name(&self) -> &'static str {
         match self {
-            Signal::Stop => "stop",
             Signal::Done => "done",
             Signal::GoAsk => "go_ask",
             Signal::GoMerge => "go_merge",
@@ -208,7 +203,6 @@ impl Signal {
     /// Returns all available signals in priority order.
     pub fn all() -> &'static [Signal] {
         &[
-            Signal::Stop,
             Signal::Done,
             Signal::GoAsk,
             Signal::GoMerge,
@@ -222,7 +216,7 @@ impl Signal {
     /// Maps signal to target stage.
     pub fn target_stage(&self) -> Stage {
         match self {
-            Signal::Stop | Signal::Done | Signal::GoAsk => Stage::Pending,
+            Signal::Done | Signal::GoAsk => Stage::Pending,
             Signal::GoMerge => Stage::Merging,
             Signal::GoReview => Stage::Reviewing,
             Signal::GoWork => Stage::Working,
@@ -254,7 +248,6 @@ impl std::str::FromStr for Signal {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().replace('_', "").as_str() {
-            "stop" => Ok(Signal::Stop),
             "done" => Ok(Signal::Done),
             "goask" | "go-ask" => Ok(Signal::GoAsk),
             "gomerge" | "go-merge" => Ok(Signal::GoMerge),
@@ -263,6 +256,46 @@ impl std::str::FromStr for Signal {
             "goplan" | "go-plan" => Ok(Signal::GoPlan),
             "goprepare" | "go-prepare" => Ok(Signal::GoPrepare),
             _ => Err(anyhow::anyhow!("Unknown signal: {}", s)),
+        }
+    }
+}
+
+/// Task flavor (stored as GitHub labels).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+pub enum Flavor {
+    #[serde(rename = "conflict")]
+    Conflict,
+    #[serde(rename = "stop")]
+    Stop,
+}
+
+impl Flavor {
+    /// Returns the plain flavor name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Flavor::Conflict => "conflict",
+            Flavor::Stop => "stop",
+        }
+    }
+}
+
+impl std::str::FromStr for Flavor {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "conflict" => Ok(Flavor::Conflict),
+            "stop" => Ok(Flavor::Stop),
+            _ => Err(anyhow::anyhow!("Unknown flavor: {}", s)),
         }
     }
 }
@@ -465,6 +498,7 @@ pub struct Task {
     pub done: bool,
     pub checklist: Vec<ChecklistItem>,
     pub signal: Option<Signal>,
+    pub flavors: HashSet<Flavor>,
     /// ETag for optimistic locking to prevent concurrent update conflicts.
     /// Used to detect if the task has been modified between read and write operations.
     #[serde(skip)]
@@ -1036,11 +1070,14 @@ impl TaskSession {
                     );
                     let _ = self.post_message(&user_msg, "system", &hostname).await;
 
-                    // Signal the merger to handle this
-                    let _ = self.set_signal(Signal::GoMerge).await;
+                    // Set stage to Merging and add conflict flavor
+                    let _ = self.modify_task(|task| {
+                        task.stage = Stage::Merging;
+                        task.flavors.insert(Flavor::Conflict);
+                    }).await;
 
                     tracing::info!(
-                        "Merge conflict detected for task #{}, signaling GoMerge",
+                        "Merge conflict detected for task #{}, setting stage to Merging with conflict flavor",
                         self.task_id
                     );
                     

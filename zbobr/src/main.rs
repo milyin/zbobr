@@ -8,7 +8,7 @@ use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use zbobr_config::{ZbobrConfigArgs, ZbobrConfigToml};
 use zbobr_dispatcher::{
-    Stage, ToolExecutor, Zbobr, ZbobrDispatcherConfig,
+    task::Flavor, Stage, Task, ToolExecutor, Zbobr, ZbobrDispatcherConfig,
     task::{Model, Parameter, Role, Tool},
 };
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
@@ -1120,18 +1120,6 @@ async fn run_role_session(
 
     // Clear any existing signal when a session starts so signal labels are removed
     // (GitHub backend will remove all "signal:*" labels when None is passed).
-    // Store the original signal in ResumeSignal parameter so the merger can restore it if needed.
-    if let Ok(task) = zbobr.get_task(task_id).await {
-        if let Some(signal) = task.signal {
-            // Don't overwrite ResumeSignal if we are starting a Merger session (signal is GoMerge)
-            // because ResumeSignal already contains the signal of the interrupted task.
-            if signal != zbobr_dispatcher::Signal::GoMerge {
-                if let Err(e) = zbobr.task_session(task_id).set_parameter(zbobr_dispatcher::Parameter::ResumeSignal, Some(signal.to_string())).await {
-                    tracing::warn!("Failed to store resume signal for task {}: {}", task_id, e);
-                }
-            }
-        }
-    }
     if let Err(e) = zbobr.set_task_signal(task_id, None).await {
         tracing::warn!(
             "Failed to clear signal for task {} when starting session: {}",
@@ -1242,16 +1230,7 @@ async fn run_role_session(
                         }
                     }
                     Role::Merger => {
-                        // After merger resolves the conflict, resume the original signal
-                        if let Ok(Some(sig_str)) = session.get_parameter(zbobr_dispatcher::Parameter::ResumeSignal).await {
-                            if let Ok(sig) = sig_str.parse::<Signal>() {
-                                sig
-                            } else {
-                                Signal::GoWork
-                            }
-                        } else {
-                            Signal::GoWork
-                        }
+                        Signal::GoWork
                     }
                     _ => {
                         // Planner and other roles don't change signal here.
@@ -1265,26 +1244,32 @@ async fn run_role_session(
                 if matches!(
                     role,
                     Role::Preparator | Role::Worker | Role::Reviewer | Role::Merger
-                ) && current_signal.is_none() && let Err(e) = session.set_signal(next_signal).await
+                ) && current_signal.is_none()
                 {
-                    tracing::error!(
-                        "Failed to set follow-up signal for task {} after session: {e}",
-                        task_id
-                    );
-                }
-
-                // Clear ResumeSignal after normal session finish, unless we are transitioning to GoMerge
-                let current_signal_after = zbobr.get_task(task_id).await.unwrap().signal;
-                if current_signal_after != Some(zbobr_dispatcher::Signal::GoMerge) {
-                    if let Err(e) = session.set_parameter(zbobr_dispatcher::Parameter::ResumeSignal, None).await {
-                        tracing::warn!("Failed to clear resume signal for task {}: {}", task_id, e);
+                    if let Err(e) = session.set_signal(next_signal).await {
+                        tracing::error!(
+                            "Failed to set follow-up signal for task {} after session: {e}",
+                            task_id
+                        );
                     }
                 }
             }
-            Err(e) => tracing::error!(
-                "Failed to read checklist for task {} after session: {e}",
-                task_id
-            ),
+            Err(e) => {
+                tracing::error!(
+                    "Failed to read checklist for task {} after session: {e}",
+                    task_id
+                );
+            }
+        }
+
+        // Clear conflict flavor after merger session
+        if matches!(role, Role::Merger) {
+            if let Err(e) = zbobr.modify_task(task_id, Box::new(|mut task: Task| {
+                task.flavors.remove(&Flavor::Conflict);
+                task
+            })).await {
+                tracing::warn!("Failed to clear conflict flavor for task {}: {}", task_id, e);
+            }
         }
     }
 
@@ -1346,10 +1331,35 @@ async fn process_task_by_stage(
             }
         }
         Stage::Preparation | Stage::Planning | Stage::Working | Stage::Reviewing | Stage::Merging => {
-            println!(
-                "Task #{} is currently in active stage {} and cannot be processed by `task process`",
-                task.id, task.stage
-            );
+            let role = match task.stage {
+                Stage::Preparation => Role::Preparator,
+                Stage::Planning => Role::Planner,
+                Stage::Working => Role::Worker,
+                Stage::Reviewing => Role::Reviewer,
+                Stage::Merging => Role::Merger,
+                _ => unreachable!(),
+            };
+            let base_prompt = match role {
+                Role::Preparator => load_prompts(&prompts.preparator, prompts.base_path.as_ref())?,
+                Role::Planner => load_prompts(&prompts.planner, prompts.base_path.as_ref())?,
+                Role::Worker => load_prompts(&prompts.worker, prompts.base_path.as_ref())?,
+                Role::Reviewer => load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?,
+                Role::Merger => load_prompts(&prompts.merger, prompts.base_path.as_ref())?,
+            };
+            let full_prompt = build_full_prompt(&base_prompt, role);
+            let task_model = task.model.clone().or(model);
+            run_role_session(
+                zbobr,
+                task.id,
+                role,
+                task_model,
+                port,
+                &full_prompt,
+                claude_executor_config,
+                copilot_executor_config,
+                mcp_tester_executor_config,
+            )
+            .await?;
         }
     }
 
@@ -1508,6 +1518,53 @@ async fn run_manager_loop(
                     break; // Only run one session per loop iteration
                 }
             }
+        }
+
+        if session_run {
+            continue;
+        }
+
+        // Check for MERGING tasks with conflict flavor
+        let merging_tasks = match zbobr
+            .list_tasks_by_stage(Stage::Merging, Some(current_tool))
+            .await
+        {
+            Ok(tasks) => tasks.into_iter().filter(|t| t.flavors.contains(&Flavor::Conflict)).collect::<Vec<_>>(),
+            Err(e) => {
+                tracing::error!("Failed to check MERGING tasks: {e}");
+                vec![]
+            }
+        };
+
+        for task in merging_tasks {
+            let merger_prompts = Prompts {
+                base_path: prompts.base_path.clone(),
+                preparator: vec![],
+                planner: vec![],
+                worker: vec![],
+                reviewer: vec![],
+                merger: prompts.merger.clone(),
+            };
+            tracing::info!(
+                "Found MERGING task #{} with conflict flavor - running merger",
+                task.id
+            );
+            if let Err(e) = process_task_by_stage(
+                zbobr,
+                &task,
+                Some(model.clone()),
+                port,
+                &merger_prompts,
+                claude_executor_config,
+                copilot_executor_config,
+                mcp_tester_executor_config,
+            )
+            .await
+            {
+                tracing::error!("Merger session failed: {e}");
+            }
+            session_run = true;
+            break; // Only run one session per loop iteration
         }
 
         if session_run {
