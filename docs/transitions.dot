@@ -3,8 +3,41 @@
 // Transitions controlled by signal and flavors
 
 digraph dispatcher_states {
-    rankdir=LR;
+    rankdir=UD;
+    { rank=min; PENDING; }
+    { rank=max; PREPARING; PLANNING; WORKING; REVIEWING; MERGING; DONE; } 
+    { rank=same; CHECK_CONFLICT_FLAG; SET_CONFLICT_FLAG; }
+    { rank=same; CHECK_PAUSE_FLAG; SET_PAUSE_FLAG; }
+    splines=true;
     node [shape=ellipse];
+
+    CHECK_PAUSE_FLAG [shape=diamond, label="pause?"];
+    CHECK_CONFLICT_FLAG [shape=diamond, label="conflict?"];
+    CHECK_SIGNALS_SIMPLE [shape=diamond, label="signal"];
+    PULL [shape=box, label="git checkout {work}\ngit fetch origin\ngit merge origin/{dst}"];
+    CHECK_MERGE_CONFLICT [shape=diamond, label="merge conflict?"];
+    CHECK_SIGNALS_REPO [shape=diamond, label="signal"];
+    SET_PAUSE_FLAG [shape=box, label="pause := true"];
+    SET_CONFLICT_FLAG [shape=box, label="conflict := true"];
+
+    // dispatcher evaluation flow
+    PENDING -> CHECK_PAUSE_FLAG;
+    CHECK_PAUSE_FLAG -> PENDING [label="yes"];
+    CHECK_PAUSE_FLAG -> CHECK_CONFLICT_FLAG [label="no"];
+    CHECK_CONFLICT_FLAG -> MERGING [label="yes"];
+    CHECK_CONFLICT_FLAG -> CHECK_SIGNALS_SIMPLE [label="no"];
+    CHECK_SIGNALS_SIMPLE -> PREPARING [label="go_prepare"];
+    CHECK_SIGNALS_SIMPLE -> DONE [label="go_done"];
+    CHECK_SIGNALS_SIMPLE -> SET_PAUSE_FLAG [label="go_ask"];
+    CHECK_SIGNALS_SIMPLE -> PULL [label="other signal"];
+    PULL -> CHECK_MERGE_CONFLICT;
+    CHECK_MERGE_CONFLICT -> SET_CONFLICT_FLAG [label="yes"];
+    SET_CONFLICT_FLAG -> PENDING;
+    SET_PAUSE_FLAG -> PENDING;
+    CHECK_MERGE_CONFLICT -> CHECK_SIGNALS_REPO [label="no"];
+    CHECK_SIGNALS_REPO -> PLANNING  [label="go_plan"];
+    CHECK_SIGNALS_REPO -> WORKING   [label="go_work"];
+    CHECK_SIGNALS_REPO -> REVIEWING [label="go_review"];
 
     PENDING;
     PREPARING;
@@ -13,24 +46,4 @@ digraph dispatcher_states {
     REVIEWING;
     MERGING;
     DONE;
-
-    // normal transitions
-    PENDING -> PREPARING [label="go_PREPARING"];
-    PENDING -> PLANNING   [label="go_PLANNING"];
-    PENDING -> WORKING    [label="go_WORKING"];
-    PENDING -> REVIEWING  [label="go_REVIEWING"];
-    PENDING -> MERGING    [label="go_MERGING"];
-    PENDING -> DONE       [label="go_DONE"];
-
-    PREPARING -> PENDING [label="(role session complete)"];
-    PLANNING   -> PENDING [label="(role session complete)"];
-    WORKING    -> PENDING [label="(role session complete)"];
-    REVIEWING  -> PENDING [label="(role session complete)"];
-    MERGING    -> PENDING [label="(role session complete)"];
-    DONE       -> PENDING [label="(role session complete)"];
-
-    // flavor-driven overrides: not shown as edges but documented
-    // conflict: when any task in PENDING has flavor "conflict", dispatcher
-    //         ignores signal and instead sets state to MERGING and runs merging
-    // pause: when flavor "pause" active, dispatcher ignores signal and keeps PENDING
 }
