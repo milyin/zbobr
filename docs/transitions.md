@@ -1,58 +1,33 @@
 # Dispatcher Task State Transitions
 
-This document explains the logic the **dispatcher** uses to manage task state transitions. It is accompanied by a Graphviz `.dot` file (`transitions.dot`) illustrating the flow.
+This page describes how the dispatcher drives tasks through its lifecycle. A companion DOT graph (`transitions.dot`) lays out the same logic visually.
 
-## States
-A task can be in one of the following states:
+## Concepts
 
-- `PENDING`
-- `PREPARING`
-- `PLANNING`
-- `WORKING`
-- `REVIEWING`
-- `MERGING`
-- `DONE`
+* **task** – the entity processed by the dispatcher.
 
-## Signals and Flavors
-Transitions between states are *only* triggered by two pieces of immutable information attached to the task:
+* **role session** – an operation on a task by an agent in some role defined by a prompt. The result of a session is a change to the task's signal and/or flags. The dispatcher routes the task to the next step depending on this data.
 
-1. **Signal:** a string of the form `go_<STATE>` for each state except `PENDING`.
-2. **Flavors:** a set of on/off flags. Currently there are two flavors:
-   - `conflict`
-   - `pause`
+* **work branch** – the Git branch in the repository in the directory provided by the dispatcher where the dispatcher expects to see the results of the agent's work.
 
-The dispatcher has **write access** only to the task's state. It may **read** the signal and the set of flavors but cannot modify them. Role sessions (see below) have no read access to state, signals, or flavors, but they may set signals and flavors blindly.
+* **destination branch** – the Git branch in the repository in the directory provided by the dispatcher where the original sources are stored.
 
-## Base Transition Rules
+## Task fields
 
-1. When the dispatcher inspects a task, it looks at its current state and flavors.
-2. **If the state is `PENDING` and no flavor overrides apply**, it interprets the `signal`:
-   - `go_PREPARING` moves the task to `PREPARING` and starts the corresponding role session.
-   - `go_PLANNING` moves to `PLANNING`, and so on for the other states.
-3. A task in any non-`PENDING` state is only returned to `PENDING` when the role session for that state finishes.
-4. There are **no direct transitions** between non-`PENDING` states.
+* **state** – the current state of the task. A task in the `PENDING` state is handled by the dispatcher. Tasks in other states are handled by the corresponding session (`MERGING`, `PREPARING`, `PLANNING`, `WORKING`, and `REVIEWING`) executed by the dispatcher. After processing, a task always returns to the `PENDING` state. A task set to `DONE` state is not handled further.
 
-> In other words: `PENDING <-> X` is the only transition pattern, with `X` being another state.
+* **signal** – an enum value indicating the desired next state for the task.
 
-## Flavor Overrides
+* **conflict** – boolean flag indicating a merging conflict.
 
-Flavors may modify the normal behaviour:
+* **pause** – boolean flag temporarily blocking task processing.
 
-- **`conflict`**: If a task in `PENDING` has the `conflict` flavor set, the dispatcher ignores the current signal completely. Instead, it sets the state to `MERGING` and starts the merging role session.
+## Task processing
 
-- **`pause`**: If `pause` is active, the dispatcher ignores signals and leaves the task in `PENDING` indefinitely. No role session is started.
+The [transitions.dot] file is the source of truth. Here are only additional explanations.
 
-Flavors are evaluated each time the dispatcher processes the task; they do not persist into the role session logic except for later detail.
+Eligible tasks are processed at regular time intervals. An eligible task is a task in the pending state with a signal set and with the pause flag not set.
 
-## Role Sessions
+Depending on the signal and flags, the dispatcher decides which agent role session to start for the task.
 
-Each state (except `PENDING`) corresponds to a *role session*. When the dispatcher moves a task into that state it launches the associated session and then returns the task to `PENDING` when the session ends. Role sessions:
-
-- Have **no visibility** into the task’s state, signal, or flavors.
-- May *blindly* set new signals and adjust flavors for future dispatching cycles.
-
-The specifics of how role sessions alter signals/flavors will be documented separately.
-
----
-
-Additional context is available in the DOT file for visualization. Use Graphviz tools (e.g., `dot -Tpng transitions.dot -o transitions.png`) to render the state diagram.
+Each session has its own possible outcomes which are determined by the MCP operation available to the role and by the session’s post-processing logic. This document only lists these outcomes without going into specific rules.
