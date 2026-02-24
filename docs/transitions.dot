@@ -1,0 +1,36 @@
+// Graphviz .dot description of task state transitions for dispatcher
+// States: PENDING, PREPARING, PLANNING, WORKING, REVIEWING, MERGING, DONE
+// Transitions controlled by signal and flavors
+
+digraph dispatcher_states {
+    rankdir=LR;
+    node [shape=ellipse];
+
+    PENDING;
+    PREPARING;
+    PLANNING;
+    WORKING;
+    REVIEWING;
+    MERGING;
+    DONE;
+
+    // normal transitions
+    PENDING -> PREPARING [label="go_PREPARING"];
+    PENDING -> PLANNING   [label="go_PLANNING"];
+    PENDING -> WORKING    [label="go_WORKING"];
+    PENDING -> REVIEWING  [label="go_REVIEWING"];
+    PENDING -> MERGING    [label="go_MERGING"];
+    PENDING -> DONE       [label="go_DONE"];
+
+    PREPARING -> PENDING [label="(role session complete)"];
+    PLANNING   -> PENDING [label="(role session complete)"];
+    WORKING    -> PENDING [label="(role session complete)"];
+    REVIEWING  -> PENDING [label="(role session complete)"];
+    MERGING    -> PENDING [label="(role session complete)"];
+    DONE       -> PENDING [label="(role session complete)"];
+
+    // flavor-driven overrides: not shown as edges but documented
+    // conflict: when any task in PENDING has flavor "conflict", dispatcher
+    //         ignores signal and instead sets state to MERGING and runs merging
+    // pause: when flavor "pause" active, dispatcher ignores signal and keeps PENDING
+}
