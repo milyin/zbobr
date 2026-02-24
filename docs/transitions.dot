@@ -1,6 +1,6 @@
 // Graphviz .dot description of task state transitions for dispatcher
 // States: PENDING, PREPARING, PLANNING, WORKING, REVIEWING, MERGING, DONE
-// Transitions controlled by signal and flavors
+// Transitions controlled by signal and flags
 
 digraph dispatcher_states {
     rankdir=UD;
