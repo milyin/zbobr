@@ -4,26 +4,51 @@
 
 digraph dispatcher_states {
     rankdir=UD;
-    { rank=min; PENDING; }
-    { rank=max; PREPARING; PLANNING; WORKING; REVIEWING; MERGING; DONE; } 
-    { rank=same; CHECK_CONFLICT_FLAG; SET_CONFLICT_FLAG; }
-    { rank=same; CHECK_PAUSE_FLAG; SET_PAUSE_FLAG; }
+
+    { rank=min; GO_PREPARE; }
+    { rank=same; PENDING; }
+    { rank=same; CHECK_PAUSE; SET_PAUSE_FLAG; SET_CONFLICT_FLAG }
+    { rank=same; PREPARING; PLANNING; WORKING; REVIEWING; MERGING } 
+    { rank=same; GO_ASK; GO_PLAN; GO_WORK; GO_REVIEW; GO_DONE; CLEAR_CONFLICT_FLAG } 
+    { rank=max; PENDING2; }
+
     splines=true;
     node [shape=ellipse];
+    node [group=git]; PULL; CHECK_MERGE_CONFLICT;
 
-    CHECK_PAUSE_FLAG [shape=diamond, label="pause?"];
-    CHECK_CONFLICT_FLAG [shape=diamond, label="conflict?"];
+    GO_PREPARE [shape=box, label="signal := go_prepare"];
+   
+    CHECK_PAUSE [shape=diamond, label="pause == true or\nsignal == None ?"];
+    CHECK_CONFLICT_FLAG [shape=diamond, label="conflict == true ?"];
     CHECK_SIGNALS_SIMPLE [shape=diamond, label="signal"];
     PULL [shape=box, label="git checkout {work}\ngit fetch origin\ngit merge origin/{dst}"];
     CHECK_MERGE_CONFLICT [shape=diamond, label="merge conflict?"];
     CHECK_SIGNALS_REPO [shape=diamond, label="signal"];
-    SET_PAUSE_FLAG [shape=box, label="pause := true"];
-    SET_CONFLICT_FLAG [shape=box, label="conflict := true"];
+    SET_PAUSE_FLAG [shape=box, label="signal := None\npause := true"];
+    SET_CONFLICT_FLAG [shape=box, label="signal preserved\nconflict := true"];
+    CLEAR_CONFLICT_FLAG [shape=box, label="signal preserved\nconflict := false"];
+
+    PENDING [ label = <signal preserved<br/><b>PENDING</b>>];
+    PENDING2 [ label = <signal preserved<br/><b>PENDING</b>>];
+    PREPARING [ label = <signal := None<br/><b>PREPARING</b>>];
+    PLANNING [ label = <signal := None<br/><b>PLANNING</b>>];
+    WORKING [ label = <signal := None<br/><b>WORKING</b>>];
+    REVIEWING [ label = <signal := None<br/><b>REVIEWING</b>>];
+    MERGING [ label = <signal preserved<br/><b>MERGING</b>>];
+    DONE [ label = <signal := None<br/><b>DONE</b>>];
+
+    GO_PREPARE [ shape = box; label = <signal := go_prepare> ];
+    GO_PLAN[ shape = box; label = <signal := go_plan> ];
+    GO_WORK[ shape = box; label = <signal := go_work> ];
+    GO_REVIEW[ shape = box; label = <signal := go_review> ];
+    GO_ASK [ shape = box; label = <signal := go_ask> ];
+    GO_DONE [ shape = box; label = <signal := go_done> ];
 
     // dispatcher evaluation flow
-    PENDING -> CHECK_PAUSE_FLAG;
-    CHECK_PAUSE_FLAG -> PENDING [label="yes"];
-    CHECK_PAUSE_FLAG -> CHECK_CONFLICT_FLAG [label="no"];
+    GO_PREPARE -> PENDING;
+    PENDING -> CHECK_PAUSE;
+    CHECK_PAUSE -> PENDING [label="yes"];
+    CHECK_PAUSE -> CHECK_CONFLICT_FLAG [label="no"];
     CHECK_CONFLICT_FLAG -> MERGING [label="yes"];
     CHECK_CONFLICT_FLAG -> CHECK_SIGNALS_SIMPLE [label="no"];
     CHECK_SIGNALS_SIMPLE -> PREPARING [label="go_prepare"];
@@ -36,14 +61,36 @@ digraph dispatcher_states {
     SET_PAUSE_FLAG -> PENDING;
     CHECK_MERGE_CONFLICT -> CHECK_SIGNALS_REPO [label="no"];
     CHECK_SIGNALS_REPO -> PLANNING  [label="go_plan"];
+    CHECK_SIGNALS_REPO -> REVIEWING  [label="go_review"];
     CHECK_SIGNALS_REPO -> WORKING   [label="go_work"];
-    CHECK_SIGNALS_REPO -> REVIEWING [label="go_review"];
 
-    PENDING;
-    PREPARING;
-    PLANNING;
-    WORKING;
-    REVIEWING;
-    MERGING;
-    DONE;
+    // Session possible outcomes
+    PREPARING -> GO_PLAN
+    PREPARING -> GO_ASK
+    PREPARING -> PENDING2
+
+    PLANNING -> GO_WORK
+    PLANNING -> GO_ASK
+    PLANNING -> PENDING2
+
+    WORKING -> GO_REVIEW
+    WORKING -> GO_PLAN
+    WORKING -> GO_ASK
+    WORKING -> PENDING2
+
+    REVIEWING -> GO_WORK
+    REVIEWING -> GO_ASK
+    REVIEWING -> GO_DONE
+    REVIEWING -> PENDING2
+
+    MERGING -> CLEAR_CONFLICT_FLAG
+    MERGING -> GO_ASK
+    MERGING -> PENDING2
+
+    GO_PLAN -> PENDING2;
+    GO_ASK -> PENDING2;
+    GO_WORK -> PENDING2;
+    GO_REVIEW -> PENDING2;
+    GO_DONE -> PENDING2;
+    CLEAR_CONFLICT_FLAG -> PENDING2;
 }
