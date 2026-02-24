@@ -497,6 +497,9 @@ impl GitHubTaskBackend {
         if let Some(url) = params_map.get(Parameter::PrUrl.name()) {
             parameters.insert(Parameter::PrUrl, url.clone());
         }
+        if let Some(sig) = params_map.get(Parameter::ResumeSignal.name()) {
+            parameters.insert(Parameter::ResumeSignal, sig.clone());
+        }
 
         let done = issue
             .labels

@@ -1120,6 +1120,18 @@ async fn run_role_session(
 
     // Clear any existing signal when a session starts so signal labels are removed
     // (GitHub backend will remove all "signal:*" labels when None is passed).
+    // Store the original signal in ResumeSignal parameter so the merger can restore it if needed.
+    if let Ok(task) = zbobr.get_task(task_id).await {
+        if let Some(signal) = task.signal {
+            // Don't overwrite ResumeSignal if we are starting a Merger session (signal is GoMerge)
+            // because ResumeSignal already contains the signal of the interrupted task.
+            if signal != zbobr_dispatcher::Signal::GoMerge {
+                if let Err(e) = zbobr.task_session(task_id).set_parameter(zbobr_dispatcher::Parameter::ResumeSignal, Some(signal.to_string())).await {
+                    tracing::warn!("Failed to store resume signal for task {}: {}", task_id, e);
+                }
+            }
+        }
+    }
     if let Err(e) = zbobr.set_task_signal(task_id, None).await {
         tracing::warn!(
             "Failed to clear signal for task {} when starting session: {}",
@@ -1230,8 +1242,16 @@ async fn run_role_session(
                         }
                     }
                     Role::Merger => {
-                        // After merger resolves the conflict, resume work
-                        Signal::GoWork
+                        // After merger resolves the conflict, resume the original signal
+                        if let Ok(Some(sig_str)) = session.get_parameter(zbobr_dispatcher::Parameter::ResumeSignal).await {
+                            if let Ok(sig) = sig_str.parse::<Signal>() {
+                                sig
+                            } else {
+                                Signal::GoWork
+                            }
+                        } else {
+                            Signal::GoWork
+                        }
                     }
                     _ => {
                         // Planner and other roles don't change signal here.
@@ -1241,15 +1261,24 @@ async fn run_role_session(
                 };
 
                 // Only set signal for Preparator/Worker/Reviewer/Merger logic above
+                let current_signal = zbobr.get_task(task_id).await.unwrap().signal;
                 if matches!(
                     role,
                     Role::Preparator | Role::Worker | Role::Reviewer | Role::Merger
-                ) && zbobr.get_task(task_id).await.unwrap().signal.is_none() && let Err(e) = session.set_signal(next_signal).await
+                ) && current_signal.is_none() && let Err(e) = session.set_signal(next_signal).await
                 {
                     tracing::error!(
                         "Failed to set follow-up signal for task {} after session: {e}",
                         task_id
                     );
+                }
+
+                // Clear ResumeSignal after normal session finish, unless we are transitioning to GoMerge
+                let current_signal_after = zbobr.get_task(task_id).await.unwrap().signal;
+                if current_signal_after != Some(zbobr_dispatcher::Signal::GoMerge) {
+                    if let Err(e) = session.set_parameter(zbobr_dispatcher::Parameter::ResumeSignal, None).await {
+                        tracing::warn!("Failed to clear resume signal for task {}: {}", task_id, e);
+                    }
                 }
             }
             Err(e) => tracing::error!(

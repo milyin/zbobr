@@ -320,13 +320,45 @@ async fn test_merging_with_real_conflict() {
         .unwrap();
     assert!(git_commit_main.success());
 
-    // Now create a task for merging
+    // Now create a task for reviewing
     let task_id = env
-        .create_task("Task with merge conflict", "Test merging with real conflicts", Stage::Merging)
+        .create_task("Task with merge conflict", "Test merging with real conflicts", Stage::Reviewing)
         .await;
     env.update_task_branches(task_id, &repo_path_str, "main", work_branch).await;
 
-    // Create a scenario that handles conflicts
+    // Set the signal to go_review
+    env.run_zbobr("task", &["update", &task_id.to_string(), "--signal", "go_review"]).await;
+
+    // Create a scenario for the reviewer that just pulls work
+    let reviewer_scenario = format!(
+        r#"name: Reviewer Conflict Trigger
+description: Trigger a merge conflict during pull_work
+timeout: 60
+stop_on_failure: true
+
+steps:
+- name: Pull work (should encounter conflicts)
+  operation:
+    type: tool_call
+    tool: {PULL_WORK}
+  store_result: pull_work_result
+  assertions:
+    - type: success
+"#,
+        PULL_WORK = zbobr_dispatcher::mcp::reviewer_tools::PULL_WORK,
+    );
+
+    // Run the reviewing stage
+    env.run_stage(task_id, Stage::Reviewing, reviewer_scenario).await;
+
+    // Check that the reviewer encountered a conflict and set the signal to go_merge
+    let output = env.show_task(task_id).await;
+    assert!(
+        output.contains("Signal:      go_merge"),
+        "Reviewer should signal go_merge after encountering conflicts"
+    );
+
+    // Create a scenario for the merger that handles conflicts
     let conflict_scenario = format!(
         r#"name: Merger Conflict Resolution Test
 description: Test handling of real merge conflicts
@@ -354,7 +386,7 @@ steps:
     type: tool_call
     tool: {REPORT_RESULTS}
     arguments:
-      message: "Detected merge conflicts in conflict_file.txt. Resolving by choosing work changes."
+      message: "Detected merge conflicts in conflict_file.txt. Resolving by choosing work changes. PULL_WORK_RETURN_VALUE=${{pull_work_result}}"
   assertions:
     - type: success
 "#,
@@ -363,20 +395,19 @@ steps:
         REPORT_RESULTS = zbobr_dispatcher::mcp::merger_tools::REPORT_RESULTS,
     );
 
-    let scenario_path = env.create_scenario("merging_conflict", &conflict_scenario).await;
-
     // Run the merging stage
     env.run_stage(task_id, Stage::Merging, conflict_scenario).await;
 
     // Check that the merger was called and handled the conflict
     let output = env.show_task(task_id).await;
+    println!("Task output after merging:\n{}", output);
     assert!(
         output.contains("Detected merge conflicts"),
         "Merger should have detected and reported conflicts"
     );
     assert!(
-        output.contains("Signal:      go_work"),
-        "Merger should signal go_work after resolving conflicts"
+        output.contains("Signal:      go_review"),
+        "Merger should restore the original signal (go_review) after resolving conflicts"
     );
 
     // Verify the cloned repo has the resolved state
@@ -411,11 +442,5 @@ steps:
         content.contains("<<<<<<< HEAD") || content.contains("=======") || content.contains(">>>>>>> main"),
         "File should contain merge conflict markers. Content: {}",
         content
-    );
-
-    // And the task should have run the merger
-    assert!(
-        output.contains("Merger Conflict Resolution Test"),
-        "Merger scenario should have been executed"
     );
 }

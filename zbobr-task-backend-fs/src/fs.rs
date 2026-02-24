@@ -45,6 +45,7 @@ impl TaskFile {
                     "destination_branch" => Ok(Parameter::DestinationBranch),
                     "work_branch" => Ok(Parameter::WorkBranch),
                     "pr_url" => Ok(Parameter::PrUrl),
+                    "resume_signal" => Ok(Parameter::ResumeSignal),
                     _ => Err(format!("Unknown parameter: {}", k)),
                 }?;
                 Ok((param, v.clone()))

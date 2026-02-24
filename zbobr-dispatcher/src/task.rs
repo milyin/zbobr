@@ -11,6 +11,7 @@ pub enum Parameter {
     DestinationBranch,
     WorkBranch,
     PrUrl,
+    ResumeSignal,
 }
 
 impl Parameter {
@@ -21,6 +22,7 @@ impl Parameter {
             Parameter::DestinationBranch => "destination_branch",
             Parameter::WorkBranch => "work_branch",
             Parameter::PrUrl => "pr_url",
+            Parameter::ResumeSignal => "resume_signal",
         }
     }
 }
@@ -907,6 +909,30 @@ impl TaskSession {
         );
         self.zbobr.sync_fork(&dest_repo, &dest_branch).await?;
 
+        let repo_name = dest_repo.split('/').last().unwrap_or(&dest_repo);
+        let path = self.zbobr.config().workspaces.join(format!("task#{}", self.task_id)).join(repo_name);
+
+        // Check if repo exists and is in conflict state
+        let is_conflicted = if path.exists() {
+            let status = tokio::process::Command::new("git")
+                .args(["ls-files", "-u"])
+                .current_dir(&path)
+                .output()
+                .await;
+            if let Ok(output) = status {
+                !output.stdout.is_empty()
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if is_conflicted {
+            tracing::info!("Repository is in a conflicted state, skipping clone_and_setup and merge");
+            return Ok(path.to_string_lossy().to_string());
+        }
+
         let path = self
             .zbobr
             .clone_and_setup(&dest_repo, &dest_branch, self.task_id)
@@ -920,7 +946,7 @@ impl TaskSession {
         // First check whether the branch already exists locally to avoid an error
         // from `git checkout -b` when the branch is present.
         let branch_ref = format!("refs/heads/{}", work_branch);
-        let exists = tokio::process::Command::new("git")
+        let exists_locally = tokio::process::Command::new("git")
             .args(["show-ref", "--verify", &branch_ref])
             .current_dir(&path)
             .status()
@@ -928,16 +954,41 @@ impl TaskSession {
             .map(|s| s.success())
             .unwrap_or(false);
 
-        if exists {
-            // Branch exists locally; simply checkout
-            let checkout_status = tokio::process::Command::new("git")
-                .args(["checkout", &work_branch])
+        let exists_on_remote = if !exists_locally {
+            tokio::process::Command::new("git")
+                .args(["fetch", "origin", &work_branch])
                 .current_dir(&path)
                 .status()
-                .await?;
+                .await
+                .map(|s| s.success())
+                .unwrap_or(false)
+        } else {
+            false
+        };
 
-            if !checkout_status.success() {
-                anyhow::bail!("Failed to checkout existing work branch '{}'", work_branch);
+        if exists_locally || exists_on_remote {
+            if exists_on_remote {
+                // Branch exists on remote but not locally; create it tracking the remote
+                let checkout_status = tokio::process::Command::new("git")
+                    .args(["checkout", "-b", &work_branch, "FETCH_HEAD"])
+                    .current_dir(&path)
+                    .status()
+                    .await?;
+
+                if !checkout_status.success() {
+                    anyhow::bail!("Failed to checkout remote work branch '{}'", work_branch);
+                }
+            } else {
+                // Branch exists locally; simply checkout
+                let checkout_status = tokio::process::Command::new("git")
+                    .args(["checkout", &work_branch])
+                    .current_dir(&path)
+                    .status()
+                    .await?;
+
+                if !checkout_status.success() {
+                    anyhow::bail!("Failed to checkout existing work branch '{}'", work_branch);
+                }
             }
 
             // Merge destination branch into work branch to pick up upstream changes.
@@ -992,6 +1043,9 @@ impl TaskSession {
                         "Merge conflict detected for task #{}, signaling GoMerge",
                         self.task_id
                     );
+                    
+                    // Return early, do not attempt to push or create PR while in conflict state
+                    return Ok(path_str);
                 } else {
                     // Non-conflict merge failure
                     anyhow::bail!(

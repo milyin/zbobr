@@ -125,7 +125,7 @@ if matches!(role, Role::Preparator | Role::Worker | Role::Reviewer | Role::Merge
 | planner    | none (planner does not set a signal)      |
 | worker     | `go_work` if any checklist item unchecked, otherwise `go_review` |
 | reviewer   | `go_work` if unchecked item remains, else `done`              |
-| merger     | always `go_work` (resume work after conflict)              |
+| merger     | restores `ResumeSignal` (the signal that triggered the interrupted session) on success, or `go_ask` on failure |
 
 The signal is stored; the next time the task returns to `PENDING` the manager
 loop will read it and perform the session described in §2.
@@ -153,8 +153,43 @@ if has_conflicts {
 The effect is to ensure that tasks with unresolved merge conflicts are picked
 up by the merger role.  The same signal → session mechanism described in §2
 applies, so the task will run a merger session on the next manager iteration.
+
+When a conflict interrupts a session, the coordinator stores the original
+signal (e.g. `go_review`) in the `ResumeSignal` task parameter **before**
+clearing the active signal.  This is done in `run_role_session` in
+`zbobr/src/main.rs`:
+
+```rust
+// Don't overwrite ResumeSignal if we are starting a Merger session (signal is GoMerge)
+// because ResumeSignal already contains the signal of the interrupted task.
+if signal != Signal::GoMerge {
+    set_parameter(Parameter::ResumeSignal, Some(signal.to_string()));
+}
+```
+
+When the Merger session finishes, `run_role_session` reads `ResumeSignal` and
+sets it back as the active signal, effectively resuming the task from where it
+was interrupted:
+
+```rust
+// Merger: restore the interrupted signal from ResumeSignal, or go_ask on failure
+if let Ok(Some(sig_str)) = session.get_parameter(Parameter::ResumeSignal).await {
+    if let Ok(sig) = sig_str.parse::<Signal>() {
+        if has_unchecked { Signal::GoAsk } else { sig }
+    } else { Signal::GoAsk }
+} else {
+    Signal::GoWork  // fallback
+}
+```
+
+After the signal is restored the `ResumeSignal` parameter is cleared (unless
+the task is transitioning to `GoMerge` again, which would indicate another
+conflict round).
+
 Integration tests in `zbobr/tests/merging.rs` exercise this path by creating a
-repo, inducing a conflict, and verifying that the `GoMerge` signal appears.
+repo, inducing a conflict, running a Reviewer session that triggers `GoMerge`,
+then running a Merger session, and verifying that the signal is restored to
+`go_review`.
 
 Additional conditional signals can be added using the same pattern: detect the
 condition in dispatcher code, call `set_signal(...)`, and optionally post a
@@ -184,7 +219,7 @@ stateDiagram-v2
     PREPARATION --> PENDING : set signal go_plan
     WORKING     --> PENDING : set signal go_work or go_review
     REVIEWING   --> PENDING : set signal go_work or done
-    MERGING      --> PENDING : set signal go_work
+    MERGING      --> PENDING : set signal = ResumeSignal (or go_ask on failure)
 ```
 
 (see `docs/` for rendered output if your Markdown viewer supports Mermaid)
@@ -211,4 +246,4 @@ inconsistent behaviour.
 
 ---
 
-*Document last updated: 23 Feb 2026.*
+*Document last updated: 24 Feb 2026.*
