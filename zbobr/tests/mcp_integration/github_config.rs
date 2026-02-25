@@ -45,7 +45,7 @@ pub struct GitHubRepoGithub {
     pub token: String,
 }
 
-#[derive(serde::Deserialize, Clone, Default)]
+#[derive(serde::Deserialize, Clone)]
 pub struct GitHubDispatcherSection {
     /// GitHub token passed as `GH_TOKEN` to agent processes.
     /// Defaults to a dummy value, which is fine when `mcp-tester` is the executor.
@@ -56,6 +56,12 @@ pub struct GitHubDispatcherSection {
 impl GitHubDispatcherSection {
     fn default_agent_token() -> String {
         "dummy-not-used".to_string()
+    }
+}
+
+impl Default for GitHubDispatcherSection {
+    fn default() -> Self {
+        Self { agent_token: Self::default_agent_token() }
     }
 }
 

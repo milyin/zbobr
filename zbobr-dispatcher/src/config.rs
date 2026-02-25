@@ -63,7 +63,11 @@ pub struct TomlPrompts {
 pub struct ZbobrDispatcherConfig {
     /// Workspaces directory; each task gets a separate subdirectory.
     pub workspaces: PathBuf,
-    /// GitHub token with read-only access for agent processes (passed as GH_TOKEN to agents).
+    /// Read-only GitHub token passed as GH_TOKEN/GITHUB_TOKEN to agent processes.
+    /// This is a security boundary: it limits what agents can do on GitHub — agents must
+    /// not have write access so that erroneous or misbehaving agents cannot modify remote
+    /// repositories. Use a fine-grained token with read-only scopes (or no scopes at all
+    /// for fully offline/mcp-tester runs). Defaults to "not-configured" when omitted.
     pub agent_github_token: String,
     // NOTE: `copilot_github_token` has been moved to the Copilot executor
     // configuration; the dispatcher no longer tracks this value.
@@ -97,7 +101,7 @@ impl Default for ZbobrDispatcherConfig {
     fn default() -> Self {
         Self {
             workspaces: PathBuf::from("./workspaces"),
-            agent_github_token: String::new(),
+            agent_github_token: "not-configured".to_string(),
             task_backend: BackendType::default(),
             repo_backend: BackendType::default(),
             cli_tool: Tool::default(),
@@ -199,7 +203,9 @@ impl ZbobrDispatcherConfig {
         // Token resolution with proper priority
 
         // Agent token: only from TOML/CLI (do not read zbobr-specific env vars)
-        let agent_github_token = merged.agent_github_token.unwrap_or_default();
+        let agent_github_token = merged
+            .agent_github_token
+            .unwrap_or_else(|| defaults.agent_github_token.clone());
 
         let git_user_name = merged.git_user_name.unwrap_or_default();
 
@@ -232,12 +238,6 @@ impl ZbobrDispatcherConfig {
 
     /// Validate that all required fields are set.
     pub fn validate(&self) -> anyhow::Result<()> {
-        if self.agent_github_token.is_empty() {
-            anyhow::bail!(
-                "agent GitHub token not set. Set agent_github_token in the config file or via CLI.\n  \
-                 This must be a token with read-only access for agent processes."
-            );
-        }
         if self.git_user_name.is_empty() {
             anyhow::bail!(
                 "git user name not set. Use --git-user-name NAME or set git_user_name in the config file.\n  \
@@ -268,7 +268,7 @@ mod tests {
         let config =
             ZbobrDispatcherConfig::build(None, ZbobrDispatcherArgs::default(), &test_config_dir())
                 .expect("build should succeed");
-        // validate() should fail because agent_github_token is missing
+        // validate() should fail because git_user_name and git_user_email are missing
         assert!(config.validate().is_err());
     }
 
@@ -383,6 +383,7 @@ mod tests {
         assert_eq!(config.cli_tool, Tool::Copilot);
         assert_eq!(config.work_branch_prefix, "zbobr_fix");
         assert_eq!(config.workspaces, PathBuf::from("./workspaces"));
+        assert_eq!(config.agent_github_token, "not-configured");
     }
 
     #[test]

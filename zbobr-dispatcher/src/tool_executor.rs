@@ -35,7 +35,9 @@ pub trait ToolExecutor: Send + Sync {
     /// * `prompt` - The prompt text for the tool
     /// * `work_dir` - The agent working directory (repo subdirectory for non-Preparator roles)
     /// * `mcp_url` - The MCP server URL
-    /// * `agent_github_token` - Read-only GitHub token for agent (passed as GH_TOKEN)
+    /// * `agent_github_token` - Read-only GitHub token for agent (passed as GH_TOKEN/GITHUB_TOKEN).
+    ///   Security boundary: limits agent's GitHub access to read-only to prevent erroneous
+    ///   writes. May be "not-configured" for offline/test runs where GitHub access is not needed.
     /// * `copilot_github_token` - Copilot's GitHub token (passed as COPILOT_GITHUB_TOKEN)
     #[allow(clippy::too_many_arguments)]
     async fn execute(

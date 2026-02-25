@@ -43,6 +43,11 @@ mod tests {
 
     #[test]
     fn build_uses_default_model_and_empty_token() {
+        unsafe {
+            env::remove_var("COPILOT_GITHUB_TOKEN");
+            env::remove_var("GH_TOKEN");
+            env::remove_var("GITHUB_TOKEN");
+        }
         let cfg = ZbobrExecutorCopilotConfig::build(None, ZbobrExecutorCopilotArgs::default());
         assert_eq!(cfg.default_model, Model::default());
         assert!(cfg.copilot_github_token.is_empty());
