@@ -42,10 +42,14 @@ pub async fn run_planning(env: &IntegrationTestEnv) {
         .create_task("Dummy Task", "Dummy task description", Stage::Preparing)
         .await;
 
+    let dest_repo = env.target_repo
+        .as_deref()
+        .map(|r| format!("https://github.com/{r}"))
+        .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
     let work_branch = format!("zbobr_fix-{task_id}-test");
     env.update_task_branches(
         task_id,
-        &repo_path.to_string_lossy(),
+        &dest_repo,
         "main",
         &work_branch,
     )
@@ -75,10 +79,14 @@ pub async fn run_working(env: &IntegrationTestEnv) {
         .create_task("Dummy Task", "Dummy task description", Stage::Working)
         .await;
 
+    let dest_repo = env.target_repo
+        .as_deref()
+        .map(|r| format!("https://github.com/{r}"))
+        .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
     let work_branch = format!("zbobr_fix-{task_id}-test");
     env.update_task_branches(
         task_id,
-        &repo_path.to_string_lossy(),
+        &dest_repo,
         "main",
         &work_branch,
     )
@@ -118,10 +126,14 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
         .create_task("Dummy Task", "Dummy task description", Stage::Reviewing)
         .await;
 
+    let dest_repo = env.target_repo
+        .as_deref()
+        .map(|r| format!("https://github.com/{r}"))
+        .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
     let work_branch = format!("zbobr_fix-{task_id}-test");
     env.update_task_branches(
         task_id,
-        &repo_path.to_string_lossy(),
+        &dest_repo,
         "main",
         &work_branch,
     )
@@ -157,14 +169,17 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
 
 pub async fn run_merging(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_merging").await;
-    let repo_path_str = repo_path.to_string_lossy().to_string();
+    let dest_repo = env.target_repo
+        .as_deref()
+        .map(|r| format!("https://github.com/{r}"))
+        .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
 
     // ---- report ending ----
     let task_report = env
         .create_task("Dummy Task", "Dummy task description", Stage::Merging)
         .await;
     let branch_report = format!("zbobr_fix-{task_report}-test");
-    env.update_task_branches(task_report, &repo_path_str, "main", &branch_report)
+    env.update_task_branches(task_report, &dest_repo, "main", &branch_report)
         .await;
     env.prepare_workspace(task_report, &repo_path, &branch_report)
         .await;
@@ -195,7 +210,7 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
         .create_task("Dummy Task", "Dummy task description", Stage::Merging)
         .await;
     let branch_ask = format!("zbobr_fix-{task_ask}-test");
-    env.update_task_branches(task_ask, &repo_path_str, "main", &branch_ask)
+    env.update_task_branches(task_ask, &dest_repo, "main", &branch_ask)
         .await;
     env.prepare_workspace(task_ask, &repo_path, &branch_ask)
         .await;
@@ -223,6 +238,10 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
 pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_merging_conflict").await;
     let repo_path_str = repo_path.to_string_lossy().to_string();
+    let dest_repo = env.target_repo
+        .as_deref()
+        .map(|r| format!("https://github.com/{r}"))
+        .unwrap_or_else(|| repo_path_str.clone());
 
     // build conflicting history on the local repo
     write_and_commit(&repo_path, "conflict_file.txt", "line1\nline2\nline3\n", "Initial").await;
@@ -237,7 +256,7 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
     let task_id = env
         .create_task("Conflict task", "Test merging with real conflicts", Stage::Merging)
         .await;
-    env.update_task_branches(task_id, &repo_path_str, "main", work_branch)
+    env.update_task_branches(task_id, &dest_repo, "main", work_branch)
         .await;
 
     // Manually set up workspace with a live merge conflict
