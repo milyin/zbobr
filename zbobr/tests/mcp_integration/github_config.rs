@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 
 /// Configuration loaded from `zbobr_github_test.toml` at the workspace root.

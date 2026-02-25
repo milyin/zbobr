@@ -6,11 +6,18 @@ use zbobr_dispatcher::Stage;
 // Backend argument bundles
 // ---------------------------------------------------------------------------
 
+// variants may be unused depending on which integration-test binary is built
+// (e.g. the filesystem-only suite never constructs the `GitHub` variants), so
+// silence dead-code warnings here rather than peppering every test file with
+// `#[allow(dead_code)]`.
+
+#[allow(dead_code)]
 pub enum TaskBackendArgs {
     Filesystem { tasks_dir: PathBuf },
     GitHub { task_repo: String, task_token: String },
 }
 
+#[allow(dead_code)]
 pub enum RepoBackendArgs {
     Filesystem,
     GitHub { fork_owner: String, repo_token: String },

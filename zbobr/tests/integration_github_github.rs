@@ -11,7 +11,8 @@ mod mcp_integration;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 
-use mcp_integration::env::{IntegrationTestEnv, RepoBackendArgs, TaskBackendArgs};
+use mcp_integration::IntegrationTestEnv;
+use mcp_integration::env::{RepoBackendArgs, TaskBackendArgs};
 use mcp_integration::github_config::GitHubTestConfig;
 use mcp_integration::test_helpers;
 
