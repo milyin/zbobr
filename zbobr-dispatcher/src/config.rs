@@ -66,8 +66,10 @@ pub struct ZbobrDispatcherConfig {
     pub agent_github_token: String,
     // NOTE: `copilot_github_token` has been moved to the Copilot executor
     // configuration; the dispatcher no longer tracks this value.
-    /// Backend to use.
-    pub backend: BackendType,
+    /// Backend to use for task storage (github or fs).
+    pub task_backend: BackendType,
+    /// Backend to use for repository operations (github or fs).
+    pub repo_backend: BackendType,
     /// CLI tool to use.
     pub cli_tool: Tool,
     /// Custom prompt files for preparator agent.
@@ -95,7 +97,8 @@ impl Default for ZbobrDispatcherConfig {
         Self {
             workspaces: PathBuf::from("./workspaces"),
             agent_github_token: String::new(),
-            backend: BackendType::default(),
+            task_backend: BackendType::default(),
+            repo_backend: BackendType::default(),
             cli_tool: Tool::default(),
             preparator_prompts: vec!["prompts/preparator.md".into(), "prompts/common.md".into()],
             planner_prompts: vec!["prompts/planner.md".into(), "prompts/common.md".into()],
@@ -134,7 +137,8 @@ impl ZbobrDispatcherConfig {
             .map(|p| zbobr_utility::resolve_path(p, config_dir))
             .unwrap_or(defaults.workspaces);
 
-        let backend = merged.backend.unwrap_or(defaults.backend);
+        let task_backend = merged.task_backend.unwrap_or(defaults.task_backend);
+        let repo_backend = merged.repo_backend.unwrap_or(defaults.repo_backend);
 
         let cli_tool = merged.cli_tool.unwrap_or(defaults.cli_tool);
 
@@ -203,7 +207,8 @@ impl ZbobrDispatcherConfig {
         Ok(Self {
             workspaces,
             agent_github_token,
-            backend,
+            task_backend,
+            repo_backend,
             cli_tool,
             preparator_prompts,
             planner_prompts,
@@ -316,7 +321,8 @@ mod tests {
     fn build_with_toml() {
         let toml = ZbobrDispatcherToml {
             workspaces: Some(PathBuf::from("/tmp/toml-ws")),
-            backend: None,
+            task_backend: None,
+            repo_backend: None,
             agent_github_token: Some("toml-agent-token".into()),
             cli_tool: Some(Tool::Claude),
             work_branch_prefix: Some("toml_fix".into()),
@@ -338,7 +344,8 @@ mod tests {
         .unwrap();
         // Absolute path stays absolute
         assert_eq!(config.workspaces, PathBuf::from("/tmp/toml-ws"));
-        assert_eq!(config.backend, BackendType::GitHub);
+        assert_eq!(config.task_backend, BackendType::GitHub);
+        assert_eq!(config.repo_backend, BackendType::GitHub);
         assert_eq!(config.cli_tool, Tool::Claude);
         assert_eq!(config.work_branch_prefix, "toml_fix");
         // Relative prompt paths resolved against config_dir
@@ -370,7 +377,8 @@ mod tests {
         let config =
             ZbobrDispatcherConfig::build(None, ZbobrDispatcherArgs::default(), &test_config_dir())
                 .unwrap();
-        assert_eq!(config.backend, BackendType::GitHub);
+        assert_eq!(config.task_backend, BackendType::GitHub);
+        assert_eq!(config.repo_backend, BackendType::GitHub);
         assert_eq!(config.cli_tool, Tool::Copilot);
         assert_eq!(config.work_branch_prefix, "zbobr_fix");
         assert_eq!(config.workspaces, PathBuf::from("./workspaces"));

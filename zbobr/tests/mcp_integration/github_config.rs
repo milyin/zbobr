@@ -1,13 +1,19 @@
 use std::path::PathBuf;
 
 /// Configuration loaded from `zbobr_github_test.toml` at the workspace root.
-/// When this file is present the integration tests also run against the GitHub
-/// backend.  Mirrors the relevant TOML sections of the standard zbobr config.
-#[derive(serde::Deserialize, Clone)]
+///
+/// Each section is optional so that only the tests relevant to the present
+/// credentials are activated:
+/// - `tasks.github` → enables GitHub task-backend tests
+/// - `repo.github`  → enables GitHub repo-backend tests
+///
+/// A section being absent causes the corresponding test combination to be
+/// skipped gracefully rather than failing.
+#[derive(serde::Deserialize, Clone, Default)]
+#[serde(default)]
 pub struct GitHubTestConfig {
-    pub tasks: GitHubTasksSection,
-    pub repo: GitHubRepoSection,
-    #[serde(default)]
+    pub tasks: Option<GitHubTasksSection>,
+    pub repo: Option<GitHubRepoSection>,
     pub dispatcher: GitHubDispatcherSection,
 }
 
@@ -57,8 +63,6 @@ impl GitHubTestConfig {
     /// Returns `None` if the file does not exist.  Panics on parse errors so
     /// that a misconfigured file is caught early.
     pub fn load() -> Option<Self> {
-        // `CARGO_MANIFEST_DIR` is the `zbobr/` package directory; its parent
-        // is the workspace root where `zbobr_github_test.toml` lives.
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let workspace_root = manifest_dir
             .parent()

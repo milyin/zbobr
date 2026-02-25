@@ -496,8 +496,11 @@ fn load_config(
     if let Some(ref ws) = cli.global.settings.dispatcher.workspaces {
         config.workspaces = ws.clone();
     }
-    if let Some(ref b) = cli.global.settings.dispatcher.backend {
-        config.backend = *b;
+    if let Some(ref b) = cli.global.settings.dispatcher.task_backend {
+        config.task_backend = *b;
+    }
+    if let Some(ref b) = cli.global.settings.dispatcher.repo_backend {
+        config.repo_backend = *b;
     }
     if let Some(ref t) = cli.global.settings.dispatcher.cli_tool {
         config.cli_tool = *t;
@@ -643,7 +646,7 @@ async fn main() -> anyhow::Result<()> {
         &config_dir,
     );
 
-    let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = match config.backend {
+    let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = match config.task_backend {
         zbobr_dispatcher::config::BackendType::GitHub => Arc::new(
             GitHubTaskBackend::new(
                 task_backend_github_toml.cloned(),
@@ -660,7 +663,7 @@ async fn main() -> anyhow::Result<()> {
             .context("Failed to create filesystem task backend")?,
         ),
     };
-    let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = match config.backend {
+    let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = match config.repo_backend {
         zbobr_dispatcher::config::BackendType::GitHub => Arc::new(
             GitHubRepoBackend::new(
                 repo_backend_github_toml.cloned(),
@@ -1522,7 +1525,7 @@ async fn run_manager_loop(
             .collect::<Vec<_>>()
             .join("; ")
     );
-    tracing::info!("Backend: {:?}", zbobr.config().backend);
+    tracing::info!("Task backend: {:?}, Repo backend: {:?}", zbobr.config().task_backend, zbobr.config().repo_backend);
 
     let mut last_cleanup = std::time::Instant::now();
 
