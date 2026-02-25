@@ -92,12 +92,7 @@ steps:
     )
 }
 
-#[tokio::test]
-async fn test_planning() {
-    let Some(env) = IntegrationTestEnv::get().await else {
-        return;
-    };
-
+async fn run_planning_test(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_planning").await;
     let task_id = env
         .create_task("Dummy Task", "Dummy task description", Stage::Preparing)
@@ -113,8 +108,9 @@ async fn test_planning() {
 
     let output = env.show_task(task_id).await;
     assert!(
-      output.contains("Signal:      go_work"),
-      "Planner follow-up signal should be GO_WORK after posting plan"
+        output.contains("Signal:      go_work"),
+        "[{}] Planner follow-up signal should be GO_WORK after posting plan",
+        env.backend_name()
     );
 
     // verify the work directory exists and is set up correctly
@@ -122,14 +118,16 @@ async fn test_planning() {
         .join(format!("task#{task_id}"))
         .join("repo_planning");
 
-    assert!(cloned_repo_path.exists(), "Work directory does not exist");
+    assert!(cloned_repo_path.exists(), "[{}] Work directory does not exist", env.backend_name());
     assert!(
         cloned_repo_path.starts_with(&env.workspaces_dir),
-        "Work directory is not inside workspaces_dir"
+        "[{}] Work directory is not inside workspaces_dir",
+        env.backend_name()
     );
     assert!(
         cloned_repo_path.join(".git").exists(),
-        "Work directory is not a git repository"
+        "[{}] Work directory is not a git repository",
+        env.backend_name()
     );
 
     let branches_output = tokio::process::Command::new("git")
@@ -142,13 +140,15 @@ async fn test_planning() {
 
     assert!(
         branches_str.contains("main"),
-        "Destination branch 'main' not found in cloned repo"
+        "[{}] Destination branch 'main' not found in cloned repo",
+        env.backend_name()
     );
 
-    let expected_work_branch = work_branch;
+    let expected_work_branch = &work_branch;
     assert!(
-        branches_str.contains(&expected_work_branch),
-        "Work branch '{expected_work_branch}' not found in cloned repo"
+        branches_str.contains(expected_work_branch.as_str()),
+        "[{}] Work branch '{expected_work_branch}' not found in cloned repo",
+        env.backend_name()
     );
 
     let current_branch_output = tokio::process::Command::new("git")
@@ -161,7 +161,19 @@ async fn test_planning() {
         .trim()
         .to_string();
     assert_eq!(
-        current_branch, expected_work_branch,
-        "Current branch is not the work branch"
+        current_branch, *expected_work_branch,
+        "[{}] Current branch is not the work branch",
+        env.backend_name()
     );
+}
+
+#[tokio::test]
+async fn test_planning() {
+    let envs = IntegrationTestEnv::get_all().await;
+    if envs.is_empty() {
+        return;
+    }
+    for env in &envs {
+        run_planning_test(env).await;
+    }
 }

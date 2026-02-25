@@ -91,12 +91,7 @@ fn merging_scenario(ending: &str) -> String {
     format!("{}{}", common_merging_steps(), merging_ending_steps(ending))
 }
 
-#[tokio::test]
-async fn test_merging() {
-    let Some(env) = IntegrationTestEnv::get().await else {
-        return;
-    };
-
+async fn run_merging_test(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_merging").await;
     let repo_path_str = repo_path.to_string_lossy().to_string();
 
@@ -111,30 +106,32 @@ async fn test_merging() {
     env.update_task_branches(task_id_report, &repo_path_str, "main", &work_branch_report).await;
     env.prepare_workspace(task_id_report, &repo_path, &work_branch_report).await;
 
-    // Test report ending explicit
     env.run_stage(task_id_report, Stage::Merging, scenario_report.clone()).await;
     let output = env.show_task(task_id_report).await;
     assert!(
         output.contains("Merger complete."),
-        "Merger report message was not recorded in discussion"
+        "[{}] Merger report message was not recorded in discussion",
+        env.backend_name()
     );
     // In the new model, merger does not set a follow-up signal;
     // the original signal is preserved through the merger session.
     // Since this test starts with no signal, signal should be (none) after merger.
     assert!(
         output.contains("Signal:      (none)"),
-        "Merger should not set a follow-up signal (original signal preserved)"
+        "[{}] Merger should not set a follow-up signal (original signal preserved)",
+        env.backend_name()
     );
 
-    // Test report ending process
     let output = env.show_task(task_id_report).await;
     assert!(
         output.contains("Merger complete."),
-        "Merger report message was not recorded in discussion"
+        "[{}] Merger report message was not recorded in discussion",
+        env.backend_name()
     );
     assert!(
         output.contains("Signal:      (none)"),
-        "Merger should not set a follow-up signal (original signal preserved)"
+        "[{}] Merger should not set a follow-up signal (original signal preserved)",
+        env.backend_name()
     );
 
     // verify the work directory exists and is set up correctly
@@ -142,10 +139,15 @@ async fn test_merging() {
         .join(format!("task#{task_id_report}"))
         .join("repo_merging");
 
-    assert!(cloned_repo_path_report.exists(), "Work directory does not exist");
+    assert!(
+        cloned_repo_path_report.exists(),
+        "[{}] Work directory does not exist",
+        env.backend_name()
+    );
     assert!(
         cloned_repo_path_report.join(".git").exists(),
-        "Work directory is not a git repository"
+        "[{}] Work directory is not a git repository",
+        env.backend_name()
     );
 
     let branches_output = tokio::process::Command::new("git")
@@ -158,11 +160,13 @@ async fn test_merging() {
 
     assert!(
         branches_str.contains("main"),
-        "Destination branch 'main' not found in cloned repo"
+        "[{}] Destination branch 'main' not found in cloned repo",
+        env.backend_name()
     );
     assert!(
-        branches_str.contains(&work_branch_report),
-        "Work branch '{work_branch_report}' not found in cloned repo"
+        branches_str.contains(work_branch_report.as_str()),
+        "[{}] Work branch '{work_branch_report}' not found in cloned repo",
+        env.backend_name()
     );
 
     let current_branch_output = tokio::process::Command::new("git")
@@ -177,7 +181,8 @@ async fn test_merging() {
 
     assert_eq!(
         current_branch, work_branch_report,
-        "Current branch is not the work branch"
+        "[{}] Current branch is not the work branch",
+        env.backend_name()
     );
 
     // Test ask ending
@@ -188,36 +193,33 @@ async fn test_merging() {
     env.update_task_branches(task_id_ask, &repo_path_str, "main", &work_branch_ask).await;
     env.prepare_workspace(task_id_ask, &repo_path, &work_branch_ask).await;
 
-    // Test ask ending explicit
     env.run_stage(task_id_ask, Stage::Merging, scenario_ask.clone()).await;
     let output = env.show_task(task_id_ask).await;
     assert!(
         output.contains("Need guidance on merge"),
-        "Ask user message was not recorded in discussion"
+        "[{}] Ask user message was not recorded in discussion",
+        env.backend_name()
     );
     assert!(
         output.contains("Pause:       true"),
-        "Merger ask_user should set pause flag instead of go_ask signal"
+        "[{}] Merger ask_user should set pause flag instead of go_ask signal",
+        env.backend_name()
     );
 
-    // Test ask ending process
     let output = env.show_task(task_id_ask).await;
     assert!(
         output.contains("Need guidance on merge"),
-        "Ask user message was not recorded in discussion"
+        "[{}] Ask user message was not recorded in discussion",
+        env.backend_name()
     );
     assert!(
         output.contains("Pause:       true"),
-        "Merger ask_user should set pause flag instead of go_ask signal"
+        "[{}] Merger ask_user should set pause flag instead of go_ask signal",
+        env.backend_name()
     );
 }
 
-#[tokio::test]
-async fn test_merging_with_real_conflict() {
-    let Some(env) = IntegrationTestEnv::get().await else {
-        return;
-    };
-
+async fn run_merging_with_real_conflict_test(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_merging_conflict").await;
     let repo_path_str = repo_path.to_string_lossy().to_string();
 
@@ -308,7 +310,7 @@ async fn test_merging_with_real_conflict() {
         .status()
         .await
         .unwrap();
-    assert!(cp_status.success(), "Failed to copy repo to workspace");
+    assert!(cp_status.success(), "[{}] Failed to copy repo to workspace", env.backend_name());
 
     // Checkout work branch and attempt merge to create conflict markers
     let checkout_status = tokio::process::Command::new("git")
@@ -326,7 +328,11 @@ async fn test_merging_with_real_conflict() {
         .await
         .unwrap();
     // Merge should fail with conflict
-    assert!(!merge_output.status.success(), "Expected merge conflict");
+    assert!(
+        !merge_output.status.success(),
+        "[{}] Expected merge conflict",
+        env.backend_name()
+    );
 
     // Create a scenario for the merger that accesses the conflicted repo
     let conflict_scenario = format!(
@@ -361,14 +367,38 @@ steps:
 
     // Check that the merger was called and handled the conflict
     let output = env.show_task(task_id).await;
-    println!("Task output after merging:\n{}", output);
+    println!("[{}] Task output after merging:\n{}", env.backend_name(), output);
     assert!(
         output.contains("Detected merge conflicts"),
-        "Merger should have detected and reported conflicts"
+        "[{}] Merger should have detected and reported conflicts",
+        env.backend_name()
     );
     // After merger, conflict flag should be cleared
     assert!(
         output.contains("Conflict:    false"),
-        "Merger should clear the conflict flag"
+        "[{}] Merger should clear the conflict flag",
+        env.backend_name()
     );
+}
+
+#[tokio::test]
+async fn test_merging() {
+    let envs = IntegrationTestEnv::get_all().await;
+    if envs.is_empty() {
+        return;
+    }
+    for env in &envs {
+        run_merging_test(env).await;
+    }
+}
+
+#[tokio::test]
+async fn test_merging_with_real_conflict() {
+    let envs = IntegrationTestEnv::get_all().await;
+    if envs.is_empty() {
+        return;
+    }
+    for env in &envs {
+        run_merging_with_real_conflict_test(env).await;
+    }
 }

@@ -3,6 +3,39 @@ use std::sync::Arc;
 use tokio::sync::OnceCell;
 use zbobr_dispatcher::Stage;
 
+use super::github_config::GitHubTestConfig;
+
+// ---------------------------------------------------------------------------
+// Backend configuration
+// ---------------------------------------------------------------------------
+
+/// CLI argument bundle that differs between filesystem and GitHub backends.
+enum BackendArgs {
+    Filesystem {
+        tasks_dir: PathBuf,
+    },
+    GitHub {
+        task_repo: String,
+        task_token: String,
+        fork_owner: String,
+        repo_token: String,
+        agent_token: String,
+    },
+}
+
+impl BackendArgs {
+    fn name(&self) -> &'static str {
+        match self {
+            BackendArgs::Filesystem { .. } => "filesystem",
+            BackendArgs::GitHub { .. } => "github",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared environment
+// ---------------------------------------------------------------------------
+
 /// All shared paths and state that survive for the entire integration-test
 /// binary run.  Created once via [`IntegrationTestEnv::get`] and then
 /// re-used by every test function.
@@ -17,78 +50,182 @@ use zbobr_dispatcher::Stage;
 /// call backend implementations directly so that the same test works with any
 /// backend (filesystem, GitHub, etc.).
 pub struct IntegrationTestEnv {
-    /// Root directory for this integration-test run.  All tasks, workspaces,
+    /// Root directory for this integration-test run.  All workspaces,
     /// scenarios and scratch repos live under here.
     pub base_path: PathBuf,
-    pub tasks_dir: PathBuf,
     pub workspaces_dir: PathBuf,
+    backend: BackendArgs,
 }
 
 // ---------------------------------------------------------------------------
-// Singleton
+// Singletons
 // ---------------------------------------------------------------------------
 
-static SHARED_ENV: OnceCell<Option<Arc<IntegrationTestEnv>>> = OnceCell::const_new();
+static FS_ENV: OnceCell<Option<Arc<IntegrationTestEnv>>> = OnceCell::const_new();
+static GITHUB_ENV: OnceCell<Option<Arc<IntegrationTestEnv>>> = OnceCell::const_new();
 
 impl IntegrationTestEnv {
-    /// Return the shared environment, initialising it on the first call.
+    /// Return the filesystem backend environment, initialising it on first call.
     ///
-    /// Returns `None` when `mcp-tester` is not installed — callers should
-    /// skip gracefully in that case.
+    /// Returns `None` when `mcp-tester` is not installed — callers should skip
+    /// gracefully in that case.
+    #[allow(dead_code)]
     pub async fn get() -> Option<Arc<IntegrationTestEnv>> {
-        SHARED_ENV
-            .get_or_init(|| async { IntegrationTestEnv::init().await })
+        FS_ENV
+            .get_or_init(|| async { IntegrationTestEnv::init_fs().await })
             .await
             .clone()
     }
 
-    /// One-time setup: verify prerequisites, create directories, run
-    /// `zbobr setup`.
-    async fn init() -> Option<Arc<IntegrationTestEnv>> {
-        let mcp_check = tokio::process::Command::new("mcp-tester")
+    /// Return all available environments (filesystem always, GitHub when
+    /// `zbobr_github_test.toml` is present at the workspace root).
+    ///
+    /// Returns an empty `Vec` when `mcp-tester` is not installed.
+    pub async fn get_all() -> Vec<Arc<IntegrationTestEnv>> {
+        let fs = FS_ENV
+            .get_or_init(|| async { IntegrationTestEnv::init_fs().await })
+            .await
+            .clone();
+        let github = GITHUB_ENV
+            .get_or_init(|| async { IntegrationTestEnv::init_github().await })
+            .await
+            .clone();
+
+        [fs, github].into_iter().flatten().collect()
+    }
+
+    // -----------------------------------------------------------------------
+    // Initialisation
+    // -----------------------------------------------------------------------
+
+    /// Verify that `mcp-tester` is installed and return `true` if it is.
+    async fn check_mcp_tester() -> bool {
+        let result = tokio::process::Command::new("mcp-tester")
             .arg("--version")
             .output()
             .await;
-        if mcp_check.is_err() || !mcp_check.unwrap().status.success() {
-            eprintln!("Skipping test: mcp-tester not installed (cargo install mcp-tester)");
-            return None;
+        match result {
+            Ok(out) if out.status.success() => true,
+            _ => {
+                eprintln!(
+                    "Skipping integration tests: mcp-tester not installed \
+                     (cargo install mcp-tester)"
+                );
+                false
+            }
         }
+    }
 
-        // Use CARGO_TARGET_TMPDIR so the directory persists for post-failure
-        // analysis and is co-located with the test binary.
-        let base_path = match std::env::var("CARGO_TARGET_TMPDIR") {
-            Ok(p) => PathBuf::from(p).join("integration_env"),
-            Err(_) => std::env::temp_dir().join("zbobr_integration_env"),
+    /// Compute the base path for an environment identified by `suffix`.
+    async fn make_base_path(suffix: &str) -> PathBuf {
+        let base = match std::env::var("CARGO_TARGET_TMPDIR") {
+            Ok(p) => PathBuf::from(p).join(format!("integration_env_{suffix}")),
+            Err(_) => std::env::temp_dir().join(format!("zbobr_integration_env_{suffix}")),
         };
-
-        // remove any leftover state from prior runs so tests start with a clean
-        // environment.  This is particularly helpful when the integration suite
-        // is re‑invoked repeatedly during development.
-        if base_path.exists() {
-            tokio::fs::remove_dir_all(&base_path)
+        // Remove leftover state from prior runs for a clean environment.
+        if base.exists() {
+            tokio::fs::remove_dir_all(&base)
                 .await
                 .expect("failed to clean previous integration env");
         }
+        tokio::fs::create_dir_all(&base)
+            .await
+            .expect("failed to create integration env base dir");
+        base
+    }
 
+    /// One-time setup for the **filesystem** backend environment.
+    async fn init_fs() -> Option<Arc<IntegrationTestEnv>> {
+        if !Self::check_mcp_tester().await {
+            return None;
+        }
+
+        let base_path = Self::make_base_path("fs").await;
         let tasks_dir = base_path.join("tasks");
         let workspaces_dir = base_path.join("workspaces");
 
+        eprintln!("[IntegrationTestEnv/fs] base path: {}", base_path.display());
+
+        let backend = BackendArgs::Filesystem {
+            tasks_dir: tasks_dir.clone(),
+        };
+        let env = Arc::new(IntegrationTestEnv {
+            base_path: base_path.clone(),
+            workspaces_dir,
+            backend,
+        });
+
+        run_zbobr_impl(&env, "setup", &[]).await;
+
+        Some(env)
+    }
+
+    /// One-time setup for the **GitHub** backend environment.
+    ///
+    /// Returns `None` when `zbobr_github_test.toml` is absent or when the
+    /// GitHub connectivity check fails.
+    async fn init_github() -> Option<Arc<IntegrationTestEnv>> {
+        if !Self::check_mcp_tester().await {
+            return None;
+        }
+
+        let config = GitHubTestConfig::load()?;
+
+        let base_path = Self::make_base_path("github").await;
+        let workspaces_dir = base_path.join("workspaces");
+
         eprintln!(
-            "[IntegrationTestEnv] base path: {}",
+            "[IntegrationTestEnv/github] base path: {}",
             base_path.display()
         );
 
-        tokio::fs::create_dir_all(&base_path)
-            .await
-            .expect("failed to create integration env base dir");
-
-        run_zbobr_impl(&base_path, &tasks_dir, &workspaces_dir, "setup", &[]).await;
-
-        Some(Arc::new(IntegrationTestEnv {
-            base_path,
-            tasks_dir,
+        let backend = BackendArgs::GitHub {
+            task_repo: config.tasks.github.task_repo,
+            task_token: config.tasks.github.token,
+            fork_owner: config.repo.github.fork_owner,
+            repo_token: config.repo.github.token,
+            agent_token: config.dispatcher.agent_token,
+        };
+        let env = Arc::new(IntegrationTestEnv {
+            base_path: base_path.clone(),
             workspaces_dir,
-        }))
+            backend,
+        });
+
+        // Attempt setup; skip gracefully on failure (e.g. invalid token).
+        let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
+        let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+        let mut args = zbobr_config_args(&env.backend, &env.workspaces_dir);
+        args.push("setup".to_string());
+
+        let status = tokio::process::Command::new(zbobr_bin)
+            .args(&args)
+            .current_dir(&base_path)
+            .env("RUST_LOG", &rust_log)
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .status()
+            .await
+            .ok()?;
+
+        if !status.success() {
+            eprintln!(
+                "[IntegrationTestEnv/github] setup failed — skipping GitHub integration tests. \
+                 Check that zbobr_github_test.toml contains valid credentials."
+            );
+            return None;
+        }
+
+        Some(env)
+    }
+
+    // -----------------------------------------------------------------------
+    // Identification
+    // -----------------------------------------------------------------------
+
+    /// Human-readable name of the active backend ("filesystem" or "github").
+    pub fn backend_name(&self) -> &'static str {
+        self.backend.name()
     }
 
     // -----------------------------------------------------------------------
@@ -130,13 +267,21 @@ impl IntegrationTestEnv {
     }
 
     /// Process a task according to its current stage.
+    #[allow(dead_code)]
     pub async fn process_task(&self, task_id: u64) {
         let task_id_str = task_id.to_string();
         self.run_zbobr("task", &["process", &task_id_str]).await;
     }
 
     /// Update a task's repository and branch information.
-    pub async fn update_task_branches(&self, task_id: u64, dest_repo: &str, dest_branch: &str, work_branch: &str) {
+    #[allow(dead_code)]
+    pub async fn update_task_branches(
+        &self,
+        task_id: u64,
+        dest_repo: &str,
+        dest_branch: &str,
+        work_branch: &str,
+    ) {
         let task_id_str = task_id.to_string();
         self.run_zbobr(
             "task",
@@ -155,6 +300,7 @@ impl IntegrationTestEnv {
     }
 
     /// Read a task's current stage from CLI output.
+    #[allow(dead_code)]
     pub async fn task_stage(&self, task_id: u64) -> Stage {
         let output = self.show_task(task_id).await;
         let stage_line = output
@@ -178,6 +324,10 @@ impl IntegrationTestEnv {
     /// Create a minimal git repository inside the environment's base directory,
     /// in a subdirectory named `<name>`.  Returns the absolute path to the
     /// newly-created repository.
+    ///
+    /// For both the filesystem and GitHub backends the local repo is used as
+    /// the code workspace; the tests exercise MCP tool behaviour (task storage)
+    /// rather than the actual git/GitHub repo backend.
     pub async fn create_git_repo(&self, name: &str) -> PathBuf {
         let repo_dir = self.base_path.join(name);
         tokio::fs::create_dir_all(&repo_dir).await.unwrap();
@@ -203,7 +353,8 @@ impl IntegrationTestEnv {
         git(&repo_dir, &["branch", "-M", "main"]).await;
 
         eprintln!(
-            "[IntegrationTestEnv] git repo created: {}",
+            "[IntegrationTestEnv/{}] git repo created: {}",
+            self.backend_name(),
             repo_dir.display()
         );
         repo_dir
@@ -215,24 +366,18 @@ impl IntegrationTestEnv {
 
     /// Execute `zbobr <command> [args…]` inheriting stdio.
     pub async fn run_zbobr(&self, command: &str, args: &[&str]) {
-        run_zbobr_impl(&self.base_path, &self.tasks_dir, &self.workspaces_dir, command, args).await;
+        run_zbobr_impl(self, command, args).await;
     }
 
     /// Execute `zbobr <command> [args…]` and return captured stdout.
     pub async fn run_zbobr_capture(&self, command: &str, args: &[&str]) -> String {
-        run_zbobr_capture_impl(
-            &self.base_path,
-            &self.tasks_dir,
-            &self.workspaces_dir,
-            command,
-            args,
-        )
-        .await
+        run_zbobr_capture_impl(self, command, args).await
     }
 
     /// Prepare a workspace directory for a task by cloning the source repo
     /// and setting up the work branch. This simulates what the dispatcher
     /// would do before starting an agent session.
+    #[allow(dead_code)]
     pub async fn prepare_workspace(
         &self,
         task_id: u64,
@@ -251,7 +396,7 @@ impl IntegrationTestEnv {
             .unwrap();
         let work_dir = workspace_dir.join(repo_name);
 
-        // Clone the source repo into the workspace
+        // Clone the source repo into the workspace.
         let clone_status = tokio::process::Command::new("git")
             .args([
                 "clone",
@@ -263,7 +408,7 @@ impl IntegrationTestEnv {
             .expect("failed to run git clone");
         assert!(clone_status.success(), "git clone failed");
 
-        // Try to checkout an existing work branch, or create a new one from HEAD
+        // Try to checkout an existing work branch, or create a new one from HEAD.
         let checkout = tokio::process::Command::new("git")
             .args(["checkout", work_branch])
             .current_dir(&work_dir)
@@ -288,20 +433,25 @@ impl IntegrationTestEnv {
     }
 
     /// Create a scenario file and return its path.
+    #[allow(dead_code)]
     pub async fn create_scenario(&self, name: &str, content: &str) -> String {
         let scenarios_dir = self.base_path.join("scenarios");
-        tokio::fs::create_dir_all(&scenarios_dir).await.expect("failed to create scenarios directory");
+        tokio::fs::create_dir_all(&scenarios_dir)
+            .await
+            .expect("failed to create scenarios directory");
         let scenario_path = scenarios_dir.join(format!("{name}.yml"));
-        tokio::fs::write(&scenario_path, content).await.expect("failed to write scenario");
+        tokio::fs::write(&scenario_path, content)
+            .await
+            .expect("failed to write scenario");
         scenario_path.to_string_lossy().to_string()
     }
 }
 
 // ---------------------------------------------------------------------------
-// Low-level helpers (private, called only by IntegrationTestEnv methods)
+// Low-level helpers (private)
 // ---------------------------------------------------------------------------
 
-fn make_zbobr_config_args(tasks_dir: &Path, workspaces_dir: &Path) -> Vec<String> {
+fn zbobr_config_args(backend: &BackendArgs, workspaces_dir: &Path) -> Vec<String> {
     let mut args = Vec::new();
     let mut push = |flag: &str, val: &str| {
         args.push(flag.to_string());
@@ -309,34 +459,46 @@ fn make_zbobr_config_args(tasks_dir: &Path, workspaces_dir: &Path) -> Vec<String
     };
 
     push("--dispatcher-workspaces", &workspaces_dir.to_string_lossy());
-    push("--tasks-fs-tasks-dir", &tasks_dir.to_string_lossy());
-    push("--dispatcher-backend", "filesystem");
     push("--dispatcher-cli-tool", "mcp-tester");
-    push("--dispatcher-agent-github-token", "dummy-not-used");
     push("--dispatcher-git-user-name", "test-bot");
     push("--dispatcher-git-user-email", "test@example.com");
+
+    match backend {
+        BackendArgs::Filesystem { tasks_dir } => {
+            push("--dispatcher-backend", "filesystem");
+            push("--tasks-fs-tasks-dir", &tasks_dir.to_string_lossy());
+            push("--dispatcher-agent-github-token", "dummy-not-used");
+        }
+        BackendArgs::GitHub {
+            task_repo,
+            task_token,
+            fork_owner,
+            repo_token,
+            agent_token,
+        } => {
+            push("--dispatcher-backend", "github");
+            push("--tasks-github-task-repo", task_repo);
+            push("--tasks-github-token", task_token);
+            push("--repo-github-fork-owner", fork_owner);
+            push("--repo-github-token", repo_token);
+            push("--dispatcher-agent-github-token", agent_token);
+        }
+    }
 
     args
 }
 
-async fn run_zbobr_impl(
-    base_path: &Path,
-    tasks_dir: &Path,
-    workspaces_dir: &Path,
-    command: &str,
-    command_args: &[&str],
-) {
+async fn run_zbobr_impl(env: &IntegrationTestEnv, command: &str, command_args: &[&str]) {
     let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
     let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
 
-    let mut args = make_zbobr_config_args(tasks_dir, workspaces_dir);
+    let mut args = zbobr_config_args(&env.backend, &env.workspaces_dir);
     args.push(command.to_string());
-    // convert the slice of &str to owned Strings and extend the argument list
     args.extend(command_args.iter().map(|s| s.to_string()));
 
     let status = tokio::process::Command::new(zbobr_bin)
         .args(&args)
-        .current_dir(base_path)
+        .current_dir(&env.base_path)
         .env("RUST_LOG", &rust_log)
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
@@ -353,22 +515,20 @@ async fn run_zbobr_impl(
 }
 
 async fn run_zbobr_capture_impl(
-    base_path: &Path,
-    tasks_dir: &Path,
-    workspaces_dir: &Path,
+    env: &IntegrationTestEnv,
     command: &str,
     command_args: &[&str],
 ) -> String {
     let zbobr_bin = env!("CARGO_BIN_EXE_zbobr");
     let rust_log = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
 
-    let mut args = make_zbobr_config_args(tasks_dir, workspaces_dir);
+    let mut args = zbobr_config_args(&env.backend, &env.workspaces_dir);
     args.push(command.to_string());
     args.extend(command_args.iter().map(|s| s.to_string()));
 
     let output = tokio::process::Command::new(zbobr_bin)
         .args(&args)
-        .current_dir(base_path)
+        .current_dir(&env.base_path)
         .env("RUST_LOG", &rust_log)
         .output()
         .await

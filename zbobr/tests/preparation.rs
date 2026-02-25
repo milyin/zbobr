@@ -105,13 +105,7 @@ steps:
     )
 }
 
-#[tokio::test]
-async fn test_preparation() {
-    let Some(env) = IntegrationTestEnv::get().await else {
-        // mcp-tester not present; skip
-        return;
-    };
-
+async fn run_preparation_test(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_preparation").await;
     let task_id = env
         .create_task("Dummy Task", "Dummy task description", Stage::Preparing)
@@ -123,7 +117,20 @@ async fn test_preparation() {
 
     let output = env.show_task(task_id).await;
     assert!(
-      output.contains("Signal:      go_plan"),
-      "Preparator follow-up signal should be GO_PLAN"
+        output.contains("Signal:      go_plan"),
+        "[{}] Preparator follow-up signal should be GO_PLAN",
+        env.backend_name()
     );
+}
+
+#[tokio::test]
+async fn test_preparation() {
+    let envs = IntegrationTestEnv::get_all().await;
+    if envs.is_empty() {
+        // mcp-tester not present; skip
+        return;
+    }
+    for env in &envs {
+        run_preparation_test(env).await;
+    }
 }

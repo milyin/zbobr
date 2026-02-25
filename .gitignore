@@ -6,3 +6,6 @@ Cargo.lock
 workspaces/
 
 .DS_Store
+
+# Local GitHub integration test credentials (contains real tokens)
+zbobr_github_test.toml

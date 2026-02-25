@@ -1,0 +1,21 @@
+# zbobr GitHub integration test configuration
+# Copy to zbobr_github_test.toml and fill in real values.
+# When this file exists at the workspace root, integration tests also run
+# against the GitHub backend in addition to the default filesystem backend.
+
+[tasks.github]
+# GitHub repository whose issues are used as the task tracker (owner/repo format).
+task_repo = "owner/zbobr-test-tasks"
+# GitHub token with read/write access to the tasks repository.
+token = "ghp_your_task_github_token_here"
+
+[repo.github]
+# GitHub user or organization where target repos are forked for implementation.
+fork_owner = "owner"
+# GitHub token with read/write access to the fork organization.
+token = "ghp_your_repo_github_token_here"
+
+[dispatcher]
+# GitHub token passed as GH_TOKEN to agent processes (optional).
+# If omitted, a dummy value is used (fine when mcp-tester is the executor).
+# agent_token = "ghp_your_agent_github_token_here"
