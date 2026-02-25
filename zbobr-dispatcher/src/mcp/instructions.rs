@@ -136,7 +136,7 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 6. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
 7. Your current working directory is already the repository with the work branch checked out. Consult `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` for branch names if needed.
 8. Implement the plan in your working directory
-9. Any uncommitted changes will be **automatically committed** by the system when you exit. You may optionally make smaller explicit commits for logical chunks if you prefer.
+9. Commit all your changes locally to the work branch with clear messages (describe what the change does, why, and reference relevant checklist item). ALWAYS ensure that you have no uncommitted changes before marking your checklist items as done.
 10. When implementation for an item is complete, mark the item done with `{CHECK_CHECKLIST_ITEM}`, and update or insert follow-up items as needed
 11. If you need human clarification or intervention, call `{ASK_USER}` or `{ASK_PLANNER}` as appropriate; use `{REPORT_ERROR}` only to report technical errors
 12. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact."#,
@@ -214,12 +214,12 @@ You have read access to the task and repository:
 4. **Attempt automatic resolution:**
    - For simple, non-overlapping changes (e.g., formatting, imports, unrelated edits), apply manual fixes that combine both changes
    - Use `git add` to resolve simple conflicts, then `git commit -m "chore: merge conflicts resolved"`
-   - If you can create a reasonable merged version, do so
+   - If you can create a reasonable merged version, do so and ensure all changes are committed
 5. **If automatic resolution is not possible:**
    - Use `{ASK_USER}` to describe the conflicts and ask which version should be preferred, or ask for guidance
    - Wait for user input before proceeding
 6. **After successful resolution:**
-   - The platform will automatically commit any remaining uncommitted changes when you exit
+   - Ensure all your changes are explicitly committed using `git commit` to the local work branch
    - The task will then resume normally with the merged code
 
 ## Conflict Resolution Principles
