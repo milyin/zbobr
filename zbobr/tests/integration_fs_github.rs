@@ -202,7 +202,7 @@ async fn test_fs_github_repo_backend_planning() {
     };
 
     let task_id = env
-        .create_task("Repo backend planning", "Test planning with GitHub-cloned workspace", Stage::Pending)
+        .create_task("Repo backend planning", "Dummy task description", Stage::Pending)
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-plan-test");
     env.update_task_branches(task_id, target, "main", &work_branch).await;
@@ -233,7 +233,7 @@ async fn test_fs_github_repo_backend_working() {
     };
 
     let task_id = env
-        .create_task("Repo backend working", "Test working with GitHub-cloned workspace", Stage::Working)
+        .create_task("Repo backend working", "Dummy task description", Stage::Working)
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-work-test");
     env.update_task_branches(task_id, target, "main", &work_branch).await;
@@ -264,7 +264,7 @@ async fn test_fs_github_repo_backend_reviewing() {
     };
 
     let task_id = env
-        .create_task("Repo backend reviewing", "Test reviewing with GitHub-cloned workspace", Stage::Reviewing)
+        .create_task("Repo backend reviewing", "Dummy task description", Stage::Reviewing)
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-review-test");
     env.update_task_branches(task_id, target, "main", &work_branch).await;
@@ -295,7 +295,7 @@ async fn test_fs_github_repo_backend_merging() {
     };
 
     let task_id = env
-        .create_task("Repo backend merging", "Test merging with GitHub-cloned workspace", Stage::Merging)
+        .create_task("Repo backend merging", "Dummy task description", Stage::Merging)
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-merge-test");
     env.update_task_branches(task_id, target, "main", &work_branch).await;
