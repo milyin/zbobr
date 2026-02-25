@@ -15,14 +15,19 @@ use mcp_integration::env::{IntegrationTestEnv, RepoBackendArgs, TaskBackendArgs}
 use mcp_integration::github_config::GitHubTestConfig;
 use mcp_integration::test_helpers;
 
-static ENV: OnceCell<Option<Arc<IntegrationTestEnv>>> = OnceCell::const_new();
+// GitHub/GitHub tests are always ignored by default; missing config should
+// cause a hard failure when run explicitly.
+static ENV: OnceCell<Arc<IntegrationTestEnv>> = OnceCell::const_new();
 static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-async fn get_env() -> Option<Arc<IntegrationTestEnv>> {
+async fn get_env() -> Arc<IntegrationTestEnv> {
     ENV.get_or_init(|| async {
-        let cfg = GitHubTestConfig::load()?;
-        let tasks = cfg.tasks?;
-        let repo = cfg.repo?;
+        let cfg = GitHubTestConfig::load()
+            .expect("zbobr_github_test.toml not found; required for GitHub tests");
+        let tasks = cfg.tasks
+            .expect("[tasks.github] section missing in zbobr_github_test.toml");
+        let repo = cfg.repo
+            .expect("[repo.github] section missing in zbobr_github_test.toml");
 
         IntegrationTestEnv::init(
             "github_github",
@@ -37,6 +42,7 @@ async fn get_env() -> Option<Arc<IntegrationTestEnv>> {
             cfg.dispatcher.agent_token,
         )
         .await
+        .expect("failed to initialize full GitHub/GitHub integration environment; check credentials")
     })
     .await
     .clone()
@@ -50,7 +56,7 @@ async fn get_env() -> Option<Arc<IntegrationTestEnv>> {
 #[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
 async fn test_github_github_preparation() {
     let _guard = TEST_LOCK.lock().await;
-    let Some(env) = get_env().await else { return };
+    let env = get_env().await;
     test_helpers::run_preparation(&env).await;
 }
 
@@ -58,7 +64,7 @@ async fn test_github_github_preparation() {
 #[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
 async fn test_github_github_planning() {
     let _guard = TEST_LOCK.lock().await;
-    let Some(env) = get_env().await else { return };
+    let env = get_env().await;
     test_helpers::run_planning(&env).await;
 }
 
@@ -66,7 +72,7 @@ async fn test_github_github_planning() {
 #[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
 async fn test_github_github_working() {
     let _guard = TEST_LOCK.lock().await;
-    let Some(env) = get_env().await else { return };
+    let env = get_env().await;
     test_helpers::run_working(&env).await;
 }
 
@@ -74,7 +80,7 @@ async fn test_github_github_working() {
 #[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
 async fn test_github_github_reviewing() {
     let _guard = TEST_LOCK.lock().await;
-    let Some(env) = get_env().await else { return };
+    let env = get_env().await;
     test_helpers::run_reviewing(&env).await;
 }
 
@@ -82,7 +88,7 @@ async fn test_github_github_reviewing() {
 #[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
 async fn test_github_github_merging() {
     let _guard = TEST_LOCK.lock().await;
-    let Some(env) = get_env().await else { return };
+    let env = get_env().await;
     test_helpers::run_merging(&env).await;
 }
 
@@ -90,6 +96,6 @@ async fn test_github_github_merging() {
 #[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
 async fn test_github_github_merging_with_real_conflict() {
     let _guard = TEST_LOCK.lock().await;
-    let Some(env) = get_env().await else { return };
+    let env = get_env().await;
     test_helpers::run_merging_with_real_conflict(&env).await;
 }

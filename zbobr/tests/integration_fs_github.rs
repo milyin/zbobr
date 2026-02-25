@@ -1,5 +1,9 @@
 /// Integration tests: filesystem task backend + GitHub repo backend.
 ///
+/// Individual test functions are marked `#[ignore]` by default; run them
+/// explicitly after adding your credentials using
+/// `cargo test --test integration_fs_github -- --ignored`.
+///
 /// Activated when `zbobr_github_test.toml` at the workspace root contains a
 /// `[repo.github]` section with valid credentials.
 /// Run this group with: `cargo test --test integration_fs_github`
@@ -13,13 +17,16 @@ use mcp_integration::env::{IntegrationTestEnv, RepoBackendArgs, TaskBackendArgs}
 use mcp_integration::github_config::GitHubTestConfig;
 use mcp_integration::test_helpers;
 
-static ENV: OnceCell<Option<Arc<IntegrationTestEnv>>> = OnceCell::const_new();
+// panicking version: missing configuration is considered an error
+static ENV: OnceCell<Arc<IntegrationTestEnv>> = OnceCell::const_new();
 static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-async fn get_env() -> Option<Arc<IntegrationTestEnv>> {
+async fn get_env() -> Arc<IntegrationTestEnv> {
     ENV.get_or_init(|| async {
-        let cfg = GitHubTestConfig::load()?;
-        let repo = cfg.repo?;
+        let cfg = GitHubTestConfig::load()
+            .expect("zbobr_github_test.toml not found; required for GitHub tests");
+        let repo = cfg.repo
+            .expect("[repo.github] section missing in zbobr_github_test.toml");
 
         let base = match std::env::var("CARGO_TARGET_TMPDIR") {
             Ok(p) => std::path::PathBuf::from(p).join("integration_env_fs_github"),
@@ -37,6 +44,7 @@ async fn get_env() -> Option<Arc<IntegrationTestEnv>> {
             cfg.dispatcher.agent_token,
         )
         .await
+        .expect("failed to initialize FS/GitHub environment; check credentials")
     })
     .await
     .clone()
@@ -47,43 +55,49 @@ async fn get_env() -> Option<Arc<IntegrationTestEnv>> {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
+#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
 async fn test_fs_github_preparation() {
     let _guard = TEST_LOCK.lock().await;
-    let Some(env) = get_env().await else { return };
+    let env = get_env().await;
     test_helpers::run_preparation(&env).await;
 }
 
 #[tokio::test]
+#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
 async fn test_fs_github_planning() {
     let _guard = TEST_LOCK.lock().await;
-    let Some(env) = get_env().await else { return };
+    let env = get_env().await;
     test_helpers::run_planning(&env).await;
 }
 
 #[tokio::test]
+#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
 async fn test_fs_github_working() {
     let _guard = TEST_LOCK.lock().await;
-    let Some(env) = get_env().await else { return };
+    let env = get_env().await;
     test_helpers::run_working(&env).await;
 }
 
 #[tokio::test]
+#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
 async fn test_fs_github_reviewing() {
     let _guard = TEST_LOCK.lock().await;
-    let Some(env) = get_env().await else { return };
+    let env = get_env().await;
     test_helpers::run_reviewing(&env).await;
 }
 
 #[tokio::test]
+#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
 async fn test_fs_github_merging() {
     let _guard = TEST_LOCK.lock().await;
-    let Some(env) = get_env().await else { return };
+    let env = get_env().await;
     test_helpers::run_merging(&env).await;
 }
 
 #[tokio::test]
+#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
 async fn test_fs_github_merging_with_real_conflict() {
     let _guard = TEST_LOCK.lock().await;
-    let Some(env) = get_env().await else { return };
+    let env = get_env().await;
     test_helpers::run_merging_with_real_conflict(&env).await;
 }

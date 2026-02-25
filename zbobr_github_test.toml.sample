@@ -1,11 +1,13 @@
 # zbobr GitHub integration test configuration
 # Copy to zbobr_github_test.toml and uncomment the sections you want to test.
 # When this file exists at the workspace root, the relevant integration test
-# binaries activate GitHub-backed test combinations:
+# binaries activate GitHub-backed test combinations.  All of the generated
+# tests are marked `#[ignore]` so they will be skipped by default; run them
+# explicitly with `cargo test -- --ignored` once you have filled in credentials:
 #
 #   integration_github_fs  — needs [tasks.github]
 #   integration_fs_github  — needs [repo.github]
-#   integration_github_github — needs both (always #[ignore], run explicitly)
+#   integration_github_github — needs both
 
 # Uncomment to enable GitHub task-backend tests (integration_github_fs,
 # integration_github_github):
