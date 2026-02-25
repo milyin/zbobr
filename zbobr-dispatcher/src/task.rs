@@ -712,7 +712,6 @@ impl RoleSession {
 
     /// Push the work_branch in the cloned repository. Stashes local changes if a different branch is selected.
     /// Rejects the push if there are uncommitted changes - all work must be committed before pushing.
-    /// The work repository has all remote information cleared - only pull_work and push_work know where to push.
     pub async fn push_work(&self) -> anyhow::Result<()> {
         // Get the destination repo (needed to find the cloned path)
         let dest_repo = self
@@ -811,7 +810,7 @@ impl RoleSession {
             );
         }
 
-        // Push to the configured remote (set by dispatcher pull_work)
+        // Push to the configured remote
         tracing::info!("Pushing branch '{}' to remote", work_branch);
         let status = tokio::process::Command::new("git")
             .args(["push", "-u", "origin", "HEAD", "--force"])
@@ -824,33 +823,6 @@ impl RoleSession {
         }
 
         Ok(())
-    }
-
-    /// Return the path to the work directory for this task.
-    /// The merge and clone are done by the dispatcher before the session starts.
-    /// This just returns the already-prepared work directory, or an error if not yet set up.
-    pub async fn pull_work(&self) -> anyhow::Result<String> {
-        let dest_repo = self
-            .get_parameter(Parameter::DestinationRepository)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("destination_repository parameter not set"))?;
-
-        let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo);
-        let path = self
-            .zbobr
-            .config()
-            .workspaces
-            .join(format!("task#{}", self.task_id))
-            .join(repo_name);
-
-        if !path.exists() {
-            anyhow::bail!(
-                "Work directory does not exist: {}. The dispatcher should have prepared it before the session.",
-                path.display()
-            );
-        }
-
-        Ok(path.to_string_lossy().to_string())
     }
 
     /// Get a task parameter value. Parameters are stored in the task's parameters HashMap.

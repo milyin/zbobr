@@ -8,7 +8,7 @@ fn working_scenario() -> String {
     use zbobr_dispatcher::mcp::worker_tools::{
         CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST, GET_DESCRIPTION,
         GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN,
-        INSERT_CHECKLIST_ITEM, PULL_WORK, PUSH_WORK, REPORT_RESULTS, UPDATE_CHECKLIST_ITEM,
+        PUSH_WORK, REPORT_RESULTS, INSERT_CHECKLIST_ITEM, UPDATE_CHECKLIST_ITEM,
     };
 
     const CHECKLIST_ID_PRIMARY: &str = "w1";
@@ -67,14 +67,6 @@ steps:
     - type: contains
       path: result
       value: "test"
-
-- name: Pull work
-  operation:
-    type: tool_call
-    tool: {PULL_WORK}
-  store_result: pull_work_result
-  assertions:
-    - type: success
 
 - name: Get checklist initially
   operation:
@@ -150,7 +142,7 @@ steps:
     type: tool_call
     tool: {REPORT_RESULTS}
     arguments:
-      message: "Worker complete. PULL_WORK_RETURN_VALUE=${{pull_work_result}}"
+      message: "Worker complete."
   assertions:
     - type: success
 "#,
@@ -189,34 +181,19 @@ async fn test_working() {
         "Expected checked checklist item was not found"
     );
 
-    let mut pull_work_return_value = None;
-    for line in output.lines() {
-        if let Some(idx) = line.find("PULL_WORK_RETURN_VALUE=") {
-            let val = line[idx + "PULL_WORK_RETURN_VALUE=".len()..].trim();
-            let val = val.trim_end_matches('\'');
-            pull_work_return_value = Some(val.to_string());
-            break;
-        }
-    }
-    let pull_work_return_value =
-        pull_work_return_value.expect("PULL_WORK_RETURN_VALUE not found in task output");
+    // verify the work directory exists and is set up correctly
+    let cloned_repo_path = env.workspaces_dir
+        .join(format!("task#{task_id}"))
+        .join("repo_working");
 
-    let parsed: serde_json::Value = serde_json::from_str(&pull_work_return_value)
-        .expect("Failed to parse PULL_WORK_RETURN_VALUE as JSON");
-    let path_str = parsed
-        .get("result")
-        .and_then(|v| v.as_str())
-        .expect("result field not found or not a string");
-
-    let cloned_repo_path = std::path::PathBuf::from(path_str);
-    assert!(cloned_repo_path.exists(), "Cloned repo path does not exist");
+    assert!(cloned_repo_path.exists(), "Work directory does not exist");
     assert!(
         cloned_repo_path.starts_with(&env.workspaces_dir),
-        "Cloned repo path is not inside workspaces_dir"
+        "Work directory is not inside workspaces_dir"
     );
     assert!(
         cloned_repo_path.join(".git").exists(),
-        "Cloned repo is not a git repository"
+        "Work directory is not a git repository"
     );
 
     let branches_output = tokio::process::Command::new("git")

@@ -26,7 +26,7 @@ impl ToolExecutor for McpTesterExecutor {
         _model: &Model,
         _port: u16,
         _prompt: &str,
-        task_dir: &Path,
+        work_dir: &Path,
         mcp_url: &str,
         _agent_github_token: &str,
         _copilot_github_token: &str,
@@ -55,13 +55,13 @@ impl ToolExecutor for McpTesterExecutor {
 
         let mut cmd = tokio::process::Command::new("mcp-tester");
         cmd.args(args)
-            .current_dir(task_dir)
+            .current_dir(work_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
         tracing::debug!(
             "Command: {}",
-            format_command_for_log("mcp-tester", &args, task_dir)
+            format_command_for_log("mcp-tester", &args, work_dir)
         );
 
         let mut child = cmd.spawn()?;

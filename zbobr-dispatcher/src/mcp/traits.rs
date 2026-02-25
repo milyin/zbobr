@@ -395,14 +395,6 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
         }
     }
 
-    async fn pull_work_impl(&self) -> String {
-        tracing::info!("[planner#{}] pull_work", self.session().task_id());
-        match self.session().pull_work().await {
-            Ok(path) => path,
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
     async fn get_param_destination_branch_impl(&self) -> String {
         self.get_param_impl(Parameter::DestinationBranch).await
     }
@@ -450,14 +442,6 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
         "Message posted to planner - task returned for clarification".to_string()
     }
 
-    async fn pull_work_impl(&self) -> String {
-        tracing::info!("[worker#{}] pull_work", self.session().task_id());
-        match self.session().pull_work().await {
-            Ok(path) => path,
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
     async fn push_work_impl(&self) -> String {
         tracing::info!("[worker#{}] push_work", self.session().task_id());
         match self.session().push_work().await {
@@ -479,13 +463,6 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
         self.get_param_impl(Parameter::WorkBranch).await
     }
 
-    async fn pull_work_impl(&self) -> String {
-        tracing::info!("[reviewer#{}] pull_work", self.session().task_id());
-        match self.session().pull_work().await {
-            Ok(path) => path,
-            Err(e) => format!("Error: {e}"),
-        }
-    }
 }
 
 // -- Merger MCP service --
@@ -498,14 +475,6 @@ pub trait MergerMcpImpl: CommonMcpImpl {
 
     async fn get_param_work_branch_impl(&self) -> String {
         self.get_param_impl(Parameter::WorkBranch).await
-    }
-
-    async fn pull_work_impl(&self) -> String {
-        tracing::info!("[merger#{}] pull_work", self.session().task_id());
-        match self.session().pull_work().await {
-            Ok(path) => path,
-            Err(e) => format!("Error: {e}"),
-        }
     }
 
     async fn push_work_impl(&self) -> String {

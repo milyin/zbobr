@@ -47,20 +47,11 @@ steps:
     - type: contains
       path: result
       value: "test"
-
-- name: Pull work
-  operation:
-    type: tool_call
-    tool: {PULL_WORK}
-  store_result: pull_work_result
-  assertions:
-    - type: success
 "#,
         GET_DESCRIPTION = zbobr_dispatcher::mcp::merger_tools::GET_DESCRIPTION,
         GET_DISCUSSION = zbobr_dispatcher::mcp::merger_tools::GET_DISCUSSION,
         GET_PARAM_DESTINATION_BRANCH = zbobr_dispatcher::mcp::merger_tools::GET_PARAM_DESTINATION_BRANCH,
         GET_PARAM_WORK_BRANCH = zbobr_dispatcher::mcp::merger_tools::GET_PARAM_WORK_BRANCH,
-        PULL_WORK = zbobr_dispatcher::mcp::merger_tools::PULL_WORK,
     )
 }
 
@@ -73,7 +64,7 @@ fn merging_ending_steps(ending: &str) -> String {
     type: tool_call
     tool: {REPORT_RESULTS}
     arguments:
-      message: "Merger complete. PULL_WORK_RETURN_VALUE=${{pull_work_result}}"
+      message: "Merger complete."
   assertions:
     - type: success
 "#,
@@ -146,40 +137,20 @@ async fn test_merging() {
         "Merger should not set a follow-up signal (original signal preserved)"
     );
 
-    // The pull_work checks for report
-    let mut pull_work_return_value = None;
-    for line in output.lines() {
-        if let Some(idx) = line.find("PULL_WORK_RETURN_VALUE=") {
-            let val = line[idx + "PULL_WORK_RETURN_VALUE=".len()..].trim();
-            let val = val.trim_end_matches('\'');
-            pull_work_return_value = Some(val.to_string());
-            break;
-        }
-    }
-    let pull_work_return_value =
-        pull_work_return_value.expect("PULL_WORK_RETURN_VALUE not found in task output");
+    // verify the work directory exists and is set up correctly
+    let cloned_repo_path_report = env.workspaces_dir
+        .join(format!("task#{task_id_report}"))
+        .join("repo_merging");
 
-    let parsed: serde_json::Value = serde_json::from_str(&pull_work_return_value)
-        .expect("Failed to parse PULL_WORK_RETURN_VALUE as JSON");
-    let path_str = parsed
-        .get("result")
-        .and_then(|v| v.as_str())
-        .expect("result field not found or not a string");
-
-    let cloned_repo_path = std::path::PathBuf::from(path_str);
-    assert!(cloned_repo_path.exists(), "Cloned repo path does not exist");
+    assert!(cloned_repo_path_report.exists(), "Work directory does not exist");
     assert!(
-        cloned_repo_path.starts_with(&env.workspaces_dir),
-        "Cloned repo path is not inside workspaces_dir"
-    );
-    assert!(
-        cloned_repo_path.join(".git").exists(),
-        "Cloned repo is not a git repository"
+        cloned_repo_path_report.join(".git").exists(),
+        "Work directory is not a git repository"
     );
 
     let branches_output = tokio::process::Command::new("git")
         .arg("branch")
-        .current_dir(&cloned_repo_path)
+        .current_dir(&cloned_repo_path_report)
         .output()
         .await
         .unwrap();
@@ -196,7 +167,7 @@ async fn test_merging() {
 
     let current_branch_output = tokio::process::Command::new("git")
         .args(["branch", "--show-current"])
-        .current_dir(&cloned_repo_path)
+        .current_dir(&cloned_repo_path_report)
         .output()
         .await
         .unwrap();
@@ -372,25 +343,16 @@ steps:
   assertions:
     - type: success
 
-- name: Pull work (access conflicted repo)
-  operation:
-    type: tool_call
-    tool: {PULL_WORK}
-  store_result: pull_work_result
-  assertions:
-    - type: success
-
 - name: Report conflict resolution
   operation:
     type: tool_call
     tool: {REPORT_RESULTS}
     arguments:
-      message: "Detected merge conflicts in conflict_file.txt. PULL_WORK_RETURN_VALUE=${{pull_work_result}}"
+      message: "Detected merge conflicts in conflict_file.txt."
   assertions:
     - type: success
 "#,
         GET_DESCRIPTION = zbobr_dispatcher::mcp::merger_tools::GET_DESCRIPTION,
-        PULL_WORK = zbobr_dispatcher::mcp::merger_tools::PULL_WORK,
         REPORT_RESULTS = zbobr_dispatcher::mcp::merger_tools::REPORT_RESULTS,
     );
 

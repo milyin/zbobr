@@ -69,13 +69,6 @@ impl PlannerMcp {
         self.post_plan_impl(&params.description).await
     }
 
-    #[tool(
-        description = "Clone the fork of the destination_repository and return the path. Automatically sets the current branch to work_branch (created from destination_branch). Stashes local changes if a different branch is selected as current. The work repository has all remote information cleared - only pull_work and push_work know where to push/pull. The model must not do git push directly."
-    )]
-    async fn pull_work(&self) -> String {
-        self.pull_work_impl().await
-    }
-
     #[tool(description = "Get the destination branch name for this task (read-only)")]
     async fn get_param_destination_branch(&self) -> String {
         self.get_param_destination_branch_impl().await

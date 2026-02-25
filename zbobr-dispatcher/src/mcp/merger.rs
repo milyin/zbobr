@@ -64,13 +64,6 @@ impl MergerMcp {
     }
 
     #[tool(
-        description = "Your workspace currently has a merge conflict. Use this to access the repository and resolve the conflicts"
-    )]
-    async fn pull_work(&self) -> String {
-        self.pull_work_impl().await
-    }
-
-    #[tool(
         description = "Push the resolved merge to the work branch in the fork. All changes must be committed before pushing."
     )]
     async fn push_work(&self) -> String {

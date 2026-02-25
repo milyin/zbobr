@@ -3,15 +3,11 @@ mod mcp_integration;
 use mcp_integration::IntegrationTestEnv;
 use zbobr_dispatcher::Stage;
 
-/// Planner scenario similar to the previous comprehensive script. The test
-/// pre-populates the expected task parameters and exercises the full planning
-/// toolchain including a `pull_work` call.
+/// Planner scenario that exercises the full planning toolchain.
 fn planning_scenario() -> String {
-    // For brevity we re-use the same YAML that was previously defined in the
-    // shared helper; duplicating it here keeps the tests independent.
     use zbobr_dispatcher::mcp::planner_tools::{
         GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH,
-        GET_PARAM_WORK_BRANCH, GET_PLAN, POST_PLAN, PULL_WORK, REPORT_RESULTS,
+        GET_PARAM_WORK_BRANCH, GET_PLAN, POST_PLAN, REPORT_RESULTS,
     };
 
     format!(
@@ -84,20 +80,12 @@ steps:
       path: result
       value: "test"
 
-- name: Pull work
-  operation:
-    type: tool_call
-    tool: {PULL_WORK}
-  store_result: pull_work_result
-  assertions:
-    - type: success
-
 - name: Report results and finish
   operation:
     type: tool_call
     tool: {REPORT_RESULTS}
     arguments:
-      message: "Planning complete. Implementation plan posted. PULL_WORK_RETURN_VALUE=${{pull_work_result}}"
+      message: "Planning complete. Implementation plan posted."
   assertions:
     - type: success
 "#,
@@ -129,39 +117,19 @@ async fn test_planning() {
       "Planner follow-up signal should be GO_WORK after posting plan"
     );
 
-    // verify clone path and branches; this logic is specific to this planning
-    // test so it remains local.
-    let output = env.show_task(task_id).await;
+    // verify the work directory exists and is set up correctly
+    let cloned_repo_path = env.workspaces_dir
+        .join(format!("task#{task_id}"))
+        .join("repo_planning");
 
-    let mut pull_work_return_value = None;
-    for line in output.lines() {
-        if let Some(idx) = line.find("PULL_WORK_RETURN_VALUE=") {
-            let val = line[idx + "PULL_WORK_RETURN_VALUE=".len()..].trim();
-            let val = val.trim_end_matches('\'');
-            pull_work_return_value = Some(val.to_string());
-            break;
-        }
-    }
-    let pull_work_return_value =
-        pull_work_return_value.expect("PULL_WORK_RETURN_VALUE not found in task output");
-
-    let parsed: serde_json::Value = serde_json::from_str(&pull_work_return_value)
-        .expect("Failed to parse PULL_WORK_RETURN_VALUE as JSON");
-    let path_str = parsed
-        .get("result")
-        .and_then(|v| v.as_str())
-        .expect("result field not found or not a string");
-
-    let cloned_repo_path = std::path::PathBuf::from(path_str);
-
-    assert!(cloned_repo_path.exists(), "Cloned repo path does not exist");
+    assert!(cloned_repo_path.exists(), "Work directory does not exist");
     assert!(
         cloned_repo_path.starts_with(&env.workspaces_dir),
-        "Cloned repo path is not inside workspaces_dir"
+        "Work directory is not inside workspaces_dir"
     );
     assert!(
         cloned_repo_path.join(".git").exists(),
-        "Cloned repo is not a git repository"
+        "Work directory is not a git repository"
     );
 
     let branches_output = tokio::process::Command::new("git")

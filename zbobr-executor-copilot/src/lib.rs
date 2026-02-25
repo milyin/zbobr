@@ -24,7 +24,7 @@ impl ToolExecutor for CopilotExecutor {
         model: &Model,
         _port: u16,
         prompt: &str,
-        task_dir: &Path,
+        work_dir: &Path,
         mcp_url: &str,
         agent_github_token: &str,
         copilot_github_token: &str,
@@ -65,13 +65,13 @@ impl ToolExecutor for CopilotExecutor {
 
         let mut cmd = tokio::process::Command::new("copilot");
         cmd.args(args)
-            .current_dir(task_dir)
+            .current_dir(work_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
         tracing::debug!(
             "Command: {}",
-            format_command_for_log("copilot", &args, task_dir)
+            format_command_for_log("copilot", &args, work_dir)
         );
 
         // Set GitHub tokens for copilot agent process

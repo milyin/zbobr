@@ -33,7 +33,7 @@ pub trait ToolExecutor: Send + Sync {
     /// * `model` - The AI model to use
     /// * `port` - The MCP server port
     /// * `prompt` - The prompt text for the tool
-    /// * `task_dir` - The task working directory
+    /// * `work_dir` - The agent working directory (repo subdirectory for non-Preparator roles)
     /// * `mcp_url` - The MCP server URL
     /// * `agent_github_token` - Read-only GitHub token for agent (passed as GH_TOKEN)
     /// * `copilot_github_token` - Copilot's GitHub token (passed as COPILOT_GITHUB_TOKEN)
@@ -45,7 +45,7 @@ pub trait ToolExecutor: Send + Sync {
         model: &crate::task::Model,
         port: u16,
         prompt: &str,
-        task_dir: &Path,
+        work_dir: &Path,
         mcp_url: &str,
         agent_github_token: &str,
         copilot_github_token: &str,

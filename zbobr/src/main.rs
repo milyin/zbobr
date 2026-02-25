@@ -1136,6 +1136,20 @@ async fn run_role_session(
     let task_dir = zbobr.config().workspaces.join(format!("task#{task_id}"));
     tokio::fs::create_dir_all(&task_dir).await?;
 
+    // For non-Preparator roles, use the repo subdirectory as the agent's working directory.
+    // The dispatcher prepares this directory before starting the session.
+    let work_dir = if role != Role::Preparator {
+        let task = zbobr.get_task(task_id).await?;
+        if let Some(dest_repo) = task.parameters.get(&Parameter::DestinationRepository) {
+            let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo.as_str());
+            task_dir.join(repo_name)
+        } else {
+            task_dir.clone()
+        }
+    } else {
+        task_dir.clone()
+    };
+
     // Create a channel to receive the actual port from the MCP server
     let (port_tx, port_rx) = std::sync::mpsc::channel();
 
@@ -1187,7 +1201,7 @@ async fn run_role_session(
         _ => "",
     };
     let (execution_interrupted, execution_error) = tokio::select! {
-        result = executor.execute(task_id, role, &model, assigned_port, prompt, &task_dir, &mcp_url, agent_token, copilot_token) => {
+        result = executor.execute(task_id, role, &model, assigned_port, prompt, &work_dir, &mcp_url, agent_token, copilot_token) => {
             match result {
                 Ok(()) => (false, None),
                 Err(e) => {

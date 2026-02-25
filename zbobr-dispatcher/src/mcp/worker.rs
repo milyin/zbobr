@@ -79,14 +79,7 @@ impl WorkerMcp {
     }
 
     #[tool(
-        description = "Clone the fork of the destination_repository and return the path. Automatically sets the current branch to work_branch (created from destination_branch). Stashes local changes if a different branch is selected as current. The work repository has all remote information cleared - only pull_work and push_work know where to push/pull. The model must not do git push directly."
-    )]
-    async fn pull_work(&self) -> String {
-        self.pull_work_impl().await
-    }
-
-    #[tool(
-        description = "Push the work_branch in the cloned repository. Returns nothing. Stashes local changes if a different branch is selected as current. All changes must be committed before pushing - the push will fail with an error listing uncommitted files if any exist. The work repository has all remote information cleared - only pull_work and push_work know where to push/pull. The model must not do git push directly."
+        description = "Push the work_branch in the cloned repository. Returns nothing. All changes must be committed before pushing - the push will fail with an error listing uncommitted files if any exist. The model must not do git push directly."
     )]
     async fn push_work(&self) -> String {
         self.push_work_impl().await

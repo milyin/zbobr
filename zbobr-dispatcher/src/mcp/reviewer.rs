@@ -67,13 +67,6 @@ impl ReviewerMcp {
         self.get_plan_impl().await
     }
 
-    #[tool(
-        description = "Clone the fork of the destination_repository and return the path. Automatically sets the current branch to work_branch (created from destination_branch). Read-only access for review purposes."
-    )]
-    async fn pull_work(&self) -> String {
-        self.pull_work_impl().await
-    }
-
     #[tool(description = "Get the task checklist as a list of checkbox items")]
     async fn get_checklist(&self) -> String {
         self.get_checklist_impl().await

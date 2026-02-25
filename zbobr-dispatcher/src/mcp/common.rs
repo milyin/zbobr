@@ -5,15 +5,15 @@ use crate::{Zbobr, task::Role};
 
 // Instruction shared across all role prompts explaining branch isolation rules.
 pub fn branch_isolation_instruction() -> String {
-    use planner_tools::{GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, PULL_WORK};
+    use planner_tools::{GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH};
     format!(
-        "Workspace branch isolation. Always start work woith the {PULL_WORK}.
-        In the project returned by it use ONLY the destination 
-        and work branches with names provided by the MCP tools `{GET_PARAM_DESTINATION_BRANCH}`, 
-        `{GET_PARAM_WORK_BRANCH}`. Do not make changes in the destination branch: this is
-        for reference only. Do NOT fetch or use any other branches. Do NOT look at branches 
-        other than the work and destination branches. If you need temporary or experimental branches, 
-        prefix their names with the work branch name to avoid interfering with other agents.",
+        "Workspace branch isolation. Your working directory is already the repository with the \
+        work branch checked out. Use ONLY the destination and work branches with names provided \
+        by the MCP tools `{GET_PARAM_DESTINATION_BRANCH}`, `{GET_PARAM_WORK_BRANCH}`. \
+        Do not make changes in the destination branch: this is for reference only. \
+        Do NOT fetch or use any other branches. Do NOT look at branches other than the work \
+        and destination branches. If you need temporary or experimental branches, prefix their \
+        names with the work branch name to avoid interfering with other agents.",
     )
 }
 
@@ -143,7 +143,6 @@ mcp_tools! {
     GET_PLAN = "get_plan",
     POST_PLAN = "post_plan",
     REPORT_ERROR = "report_error",
-    PULL_WORK = "pull_work",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
     REPORT_RESULTS = "report_results",
@@ -157,7 +156,6 @@ mcp_tools! {
     REPORT_ERROR = "report_error",
     ASK_USER = "ask_user",
     ASK_PLANNER = "ask_planner",
-    PULL_WORK = "pull_work",
     PUSH_WORK = "push_work",
     GET_CHECKLIST = "get_checklist",
     INSERT_CHECKLIST_ITEM = "insert_checklist_item",
@@ -174,7 +172,6 @@ mcp_tools! {
     GET_DESCRIPTION = "get_description",
     GET_PLAN = "get_plan",
     REPORT_ERROR = "report_error",
-    PULL_WORK = "pull_work",
     INSERT_CHECKLIST_ITEM = "insert_checklist_item",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
@@ -187,7 +184,6 @@ mcp_tools! {
     GET_DISCUSSION = "get_discussion",
     REPORT_ERROR = "report_error",
     ASK_USER = "ask_user",
-    PULL_WORK = "pull_work",
     PUSH_WORK = "push_work",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
