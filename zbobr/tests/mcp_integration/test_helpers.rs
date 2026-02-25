@@ -46,6 +46,7 @@ pub async fn run_planning(env: &IntegrationTestEnv) {
         .as_deref()
         .map(|r| format!("https://github.com/{r}"))
         .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
+    let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo).to_string();
     let work_branch = format!("zbobr_fix-{task_id}-test");
     env.update_task_branches(
         task_id,
@@ -54,7 +55,11 @@ pub async fn run_planning(env: &IntegrationTestEnv) {
         &work_branch,
     )
     .await;
-    env.prepare_workspace(task_id, &repo_path, &work_branch).await;
+    if let Some(target) = env.target_repo.as_deref() {
+        env.prepare_workspace_via_repo_backend(task_id, target, &work_branch).await;
+    } else {
+        env.prepare_workspace(task_id, &repo_path, &work_branch).await;
+    }
 
     env.run_stage(task_id, Stage::Planning, scenarios::planning_scenario())
         .await;
@@ -66,7 +71,7 @@ pub async fn run_planning(env: &IntegrationTestEnv) {
         env.name()
     );
 
-    assert_workspace_ok(env, task_id, "repo_planning", &work_branch).await;
+    assert_workspace_ok(env, task_id, &repo_name, &work_branch).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +88,7 @@ pub async fn run_working(env: &IntegrationTestEnv) {
         .as_deref()
         .map(|r| format!("https://github.com/{r}"))
         .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
+    let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo).to_string();
     let work_branch = format!("zbobr_fix-{task_id}-test");
     env.update_task_branches(
         task_id,
@@ -91,7 +97,11 @@ pub async fn run_working(env: &IntegrationTestEnv) {
         &work_branch,
     )
     .await;
-    env.prepare_workspace(task_id, &repo_path, &work_branch).await;
+    if let Some(target) = env.target_repo.as_deref() {
+        env.prepare_workspace_via_repo_backend(task_id, target, &work_branch).await;
+    } else {
+        env.prepare_workspace(task_id, &repo_path, &work_branch).await;
+    }
 
     env.run_stage(task_id, Stage::Working, scenarios::working_scenario())
         .await;
@@ -113,7 +123,7 @@ pub async fn run_working(env: &IntegrationTestEnv) {
         env.name()
     );
 
-    assert_workspace_ok(env, task_id, "repo_working", &work_branch).await;
+    assert_workspace_ok(env, task_id, &repo_name, &work_branch).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +140,7 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
         .as_deref()
         .map(|r| format!("https://github.com/{r}"))
         .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
+    let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo).to_string();
     let work_branch = format!("zbobr_fix-{task_id}-test");
     env.update_task_branches(
         task_id,
@@ -138,7 +149,11 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
         &work_branch,
     )
     .await;
-    env.prepare_workspace(task_id, &repo_path, &work_branch).await;
+    if let Some(target) = env.target_repo.as_deref() {
+        env.prepare_workspace_via_repo_backend(task_id, target, &work_branch).await;
+    } else {
+        env.prepare_workspace(task_id, &repo_path, &work_branch).await;
+    }
 
     env.run_stage(task_id, Stage::Reviewing, scenarios::reviewing_scenario())
         .await;
@@ -160,7 +175,7 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
         env.name()
     );
 
-    assert_workspace_ok(env, task_id, "repo_reviewing", &work_branch).await;
+    assert_workspace_ok(env, task_id, &repo_name, &work_branch).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +188,7 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
         .as_deref()
         .map(|r| format!("https://github.com/{r}"))
         .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
+    let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo).to_string();
 
     // ---- report ending ----
     let task_report = env
@@ -181,8 +197,11 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
     let branch_report = format!("zbobr_fix-{task_report}-test");
     env.update_task_branches(task_report, &dest_repo, "main", &branch_report)
         .await;
-    env.prepare_workspace(task_report, &repo_path, &branch_report)
-        .await;
+    if let Some(target) = env.target_repo.as_deref() {
+        env.prepare_workspace_via_repo_backend(task_report, target, &branch_report).await;
+    } else {
+        env.prepare_workspace(task_report, &repo_path, &branch_report).await;
+    }
 
     env.run_stage(
         task_report,
@@ -203,7 +222,7 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
         env.name()
     );
 
-    assert_workspace_ok(env, task_report, "repo_merging", &branch_report).await;
+    assert_workspace_ok(env, task_report, &repo_name, &branch_report).await;
 
     // ---- ask ending ----
     let task_ask = env
@@ -212,8 +231,11 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
     let branch_ask = format!("zbobr_fix-{task_ask}-test");
     env.update_task_branches(task_ask, &dest_repo, "main", &branch_ask)
         .await;
-    env.prepare_workspace(task_ask, &repo_path, &branch_ask)
-        .await;
+    if let Some(target) = env.target_repo.as_deref() {
+        env.prepare_workspace_via_repo_backend(task_ask, target, &branch_ask).await;
+    } else {
+        env.prepare_workspace(task_ask, &repo_path, &branch_ask).await;
+    }
 
     env.run_stage(
         task_ask,
@@ -242,6 +264,7 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
         .as_deref()
         .map(|r| format!("https://github.com/{r}"))
         .unwrap_or_else(|| repo_path_str.clone());
+    let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo).to_string();
 
     // build conflicting history on the local repo
     write_and_commit(&repo_path, "conflict_file.txt", "line1\nline2\nline3\n", "Initial").await;
@@ -262,7 +285,7 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
     // Manually set up workspace with a live merge conflict
     let workspace_dir = env.workspaces_dir.join(format!("task#{task_id}"));
     tokio::fs::create_dir_all(&workspace_dir).await.unwrap();
-    let work_dir = workspace_dir.join("repo_merging_conflict");
+    let work_dir = workspace_dir.join(&repo_name);
 
     let cp_ok = tokio::process::Command::new("cp")
         .args(["-r", &repo_path_str, work_dir.to_str().unwrap()])
