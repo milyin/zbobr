@@ -63,13 +63,6 @@ impl MergerMcp {
         self.ask_user_impl(&params.message).await
     }
 
-    #[tool(
-        description = "Push the resolved merge to the work branch in the fork. All changes must be committed before pushing."
-    )]
-    async fn push_work(&self) -> String {
-        self.push_work_impl().await
-    }
-
     #[tool(description = "Get the destination branch name for this task (read-only)")]
     async fn get_param_destination_branch(&self) -> String {
         self.get_param_destination_branch_impl().await

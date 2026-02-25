@@ -61,7 +61,15 @@ pub struct ChecklistItem {
 
 /// Workflow stage (maps to GitHub milestones internally).
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 pub enum Stage {
     Pending,
@@ -661,7 +669,7 @@ impl RoleSession {
         Ok(())
     }
 
-    /// Push the current branch and create a PR within the fork.
+    /// Push the branch and create PR within the fork.
     /// The PR is created in the fork repo with `destination_branch` as base.
     pub async fn push_branch_and_create_pr(
         &self,
@@ -708,121 +716,6 @@ impl RoleSession {
             )
             .await?;
         Ok(pr_url)
-    }
-
-    /// Push the work_branch in the cloned repository. Stashes local changes if a different branch is selected.
-    /// Rejects the push if there are uncommitted changes - all work must be committed before pushing.
-    pub async fn push_work(&self) -> anyhow::Result<()> {
-        // Get the destination repo (needed to find the cloned path)
-        let dest_repo = self
-            .get_parameter(Parameter::DestinationRepository)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("destination_repository parameter not set"))?;
-
-        // Compute the work directory: workspace/task#<id>/<repo>
-        let repo_name = extract_repo_name(&dest_repo).ok_or_else(|| {
-            anyhow::anyhow!("Invalid destination_repository format: {}", dest_repo)
-        })?;
-
-        let work_dir = self
-            .zbobr
-            .config()
-            .workspaces
-            .join(format!("task#{}", self.task_id))
-            .join(repo_name);
-
-        if !work_dir.exists() {
-            anyhow::bail!("Work directory does not exist: {}", work_dir.display());
-        }
-
-        // Get the work_branch name
-        let work_branch = self
-            .get_parameter(Parameter::WorkBranch)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("work_branch parameter not set"))?;
-
-        // Get current branch
-        let output = tokio::process::Command::new("git")
-            .args(["rev-parse", "--abbrev-ref", "HEAD"])
-            .current_dir(&work_dir)
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            anyhow::bail!("Failed to get current branch");
-        }
-
-        let current_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-        // If on a different branch, stash changes
-        if current_branch != work_branch {
-            tracing::info!(
-                "Stashing changes on branch '{}' before switching to '{}'",
-                current_branch,
-                work_branch
-            );
-            let stash_status = tokio::process::Command::new("git")
-                .args(["stash"])
-                .current_dir(&work_dir)
-                .status()
-                .await?;
-
-            if !stash_status.success() {
-                tracing::warn!("Stash may have failed or nothing to stash");
-            }
-
-            // Switch to work branch
-            tracing::info!("Switching to branch '{}'", work_branch);
-            let checkout_status = tokio::process::Command::new("git")
-                .args(["checkout", &work_branch])
-                .current_dir(&work_dir)
-                .status()
-                .await?;
-
-            if !checkout_status.success() {
-                anyhow::bail!("Failed to checkout branch '{}'", work_branch);
-            }
-        }
-
-        // Check for uncommitted changes before pushing
-        tracing::info!(
-            "Checking for uncommitted changes on branch '{}'",
-            work_branch
-        );
-        let status_output = tokio::process::Command::new("git")
-            .args(["status", "--porcelain"])
-            .current_dir(&work_dir)
-            .output()
-            .await?;
-
-        if !status_output.status.success() {
-            anyhow::bail!("Failed to check git status");
-        }
-
-        let uncommitted = String::from_utf8_lossy(&status_output.stdout)
-            .trim()
-            .to_string();
-        if !uncommitted.is_empty() {
-            anyhow::bail!(
-                "Cannot push: there are uncommitted changes on branch '{}'. Please commit all changes before pushing.\n\nUncommitted files:\n{}",
-                work_branch,
-                uncommitted
-            );
-        }
-
-        // Push to the configured remote
-        tracing::info!("Pushing branch '{}' to remote", work_branch);
-        let status = tokio::process::Command::new("git")
-            .args(["push", "-u", "origin", "HEAD", "--force"])
-            .current_dir(&work_dir)
-            .status()
-            .await?;
-
-        if !status.success() {
-            anyhow::bail!("Failed to push work branch");
-        }
-
-        Ok(())
     }
 
     /// Get a task parameter value. Parameters are stored in the task's parameters HashMap.

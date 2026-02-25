@@ -796,7 +796,10 @@ async fn main() -> anyhow::Result<()> {
                     .map(|m| m.parse::<Model>().context("Invalid model"))
                     .transpose()?;
                 let signal = signal
-                    .map(|s| s.parse::<zbobr_dispatcher::Signal>().context("Invalid signal"))
+                    .map(|s| {
+                        s.parse::<zbobr_dispatcher::Signal>()
+                            .context("Invalid signal")
+                    })
                     .transpose()?;
                 zbobr
                     .modify_task(
@@ -823,7 +826,8 @@ async fn main() -> anyhow::Result<()> {
                             if let Some(repo) = dest_repo {
                                 match repo {
                                     Some(repo) => {
-                                        task.parameters.insert(Parameter::DestinationRepository, repo);
+                                        task.parameters
+                                            .insert(Parameter::DestinationRepository, repo);
                                     }
                                     None => {
                                         task.parameters.remove(&Parameter::DestinationRepository);
@@ -833,7 +837,8 @@ async fn main() -> anyhow::Result<()> {
                             if let Some(branch) = dest_branch {
                                 match branch {
                                     Some(branch) => {
-                                        task.parameters.insert(Parameter::DestinationBranch, branch);
+                                        task.parameters
+                                            .insert(Parameter::DestinationBranch, branch);
                                     }
                                     None => {
                                         task.parameters.remove(&Parameter::DestinationBranch);
@@ -1124,7 +1129,9 @@ async fn run_role_session(
     // Clear any existing signal when a non-merger session starts so signal labels are removed.
     // For merger sessions, preserve the signal so it survives the merge resolution
     // and can be dispatched on the next iteration.
-    if role != Role::Merger && let Err(e) = zbobr.set_task_signal(task_id, None).await {
+    if role != Role::Merger
+        && let Err(e) = zbobr.set_task_signal(task_id, None).await
+    {
         tracing::warn!(
             "Failed to clear signal for task {} when starting session: {}",
             task_id,
@@ -1224,6 +1231,48 @@ async fn run_role_session(
         tracing::info!("Session interrupted for task #{task_id}, moved to PENDING");
     } else {
         tracing::info!("Session complete for task #{task_id}");
+
+        if execution_error.is_none() && (role == Role::Worker || role == Role::Merger) {
+            tracing::info!("Checking for uncommitted changes in {}", work_dir.display());
+
+            match tokio::process::Command::new("git")
+                .args(["status", "--porcelain"])
+                .current_dir(&work_dir)
+                .output()
+                .await
+            {
+                Ok(status_output) if status_output.status.success() => {
+                    let uncommitted = String::from_utf8_lossy(&status_output.stdout)
+                        .trim()
+                        .to_string();
+                    if !uncommitted.is_empty() {
+                        tracing::info!("Found uncommitted changes, auto-committing...");
+                        let _ = tokio::process::Command::new("git")
+                            .args(["add", "."])
+                            .current_dir(&work_dir)
+                            .status()
+                            .await;
+
+                        let commit_msg = format!("Auto-commit by {} agent", role.as_str());
+                        match tokio::process::Command::new("git")
+                            .args(["commit", "-m", &commit_msg])
+                            .current_dir(&work_dir)
+                            .status()
+                            .await
+                        {
+                            Ok(commit_status) if commit_status.success() => {
+                                tracing::info!("Auto-commit successful");
+                            }
+                            _ => tracing::warn!("Auto-commit failed"),
+                        }
+                    } else {
+                        tracing::info!("No uncommitted changes found");
+                    }
+                }
+                _ => tracing::warn!("Failed to check git status for auto-commit"),
+            }
+        }
+
         // After a normal (non-interrupted) session finish, decide next state
         // based on the current checklist and role.
         let current_task = zbobr.get_task(task_id).await?;
@@ -1299,7 +1348,10 @@ async fn process_task_by_stage(
         Stage::Pending => {
             // Follow transitions.dot: pause check → conflict check → signal routing
             if task.pause || task.signal.is_none() {
-                println!("Task #{} is PENDING (pause={}, signal={:?}) — skipped", task.id, task.pause, task.signal);
+                println!(
+                    "Task #{} is PENDING (pause={}, signal={:?}) — skipped",
+                    task.id, task.pause, task.signal
+                );
                 return Ok(());
             }
             if task.conflict {
@@ -1308,14 +1360,24 @@ async fn process_task_by_stage(
                 let full_prompt = build_full_prompt(&base_prompt, Role::Merger);
                 let task_model = task.model.clone().or(model);
                 run_role_session(
-                    zbobr, task.id, Role::Merger, task_model, port, &full_prompt,
-                    claude_executor_config, copilot_executor_config, mcp_tester_executor_config,
-                ).await?;
+                    zbobr,
+                    task.id,
+                    Role::Merger,
+                    task_model,
+                    port,
+                    &full_prompt,
+                    claude_executor_config,
+                    copilot_executor_config,
+                    mcp_tester_executor_config,
+                )
+                .await?;
             } else {
                 let signal = task.signal.unwrap();
                 let role = signal.target_role();
                 let base_prompt = match role {
-                    Role::Preparator => load_prompts(&prompts.preparator, prompts.base_path.as_ref())?,
+                    Role::Preparator => {
+                        load_prompts(&prompts.preparator, prompts.base_path.as_ref())?
+                    }
                     Role::Planner => load_prompts(&prompts.planner, prompts.base_path.as_ref())?,
                     Role::Worker => load_prompts(&prompts.worker, prompts.base_path.as_ref())?,
                     Role::Reviewer => load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?,
@@ -1324,9 +1386,17 @@ async fn process_task_by_stage(
                 let full_prompt = build_full_prompt(&base_prompt, role);
                 let task_model = task.model.clone().or(model);
                 run_role_session(
-                    zbobr, task.id, role, task_model, port, &full_prompt,
-                    claude_executor_config, copilot_executor_config, mcp_tester_executor_config,
-                ).await?;
+                    zbobr,
+                    task.id,
+                    role,
+                    task_model,
+                    port,
+                    &full_prompt,
+                    claude_executor_config,
+                    copilot_executor_config,
+                    mcp_tester_executor_config,
+                )
+                .await?;
             }
         }
         Stage::Preparing | Stage::Planning | Stage::Working | Stage::Reviewing | Stage::Merging => {
@@ -1348,9 +1418,17 @@ async fn process_task_by_stage(
             let full_prompt = build_full_prompt(&base_prompt, role);
             let task_model = task.model.clone().or(model);
             run_role_session(
-                zbobr, task.id, role, task_model, port, &full_prompt,
-                claude_executor_config, copilot_executor_config, mcp_tester_executor_config,
-            ).await?;
+                zbobr,
+                task.id,
+                role,
+                task_model,
+                port,
+                &full_prompt,
+                claude_executor_config,
+                copilot_executor_config,
+                mcp_tester_executor_config,
+            )
+            .await?;
         }
         Stage::Done => {
             println!("Task #{} is DONE — nothing to process", task.id);
@@ -1489,12 +1567,23 @@ async fn run_manager_loop(
                 let task_model = task.model.clone().unwrap_or_else(|| model.clone());
                 tracing::info!(
                     "Found PENDING task #{} with conflict flag - running merger (tool: {:?}, model: {})",
-                    task.id, task.tool, task_model
+                    task.id,
+                    task.tool,
+                    task_model
                 );
                 if let Err(e) = run_role_session(
-                    zbobr, task.id, Role::Merger, Some(task_model), port,
-                    &merger_prompt, claude_executor_config, copilot_executor_config, mcp_tester_executor_config,
-                ).await {
+                    zbobr,
+                    task.id,
+                    Role::Merger,
+                    Some(task_model),
+                    port,
+                    &merger_prompt,
+                    claude_executor_config,
+                    copilot_executor_config,
+                    mcp_tester_executor_config,
+                )
+                .await
+                {
                     tracing::error!("Merger session failed: {e}");
                 }
                 session_run = true;
@@ -1514,12 +1603,25 @@ async fn run_manager_loop(
             };
             tracing::info!(
                 "Found PENDING task #{} with signal {:?} (tool: {:?}, model: {}) - running {:?}",
-                task.id, signal, task.tool, task_model, role
+                task.id,
+                signal,
+                task.tool,
+                task_model,
+                role
             );
             if let Err(e) = run_role_session(
-                zbobr, task.id, role, Some(task_model), port, prompt,
-                claude_executor_config, copilot_executor_config, mcp_tester_executor_config,
-            ).await {
+                zbobr,
+                task.id,
+                role,
+                Some(task_model),
+                port,
+                prompt,
+                claude_executor_config,
+                copilot_executor_config,
+                mcp_tester_executor_config,
+            )
+            .await
+            {
                 tracing::error!("{:?} session failed: {e}", role);
             }
             session_run = true;
@@ -1540,7 +1642,11 @@ async fn run_manager_loop(
         ];
         let mut active_counts = std::collections::HashMap::new();
         for stage in &active_stages {
-            let count = zbobr.list_tasks_by_stage(*stage, Some(current_tool)).await.unwrap_or_default().len();
+            let count = zbobr
+                .list_tasks_by_stage(*stage, Some(current_tool))
+                .await
+                .unwrap_or_default()
+                .len();
             active_counts.insert(stage, count);
         }
         tracing::info!(

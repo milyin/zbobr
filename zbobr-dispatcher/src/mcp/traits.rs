@@ -441,15 +441,6 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
         }
         "Message posted to planner - task returned for clarification".to_string()
     }
-
-    async fn push_work_impl(&self) -> String {
-        tracing::info!("[worker#{}] push_work", self.session().task_id());
-        match self.session().push_work().await {
-            Ok(()) => "Work branch pushed successfully".to_string(),
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
 }
 
 /// Reviewer-specific MCP implementations
@@ -462,7 +453,6 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
     async fn get_param_work_branch_impl(&self) -> String {
         self.get_param_impl(Parameter::WorkBranch).await
     }
-
 }
 
 // -- Merger MCP service --
@@ -475,13 +465,5 @@ pub trait MergerMcpImpl: CommonMcpImpl {
 
     async fn get_param_work_branch_impl(&self) -> String {
         self.get_param_impl(Parameter::WorkBranch).await
-    }
-
-    async fn push_work_impl(&self) -> String {
-        tracing::info!("[merger#{}] push_work", self.session().task_id());
-        match self.session().push_work().await {
-            Ok(()) => "Merged conflicts pushed successfully".to_string(),
-            Err(e) => format!("Error: {e}"),
-        }
     }
 }

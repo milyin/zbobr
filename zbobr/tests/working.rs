@@ -8,7 +8,7 @@ fn working_scenario() -> String {
     use zbobr_dispatcher::mcp::worker_tools::{
         CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST, GET_DESCRIPTION,
         GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN,
-        PUSH_WORK, REPORT_RESULTS, INSERT_CHECKLIST_ITEM, UPDATE_CHECKLIST_ITEM,
+        INSERT_CHECKLIST_ITEM, REPORT_RESULTS, UPDATE_CHECKLIST_ITEM,
     };
 
     const CHECKLIST_ID_PRIMARY: &str = "w1";
@@ -130,13 +130,6 @@ steps:
       path: result
       value: "deleted"
 
-- name: Push work branch
-  operation:
-    type: tool_call
-    tool: {PUSH_WORK}
-  assertions:
-    - type: success
-
 - name: Report results and finish
   operation:
     type: tool_call
@@ -162,10 +155,13 @@ async fn test_working() {
 
     let work_branch = format!("zbobr_fix-{task_id}-test");
     let repo_path_str = repo_path.to_string_lossy().to_string();
-    env.update_task_branches(task_id, &repo_path_str, "main", &work_branch).await;
-    env.prepare_workspace(task_id, &repo_path, &work_branch).await;
+    env.update_task_branches(task_id, &repo_path_str, "main", &work_branch)
+        .await;
+    env.prepare_workspace(task_id, &repo_path, &work_branch)
+        .await;
 
-    env.run_stage(task_id, Stage::Working, working_scenario()).await;
+    env.run_stage(task_id, Stage::Working, working_scenario())
+        .await;
 
     let output = env.show_task(task_id).await;
     assert!(
@@ -182,7 +178,8 @@ async fn test_working() {
     );
 
     // verify the work directory exists and is set up correctly
-    let cloned_repo_path = env.workspaces_dir
+    let cloned_repo_path = env
+        .workspaces_dir
         .join(format!("task#{task_id}"))
         .join("repo_working");
 

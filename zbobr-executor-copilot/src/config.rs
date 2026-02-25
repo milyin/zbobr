@@ -51,7 +51,9 @@ mod tests {
     #[test]
     fn build_prefers_env_var_over_toml() {
         // set a temporary env var
-        env::set_var("COPILOT_GITHUB_TOKEN", "from-env");
+        unsafe {
+            env::set_var("COPILOT_GITHUB_TOKEN", "from-env");
+        }
         let toml = ZbobrExecutorCopilotToml {
             default_model: None,
             copilot_github_token: Some("from-toml".into()),
@@ -59,15 +61,23 @@ mod tests {
         let cfg =
             ZbobrExecutorCopilotConfig::build(Some(toml), ZbobrExecutorCopilotArgs::default());
         assert_eq!(cfg.copilot_github_token, "from-env");
-        env::remove_var("COPILOT_GITHUB_TOKEN");
+        unsafe {
+            env::remove_var("COPILOT_GITHUB_TOKEN");
+        }
     }
 
     #[test]
     fn build_falls_back_to_gh_token_env() {
-        env::remove_var("COPILOT_GITHUB_TOKEN");
-        env::set_var("GH_TOKEN", "gh-env");
+        unsafe {
+            env::remove_var("COPILOT_GITHUB_TOKEN");
+        }
+        unsafe {
+            env::set_var("GH_TOKEN", "gh-env");
+        }
         let cfg = ZbobrExecutorCopilotConfig::build(None, ZbobrExecutorCopilotArgs::default());
         assert_eq!(cfg.copilot_github_token, "gh-env");
-        env::remove_var("GH_TOKEN");
+        unsafe {
+            env::remove_var("GH_TOKEN");
+        }
     }
 }

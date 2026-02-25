@@ -78,13 +78,6 @@ impl WorkerMcp {
         self.get_plan_impl().await
     }
 
-    #[tool(
-        description = "Push the work_branch in the cloned repository. Returns nothing. All changes must be committed before pushing - the push will fail with an error listing uncommitted files if any exist. The model must not do git push directly."
-    )]
-    async fn push_work(&self) -> String {
-        self.push_work_impl().await
-    }
-
     #[tool(description = "Get the task checklist as a list of checkbox items")]
     async fn get_checklist(&self) -> String {
         self.get_checklist_impl().await

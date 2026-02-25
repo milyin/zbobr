@@ -90,8 +90,7 @@ pub fn worker_instructions() -> String {
     use worker_tools::{
         ASK_PLANNER, ASK_USER, CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST,
         GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
-        GET_PLAN, INSERT_CHECKLIST_ITEM, PUSH_WORK, REPORT_ERROR, REPORT_RESULTS,
-        UPDATE_CHECKLIST_ITEM,
+        GET_PLAN, INSERT_CHECKLIST_ITEM, REPORT_ERROR, REPORT_RESULTS, UPDATE_CHECKLIST_ITEM,
     };
     let branch_isolation = crate::mcp::common::branch_isolation_instruction();
     let instructions = format!(
@@ -106,7 +105,7 @@ The checklist is your persistent memory for this task. It survives across sessio
 **Key principles:**
 - Start by using `{GET_CHECKLIST}` to read the current checklist — it tells you exactly where you are in the work.
 - If the checklist is empty when you start, use `{INSERT_CHECKLIST_ITEM}` to create it based on the plan. Break the plan into clear, actionable steps.
-- Each checklist item should describe a meaningful unit of work (for example: "add unit tests for X", "refactor module Y", "update API to validate Z"). Do NOT use checklist items to record internal or platform tool actions (for example: "call {PUSH_WORK}").
+- Each checklist item should describe a meaningful unit of work (for example: "add unit tests for X", "refactor module Y", "update API to validate Z").
 - Use `{CHECK_CHECKLIST_ITEM}` to mark items as checked (`✓`) when you complete them to record progress.
 - Use `{INSERT_CHECKLIST_ITEM}` to add new items during work if you discover additional steps needed.
 - Use `{UPDATE_CHECKLIST_ITEM}` to edit item text to refine understanding as you work.
@@ -137,11 +136,10 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 6. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
 7. Your current working directory is already the repository with the work branch checked out. Consult `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` for branch names if needed.
 8. Implement the plan in your working directory
-9. Commit changes locally with clear messages (describe what the change does, why, and reference relevant checklist item)
-10. When implementation for an item is complete, mark the item done with `{CHECK_CHECKLIST_ITEM}`, save intermediate results with `{PUSH_WORK}` (which requires all changes to be committed first), and update or insert follow-up items as needed
-11. Do not add low-level platform or tool-invocation steps (for example, `{PUSH_WORK}`) into your checklist — checklist items should remain human-meaningful and task-focused
-12. If you need human clarification or intervention, call `{ASK_USER}` or `{ASK_PLANNER}` as appropriate; use `{REPORT_ERROR}` only to report technical errors
-13. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact."#,
+9. Any uncommitted changes will be **automatically committed** by the system when you exit. You may optionally make smaller explicit commits for logical chunks if you prefer.
+10. When implementation for an item is complete, mark the item done with `{CHECK_CHECKLIST_ITEM}`, and update or insert follow-up items as needed
+11. If you need human clarification or intervention, call `{ASK_USER}` or `{ASK_PLANNER}` as appropriate; use `{REPORT_ERROR}` only to report technical errors
+12. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact."#,
     );
 
     instructions
@@ -181,10 +179,7 @@ Review the implementation changes and ensure they meet coding standards and task
 
 /// Generate hardcoded merger instructions using tool name constants.
 pub fn merger_instructions() -> String {
-    use merger_tools::{
-        ASK_USER, GET_DESCRIPTION, GET_DISCUSSION, PUSH_WORK, REPORT_ERROR,
-        REPORT_RESULTS,
-    };
+    use merger_tools::{ASK_USER, GET_DESCRIPTION, GET_DISCUSSION, REPORT_ERROR, REPORT_RESULTS};
     let branch_isolation = crate::mcp::common::branch_isolation_instruction();
     let instructions = format!(
         r#"# Merger Agent
@@ -201,7 +196,6 @@ You have read access to the task and repository:
 - Use `{GET_DESCRIPTION}` to understand the task context
 - Use `{GET_DISCUSSION}` to see prior comments and what happened
 - Your current working directory is already the repository with the work branch checked out and merge conflicts present
-- Use `{PUSH_WORK}` to push resolved conflicts back to work branch
 - Use `{ASK_USER}` to ask the user for clarification on conflict resolution
 - Use `{REPORT_ERROR}` to report when conflicts cannot be resolved
 
@@ -220,13 +214,12 @@ You have read access to the task and repository:
 4. **Attempt automatic resolution:**
    - For simple, non-overlapping changes (e.g., formatting, imports, unrelated edits), apply manual fixes that combine both changes
    - Use `git add` to resolve simple conflicts, then `git commit -m "chore: merge conflicts resolved"`
-   - If you can create a reasonable merged version, do so and commit it
+   - If you can create a reasonable merged version, do so
 5. **If automatic resolution is not possible:**
    - Use `{ASK_USER}` to describe the conflicts and ask which version should be preferred, or ask for guidance
    - Wait for user input before proceeding
 6. **After successful resolution:**
-   - Commit all changes: `git commit -m "chore: merge resolution"`
-   - Use `{PUSH_WORK}` to push the resolved merge to the work branch
+   - The platform will automatically commit any remaining uncommitted changes when you exit
    - The task will then resume normally with the merged code
 
 ## Conflict Resolution Principles
