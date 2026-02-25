@@ -1,12 +1,12 @@
 use crate::{
     mcp::common::get_hostname,
-    task::{ChecklistItem, Parameter, Role, TaskSession},
+    task::{ChecklistItem, Parameter, Role, RoleSession},
 };
 
 /// Common trait for MCP services (Planner, Worker) - shared implementations
 #[allow(async_fn_in_trait)]
 pub trait CommonMcpImpl: Send + Sync {
-    fn session(&self) -> &TaskSession;
+    fn session(&self) -> &RoleSession;
     fn role(&self) -> Role;
 
     fn role_name(&self) -> &'static str {
@@ -63,10 +63,10 @@ pub trait CommonMcpImpl: Send + Sync {
             return format!("Error posting error message: {e}");
         }
 
-        // Signal to pause task processing and wait for user response
-        if let Err(e) = self.session().set_signal(crate::Signal::GoAsk).await {
+        // Set pause flag to stop task processing and wait for user response
+        if let Err(e) = self.session().set_pause(true).await {
             tracing::error!(
-                "Failed to set signal GoAsk for task {} after reporting error: {e}",
+                "Failed to set pause for task {} after reporting error: {e}",
                 self.session().task_id()
             );
             return format!("Error reporting error but error pausing task: {e}");
@@ -118,10 +118,10 @@ pub trait CommonMcpImpl: Send + Sync {
             return format!("Error posting ask_user message: {e}");
         }
 
-        // Signal to pause task processing and wait for user response
-        if let Err(e) = self.session().set_signal(crate::Signal::GoAsk).await {
+        // Set pause flag to stop task processing and wait for user response
+        if let Err(e) = self.session().set_pause(true).await {
             tracing::error!(
-                "Failed to set signal GoAsk for task {} after asking user: {e}",
+                "Failed to set pause for task {} after asking user: {e}",
                 self.session().task_id()
             );
             return format!("Error asking user but error pausing task: {e}");
@@ -466,13 +466,6 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
         }
     }
 
-    async fn mark_done_impl(&self) -> String {
-        tracing::info!("[worker#{}] mark_done", self.session().task_id());
-        match self.session().mark_done().await {
-            Ok(()) => "Task marked as done".to_string(),
-            Err(e) => format!("Error: {e}"),
-        }
-    }
 }
 
 /// Reviewer-specific MCP implementations

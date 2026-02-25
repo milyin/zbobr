@@ -1,7 +1,7 @@
-use std::{collections::{HashMap, HashSet}, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 use async_trait::async_trait;
-use zbobr_dispatcher::{Model, Parameter, Signal, Stage, Task, Tool, task::Flavor, backend::TaskBackend};
+use zbobr_dispatcher::{Model, Parameter, Signal, Stage, Task, Tool, backend::TaskBackend};
 
 use crate::{
     config::ZbobrTaskBackendGithubConfig,
@@ -141,16 +141,14 @@ impl GitHubTaskBackend {
             .and_then(|name| name.parse().ok())
     }
 
-    /// Convert a Flavor to its GitHub label representation.
-    fn flavor_to_label(flavor: Flavor) -> String {
-        format!("flavor:{}", flavor.name())
+    /// Convert a flag name to its GitHub label representation.
+    fn flag_to_label(name: &str) -> String {
+        format!("flag:{}", name)
     }
 
-    /// Parse a GitHub label string back to a Flavor.
-    fn label_to_flavor(label: &str) -> Option<Flavor> {
-        label
-            .strip_prefix("flavor:")
-            .and_then(|name| name.parse().ok())
+    /// Parse a GitHub label string back to a flag name.
+    fn label_to_flag(label: &str) -> Option<&str> {
+        label.strip_prefix("flag:")
     }
 
     fn parse_repo(&self) -> anyhow::Result<(&str, &str)> {
@@ -226,32 +224,35 @@ impl GitHubTaskBackend {
         Ok(())
     }
 
-    /// Apply flavor changes on a GitHub issue (remove old flavor labels, add new ones).
-    async fn apply_flavor_change(&self, id: u64, flavors: &HashSet<Flavor>) -> anyhow::Result<()> {
+    /// Apply flag changes on a GitHub issue (sync conflict and pause labels).
+    async fn apply_flag_change(
+        &self,
+        id: u64,
+        conflict: bool,
+        pause: bool,
+    ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        // Remove all existing flavor labels
-        for flavor in [Flavor::Conflict, Flavor::Stop] {
-            let label = Self::flavor_to_label(flavor);
-            let _ = retry_github("remove flavor label", || async {
-                self.octocrab
-                    .issues(owner, repo)
-                    .remove_label(id, &label)
-                    .await
-            })
-            .await;
-        }
-
-        // Add new flavor labels
-        let labels: Vec<String> = flavors.iter().map(|f| Self::flavor_to_label(*f)).collect();
-        if !labels.is_empty() {
-            retry_github("add flavor labels", || async {
-                self.octocrab
-                    .issues(owner, repo)
-                    .add_labels(id, &labels)
-                    .await
-            })
-            .await?;
+        for (flag_name, desired) in [("conflict", conflict), ("pause", pause)] {
+            let label = Self::flag_to_label(flag_name);
+            if desired {
+                let labels: Vec<String> = vec![label];
+                let _ = retry_github("add flag label", || async {
+                    self.octocrab
+                        .issues(owner, repo)
+                        .add_labels(id, &labels)
+                        .await
+                })
+                .await;
+            } else {
+                let _ = retry_github("remove flag label", || async {
+                    self.octocrab
+                        .issues(owner, repo)
+                        .remove_label(id, &label)
+                        .await
+                })
+                .await;
+            }
         }
 
         Ok(())
@@ -407,11 +408,12 @@ impl GitHubTaskBackend {
         // Create stages
         let desired_stages = [
             Stage::Pending,
-            Stage::Preparation,
+            Stage::Preparing,
             Stage::Planning,
             Stage::Working,
             Stage::Reviewing,
             Stage::Merging,
+            Stage::Done,
         ];
         let existing = self.list_stages().await?;
         let existing_titles: Vec<&str> = existing.iter().map(|(_, t)| t.as_str()).collect();
@@ -441,7 +443,7 @@ impl GitHubTaskBackend {
         const SIGNAL_LABEL_COLOR: &str = "5319e7";
         const TOOL_LABEL_COLOR: &str = "d4c5f9";
         const MODEL_LABEL_COLOR: &str = "bfd4f2";
-        const FLAVOR_LABEL_COLOR: &str = "f9d0c4";
+        const FLAG_LABEL_COLOR: &str = "f9d0c4";
 
         for signal in Signal::all() {
             let signal_label = Self::signal_to_label(*signal);
@@ -491,19 +493,19 @@ impl GitHubTaskBackend {
             }
         }
 
-        for flavor in [Flavor::Conflict, Flavor::Stop] {
-            let flavor_label = Self::flavor_to_label(flavor);
-            let flavor_desc = format!("Flavor: {}", flavor.name());
-            if !existing_labels.contains(&flavor_label) {
-                tracing::info!("Creating label '{flavor_label}'");
-                self.create_label(&flavor_label, FLAVOR_LABEL_COLOR, &flavor_desc)
+        for flag_name in ["conflict", "pause"] {
+            let flag_label = Self::flag_to_label(flag_name);
+            let flag_desc = format!("Flag: {}", flag_name);
+            if !existing_labels.contains(&flag_label) {
+                tracing::info!("Creating label '{flag_label}'");
+                self.create_label(&flag_label, FLAG_LABEL_COLOR, &flag_desc)
                     .await?;
             } else if force {
-                tracing::info!("Updating label '{flavor_label}' (force)");
-                self.update_label(&flavor_label, FLAVOR_LABEL_COLOR, &flavor_desc)
+                tracing::info!("Updating label '{flag_label}' (force)");
+                self.update_label(&flag_label, FLAG_LABEL_COLOR, &flag_desc)
                     .await?;
             } else {
-                tracing::info!("Label '{flavor_label}' already exists");
+                tracing::info!("Label '{flag_label}' already exists");
             }
         }
 
@@ -558,22 +560,21 @@ impl GitHubTaskBackend {
             parameters.insert(Parameter::PrUrl, url.clone());
         }
 
-        let done = issue
-            .labels
-            .iter()
-            .any(|l| Self::label_to_signal(&l.name) == Some(Signal::Done));
-
         let signal = issue
             .labels
             .iter()
             .filter_map(|l| Self::label_to_signal(&l.name))
             .min();
 
-        let flavors = issue
+        let conflict = issue
             .labels
             .iter()
-            .filter_map(|l| Self::label_to_flavor(&l.name))
-            .collect();
+            .any(|l| Self::label_to_flag(&l.name) == Some("conflict"));
+
+        let pause = issue
+            .labels
+            .iter()
+            .any(|l| Self::label_to_flag(&l.name) == Some("pause"));
 
         Task {
             id: issue.number,
@@ -585,10 +586,10 @@ impl GitHubTaskBackend {
             tool,
             model,
             parameters,
-            done,
             checklist,
             signal,
-            flavors,
+            conflict,
+            pause,
             etag: Some(body),
         }
     }
@@ -693,7 +694,8 @@ impl TaskBackend for GitHubTaskBackend {
         let task = self.get_task(id).await?;
         let original_stage = task.stage;
         let original_signal = task.signal;
-        let original_flavors = task.flavors.clone();
+        let original_conflict = task.conflict;
+        let original_pause = task.pause;
         let expected_description = task.etag.clone().unwrap_or_else(|| {
             let string_params: HashMap<String, String> = task
                 .parameters
@@ -764,9 +766,10 @@ impl TaskBackend for GitHubTaskBackend {
             self.apply_signal_change(id, task.signal).await?;
         }
 
-        // Apply flavor change if it differs
-        if task.flavors != original_flavors {
-            self.apply_flavor_change(id, &task.flavors).await?;
+        // Apply flag changes if they differ
+        if task.conflict != original_conflict || task.pause != original_pause {
+            self.apply_flag_change(id, task.conflict, task.pause)
+                .await?;
         }
 
         Ok(())
@@ -883,11 +886,12 @@ impl TaskBackend for GitHubTaskBackend {
 /// Stage descriptions.
 fn stage_description(stage: Stage) -> &'static str {
     match stage {
-        Stage::Pending => "Task is under user's control, bot ignores it",
-        Stage::Preparation => "Task parameters are being set, other bots ignore it",
-        Stage::Planning => "Task is in planning, other bots ignore it",
-        Stage::Working => "Task is in work, other bots ignore it",
-        Stage::Reviewing => "Task is in review, other bots ignore it",
-        Stage::Merging => "Task is in merge conflict resolution, other bots ignore it",
+        Stage::Pending => "Task is pending dispatch",
+        Stage::Preparing => "Task parameters are being set",
+        Stage::Planning => "Task is in planning",
+        Stage::Working => "Task is in work",
+        Stage::Reviewing => "Task is in review",
+        Stage::Merging => "Task is in merge conflict resolution",
+        Stage::Done => "Task is complete",
     }
 }

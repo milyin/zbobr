@@ -13,7 +13,7 @@ pub use mcp::{
     MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, WorkerMcp, merger_instructions,
     planner_instructions, preparator_instructions, reviewer_instructions, worker_instructions,
 };
-pub use task::{ChecklistItem, Model, Parameter, Signal, Stage, Task, TaskSession, Tool};
+pub use task::{ChecklistItem, Model, Parameter, RoleSession, Signal, Stage, Task, TaskSession, Tool};
 pub use tool_executor::ToolExecutor;
 
 use crate::backend::{RepoBackend, TaskBackend};
@@ -57,9 +57,14 @@ impl Zbobr {
             .clone()
     }
 
-    /// Create a TaskSession bound to a specific task.
+    /// Create a TaskSession bound to a specific task (full dispatcher access).
     pub fn task_session(&self, task_id: u64) -> TaskSession {
         TaskSession::new(self.clone(), task_id)
+    }
+
+    /// Create a RoleSession bound to a specific task (restricted MCP tool access).
+    pub fn role_session(&self, task_id: u64) -> RoleSession {
+        RoleSession::new(self.clone(), task_id)
     }
 
     /// Validate that both backends can reach required resources.

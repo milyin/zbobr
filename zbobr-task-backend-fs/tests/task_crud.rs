@@ -47,7 +47,8 @@ async fn create_read_modify_task() {
         task.parameters.get(&Parameter::DestinationBranch),
         Some(&"main".to_string()),
     );
-    assert!(!task.done);
+    assert!(!task.conflict);
+    assert!(!task.pause);
     assert!(task.checklist.is_empty());
     assert!(task.signal.is_none());
 
@@ -60,7 +61,8 @@ async fn create_read_modify_task() {
                 t.description = "Updated description".to_string();
                 t.plan = "Step 1: do stuff\nStep 2: profit".to_string();
                 t.stage = Stage::Working;
-                t.done = true;
+                t.conflict = true;
+                t.pause = true;
                 t.signal = Some(Signal::GoReview);
                 t.checklist = vec![
                     ChecklistItem {
@@ -92,7 +94,8 @@ async fn create_read_modify_task() {
     assert_eq!(task.description, "Updated description");
     assert_eq!(task.plan, "Step 1: do stuff\nStep 2: profit");
     assert_eq!(task.stage, Stage::Working);
-    assert!(task.done);
+    assert!(task.conflict);
+    assert!(task.pause);
     assert_eq!(task.signal, Some(Signal::GoReview));
     assert_eq!(task.checklist.len(), 2);
     assert_eq!(task.checklist[0].id, "item-1");

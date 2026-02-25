@@ -11,17 +11,17 @@ use crate::{
         common::{MessageParam, SetDestinationBranchParam, SetDestinationRepositoryParam},
         traits::{CommonMcpImpl, PreparatorMcpImpl},
     },
-    task::TaskSession,
+    task::RoleSession,
 };
 
 #[derive(Clone)]
 pub struct PreparatorMcp {
-    session: TaskSession,
+    session: RoleSession,
     tool_router: ToolRouter<Self>,
 }
 
 impl CommonMcpImpl for PreparatorMcp {
-    fn session(&self) -> &TaskSession {
+    fn session(&self) -> &RoleSession {
         &self.session
     }
 
@@ -36,7 +36,7 @@ impl PreparatorMcpImpl for PreparatorMcp {}
 impl PreparatorMcp {
     pub fn new(zbobr: Zbobr, task_id: u64) -> Self {
         Self {
-            session: zbobr.task_session(task_id),
+            session: zbobr.role_session(task_id),
             tool_router: Self::tool_router(),
         }
     }

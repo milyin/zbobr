@@ -112,13 +112,13 @@ async fn test_planning() {
 
     let repo_path = env.create_git_repo("repo_planning").await;
     let task_id = env
-        .create_task("Dummy Task", "Dummy task description", Stage::Preparation)
+        .create_task("Dummy Task", "Dummy task description", Stage::Preparing)
         .await;
 
     let work_branch = format!("zbobr_fix-{task_id}-test");
-    let task_id_str = task_id.to_string();
     let repo_path_str = repo_path.to_string_lossy().to_string();
     env.update_task_branches(task_id, &repo_path_str, "main", &work_branch).await;
+    env.prepare_workspace(task_id, &repo_path, &work_branch).await;
 
     // run the planning stage itself
     env.run_stage(task_id, Stage::Planning, planning_scenario()).await;

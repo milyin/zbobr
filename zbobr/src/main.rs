@@ -8,7 +8,7 @@ use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use zbobr_config::{ZbobrConfigArgs, ZbobrConfigToml};
 use zbobr_dispatcher::{
-    task::Flavor, Stage, Task, ToolExecutor, Zbobr, ZbobrDispatcherConfig,
+    Signal, Stage, ToolExecutor, Zbobr, ZbobrDispatcherConfig,
     task::{Model, Parameter, Role, Tool},
 };
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
@@ -43,7 +43,8 @@ struct ConfigFileArg {
     name = "zbobr",
     about = "AI-powered task dispatcher",
     long_about = "AI-powered task dispatcher that manages tasks through automated stages.\n\n\
-        Tasks flow through: PENDING -> GO_PREPARATION -> PREPARATION -> GO_PLANNING -> PLANNING -> GO_WORKING -> WORKING -> GO_REVIEWING -> REVIEWING -> GO_MERGING -> MERGING.\n\
+        Tasks flow through: PENDING -> PREPARING -> PLANNING -> WORKING -> REVIEWING -> DONE.\n\
+        Merge conflicts are handled by MERGING sessions when the conflict flag is set.\n\
         Preparator roles set parameters, planner roles create implementation plans, worker roles implement them\n\
         by forking target repositories and creating pull requests, reviewer roles review the changes,\n\
         and merger roles resolve any merge conflicts.\n\n\
@@ -435,7 +436,8 @@ fn print_task(task: &zbobr_dispatcher::Task) {
             .map(|s| s.to_string())
             .unwrap_or_else(|| "(none)".to_string())
     );
-    println!("Done:        {}", task.done);
+    println!("Conflict:    {}", task.conflict);
+    println!("Pause:       {}", task.pause);
     if !task.parameters.is_empty() {
         println!("Parameters:");
         for (k, v) in &task.parameters {
@@ -741,11 +743,12 @@ async fn main() -> anyhow::Result<()> {
                     // iterate all stages if no specific stage provided
                     let all_stages = [
                         Stage::Pending,
-                        Stage::Preparation,
+                        Stage::Preparing,
                         Stage::Planning,
                         Stage::Working,
                         Stage::Reviewing,
                         Stage::Merging,
+                        Stage::Done,
                     ];
                     for st in all_stages {
                         let mut ts = zbobr.list_tasks_by_stage(st, tool_filter).await?;
@@ -1110,7 +1113,7 @@ async fn run_role_session(
 
     // Set stage
     let stage = match role {
-        Role::Preparator => Stage::Preparation,
+        Role::Preparator => Stage::Preparing,
         Role::Planner => Stage::Planning,
         Role::Worker => Stage::Working,
         Role::Reviewer => Stage::Reviewing,
@@ -1118,9 +1121,10 @@ async fn run_role_session(
     };
     zbobr.set_task_stage(task_id, stage).await?;
 
-    // Clear any existing signal when a session starts so signal labels are removed
-    // (GitHub backend will remove all "signal:*" labels when None is passed).
-    if let Err(e) = zbobr.set_task_signal(task_id, None).await {
+    // Clear any existing signal when a non-merger session starts so signal labels are removed.
+    // For merger sessions, preserve the signal so it survives the merge resolution
+    // and can be dispatched on the next iteration.
+    if role != Role::Merger && let Err(e) = zbobr.set_task_signal(task_id, None).await {
         tracing::warn!(
             "Failed to clear signal for task {} when starting session: {}",
             task_id,
@@ -1198,77 +1202,59 @@ async fn run_role_session(
         }
     };
 
-    // Unlock task by moving back to PENDING - main loop will handle any signal-based transitions
-    zbobr.set_task_stage(task_id, Stage::Pending).await?;
+    let task_session = zbobr.task_session(task_id);
+
     if execution_interrupted {
+        // Unlock task by moving back to PENDING
+        task_session.set_stage(Stage::Pending).await?;
         tracing::info!("Session interrupted for task #{task_id}, moved to PENDING");
     } else {
-        tracing::info!("Session complete for task #{task_id}, moved to PENDING");
-        // After a normal (non-interrupted) session finish, decide next signal
-        // based on the current checklist and role. This centralizes the
-        // checkbox->signal transition in the main loop rather than inside
-        // individual checklist operations.
-        let session = zbobr.task_session(task_id);
-        match session.get_checklist().await {
-            Ok(items) => {
-                let has_unchecked = items.iter().any(|i| !i.checked);
-                use zbobr_dispatcher::Signal;
-                let next_signal = match role {
-                    Role::Preparator => Signal::GoPlan,
-                    Role::Worker => {
-                        if has_unchecked {
-                            Signal::GoWork
-                        } else {
-                            Signal::GoReview
-                        }
-                    }
-                    Role::Reviewer => {
-                        if has_unchecked {
-                            Signal::GoWork
-                        } else {
-                            Signal::Done
-                        }
-                    }
-                    Role::Merger => {
-                        Signal::GoWork
-                    }
-                    _ => {
-                        // Planner and other roles don't change signal here.
-                        // Leave as-is.
-                        Signal::GoAsk // placeholder no-op; we'll skip setting below
-                    }
-                };
+        tracing::info!("Session complete for task #{task_id}");
+        // After a normal (non-interrupted) session finish, decide next state
+        // based on the current checklist and role.
+        let current_task = zbobr.get_task(task_id).await?;
+        let has_unchecked = current_task.checklist.iter().any(|i| !i.checked);
 
-                // Only set signal for Preparator/Worker/Reviewer/Merger logic above
-                let current_signal = zbobr.get_task(task_id).await.unwrap().signal;
-                if matches!(
-                    role,
-                    Role::Preparator | Role::Worker | Role::Reviewer | Role::Merger
-                ) && current_signal.is_none()
-                {
-                    if let Err(e) = session.set_signal(next_signal).await {
-                        tracing::error!(
-                            "Failed to set follow-up signal for task {} after session: {e}",
-                            task_id
-                        );
+        match role {
+            Role::Preparator => {
+                // Preparator done → go to planning (if agent didn't set a signal)
+                if current_task.signal.is_none() && !current_task.pause {
+                    task_session.set_signal(Some(Signal::GoPlan)).await?;
+                }
+                task_session.set_stage(Stage::Pending).await?;
+            }
+            Role::Planner => {
+                // Planner done → back to PENDING (planner's post_plan sets GoWork via RoleSession)
+                task_session.set_stage(Stage::Pending).await?;
+            }
+            Role::Worker => {
+                // Worker done → if all checked, go to review; otherwise stay on work
+                if current_task.signal.is_none() && !current_task.pause {
+                    if has_unchecked {
+                        task_session.set_signal(Some(Signal::GoWork)).await?;
+                    } else {
+                        task_session.set_signal(Some(Signal::GoReview)).await?;
                     }
                 }
+                task_session.set_stage(Stage::Pending).await?;
             }
-            Err(e) => {
-                tracing::error!(
-                    "Failed to read checklist for task {} after session: {e}",
-                    task_id
-                );
+            Role::Reviewer => {
+                // Reviewer done → if unchecked items, send back to worker; otherwise DONE
+                if current_task.signal.is_none() && !current_task.pause {
+                    if has_unchecked {
+                        task_session.set_signal(Some(Signal::GoWork)).await?;
+                        task_session.set_stage(Stage::Pending).await?;
+                    } else {
+                        task_session.mark_done().await?;
+                    }
+                } else {
+                    task_session.set_stage(Stage::Pending).await?;
+                }
             }
-        }
-
-        // Clear conflict flavor after merger session
-        if matches!(role, Role::Merger) {
-            if let Err(e) = zbobr.modify_task(task_id, Box::new(|mut task: Task| {
-                task.flavors.remove(&Flavor::Conflict);
-                task
-            })).await {
-                tracing::warn!("Failed to clear conflict flavor for task {}: {}", task_id, e);
+            Role::Merger => {
+                // Merger done → clear conflict flag, back to PENDING
+                task_session.set_conflict(false).await?;
+                task_session.set_stage(Stage::Pending).await?;
             }
         }
     }
@@ -1297,42 +1283,41 @@ async fn process_task_by_stage(
 ) -> anyhow::Result<()> {
     match task.stage {
         Stage::Pending => {
-            if let Some(signal) = task.signal {
-                if let Some(role) = signal.target_role() {
-                    let base_prompt = match role {
-                        Role::Preparator => load_prompts(&prompts.preparator, prompts.base_path.as_ref())?,
-                        Role::Planner => load_prompts(&prompts.planner, prompts.base_path.as_ref())?,
-                        Role::Worker => load_prompts(&prompts.worker, prompts.base_path.as_ref())?,
-                        Role::Reviewer => load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?,
-                        Role::Merger => load_prompts(&prompts.merger, prompts.base_path.as_ref())?,
-                    };
-                    let full_prompt = build_full_prompt(&base_prompt, role);
-                    let task_model = task.model.clone().or(model);
-                    run_role_session(
-                        zbobr,
-                        task.id,
-                        role,
-                        task_model,
-                        port,
-                        &full_prompt,
-                        claude_executor_config,
-                        copilot_executor_config,
-                        mcp_tester_executor_config,
-                    )
-                    .await?;
-                } else {
-                    println!(
-                        "Task #{} is PENDING with signal {} (no role to run)",
-                        task.id, signal
-                    );
-                }
+            // Follow transitions.dot: pause check → conflict check → signal routing
+            if task.pause || task.signal.is_none() {
+                println!("Task #{} is PENDING (pause={}, signal={:?}) — skipped", task.id, task.pause, task.signal);
+                return Ok(());
+            }
+            if task.conflict {
+                // Conflict flag set → run merger
+                let base_prompt = load_prompts(&prompts.merger, prompts.base_path.as_ref())?;
+                let full_prompt = build_full_prompt(&base_prompt, Role::Merger);
+                let task_model = task.model.clone().or(model);
+                run_role_session(
+                    zbobr, task.id, Role::Merger, task_model, port, &full_prompt,
+                    claude_executor_config, copilot_executor_config, mcp_tester_executor_config,
+                ).await?;
             } else {
-                println!("Task #{} is PENDING with no signal", task.id);
+                let signal = task.signal.unwrap();
+                let role = signal.target_role();
+                let base_prompt = match role {
+                    Role::Preparator => load_prompts(&prompts.preparator, prompts.base_path.as_ref())?,
+                    Role::Planner => load_prompts(&prompts.planner, prompts.base_path.as_ref())?,
+                    Role::Worker => load_prompts(&prompts.worker, prompts.base_path.as_ref())?,
+                    Role::Reviewer => load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?,
+                    Role::Merger => load_prompts(&prompts.merger, prompts.base_path.as_ref())?,
+                };
+                let full_prompt = build_full_prompt(&base_prompt, role);
+                let task_model = task.model.clone().or(model);
+                run_role_session(
+                    zbobr, task.id, role, task_model, port, &full_prompt,
+                    claude_executor_config, copilot_executor_config, mcp_tester_executor_config,
+                ).await?;
             }
         }
-        Stage::Preparation | Stage::Planning | Stage::Working | Stage::Reviewing | Stage::Merging => {
+        Stage::Preparing | Stage::Planning | Stage::Working | Stage::Reviewing | Stage::Merging => {
             let role = match task.stage {
-                Stage::Preparation => Role::Preparator,
+                Stage::Preparing => Role::Preparator,
                 Stage::Planning => Role::Planner,
                 Stage::Working => Role::Worker,
                 Stage::Reviewing => Role::Reviewer,
@@ -1349,17 +1334,12 @@ async fn process_task_by_stage(
             let full_prompt = build_full_prompt(&base_prompt, role);
             let task_model = task.model.clone().or(model);
             run_role_session(
-                zbobr,
-                task.id,
-                role,
-                task_model,
-                port,
-                &full_prompt,
-                claude_executor_config,
-                copilot_executor_config,
-                mcp_tester_executor_config,
-            )
-            .await?;
+                zbobr, task.id, role, task_model, port, &full_prompt,
+                claude_executor_config, copilot_executor_config, mcp_tester_executor_config,
+            ).await?;
+        }
+        Stage::Done => {
+            println!("Task #{} is DONE — nothing to process", task.id);
         }
     }
 
@@ -1467,7 +1447,11 @@ async fn run_manager_loop(
         // Check for processable tasks using tool-based filtering
         let current_tool = zbobr.config().cli_tool;
 
-        // Check for PENDING tasks with signals and run sessions directly
+        // Implement transitions.dot flow for PENDING tasks:
+        // 1. if pause==true or signal==None → skip
+        // 2. if conflict==true → run Merger session
+        // 3. if signal==GoPrepare → run Preparator session (no git pull)
+        // 4. otherwise (GoPlan/GoWork/GoReview) → run session for signal's role
         let pending_tasks = match zbobr
             .list_tasks_by_stage(Stage::Pending, Some(current_tool))
             .await
@@ -1481,87 +1465,48 @@ async fn run_manager_loop(
 
         let mut session_run = false;
         for task in pending_tasks {
-            if let Some(signal) = task.signal {
-                if let Some(role) = signal.target_role() {
-                    let task_model = task.model.clone().unwrap_or_else(|| model.clone());
-                    let prompt = match role {
-                        Role::Preparator => &preparator_prompt,
-                        Role::Planner => &planner_prompt,
-                        Role::Worker => &worker_prompt,
-                        Role::Reviewer => &reviewer_prompt,
-                        Role::Merger => &merger_prompt,
-                    };
-                    tracing::info!(
-                        "Found PENDING task #{} with signal {:?} (tool: {:?}, model: {}) - running {:?}",
-                        task.id,
-                        signal,
-                        task.tool,
-                        task_model,
-                        role
-                    );
-                    if let Err(e) = run_role_session(
-                        zbobr,
-                        task.id,
-                        role,
-                        Some(task_model),
-                        port,
-                        prompt,
-                        claude_executor_config,
-                        copilot_executor_config,
-                        mcp_tester_executor_config,
-                    )
-                    .await
-                    {
-                        tracing::error!("{:?} session failed: {e}", role);
-                    }
-                    session_run = true;
-                    break; // Only run one session per loop iteration
+            // Step 1: skip if paused or no signal
+            if task.pause || task.signal.is_none() {
+                continue;
+            }
+
+            // Step 2: conflict flag → run merger
+            if task.conflict {
+                let task_model = task.model.clone().unwrap_or_else(|| model.clone());
+                tracing::info!(
+                    "Found PENDING task #{} with conflict flag - running merger (tool: {:?}, model: {})",
+                    task.id, task.tool, task_model
+                );
+                if let Err(e) = run_role_session(
+                    zbobr, task.id, Role::Merger, Some(task_model), port,
+                    &merger_prompt, claude_executor_config, copilot_executor_config, mcp_tester_executor_config,
+                ).await {
+                    tracing::error!("Merger session failed: {e}");
                 }
+                session_run = true;
+                break;
             }
-        }
 
-        if session_run {
-            continue;
-        }
-
-        // Check for MERGING tasks with conflict flavor
-        let merging_tasks = match zbobr
-            .list_tasks_by_stage(Stage::Merging, Some(current_tool))
-            .await
-        {
-            Ok(tasks) => tasks.into_iter().filter(|t| t.flavors.contains(&Flavor::Conflict)).collect::<Vec<_>>(),
-            Err(e) => {
-                tracing::error!("Failed to check MERGING tasks: {e}");
-                vec![]
-            }
-        };
-
-        for task in merging_tasks {
-            let merger_prompts = Prompts {
-                base_path: prompts.base_path.clone(),
-                preparator: vec![],
-                planner: vec![],
-                worker: vec![],
-                reviewer: vec![],
-                merger: prompts.merger.clone(),
+            // Step 3/4: route by signal
+            let signal = task.signal.unwrap();
+            let role = signal.target_role();
+            let task_model = task.model.clone().unwrap_or_else(|| model.clone());
+            let prompt = match role {
+                Role::Preparator => &preparator_prompt,
+                Role::Planner => &planner_prompt,
+                Role::Worker => &worker_prompt,
+                Role::Reviewer => &reviewer_prompt,
+                Role::Merger => &merger_prompt,
             };
             tracing::info!(
-                "Found MERGING task #{} with conflict flavor - running merger",
-                task.id
+                "Found PENDING task #{} with signal {:?} (tool: {:?}, model: {}) - running {:?}",
+                task.id, signal, task.tool, task_model, role
             );
-            if let Err(e) = process_task_by_stage(
-                zbobr,
-                &task,
-                Some(model.clone()),
-                port,
-                &merger_prompts,
-                claude_executor_config,
-                copilot_executor_config,
-                mcp_tester_executor_config,
-            )
-            .await
-            {
-                tracing::error!("Merger session failed: {e}");
+            if let Err(e) = run_role_session(
+                zbobr, task.id, role, Some(task_model), port, prompt,
+                claude_executor_config, copilot_executor_config, mcp_tester_executor_config,
+            ).await {
+                tracing::error!("{:?} session failed: {e}", role);
             }
             session_run = true;
             break; // Only run one session per loop iteration
@@ -1572,9 +1517,8 @@ async fn run_manager_loop(
         }
 
         // Log task statistics before sleeping
-        // Count tasks in active stages
         let active_stages = [
-            Stage::Preparation,
+            Stage::Preparing,
             Stage::Planning,
             Stage::Working,
             Stage::Reviewing,
@@ -1586,9 +1530,9 @@ async fn run_manager_loop(
             active_counts.insert(stage, count);
         }
         tracing::info!(
-            "Task statistics for tool {:?}: PREPARATION={}, PLANNING={}, WORKING={}, REVIEWING={}, MERGING={}",
+            "Task statistics for tool {:?}: PREPARING={}, PLANNING={}, WORKING={}, REVIEWING={}, MERGING={}",
             current_tool,
-            active_counts[&Stage::Preparation],
+            active_counts[&Stage::Preparing],
             active_counts[&Stage::Planning],
             active_counts[&Stage::Working],
             active_counts[&Stage::Reviewing],

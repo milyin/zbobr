@@ -230,6 +230,63 @@ impl IntegrationTestEnv {
         .await
     }
 
+    /// Prepare a workspace directory for a task by cloning the source repo
+    /// and setting up the work branch. This simulates what the dispatcher
+    /// would do before starting an agent session.
+    pub async fn prepare_workspace(
+        &self,
+        task_id: u64,
+        repo_path: &Path,
+        work_branch: &str,
+    ) -> PathBuf {
+        let workspace_dir = self.workspaces_dir.join(format!("task#{task_id}"));
+        tokio::fs::create_dir_all(&workspace_dir)
+            .await
+            .expect("failed to create workspace dir");
+
+        let repo_name = repo_path
+            .file_name()
+            .expect("repo_path must have a file name")
+            .to_str()
+            .unwrap();
+        let work_dir = workspace_dir.join(repo_name);
+
+        // Clone the source repo into the workspace
+        let clone_status = tokio::process::Command::new("git")
+            .args([
+                "clone",
+                repo_path.to_str().unwrap(),
+                work_dir.to_str().unwrap(),
+            ])
+            .status()
+            .await
+            .expect("failed to run git clone");
+        assert!(clone_status.success(), "git clone failed");
+
+        // Try to checkout an existing work branch, or create a new one from HEAD
+        let checkout = tokio::process::Command::new("git")
+            .args(["checkout", work_branch])
+            .current_dir(&work_dir)
+            .output()
+            .await
+            .expect("failed to run git checkout");
+
+        if !checkout.status.success() {
+            let create = tokio::process::Command::new("git")
+                .args(["checkout", "-b", work_branch])
+                .current_dir(&work_dir)
+                .status()
+                .await
+                .expect("failed to run git checkout -b");
+            assert!(
+                create.success(),
+                "failed to create work branch '{work_branch}'"
+            );
+        }
+
+        work_dir
+    }
+
     /// Create a scenario file and return its path.
     pub async fn create_scenario(&self, name: &str, content: &str) -> String {
         let scenarios_dir = self.base_path.join("scenarios");

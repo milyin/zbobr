@@ -11,7 +11,7 @@ use super::env::IntegrationTestEnv;
 /// Return `(subcommand, executor_flag_suffix)` for the given stage.
 pub fn stage_meta(stage: Stage) -> (&'static str, &'static str) {
     match stage {
-        Stage::Preparation => ("prepare", "preparation"),
+        Stage::Preparing => ("prepare", "preparation"),
         Stage::Planning => ("plan", "planning"),
         Stage::Working => ("work", "working"),
         Stage::Reviewing => ("review", "reviewing"),

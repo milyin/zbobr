@@ -14,17 +14,17 @@ use crate::{
         },
         traits::{CommonMcpImpl, WorkerMcpImpl},
     },
-    task::TaskSession,
+    task::RoleSession,
 };
 
 #[derive(Clone)]
 pub struct WorkerMcp {
-    session: TaskSession,
+    session: RoleSession,
     tool_router: ToolRouter<Self>,
 }
 
 impl CommonMcpImpl for WorkerMcp {
-    fn session(&self) -> &TaskSession {
+    fn session(&self) -> &RoleSession {
         &self.session
     }
 
@@ -39,7 +39,7 @@ impl WorkerMcpImpl for WorkerMcp {}
 impl WorkerMcp {
     pub fn new(zbobr: Zbobr, task_id: u64) -> Self {
         Self {
-            session: zbobr.task_session(task_id),
+            session: zbobr.role_session(task_id),
             tool_router: Self::tool_router(),
         }
     }

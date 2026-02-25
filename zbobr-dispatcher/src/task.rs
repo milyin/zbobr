@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::Zbobr;
 
@@ -65,33 +65,36 @@ pub struct ChecklistItem {
 )]
 pub enum Stage {
     Pending,
-    Preparation,
+    Preparing,
     Planning,
     Working,
     Reviewing,
     Merging,
+    Done,
 }
 
 impl Stage {
     pub fn milestone_name(&self) -> &'static str {
         match self {
             Stage::Pending => "PENDING",
-            Stage::Preparation => "PREPARATION",
+            Stage::Preparing => "PREPARING",
             Stage::Planning => "PLANNING",
             Stage::Working => "WORKING",
             Stage::Reviewing => "REVIEWING",
             Stage::Merging => "MERGING",
+            Stage::Done => "DONE",
         }
     }
 
     pub fn from_milestone_name(name: &str) -> Option<Self> {
         match name {
             "PENDING" => Some(Stage::Pending),
-            "PREPARATION" => Some(Stage::Preparation),
+            "PREPARING" | "PREPARATION" => Some(Stage::Preparing),
             "PLANNING" => Some(Stage::Planning),
             "WORKING" => Some(Stage::Working),
             "REVIEWING" => Some(Stage::Reviewing),
             "MERGING" => Some(Stage::Merging),
+            "DONE" => Some(Stage::Done),
             _ => None,
         }
     }
@@ -154,7 +157,7 @@ impl std::str::FromStr for Role {
 }
 
 /// Signal for task flow control (mapped to labels in GitHub backend).
-/// Ordered by priority (highest to lowest).
+/// Ordered by priority (highest to lowest): GoPrepare > GoPlan > GoWork > GoReview.
 #[derive(
     Debug,
     Clone,
@@ -168,31 +171,20 @@ impl std::str::FromStr for Role {
     schemars::JsonSchema,
 )]
 pub enum Signal {
-    #[serde(rename = "go_ask")]
-    GoAsk = 1, // go ask is higher priority than done because it indicates a need for human input,
-    // while done supposes normal completion and less urgency. So go_ask should override done
-    // if both are signalled by an agent.
-    #[serde(rename = "done")]
-    Done = 2,
-    #[serde(rename = "go_merge")]
-    GoMerge = 3,
+    #[serde(rename = "go_prepare")]
+    GoPrepare = 1,
+    #[serde(rename = "go_plan")]
+    GoPlan = 2,
+    #[serde(rename = "go_work")]
+    GoWork = 3,
     #[serde(rename = "go_review")]
     GoReview = 4,
-    #[serde(rename = "go_work")]
-    GoWork = 5,
-    #[serde(rename = "go_plan")]
-    GoPlan = 6,
-    #[serde(rename = "go_prepare")]
-    GoPrepare = 7,
 }
 
 impl Signal {
     /// Returns the plain signal name.
     pub fn name(&self) -> &'static str {
         match self {
-            Signal::Done => "done",
-            Signal::GoAsk => "go_ask",
-            Signal::GoMerge => "go_merge",
             Signal::GoReview => "go_review",
             Signal::GoWork => "go_work",
             Signal::GoPlan => "go_plan",
@@ -203,37 +195,20 @@ impl Signal {
     /// Returns all available signals in priority order.
     pub fn all() -> &'static [Signal] {
         &[
-            Signal::Done,
-            Signal::GoAsk,
-            Signal::GoMerge,
-            Signal::GoReview,
-            Signal::GoWork,
-            Signal::GoPlan,
             Signal::GoPrepare,
+            Signal::GoPlan,
+            Signal::GoWork,
+            Signal::GoReview,
         ]
     }
 
-    /// Maps signal to target stage.
-    pub fn target_stage(&self) -> Stage {
+    /// Maps signal to the role that should execute the session.
+    pub fn target_role(&self) -> Role {
         match self {
-            Signal::Done | Signal::GoAsk => Stage::Pending,
-            Signal::GoMerge => Stage::Merging,
-            Signal::GoReview => Stage::Reviewing,
-            Signal::GoWork => Stage::Working,
-            Signal::GoPlan => Stage::Planning,
-            Signal::GoPrepare => Stage::Preparation,
-        }
-    }
-
-    /// Maps signal to role for session execution.
-    pub fn target_role(&self) -> Option<Role> {
-        match self {
-            Signal::GoMerge => Some(Role::Merger),
-            Signal::GoReview => Some(Role::Reviewer),
-            Signal::GoWork => Some(Role::Worker),
-            Signal::GoPlan => Some(Role::Planner),
-            Signal::GoPrepare => Some(Role::Preparator),
-            _ => None,
+            Signal::GoReview => Role::Reviewer,
+            Signal::GoWork => Role::Worker,
+            Signal::GoPlan => Role::Planner,
+            Signal::GoPrepare => Role::Preparator,
         }
     }
 }
@@ -248,54 +223,11 @@ impl std::str::FromStr for Signal {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().replace('_', "").as_str() {
-            "done" => Ok(Signal::Done),
-            "goask" | "go-ask" => Ok(Signal::GoAsk),
-            "gomerge" | "go-merge" => Ok(Signal::GoMerge),
             "goreview" | "go-review" => Ok(Signal::GoReview),
             "gowork" | "go-work" => Ok(Signal::GoWork),
             "goplan" | "go-plan" => Ok(Signal::GoPlan),
             "goprepare" | "go-prepare" => Ok(Signal::GoPrepare),
             _ => Err(anyhow::anyhow!("Unknown signal: {}", s)),
-        }
-    }
-}
-
-/// Task flavor (stored as GitHub labels).
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-pub enum Flavor {
-    #[serde(rename = "conflict")]
-    Conflict,
-    #[serde(rename = "stop")]
-    Stop,
-}
-
-impl Flavor {
-    /// Returns the plain flavor name.
-    pub fn name(&self) -> &'static str {
-        match self {
-            Flavor::Conflict => "conflict",
-            Flavor::Stop => "stop",
-        }
-    }
-}
-
-impl std::str::FromStr for Flavor {
-    type Err = anyhow::Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "conflict" => Ok(Flavor::Conflict),
-            "stop" => Ok(Flavor::Stop),
-            _ => Err(anyhow::anyhow!("Unknown flavor: {}", s)),
         }
     }
 }
@@ -483,7 +415,7 @@ impl std::str::FromStr for Model {
     }
 }
 
-/// A task in the abstract domain (generic, backed by GitHub or Stub).
+/// A task in the abstract domain (generic, backed by GitHub or Filesystem).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Task {
     pub id: u64,
@@ -495,24 +427,32 @@ pub struct Task {
     pub tool: Option<Tool>,
     pub model: Option<Model>,
     pub parameters: HashMap<Parameter, String>,
-    pub done: bool,
     pub checklist: Vec<ChecklistItem>,
     pub signal: Option<Signal>,
-    pub flavors: HashSet<Flavor>,
+    pub conflict: bool,
+    pub pause: bool,
     /// ETag for optimistic locking to prevent concurrent update conflicts.
     /// Used to detect if the task has been modified between read and write operations.
     #[serde(skip)]
     pub etag: Option<String>,
 }
 
-/// Task session bound to a specific task, with role-based behavior.
+// ---------------------------------------------------------------------------
+// RoleSession — restricted access for MCP tools during agent sessions.
+//
+// Cannot modify: stage, conflict (those are dispatcher-only transitions).
+// Can modify: description, plan, checklist, parameters, signal, pause.
+// ---------------------------------------------------------------------------
+
+/// Restricted task session for MCP tool operations.
+/// Stage and conflict flag are protected — only the dispatcher may change them.
 #[derive(Clone)]
-pub struct TaskSession {
+pub struct RoleSession {
     zbobr: Zbobr,
     task_id: u64,
 }
 
-impl TaskSession {
+impl RoleSession {
     pub(crate) fn new(zbobr: Zbobr, task_id: u64) -> Self {
         Self { zbobr, task_id }
     }
@@ -561,19 +501,17 @@ impl TaskSession {
         Ok(self.get_task().await?.checklist)
     }
 
-    /// Atomically read-modify-write the task body (description, parameters, plan, checklist).
+    /// Atomically read-modify-write the task body.
     ///
     /// The closure receives a mutable `Task` reference and may modify `description`,
-    /// `parameters`, `plan`, and `checklist`. All other `Task` fields are ignored on write.
+    /// `parameters`, `plan`, `checklist`, `signal`, and `pause`.
     ///
-    /// Concurrent `modify_task` calls on the same task are serialized by an in-process
-    /// per-task mutex, so concurrent MCP tool calls cannot overwrite each other's changes.
-    /// Cross-process conflicts are handled by backend-level three-way merge.
+    /// **Protected fields**: `stage` and `conflict` are saved before the mutation
+    /// and restored afterwards, so MCP tools cannot change them.
     pub async fn modify_task<F>(&self, mutate: F) -> anyhow::Result<()>
     where
         F: FnOnce(&mut Task) + Send + 'static,
     {
-        // Acquire per-task lock to serialize concurrent modify_task calls
         let lock = self.zbobr.task_lock(self.task_id);
         let _guard = lock.lock().await;
 
@@ -582,38 +520,15 @@ impl TaskSession {
             .modify_task(
                 self.task_id,
                 Box::new(move |mut task| {
+                    let saved_stage = task.stage;
+                    let saved_conflict = task.conflict;
                     mutate(&mut task);
+                    task.stage = saved_stage;
+                    task.conflict = saved_conflict;
                     task
                 }),
             )
             .await
-    }
-
-    /// Update the task description (only the description part, preserving plan/checklist/parameters).
-    pub async fn update_description(&self, description: &str) -> anyhow::Result<()> {
-        let desc = description.to_string();
-        self.modify_task(move |task| {
-            task.description = desc;
-        })
-        .await
-    }
-
-    /// Update the task plan (preserving description/checklist/parameters).
-    pub async fn update_plan(&self, plan: &str) -> anyhow::Result<()> {
-        let plan = plan.to_string();
-        self.modify_task(move |task| {
-            task.plan = plan;
-        })
-        .await
-    }
-
-    /// Update the task checklist (preserving description/plan/parameters).
-    pub async fn update_checklist(&self, checklist: &[ChecklistItem]) -> anyhow::Result<()> {
-        let items = checklist.to_vec();
-        self.modify_task(move |task| {
-            task.checklist = items;
-        })
-        .await
     }
 
     /// Get all discussion messages on the task.
@@ -657,12 +572,10 @@ impl TaskSession {
         .await
     }
 
-    /// Transition task to stage based on current signal.
-    pub async fn transition_by_signal(&self) -> anyhow::Result<()> {
+    /// Set the pause flag on the task.
+    pub async fn set_pause(&self, pause: bool) -> anyhow::Result<()> {
         self.modify_task(move |task| {
-            if let Some(sig) = task.signal {
-                task.stage = sig.target_stage();
-            }
+            task.pause = pause;
         })
         .await
     }
@@ -898,7 +811,7 @@ impl TaskSession {
             );
         }
 
-        // Push to the configured remote (set by pull_work)
+        // Push to the configured remote (set by dispatcher pull_work)
         tracing::info!("Pushing branch '{}' to remote", work_branch);
         let status = tokio::process::Command::new("git")
             .args(["push", "-u", "origin", "HEAD", "--force"])
@@ -913,328 +826,31 @@ impl TaskSession {
         Ok(())
     }
 
-    /// Pull a repository, forking if needed. Clones the destination_repository fork, creates and checks out work_branch.
-    /// Cleans up remote information - only pull_work and push_work know where to push/pull.
-    /// Stashes local changes if a different branch is selected as current.
-    /// Also creates a PR from work_branch to destination_branch in the fork repo if all parameters are set.
+    /// Return the path to the work directory for this task.
+    /// The merge and clone are done by the dispatcher before the session starts.
+    /// This just returns the already-prepared work directory, or an error if not yet set up.
     pub async fn pull_work(&self) -> anyhow::Result<String> {
-        // Get required parameters
         let dest_repo = self
             .get_parameter(Parameter::DestinationRepository)
             .await?
             .ok_or_else(|| anyhow::anyhow!("destination_repository parameter not set"))?;
 
-        let dest_branch = self
-            .get_parameter(Parameter::DestinationBranch)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("destination_branch parameter not set"))?;
-
-        let work_branch = self
-            .get_parameter(Parameter::WorkBranch)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("work_branch parameter not set"))?;
-
-        // Clone and setup the repository with forking
-        // Ensure the fork in GitHub is synchronized with the destination repository
-        tracing::info!(
-            "Synchronizing fork for {} on branch {}",
-            dest_repo,
-            dest_branch
-        );
-        self.zbobr.sync_fork(&dest_repo, &dest_branch).await?;
-
-        let repo_name = dest_repo.split('/').last().unwrap_or(&dest_repo);
-        let path = self.zbobr.config().workspaces.join(format!("task#{}", self.task_id)).join(repo_name);
-
-        // Check if repo exists and is in conflict state
-        let is_conflicted = if path.exists() {
-            let status = tokio::process::Command::new("git")
-                .args(["ls-files", "-u"])
-                .current_dir(&path)
-                .output()
-                .await;
-            if let Ok(output) = status {
-                !output.stdout.is_empty()
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
-        if is_conflicted {
-            tracing::info!("Repository is in a conflicted state, skipping clone_and_setup and merge");
-            return Ok(path.to_string_lossy().to_string());
-        }
-
+        let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo);
         let path = self
             .zbobr
-            .clone_and_setup(&dest_repo, &dest_branch, self.task_id)
-            .await?;
+            .config()
+            .workspaces
+            .join(format!("task#{}", self.task_id))
+            .join(repo_name);
 
-        let path_str = path.to_string_lossy().to_string();
-
-        // No tracking required: local path layout is workspace/task#<id>/<repo>
-
-        // Create the work branch from destination_branch if it doesn't exist.
-        // First check whether the branch already exists locally to avoid an error
-        // from `git checkout -b` when the branch is present.
-        let branch_ref = format!("refs/heads/{}", work_branch);
-        let exists_locally = tokio::process::Command::new("git")
-            .args(["show-ref", "--verify", &branch_ref])
-            .current_dir(&path)
-            .status()
-            .await
-            .map(|s| s.success())
-            .unwrap_or(false);
-
-        let exists_on_remote = if !exists_locally {
-            tokio::process::Command::new("git")
-                .args(["fetch", "origin", &work_branch])
-                .current_dir(&path)
-                .status()
-                .await
-                .map(|s| s.success())
-                .unwrap_or(false)
-        } else {
-            false
-        };
-
-        if exists_locally || exists_on_remote {
-            if exists_on_remote {
-                // Branch exists on remote but not locally; create it tracking the remote
-                let checkout_status = tokio::process::Command::new("git")
-                    .args(["checkout", "-b", &work_branch, "FETCH_HEAD"])
-                    .current_dir(&path)
-                    .status()
-                    .await?;
-
-                if !checkout_status.success() {
-                    anyhow::bail!("Failed to checkout remote work branch '{}'", work_branch);
-                }
-            } else {
-                // Branch exists locally; simply checkout
-                let checkout_status = tokio::process::Command::new("git")
-                    .args(["checkout", &work_branch])
-                    .current_dir(&path)
-                    .status()
-                    .await?;
-
-                if !checkout_status.success() {
-                    anyhow::bail!("Failed to checkout existing work branch '{}'", work_branch);
-                }
-            }
-
-            // Merge destination branch into work branch to pick up upstream changes.
-            // Configure git user first so merge commits (if any) have valid author info.
-            let config = self.zbobr.config();
-            crate::backend::configure_git_user(
-                &path,
-                &config.git_user_name,
-                &config.git_user_email,
-            )
-            .await?;
-
-            tracing::info!(
-                "Merging destination branch '{}' into work branch '{}'",
-                dest_branch,
-                work_branch
-            );
-            let merge_output = tokio::process::Command::new("git")
-                .args(["merge", &dest_branch, "--no-edit"])
-                .current_dir(&path)
-                .output()
-                .await?;
-
-            if !merge_output.status.success() {
-                let stderr = String::from_utf8_lossy(&merge_output.stderr);
-                let stdout = String::from_utf8_lossy(&merge_output.stdout);
-
-                // Check if there are merge conflicts
-                let has_conflicts = stderr.contains("CONFLICT")
-                    || stdout.contains("CONFLICT")
-                    || stderr.contains("Automatic merge failed");
-
-                if has_conflicts {
-                    // Don't abort the merge yet - leave it in conflict state for the merger agent
-                    // The merger agent will examine the conflicts and try to resolve them
-
-                    let hostname = hostname::get()
-                        .ok()
-                        .and_then(|h| h.into_string().ok())
-                        .unwrap_or_else(|| "unknown".to_string());
-                    let user_msg = format!(
-                        "⚠️  Merge conflict detected while automatically merging destination branch '{}' into work branch '{}'. \
-                         A merger agent has been started to attempt automatic conflict resolution.",
-                        dest_branch, work_branch
-                    );
-                    let _ = self.post_message(&user_msg, "system", &hostname).await;
-
-                    // Set stage to Merging and add conflict flavor
-                    let _ = self.modify_task(|task| {
-                        task.stage = Stage::Merging;
-                        task.flavors.insert(Flavor::Conflict);
-                    }).await;
-
-                    tracing::info!(
-                        "Merge conflict detected for task #{}, setting stage to Merging with conflict flavor",
-                        self.task_id
-                    );
-                    
-                    // Return early, do not attempt to push or create PR while in conflict state
-                    return Ok(path_str);
-                } else {
-                    // Non-conflict merge failure
-                    anyhow::bail!(
-                        "Failed to merge '{}' into '{}': {}",
-                        dest_branch,
-                        work_branch,
-                        stderr.trim()
-                    );
-                }
-            } else {
-                tracing::info!(
-                    "Successfully merged '{}' into '{}'",
-                    dest_branch,
-                    work_branch
-                );
-            }
-        } else {
-            // Branch does not exist locally; create it from current HEAD (destination branch)
-            let create_branch = tokio::process::Command::new("git")
-                .args(["checkout", "-b", &work_branch])
-                .current_dir(&path)
-                .status()
-                .await?;
-
-            if !create_branch.success() {
-                anyhow::bail!("Failed to create work branch '{}'", work_branch);
-            }
-
-            // Create a placeholder file to ensure the branch has at least one commit
-            // (GitHub PR API rejects branches with no commits between them)
-            let config = self.zbobr.config();
-            crate::backend::configure_git_user(
-                &path,
-                &config.git_user_name,
-                &config.git_user_email,
-            )
-            .await?;
-            crate::backend::create_placeholder_commit(&path, &work_branch).await?;
-        }
-
-        // Clean up remote information - remove fork if it was previously set up
-        // Set up fork remote and push work branch (backend handles fork_owner internally)
-        self.zbobr
-            .setup_fork_remote_and_push(&path, &dest_repo, &work_branch)
-            .await?;
-
-        // Create PR from work_branch to destination_branch in the fork repo
-        let repo_name = extract_repo_name(&dest_repo).ok_or_else(|| {
-            anyhow::anyhow!("Invalid destination_repository format: {}", dest_repo)
-        })?;
-        if let Err(e) = self
-            .create_pr_for_work_branch(&repo_name, &work_branch, &dest_branch)
-            .await
-        {
-            // Log the error and also notify the user via task discussion, but don't fail the pull_work
-            tracing::error!(
-                "Failed to create PR for work branch {} -> {}: {e}",
-                work_branch,
-                dest_branch
-            );
-            let hostname = hostname::get()
-                .ok()
-                .and_then(|h| h.into_string().ok())
-                .unwrap_or_else(|| "unknown".to_string());
-            let msg = format!(
-                "⚠️  Failed to create PR: {}. You can create it manually or continue working.",
-                e
-            );
-            let _ = self.post_message(&msg, "worker", &hostname).await;
-        }
-
-        // Rename 'origin' to a temporary name, configure it with internal credentials, then back to origin
-        // This ensures the model can't directly access remote URLs
-        tracing::info!("Setting up internal remote for pull_work/push_work only");
-
-        Ok(path_str)
-    }
-
-    /// Create a PR from work_branch to destination_branch in the fork repo.
-    async fn create_pr_for_work_branch(
-        &self,
-        repo_name: &str,
-        work_branch: &str,
-        destination_branch: &str,
-    ) -> anyhow::Result<()> {
-        tracing::info!(
-            "Creating PR for repo '{}' from {} to {}",
-            repo_name,
-            work_branch,
-            destination_branch
-        );
-
-        // If a PR URL is already stored in the task parameters, verify it exists
-        // and skip creating a new PR when that's the case.
-        if let Ok(Some(existing_pr)) = self.get_parameter(Parameter::PrUrl).await {
-            match self.zbobr.parse_pr_to_repo_branch(&existing_pr).await {
-                Ok((_repo, _branch)) => {
-                    tracing::info!(
-                        "PR already exists for task {}: {}",
-                        self.task_id,
-                        existing_pr
-                    );
-                    return Ok(());
-                }
-                Err(e) => {
-                    tracing::info!(
-                        "Stored pr_url '{}' could not be verified: {}. Creating new PR.",
-                        existing_pr,
-                        e
-                    );
-                }
-            }
-        }
-        // Guard: work_branch must be a branch name or owner:branch, but not a full repo path
-        // (e.g. owner/repo/branch) which is invalid for the Pulls API head field.
-        let slash_count = work_branch.chars().filter(|c| *c == '/').count();
-        if slash_count >= 2 {
+        if !path.exists() {
             anyhow::bail!(
-                "work_branch has invalid format '{}'. Use a branch name like 'feature/x' or 'owner:branch', not 'owner/repo/branch'.",
-                work_branch
+                "Work directory does not exist: {}. The dispatcher should have prepared it before the session.",
+                path.display()
             );
         }
 
-        // Build PR metadata from task (decoupled from repo backend)
-        let task = self.get_task().await?;
-        let pr_title = format!("Fix #{}: {}", self.task_id, task.title);
-        let pr_body = format!(
-            "Resolves #{}\n\nImplementation for: {}",
-            self.task_id, task.title
-        );
-
-        let pr_url = self
-            .zbobr
-            .create_pr_in_fork(
-                repo_name,
-                work_branch,
-                destination_branch,
-                &pr_title,
-                &pr_body,
-            )
-            .await?;
-
-        // Store the PR URL in the task
-        self.set_parameter(Parameter::PrUrl, Some(pr_url)).await?;
-
-        Ok(())
-    }
-
-    /// Mark task as done (sets signal to Done). Stage transition will be handled by main loop.
-    pub async fn mark_done(&self) -> anyhow::Result<()> {
-        self.set_signal(Signal::Done).await?;
-        Ok(())
+        Ok(path.to_string_lossy().to_string())
     }
 
     /// Get a task parameter value. Parameters are stored in the task's parameters HashMap.
@@ -1260,6 +876,107 @@ impl TaskSession {
         .await
     }
 }
+
+// ---------------------------------------------------------------------------
+// TaskSession — full access for the dispatcher.
+//
+// Can modify everything including stage and conflict flag.
+// ---------------------------------------------------------------------------
+
+/// Full-access task session for the dispatcher.
+/// Can change stage, conflict flag, and all other fields.
+#[derive(Clone)]
+pub struct TaskSession {
+    zbobr: Zbobr,
+    task_id: u64,
+}
+
+impl TaskSession {
+    pub(crate) fn new(zbobr: Zbobr, task_id: u64) -> Self {
+        Self { zbobr, task_id }
+    }
+
+    pub fn task_id(&self) -> u64 {
+        self.task_id
+    }
+
+    /// Get a restricted RoleSession view for MCP tool operations.
+    pub fn role_session(&self) -> RoleSession {
+        RoleSession::new(self.zbobr.clone(), self.task_id)
+    }
+
+    /// Read the full task state.
+    pub async fn get_task(&self) -> anyhow::Result<Task> {
+        self.zbobr.get_task(self.task_id).await
+    }
+
+    /// Get the current task checklist.
+    pub async fn get_checklist(&self) -> anyhow::Result<Vec<ChecklistItem>> {
+        Ok(self.get_task().await?.checklist)
+    }
+
+    /// Atomically read-modify-write the task with unrestricted access.
+    /// Only the dispatcher should use this.
+    pub async fn modify_task<F>(&self, mutate: F) -> anyhow::Result<()>
+    where
+        F: FnOnce(&mut Task) + Send + 'static,
+    {
+        let lock = self.zbobr.task_lock(self.task_id);
+        let _guard = lock.lock().await;
+
+        self.zbobr
+            .task_backend
+            .modify_task(
+                self.task_id,
+                Box::new(move |mut task| {
+                    mutate(&mut task);
+                    task
+                }),
+            )
+            .await
+    }
+
+    /// Set the task stage (dispatcher only).
+    pub async fn set_stage(&self, stage: Stage) -> anyhow::Result<()> {
+        self.modify_task(move |task| {
+            task.stage = stage;
+        })
+        .await
+    }
+
+    /// Set the conflict flag (dispatcher only).
+    pub async fn set_conflict(&self, conflict: bool) -> anyhow::Result<()> {
+        self.modify_task(move |task| {
+            task.conflict = conflict;
+        })
+        .await
+    }
+
+    /// Set signal on the task (dispatcher only, no priority check).
+    pub async fn set_signal(&self, signal: Option<Signal>) -> anyhow::Result<()> {
+        self.modify_task(move |task| {
+            task.signal = signal;
+        })
+        .await
+    }
+
+    /// Mark task as done: set stage to Done and clear signal.
+    pub async fn mark_done(&self) -> anyhow::Result<()> {
+        self.modify_task(move |task| {
+            task.stage = Stage::Done;
+            task.signal = None;
+        })
+        .await
+    }
+
+    /// Post a message to the task discussion with role and hostname metadata.
+    pub async fn post_message(&self, msg: &str, role: &str, hostname: &str) -> anyhow::Result<()> {
+        self.zbobr
+            .post_task_comment(self.task_id, msg, role, hostname)
+            .await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1270,8 +987,21 @@ mod tests {
         assert_eq!(Stage::Planning.milestone_name(), "PLANNING");
         assert_eq!(Stage::Working.milestone_name(), "WORKING");
         assert_eq!(Stage::Reviewing.milestone_name(), "REVIEWING");
-        assert_eq!(Stage::Preparation.milestone_name(), "PREPARATION");
+        assert_eq!(Stage::Preparing.milestone_name(), "PREPARING");
         assert_eq!(Stage::Merging.milestone_name(), "MERGING");
+        assert_eq!(Stage::Done.milestone_name(), "DONE");
+    }
+
+    #[test]
+    fn stage_backward_compat() {
+        assert_eq!(
+            Stage::from_milestone_name("PREPARATION"),
+            Some(Stage::Preparing)
+        );
+        assert_eq!(
+            Stage::from_milestone_name("PREPARING"),
+            Some(Stage::Preparing)
+        );
     }
 
     #[test]
@@ -1279,6 +1009,7 @@ mod tests {
         assert_eq!(Stage::Planning.to_string(), "PLANNING");
         assert_eq!(Stage::Working.to_string(), "WORKING");
         assert_eq!(Stage::Reviewing.to_string(), "REVIEWING");
+        assert_eq!(Stage::Done.to_string(), "DONE");
     }
 
     #[test]
@@ -1301,9 +1032,10 @@ mod tests {
             tool: Some(Tool::Claude),
             model: Some(Model::Claude3Opus),
             parameters: HashMap::new(),
-            done: false,
             checklist: vec![],
             signal: None,
+            conflict: false,
+            pause: false,
             etag: None,
         };
         let json = serde_json::to_string(&task).unwrap();
@@ -1313,7 +1045,16 @@ mod tests {
         assert_eq!(back.stage, Stage::Planning);
         assert_eq!(back.tool, Some(Tool::Claude));
         assert_eq!(back.model, Some(Model::Claude3Opus));
-        assert!(!back.done);
+        assert!(!back.conflict);
+        assert!(!back.pause);
+    }
+
+    #[test]
+    fn signal_target_role() {
+        assert_eq!(Signal::GoPrepare.target_role(), Role::Preparator);
+        assert_eq!(Signal::GoPlan.target_role(), Role::Planner);
+        assert_eq!(Signal::GoWork.target_role(), Role::Worker);
+        assert_eq!(Signal::GoReview.target_role(), Role::Reviewer);
     }
 
     #[test]

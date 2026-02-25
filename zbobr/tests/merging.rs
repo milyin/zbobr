@@ -111,16 +111,14 @@ async fn test_merging() {
 
     let scenario_report = merging_scenario("report");
     let scenario_ask = merging_scenario("ask");
-    let scenario_path_report = env.create_scenario("merging_report", &scenario_report).await;
-    let scenario_path_ask = env.create_scenario("merging_ask", &scenario_ask).await;
 
     // Test report ending
     let task_id_report = env
         .create_task("Dummy Task", "Dummy task description", Stage::Merging)
         .await;
     let work_branch_report = format!("zbobr_fix-{task_id_report}-test");
-    let task_id_str_report = task_id_report.to_string();
     env.update_task_branches(task_id_report, &repo_path_str, "main", &work_branch_report).await;
+    env.prepare_workspace(task_id_report, &repo_path, &work_branch_report).await;
 
     // Test report ending explicit
     env.run_stage(task_id_report, Stage::Merging, scenario_report.clone()).await;
@@ -129,22 +127,23 @@ async fn test_merging() {
         output.contains("Merger complete."),
         "Merger report message was not recorded in discussion"
     );
+    // In the new model, merger does not set a follow-up signal;
+    // the original signal is preserved through the merger session.
+    // Since this test starts with no signal, signal should be (none) after merger.
     assert!(
-        output.contains("Signal:      go_work"),
-        "Merger follow-up signal should be GO_WORK after merge resolution"
+        output.contains("Signal:      (none)"),
+        "Merger should not set a follow-up signal (original signal preserved)"
     );
 
     // Test report ending process
-    // env.run_zbobr("task", &["update", &task_id_str_report, "--stage", "PENDING", "--signal", "go_merge"]).await;
-    // env.run_zbobr("task", &["process", &task_id_str_report, "--executor-mcp-tester-merging", &scenario_path_report]).await;
     let output = env.show_task(task_id_report).await;
     assert!(
         output.contains("Merger complete."),
         "Merger report message was not recorded in discussion"
     );
     assert!(
-        output.contains("Signal:      go_work"),
-        "Merger follow-up signal should be GO_WORK after merge resolution"
+        output.contains("Signal:      (none)"),
+        "Merger should not set a follow-up signal (original signal preserved)"
     );
 
     // The pull_work checks for report
@@ -215,8 +214,8 @@ async fn test_merging() {
         .create_task("Dummy Task", "Dummy task description", Stage::Merging)
         .await;
     let work_branch_ask = format!("zbobr_fix-{task_id_ask}-test");
-    let task_id_str_ask = task_id_ask.to_string();
     env.update_task_branches(task_id_ask, &repo_path_str, "main", &work_branch_ask).await;
+    env.prepare_workspace(task_id_ask, &repo_path, &work_branch_ask).await;
 
     // Test ask ending explicit
     env.run_stage(task_id_ask, Stage::Merging, scenario_ask.clone()).await;
@@ -226,21 +225,19 @@ async fn test_merging() {
         "Ask user message was not recorded in discussion"
     );
     assert!(
-        output.contains("Signal:      go_ask"),
-        "Merger should set signal to GO_ASK when asking user"
+        output.contains("Pause:       true"),
+        "Merger ask_user should set pause flag instead of go_ask signal"
     );
 
     // Test ask ending process
-    // env.run_zbobr("task", &["update", &task_id_str_ask, "--stage", "PENDING", "--signal", "go_merge"]).await;
-    // env.run_zbobr("task", &["process", &task_id_str_ask, "--executor-mcp-tester-merging", &scenario_path_ask]).await;
     let output = env.show_task(task_id_ask).await;
     assert!(
         output.contains("Need guidance on merge"),
         "Ask user message was not recorded in discussion"
     );
     assert!(
-        output.contains("Signal:      go_ask"),
-        "Merger should set signal to GO_ASK when asking user"
+        output.contains("Pause:       true"),
+        "Merger ask_user should set pause flag instead of go_ask signal"
     );
 }
 
@@ -320,45 +317,47 @@ async fn test_merging_with_real_conflict() {
         .unwrap();
     assert!(git_commit_main.success());
 
-    // Now create a task for reviewing
+    // In the new model, the conflict is detected by the dispatcher during pull,
+    // not by the agent's pull_work MCP tool. Create a task at MERGING stage directly
+    // and test that the merger can access the work directory with conflict markers.
     let task_id = env
-        .create_task("Task with merge conflict", "Test merging with real conflicts", Stage::Reviewing)
+        .create_task("Task with merge conflict", "Test merging with real conflicts", Stage::Merging)
         .await;
     env.update_task_branches(task_id, &repo_path_str, "main", work_branch).await;
 
-    // Set the signal to go_review
-    env.run_zbobr("task", &["update", &task_id.to_string(), "--signal", "go_review"]).await;
+    // Set up the workspace manually to simulate what the dispatcher would do:
+    // clone the repo and create a merge conflict in the work directory
+    let workspace_dir = env.workspaces_dir.join(format!("task#{task_id}"));
+    tokio::fs::create_dir_all(&workspace_dir).await.unwrap();
+    let work_dir = workspace_dir.join("repo_merging_conflict");
 
-    // Create a scenario for the reviewer that just pulls work
-    let reviewer_scenario = format!(
-        r#"name: Reviewer Conflict Trigger
-description: Trigger a merge conflict during pull_work
-timeout: 60
-stop_on_failure: true
+    // Copy the repo to the workspace
+    let cp_status = tokio::process::Command::new("cp")
+        .args(["-r", &repo_path_str, work_dir.to_str().unwrap()])
+        .status()
+        .await
+        .unwrap();
+    assert!(cp_status.success(), "Failed to copy repo to workspace");
 
-steps:
-- name: Pull work (should encounter conflicts)
-  operation:
-    type: tool_call
-    tool: {PULL_WORK}
-  store_result: pull_work_result
-  assertions:
-    - type: success
-"#,
-        PULL_WORK = zbobr_dispatcher::mcp::reviewer_tools::PULL_WORK,
-    );
+    // Checkout work branch and attempt merge to create conflict markers
+    let checkout_status = tokio::process::Command::new("git")
+        .args(["checkout", work_branch])
+        .current_dir(&work_dir)
+        .status()
+        .await
+        .unwrap();
+    assert!(checkout_status.success());
 
-    // Run the reviewing stage
-    env.run_stage(task_id, Stage::Reviewing, reviewer_scenario).await;
+    let merge_output = tokio::process::Command::new("git")
+        .args(["merge", "main", "--no-edit"])
+        .current_dir(&work_dir)
+        .output()
+        .await
+        .unwrap();
+    // Merge should fail with conflict
+    assert!(!merge_output.status.success(), "Expected merge conflict");
 
-    // Check that the reviewer encountered a conflict and set the signal to go_merge
-    let output = env.show_task(task_id).await;
-    assert!(
-        output.contains("Signal:      go_merge"),
-        "Reviewer should signal go_merge after encountering conflicts"
-    );
-
-    // Create a scenario for the merger that handles conflicts
+    // Create a scenario for the merger that accesses the conflicted repo
     let conflict_scenario = format!(
         r#"name: Merger Conflict Resolution Test
 description: Test handling of real merge conflicts
@@ -373,7 +372,7 @@ steps:
   assertions:
     - type: success
 
-- name: Pull work (should encounter conflicts)
+- name: Pull work (access conflicted repo)
   operation:
     type: tool_call
     tool: {PULL_WORK}
@@ -381,12 +380,12 @@ steps:
   assertions:
     - type: success
 
-- name: Check for merge conflicts
+- name: Report conflict resolution
   operation:
     type: tool_call
     tool: {REPORT_RESULTS}
     arguments:
-      message: "Detected merge conflicts in conflict_file.txt. Resolving by choosing work changes. PULL_WORK_RETURN_VALUE=${{pull_work_result}}"
+      message: "Detected merge conflicts in conflict_file.txt. PULL_WORK_RETURN_VALUE=${{pull_work_result}}"
   assertions:
     - type: success
 "#,
@@ -405,42 +404,9 @@ steps:
         output.contains("Detected merge conflicts"),
         "Merger should have detected and reported conflicts"
     );
+    // After merger, conflict flag should be cleared
     assert!(
-        output.contains("Signal:      go_review"),
-        "Merger should restore the original signal (go_review) after resolving conflicts"
-    );
-
-    // Verify the cloned repo has the resolved state
-    let mut pull_work_path = None;
-    for line in output.lines() {
-        if let Some(idx) = line.find("PULL_WORK_RETURN_VALUE=") {
-            let val = line[idx + "PULL_WORK_RETURN_VALUE=".len()..].trim();
-            let val = val.trim_end_matches('\'');
-            let parsed: serde_json::Value = serde_json::from_str(&val).unwrap();
-            let path_str = parsed.get("result").unwrap().as_str().unwrap();
-            pull_work_path = Some(std::path::PathBuf::from(path_str));
-            break;
-        }
-    }
-    let pull_work_path = pull_work_path.expect("PULL_WORK_RETURN_VALUE not found");
-
-    // Check that the conflict was resolved (work branch should be checked out)
-    let current_branch_output = tokio::process::Command::new("git")
-        .args(["branch", "--show-current"])
-        .current_dir(&pull_work_path)
-        .output()
-        .await
-        .unwrap();
-    let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
-        .trim()
-        .to_string();
-    assert_eq!(current_branch, work_branch, "Should be on work branch");
-
-    // Check that the conflict was detected (file should have conflict markers)
-    let content = tokio::fs::read_to_string(pull_work_path.join("conflict_file.txt")).await.unwrap();
-    assert!(
-        content.contains("<<<<<<< HEAD") || content.contains("=======") || content.contains(">>>>>>> main"),
-        "File should contain merge conflict markers. Content: {}",
-        content
+        output.contains("Conflict:    false"),
+        "Merger should clear the conflict flag"
     );
 }

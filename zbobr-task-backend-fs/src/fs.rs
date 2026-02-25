@@ -1,10 +1,10 @@
-use std::{collections::{HashMap, HashSet}, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use zbobr_dispatcher::{ChecklistItem, Model, Parameter, Stage, Task, Tool, task::Flavor, backend::TaskBackend};
+use zbobr_dispatcher::{ChecklistItem, Model, Parameter, Stage, Task, Tool, backend::TaskBackend};
 
 use crate::config::ZbobrTaskBackendFsConfig;
 
@@ -19,10 +19,12 @@ struct TaskFile {
     tool: Option<String>,
     model: Option<String>,
     parameters: HashMap<String, String>,
-    done: bool,
+    #[serde(default)]
+    conflict: bool,
+    #[serde(default)]
+    pause: bool,
     checklist: Vec<ChecklistItem>,
     signal: Option<String>,
-    flavors: Vec<String>,
     closed: bool,
 }
 
@@ -36,12 +38,6 @@ impl TaskFile {
         let model = self.model.as_ref().map(|s| s.parse()).transpose()?;
 
         let signal = self.signal.as_ref().map(|s| s.parse()).transpose()?;
-
-        let flavors: HashSet<Flavor> = self
-            .flavors
-            .iter()
-            .filter_map(|s| s.parse().ok())
-            .collect();
 
         let parameters: Result<HashMap<Parameter, String>, String> = self
             .parameters
@@ -69,10 +65,10 @@ impl TaskFile {
             tool,
             model,
             parameters,
-            done: self.done,
             checklist: self.checklist.clone(),
             signal,
-            flavors,
+            conflict: self.conflict,
+            pause: self.pause,
             etag: None,
         })
     }
@@ -91,10 +87,10 @@ impl TaskFile {
                 .iter()
                 .map(|(k, v)| (k.name().to_string(), v.clone()))
                 .collect(),
-            done: task.done,
+            conflict: task.conflict,
+            pause: task.pause,
             checklist: task.checklist.clone(),
             signal: task.signal.map(|s| s.name().to_string()),
-            flavors: task.flavors.iter().map(|f| f.name().to_string()).collect(),
             closed,
         }
     }
@@ -280,10 +276,10 @@ impl TaskBackend for FilesystemTaskBackend {
             tool,
             model,
             parameters,
-            done: false,
             checklist: vec![],
             signal: None,
-            flavors: HashSet::new(),
+            conflict: false,
+            pause: false,
             etag: None,
         };
 

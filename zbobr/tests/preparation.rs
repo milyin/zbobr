@@ -114,11 +114,11 @@ async fn test_preparation() {
 
     let repo_path = env.create_git_repo("repo_preparation").await;
     let task_id = env
-        .create_task("Dummy Task", "Dummy task description", Stage::Preparation)
+        .create_task("Dummy Task", "Dummy task description", Stage::Preparing)
         .await;
 
     // run the preparator stage with the comprehensive scenario defined above
-    env.run_stage(task_id, Stage::Preparation, preparation_scenario(&repo_path.to_string_lossy()))
+    env.run_stage(task_id, Stage::Preparing, preparation_scenario(&repo_path.to_string_lossy()))
         .await;
 
     let output = env.show_task(task_id).await;
