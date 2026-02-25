@@ -35,7 +35,6 @@ async fn create_read_modify_task() {
     assert_eq!(task.title, "Test task title");
     assert_eq!(task.description, "Test task description");
     assert_eq!(task.plan, "");
-    assert!(task.discussion.is_empty());
     assert_eq!(task.stage, Stage::Pending);
     assert_eq!(task.tool, Some(Tool::Claude));
     assert_eq!(task.model, Some(Model::ClaudeOpus4_6));

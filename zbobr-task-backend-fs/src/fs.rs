@@ -60,7 +60,6 @@ impl TaskFile {
             title: self.title.clone(),
             description: self.description.clone(),
             plan: self.plan.clone(),
-            discussion: vec![], // Will be loaded separately
             stage,
             tool,
             model,
@@ -247,12 +246,7 @@ impl FilesystemTaskBackend {
 impl TaskBackend for FilesystemTaskBackend {
     async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
         let task_file = self.read_task_file(id).await?;
-        let mut task = task_file.to_task()?;
-
-        // Load comments
-        task.discussion = self.read_comments(id).await?;
-
-        Ok(task)
+        task_file.to_task()
     }
 
     async fn create_task(
@@ -271,7 +265,6 @@ impl TaskBackend for FilesystemTaskBackend {
             title: title.to_string(),
             description: description.to_string(),
             plan: String::new(),
-            discussion: vec![],
             stage,
             tool,
             model,

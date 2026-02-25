@@ -413,7 +413,7 @@ fn build_full_prompt(user_context: &str, role: Role) -> String {
 }
 
 /// Print a task to stdout in a human-readable format.
-fn print_task(task: &zbobr_dispatcher::Task) {
+fn print_task(task: &zbobr_dispatcher::Task, discussion: &[String]) {
     println!("ID:          {}", task.id);
     println!("Title:       {}", task.title);
     println!("Stage:       {}", task.stage);
@@ -457,9 +457,9 @@ fn print_task(task: &zbobr_dispatcher::Task) {
             println!("  {} {}", mark, item.text);
         }
     }
-    if !task.discussion.is_empty() {
-        println!("Discussion ({} comment(s)):", task.discussion.len());
-        for (i, msg) in task.discussion.iter().enumerate() {
+    if !discussion.is_empty() {
+        println!("Discussion ({} comment(s)):", discussion.len());
+        for (i, msg) in discussion.iter().enumerate() {
             println!("  [{}] {}", i + 1, msg);
         }
     }
@@ -765,14 +765,15 @@ async fn main() -> anyhow::Result<()> {
                     println!("No tasks found");
                 } else {
                     for task in &tasks {
-                        print_task(task);
+                        print_task(task, &[]);
                         println!("---");
                     }
                 }
             }
             TaskSubcommand::Show { id } => {
                 let task = zbobr.get_task(id).await?;
-                print_task(&task);
+                let discussion = zbobr.get_task_comments(id).await?;
+                print_task(&task, &discussion);
             }
             TaskSubcommand::Update {
                 id,

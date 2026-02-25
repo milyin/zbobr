@@ -581,7 +581,6 @@ impl GitHubTaskBackend {
             title: issue.title,
             description,
             plan,
-            discussion: vec![],
             stage,
             tool,
             model,
