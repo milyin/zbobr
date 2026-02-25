@@ -18,6 +18,7 @@ use crate::task::Tool;
 )]
 pub enum BackendType {
     #[serde(rename = "github")]
+    #[clap(alias = "github")]
     #[default]
     GitHub,
     #[serde(rename = "fs")]
