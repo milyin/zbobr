@@ -40,6 +40,7 @@ async fn get_env() -> Arc<IntegrationTestEnv> {
             },
             RepoBackendArgs::Filesystem,
             cfg.dispatcher.agent_token,
+            None,
         )
         .await
         .expect("failed to initialize GitHub/FS integration environment; check credentials")

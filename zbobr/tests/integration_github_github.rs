@@ -30,6 +30,7 @@ async fn get_env() -> Arc<IntegrationTestEnv> {
         let repo = cfg.repo
             .expect("[repo.github] section missing in zbobr_github_test.toml");
 
+        let target_repo = Some(tasks.github.task_repo.clone());
         IntegrationTestEnv::init(
             "github_github",
             TaskBackendArgs::GitHub {
@@ -41,6 +42,7 @@ async fn get_env() -> Arc<IntegrationTestEnv> {
                 repo_token: repo.github.token,
             },
             cfg.dispatcher.agent_token,
+            target_repo,
         )
         .await
         .expect("failed to initialize full GitHub/GitHub integration environment; check credentials")

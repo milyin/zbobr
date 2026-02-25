@@ -28,6 +28,7 @@ async fn get_env() -> Option<Arc<IntegrationTestEnv>> {
             TaskBackendArgs::Filesystem { tasks_dir },
             RepoBackendArgs::Filesystem,
             "dummy-not-used".to_string(),
+            None,
         )
         .await
     })

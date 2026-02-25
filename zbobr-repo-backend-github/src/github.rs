@@ -255,30 +255,37 @@ impl RepoBackend for GitHubRepoBackend {
             }
         }
 
-        // Ensure fork exists
-        let fork_repo = self.ensure_fork(target_repo).await?;
+        // In same-org mode (fork_owner == target repo owner), work directly on
+        // the repo without forking.  In cross-org mode, ensure the fork exists
+        // and add a "fork" remote pointing to it.
+        let same_org = repo.owner().eq_ignore_ascii_case(&self.backend_config.fork_owner);
+        if same_org {
+            tracing::info!("Same-org mode: skipping fork setup for {target_repo}");
+        } else {
+            let fork_repo = self.ensure_fork(target_repo).await?;
 
-        // Add fork remote if not present
-        let remote_check = tokio::process::Command::new("git")
-            .args(["remote", "get-url", "fork"])
-            .current_dir(&work_dir)
-            .output()
-            .await?;
-
-        if !remote_check.status.success() {
-            tracing::info!("Adding fork remote for {fork_repo}");
-            let status = tokio::process::Command::new("git")
-                .args([
-                    "remote",
-                    "add",
-                    "fork",
-                    &format!("https://github.com/{fork_repo}.git"),
-                ])
+            // Add fork remote if not present
+            let remote_check = tokio::process::Command::new("git")
+                .args(["remote", "get-url", "fork"])
                 .current_dir(&work_dir)
-                .status()
+                .output()
                 .await?;
-            if !status.success() {
-                anyhow::bail!("Failed to add fork remote");
+
+            if !remote_check.status.success() {
+                tracing::info!("Adding fork remote for {fork_repo}");
+                let status = tokio::process::Command::new("git")
+                    .args([
+                        "remote",
+                        "add",
+                        "fork",
+                        &format!("https://github.com/{fork_repo}.git"),
+                    ])
+                    .current_dir(&work_dir)
+                    .status()
+                    .await?;
+                if !status.success() {
+                    anyhow::bail!("Failed to add fork remote");
+                }
             }
         }
 
@@ -433,20 +440,37 @@ impl RepoBackend for GitHubRepoBackend {
             }
         }
 
-        tracing::info!("Pushing {branch_name} to fork");
+        // In same-org mode there is no "fork" remote — push directly to origin
+        // and use a simple branch name for the PR head.  In cross-org mode push
+        // to the fork remote and prefix the head with the fork owner.
+        let has_fork_remote = tokio::process::Command::new("git")
+            .args(["remote", "get-url", "fork"])
+            .current_dir(&work_dir)
+            .output()
+            .await?
+            .status
+            .success();
+
+        let (push_remote, pr_head) = if has_fork_remote {
+            ("fork", format!("{}:{branch_name}", self.backend_config.fork_owner))
+        } else {
+            ("origin", branch_name.clone())
+        };
+
+        tracing::info!("Pushing {branch_name} to {push_remote}");
         let status = tokio::process::Command::new("git")
-            .args(["push", "fork", "HEAD"])
+            .args(["push", push_remote, "HEAD"])
             .current_dir(&work_dir)
             .status()
             .await?;
         if !status.success() {
-            anyhow::bail!("Failed to push to fork");
+            anyhow::bail!("Failed to push to {push_remote}");
         }
 
         // Create PR
         let pr_payload = serde_json::json!({
             "title": pr_title,
-            "head": format!("{}:{branch_name}", self.backend_config.fork_owner),
+            "head": pr_head,
             "body": pr_body,
         });
 
@@ -560,6 +584,13 @@ impl RepoBackend for GitHubRepoBackend {
 
     async fn sync_fork(&self, target_repo: &str, branch: &str) -> anyhow::Result<()> {
         let repo = parse_github_repo(target_repo)?;
+
+        // In same-org mode there is no separate fork to sync.
+        if repo.owner().eq_ignore_ascii_case(&self.backend_config.fork_owner) {
+            tracing::info!("Same-org mode: skipping sync_fork for {target_repo}");
+            return Ok(());
+        }
+
         let fork_repo = self.ensure_fork(target_repo).await?;
 
         let endpoint = format!("/repos/{}/merge-upstream", fork_repo);

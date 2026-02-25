@@ -175,6 +175,11 @@ enum TaskSubcommand {
         /// Task ID
         id: u64,
     },
+    /// Clone the task's destination repository into its workspace using the configured repo backend
+    Clone {
+        /// Task ID
+        task: u64,
+    },
     /// Run preparator role for a specific task (sets destination repository and branches)
     Prepare {
         /// Task ID
@@ -868,6 +873,21 @@ async fn main() -> anyhow::Result<()> {
             TaskSubcommand::Delete { id } => {
                 zbobr.close_task(id).await?;
                 println!("Deleted task #{}", id);
+            }
+            TaskSubcommand::Clone { task } => {
+                let t = zbobr.get_task(task).await?;
+                let dest_repo = t
+                    .parameters
+                    .get(&Parameter::DestinationRepository)
+                    .ok_or_else(|| anyhow::anyhow!("Task #{task} has no destination repository"))?
+                    .clone();
+                let dest_branch = t
+                    .parameters
+                    .get(&Parameter::DestinationBranch)
+                    .cloned()
+                    .unwrap_or_else(|| "main".to_string());
+                let path = zbobr.clone_and_setup(&dest_repo, &dest_branch, task).await?;
+                println!("Cloned to {}", path.display());
             }
             TaskSubcommand::Prepare {
                 task,

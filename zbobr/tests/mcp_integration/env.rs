@@ -43,6 +43,9 @@ pub struct IntegrationTestEnv {
     task_backend: TaskBackendArgs,
     repo_backend: RepoBackendArgs,
     agent_token: String,
+    /// Optional GitHub repository slug (e.g. `"zbobr/test_tasks"`) used by
+    /// repo-backend tests that need to clone a real remote repo.
+    pub target_repo: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +63,7 @@ impl IntegrationTestEnv {
         task_backend: TaskBackendArgs,
         repo_backend: RepoBackendArgs,
         agent_token: String,
+        target_repo: Option<String>,
     ) -> Option<Arc<Self>> {
         if !check_mcp_tester().await {
             return None;
@@ -77,6 +81,7 @@ impl IntegrationTestEnv {
             task_backend,
             repo_backend,
             agent_token,
+            target_repo,
         });
 
         // For GitHub backends, setup can fail if credentials are invalid.
@@ -280,6 +285,62 @@ impl IntegrationTestEnv {
                 .expect("failed to run git checkout -b")
                 .success();
             assert!(ok, "[{}] failed to create branch '{work_branch}'", self.name);
+        }
+
+        work_dir
+    }
+
+    /// Clone `repo_slug` into a per-task workspace directory via the configured
+    /// repo backend (`zbobr task clone`), then check out `work_branch`
+    /// (creating it if absent).  Returns the clone path.
+    ///
+    /// Unlike `prepare_workspace`, this method exercises the real repo backend
+    /// (e.g. `clone_and_setup` for the GitHub backend) rather than calling
+    /// `git clone` directly.  The task must already have its `dest_repo` and
+    /// `dest_branch` parameters set before calling this.
+    pub async fn prepare_workspace_via_repo_backend(
+        &self,
+        task_id: u64,
+        repo_slug: &str,
+        work_branch: &str,
+    ) -> PathBuf {
+        self.run_zbobr("task", &["clone", &task_id.to_string()])
+            .await;
+
+        let repo_name = repo_slug.rsplit('/').next().unwrap_or(repo_slug);
+        let work_dir = self
+            .workspaces_dir
+            .join(format!("task#{task_id}"))
+            .join(repo_name);
+
+        assert!(
+            work_dir.exists(),
+            "[{}] Workspace directory missing after clone: {}",
+            self.name,
+            work_dir.display()
+        );
+
+        // Create/checkout the work branch
+        let checkout = tokio::process::Command::new("git")
+            .args(["checkout", work_branch])
+            .current_dir(&work_dir)
+            .output()
+            .await
+            .expect("failed to run git checkout");
+
+        if !checkout.status.success() {
+            let ok = tokio::process::Command::new("git")
+                .args(["checkout", "-b", work_branch])
+                .current_dir(&work_dir)
+                .status()
+                .await
+                .expect("failed to run git checkout -b")
+                .success();
+            assert!(
+                ok,
+                "[{}] failed to create branch '{}' in workspace",
+                self.name, work_branch
+            );
         }
 
         work_dir
