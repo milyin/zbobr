@@ -14,8 +14,3 @@ token = "ghp_your_task_github_token_here"
 fork_owner = "owner"
 # GitHub token with read/write access to the fork organization.
 token = "ghp_your_repo_github_token_here"
-
-[dispatcher]
-# GitHub token passed as GH_TOKEN to agent processes (optional).
-# If omitted, a dummy value is used (fine when mcp-tester is the executor).
-# agent_token = "ghp_your_agent_github_token_here"
