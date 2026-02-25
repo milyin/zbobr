@@ -14,6 +14,7 @@ use mcp_integration::github_config::GitHubTestConfig;
 use mcp_integration::test_helpers;
 
 static ENV: OnceCell<Option<Arc<IntegrationTestEnv>>> = OnceCell::const_new();
+static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 async fn get_env() -> Option<Arc<IntegrationTestEnv>> {
     ENV.get_or_init(|| async {
@@ -41,36 +42,42 @@ async fn get_env() -> Option<Arc<IntegrationTestEnv>> {
 
 #[tokio::test]
 async fn test_github_fs_preparation() {
+    let _guard = TEST_LOCK.lock().await;
     let Some(env) = get_env().await else { return };
     test_helpers::run_preparation(&env).await;
 }
 
 #[tokio::test]
 async fn test_github_fs_planning() {
+    let _guard = TEST_LOCK.lock().await;
     let Some(env) = get_env().await else { return };
     test_helpers::run_planning(&env).await;
 }
 
 #[tokio::test]
 async fn test_github_fs_working() {
+    let _guard = TEST_LOCK.lock().await;
     let Some(env) = get_env().await else { return };
     test_helpers::run_working(&env).await;
 }
 
 #[tokio::test]
 async fn test_github_fs_reviewing() {
+    let _guard = TEST_LOCK.lock().await;
     let Some(env) = get_env().await else { return };
     test_helpers::run_reviewing(&env).await;
 }
 
 #[tokio::test]
 async fn test_github_fs_merging() {
+    let _guard = TEST_LOCK.lock().await;
     let Some(env) = get_env().await else { return };
     test_helpers::run_merging(&env).await;
 }
 
 #[tokio::test]
 async fn test_github_fs_merging_with_real_conflict() {
+    let _guard = TEST_LOCK.lock().await;
     let Some(env) = get_env().await else { return };
     test_helpers::run_merging_with_real_conflict(&env).await;
 }
