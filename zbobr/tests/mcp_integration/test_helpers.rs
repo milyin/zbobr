@@ -64,6 +64,7 @@ pub async fn run_planning(env: &IntegrationTestEnv) {
         "[{}] PR URL should be stored after planning stage:\n{output}",
         env.name()
     );
+    assert_pr_url_points_to_branch(env, &output, &work_branch).await;
 
     assert_workspace_ok(env, task_id, &repo_name, &work_branch).await;
 }
@@ -110,6 +111,7 @@ pub async fn run_working(env: &IntegrationTestEnv) {
         "[{}] PR URL should be stored after working stage:\n{output}",
         env.name()
     );
+    assert_pr_url_points_to_branch(env, &output, &work_branch).await;
 
     assert_workspace_ok(env, task_id, &repo_name, &work_branch).await;
 }
@@ -156,6 +158,7 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
         "[{}] PR URL should be stored after reviewing stage:\n{output}",
         env.name()
     );
+    assert_pr_url_points_to_branch(env, &output, &work_branch).await;
 
     assert_workspace_ok(env, task_id, &repo_name, &work_branch).await;
 }
@@ -215,6 +218,8 @@ pub async fn run_reviewing_approval(env: &IntegrationTestEnv) {
         "[{}] PR URL should be stored after reviewer approval:\n{output}",
         env.name()
     );
+    assert_pr_url_points_to_branch(env, &output, &work_branch).await;
+    assert_pr_has_commits(env, &output, "main").await;
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +284,8 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
         "[{}] PR URL should be stored in task parameters after merger:\n{output}",
         env.name()
     );
+    assert_pr_url_points_to_branch(env, &output, &branch_report).await;
+    assert_pr_has_commits(env, &output, "main").await;
 
     assert_workspace_ok(env, task_report, &repo_name, &branch_report).await;
 
@@ -514,6 +521,82 @@ pub async fn run_conflict_detection(env: &IntegrationTestEnv) {
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+/// Extract the `pr_url` value from `zbobr task show` output.
+fn extract_pr_url(output: &str) -> Option<String> {
+    output
+        .lines()
+        .find(|l| l.trim_start().starts_with("pr_url:"))
+        .and_then(|l| l.splitn(2, ':').nth(1))
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// Validate that the PR reference stored in the task output is correct:
+/// - The path exists as a git repository.
+/// - The currently checked-out branch matches `expected_branch`.
+///
+/// For the FS backend, `pr_url` is the work directory path, so these checks
+/// exercise the full chain: workspace setup → ensure_branch_and_pr → stored URL.
+async fn assert_pr_url_points_to_branch(env: &IntegrationTestEnv, output: &str, expected_branch: &str) {
+    let pr_url = extract_pr_url(output).unwrap_or_else(|| {
+        panic!(
+            "[{}] pr_url not found in task output:\n{output}",
+            env.name()
+        )
+    });
+
+    // For the GitHub backend the pr_url is an https:// URL — skip git checks.
+    if pr_url.starts_with("http") {
+        return;
+    }
+
+    let pr_path = PathBuf::from(&pr_url);
+    assert!(
+        pr_path.join(".git").exists(),
+        "[{}] pr_url '{}' is not a git repository",
+        env.name(),
+        pr_url
+    );
+
+    let current = git_output(&pr_path, &["branch", "--show-current"]).await;
+    assert_eq!(
+        current.trim(),
+        expected_branch,
+        "[{}] pr_url '{}' is not on the expected branch",
+        env.name(),
+        pr_url
+    );
+}
+
+/// Verify the work branch in the pr_url directory has at least one commit
+/// ahead of `origin/main` (i.e., real work was pushed into the PR).
+async fn assert_pr_has_commits(env: &IntegrationTestEnv, output: &str, dest_branch: &str) {
+    let pr_url = match extract_pr_url(output) {
+        Some(u) => u,
+        None => return, // already asserted elsewhere
+    };
+
+    // Skip for GitHub backend (pr_url is an https:// URL).
+    if pr_url.starts_with("http") {
+        return;
+    }
+
+    let pr_path = PathBuf::from(&pr_url);
+    let log = git_output(
+        &pr_path,
+        &["log", &format!("origin/{}..HEAD", dest_branch), "--oneline"],
+    )
+    .await;
+
+    assert!(
+        !log.trim().is_empty(),
+        "[{}] pr_url '{}' work branch has no commits ahead of origin/{} — expected at least one",
+        env.name(),
+        pr_url,
+        dest_branch
+    );
+}
 
 async fn write_and_commit(repo: &PathBuf, file: &str, content: &str, msg: &str) {
     tokio::fs::write(repo.join(file), content).await.unwrap();
