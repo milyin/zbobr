@@ -221,7 +221,27 @@ impl RepoBackend for GitHubRepoBackend {
                 .status()
                 .await?;
             if !status.success() {
-                anyhow::bail!("Failed to clone {target_repo}");
+                // Branch may not exist on remote yet — clone the default branch instead.
+                tracing::info!(
+                    "Branch {branch} not found on remote, cloning default branch of {target_repo}"
+                );
+                let fallback_status = tokio::process::Command::new("gh")
+                    .args([
+                        "repo",
+                        "clone",
+                        target_repo,
+                        work_dir.to_str().unwrap(),
+                        "--",
+                        "--depth",
+                        "1",
+                    ])
+                    .env("GH_TOKEN", &self.backend_config.token)
+                    .env("GITHUB_TOKEN", &self.backend_config.token)
+                    .status()
+                    .await?;
+                if !fallback_status.success() {
+                    anyhow::bail!("Failed to clone {target_repo}");
+                }
             }
         } else {
             tracing::info!("Updating {target_repo} in {}", work_dir.display());
@@ -251,7 +271,16 @@ impl RepoBackend for GitHubRepoBackend {
                 .status()
                 .await?;
             if !checkout_remote_status.success() {
-                anyhow::bail!("Failed to checkout branch {branch}");
+                // Branch doesn't exist on remote either — create it fresh from current HEAD.
+                tracing::info!("Creating new local branch {branch}");
+                let create_status = tokio::process::Command::new("git")
+                    .args(["checkout", "-b", branch])
+                    .current_dir(&work_dir)
+                    .status()
+                    .await?;
+                if !create_status.success() {
+                    anyhow::bail!("Failed to checkout branch {branch}");
+                }
             }
         }
 
