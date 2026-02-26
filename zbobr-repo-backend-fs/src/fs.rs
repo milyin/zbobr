@@ -246,6 +246,7 @@ impl RepoBackend for FilesystemRepoBackend {
         &self,
         target_repo: &str,
         workspace_path: &Path,
+        destination_branch: &str,
         pr_title: &str,
         pr_body: &str,
     ) -> anyhow::Result<String> {
@@ -269,17 +270,12 @@ impl RepoBackend for FilesystemRepoBackend {
             anyhow::bail!("Failed to push to origin");
         }
 
-        // Determine the base branch (default branch of origin)
-        let base_branch = Self::default_branch(&work_dir)
-            .await
-            .unwrap_or_else(|_| "main".to_string());
-
         // Create PR YAML file
         self.write_pr(
             &repo_name,
             target_repo,
             &branch_name,
-            &base_branch,
+            destination_branch,
             pr_title,
             pr_body,
         )

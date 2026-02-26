@@ -224,12 +224,19 @@ impl Zbobr {
         &self,
         target_repo: &str,
         task_id: u64,
+        destination_branch: &str,
         pr_title: &str,
         pr_body: &str,
     ) -> anyhow::Result<String> {
         let workspace_path = self.config.workspaces.join(format!("task#{task_id}"));
         self.repo_backend
-            .push_and_create_pr(target_repo, &workspace_path, pr_title, pr_body)
+            .push_and_create_pr(
+                target_repo,
+                &workspace_path,
+                destination_branch,
+                pr_title,
+                pr_body,
+            )
             .await
     }
 

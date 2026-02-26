@@ -187,12 +187,14 @@ pub trait RepoBackend: Send + Sync {
     // -- PR operations --
 
     /// Push the current branch to the fork remote and create a PR.
+    /// `destination_branch` is the base branch for the PR (e.g. "main").
     /// `pr_title` and `pr_body` are provided by the caller (decoupled from task storage).
     /// `workspace_path` is the directory containing the cloned repository.
     async fn push_and_create_pr(
         &self,
         target_repo: &str,
         workspace_path: &std::path::Path,
+        destination_branch: &str,
         pr_title: &str,
         pr_body: &str,
     ) -> anyhow::Result<String>;

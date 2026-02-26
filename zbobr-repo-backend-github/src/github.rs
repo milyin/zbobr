@@ -374,6 +374,7 @@ impl RepoBackend for GitHubRepoBackend {
         &self,
         target_repo: &str,
         workspace_path: &std::path::Path,
+        destination_branch: &str,
         pr_title: &str,
         pr_body: &str,
     ) -> anyhow::Result<String> {
@@ -471,6 +472,7 @@ impl RepoBackend for GitHubRepoBackend {
         let pr_payload = serde_json::json!({
             "title": pr_title,
             "head": pr_head,
+            "base": destination_branch,
             "body": pr_body,
         });
 

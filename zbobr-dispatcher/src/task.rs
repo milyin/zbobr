@@ -719,9 +719,9 @@ impl RoleSession {
 
     /// Push the work branch to the remote and create a PR against the destination branch.
     ///
-    /// Reads `DestinationRepository` from task parameters, builds PR metadata from the
-    /// task title, delegates to the repo backend, then stores the resulting URL in
-    /// `Parameter::PrUrl`.
+    /// Reads `DestinationRepository` and `DestinationBranch` from task parameters, builds
+    /// PR metadata from the task title, delegates to the repo backend, then stores the
+    /// resulting URL in `Parameter::PrUrl`.
     pub async fn create_pr(&self, pr_body: &str) -> anyhow::Result<String> {
         let task = self.get_task().await?;
         let dest_repo = task
@@ -729,11 +729,16 @@ impl RoleSession {
             .get(&Parameter::DestinationRepository)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("destination_repository parameter is not set"))?;
+        let dest_branch = task
+            .parameters
+            .get(&Parameter::DestinationBranch)
+            .cloned()
+            .unwrap_or_else(|| "main".to_string());
         let pr_title = format!("Fix #{}: {}", self.task_id, task.title);
 
         let pr_url = self
             .zbobr
-            .push_and_create_pr(&dest_repo, self.task_id, &pr_title, pr_body)
+            .push_and_create_pr(&dest_repo, self.task_id, &dest_branch, &pr_title, pr_body)
             .await?;
 
         self.set_parameter(Parameter::PrUrl, Some(pr_url.clone()))
