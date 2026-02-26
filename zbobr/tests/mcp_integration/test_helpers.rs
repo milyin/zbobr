@@ -577,8 +577,9 @@ async fn assert_pr_has_commits(env: &IntegrationTestEnv, output: &str, dest_bran
         None => return, // already asserted elsewhere
     };
 
-    // Skip for GitHub backend (pr_url is an https:// URL).
     if pr_url.starts_with("http") {
+        // GitHub backend: verify the PR via the API.
+        assert_github_pr_has_commits(env, &pr_url, dest_branch).await;
         return;
     }
 
@@ -595,6 +596,52 @@ async fn assert_pr_has_commits(env: &IntegrationTestEnv, output: &str, dest_bran
         env.name(),
         pr_url,
         dest_branch
+    );
+}
+
+/// Parse a GitHub PR URL (`https://github.com/{owner}/{repo}/pull/{number}`)
+/// and use `gh api` to verify the PR exists, has at least one commit, and
+/// targets `dest_branch`.
+async fn assert_github_pr_has_commits(env: &IntegrationTestEnv, pr_url: &str, dest_branch: &str) {
+    // Split: ["https:", "", "github.com", owner, repo, "pull", number, ...]
+    let parts: Vec<&str> = pr_url.trim_end_matches('/').splitn(8, '/').collect();
+    assert!(
+        parts.len() >= 7 && parts[5] == "pull",
+        "[{}] Cannot parse GitHub PR URL: {pr_url}",
+        env.name()
+    );
+    let (owner, repo, pr_number) = (parts[3], parts[4], parts[6]);
+
+    let api_path = format!("repos/{owner}/{repo}/pulls/{pr_number}");
+    let out = tokio::process::Command::new("gh")
+        .args(["api", &api_path])
+        .output()
+        .await
+        .unwrap_or_else(|e| panic!("[{}] failed to run `gh api`: {e}", env.name()));
+
+    assert!(
+        out.status.success(),
+        "[{}] `gh api {api_path}` failed:\n{}",
+        env.name(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|e| panic!("[{}] failed to parse gh api response: {e}", env.name()));
+
+    let commits = json["commits"].as_u64().unwrap_or(0);
+    assert!(
+        commits > 0,
+        "[{}] GitHub PR {pr_url} has 0 commits — expected at least one",
+        env.name()
+    );
+
+    let base_ref = json["base"]["ref"].as_str().unwrap_or("unknown");
+    assert_eq!(
+        base_ref, dest_branch,
+        "[{}] GitHub PR {pr_url} targets branch '{}', expected '{dest_branch}'",
+        env.name(),
+        base_ref
     );
 }
 
