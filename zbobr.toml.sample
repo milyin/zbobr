@@ -27,13 +27,15 @@ git_user_email = "your.email@example.com"
 # agent_github_token = ""
 
 
-[dispatcher.prompts]
-# Base directory for additional prompt files (appended after built-in instructions)
-# path = "./prompts"
-# Additional context files for planner (relative to path above, or absolute)
-# planner = ["planner.md", "common.md"]
-# Additional context files for worker
-# worker = ["worker.md", "common.md"]
+# Base directory for resolving relative prompt file paths
+# prompts_path = "./prompts"
+
+# Additional context files per agent role (relative to prompts_path, or absolute)
+# preparator_prompts = ["preparator.md", "common.md"]
+# planner_prompts = ["planner.md", "common.md"]
+# worker_prompts = ["worker.md", "common.md"]
+# reviewer_prompts = ["reviewer.md", "common.md"]
+# merger_prompts = ["merger.md", "common.md"]
 
 [tasks.github]
 # Task project repository ("owner/repo") - where tasks are tracked
