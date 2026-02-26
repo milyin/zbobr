@@ -59,6 +59,11 @@ pub async fn run_planning(env: &IntegrationTestEnv) {
         "[{}] Planner should emit go_work after posting plan",
         env.name()
     );
+    assert!(
+        output.contains("pr_url:"),
+        "[{}] PR URL should be stored after planning stage:\n{output}",
+        env.name()
+    );
 
     assert_workspace_ok(env, task_id, &repo_name, &work_branch).await;
 }
@@ -100,6 +105,11 @@ pub async fn run_working(env: &IntegrationTestEnv) {
         "[{}] Expected checked checklist item not found",
         env.name()
     );
+    assert!(
+        output.contains("pr_url:"),
+        "[{}] PR URL should be stored after working stage:\n{output}",
+        env.name()
+    );
 
     assert_workspace_ok(env, task_id, &repo_name, &work_branch).await;
 }
@@ -139,6 +149,11 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
     assert!(
         output.contains("[ ] Fix review issue: adjust edge-case handling"),
         "[{}] Expected unchecked review item not found",
+        env.name()
+    );
+    assert!(
+        output.contains("pr_url:"),
+        "[{}] PR URL should be stored after reviewing stage:\n{output}",
         env.name()
     );
 
