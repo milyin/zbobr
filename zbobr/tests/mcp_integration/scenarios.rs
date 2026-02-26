@@ -407,6 +407,46 @@ steps:
     )
 }
 
+/// Scenario where the reviewer finds no issues (empty checklist → DONE + PR creation).
+pub fn reviewing_approval_scenario() -> String {
+    use zbobr_dispatcher::mcp::reviewer_tools::{GET_DESCRIPTION, GET_PLAN, REPORT_RESULTS};
+
+    format!(
+        r#"name: Reviewer Approval Test
+description: Reviewer finds no issues — triggers DONE and PR creation
+timeout: 60
+stop_on_failure: true
+
+steps:
+- name: Get task description
+  operation:
+    type: tool_call
+    tool: {GET_DESCRIPTION}
+  assertions:
+    - type: success
+    - type: contains
+      path: result
+      value: "Dummy task description"
+
+- name: Get plan
+  operation:
+    type: tool_call
+    tool: {GET_PLAN}
+  assertions:
+    - type: success
+
+- name: Report results and finish (no checklist items inserted)
+  operation:
+    type: tool_call
+    tool: {REPORT_RESULTS}
+    arguments:
+      message: "Reviewer approved. No issues found."
+  assertions:
+    - type: success
+"#,
+    )
+}
+
 pub fn merging_scenario(ending: &str) -> String {
     use zbobr_dispatcher::mcp::merger_tools::{
         ASK_USER, GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH,

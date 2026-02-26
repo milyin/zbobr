@@ -88,3 +88,10 @@ async fn test_fs_fs_conflict_detection() {
     let Some(env) = get_env().await else { return };
     test_helpers::run_conflict_detection(&env).await;
 }
+
+#[tokio::test]
+async fn test_fs_fs_reviewing_approval() {
+    let _guard = TEST_LOCK.lock().await;
+    let Some(env) = get_env().await else { return };
+    test_helpers::run_reviewing_approval(&env).await;
+}

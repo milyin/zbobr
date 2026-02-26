@@ -114,6 +114,14 @@ async fn test_fs_github_conflict_detection() {
     test_helpers::run_conflict_detection(&env).await;
 }
 
+#[tokio::test]
+#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
+async fn test_fs_github_reviewing_approval() {
+    let _guard = TEST_LOCK.lock().await;
+    let env = get_env().await;
+    test_helpers::run_reviewing_approval(&env).await;
+}
+
 // ---------------------------------------------------------------------------
 // GitHub repo backend tests — exercise clone_and_setup() with a real GitHub
 // repository.  These require env.target_repo to be set (populated from

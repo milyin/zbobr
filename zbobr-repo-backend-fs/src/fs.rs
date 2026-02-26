@@ -252,18 +252,7 @@ impl RepoBackend for FilesystemRepoBackend {
 
         let branch_name = Self::current_branch(&work_dir).await?;
 
-        // Push to origin
-        tracing::info!("Pushing {} to origin", branch_name);
-        let status = tokio::process::Command::new("git")
-            .args(["push", "origin", "HEAD"])
-            .current_dir(&work_dir)
-            .status()
-            .await?;
-        if !status.success() {
-            anyhow::bail!("Failed to push to origin");
-        }
-
-        // Create PR YAML file
+        // No git push — fs backend simulates PR creation locally via YAML file
         self.write_pr(
             &repo_name,
             target_repo,

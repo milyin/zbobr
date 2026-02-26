@@ -146,6 +146,63 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
 }
 
 // ---------------------------------------------------------------------------
+// Reviewing — approval path (no issues → DONE + PR)
+// ---------------------------------------------------------------------------
+
+pub async fn run_reviewing_approval(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_reviewing_approval").await;
+    let task_id = env
+        .create_task("Dummy Task", "Dummy task description", Stage::Reviewing)
+        .await;
+
+    let dest_repo = env.target_repo
+        .as_deref()
+        .map(|r| format!("https://github.com/{r}"))
+        .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
+    let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo).to_string();
+    let work_branch = format!("zbobr_fix-{task_id}-test");
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch).await;
+
+    if let Some(target) = env.target_repo.as_deref() {
+        env.prepare_workspace_via_repo_backend(task_id, target, &work_branch).await;
+    } else {
+        env.prepare_workspace(task_id, &repo_path, &work_branch).await;
+    }
+
+    // Add a placeholder commit so the work branch differs from main (PR requires changes).
+    let work_dir = env
+        .workspaces_dir
+        .join(format!("task#{task_id}"))
+        .join(&repo_name);
+    write_and_commit(
+        &work_dir,
+        "ZBOBR_PLACEHOLDER.md",
+        &format!("placeholder for task #{task_id}\n"),
+        "chore: add placeholder for PR",
+    )
+    .await;
+
+    env.run_stage(
+        task_id,
+        Stage::Reviewing,
+        scenarios::reviewing_approval_scenario(),
+    )
+    .await;
+
+    let output = env.show_task(task_id).await;
+    assert!(
+        output.contains("Stage:       DONE"),
+        "[{}] Reviewer approval should move task to done:\n{output}",
+        env.name()
+    );
+    assert!(
+        output.contains("pr_url:"),
+        "[{}] PR URL should be stored after reviewer approval:\n{output}",
+        env.name()
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Merging
 // ---------------------------------------------------------------------------
 

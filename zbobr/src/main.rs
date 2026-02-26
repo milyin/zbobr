@@ -1396,6 +1396,12 @@ async fn run_role_session(
                         task_session.set_signal(Some(Signal::GoWork)).await?;
                         task_session.set_stage(Stage::Pending).await?;
                     } else {
+                        // All items checked — push branch and create PR, then mark done
+                        let role_session = task_session.role_session();
+                        let pr_url = role_session
+                            .create_pr("Implementation reviewed and approved. Ready to merge.")
+                            .await?;
+                        tracing::info!("PR created after reviewer approval: {pr_url}");
                         task_session.mark_done().await?;
                     }
                 } else {
@@ -1406,13 +1412,10 @@ async fn run_role_session(
                 // Merger done → clear conflict flag, push work branch and create PR, back to PENDING
                 task_session.set_conflict(false).await?;
                 let role_session = task_session.role_session();
-                match role_session
+                let pr_url = role_session
                     .create_pr("Conflict resolved. Ready for review.")
-                    .await
-                {
-                    Ok(pr_url) => tracing::info!("PR created after merger: {pr_url}"),
-                    Err(e) => tracing::warn!("Could not create PR after merger: {e}"),
-                }
+                    .await?;
+                tracing::info!("PR created after merger: {pr_url}");
                 task_session.set_stage(Stage::Pending).await?;
             }
         }
