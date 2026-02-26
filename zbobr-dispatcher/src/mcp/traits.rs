@@ -466,4 +466,5 @@ pub trait MergerMcpImpl: CommonMcpImpl {
     async fn get_param_work_branch_impl(&self) -> String {
         self.get_param_impl(Parameter::WorkBranch).await
     }
+
 }

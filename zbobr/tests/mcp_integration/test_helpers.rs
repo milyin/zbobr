@@ -203,6 +203,19 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
         env.prepare_workspace(task_report, &repo_path, &branch_report).await;
     }
 
+    // Add a dummy commit so the work branch has changes above main (required for PR creation).
+    let work_dir_report = env
+        .workspaces_dir
+        .join(format!("task#{task_report}"))
+        .join(&repo_name);
+    write_and_commit(
+        &work_dir_report,
+        "ZBOBR_PLACEHOLDER.md",
+        &format!("placeholder for task #{task_report}\n"),
+        "chore: add placeholder for PR",
+    )
+    .await;
+
     env.run_stage(
         task_report,
         Stage::Merging,
@@ -221,6 +234,14 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
         "[{}] Merger should not set a follow-up signal",
         env.name()
     );
+    // The dispatcher automatically pushes the work branch and creates a PR after merger.
+    if env.target_repo.is_some() {
+        assert!(
+            output.contains("pr_url:"),
+            "[{}] PR URL should be stored in task parameters after merger",
+            env.name()
+        );
+    }
 
     assert_workspace_ok(env, task_report, &repo_name, &branch_report).await;
 

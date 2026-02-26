@@ -717,6 +717,30 @@ impl RoleSession {
         Ok(pr_url)
     }
 
+    /// Push the work branch to the remote and create a PR against the destination branch.
+    ///
+    /// Reads `DestinationRepository` from task parameters, builds PR metadata from the
+    /// task title, delegates to the repo backend, then stores the resulting URL in
+    /// `Parameter::PrUrl`.
+    pub async fn create_pr(&self, pr_body: &str) -> anyhow::Result<String> {
+        let task = self.get_task().await?;
+        let dest_repo = task
+            .parameters
+            .get(&Parameter::DestinationRepository)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("destination_repository parameter is not set"))?;
+        let pr_title = format!("Fix #{}: {}", self.task_id, task.title);
+
+        let pr_url = self
+            .zbobr
+            .push_and_create_pr(&dest_repo, self.task_id, &pr_title, pr_body)
+            .await?;
+
+        self.set_parameter(Parameter::PrUrl, Some(pr_url.clone()))
+            .await?;
+        Ok(pr_url)
+    }
+
     /// Get a task parameter value. Parameters are stored in the task's parameters HashMap.
     pub async fn get_parameter(&self, param: Parameter) -> anyhow::Result<Option<String>> {
         let task = self.zbobr.get_task(self.task_id).await?;

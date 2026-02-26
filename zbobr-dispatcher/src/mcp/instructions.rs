@@ -220,7 +220,8 @@ You have read access to the task and repository:
    - Wait for user input before proceeding
 6. **After successful resolution:**
    - Ensure all your changes are explicitly committed using `git commit` to the local work branch
-   - The task will then resume normally with the merged code
+   - The framework will automatically push the resolved branch and open a pull request
+7. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact.
 
 ## Conflict Resolution Principles
 
@@ -228,7 +229,6 @@ You have read access to the task and repository:
 - For conflicting edits to the same code, ask the user which version is preferred
 - Preserve the intent of both branches' changes if both changes are valid
 - Do NOT delete either branch's work without explicit user guidance
-7. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact.
 "#,
     );
 

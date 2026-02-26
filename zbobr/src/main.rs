@@ -1339,8 +1339,16 @@ async fn run_role_session(
                 }
             }
             Role::Merger => {
-                // Merger done → clear conflict flag, back to PENDING
+                // Merger done → clear conflict flag, push work branch and create PR, back to PENDING
                 task_session.set_conflict(false).await?;
+                let role_session = task_session.role_session();
+                match role_session
+                    .create_pr("Conflict resolved. Ready for review.")
+                    .await
+                {
+                    Ok(pr_url) => tracing::info!("PR created after merger: {pr_url}"),
+                    Err(e) => tracing::warn!("Could not create PR after merger: {e}"),
+                }
                 task_session.set_stage(Stage::Pending).await?;
             }
         }
