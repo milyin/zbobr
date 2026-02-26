@@ -1340,6 +1340,18 @@ async fn run_role_session(
         // Unlock task by moving back to PENDING
         task_session.set_stage(Stage::Pending).await?;
         tracing::info!("Session interrupted for task #{task_id}, moved to PENDING");
+    } else if let Some(ref e) = execution_error {
+        // Tool crashed: post error to discussion, pause task, return to PENDING
+        let error_msg = format!("Execution failed: {e}");
+        let hostname = zbobr_dispatcher::mcp::common::get_hostname();
+        if let Err(post_err) = task_session.post_message(&error_msg, "error", &hostname).await {
+            tracing::error!("Failed to post error to task #{task_id}: {post_err}");
+        }
+        if let Err(pause_err) = task_session.modify_task(|task| { task.pause = true; }).await {
+            tracing::error!("Failed to set pause for task #{task_id}: {pause_err}");
+        }
+        task_session.set_stage(Stage::Pending).await?;
+        tracing::info!("Session failed for task #{task_id}, moved to PENDING with pause");
     } else {
         tracing::info!("Session complete for task #{task_id}");
 
