@@ -185,20 +185,39 @@ impl GitHubRepoBackend {
             // Wait a moment for the fork to be ready
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         } else {
-            // Fork exists — sync it with upstream before use
-            let endpoint = format!("/repos/{}/merge-upstream", fork_repo);
-            let body = serde_json::json!({ "branch": branch });
-
-            tracing::info!("Syncing fork {fork_repo} from {}/{}", repo.owner(), branch);
-
-            self.octocrab
-                .post::<serde_json::Value, serde_json::Value>(endpoint, Some(&body))
+            // Fork exists — sync it with upstream if the branch exists there.
+            // Work branches created locally won't exist on upstream yet; skip sync for those.
+            let branch_exists_on_upstream = self
+                .octocrab
+                .get::<serde_json::Value, _, _>(
+                    format!("/repos/{}/branches/{}", repo.full_name, branch),
+                    None::<&()>,
+                )
                 .await
-                .with_context(|| {
-                    format!("Failed to sync fork {fork_repo} with upstream {target_repo}/{branch}")
-                })?;
+                .is_ok();
 
-            tracing::info!("Successfully synced fork {fork_repo}");
+            if branch_exists_on_upstream {
+                let endpoint = format!("/repos/{}/merge-upstream", fork_repo);
+                let body = serde_json::json!({ "branch": branch });
+
+                tracing::info!("Syncing fork {fork_repo} from {}/{}", repo.owner(), branch);
+
+                self.octocrab
+                    .post::<serde_json::Value, serde_json::Value>(endpoint, Some(&body))
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Failed to sync fork {fork_repo} with upstream {}/{branch}",
+                            repo.full_name
+                        )
+                    })?;
+
+                tracing::info!("Successfully synced fork {fork_repo}");
+            } else {
+                tracing::info!(
+                    "Branch {branch} does not exist on upstream {target_repo}, skipping fork sync"
+                );
+            }
         }
 
         Ok(fork_repo)
