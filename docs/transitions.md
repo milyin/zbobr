@@ -1,5 +1,7 @@
 # Dispatcher Task State Transitions
 
+<!-- markdownlint-disable MD047 -->
+
 This page describes how the dispatcher drives tasks through its lifecycle. A companion DOT graph (`transitions.dot`) lays out the same logic visually.
 
 ## Concepts
@@ -21,6 +23,7 @@ This page describes how the dispatcher drives tasks through its lifecycle. A com
 * **conflict** – boolean flag indicating a merging conflict.
 
 * **pause** – boolean flag temporarily blocking task processing.
+* **confirm** – boolean flag indicating that every stage transition should also set `pause`.  When true the dispatcher (and CLI updates) will automatically pause the task whenever its stage changes, giving operators an opportunity to review before additional work proceeds.
 
 ## Task processing
 

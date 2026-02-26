@@ -326,3 +326,34 @@ async fn test_fs_github_repo_backend_merging() {
         env.name()
     );
 }
+
+// ---------------------------------------------------------------------------
+// Confirm flag behaviour
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "GitHub-backed test; requires zbobr_github_test.toml with [tasks.github]"]
+async fn cli_confirm_flag_pauses_on_stage_change() {
+    let _guard = TEST_LOCK.lock().await;
+    let env = get_env().await;
+
+    let task_id = env
+        .create_task_with_confirm("Confirm test", "desc", Stage::Pending, true)
+        .await;
+
+    // verify confirm field is visible in show output (print_task now prints it)
+    let output = env.show_task(task_id).await;
+    assert!(output.contains("Confirm:"), "confirm should be printed: {}", output);
+
+    // update the stage using CLI; pause should automatically be set because confirm = true
+    env.run_zbobr(
+        "task",
+        &["update", &task_id.to_string(), "--stage", "PLANNING"],
+    )
+    .await;
+    let output2 = env.show_task(task_id).await;
+    assert!(
+        output2.contains("Pause:       true"),
+        "task should be paused after stage change with confirm\n{output2}"
+    );
+}

@@ -97,6 +97,7 @@ zbobr task list --stage PENDING   # Filter tasks by stage
 zbobr task list --tool copilot   # Filter tasks by tool
 zbobr task plan 42        # Run planner on issue #42
 zbobr task work 42        # Run worker on issue #42
+zbobr task create "Title" --description "desc" --confirm    # create new task that will pause on each stage change
 ```
 
 Notes on TOML layout:

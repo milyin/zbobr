@@ -120,6 +120,9 @@ enum TaskSubcommand {
         /// Destination branch
         #[arg(long)]
         dest_branch: Option<String>,
+        /// When set the task will be paused automatically on every stage change
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        confirm: bool,
     },
     /// List existing tasks (optionally filter by stage or tool)
     List {
@@ -169,6 +172,10 @@ enum TaskSubcommand {
         /// New signal (go_preparation, go_planning, etc.)
         #[arg(long)]
         signal: Option<String>,
+        /// Set or clear the confirm flag (true/false).  When set a stage change will
+        /// automatically pause the task.
+        #[arg(long)]
+        confirm: Option<bool>,
     },
     /// Delete (close) a task by ID
     Delete {
@@ -705,6 +712,7 @@ async fn main() -> anyhow::Result<()> {
                 model,
                 dest_repo,
                 dest_branch,
+                confirm,
             } => {
                 let stage = Stage::from_milestone_name(&stage.to_uppercase())
                     .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", stage))?;
@@ -727,6 +735,9 @@ async fn main() -> anyhow::Result<()> {
                         dest_branch,
                     )
                     .await?;
+                if confirm {
+                    zbobr.task_session(id).set_confirm(true).await?;
+                }
                 println!("Created task #{}", id);
             }
             TaskSubcommand::List { stage, tool } => {
@@ -791,6 +802,7 @@ async fn main() -> anyhow::Result<()> {
                 dest_branch,
                 work_branch,
                 signal,
+                confirm,
             } => {
                 let stage = stage
                     .map(|s| {
@@ -820,7 +832,13 @@ async fn main() -> anyhow::Result<()> {
                             if let Some(d) = description {
                                 task.description = d;
                             }
+                            if let Some(c) = confirm {
+                                task.confirm = c;
+                            }
                             if let Some(s) = stage {
+                                if task.confirm && task.stage != s {
+                                    task.pause = true;
+                                }
                                 task.stage = s;
                             }
                             if let Some(to) = tool {
@@ -863,6 +881,9 @@ async fn main() -> anyhow::Result<()> {
                                         task.parameters.remove(&Parameter::WorkBranch);
                                     }
                                 }
+                            }
+                            if let Some(c) = confirm {
+                                task.confirm = c;
                             }
                             task
                         }),
@@ -1921,6 +1942,49 @@ mod tests {
                     assert_eq!(dest_repo, Some(None));
                     assert_eq!(dest_branch, Some(None));
                     assert_eq!(work_branch, Some(None));
+                }
+                _ => panic!("expected Update subcommand"),
+            }
+        } else {
+            panic!("expected Task command");
+        }
+    }
+
+    #[test]
+    fn task_create_confirm_parsing() {
+        let cli = Cli::parse_from([
+            "zbobr",
+            "task",
+            "create",
+            "foo",
+            "--confirm",
+        ]);
+        if let Command::Task { subcommand } = cli.command {
+            match subcommand {
+                TaskSubcommand::Create { confirm, .. } => {
+                    assert!(confirm);
+                }
+                _ => panic!("expected Create subcommand"),
+            }
+        } else {
+            panic!("expected Task command");
+        }
+    }
+
+    #[test]
+    fn task_update_confirm_parsing() {
+        let cli = Cli::parse_from([
+            "zbobr",
+            "task",
+            "update",
+            "1",
+            "--confirm",
+            "false",
+        ]);
+        if let Command::Task { subcommand } = cli.command {
+            match subcommand {
+                TaskSubcommand::Update { confirm, .. } => {
+                    assert_eq!(confirm, Some(false));
                 }
                 _ => panic!("expected Update subcommand"),
             }

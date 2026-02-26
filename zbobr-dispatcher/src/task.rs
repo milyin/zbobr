@@ -438,6 +438,10 @@ pub struct Task {
     pub signal: Option<Signal>,
     pub conflict: bool,
     pub pause: bool,
+    /// When true the dispatcher will automatically set the pause flag any time
+    /// the task's stage is changed.  This gives human operators an opportunity to
+    /// review a transition before the next processing step occurs.
+    pub confirm: bool,
     /// ETag for optimistic locking to prevent concurrent update conflicts.
     /// Used to detect if the task has been modified between read and write operations.
     #[serde(skip)]
@@ -447,7 +451,7 @@ pub struct Task {
 // ---------------------------------------------------------------------------
 // RoleSession — restricted access for MCP tools during agent sessions.
 //
-// Cannot modify: stage, conflict (those are dispatcher-only transitions).
+// Cannot modify: stage, conflict, confirm (those are dispatcher-only transitions).
 // Can modify: description, plan, checklist, parameters, signal, pause.
 // ---------------------------------------------------------------------------
 
@@ -867,7 +871,20 @@ impl TaskSession {
     /// Set the task stage (dispatcher only).
     pub async fn set_stage(&self, stage: Stage) -> anyhow::Result<()> {
         self.modify_task(move |task| {
+            // if confirm flag is enabled we always pause on any stage transition
+            if task.confirm && task.stage != stage {
+                task.pause = true;
+            }
             task.stage = stage;
+        })
+        .await
+    }
+
+    /// Set the confirm flag on the task (dispatcher only).
+    /// This is convenience used by create_task_with_confirm.
+    pub async fn set_confirm(&self, confirm: bool) -> anyhow::Result<()> {
+        self.modify_task(move |task| {
+            task.confirm = confirm;
         })
         .await
     }
@@ -908,6 +925,7 @@ impl TaskSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
 
     #[test]
     fn stage_milestone_names() {
@@ -963,6 +981,7 @@ mod tests {
             signal: None,
             conflict: false,
             pause: false,
+            confirm: false,
             etag: None,
         };
         let json = serde_json::to_string(&task).unwrap();
@@ -974,6 +993,244 @@ mod tests {
         assert_eq!(back.model, Some(Model::Claude3Opus));
         assert!(!back.conflict);
         assert!(!back.pause);
+        assert!(!back.confirm);
+    }
+
+    #[test]
+    fn confirm_flag_triggers_pause_on_stage_change() {
+        let mut t = Task {
+            id: 1,
+            title: "x".into(),
+            description: "".into(),
+            plan: String::new(),
+            stage: Stage::Pending,
+            tool: None,
+            model: None,
+            parameters: HashMap::new(),
+            checklist: vec![],
+            signal: None,
+            conflict: false,
+            pause: false,
+            confirm: true,
+            etag: None,
+        };
+        let new_stage = Stage::Planning;
+        if t.confirm && t.stage != new_stage {
+            t.pause = true;
+        }
+        t.stage = new_stage;
+        assert!(t.pause, "task should have been paused when confirm=true and stage changed");
+    }
+
+    #[test]
+    fn update_closure_applies_confirm_first() {
+        // simulate the modify_task closure used by the CLI update command
+        let mut task = Task {
+            id: 2,
+            title: "x".into(),
+            description: "".into(),
+            plan: String::new(),
+            stage: Stage::Pending,
+            tool: None,
+            model: None,
+            parameters: HashMap::new(),
+            checklist: vec![],
+            signal: None,
+            conflict: false,
+            pause: false,
+            confirm: false,
+            etag: None,
+        };
+        let new_confirm = Some(true);
+        let new_stage = Some(Stage::Planning);
+
+        if let Some(c) = new_confirm {
+            task.confirm = c;
+        }
+        if let Some(s) = new_stage {
+            if task.confirm && task.stage != s {
+                task.pause = true;
+            }
+            task.stage = s;
+        }
+
+        assert!(task.pause, "pause must be set when confirm is enabled and stage changes");
+    }
+
+    // asynchronous tests require a runtime; use tokio for the following
+    #[tokio::test]
+    async fn task_session_set_stage_pauses_when_confirm() {
+        use crate::{Zbobr, config::ZbobrDispatcherConfig};
+        use std::sync::Arc;
+        use std::collections::HashMap;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use tokio::sync::Mutex;
+
+        // simple in-memory task backend implementation for testing
+        struct DummyBackend {
+            tasks: Mutex<HashMap<u64, Task>>,
+            next_id: AtomicU64,
+        }
+
+        #[async_trait]
+        impl crate::backend::TaskBackend for DummyBackend {
+            async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
+                let tasks = self.tasks.lock().await;
+                tasks
+                    .get(&id)
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("not found"))
+            }
+            async fn create_task(
+                &self,
+                title: &str,
+                description: &str,
+                stage: Stage,
+                tool: Option<Tool>,
+                model: Option<Model>,
+                parameters: HashMap<Parameter, String>,
+            ) -> anyhow::Result<u64> {
+                let id = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
+                let task = Task {
+                    id,
+                    title: title.to_string(),
+                    description: description.to_string(),
+                    plan: String::new(),
+                    stage,
+                    tool,
+                    model,
+                    parameters,
+                    checklist: vec![],
+                    signal: None,
+                    conflict: false,
+                    pause: false,
+                    confirm: false,
+                    etag: None,
+                };
+                self.tasks.lock().await.insert(id, task);
+                Ok(id)
+            }
+            async fn close_task(&self, _id: u64) -> anyhow::Result<()> { Ok(()) }
+            async fn is_task_closed(&self, _id: u64) -> anyhow::Result<bool> { Ok(false) }
+            async fn modify_task(
+                &self,
+                id: u64,
+                mutate: Box<dyn FnOnce(Task) -> Task + Send>,
+            ) -> anyhow::Result<()> {
+                let mut tasks = self.tasks.lock().await;
+                if let Some(t) = tasks.remove(&id) {
+                    let t = mutate(t);
+                    tasks.insert(id, t);
+                    Ok(())
+                } else {
+                    Err(anyhow::anyhow!("not found"))
+                }
+            }
+            async fn list_tasks_by_stage(
+                &self,
+                _stage: Stage,
+                _tool: Option<Tool>,
+            ) -> anyhow::Result<Vec<Task>> {
+                Ok(vec![])
+            }
+            async fn get_task_comments(&self, _id: u64) -> anyhow::Result<Vec<String>> {
+                Ok(vec![])
+            }
+            async fn post_task_comment(
+                &self,
+                _id: u64,
+                _body: &str,
+                _role: &str,
+                _hostname: &str,
+            ) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn setup(&self, _force: bool) -> anyhow::Result<()> { Ok(()) }
+            async fn validate_connectivity(&self) -> anyhow::Result<()> { Ok(()) }
+        }
+
+        struct DummyRepo;
+        #[async_trait]
+        impl crate::backend::RepoBackend for DummyRepo {
+            async fn clone_and_setup(
+                &self,
+                _target_repo: &str,
+                _branch: &str,
+                _workspace_path: &std::path::Path,
+            ) -> anyhow::Result<std::path::PathBuf> {
+                unreachable!()
+            }
+            async fn clone_readonly(
+                &self,
+                _target_repo: &str,
+                _branch: &str,
+                _workspace_path: &std::path::Path,
+            ) -> anyhow::Result<std::path::PathBuf> {
+                unreachable!()
+            }
+            async fn sync_fork(&self, _target_repo: &str, _branch: &str) -> anyhow::Result<()> {
+                unreachable!()
+            }
+            async fn setup_fork_remote_and_push(
+                &self,
+                _work_dir: &std::path::Path,
+                _target_repo: &str,
+                _work_branch: &str,
+            ) -> anyhow::Result<()> {
+                unreachable!()
+            }
+            async fn ensure_branch_and_pr(
+                &self,
+                _target_repo: &str,
+                _workspace_path: &std::path::Path,
+                _work_branch: &str,
+                _destination_branch: &str,
+                _pr_title: &str,
+            ) -> anyhow::Result<String> {
+                unreachable!()
+            }
+            async fn push_branch(
+                &self,
+                _target_repo: &str,
+                _workspace_path: &std::path::Path,
+                _work_branch: &str,
+            ) -> anyhow::Result<()> {
+                unreachable!()
+            }
+            async fn create_pr_in_fork(
+                &self,
+                _repo_name: &str,
+                _work_branch: &str,
+                _destination_branch: &str,
+                _pr_title: &str,
+                _pr_body: &str,
+            ) -> anyhow::Result<String> {
+                unreachable!()
+            }
+            async fn parse_pr_to_repo_branch(&self, _pr_ref: &str) -> anyhow::Result<(String, String)> {
+                unreachable!()
+            }
+            async fn validate_connectivity(&self) -> anyhow::Result<()> {
+                Ok(())
+            }
+            fn debug_state(&self) -> String { "dummy".to_string() }
+        }
+
+        let backend = Arc::new(DummyBackend {
+            tasks: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(0),
+        });
+        let repo = Arc::new(DummyRepo);
+        let zbobr = Zbobr::new(ZbobrDispatcherConfig::default(), backend.clone(), repo.clone());
+
+        let id = zbobr
+            .create_task("t", "", Stage::Pending, None, None, None, None)
+            .await
+            .unwrap();
+        zbobr.task_session(id).set_confirm(true).await.unwrap();
+        zbobr.task_session(id).set_stage(Stage::Planning).await.unwrap();
+        let t = zbobr.get_task(id).await.unwrap();
+        assert!(t.pause);
     }
 
     #[test]

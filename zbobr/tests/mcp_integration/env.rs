@@ -125,22 +125,35 @@ impl IntegrationTestEnv {
     // Task utilities
     // -----------------------------------------------------------------------
 
-    /// Create a new task via the CLI and return its ID.
+    /// Create a new task via the CLI and return its ID (confirm=false).
     pub async fn create_task(&self, title: &str, description: &str, stage: Stage) -> u64 {
+        self.create_task_with_confirm(title, description, stage, false)
+            .await
+    }
+
+    /// Create a new task via the CLI and return its ID, optionally enabling
+    /// the `--confirm` flag when true.
+    pub async fn create_task_with_confirm(
+        &self,
+        title: &str,
+        description: &str,
+        stage: Stage,
+        confirm: bool,
+    ) -> u64 {
         let stage_str = stage.to_string();
-        let output = self
-            .run_zbobr_capture(
-                "task",
-                &[
-                    "create",
-                    title,
-                    "--description",
-                    description,
-                    "--stage",
-                    &stage_str,
-                ],
-            )
-            .await;
+        let mut args: Vec<&str> = vec![
+            "create",
+            title,
+            "--description",
+            description,
+            "--stage",
+            &stage_str,
+        ];
+        if confirm {
+            args.push("--confirm");
+        }
+
+        let output = self.run_zbobr_capture("task", &args).await;
 
         let line = output
             .lines()

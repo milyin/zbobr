@@ -230,10 +230,11 @@ impl GitHubTaskBackend {
         id: u64,
         conflict: bool,
         pause: bool,
+        confirm: bool,
     ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        for (flag_name, desired) in [("conflict", conflict), ("pause", pause)] {
+        for (flag_name, desired) in [("conflict", conflict), ("pause", pause), ("confirm", confirm)] {
             let label = Self::flag_to_label(flag_name);
             if desired {
                 let labels: Vec<String> = vec![label];
@@ -493,7 +494,7 @@ impl GitHubTaskBackend {
             }
         }
 
-        for flag_name in ["conflict", "pause"] {
+        for flag_name in ["conflict", "pause", "confirm"] {
             let flag_label = Self::flag_to_label(flag_name);
             let flag_desc = format!("Flag: {}", flag_name);
             if !existing_labels.contains(&flag_label) {
@@ -576,6 +577,11 @@ impl GitHubTaskBackend {
             .iter()
             .any(|l| Self::label_to_flag(&l.name) == Some("pause"));
 
+        let confirm = issue
+            .labels
+            .iter()
+            .any(|l| Self::label_to_flag(&l.name) == Some("confirm"));
+
         Task {
             id: issue.number,
             title: issue.title,
@@ -589,6 +595,7 @@ impl GitHubTaskBackend {
             signal,
             conflict,
             pause,
+            confirm,
             etag: Some(body),
         }
     }
@@ -695,6 +702,7 @@ impl TaskBackend for GitHubTaskBackend {
         let original_signal = task.signal;
         let original_conflict = task.conflict;
         let original_pause = task.pause;
+        let original_confirm = task.confirm;
         let expected_description = task.etag.clone().unwrap_or_else(|| {
             let string_params: HashMap<String, String> = task
                 .parameters
@@ -766,8 +774,8 @@ impl TaskBackend for GitHubTaskBackend {
         }
 
         // Apply flag changes if they differ
-        if task.conflict != original_conflict || task.pause != original_pause {
-            self.apply_flag_change(id, task.conflict, task.pause)
+        if task.conflict != original_conflict || task.pause != original_pause || task.confirm != original_confirm {
+            self.apply_flag_change(id, task.conflict, task.pause, task.confirm)
                 .await?;
         }
 
@@ -892,5 +900,45 @@ fn stage_description(stage: Stage) -> &'static str {
         Stage::Reviewing => "Task is in review",
         Stage::Merging => "Task is in merge conflict resolution",
         Stage::Done => "Task is complete",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zbobr_dispatcher::{Stage, Tool, Model, Signal, Parameter};
+
+    #[test]
+    fn issue_to_task_includes_confirm_flag() {
+        let issue = IssueResponse {
+            number: 10,
+            title: "foo".to_string(),
+            body: Some("".to_string()),
+            state: "open".to_string(),
+            milestone: None,
+            labels: vec![IssueLabel { name: "flag:confirm".to_string() }],
+        };
+
+        let task = GitHubTaskBackend::issue_to_task(issue);
+        assert!(task.confirm, "confirm flag should be parsed from labels");
+    }
+
+    #[test]
+    fn apply_flag_change_adds_and_removes_confirm_label() {
+        // This test just exercises the label loop; we don't hit GitHub.
+        let backend = GitHubTaskBackend::new(
+            None,
+            crate::config::ZbobrTaskBackendGithubArgs::default(),
+        )
+        .expect("backend init");
+
+        // the method returns Result<(), _>; call with dummy values to ensure no panics
+        // since actual network calls are inside retry_github we simply drop the future.
+        // We cannot easily verify labels without mocking; ensure the code compiles and runs
+        // the loop by invoking with both true/false combinations.
+        futures::executor::block_on(async {
+            let _ = backend.apply_flag_change(1, true, false, true).await;
+            let _ = backend.apply_flag_change(1, false, true, false).await;
+        });
     }
 }

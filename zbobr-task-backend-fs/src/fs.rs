@@ -23,6 +23,8 @@ struct TaskFile {
     conflict: bool,
     #[serde(default)]
     pause: bool,
+    #[serde(default)]
+    confirm: bool,
     checklist: Vec<ChecklistItem>,
     signal: Option<String>,
     closed: bool,
@@ -68,6 +70,7 @@ impl TaskFile {
             signal,
             conflict: self.conflict,
             pause: self.pause,
+            confirm: self.confirm,
             etag: None,
         })
     }
@@ -88,6 +91,7 @@ impl TaskFile {
                 .collect(),
             conflict: task.conflict,
             pause: task.pause,
+            confirm: task.confirm,
             checklist: task.checklist.clone(),
             signal: task.signal.map(|s| s.name().to_string()),
             closed,
@@ -273,6 +277,7 @@ impl TaskBackend for FilesystemTaskBackend {
             signal: None,
             conflict: false,
             pause: false,
+            confirm: false,
             etag: None,
         };
 

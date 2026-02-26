@@ -48,6 +48,7 @@ async fn create_read_modify_task() {
     );
     assert!(!task.conflict);
     assert!(!task.pause);
+    assert!(!task.confirm, "new tasks should default confirm=false");
     assert!(task.checklist.is_empty());
     assert!(task.signal.is_none());
 
@@ -62,6 +63,7 @@ async fn create_read_modify_task() {
                 t.stage = Stage::Working;
                 t.conflict = true;
                 t.pause = true;
+                t.confirm = true;
                 t.signal = Some(Signal::GoReview);
                 t.checklist = vec![
                     ChecklistItem {
@@ -95,6 +97,7 @@ async fn create_read_modify_task() {
     assert_eq!(task.stage, Stage::Working);
     assert!(task.conflict);
     assert!(task.pause);
+    assert!(task.confirm);
     assert_eq!(task.signal, Some(Signal::GoReview));
     assert_eq!(task.checklist.len(), 2);
     assert_eq!(task.checklist[0].id, "item-1");

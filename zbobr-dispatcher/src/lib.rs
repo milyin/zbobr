@@ -91,17 +91,49 @@ impl Zbobr {
         destination_repository: Option<String>,
         destination_branch: Option<String>,
     ) -> anyhow::Result<u64> {
-        let mut parameters = std::collections::HashMap::new();
-        if let Some(repo) = destination_repository {
-            parameters.insert(Parameter::DestinationRepository, repo);
-        }
-        if let Some(branch) = destination_branch {
-            parameters.insert(Parameter::DestinationBranch, branch);
-        }
+        self.create_task_with_confirm(
+            title,
+            description,
+            stage,
+            tool,
+            model,
+            destination_repository,
+            destination_branch,
+            false,
+        )
+        .await
+    }
 
-        self.task_backend
-            .create_task(title, description, stage, tool, model, parameters)
-            .await
+    /// Like `create_task` but also set the confirm flag on the new task when
+    /// `confirm == true`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_task_with_confirm(
+        &self,
+        title: &str,
+        description: &str,
+        stage: Stage,
+        tool: Option<Tool>,
+        model: Option<Model>,
+        destination_repository: Option<String>,
+        destination_branch: Option<String>,
+        confirm: bool,
+    ) -> anyhow::Result<u64> {
+        let id = {
+            let mut parameters = std::collections::HashMap::new();
+            if let Some(repo) = destination_repository {
+                parameters.insert(Parameter::DestinationRepository, repo);
+            }
+            if let Some(branch) = destination_branch {
+                parameters.insert(Parameter::DestinationBranch, branch);
+            }
+            self.task_backend
+                .create_task(title, description, stage, tool, model, parameters)
+                .await?
+        };
+        if confirm {
+            self.task_session(id).set_confirm(true).await?;
+        }
+        Ok(id)
     }
 
     pub async fn close_task(&self, id: u64) -> anyhow::Result<()> {

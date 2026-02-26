@@ -25,6 +25,9 @@ digraph dispatcher_states {
     CHECK_SIGNALS_REPO [shape=diamond, label="signal"];
     SET_CONFLICT_FLAG [shape=box, label="conflict := true"];
     CLEAR_CONFLICT_FLAG [shape=box, label="conflict := false"];
+    // note: pause may also be set whenever the confirm flag is active and a
+    // stage transition occurs.  This is enforced by the dispatcher rather than
+    // being shown explicitly in the graph edges.
     SET_PAUSE_FLAG [shape=box, label="pause := true"];
 
     PENDING [ label = <<b>PENDING</b>>];
