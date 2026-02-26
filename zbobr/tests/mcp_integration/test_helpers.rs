@@ -331,11 +331,11 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
         .unwrap_or_else(|| repo_path_str.clone());
     let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo).to_string();
 
-    let work_branch = "work_branch_conflict";
     let task_id = env
         .create_task("Conflict task", "Test merging with real conflicts", Stage::Merging)
         .await;
-    env.update_task_branches(task_id, &dest_repo, "main", work_branch)
+    let work_branch = format!("zbobr_conflict-{task_id}-test");
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
     // Set up workspace with a live merge conflict.
@@ -343,7 +343,7 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
     // that origin/fork remotes are correctly set up (PR creation can succeed).
     // Otherwise fall back to the cp -r approach with a local bare repo.
     let work_dir = if let Some(target) = env.target_repo.as_deref() {
-        let wd = env.prepare_workspace_via_repo_backend(task_id, target, work_branch).await;
+        let wd = env.prepare_workspace_via_repo_backend(task_id, target, &work_branch).await;
 
         // Inject conflicting changes locally (conflict_file.txt does not exist
         // on the remote, so both branches adding it differently is an add/add conflict).
@@ -352,13 +352,13 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
         git_in(&wd, &["checkout", "main"]).await;
         write_and_commit(&wd, "conflict_file.txt", "line1\nline2 main\nline3\n", "Main change").await;
 
-        git_in(&wd, &["checkout", work_branch]).await;
+        git_in(&wd, &["checkout", &work_branch]).await;
         wd
     } else {
         // Local-only: build conflicting history on the source repo then cp -r.
         write_and_commit(&repo_path, "conflict_file.txt", "line1\nline2\nline3\n", "Initial").await;
 
-        git_in(&repo_path, &["checkout", "-b", work_branch]).await;
+        git_in(&repo_path, &["checkout", "-b", &work_branch]).await;
         write_and_commit(&repo_path, "conflict_file.txt", "line1\nline2 work\nline3\n", "Work change").await;
 
         git_in(&repo_path, &["checkout", "main"]).await;
@@ -376,7 +376,7 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
             .success();
         assert!(cp_ok, "[{}] cp to workspace failed", env.name());
 
-        git_in(&wd, &["checkout", work_branch]).await;
+        git_in(&wd, &["checkout", &work_branch]).await;
         wd
     };
 
