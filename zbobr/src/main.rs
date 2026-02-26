@@ -1207,12 +1207,24 @@ async fn run_role_session(
 
     // For all roles that have a work directory (not Preparator), ensure the PR URL is stored.
     // This creates the work branch and PR on the remote the first time, and returns the
-    // cached URL on subsequent calls.  Failures are non-fatal (warn only).
+    // cached URL on subsequent calls.  Failures are fatal — report to task discussion and abort.
     if !matches!(role, Role::Preparator) {
         let role_session = zbobr.role_session(task_id);
         match role_session.ensure_pr_url().await {
             Ok(pr_url) => tracing::info!("PR reference: {pr_url}"),
-            Err(e) => tracing::warn!("Could not ensure PR URL for task #{task_id}: {e}"),
+            Err(e) => {
+                let msg = format!("Could not ensure PR URL for task #{task_id}: {e}");
+                tracing::error!("{msg}");
+                let hostname = zbobr_dispatcher::mcp::common::get_hostname();
+                let task_session = zbobr.task_session(task_id);
+                if let Err(post_err) = task_session
+                    .post_message(&msg, "error", &hostname)
+                    .await
+                {
+                    tracing::warn!("Failed to post error to task discussion: {post_err}");
+                }
+                return Err(anyhow::anyhow!("{msg}"));
+            }
         }
     }
 
