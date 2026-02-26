@@ -1205,6 +1205,46 @@ async fn run_role_session(
         }
     };
 
+    // For roles that operate on the work branch (Planner, Worker, Reviewer), attempt to
+    // integrate the destination branch.  This catches conflicts early — before the agent
+    // session starts — so we can hand off to the Merger without wasting an agent run.
+    // Merger and Preparator are excluded: Merger already has the conflict in its workspace,
+    // and Preparator has no repository yet.
+    if matches!(role, Role::Planner | Role::Worker | Role::Reviewer) {
+        let task = zbobr.get_task(task_id).await?;
+        let dest_branch = task
+            .parameters
+            .get(&Parameter::DestinationBranch)
+            .cloned()
+            .unwrap_or_else(|| "main".to_string());
+
+        let merge = tokio::process::Command::new("git")
+            .args(["merge", &dest_branch, "--no-edit"])
+            .current_dir(&work_dir)
+            .output()
+            .await
+            .context("Failed to run git merge for conflict detection")?;
+
+        if !merge.status.success() {
+            // Leave the workspace in the conflicted state so the Merger can resolve it.
+            tracing::warn!(
+                "Merge conflict detected for task #{task_id} \
+                 (merging '{dest_branch}' into work branch). \
+                 Setting conflict flag and deferring to Merger."
+            );
+            zbobr
+                .task_session(task_id)
+                .set_conflict(true)
+                .await
+                .context("Failed to set conflict flag")?;
+            zbobr
+                .set_task_stage(task_id, Stage::Pending)
+                .await
+                .context("Failed to reset stage to Pending after conflict")?;
+            return Ok(());
+        }
+    }
+
     // Create a channel to receive the actual port from the MCP server
     let (port_tx, port_rx) = std::sync::mpsc::channel();
 
