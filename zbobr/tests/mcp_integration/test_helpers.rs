@@ -287,36 +287,54 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
         .unwrap_or_else(|| repo_path_str.clone());
     let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo).to_string();
 
-    // build conflicting history on the local repo
-    write_and_commit(&repo_path, "conflict_file.txt", "line1\nline2\nline3\n", "Initial").await;
-
     let work_branch = "work_branch_conflict";
-    git_in(&repo_path, &["checkout", "-b", work_branch]).await;
-    write_and_commit(&repo_path, "conflict_file.txt", "line1\nline2 work\nline3\n", "Work change").await;
-
-    git_in(&repo_path, &["checkout", "main"]).await;
-    write_and_commit(&repo_path, "conflict_file.txt", "line1\nline2 main\nline3\n", "Main change").await;
-
     let task_id = env
         .create_task("Conflict task", "Test merging with real conflicts", Stage::Merging)
         .await;
     env.update_task_branches(task_id, &dest_repo, "main", work_branch)
         .await;
 
-    // Manually set up workspace with a live merge conflict
-    let workspace_dir = env.workspaces_dir.join(format!("task#{task_id}"));
-    tokio::fs::create_dir_all(&workspace_dir).await.unwrap();
-    let work_dir = workspace_dir.join(&repo_name);
+    // Set up workspace with a live merge conflict.
+    // When a real GitHub repo backend is configured, clone via the backend so
+    // that origin/fork remotes are correctly set up (PR creation can succeed).
+    // Otherwise fall back to the cp -r approach with a local bare repo.
+    let work_dir = if let Some(target) = env.target_repo.as_deref() {
+        let wd = env.prepare_workspace_via_repo_backend(task_id, target, work_branch).await;
 
-    let cp_ok = tokio::process::Command::new("cp")
-        .args(["-r", &repo_path_str, work_dir.to_str().unwrap()])
-        .status()
-        .await
-        .unwrap()
-        .success();
-    assert!(cp_ok, "[{}] cp to workspace failed", env.name());
+        // Inject conflicting changes locally (conflict_file.txt does not exist
+        // on the remote, so both branches adding it differently is an add/add conflict).
+        write_and_commit(&wd, "conflict_file.txt", "line1\nline2 work\nline3\n", "Work change").await;
 
-    git_in(&work_dir, &["checkout", work_branch]).await;
+        git_in(&wd, &["checkout", "main"]).await;
+        write_and_commit(&wd, "conflict_file.txt", "line1\nline2 main\nline3\n", "Main change").await;
+
+        git_in(&wd, &["checkout", work_branch]).await;
+        wd
+    } else {
+        // Local-only: build conflicting history on the source repo then cp -r.
+        write_and_commit(&repo_path, "conflict_file.txt", "line1\nline2\nline3\n", "Initial").await;
+
+        git_in(&repo_path, &["checkout", "-b", work_branch]).await;
+        write_and_commit(&repo_path, "conflict_file.txt", "line1\nline2 work\nline3\n", "Work change").await;
+
+        git_in(&repo_path, &["checkout", "main"]).await;
+        write_and_commit(&repo_path, "conflict_file.txt", "line1\nline2 main\nline3\n", "Main change").await;
+
+        let workspace_dir = env.workspaces_dir.join(format!("task#{task_id}"));
+        tokio::fs::create_dir_all(&workspace_dir).await.unwrap();
+        let wd = workspace_dir.join(&repo_name);
+
+        let cp_ok = tokio::process::Command::new("cp")
+            .args(["-r", &repo_path_str, wd.to_str().unwrap()])
+            .status()
+            .await
+            .unwrap()
+            .success();
+        assert!(cp_ok, "[{}] cp to workspace failed", env.name());
+
+        git_in(&wd, &["checkout", work_branch]).await;
+        wd
+    };
 
     // merge should produce conflict markers
     let merge = tokio::process::Command::new("git")
