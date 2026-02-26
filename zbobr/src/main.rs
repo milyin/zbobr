@@ -1167,18 +1167,42 @@ async fn run_role_session(
     let task_dir = zbobr.config().workspaces.join(format!("task#{task_id}"));
     tokio::fs::create_dir_all(&task_dir).await?;
 
-    // For non-Preparator roles, use the repo subdirectory as the agent's working directory.
-    // The dispatcher prepares this directory before starting the session.
-    let work_dir = if role != Role::Preparator {
-        let task = zbobr.get_task(task_id).await?;
-        if let Some(dest_repo) = task.parameters.get(&Parameter::DestinationRepository) {
-            let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo.as_str());
+    // For non-Preparator roles, prepare the work repository.
+    let work_dir = match role {
+        Role::Preparator => task_dir.clone(),
+        Role::Merger => {
+            // Merger always works on an existing workspace set up by a prior stage.
+            // Do not re-clone — the workspace may contain a live merge conflict.
+            let task = zbobr.get_task(task_id).await?;
+            let dest_repo = task
+                .parameters
+                .get(&Parameter::DestinationRepository)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Task #{task_id} has no destination_repository parameter")
+                })?
+                .as_str();
+            let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo);
             task_dir.join(repo_name)
-        } else {
-            task_dir.clone()
         }
-    } else {
-        task_dir.clone()
+        _ => {
+            // Planner, Worker, Reviewer: clone the repository and check out the work branch.
+            let task = zbobr.get_task(task_id).await?;
+            let dest_repo = task
+                .parameters
+                .get(&Parameter::DestinationRepository)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Task #{task_id} has no destination_repository parameter")
+                })?
+                .clone();
+            let work_branch = task
+                .parameters
+                .get(&Parameter::WorkBranch)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Task #{task_id} has no work_branch parameter")
+                })?
+                .clone();
+            zbobr.clone_and_setup(&dest_repo, &work_branch, task_id).await?
+        }
     };
 
     // Create a channel to receive the actual port from the MCP server

@@ -153,14 +153,7 @@ impl RepoBackend for FilesystemRepoBackend {
         if !work_dir.exists() {
             tracing::info!("Cloning {} into {}", target_repo, work_dir.display());
             let status = tokio::process::Command::new("git")
-                .args([
-                    "clone",
-                    "--branch",
-                    branch,
-                    "--single-branch",
-                    target_repo,
-                    work_dir.to_str().unwrap(),
-                ])
+                .args(["clone", target_repo, work_dir.to_str().unwrap()])
                 .status()
                 .await?;
             if !status.success() {
@@ -169,7 +162,7 @@ impl RepoBackend for FilesystemRepoBackend {
         } else {
             tracing::info!("Updating {} in {}", target_repo, work_dir.display());
             let fetch_status = tokio::process::Command::new("git")
-                .args(["fetch", "origin", branch])
+                .args(["fetch", "origin"])
                 .current_dir(&work_dir)
                 .status()
                 .await?;
@@ -181,7 +174,7 @@ impl RepoBackend for FilesystemRepoBackend {
             }
         }
 
-        // Checkout the requested branch
+        // Checkout the requested branch; create from HEAD if it doesn't exist yet.
         tracing::info!("Checking out branch {}", branch);
         let checkout_status = tokio::process::Command::new("git")
             .args(["checkout", branch])
@@ -189,13 +182,13 @@ impl RepoBackend for FilesystemRepoBackend {
             .status()
             .await?;
         if !checkout_status.success() {
-            let checkout_remote_status = tokio::process::Command::new("git")
-                .args(["checkout", "-b", branch, &format!("origin/{}", branch)])
+            let create_status = tokio::process::Command::new("git")
+                .args(["checkout", "-b", branch])
                 .current_dir(&work_dir)
                 .status()
                 .await?;
-            if !checkout_remote_status.success() {
-                anyhow::bail!("Failed to checkout branch {}", branch);
+            if !create_status.success() {
+                anyhow::bail!("Failed to checkout or create branch {}", branch);
             }
         }
 

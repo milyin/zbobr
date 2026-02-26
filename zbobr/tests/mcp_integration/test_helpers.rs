@@ -48,18 +48,7 @@ pub async fn run_planning(env: &IntegrationTestEnv) {
         .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
     let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo).to_string();
     let work_branch = format!("zbobr_fix-{task_id}-test");
-    env.update_task_branches(
-        task_id,
-        &dest_repo,
-        "main",
-        &work_branch,
-    )
-    .await;
-    if let Some(target) = env.target_repo.as_deref() {
-        env.prepare_workspace_via_repo_backend(task_id, target, &work_branch).await;
-    } else {
-        env.prepare_workspace(task_id, &repo_path, &work_branch).await;
-    }
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch).await;
 
     env.run_stage(task_id, Stage::Planning, scenarios::planning_scenario())
         .await;
@@ -90,18 +79,7 @@ pub async fn run_working(env: &IntegrationTestEnv) {
         .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
     let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo).to_string();
     let work_branch = format!("zbobr_fix-{task_id}-test");
-    env.update_task_branches(
-        task_id,
-        &dest_repo,
-        "main",
-        &work_branch,
-    )
-    .await;
-    if let Some(target) = env.target_repo.as_deref() {
-        env.prepare_workspace_via_repo_backend(task_id, target, &work_branch).await;
-    } else {
-        env.prepare_workspace(task_id, &repo_path, &work_branch).await;
-    }
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch).await;
 
     env.run_stage(task_id, Stage::Working, scenarios::working_scenario())
         .await;
@@ -142,18 +120,7 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
         .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
     let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo).to_string();
     let work_branch = format!("zbobr_fix-{task_id}-test");
-    env.update_task_branches(
-        task_id,
-        &dest_repo,
-        "main",
-        &work_branch,
-    )
-    .await;
-    if let Some(target) = env.target_repo.as_deref() {
-        env.prepare_workspace_via_repo_backend(task_id, target, &work_branch).await;
-    } else {
-        env.prepare_workspace(task_id, &repo_path, &work_branch).await;
-    }
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch).await;
 
     env.run_stage(task_id, Stage::Reviewing, scenarios::reviewing_scenario())
         .await;
