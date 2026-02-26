@@ -1659,6 +1659,8 @@ async fn run_manager_loop(
     let mut last_cleanup = std::time::Instant::now();
 
     loop {
+        let loop_start = std::time::Instant::now();
+
         // Run cleanup if interval has passed
         if last_cleanup.elapsed().as_secs() >= cleanup_interval_secs {
             tracing::info!("Running workspaces cleanup...");
@@ -1791,16 +1793,20 @@ async fn run_manager_loop(
             active_counts[&Stage::Merging]
         );
 
-        tracing::info!("No processable tasks. Sleeping {interval_secs}s...");
-
-        // Sleep with Ctrl+C handling
-        tokio::select! {
-            _ = tokio::time::sleep(std::time::Duration::from_secs(interval_secs)) => {
-                // Continue to next iteration
-            }
-            _ = tokio::signal::ctrl_c() => {
-                tracing::info!("Received shutdown signal, exiting...");
-                break;
+        // Sleep for the remainder of the interval, accounting for time already spent
+        // in this iteration (e.g. running a session). If elapsed >= interval, skip sleep.
+        let elapsed = loop_start.elapsed();
+        let sleep_dur = std::time::Duration::from_secs(interval_secs).saturating_sub(elapsed);
+        if sleep_dur.is_zero() {
+            tracing::info!("No processable tasks. Interval already elapsed, continuing immediately.");
+        } else {
+            tracing::info!("No processable tasks. Sleeping {}s...", sleep_dur.as_secs());
+            tokio::select! {
+                _ = tokio::time::sleep(sleep_dur) => {}
+                _ = tokio::signal::ctrl_c() => {
+                    tracing::info!("Received shutdown signal, exiting...");
+                    break;
+                }
             }
         }
     }
