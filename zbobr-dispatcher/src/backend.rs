@@ -170,11 +170,6 @@ pub trait RepoBackend: Send + Sync {
 
     // -- Fork management --
 
-    /// Ensure the fork is synchronized with the upstream `target_repo` on `branch`.
-    /// This performs a server-side sync (same as GitHub "Sync fork" button) and is
-    /// not a local operation on the cloned copy.
-    async fn sync_fork(&self, target_repo: &str, branch: &str) -> anyhow::Result<()>;
-
     /// Replace origin remote with the fork URL and push a work branch.
     /// The backend determines the fork owner and constructs the fork URL internally.
     async fn setup_fork_remote_and_push(

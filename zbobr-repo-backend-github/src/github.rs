@@ -137,7 +137,7 @@ impl GitHubRepoBackend {
         })
     }
 
-    async fn ensure_fork(&self, target_repo: &str) -> anyhow::Result<String> {
+    async fn ensure_fork(&self, target_repo: &str, branch: &str) -> anyhow::Result<String> {
         let repo = parse_github_repo(target_repo)?;
         let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo.name());
 
@@ -150,7 +150,6 @@ impl GitHubRepoBackend {
         .is_ok();
 
         if !exists {
-            let repo = parse_github_repo(target_repo)?;
             let fork_owner = &self.backend_config.fork_owner;
             let endpoint = format!("/repos/{}/forks", repo.full_name);
             let payload = serde_json::json!({ "organization": fork_owner });
@@ -185,6 +184,21 @@ impl GitHubRepoBackend {
 
             // Wait a moment for the fork to be ready
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        } else {
+            // Fork exists — sync it with upstream before use
+            let endpoint = format!("/repos/{}/merge-upstream", fork_repo);
+            let body = serde_json::json!({ "branch": branch });
+
+            tracing::info!("Syncing fork {fork_repo} from {}/{}", repo.owner(), branch);
+
+            self.octocrab
+                .post::<serde_json::Value, serde_json::Value>(endpoint, Some(&body))
+                .await
+                .with_context(|| {
+                    format!("Failed to sync fork {fork_repo} with upstream {target_repo}/{branch}")
+                })?;
+
+            tracing::info!("Successfully synced fork {fork_repo}");
         }
 
         Ok(fork_repo)
@@ -342,7 +356,7 @@ impl RepoBackend for GitHubRepoBackend {
         if same_org {
             tracing::info!("Same-org mode: skipping fork setup for {target_repo}");
         } else {
-            let fork_repo = self.ensure_fork(target_repo).await?;
+            let fork_repo = self.ensure_fork(target_repo, branch).await?;
 
             // Add fork remote if not present
             let remote_check = tokio::process::Command::new("git")
@@ -692,47 +706,6 @@ impl RepoBackend for GitHubRepoBackend {
         }
 
         Ok(())
-    }
-
-    async fn sync_fork(&self, target_repo: &str, branch: &str) -> anyhow::Result<()> {
-        let repo = parse_github_repo(target_repo)?;
-
-        // In same-org mode there is no separate fork to sync.
-        if repo.owner().eq_ignore_ascii_case(&self.backend_config.fork_owner) {
-            tracing::info!("Same-org mode: skipping sync_fork for {target_repo}");
-            return Ok(());
-        }
-
-        let fork_repo = self.ensure_fork(target_repo).await?;
-
-        let endpoint = format!("/repos/{}/merge-upstream", fork_repo);
-        let body = serde_json::json!({
-            "branch": branch,
-            "upstream": format!("{}:{}", repo.owner(), branch),
-            "commit_message": format!("Sync fork {} from {}/{}", fork_repo, repo.owner(), branch),
-        });
-
-        tracing::info!("Calling merge-upstream for {} -> {}", fork_repo, branch);
-
-        match self
-            .octocrab
-            .post::<serde_json::Value, serde_json::Value>(endpoint, Some(&body))
-            .await
-        {
-            Ok(_) => {
-                tracing::info!(
-                    "Successfully synced fork {} from {}/{}",
-                    fork_repo,
-                    repo.owner(),
-                    branch
-                );
-                Ok(())
-            }
-            Err(e) => {
-                tracing::error!("merge-upstream failed for {}: {}", fork_repo, e);
-                Err(octocrab_to_anyhow(e))
-            }
-        }
     }
 
     async fn parse_pr_to_repo_branch(&self, pr_ref: &str) -> anyhow::Result<(String, String)> {

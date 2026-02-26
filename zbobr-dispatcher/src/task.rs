@@ -1168,9 +1168,6 @@ mod tests {
             ) -> anyhow::Result<std::path::PathBuf> {
                 unreachable!()
             }
-            async fn sync_fork(&self, _target_repo: &str, _branch: &str) -> anyhow::Result<()> {
-                unreachable!()
-            }
             async fn setup_fork_remote_and_push(
                 &self,
                 _work_dir: &std::path::Path,

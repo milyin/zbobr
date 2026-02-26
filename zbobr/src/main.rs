@@ -1224,7 +1224,22 @@ async fn run_role_session(
                     anyhow::anyhow!("Task #{task_id} has no work_branch parameter")
                 })?
                 .clone();
-            zbobr.clone_and_setup(&dest_repo, &work_branch, task_id).await?
+            match zbobr.clone_and_setup(&dest_repo, &work_branch, task_id).await {
+                Ok(path) => path,
+                Err(e) => {
+                    let msg = format!("Failed to prepare workspace for task #{task_id}: {e}");
+                    tracing::error!("{msg}");
+                    let hostname = zbobr_dispatcher::mcp::common::get_hostname();
+                    if let Err(post_err) = zbobr
+                        .task_session(task_id)
+                        .post_message(&msg, "error", &hostname)
+                        .await
+                    {
+                        tracing::warn!("Failed to post error to task discussion: {post_err}");
+                    }
+                    return Err(anyhow::anyhow!("{msg}"));
+                }
+            }
         }
     };
 

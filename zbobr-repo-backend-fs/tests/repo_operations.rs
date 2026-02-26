@@ -44,16 +44,6 @@ async fn test_debug_state() {
     );
 }
 
-#[tokio::test]
-async fn test_sync_fork_is_noop() {
-    let setup = create_test_setup().await;
-    setup
-        .backend
-        .sync_fork(&source_repo_str(&setup), "main")
-        .await
-        .expect("sync_fork should succeed (no-op)");
-}
-
 // ---------------------------------------------------------------------------
 // Clone operations
 // ---------------------------------------------------------------------------

@@ -314,11 +314,6 @@ impl Zbobr {
             .await
     }
 
-    /// Ensure the fork is synchronized with the upstream `target_repo` on `branch`.
-    pub async fn sync_fork(&self, target_repo: &str, branch: &str) -> anyhow::Result<()> {
-        self.repo_backend.sync_fork(target_repo, branch).await
-    }
-
     // -- Combined state --
 
     pub fn debug_state(&self) -> String {

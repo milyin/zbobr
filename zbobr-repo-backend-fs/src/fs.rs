@@ -207,12 +207,6 @@ impl RepoBackend for FilesystemRepoBackend {
             .await
     }
 
-    async fn sync_fork(&self, _target_repo: &str, _branch: &str) -> anyhow::Result<()> {
-        // No-op for filesystem backend — there is no remote fork to sync
-        tracing::debug!("sync_fork is a no-op for filesystem backend");
-        Ok(())
-    }
-
     async fn setup_fork_remote_and_push(
         &self,
         work_dir: &Path,
