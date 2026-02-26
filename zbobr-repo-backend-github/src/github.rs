@@ -197,9 +197,15 @@ impl GitHubRepoBackend {
             html_url: String,
         }
 
+        // GitHub's list-PRs API requires "owner:branch" format for the head
+        // filter; a bare branch name is silently ignored and all open PRs are
+        // returned, causing the wrong PR to be selected.
+        let owner = full_repo.split('/').next().unwrap_or(full_repo);
+        let head_filter = format!("{owner}:{head}");
+
         let endpoint = format!("/repos/{full_repo}/pulls");
         let params = serde_json::json!({
-            "head": head,
+            "head": head_filter,
             "base": base,
             "state": "open",
         });
