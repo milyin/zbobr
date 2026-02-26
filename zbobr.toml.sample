@@ -79,7 +79,7 @@ fork_owner = "{{FORK_OWNER}}"
 # Prefer env vars instead of storing in config.
 # copilot_github_token = ""
 
-[executor.mcp-tester]
+[executor.mcp_tester]
 # YAML scenario files for mcp-tester, one per stage.
 # Use with --cli-tool mcp-tester to validate MCP servers.
 # planning = "scenarios/planning.yml"
