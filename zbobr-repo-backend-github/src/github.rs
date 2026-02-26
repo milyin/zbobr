@@ -489,13 +489,17 @@ impl RepoBackend for GitHubRepoBackend {
             .status
             .success();
 
-        let (push_remote, pr_head) = if has_fork_remote {
+        // In cross-org mode push to the fork remote and create the PR inside
+        // the fork.  The user is responsible for retargeting the PR to the
+        // upstream repo.  In same-org mode push directly to origin and create
+        // the PR there.
+        let (push_remote, pr_repo) = if has_fork_remote {
             (
                 "fork",
-                format!("{}:{work_branch}", self.backend_config.fork_owner),
+                format!("{}/{}", self.backend_config.fork_owner, repo.name()),
             )
         } else {
-            ("origin", work_branch.to_string())
+            ("origin", repo.full_name.clone())
         };
 
         tracing::info!("Pushing {work_branch} to {push_remote}");
@@ -512,7 +516,7 @@ impl RepoBackend for GitHubRepoBackend {
         // query the open PRs to find and return the existing PR URL.
         let pr_payload = serde_json::json!({
             "title": pr_title,
-            "head": pr_head,
+            "head": work_branch,
             "base": destination_branch,
             "body": "",
         });
@@ -522,7 +526,7 @@ impl RepoBackend for GitHubRepoBackend {
             html_url: String,
         }
 
-        let pr_endpoint = format!("/repos/{}/pulls", repo.full_name);
+        let pr_endpoint = format!("/repos/{pr_repo}/pulls");
 
         let create_result: Result<PrResponse, octocrab::Error> = self
             .octocrab
@@ -535,7 +539,7 @@ impl RepoBackend for GitHubRepoBackend {
                 tracing::info!(
                     "PR already exists for {work_branch}, looking up existing PR"
                 );
-                self.find_existing_pr(&repo.full_name, &pr_head, destination_branch)
+                self.find_existing_pr(&pr_repo, work_branch, destination_branch)
                     .await
             }
             Err(e) => Err(octocrab_to_anyhow(e)),
@@ -589,7 +593,7 @@ impl RepoBackend for GitHubRepoBackend {
         let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo_name);
 
         tracing::info!(
-            "Creating PR in {} from {} to {} using octocrab",
+            "Creating PR in fork {} from {} to {}",
             fork_repo,
             work_branch,
             destination_branch
@@ -609,7 +613,7 @@ impl RepoBackend for GitHubRepoBackend {
             html_url: String,
         }
 
-        let response: PrResponse = retry_github("create PR", || {
+        let response: PrResponse = retry_github("create PR in fork", || {
             self.octocrab.post(pr_endpoint.clone(), Some(&pr_payload))
         })
         .await?;
