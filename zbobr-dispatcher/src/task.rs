@@ -717,13 +717,16 @@ impl RoleSession {
         Ok(pr_url)
     }
 
-    /// Push the work branch to the remote and create a PR against the destination branch.
+    /// Ensure `pr_url` is stored in task parameters.
     ///
-    /// Reads `DestinationRepository` and `DestinationBranch` from task parameters, builds
-    /// PR metadata from the task title, delegates to the repo backend, then stores the
-    /// resulting URL in `Parameter::PrUrl`.
-    pub async fn create_pr(&self, pr_body: &str) -> anyhow::Result<String> {
+    /// If already set, returns the existing value immediately.
+    /// If not set: calls `ensure_branch_and_pr` on the repo backend, stores the
+    /// resulting URL in `Parameter::PrUrl`, and returns it.
+    pub async fn ensure_pr_url(&self) -> anyhow::Result<String> {
         let task = self.get_task().await?;
+        if let Some(url) = task.parameters.get(&Parameter::PrUrl).cloned() {
+            return Ok(url);
+        }
         let dest_repo = task
             .parameters
             .get(&Parameter::DestinationRepository)
@@ -734,16 +737,48 @@ impl RoleSession {
             .get(&Parameter::DestinationBranch)
             .cloned()
             .unwrap_or_else(|| "main".to_string());
+        let work_branch = task
+            .parameters
+            .get(&Parameter::WorkBranch)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("work_branch parameter is not set"))?;
         let pr_title = format!("Fix #{}: {}", self.task_id, task.title);
 
         let pr_url = self
             .zbobr
-            .push_and_create_pr(&dest_repo, self.task_id, &dest_branch, &pr_title, pr_body)
+            .ensure_branch_and_pr(
+                &dest_repo,
+                self.task_id,
+                &work_branch,
+                &dest_branch,
+                &pr_title,
+            )
             .await?;
 
         self.set_parameter(Parameter::PrUrl, Some(pr_url.clone()))
             .await?;
         Ok(pr_url)
+    }
+
+    /// Push current work branch commits to the remote.
+    ///
+    /// Reads `DestinationRepository` and `WorkBranch` from task parameters and delegates
+    /// to the repo backend. FS backend is a no-op; GitHub backend performs a git push.
+    pub async fn push_branch_commits(&self) -> anyhow::Result<()> {
+        let task = self.get_task().await?;
+        let dest_repo = task
+            .parameters
+            .get(&Parameter::DestinationRepository)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("destination_repository parameter is not set"))?;
+        let work_branch = task
+            .parameters
+            .get(&Parameter::WorkBranch)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("work_branch parameter is not set"))?;
+        self.zbobr
+            .push_branch(&dest_repo, self.task_id, &work_branch)
+            .await
     }
 
     /// Get a task parameter value. Parameters are stored in the task's parameters HashMap.

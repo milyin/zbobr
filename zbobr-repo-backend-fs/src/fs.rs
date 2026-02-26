@@ -235,13 +235,13 @@ impl RepoBackend for FilesystemRepoBackend {
         Ok(())
     }
 
-    async fn push_and_create_pr(
+    async fn ensure_branch_and_pr(
         &self,
         target_repo: &str,
         workspace_path: &Path,
-        destination_branch: &str,
-        pr_title: &str,
-        pr_body: &str,
+        _work_branch: &str,
+        _destination_branch: &str,
+        _pr_title: &str,
     ) -> anyhow::Result<String> {
         let repo_name = Self::repo_name_from_path(target_repo)?;
         let work_dir = workspace_path.join(&repo_name);
@@ -250,18 +250,18 @@ impl RepoBackend for FilesystemRepoBackend {
             anyhow::bail!("Work directory does not exist: {}", work_dir.display());
         }
 
-        let branch_name = Self::current_branch(&work_dir).await?;
+        // FS backend: return the work directory path as the "PR URL"
+        Ok(work_dir.to_string_lossy().to_string())
+    }
 
-        // No git push — fs backend simulates PR creation locally via YAML file
-        self.write_pr(
-            &repo_name,
-            target_repo,
-            &branch_name,
-            destination_branch,
-            pr_title,
-            pr_body,
-        )
-        .await
+    async fn push_branch(
+        &self,
+        _target_repo: &str,
+        _workspace_path: &Path,
+        _work_branch: &str,
+    ) -> anyhow::Result<()> {
+        // FS backend: no-op
+        Ok(())
     }
 
     async fn create_pr_in_fork(

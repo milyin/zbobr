@@ -220,23 +220,35 @@ impl Zbobr {
         self.repo_backend.parse_pr_to_repo_branch(pr_ref).await
     }
 
-    pub async fn push_and_create_pr(
+    pub async fn ensure_branch_and_pr(
         &self,
         target_repo: &str,
         task_id: u64,
+        work_branch: &str,
         destination_branch: &str,
         pr_title: &str,
-        pr_body: &str,
     ) -> anyhow::Result<String> {
         let workspace_path = self.config.workspaces.join(format!("task#{task_id}"));
         self.repo_backend
-            .push_and_create_pr(
+            .ensure_branch_and_pr(
                 target_repo,
                 &workspace_path,
+                work_branch,
                 destination_branch,
                 pr_title,
-                pr_body,
             )
+            .await
+    }
+
+    pub async fn push_branch(
+        &self,
+        target_repo: &str,
+        task_id: u64,
+        work_branch: &str,
+    ) -> anyhow::Result<()> {
+        let workspace_path = self.config.workspaces.join(format!("task#{task_id}"));
+        self.repo_backend
+            .push_branch(target_repo, &workspace_path, work_branch)
             .await
     }
 

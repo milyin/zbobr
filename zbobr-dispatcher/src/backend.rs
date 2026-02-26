@@ -186,18 +186,31 @@ pub trait RepoBackend: Send + Sync {
 
     // -- PR operations --
 
-    /// Push the current branch to the fork remote and create a PR.
-    /// `destination_branch` is the base branch for the PR (e.g. "main").
-    /// `pr_title` and `pr_body` are provided by the caller (decoupled from task storage).
-    /// `workspace_path` is the directory containing the cloned repository.
-    async fn push_and_create_pr(
+    /// Create (or find existing) branch reference on the remote and return a PR URL.
+    ///
+    /// For FS backend: returns the work directory path string (no git push).
+    /// For GitHub backend: pushes the branch (adding a placeholder commit if the branch has no
+    /// new commits relative to `destination_branch`), creates a draft PR, or finds the existing
+    /// PR URL if GitHub returns 422, and returns the PR `html_url`.
+    async fn ensure_branch_and_pr(
         &self,
         target_repo: &str,
         workspace_path: &std::path::Path,
+        work_branch: &str,
         destination_branch: &str,
         pr_title: &str,
-        pr_body: &str,
     ) -> anyhow::Result<String>;
+
+    /// Push current work branch commits to the remote (fork or origin).
+    ///
+    /// FS backend: no-op (`Ok(())`).
+    /// GitHub backend: git push to fork or origin (same remote detection as `ensure_branch_and_pr`).
+    async fn push_branch(
+        &self,
+        target_repo: &str,
+        workspace_path: &std::path::Path,
+        work_branch: &str,
+    ) -> anyhow::Result<()>;
 
     /// Create a PR from work_branch to destination_branch in the fork repo.
     /// `repo_name` is just the repository name (e.g. "myrepo"), not a full "owner/repo" path.

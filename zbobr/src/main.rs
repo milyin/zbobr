@@ -1205,6 +1205,17 @@ async fn run_role_session(
         }
     };
 
+    // For all roles that have a work directory (not Preparator), ensure the PR URL is stored.
+    // This creates the work branch and PR on the remote the first time, and returns the
+    // cached URL on subsequent calls.  Failures are non-fatal (warn only).
+    if !matches!(role, Role::Preparator) {
+        let role_session = zbobr.role_session(task_id);
+        match role_session.ensure_pr_url().await {
+            Ok(pr_url) => tracing::info!("PR reference: {pr_url}"),
+            Err(e) => tracing::warn!("Could not ensure PR URL for task #{task_id}: {e}"),
+        }
+    }
+
     // For roles that operate on the work branch (Planner, Worker, Reviewer), attempt to
     // integrate the destination branch.  This catches conflicts early — before the agent
     // session starts — so we can hand off to the Merger without wasting an agent run.
@@ -1359,6 +1370,12 @@ async fn run_role_session(
                 }
                 _ => tracing::warn!("Failed to check git status for auto-commit"),
             }
+
+            // Push committed changes to remote so the GitHub PR stays current.
+            let role_session = task_session.role_session();
+            if let Err(e) = role_session.push_branch_commits().await {
+                tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
+            }
         }
 
         // After a normal (non-interrupted) session finish, decide next state
@@ -1391,17 +1408,12 @@ async fn run_role_session(
             }
             Role::Reviewer => {
                 // Reviewer done → if unchecked items, send back to worker; otherwise DONE
+                // PR already exists (created at workspace setup time via ensure_pr_url).
                 if current_task.signal.is_none() && !current_task.pause {
                     if has_unchecked {
                         task_session.set_signal(Some(Signal::GoWork)).await?;
                         task_session.set_stage(Stage::Pending).await?;
                     } else {
-                        // All items checked — push branch and create PR, then mark done
-                        let role_session = task_session.role_session();
-                        let pr_url = role_session
-                            .create_pr("Implementation reviewed and approved. Ready to merge.")
-                            .await?;
-                        tracing::info!("PR created after reviewer approval: {pr_url}");
                         task_session.mark_done().await?;
                     }
                 } else {
@@ -1409,13 +1421,10 @@ async fn run_role_session(
                 }
             }
             Role::Merger => {
-                // Merger done → clear conflict flag, push work branch and create PR, back to PENDING
+                // Merger done → clear conflict flag, back to PENDING.
+                // PR already exists (created at workspace setup time via ensure_pr_url).
+                // push_branch_commits was already called above after auto-commit.
                 task_session.set_conflict(false).await?;
-                let role_session = task_session.role_session();
-                let pr_url = role_session
-                    .create_pr("Conflict resolved. Ready for review.")
-                    .await?;
-                tracing::info!("PR created after merger: {pr_url}");
                 task_session.set_stage(Stage::Pending).await?;
             }
         }

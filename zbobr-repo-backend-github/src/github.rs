@@ -183,6 +183,45 @@ impl GitHubRepoBackend {
 
         Ok(fork_repo)
     }
+
+    /// Query GitHub for an existing open PR matching `head` → `base`.
+    /// Returns the `html_url` of the first matching PR.
+    async fn find_existing_pr(
+        &self,
+        full_repo: &str,
+        head: &str,
+        base: &str,
+    ) -> anyhow::Result<String> {
+        #[derive(serde::Deserialize)]
+        struct PrListItem {
+            html_url: String,
+        }
+
+        let endpoint = format!("/repos/{full_repo}/pulls");
+        let params = serde_json::json!({
+            "head": head,
+            "base": base,
+            "state": "open",
+        });
+
+        let prs: Vec<PrListItem> = self
+            .octocrab
+            .get(&endpoint, Some(&params))
+            .await
+            .map_err(octocrab_to_anyhow)?;
+
+        prs.into_iter()
+            .next()
+            .map(|pr| pr.html_url)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No existing open PR found for head '{}' -> base '{}' in {}",
+                    head,
+                    base,
+                    full_repo
+                )
+            })
+    }
 }
 
 #[async_trait]
@@ -399,13 +438,13 @@ impl RepoBackend for GitHubRepoBackend {
         Ok(work_dir)
     }
 
-    async fn push_and_create_pr(
+    async fn ensure_branch_and_pr(
         &self,
         target_repo: &str,
         workspace_path: &std::path::Path,
+        work_branch: &str,
         destination_branch: &str,
         pr_title: &str,
-        pr_body: &str,
     ) -> anyhow::Result<String> {
         let repo = parse_github_repo(target_repo)?;
         let work_dir = workspace_path.join(repo.name());
@@ -414,60 +453,29 @@ impl RepoBackend for GitHubRepoBackend {
             anyhow::bail!("Work directory does not exist: {}", work_dir.display());
         }
 
-        let branch_name = {
-            let out = tokio::process::Command::new("git")
-                .args(["rev-parse", "--abbrev-ref", "HEAD"])
-                .current_dir(&work_dir)
-                .output()
-                .await
-                .context("Failed to determine current branch")?;
-            if !out.status.success() {
-                anyhow::bail!("Failed to determine current branch");
-            }
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
-        };
+        // Check if the branch has any commits ahead of the destination branch.
+        // If not, create a placeholder commit so GitHub PR API won't reject it.
+        let log_out = tokio::process::Command::new("git")
+            .args([
+                "log",
+                &format!("origin/{}..HEAD", destination_branch),
+                "--oneline",
+            ])
+            .current_dir(&work_dir)
+            .output()
+            .await
+            .context("Failed to check commits ahead of destination branch")?;
 
-        // Remove placeholder if present
-        let zbobr_placeholder = work_dir.join(".zbobr").join(&branch_name);
-        if zbobr_placeholder.exists() {
-            match tokio::process::Command::new("git")
-                .args(["status", "--porcelain"])
-                .current_dir(&work_dir)
-                .output()
+        let has_commits_ahead = log_out.status.success()
+            && !String::from_utf8_lossy(&log_out.stdout).trim().is_empty();
+
+        if !has_commits_ahead {
+            tracing::info!(
+                "No commits ahead of origin/{destination_branch} — creating placeholder commit"
+            );
+            zbobr_dispatcher::backend::create_placeholder_commit(&work_dir, work_branch)
                 .await
-            {
-                Ok(out) => {
-                    if !out.stdout.is_empty() {
-                        tracing::info!(
-                            "Local changes detected; removing placeholder {} and committing changes",
-                            branch_name
-                        );
-                        let _ = tokio::process::Command::new("git")
-                            .args(["rm", "-f", format!(".zbobr/{}", &branch_name).as_str()])
-                            .current_dir(&work_dir)
-                            .status()
-                            .await;
-                        let _ = tokio::process::Command::new("git")
-                            .args(["add", "-A"])
-                            .current_dir(&work_dir)
-                            .status()
-                            .await;
-                        let commit_msg = format!(
-                            "chore: remove placeholder {} and apply changes",
-                            &branch_name
-                        );
-                        let commit_status = tokio::process::Command::new("git")
-                            .args(["commit", "-m", &commit_msg])
-                            .current_dir(&work_dir)
-                            .status()
-                            .await;
-                        if let Err(e) = commit_status {
-                            tracing::warn!("Failed to commit after removing placeholder: {}", e);
-                        }
-                    }
-                }
-                Err(e) => tracing::warn!("Failed to check git status: {}", e),
-            }
+                .context("Failed to create placeholder commit")?;
         }
 
         // In same-org mode there is no "fork" remote — push directly to origin
@@ -482,12 +490,15 @@ impl RepoBackend for GitHubRepoBackend {
             .success();
 
         let (push_remote, pr_head) = if has_fork_remote {
-            ("fork", format!("{}:{branch_name}", self.backend_config.fork_owner))
+            (
+                "fork",
+                format!("{}:{work_branch}", self.backend_config.fork_owner),
+            )
         } else {
-            ("origin", branch_name.clone())
+            ("origin", work_branch.to_string())
         };
 
-        tracing::info!("Pushing {branch_name} to {push_remote}");
+        tracing::info!("Pushing {work_branch} to {push_remote}");
         let status = tokio::process::Command::new("git")
             .args(["push", push_remote, "HEAD"])
             .current_dir(&work_dir)
@@ -497,12 +508,13 @@ impl RepoBackend for GitHubRepoBackend {
             anyhow::bail!("Failed to push to {push_remote}");
         }
 
-        // Create PR
+        // Try to create the PR.  If GitHub returns 422 (PR already exists for this branch),
+        // query the open PRs to find and return the existing PR URL.
         let pr_payload = serde_json::json!({
             "title": pr_title,
             "head": pr_head,
             "base": destination_branch,
-            "body": pr_body,
+            "body": "",
         });
 
         #[derive(serde::Deserialize)]
@@ -511,13 +523,59 @@ impl RepoBackend for GitHubRepoBackend {
         }
 
         let pr_endpoint = format!("/repos/{}/pulls", repo.full_name);
-        let response: PrResponse = self
-            .octocrab
-            .post(pr_endpoint, Some(&pr_payload))
-            .await
-            .map_err(|e| anyhow::anyhow!("GitHub API error: {}", e))?;
 
-        Ok(response.html_url)
+        let create_result: Result<PrResponse, octocrab::Error> = self
+            .octocrab
+            .post(pr_endpoint.clone(), Some(&pr_payload))
+            .await;
+
+        match create_result {
+            Ok(pr) => Ok(pr.html_url),
+            Err(octocrab::Error::GitHub { ref source, .. }) if source.status_code.as_u16() == 422 => {
+                tracing::info!(
+                    "PR already exists for {work_branch}, looking up existing PR"
+                );
+                self.find_existing_pr(&repo.full_name, &pr_head, destination_branch)
+                    .await
+            }
+            Err(e) => Err(octocrab_to_anyhow(e)),
+        }
+    }
+
+    async fn push_branch(
+        &self,
+        target_repo: &str,
+        workspace_path: &std::path::Path,
+        work_branch: &str,
+    ) -> anyhow::Result<()> {
+        let repo = parse_github_repo(target_repo)?;
+        let work_dir = workspace_path.join(repo.name());
+
+        if !work_dir.exists() {
+            anyhow::bail!("Work directory does not exist: {}", work_dir.display());
+        }
+
+        let has_fork_remote = tokio::process::Command::new("git")
+            .args(["remote", "get-url", "fork"])
+            .current_dir(&work_dir)
+            .output()
+            .await?
+            .status
+            .success();
+
+        let push_remote = if has_fork_remote { "fork" } else { "origin" };
+
+        tracing::info!("Pushing {work_branch} to {push_remote}");
+        let status = tokio::process::Command::new("git")
+            .args(["push", push_remote, "HEAD"])
+            .current_dir(&work_dir)
+            .status()
+            .await?;
+        if !status.success() {
+            anyhow::bail!("Failed to push to {push_remote}");
+        }
+
+        Ok(())
     }
 
     async fn create_pr_in_fork(

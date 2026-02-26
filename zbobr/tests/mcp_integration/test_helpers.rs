@@ -258,14 +258,12 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
         "[{}] Merger should not set a follow-up signal",
         env.name()
     );
-    // The dispatcher automatically pushes the work branch and creates a PR after merger.
-    if env.target_repo.is_some() {
-        assert!(
-            output.contains("pr_url:"),
-            "[{}] PR URL should be stored in task parameters after merger",
-            env.name()
-        );
-    }
+    // The PR URL is stored at workspace setup time (ensure_pr_url in run_role_session).
+    assert!(
+        output.contains("pr_url:"),
+        "[{}] PR URL should be stored in task parameters after merger:\n{output}",
+        env.name()
+    );
 
     assert_workspace_ok(env, task_report, &repo_name, &branch_report).await;
 
