@@ -626,41 +626,44 @@ impl RepoBackend for GitHubRepoBackend {
     }
 
     async fn parse_pr_to_repo_branch(&self, pr_ref: &str) -> anyhow::Result<(String, String)> {
-        let (owner, repo, pr_number) = if pr_ref.starts_with("https://github.com/") {
-            let parts: Vec<&str> = pr_ref
-                .trim_start_matches("https://github.com/")
-                .split('/')
-                .collect();
-            if parts.len() >= 4 && parts[2] == "pull" {
-                let owner = parts[0];
-                let repo = parts[1];
-                let pr_num = parts[3]
-                    .parse::<u64>()
-                    .map_err(|_| anyhow::anyhow!("Invalid PR number in URL: {pr_ref}"))?;
-                (owner.to_string(), repo.to_string(), pr_num)
-            } else {
-                anyhow::bail!("Invalid PR URL format: {pr_ref}");
-            }
-        } else if pr_ref.contains('#') {
-            let parts: Vec<&str> = pr_ref.split('#').collect();
-            if parts.len() == 2 {
-                let repo_parts: Vec<&str> = parts[0].split('/').collect();
-                if repo_parts.len() == 2 {
-                    let owner = repo_parts[0];
-                    let repo = repo_parts[1];
-                    let pr_num = parts[1]
+        fn parse_ref(pr_ref: &str) -> anyhow::Result<(String, String, u64)> {
+            if pr_ref.starts_with("https://github.com/") {
+                let parts: Vec<&str> = pr_ref
+                    .trim_start_matches("https://github.com/")
+                    .split('/')
+                    .collect();
+                if parts.len() >= 4 && parts[2] == "pull" {
+                    let pr_num = parts[3]
                         .parse::<u64>()
-                        .map_err(|_| anyhow::anyhow!("Invalid PR number: {}", parts[1]))?;
-                    (owner.to_string(), repo.to_string(), pr_num)
-                } else {
-                    anyhow::bail!("Invalid repo format in PR reference: {pr_ref}");
+                        .map_err(|_| anyhow::anyhow!("Invalid PR number in URL: {pr_ref}"))?;
+                    return Ok((parts[0].to_string(), parts[1].to_string(), pr_num));
                 }
-            } else {
-                anyhow::bail!("Invalid PR reference format: {pr_ref}");
+                return Err(anyhow::anyhow!("Invalid PR URL format: {pr_ref}"));
             }
-        } else {
-            anyhow::bail!("PR reference must be a URL or owner/repo#number format: {pr_ref}");
-        };
+            if pr_ref.contains('#') {
+                let parts: Vec<&str> = pr_ref.split('#').collect();
+                if parts.len() == 2 {
+                    let repo_parts: Vec<&str> = parts[0].split('/').collect();
+                    if repo_parts.len() == 2 {
+                        let pr_num = parts[1]
+                            .parse::<u64>()
+                            .map_err(|_| anyhow::anyhow!("Invalid PR number: {}", parts[1]))?;
+                        return Ok((
+                            repo_parts[0].to_string(),
+                            repo_parts[1].to_string(),
+                            pr_num,
+                        ));
+                    }
+                    return Err(anyhow::anyhow!("Invalid repo format in PR reference: {pr_ref}"));
+                }
+                return Err(anyhow::anyhow!("Invalid PR reference format: {pr_ref}"));
+            }
+            Err(anyhow::anyhow!(
+                "PR reference must be a URL or owner/repo#number format: {pr_ref}"
+            ))
+        }
+
+        let (owner, repo, pr_number) = parse_ref(pr_ref)?;
 
         #[derive(serde::Deserialize)]
         struct PrHead {
