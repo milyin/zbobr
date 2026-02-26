@@ -81,3 +81,10 @@ async fn test_fs_fs_merging_with_real_conflict() {
     let Some(env) = get_env().await else { return };
     test_helpers::run_merging_with_real_conflict(&env).await;
 }
+
+#[tokio::test]
+async fn test_fs_fs_conflict_detection() {
+    let _guard = TEST_LOCK.lock().await;
+    let Some(env) = get_env().await else { return };
+    test_helpers::run_conflict_detection(&env).await;
+}

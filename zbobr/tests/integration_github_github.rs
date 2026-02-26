@@ -102,3 +102,11 @@ async fn test_github_github_merging_with_real_conflict() {
     let env = get_env().await;
     test_helpers::run_merging_with_real_conflict(&env).await;
 }
+
+#[tokio::test]
+#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
+async fn test_github_github_conflict_detection() {
+    let _guard = TEST_LOCK.lock().await;
+    let env = get_env().await;
+    test_helpers::run_conflict_detection(&env).await;
+}

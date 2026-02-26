@@ -337,6 +337,111 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
 }
 
 // ---------------------------------------------------------------------------
+// Conflict detection
+// ---------------------------------------------------------------------------
+
+/// Verify the automatic conflict-detection path in `run_role_session`:
+///
+/// 1. The dispatcher clones the work branch.
+/// 2. It tries `git merge <dest_branch>` and finds a conflict.
+/// 3. It sets `conflict = true`, reverts the task to Pending, and returns
+///    without launching the agent.
+/// 4. The Merger is then run on the already-conflicted workspace and clears
+///    the flag.
+///
+/// This test relies on a purely local git repo and is skipped when a GitHub
+/// repo backend is configured (`env.target_repo.is_some()`).
+pub async fn run_conflict_detection(env: &IntegrationTestEnv) {
+    if env.target_repo.is_some() {
+        eprintln!(
+            "[{}] Skipping run_conflict_detection: requires local repo backend",
+            env.name()
+        );
+        return;
+    }
+
+    let repo_path = env.create_git_repo("repo_conflict_detection").await;
+    let repo_path_str = repo_path.to_string_lossy().to_string();
+    let repo_name = repo_path
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    let work_branch = "zbobr_conflict-detect-work";
+
+    // Build conflicting histories: both main and work_branch add different
+    // content to conflict_file.txt after their common ancestor.
+    git_in(&repo_path, &["checkout", "-b", work_branch]).await;
+    write_and_commit(
+        &repo_path,
+        "conflict_file.txt",
+        "line1\nline2 work\nline3\n",
+        "Work change",
+    )
+    .await;
+    git_in(&repo_path, &["checkout", "main"]).await;
+    write_and_commit(
+        &repo_path,
+        "conflict_file.txt",
+        "line1\nline2 main\nline3\n",
+        "Main change",
+    )
+    .await;
+
+    let task_id = env
+        .create_task(
+            "Conflict Detection",
+            "Dummy task description",
+            Stage::Working,
+        )
+        .await;
+    env.update_task_branches(task_id, &repo_path_str, "main", work_branch)
+        .await;
+
+    // Run the Worker stage.  The dispatcher clones the repo, attempts
+    // `git merge main`, detects the conflict, sets conflict=true, and exits
+    // successfully without invoking the mcp-tester agent.
+    env.run_stage(task_id, Stage::Working, scenarios::working_scenario())
+        .await;
+
+    let output = env.show_task(task_id).await;
+    assert!(
+        output.contains("Conflict:    true"),
+        "[{}] Conflict flag should be set after automatic conflict detection:\n{output}",
+        env.name()
+    );
+
+    // Workspace must exist and be in an unresolved merge state.
+    let work_dir = env
+        .workspaces_dir
+        .join(format!("task#{task_id}"))
+        .join(&repo_name);
+    let git_status = git_output(&work_dir, &["status"]).await;
+    assert!(
+        git_status.contains("You have unmerged paths")
+            || git_status.contains("Unmerged paths"),
+        "[{}] Workspace should be in a conflicted git state:\n{git_status}",
+        env.name()
+    );
+
+    // Run the Merger on the already-conflicted workspace.
+    env.run_stage(
+        task_id,
+        Stage::Merging,
+        scenarios::merging_conflict_scenario(),
+    )
+    .await;
+
+    let output = env.show_task(task_id).await;
+    assert!(
+        output.contains("Conflict:    false"),
+        "[{}] Conflict flag should be cleared after Merger session:\n{output}",
+        env.name()
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
 

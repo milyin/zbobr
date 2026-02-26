@@ -100,3 +100,11 @@ async fn test_github_fs_merging_with_real_conflict() {
     let env = get_env().await;
     test_helpers::run_merging_with_real_conflict(&env).await;
 }
+
+#[tokio::test]
+#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
+async fn test_github_fs_conflict_detection() {
+    let _guard = TEST_LOCK.lock().await;
+    let env = get_env().await;
+    test_helpers::run_conflict_detection(&env).await;
+}
