@@ -680,6 +680,8 @@ async fn main() -> anyhow::Result<()> {
             GitHubRepoBackend::new(
                 repo_backend_github_toml.cloned(),
                 cli.global.settings.repo.github.clone(),
+                config.git_user_name.clone(),
+                config.git_user_email.clone(),
             )
             .context("Failed to create GitHub repo backend")?,
         ),

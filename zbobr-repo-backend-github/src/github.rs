@@ -112,12 +112,16 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
 pub struct GitHubRepoBackend {
     backend_config: ZbobrRepoBackendGithubConfig,
     octocrab: octocrab::Octocrab,
+    git_user_name: String,
+    git_user_email: String,
 }
 
 impl GitHubRepoBackend {
     pub fn new(
         toml: Option<crate::config::ZbobrRepoBackendGithubToml>,
         args: crate::config::ZbobrRepoBackendGithubArgs,
+        git_user_name: String,
+        git_user_email: String,
     ) -> anyhow::Result<Self> {
         let backend_config = ZbobrRepoBackendGithubConfig::build(toml, args);
         backend_config.validate()?;
@@ -128,6 +132,8 @@ impl GitHubRepoBackend {
         Ok(Self {
             backend_config,
             octocrab,
+            git_user_name,
+            git_user_email,
         })
     }
 
@@ -479,6 +485,13 @@ impl RepoBackend for GitHubRepoBackend {
             tracing::info!(
                 "No commits ahead of origin/{destination_branch} — creating placeholder commit"
             );
+            zbobr_dispatcher::backend::configure_git_user(
+                &work_dir,
+                &self.git_user_name,
+                &self.git_user_email,
+            )
+            .await
+            .context("Failed to configure git user for placeholder commit")?;
             zbobr_dispatcher::backend::create_placeholder_commit(&work_dir, work_branch)
                 .await
                 .context("Failed to create placeholder commit")?;
