@@ -98,22 +98,30 @@ impl ToolExecutor for ClaudeExecutor {
         let stderr_task = tokio::spawn(async move {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
+            let mut collected = Vec::new();
             while let Ok(Some(line)) = lines.next_line().await {
                 tracing::warn!("[claude] {}", line);
+                collected.push(line);
             }
+            collected
         });
 
         // Wait for process to complete
         let status = child.wait().await?;
 
         // Wait for output tasks to finish
-        let _ = tokio::join!(stdout_task, stderr_task);
+        let (_, stderr_result) = tokio::join!(stdout_task, stderr_task);
 
         tracing::debug!("Claude finished execution with status: {status}");
 
         if !status.success() {
-            tracing::error!("claude exited with status: {status}");
-            anyhow::bail!("claude exited with status: {status}");
+            let error_context = match stderr_result {
+                Ok(lines) if !lines.is_empty() => {
+                    format!("\nClaude output:\n{}", lines.join("\n"))
+                }
+                _ => String::new(),
+            };
+            anyhow::bail!("claude exited with status: {status}{error_context}");
         }
 
         Ok(())
