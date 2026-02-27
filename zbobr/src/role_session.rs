@@ -11,7 +11,11 @@ use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig}
 /// High–level entry point moved out of `main.rs`.
 ///
 /// The body was originally a monolithic function; it has been split into a few
-/// smaller helper routines for clarity and to keep `main.rs` manageable.
+/// smaller helper routines for clarity and to keep `main.rs` manageable.  The
+/// previous version also included an internal `set_stage` helper that matched
+/// a `Role` to its corresponding `Stage`; this logic is now provided by the
+/// `From<Role> for Stage` implementation in the dispatcher crate, so callers
+/// can simply convert with `role.into()`.
 pub(crate) async fn run_role_session(
     zbobr: &Zbobr,
     task_id: u64,
@@ -26,7 +30,8 @@ pub(crate) async fn run_role_session(
     let cli_tool = zbobr.config().cli_tool;
     let model = resolve_model(cli_tool, model, claude_executor_config, copilot_executor_config);
 
-    set_stage(zbobr, task_id, role).await?;
+    // update task stage based on role; we implement `From<Role> for Stage`
+    zbobr.set_task_stage(task_id, role.into()).await?;
 
     let task_dir = zbobr.config().workspaces.join(format!("task#{task_id}"));
     tokio::fs::create_dir_all(&task_dir).await?;
@@ -100,16 +105,6 @@ fn resolve_model(
     })
 }
 
-async fn set_stage(zbobr: &Zbobr, task_id: u64, role: Role) -> anyhow::Result<()> {
-    let stage = match role {
-        Role::Preparator => Stage::Preparing,
-        Role::Planner => Stage::Planning,
-        Role::Worker => Stage::Working,
-        Role::Reviewer => Stage::Reviewing,
-        Role::Merger => Stage::Merging,
-    };
-    zbobr.set_task_stage(task_id, stage).await
-}
 
 /// Prepare the workspace directory for the given role.  Returns the directory
 /// that the agent should operate in.

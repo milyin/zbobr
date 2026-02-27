@@ -1234,14 +1234,10 @@ async fn process_task_by_stage(
             }
         }
         Stage::Preparing | Stage::Planning | Stage::Working | Stage::Reviewing | Stage::Merging => {
-            let role = match task.stage {
-                Stage::Preparing => Role::Preparator,
-                Stage::Planning => Role::Planner,
-                Stage::Working => Role::Worker,
-                Stage::Reviewing => Role::Reviewer,
-                Stage::Merging => Role::Merger,
-                _ => unreachable!(),
-            };
+            // convert the current stage to the corresponding role using TryFrom;
+            // the preceding `if` ensures the value is one of the mapped stages so
+            // `unwrap()` is safe.
+            let role = Role::try_from(task.stage).unwrap();
             let base_prompt = match role {
                 Role::Preparator => load_prompts(&prompts.preparator, prompts.base_path.as_ref())?,
                 Role::Planner => load_prompts(&prompts.planner, prompts.base_path.as_ref())?,

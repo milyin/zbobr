@@ -144,6 +144,40 @@ impl Role {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Conversion helpers
+// ---------------------------------------------------------------------------
+
+impl From<Role> for Stage {
+    fn from(role: Role) -> Stage {
+        match role {
+            Role::Preparator => Stage::Preparing,
+            Role::Planner => Stage::Planning,
+            Role::Worker => Stage::Working,
+            Role::Reviewer => Stage::Reviewing,
+            Role::Merger => Stage::Merging,
+        }
+    }
+}
+
+impl std::convert::TryFrom<Stage> for Role {
+    type Error = anyhow::Error;
+
+    fn try_from(stage: Stage) -> Result<Self, Self::Error> {
+        match stage {
+            Stage::Preparing => Ok(Role::Preparator),
+            Stage::Planning => Ok(Role::Planner),
+            Stage::Working => Ok(Role::Worker),
+            Stage::Reviewing => Ok(Role::Reviewer),
+            Stage::Merging => Ok(Role::Merger),
+            other => Err(anyhow::anyhow!(
+                "cannot convert stage {:?} into a role",
+                other
+            )),
+        }
+    }
+}
+
 impl std::fmt::Display for Role {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
@@ -966,6 +1000,26 @@ mod tests {
         assert_eq!(Stage::Working.to_string(), "WORKING");
         assert_eq!(Stage::Reviewing.to_string(), "REVIEWING");
         assert_eq!(Stage::Done.to_string(), "DONE");
+    }
+
+    #[test]
+    fn convert_role_to_stage() {
+        assert_eq!(Stage::from(Role::Preparator), Stage::Preparing);
+        assert_eq!(Stage::from(Role::Planner), Stage::Planning);
+        assert_eq!(Stage::from(Role::Worker), Stage::Working);
+        assert_eq!(Stage::from(Role::Reviewer), Stage::Reviewing);
+        assert_eq!(Stage::from(Role::Merger), Stage::Merging);
+    }
+
+    #[test]
+    fn try_convert_stage_to_role() {
+        assert_eq!(Role::try_from(Stage::Preparing).unwrap(), Role::Preparator);
+        assert_eq!(Role::try_from(Stage::Planning).unwrap(), Role::Planner);
+        assert_eq!(Role::try_from(Stage::Working).unwrap(), Role::Worker);
+        assert_eq!(Role::try_from(Stage::Reviewing).unwrap(), Role::Reviewer);
+        assert_eq!(Role::try_from(Stage::Merging).unwrap(), Role::Merger);
+        assert!(Role::try_from(Stage::Pending).is_err());
+        assert!(Role::try_from(Stage::Done).is_err());
     }
 
     #[test]
