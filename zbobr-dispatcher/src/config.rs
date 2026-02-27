@@ -485,4 +485,71 @@ mod tests {
 
         assert_eq!(config.overwrite_author, false);
     }
+
+    #[test]
+    fn cli_flag_overrides_toml_overwrite_author() {
+        // When CLI flag is set, it should override TOML value
+        let toml = ZbobrDispatcherToml {
+            workspaces: None,
+            task_backend: None,
+            repo_backend: None,
+            agent_github_token: None,
+            cli_tool: None,
+            work_branch_prefix: None,
+            git_user_name: None,
+            git_user_email: None,
+            overwrite_author: Some(false),
+            prompts_path: None,
+            preparator_prompts: None,
+            planner_prompts: None,
+            worker_prompts: None,
+            reviewer_prompts: None,
+            merger_prompts: None,
+        };
+
+        // Create args with CLI flag set to true, overriding TOML false
+        let mut args = ZbobrDispatcherArgs::default();
+        args.overwrite_author = Some(true);
+
+        let config = ZbobrDispatcherConfig::build(
+            Some(toml),
+            args,
+            &test_config_dir(),
+        )
+        .unwrap();
+
+        assert_eq!(config.overwrite_author, true);
+    }
+
+    #[test]
+    fn cli_flag_overrides_default() {
+        // When CLI flag is set without TOML, it should override default
+        let mut args = ZbobrDispatcherArgs::default();
+        args.overwrite_author = Some(true);
+
+        let config = ZbobrDispatcherConfig::build(
+            None,
+            args,
+            &test_config_dir(),
+        )
+        .unwrap();
+
+        assert_eq!(config.overwrite_author, true);
+    }
+
+    #[test]
+    fn cli_flag_can_be_false() {
+        // When CLI flag is explicitly set to false, it should be false
+        let mut args = ZbobrDispatcherArgs::default();
+        args.overwrite_author = Some(false);
+
+        let config = ZbobrDispatcherConfig::build(
+            None,
+            args,
+            &test_config_dir(),
+        )
+        .unwrap();
+
+        assert_eq!(config.overwrite_author, false);
+    }
 }
