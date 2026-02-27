@@ -95,6 +95,8 @@ pub struct ZbobrDispatcherConfig {
     pub git_user_name: String,
     /// Git user email for commits made by the tool.
     pub git_user_email: String,
+    /// Rewrite commit authors after each stage completes to match configured git user.
+    pub overwrite_author: bool,
 }
 
 impl Default for ZbobrDispatcherConfig {
@@ -114,6 +116,7 @@ impl Default for ZbobrDispatcherConfig {
             prompts_path: None,
             git_user_name: String::new(),
             git_user_email: String::new(),
+            overwrite_author: false,
         }
     }
 }
@@ -211,6 +214,8 @@ impl ZbobrDispatcherConfig {
 
         let git_user_email = merged.git_user_email.unwrap_or_default();
 
+        let overwrite_author = merged.overwrite_author.unwrap_or(defaults.overwrite_author);
+
         Ok(Self {
             workspaces,
             agent_github_token,
@@ -226,6 +231,7 @@ impl ZbobrDispatcherConfig {
             prompts_path,
             git_user_name,
             git_user_email,
+            overwrite_author,
         })
     }
 
@@ -329,6 +335,7 @@ mod tests {
             work_branch_prefix: Some("toml_fix".into()),
             git_user_name: Some("test-user".into()),
             git_user_email: Some("test@example.com".into()),
+            overwrite_author: Some(true),
             prompts_path: Some(PathBuf::from("/opt/prompts")),
             preparator_prompts: Some(vec![PathBuf::from("pre.md")]),
             planner_prompts: Some(vec![PathBuf::from("p.md")]),
@@ -371,6 +378,7 @@ mod tests {
         assert_eq!(config.agent_github_token, "toml-agent-token");
         assert_eq!(config.git_user_name, "test-user");
         assert_eq!(config.git_user_email, "test@example.com");
+        assert_eq!(config.overwrite_author, true);
     }
 
     #[test]
@@ -384,6 +392,7 @@ mod tests {
         assert_eq!(config.work_branch_prefix, "zbobr_fix");
         assert_eq!(config.workspaces, PathBuf::from("./workspaces"));
         assert_eq!(config.agent_github_token, "not-configured");
+        assert_eq!(config.overwrite_author, false);
     }
 
     #[test]
@@ -404,5 +413,143 @@ mod tests {
         assert!("invalid".parse::<BackendType>().is_err());
         assert_eq!(BackendType::GitHub.to_string(), "github");
         assert_eq!(BackendType::Filesystem.to_string(), "fs");
+    }
+
+    #[test]
+    fn cli_flag_default_false_when_not_specified() {
+        // Default is false when neither TOML nor CLI specifies it
+        let config =
+            ZbobrDispatcherConfig::build(None, ZbobrDispatcherArgs::default(), &test_config_dir())
+                .unwrap();
+        assert_eq!(config.overwrite_author, false);
+    }
+
+    #[test]
+    fn toml_overwrite_author_true() {
+        // When TOML has overwrite_author = true
+        let toml = ZbobrDispatcherToml {
+            workspaces: None,
+            task_backend: None,
+            repo_backend: None,
+            agent_github_token: None,
+            cli_tool: None,
+            work_branch_prefix: None,
+            git_user_name: None,
+            git_user_email: None,
+            overwrite_author: Some(true),
+            prompts_path: None,
+            preparator_prompts: None,
+            planner_prompts: None,
+            worker_prompts: None,
+            reviewer_prompts: None,
+            merger_prompts: None,
+        };
+
+        let config = ZbobrDispatcherConfig::build(
+            Some(toml),
+            ZbobrDispatcherArgs::default(),
+            &test_config_dir(),
+        )
+        .unwrap();
+
+        assert_eq!(config.overwrite_author, true);
+    }
+
+    #[test]
+    fn toml_overwrite_author_false() {
+        // When TOML explicitly has overwrite_author = false
+        let toml = ZbobrDispatcherToml {
+            workspaces: None,
+            task_backend: None,
+            repo_backend: None,
+            agent_github_token: None,
+            cli_tool: None,
+            work_branch_prefix: None,
+            git_user_name: None,
+            git_user_email: None,
+            overwrite_author: Some(false),
+            prompts_path: None,
+            preparator_prompts: None,
+            planner_prompts: None,
+            worker_prompts: None,
+            reviewer_prompts: None,
+            merger_prompts: None,
+        };
+
+        let config = ZbobrDispatcherConfig::build(
+            Some(toml),
+            ZbobrDispatcherArgs::default(),
+            &test_config_dir(),
+        )
+        .unwrap();
+
+        assert_eq!(config.overwrite_author, false);
+    }
+
+    #[test]
+    fn cli_flag_overrides_toml_overwrite_author() {
+        // When CLI flag is set, it should override TOML value
+        let toml = ZbobrDispatcherToml {
+            workspaces: None,
+            task_backend: None,
+            repo_backend: None,
+            agent_github_token: None,
+            cli_tool: None,
+            work_branch_prefix: None,
+            git_user_name: None,
+            git_user_email: None,
+            overwrite_author: Some(false),
+            prompts_path: None,
+            preparator_prompts: None,
+            planner_prompts: None,
+            worker_prompts: None,
+            reviewer_prompts: None,
+            merger_prompts: None,
+        };
+
+        // Create args with CLI flag set to true, overriding TOML false
+        let mut args = ZbobrDispatcherArgs::default();
+        args.overwrite_author = Some(true);
+
+        let config = ZbobrDispatcherConfig::build(
+            Some(toml),
+            args,
+            &test_config_dir(),
+        )
+        .unwrap();
+
+        assert_eq!(config.overwrite_author, true);
+    }
+
+    #[test]
+    fn cli_flag_overrides_default() {
+        // When CLI flag is set without TOML, it should override default
+        let mut args = ZbobrDispatcherArgs::default();
+        args.overwrite_author = Some(true);
+
+        let config = ZbobrDispatcherConfig::build(
+            None,
+            args,
+            &test_config_dir(),
+        )
+        .unwrap();
+
+        assert_eq!(config.overwrite_author, true);
+    }
+
+    #[test]
+    fn cli_flag_can_be_false() {
+        // When CLI flag is explicitly set to false, it should be false
+        let mut args = ZbobrDispatcherArgs::default();
+        args.overwrite_author = Some(false);
+
+        let config = ZbobrDispatcherConfig::build(
+            None,
+            args,
+            &test_config_dir(),
+        )
+        .unwrap();
+
+        assert_eq!(config.overwrite_author, false);
     }
 }

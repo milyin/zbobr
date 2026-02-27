@@ -1153,6 +1153,7 @@ mod tests {
             }
             async fn setup(&self, _force: bool) -> anyhow::Result<()> { Ok(()) }
             async fn validate_connectivity(&self) -> anyhow::Result<()> { Ok(()) }
+            fn debug_state(&self) -> String { "DummyBackend".to_string() }
         }
 
         struct DummyRepo;

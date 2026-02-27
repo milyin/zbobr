@@ -7,6 +7,10 @@ git_user_name = "zbobr"
 git_user_email = "zbobr@example.com"
 work_branch_prefix = "zbobr"
 
+# Uncomment to rewrite commit authors after each stage completes
+# (useful for CI systems that verify committer identity)
+# overwrite_author = true
+
 # Filesystem task backend configuration
 # Tasks are stored as YAML files in a configurable directory
 [tasks.fs]
