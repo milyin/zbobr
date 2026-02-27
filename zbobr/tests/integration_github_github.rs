@@ -25,9 +25,11 @@ async fn get_env() -> Arc<IntegrationTestEnv> {
     ENV.get_or_init(|| async {
         let cfg = GitHubTestConfig::load()
             .expect("zbobr_github_test.toml not found; required for GitHub tests");
-        let tasks = cfg.tasks
+        let tasks = cfg
+            .tasks
             .expect("[tasks.github] section missing in zbobr_github_test.toml");
-        let repo = cfg.repo
+        let repo = cfg
+            .repo
             .expect("[repo.github] section missing in zbobr_github_test.toml");
 
         let target_repo = Some(tasks.github.task_repo.clone());
@@ -45,7 +47,9 @@ async fn get_env() -> Arc<IntegrationTestEnv> {
             target_repo,
         )
         .await
-        .expect("failed to initialize full GitHub/GitHub integration environment; check credentials")
+        .expect(
+            "failed to initialize full GitHub/GitHub integration environment; check credentials",
+        )
     })
     .await
     .clone()

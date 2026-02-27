@@ -13,7 +13,9 @@ pub use mcp::{
     MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, WorkerMcp, merger_instructions,
     planner_instructions, preparator_instructions, reviewer_instructions, worker_instructions,
 };
-pub use task::{ChecklistItem, Model, Parameter, RoleSession, Signal, Stage, Task, TaskSession, Tool};
+pub use task::{
+    ChecklistItem, Model, Parameter, RoleSession, Signal, Stage, Task, TaskSession, Tool,
+};
 pub use tool_executor::ToolExecutor;
 
 use crate::backend::{RepoBackend, TaskBackend};
@@ -228,7 +230,12 @@ impl Zbobr {
     ) -> anyhow::Result<PathBuf> {
         let workspace_path = self.config.workspaces.join(format!("task#{task_id}"));
         self.repo_backend
-            .clone_and_setup(target_repo, work_branch, destination_branch, &workspace_path)
+            .clone_and_setup(
+                target_repo,
+                work_branch,
+                destination_branch,
+                &workspace_path,
+            )
             .await
     }
 

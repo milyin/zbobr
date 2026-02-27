@@ -1214,9 +1214,7 @@ async fn run_role_session(
             let work_branch = task
                 .parameters
                 .get(&Parameter::WorkBranch)
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Task #{task_id} has no work_branch parameter")
-                })?
+                .ok_or_else(|| anyhow::anyhow!("Task #{task_id} has no work_branch parameter"))?
                 .clone();
             let dest_branch_for_setup = task
                 .parameters
@@ -1257,10 +1255,7 @@ async fn run_role_session(
                 tracing::error!("{msg}");
                 let hostname = zbobr_dispatcher::mcp::common::get_hostname();
                 let task_session = zbobr.task_session(task_id);
-                if let Err(post_err) = task_session
-                    .post_message(&msg, "error", &hostname)
-                    .await
-                {
+                if let Err(post_err) = task_session.post_message(&msg, "error", &hostname).await {
                     tracing::warn!("Failed to post error to task discussion: {post_err}");
                 }
                 return Err(anyhow::anyhow!("{msg}"));
@@ -1384,10 +1379,18 @@ async fn run_role_session(
         // Tool crashed: post error to discussion, pause task, return to PENDING
         let error_msg = format!("Execution failed: {e}");
         let hostname = zbobr_dispatcher::mcp::common::get_hostname();
-        if let Err(post_err) = task_session.post_message(&error_msg, "error", &hostname).await {
+        if let Err(post_err) = task_session
+            .post_message(&error_msg, "error", &hostname)
+            .await
+        {
             tracing::error!("Failed to post error to task #{task_id}: {post_err}");
         }
-        if let Err(pause_err) = task_session.modify_task(|task| { task.pause = true; }).await {
+        if let Err(pause_err) = task_session
+            .modify_task(|task| {
+                task.pause = true;
+            })
+            .await
+        {
             tracing::error!("Failed to set pause for task #{task_id}: {pause_err}");
         }
         task_session.set_stage(Stage::Pending).await?;
@@ -1490,7 +1493,9 @@ async fn run_role_session(
                                 tracing::info!("Successfully rewrote commit authors");
                                 // Push the rewritten commits
                                 if let Err(e) = role_session.push_branch_commits().await {
-                                    tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
+                                    tracing::warn!(
+                                        "Could not push rewritten commits for task #{task_id}: {e}"
+                                    );
                                 }
                             }
                             Ok(output) => {
@@ -1500,7 +1505,9 @@ async fn run_role_session(
                                 );
                             }
                             Err(e) => {
-                                tracing::warn!("Error running git rebase for author rewriting: {e}");
+                                tracing::warn!(
+                                    "Error running git rebase for author rewriting: {e}"
+                                );
                             }
                         }
                     } else {
@@ -1593,10 +1600,7 @@ async fn process_task_by_stage(
             // detects a merge conflict it clears the signal and sets conflict=true, so the
             // Merger must be dispatched even without a signal present.
             if task.pause {
-                println!(
-                    "Task #{} is PENDING (paused) — skipped",
-                    task.id
-                );
+                println!("Task #{} is PENDING (paused) — skipped", task.id);
                 return Ok(());
             }
             if task.conflict {
@@ -1773,7 +1777,11 @@ async fn run_manager_loop(
             .collect::<Vec<_>>()
             .join("; ")
     );
-    tracing::info!("Task backend: {:?}, Repo backend: {:?}", zbobr.config().task_backend, zbobr.config().repo_backend);
+    tracing::info!(
+        "Task backend: {:?}, Repo backend: {:?}",
+        zbobr.config().task_backend,
+        zbobr.config().repo_backend
+    );
 
     let mut last_cleanup = std::time::Instant::now();
 
@@ -1920,7 +1928,9 @@ async fn run_manager_loop(
         let elapsed = loop_start.elapsed();
         let sleep_dur = std::time::Duration::from_secs(interval_secs).saturating_sub(elapsed);
         if sleep_dur.is_zero() {
-            tracing::info!("No processable tasks. Interval already elapsed, continuing immediately.");
+            tracing::info!(
+                "No processable tasks. Interval already elapsed, continuing immediately."
+            );
         } else {
             tracing::info!("No processable tasks. Sleeping {}s...", sleep_dur.as_secs());
             tokio::select! {
@@ -2053,13 +2063,7 @@ mod tests {
 
     #[test]
     fn task_create_confirm_parsing() {
-        let cli = Cli::parse_from([
-            "zbobr",
-            "task",
-            "create",
-            "foo",
-            "--confirm",
-        ]);
+        let cli = Cli::parse_from(["zbobr", "task", "create", "foo", "--confirm"]);
         if let Command::Task { subcommand } = cli.command {
             match subcommand {
                 TaskSubcommand::Create { confirm, .. } => {
@@ -2074,14 +2078,7 @@ mod tests {
 
     #[test]
     fn task_update_confirm_parsing() {
-        let cli = Cli::parse_from([
-            "zbobr",
-            "task",
-            "update",
-            "1",
-            "--confirm",
-            "false",
-        ]);
+        let cli = Cli::parse_from(["zbobr", "task", "update", "1", "--confirm", "false"]);
         if let Command::Task { subcommand } = cli.command {
             match subcommand {
                 TaskSubcommand::Update { confirm, .. } => {
