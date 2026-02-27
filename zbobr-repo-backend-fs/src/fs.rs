@@ -142,7 +142,8 @@ impl RepoBackend for FilesystemRepoBackend {
     async fn clone_and_setup(
         &self,
         target_repo: &str,
-        branch: &str,
+        work_branch: &str,
+        destination_branch: &str,
         workspace_path: &Path,
     ) -> anyhow::Result<PathBuf> {
         let repo_name = Self::repo_name_from_path(target_repo)?;
@@ -172,23 +173,48 @@ impl RepoBackend for FilesystemRepoBackend {
                     target_repo
                 );
             }
+
+            // Force-reset the local destination branch to match origin exactly.
+            // Only needed when work_branch differs from destination_branch.
+            if work_branch != destination_branch {
+                let reset_output = tokio::process::Command::new("git")
+                    .args([
+                        "branch",
+                        "-f",
+                        destination_branch,
+                        &format!("origin/{destination_branch}"),
+                    ])
+                    .current_dir(&work_dir)
+                    .output()
+                    .await?;
+                if !reset_output.status.success() {
+                    let stderr = String::from_utf8_lossy(&reset_output.stderr);
+                    tracing::warn!(
+                        "Failed to reset '{destination_branch}' to origin/{destination_branch}: {stderr}"
+                    );
+                } else {
+                    tracing::info!(
+                        "Reset local '{destination_branch}' to match origin/{destination_branch}"
+                    );
+                }
+            }
         }
 
-        // Checkout the requested branch; create from HEAD if it doesn't exist yet.
-        tracing::info!("Checking out branch {}", branch);
+        // Checkout the work branch; create from HEAD if it doesn't exist yet.
+        tracing::info!("Checking out branch {}", work_branch);
         let checkout_status = tokio::process::Command::new("git")
-            .args(["checkout", branch])
+            .args(["checkout", work_branch])
             .current_dir(&work_dir)
             .status()
             .await?;
         if !checkout_status.success() {
             let create_status = tokio::process::Command::new("git")
-                .args(["checkout", "-b", branch])
+                .args(["checkout", "-b", work_branch])
                 .current_dir(&work_dir)
                 .status()
                 .await?;
             if !create_status.success() {
-                anyhow::bail!("Failed to checkout or create branch {}", branch);
+                anyhow::bail!("Failed to checkout or create branch {}", work_branch);
             }
         }
 
@@ -201,9 +227,9 @@ impl RepoBackend for FilesystemRepoBackend {
         branch: &str,
         workspace_path: &Path,
     ) -> anyhow::Result<PathBuf> {
-        // In FS mode, clone_readonly is identical to clone_and_setup
-        // (no fork concept to skip)
-        self.clone_and_setup(target_repo, branch, workspace_path)
+        // In FS mode, clone_readonly checks out the requested branch directly.
+        // Use the same branch for both work and destination (no separate dest branch to sync).
+        self.clone_and_setup(target_repo, branch, branch, workspace_path)
             .await
     }
 
