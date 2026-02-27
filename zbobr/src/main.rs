@@ -1506,7 +1506,7 @@ async fn run_role_session(
                                 "rebase",
                                 "--exec",
                                 "git commit --amend --no-edit --reset-author",
-                                &format!("{dest_branch}..HEAD"),
+                                &dest_branch,
                             ])
                             .env("GIT_AUTHOR_NAME", git_user_name)
                             .env("GIT_AUTHOR_EMAIL", git_user_email)
