@@ -519,6 +519,54 @@ pub async fn run_conflict_detection(env: &IntegrationTestEnv) {
 }
 
 // ---------------------------------------------------------------------------
+// report_error signal preservation
+// ---------------------------------------------------------------------------
+
+/// Verify that `report_error` sets the pause flag but does NOT clear the
+/// pre-existing signal on the task.  The dispatcher must be able to resume
+/// routing after the user acknowledges the error.
+pub async fn run_report_error_preserves_signal(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_report_error").await;
+    let dest_repo = env.target_repo
+        .as_deref()
+        .map(|r| format!("https://github.com/{r}"))
+        .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
+    let task_id = env
+        .create_task("Error Task", "Dummy task description", Stage::Working)
+        .await;
+    let work_branch = format!("zbobr_fix-{task_id}-err-test");
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
+
+    // Set a signal before the session so we can verify it survives report_error.
+    env.update_task_signal(task_id, "go_work").await;
+
+    env.run_stage(
+        task_id,
+        Stage::Working,
+        scenarios::worker_report_error_scenario(),
+    )
+    .await;
+
+    let output = env.show_task(task_id).await;
+    assert!(
+        output.contains("Something went wrong during work"),
+        "[{}] report_error message should appear in discussion:\n{output}",
+        env.name()
+    );
+    assert!(
+        output.contains("Pause:       true"),
+        "[{}] report_error must set the pause flag:\n{output}",
+        env.name()
+    );
+    assert!(
+        output.contains("Signal:      go_work"),
+        "[{}] report_error must not clear the signal:\n{output}",
+        env.name()
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Signal Preservation During Conflict Resolution
 // ---------------------------------------------------------------------------
 

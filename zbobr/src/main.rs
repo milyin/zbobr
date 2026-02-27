@@ -1479,6 +1479,19 @@ async fn run_role_session(
         let current_task = zbobr.get_task(task_id).await?;
         let has_unchecked = current_task.checklist.iter().any(|i| !i.checked);
 
+        // If the agent called report_error or ask_user (pause=true) without setting a new
+        // signal, restore the signal that was cleared at session start so the task can be
+        // re-dispatched after the user responds.
+        if current_task.pause && current_task.signal.is_none() {
+            if let Some(signal) = saved_signal {
+                if let Err(e) = zbobr.set_task_signal(task_id, Some(signal)).await {
+                    tracing::warn!(
+                        "Failed to restore signal after paused session for task #{task_id}: {e}"
+                    );
+                }
+            }
+        }
+
         match role {
             Role::Preparator => {
                 // Preparator done → go to planning (if agent didn't set a signal)

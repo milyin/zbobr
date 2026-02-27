@@ -206,6 +206,18 @@ async fn test_github_fs_repo_backend_merging_cross_org() {
 }
 
 // ---------------------------------------------------------------------------
+// report_error signal preservation
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
+async fn test_github_fs_report_error_preserves_signal() {
+    let _guard = TEST_LOCK.lock().await;
+    let env = get_env().await;
+    test_helpers::run_report_error_preserves_signal(&env).await;
+}
+
+// ---------------------------------------------------------------------------
 // Confirm flag behaviour
 // ---------------------------------------------------------------------------
 

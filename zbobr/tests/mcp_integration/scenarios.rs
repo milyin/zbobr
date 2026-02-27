@@ -528,6 +528,30 @@ steps:
     )
 }
 
+/// Scenario that calls `report_error` during a worker session.
+/// Used to verify that report_error sets the pause flag but leaves the signal intact.
+pub fn worker_report_error_scenario() -> String {
+    use zbobr_dispatcher::mcp::worker_tools::REPORT_ERROR;
+
+    format!(
+        r#"name: Worker Report Error Test
+description: Verify report_error sets pause without clearing signal
+timeout: 60
+stop_on_failure: true
+
+steps:
+- name: Report error
+  operation:
+    type: tool_call
+    tool: {REPORT_ERROR}
+    arguments:
+      message: "Something went wrong during work"
+  assertions:
+    - type: success
+"#,
+    )
+}
+
 pub fn merging_conflict_scenario() -> String {
     use zbobr_dispatcher::mcp::merger_tools::{GET_DESCRIPTION, REPORT_RESULTS};
 

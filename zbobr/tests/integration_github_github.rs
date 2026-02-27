@@ -208,6 +208,18 @@ async fn test_github_github_repo_backend_merging_cross_org() {
 }
 
 // ---------------------------------------------------------------------------
+// report_error signal preservation
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
+async fn test_github_github_report_error_preserves_signal() {
+    let _guard = TEST_LOCK.lock().await;
+    let env = get_env().await;
+    test_helpers::run_report_error_preserves_signal(&env).await;
+}
+
+// ---------------------------------------------------------------------------
 // Confirm flag behaviour
 // ---------------------------------------------------------------------------
 

@@ -932,6 +932,10 @@ impl TaskSession {
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use crate::config::ZbobrDispatcherConfig;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use tokio::sync::Mutex;
 
     #[test]
     fn stage_milestone_names() {
@@ -1063,170 +1067,169 @@ mod tests {
         assert!(task.pause, "pause must be set when confirm is enabled and stage changes");
     }
 
-    // asynchronous tests require a runtime; use tokio for the following
-    #[tokio::test]
-    async fn task_session_set_stage_pauses_when_confirm() {
-        use crate::{Zbobr, config::ZbobrDispatcherConfig};
-        use std::sync::Arc;
-        use std::collections::HashMap;
-        use std::sync::atomic::{AtomicU64, Ordering};
-        use tokio::sync::Mutex;
+    // --- Shared async test infrastructure ---
 
-        // simple in-memory task backend implementation for testing
-        struct DummyBackend {
-            tasks: Mutex<HashMap<u64, Task>>,
-            next_id: AtomicU64,
+    struct DummyBackend {
+        tasks: Mutex<HashMap<u64, Task>>,
+        next_id: AtomicU64,
+    }
+
+    #[async_trait]
+    impl crate::backend::TaskBackend for DummyBackend {
+        async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
+            let tasks = self.tasks.lock().await;
+            tasks
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("not found"))
         }
-
-        #[async_trait]
-        impl crate::backend::TaskBackend for DummyBackend {
-            async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
-                let tasks = self.tasks.lock().await;
-                tasks
-                    .get(&id)
-                    .cloned()
-                    .ok_or_else(|| anyhow::anyhow!("not found"))
-            }
-            async fn create_task(
-                &self,
-                title: &str,
-                description: &str,
-                stage: Stage,
-                tool: Option<Tool>,
-                model: Option<Model>,
-                parameters: HashMap<Parameter, String>,
-            ) -> anyhow::Result<u64> {
-                let id = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
-                let task = Task {
-                    id,
-                    title: title.to_string(),
-                    description: description.to_string(),
-                    plan: String::new(),
-                    stage,
-                    tool,
-                    model,
-                    parameters,
-                    checklist: vec![],
-                    signal: None,
-                    conflict: false,
-                    pause: false,
-                    confirm: false,
-                    etag: None,
-                };
-                self.tasks.lock().await.insert(id, task);
-                Ok(id)
-            }
-            async fn close_task(&self, _id: u64) -> anyhow::Result<()> { Ok(()) }
-            async fn is_task_closed(&self, _id: u64) -> anyhow::Result<bool> { Ok(false) }
-            async fn modify_task(
-                &self,
-                id: u64,
-                mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-            ) -> anyhow::Result<()> {
-                let mut tasks = self.tasks.lock().await;
-                if let Some(t) = tasks.remove(&id) {
-                    let t = mutate(t);
-                    tasks.insert(id, t);
-                    Ok(())
-                } else {
-                    Err(anyhow::anyhow!("not found"))
-                }
-            }
-            async fn list_tasks_by_stage(
-                &self,
-                _stage: Stage,
-                _tool: Option<Tool>,
-            ) -> anyhow::Result<Vec<Task>> {
-                Ok(vec![])
-            }
-            async fn get_task_comments(&self, _id: u64) -> anyhow::Result<Vec<String>> {
-                Ok(vec![])
-            }
-            async fn post_task_comment(
-                &self,
-                _id: u64,
-                _body: &str,
-                _role: &str,
-                _hostname: &str,
-            ) -> anyhow::Result<()> {
+        async fn create_task(
+            &self,
+            title: &str,
+            description: &str,
+            stage: Stage,
+            tool: Option<Tool>,
+            model: Option<Model>,
+            parameters: HashMap<Parameter, String>,
+        ) -> anyhow::Result<u64> {
+            let id = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
+            let task = Task {
+                id,
+                title: title.to_string(),
+                description: description.to_string(),
+                plan: String::new(),
+                stage,
+                tool,
+                model,
+                parameters,
+                checklist: vec![],
+                signal: None,
+                conflict: false,
+                pause: false,
+                confirm: false,
+                etag: None,
+            };
+            self.tasks.lock().await.insert(id, task);
+            Ok(id)
+        }
+        async fn close_task(&self, _id: u64) -> anyhow::Result<()> { Ok(()) }
+        async fn is_task_closed(&self, _id: u64) -> anyhow::Result<bool> { Ok(false) }
+        async fn modify_task(
+            &self,
+            id: u64,
+            mutate: Box<dyn FnOnce(Task) -> Task + Send>,
+        ) -> anyhow::Result<()> {
+            let mut tasks = self.tasks.lock().await;
+            if let Some(t) = tasks.remove(&id) {
+                let t = mutate(t);
+                tasks.insert(id, t);
                 Ok(())
+            } else {
+                Err(anyhow::anyhow!("not found"))
             }
-            async fn setup(&self, _force: bool) -> anyhow::Result<()> { Ok(()) }
-            async fn validate_connectivity(&self) -> anyhow::Result<()> { Ok(()) }
         }
-
-        struct DummyRepo;
-        #[async_trait]
-        impl crate::backend::RepoBackend for DummyRepo {
-            async fn clone_and_setup(
-                &self,
-                _target_repo: &str,
-                _work_branch: &str,
-                _destination_branch: &str,
-                _workspace_path: &std::path::Path,
-            ) -> anyhow::Result<std::path::PathBuf> {
-                unreachable!()
-            }
-            async fn clone_readonly(
-                &self,
-                _target_repo: &str,
-                _branch: &str,
-                _workspace_path: &std::path::Path,
-            ) -> anyhow::Result<std::path::PathBuf> {
-                unreachable!()
-            }
-            async fn setup_fork_remote_and_push(
-                &self,
-                _work_dir: &std::path::Path,
-                _target_repo: &str,
-                _work_branch: &str,
-            ) -> anyhow::Result<()> {
-                unreachable!()
-            }
-            async fn ensure_branch_and_pr(
-                &self,
-                _target_repo: &str,
-                _workspace_path: &std::path::Path,
-                _work_branch: &str,
-                _destination_branch: &str,
-                _pr_title: &str,
-            ) -> anyhow::Result<String> {
-                unreachable!()
-            }
-            async fn push_branch(
-                &self,
-                _target_repo: &str,
-                _workspace_path: &std::path::Path,
-                _work_branch: &str,
-            ) -> anyhow::Result<()> {
-                unreachable!()
-            }
-            async fn create_pr_in_fork(
-                &self,
-                _repo_name: &str,
-                _work_branch: &str,
-                _destination_branch: &str,
-                _pr_title: &str,
-                _pr_body: &str,
-            ) -> anyhow::Result<String> {
-                unreachable!()
-            }
-            async fn parse_pr_to_repo_branch(&self, _pr_ref: &str) -> anyhow::Result<(String, String)> {
-                unreachable!()
-            }
-            async fn validate_connectivity(&self) -> anyhow::Result<()> {
-                Ok(())
-            }
-            fn debug_state(&self) -> String { "dummy".to_string() }
+        async fn list_tasks_by_stage(
+            &self,
+            _stage: Stage,
+            _tool: Option<Tool>,
+        ) -> anyhow::Result<Vec<Task>> {
+            Ok(vec![])
         }
+        async fn get_task_comments(&self, _id: u64) -> anyhow::Result<Vec<String>> {
+            Ok(vec![])
+        }
+        async fn post_task_comment(
+            &self,
+            _id: u64,
+            _body: &str,
+            _role: &str,
+            _hostname: &str,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn setup(&self, _force: bool) -> anyhow::Result<()> { Ok(()) }
+        async fn validate_connectivity(&self) -> anyhow::Result<()> { Ok(()) }
+        fn debug_state(&self) -> String { "dummy".to_string() }
+    }
 
-        let backend = Arc::new(DummyBackend {
+    struct DummyRepo;
+    #[async_trait]
+    impl crate::backend::RepoBackend for DummyRepo {
+        async fn clone_and_setup(
+            &self,
+            _target_repo: &str,
+            _work_branch: &str,
+            _destination_branch: &str,
+            _workspace_path: &std::path::Path,
+        ) -> anyhow::Result<std::path::PathBuf> {
+            unreachable!()
+        }
+        async fn clone_readonly(
+            &self,
+            _target_repo: &str,
+            _branch: &str,
+            _workspace_path: &std::path::Path,
+        ) -> anyhow::Result<std::path::PathBuf> {
+            unreachable!()
+        }
+        async fn setup_fork_remote_and_push(
+            &self,
+            _work_dir: &std::path::Path,
+            _target_repo: &str,
+            _work_branch: &str,
+        ) -> anyhow::Result<()> {
+            unreachable!()
+        }
+        async fn ensure_branch_and_pr(
+            &self,
+            _target_repo: &str,
+            _workspace_path: &std::path::Path,
+            _work_branch: &str,
+            _destination_branch: &str,
+            _pr_title: &str,
+        ) -> anyhow::Result<String> {
+            unreachable!()
+        }
+        async fn push_branch(
+            &self,
+            _target_repo: &str,
+            _workspace_path: &std::path::Path,
+            _work_branch: &str,
+        ) -> anyhow::Result<()> {
+            unreachable!()
+        }
+        async fn create_pr_in_fork(
+            &self,
+            _repo_name: &str,
+            _work_branch: &str,
+            _destination_branch: &str,
+            _pr_title: &str,
+            _pr_body: &str,
+        ) -> anyhow::Result<String> {
+            unreachable!()
+        }
+        async fn parse_pr_to_repo_branch(&self, _pr_ref: &str) -> anyhow::Result<(String, String)> {
+            unreachable!()
+        }
+        async fn validate_connectivity(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn debug_state(&self) -> String { "dummy".to_string() }
+    }
+
+    fn make_test_zbobr() -> crate::Zbobr {
+        let backend: Arc<dyn crate::backend::TaskBackend> = Arc::new(DummyBackend {
             tasks: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(0),
         });
-        let repo = Arc::new(DummyRepo);
-        let zbobr = Zbobr::new(ZbobrDispatcherConfig::default(), backend.clone(), repo.clone());
+        let repo: Arc<dyn crate::backend::RepoBackend> = Arc::new(DummyRepo);
+        crate::Zbobr::new(ZbobrDispatcherConfig::default(), backend, repo)
+    }
 
+    // asynchronous tests require a runtime; use tokio for the following
+    #[tokio::test]
+    async fn task_session_set_stage_pauses_when_confirm() {
+        let zbobr = make_test_zbobr();
         let id = zbobr
             .create_task("t", "", Stage::Pending, None, None, None, None)
             .await
@@ -1234,6 +1237,24 @@ mod tests {
         zbobr.task_session(id).set_confirm(true).await.unwrap();
         zbobr.task_session(id).set_stage(Stage::Planning).await.unwrap();
         let t = zbobr.get_task(id).await.unwrap();
+        assert!(t.pause);
+    }
+
+    #[tokio::test]
+    async fn set_pause_preserves_signal() {
+        // Verify set_pause(true) does not clear the signal — this is the contract
+        // that report_error and ask_user (which call set_pause) must uphold so the
+        // dispatcher can still route the task after the user responds.
+        let zbobr = make_test_zbobr();
+        let id = zbobr
+            .create_task("t", "", Stage::Working, None, None, None, None)
+            .await
+            .unwrap();
+        // Use role_session which has the same set_signal/set_pause methods as MCP commands
+        zbobr.role_session(id).set_signal(Signal::GoWork).await.unwrap();
+        zbobr.role_session(id).set_pause(true).await.unwrap();
+        let t = zbobr.get_task(id).await.unwrap();
+        assert_eq!(t.signal, Some(Signal::GoWork), "signal must not be cleared by set_pause");
         assert!(t.pause);
     }
 
