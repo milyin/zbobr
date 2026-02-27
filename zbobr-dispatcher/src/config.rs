@@ -392,6 +392,7 @@ mod tests {
         assert_eq!(config.work_branch_prefix, "zbobr_fix");
         assert_eq!(config.workspaces, PathBuf::from("./workspaces"));
         assert_eq!(config.agent_github_token, "not-configured");
+        assert_eq!(config.overwrite_author, false);
     }
 
     #[test]
