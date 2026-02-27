@@ -1025,7 +1025,10 @@ mod tests {
             t.pause = true;
         }
         t.stage = new_stage;
-        assert!(t.pause, "task should have been paused when confirm=true and stage changed");
+        assert!(
+            t.pause,
+            "task should have been paused when confirm=true and stage changed"
+        );
     }
 
     #[test]
@@ -1060,15 +1063,18 @@ mod tests {
             task.stage = s;
         }
 
-        assert!(task.pause, "pause must be set when confirm is enabled and stage changes");
+        assert!(
+            task.pause,
+            "pause must be set when confirm is enabled and stage changes"
+        );
     }
 
     // asynchronous tests require a runtime; use tokio for the following
     #[tokio::test]
     async fn task_session_set_stage_pauses_when_confirm() {
         use crate::{Zbobr, config::ZbobrDispatcherConfig};
-        use std::sync::Arc;
         use std::collections::HashMap;
+        use std::sync::Arc;
         use std::sync::atomic::{AtomicU64, Ordering};
         use tokio::sync::Mutex;
 
@@ -1116,8 +1122,12 @@ mod tests {
                 self.tasks.lock().await.insert(id, task);
                 Ok(id)
             }
-            async fn close_task(&self, _id: u64) -> anyhow::Result<()> { Ok(()) }
-            async fn is_task_closed(&self, _id: u64) -> anyhow::Result<bool> { Ok(false) }
+            async fn close_task(&self, _id: u64) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn is_task_closed(&self, _id: u64) -> anyhow::Result<bool> {
+                Ok(false)
+            }
             async fn modify_task(
                 &self,
                 id: u64,
@@ -1151,9 +1161,15 @@ mod tests {
             ) -> anyhow::Result<()> {
                 Ok(())
             }
-            async fn setup(&self, _force: bool) -> anyhow::Result<()> { Ok(()) }
-            async fn validate_connectivity(&self) -> anyhow::Result<()> { Ok(()) }
-            fn debug_state(&self) -> String { "DummyBackend".to_string() }
+            async fn setup(&self, _force: bool) -> anyhow::Result<()> {
+                Ok(())
+            }
+            async fn validate_connectivity(&self) -> anyhow::Result<()> {
+                Ok(())
+            }
+            fn debug_state(&self) -> String {
+                "DummyBackend".to_string()
+            }
         }
 
         struct DummyRepo;
@@ -1212,13 +1228,18 @@ mod tests {
             ) -> anyhow::Result<String> {
                 unreachable!()
             }
-            async fn parse_pr_to_repo_branch(&self, _pr_ref: &str) -> anyhow::Result<(String, String)> {
+            async fn parse_pr_to_repo_branch(
+                &self,
+                _pr_ref: &str,
+            ) -> anyhow::Result<(String, String)> {
                 unreachable!()
             }
             async fn validate_connectivity(&self) -> anyhow::Result<()> {
                 Ok(())
             }
-            fn debug_state(&self) -> String { "dummy".to_string() }
+            fn debug_state(&self) -> String {
+                "dummy".to_string()
+            }
         }
 
         let backend = Arc::new(DummyBackend {
@@ -1226,14 +1247,22 @@ mod tests {
             next_id: AtomicU64::new(0),
         });
         let repo = Arc::new(DummyRepo);
-        let zbobr = Zbobr::new(ZbobrDispatcherConfig::default(), backend.clone(), repo.clone());
+        let zbobr = Zbobr::new(
+            ZbobrDispatcherConfig::default(),
+            backend.clone(),
+            repo.clone(),
+        );
 
         let id = zbobr
             .create_task("t", "", Stage::Pending, None, None, None, None)
             .await
             .unwrap();
         zbobr.task_session(id).set_confirm(true).await.unwrap();
-        zbobr.task_session(id).set_stage(Stage::Planning).await.unwrap();
+        zbobr
+            .task_session(id)
+            .set_stage(Stage::Planning)
+            .await
+            .unwrap();
         let t = zbobr.get_task(id).await.unwrap();
         assert!(t.pause);
     }

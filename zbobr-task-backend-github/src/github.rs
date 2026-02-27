@@ -234,7 +234,11 @@ impl GitHubTaskBackend {
     ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        for (flag_name, desired) in [("conflict", conflict), ("pause", pause), ("confirm", confirm)] {
+        for (flag_name, desired) in [
+            ("conflict", conflict),
+            ("pause", pause),
+            ("confirm", confirm),
+        ] {
             let label = Self::flag_to_label(flag_name);
             if desired {
                 let labels: Vec<String> = vec![label];
@@ -774,7 +778,10 @@ impl TaskBackend for GitHubTaskBackend {
         }
 
         // Apply flag changes if they differ
-        if task.conflict != original_conflict || task.pause != original_pause || task.confirm != original_confirm {
+        if task.conflict != original_conflict
+            || task.pause != original_pause
+            || task.confirm != original_confirm
+        {
             self.apply_flag_change(id, task.conflict, task.pause, task.confirm)
                 .await?;
         }
@@ -906,7 +913,7 @@ fn stage_description(stage: Stage) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zbobr_dispatcher::{Stage, Tool, Model, Signal, Parameter};
+    use zbobr_dispatcher::{Model, Parameter, Signal, Stage, Tool};
 
     #[test]
     fn issue_to_task_includes_confirm_flag() {
@@ -916,7 +923,9 @@ mod tests {
             body: Some("".to_string()),
             state: "open".to_string(),
             milestone: None,
-            labels: vec![IssueLabel { name: "flag:confirm".to_string() }],
+            labels: vec![IssueLabel {
+                name: "flag:confirm".to_string(),
+            }],
         };
 
         let task = GitHubTaskBackend::issue_to_task(issue);
@@ -926,11 +935,9 @@ mod tests {
     #[test]
     fn apply_flag_change_adds_and_removes_confirm_label() {
         // This test just exercises the label loop; we don't hit GitHub.
-        let backend = GitHubTaskBackend::new(
-            None,
-            crate::config::ZbobrTaskBackendGithubArgs::default(),
-        )
-        .expect("backend init");
+        let backend =
+            GitHubTaskBackend::new(None, crate::config::ZbobrTaskBackendGithubArgs::default())
+                .expect("backend init");
 
         // the method returns Result<(), _>; call with dummy values to ensure no panics
         // since actual network calls are inside retry_github we simply drop the future.

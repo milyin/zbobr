@@ -3,7 +3,7 @@ use std::process::Command;
 use tempfile::TempDir;
 
 /// Test that author rewriting works with a real git repository.
-/// 
+///
 /// This integration test:
 /// 1. Creates a temporary git repository
 /// 2. Creates commits with a different author
@@ -18,7 +18,12 @@ fn test_author_rewriting_with_git_rebase() {
     init_git_repo(repo_path);
 
     // Create initial commit with one author
-    create_commit(repo_path, "Initial commit", "original-user", "original@example.com");
+    create_commit(
+        repo_path,
+        "Initial commit",
+        "original-user",
+        "original@example.com",
+    );
 
     // Get the default branch name after first commit
     let default_branch_cmd = "git rev-parse --abbrev-ref HEAD";
@@ -28,7 +33,9 @@ fn test_author_rewriting_with_git_rebase() {
         .current_dir(repo_path)
         .output()
         .expect("Failed to get branch");
-    let default_branch = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
+    let default_branch = String::from_utf8_lossy(&branch_output.stdout)
+        .trim()
+        .to_string();
 
     // Create a work branch
     run_git_command(repo_path, &["checkout", "-b", "work-branch"]);
@@ -40,14 +47,20 @@ fn test_author_rewriting_with_git_rebase() {
     // Switch back to default branch and verify it still has original author
     run_git_command(repo_path, &["checkout", &default_branch]);
     let main_author = get_last_commit_author(repo_path);
-    assert_eq!(main_author, "original-user", "Default branch author should be original");
+    assert_eq!(
+        main_author, "original-user",
+        "Default branch author should be original"
+    );
 
     // Switch back to work branch
     run_git_command(repo_path, &["checkout", "work-branch"]);
 
     // Verify work commits have different author before rewriting
     let before_author = get_last_commit_author(repo_path);
-    assert_eq!(before_author, "work-user", "Work branch author should be different");
+    assert_eq!(
+        before_author, "work-user",
+        "Work branch author should be different"
+    );
 
     // Now simulate the dispatcher's author rewriting logic
     let new_author = "dispatcher-user";
@@ -86,7 +99,10 @@ fn test_author_rewriting_with_git_rebase() {
     // Verify that default branch still has original author (not affected by rebase)
     run_git_command(repo_path, &["checkout", &default_branch]);
     let main_author_check = get_last_commit_author(repo_path);
-    assert_eq!(main_author_check, "original-user", "Default branch author was affected by rebase");
+    assert_eq!(
+        main_author_check, "original-user",
+        "Default branch author was affected by rebase"
+    );
 }
 
 /// Test that author rewriting handles multiple commits correctly.
@@ -106,7 +122,9 @@ fn test_author_rewriting_multiple_commits() {
         .current_dir(repo_path)
         .output()
         .expect("Failed to get branch");
-    let default_branch = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
+    let default_branch = String::from_utf8_lossy(&branch_output.stdout)
+        .trim()
+        .to_string();
 
     run_git_command(repo_path, &["checkout", "-b", "work-branch"]);
 
@@ -150,10 +168,17 @@ fn test_author_rewriting_multiple_commits() {
     // Verify the first 3 commits (newest) on work branch have the new author after rebase
     // The last one is the original commit which was not part of the rebase
     for (i, author) in authors_after.iter().take(3).enumerate() {
-        assert_eq!(author, new_author, "Commit {} author not rewritten to {}", i, new_author);
+        assert_eq!(
+            author, new_author,
+            "Commit {} author not rewritten to {}",
+            i, new_author
+        );
     }
     // The original commit (last in the log, first chronologically) should still have its original author
-    assert_eq!(authors_after[3], "original", "Original commit author should not change");
+    assert_eq!(
+        authors_after[3], "original",
+        "Original commit author should not change"
+    );
 }
 
 /// Test that author rewriting fails gracefully when destination branch doesn't exist.
@@ -169,7 +194,8 @@ fn test_author_rewriting_nonexistent_destination() {
     create_commit(repo_path, "Work commit", "work-user", "work@example.com");
 
     // Try to rebase onto nonexistent branch
-    let rebase_cmd = "git rebase --exec 'git commit --amend --no-edit --reset-author' 'nonexistent'";
+    let rebase_cmd =
+        "git rebase --exec 'git commit --amend --no-edit --reset-author' 'nonexistent'";
     let output = std::process::Command::new("sh")
         .arg("-c")
         .arg(rebase_cmd)
@@ -208,8 +234,10 @@ fn create_commit(path: &Path, message: &str, author_name: &str, author_email: &s
     let commit_output = std::process::Command::new("git")
         .args(&[
             "commit",
-            "-m", message,
-            "--author", &format!("{} <{}>", author_name, author_email),
+            "-m",
+            message,
+            "--author",
+            &format!("{} <{}>", author_name, author_email),
         ])
         .current_dir(path)
         .output()
@@ -248,8 +276,5 @@ fn get_last_commit_author(path: &Path) -> String {
 
 fn get_all_commit_authors(path: &Path) -> Vec<String> {
     let output = run_git_command(path, &["log", "--format=%an"]);
-    output
-        .lines()
-        .map(|line| line.to_string())
-        .collect()
+    output.lines().map(|line| line.to_string()).collect()
 }

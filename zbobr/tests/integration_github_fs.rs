@@ -29,7 +29,8 @@ async fn get_env() -> Arc<IntegrationTestEnv> {
     ENV.get_or_init(|| async {
         let cfg = GitHubTestConfig::load()
             .expect("zbobr_github_test.toml not found; required for GitHub tests");
-        let tasks = cfg.tasks
+        let tasks = cfg
+            .tasks
             .expect("[tasks.github] section missing in zbobr_github_test.toml");
 
         IntegrationTestEnv::init(

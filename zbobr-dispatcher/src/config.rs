@@ -511,12 +511,7 @@ mod tests {
         let mut args = ZbobrDispatcherArgs::default();
         args.overwrite_author = Some(true);
 
-        let config = ZbobrDispatcherConfig::build(
-            Some(toml),
-            args,
-            &test_config_dir(),
-        )
-        .unwrap();
+        let config = ZbobrDispatcherConfig::build(Some(toml), args, &test_config_dir()).unwrap();
 
         assert_eq!(config.overwrite_author, true);
     }
@@ -527,12 +522,7 @@ mod tests {
         let mut args = ZbobrDispatcherArgs::default();
         args.overwrite_author = Some(true);
 
-        let config = ZbobrDispatcherConfig::build(
-            None,
-            args,
-            &test_config_dir(),
-        )
-        .unwrap();
+        let config = ZbobrDispatcherConfig::build(None, args, &test_config_dir()).unwrap();
 
         assert_eq!(config.overwrite_author, true);
     }
@@ -543,12 +533,7 @@ mod tests {
         let mut args = ZbobrDispatcherArgs::default();
         args.overwrite_author = Some(false);
 
-        let config = ZbobrDispatcherConfig::build(
-            None,
-            args,
-            &test_config_dir(),
-        )
-        .unwrap();
+        let config = ZbobrDispatcherConfig::build(None, args, &test_config_dir()).unwrap();
 
         assert_eq!(config.overwrite_author, false);
     }

@@ -112,6 +112,7 @@ impl FilesystemRepoBackend {
     }
 
     /// Get the current branch name in a git working directory.
+    #[allow(dead_code)]
     async fn current_branch(work_dir: &Path) -> anyhow::Result<String> {
         let out = tokio::process::Command::new("git")
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -355,6 +356,7 @@ impl RepoBackend for FilesystemRepoBackend {
 
 impl FilesystemRepoBackend {
     /// Get the default branch of origin remote.
+    #[allow(dead_code)]
     async fn default_branch(work_dir: &Path) -> anyhow::Result<String> {
         let out = tokio::process::Command::new("git")
             .args(["symbolic-ref", "refs/remotes/origin/HEAD", "--short"])
