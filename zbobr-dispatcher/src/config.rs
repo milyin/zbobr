@@ -414,4 +414,75 @@ mod tests {
         assert_eq!(BackendType::GitHub.to_string(), "github");
         assert_eq!(BackendType::Filesystem.to_string(), "fs");
     }
+
+    #[test]
+    fn cli_flag_default_false_when_not_specified() {
+        // Default is false when neither TOML nor CLI specifies it
+        let config =
+            ZbobrDispatcherConfig::build(None, ZbobrDispatcherArgs::default(), &test_config_dir())
+                .unwrap();
+        assert_eq!(config.overwrite_author, false);
+    }
+
+    #[test]
+    fn toml_overwrite_author_true() {
+        // When TOML has overwrite_author = true
+        let toml = ZbobrDispatcherToml {
+            workspaces: None,
+            task_backend: None,
+            repo_backend: None,
+            agent_github_token: None,
+            cli_tool: None,
+            work_branch_prefix: None,
+            git_user_name: None,
+            git_user_email: None,
+            overwrite_author: Some(true),
+            prompts_path: None,
+            preparator_prompts: None,
+            planner_prompts: None,
+            worker_prompts: None,
+            reviewer_prompts: None,
+            merger_prompts: None,
+        };
+
+        let config = ZbobrDispatcherConfig::build(
+            Some(toml),
+            ZbobrDispatcherArgs::default(),
+            &test_config_dir(),
+        )
+        .unwrap();
+
+        assert_eq!(config.overwrite_author, true);
+    }
+
+    #[test]
+    fn toml_overwrite_author_false() {
+        // When TOML explicitly has overwrite_author = false
+        let toml = ZbobrDispatcherToml {
+            workspaces: None,
+            task_backend: None,
+            repo_backend: None,
+            agent_github_token: None,
+            cli_tool: None,
+            work_branch_prefix: None,
+            git_user_name: None,
+            git_user_email: None,
+            overwrite_author: Some(false),
+            prompts_path: None,
+            preparator_prompts: None,
+            planner_prompts: None,
+            worker_prompts: None,
+            reviewer_prompts: None,
+            merger_prompts: None,
+        };
+
+        let config = ZbobrDispatcherConfig::build(
+            Some(toml),
+            ZbobrDispatcherArgs::default(),
+            &test_config_dir(),
+        )
+        .unwrap();
+
+        assert_eq!(config.overwrite_author, false);
+    }
 }
