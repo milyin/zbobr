@@ -1501,13 +1501,14 @@ async fn run_role_session(
                 if let (Ok(user_out), Ok(email_out)) = (config_user, config_email) {
                     if user_out.status.success() && email_out.status.success() {
                         // Use rebase to rewrite commits since destination branch
-                        let rebase_output = tokio::process::Command::new("git")
-                            .args([
-                                "rebase",
-                                "--exec",
-                                "git commit --amend --no-edit --reset-author",
-                                &dest_branch,
-                            ])
+                        // We use sh -c to properly invoke the compound git command
+                        let rebase_cmd = format!(
+                            "git rebase --exec 'git commit --amend --no-edit --reset-author' '{}'",
+                            dest_branch
+                        );
+                        let rebase_output = tokio::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(&rebase_cmd)
                             .env("GIT_AUTHOR_NAME", git_user_name)
                             .env("GIT_AUTHOR_EMAIL", git_user_email)
                             .env("GIT_COMMITTER_NAME", git_user_name)
