@@ -38,4 +38,5 @@ zbobr-task-backend-fs = { workspace = true }
 zbobr-dispatcher = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
+tempfile = "3.8"
 
