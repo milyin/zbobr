@@ -236,6 +236,47 @@ Token resolution order used by zbobr:
 
 Required token permissions: The token needs `repo` scope (full access to repositories) to create forks, manage issues/labels/milestones, and push branches.
 
+### GitHub Backend Token Requirements
+
+Zbobr uses two separate backend tokens. See [docs/github-token-permissions.md](docs/github-token-permissions.md) for the full per-operation breakdown.
+
+#### Repo Backend Token (`ZBOBR_REPO_GITHUB_TOKEN`)
+
+Manages forks, branches, and pull requests on target repositories.
+
+Classic PAT scopes:
+
+- `repo`
+- `workflow` (required when target repos contain `.github/workflows/`)
+
+Fine-grained PAT — on the **upstream** (target) repositories:
+
+- `Administration` (Read/Write)
+- `Contents` (Read-only)
+- `Metadata` (Read-only)
+- `Pull requests` (Read/Write) — same-org mode only
+
+Fine-grained PAT — on the **fork** repositories under `fork_owner`:
+
+- `Contents` (Read/Write)
+- `Workflows` (Read/Write)
+- `Pull requests` (Read/Write)
+- `Metadata` (Read-only)
+
+#### Task Backend Token (`ZBOBR_TASK_GITHUB_TOKEN`)
+
+Manages the task project repository: issues, milestones, labels, and comments.
+
+Classic PAT scopes:
+
+- `repo`
+
+Fine-grained PAT — on the **task repo**:
+
+- `Issues` (Read/Write)
+- `Metadata` (Read-only)
+- `Administration` (Read/Write) — `zbobr setup` only, to create the task repo
+
 ### GitHub Tokens for Agents and Copilot
 
 Zbobr manages **three distinct GitHub tokens** with different access levels and purposes:
