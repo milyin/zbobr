@@ -95,6 +95,8 @@ pub struct ZbobrDispatcherConfig {
     pub git_user_name: String,
     /// Git user email for commits made by the tool.
     pub git_user_email: String,
+    /// Rewrite commit authors after each stage completes to match configured git user.
+    pub overwrite_author: bool,
 }
 
 impl Default for ZbobrDispatcherConfig {
@@ -114,6 +116,7 @@ impl Default for ZbobrDispatcherConfig {
             prompts_path: None,
             git_user_name: String::new(),
             git_user_email: String::new(),
+            overwrite_author: false,
         }
     }
 }
@@ -211,6 +214,8 @@ impl ZbobrDispatcherConfig {
 
         let git_user_email = merged.git_user_email.unwrap_or_default();
 
+        let overwrite_author = merged.overwrite_author.unwrap_or(defaults.overwrite_author);
+
         Ok(Self {
             workspaces,
             agent_github_token,
@@ -226,6 +231,7 @@ impl ZbobrDispatcherConfig {
             prompts_path,
             git_user_name,
             git_user_email,
+            overwrite_author,
         })
     }
 
@@ -329,6 +335,7 @@ mod tests {
             work_branch_prefix: Some("toml_fix".into()),
             git_user_name: Some("test-user".into()),
             git_user_email: Some("test@example.com".into()),
+            overwrite_author: Some(true),
             prompts_path: Some(PathBuf::from("/opt/prompts")),
             preparator_prompts: Some(vec![PathBuf::from("pre.md")]),
             planner_prompts: Some(vec![PathBuf::from("p.md")]),
@@ -371,6 +378,7 @@ mod tests {
         assert_eq!(config.agent_github_token, "toml-agent-token");
         assert_eq!(config.git_user_name, "test-user");
         assert_eq!(config.git_user_email, "test@example.com");
+        assert_eq!(config.overwrite_author, true);
     }
 
     #[test]

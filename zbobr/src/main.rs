@@ -1472,6 +1472,55 @@ async fn run_role_session(
             if let Err(e) = role_session.push_branch_commits().await {
                 tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
             }
+
+            // Rewrite commit authors if enabled.
+            if zbobr.config().overwrite_author {
+                let task = zbobr.get_task(task_id).await?;
+                let dest_branch = task
+                    .parameters
+                    .get(&Parameter::DestinationBranch)
+                    .cloned()
+                    .unwrap_or_else(|| "main".to_string());
+
+                let git_user_name = &zbobr.config().git_user_name;
+                let git_user_email = &zbobr.config().git_user_email;
+
+                // Use rebase to rewrite commits since destination branch
+                let rebase_output = tokio::process::Command::new("git")
+                    .args([
+                        "rebase",
+                        "-i",
+                        "--exec",
+                        "git commit --amend --no-edit --reset-author",
+                        &format!("{dest_branch}..HEAD"),
+                    ])
+                    .env("GIT_AUTHOR_NAME", git_user_name)
+                    .env("GIT_AUTHOR_EMAIL", git_user_email)
+                    .env("GIT_COMMITTER_NAME", git_user_name)
+                    .env("GIT_COMMITTER_EMAIL", git_user_email)
+                    .current_dir(&work_dir)
+                    .output()
+                    .await;
+
+                match rebase_output {
+                    Ok(output) if output.status.success() => {
+                        tracing::info!("Successfully rewrote commit authors");
+                        // Push the rewritten commits
+                        if let Err(e) = role_session.push_branch_commits().await {
+                            tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
+                        }
+                    }
+                    Ok(output) => {
+                        tracing::warn!(
+                            "Failed to rewrite commit authors: {}",
+                            String::from_utf8_lossy(&output.stderr)
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!("Error running git rebase for author rewriting: {e}");
+                    }
+                }
+            }
         }
 
         // After a normal (non-interrupted) session finish, decide next state
