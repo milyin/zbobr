@@ -311,7 +311,7 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
         "[{}] Merger should not set a follow-up signal",
         env.name()
     );
-    // The PR URL is stored at workspace setup time (ensure_pr_url in run_role_session).
+    // The PR URL is stored at workspace setup time (ensure_pr_url in role_session::run_role_session).
     assert!(
         output.contains("pr_url:"),
         "[{}] PR URL should be stored in task parameters after merger:\n{output}",
@@ -489,7 +489,7 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
 // Conflict detection
 // ---------------------------------------------------------------------------
 
-/// Verify the automatic conflict-detection path in `run_role_session`:
+/// Verify the automatic conflict-detection path in `role_session::run_role_session`:
 ///
 /// 1. The dispatcher clones the work branch.
 /// 2. It tries `git merge <dest_branch>` and finds a conflict.
