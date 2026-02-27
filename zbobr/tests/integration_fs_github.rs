@@ -26,7 +26,8 @@ async fn get_env() -> Arc<IntegrationTestEnv> {
     ENV.get_or_init(|| async {
         let cfg = GitHubTestConfig::load()
             .expect("zbobr_github_test.toml not found; required for GitHub tests");
-        let repo = cfg.repo
+        let repo = cfg
+            .repo
             .expect("[repo.github] section missing in zbobr_github_test.toml");
 
         let base = match std::env::var("CARGO_TARGET_TMPDIR") {

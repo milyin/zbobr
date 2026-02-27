@@ -931,8 +931,8 @@ impl TaskSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::config::ZbobrDispatcherConfig;
+    use async_trait::async_trait;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
     use tokio::sync::Mutex;
@@ -1029,7 +1029,10 @@ mod tests {
             t.pause = true;
         }
         t.stage = new_stage;
-        assert!(t.pause, "task should have been paused when confirm=true and stage changed");
+        assert!(
+            t.pause,
+            "task should have been paused when confirm=true and stage changed"
+        );
     }
 
     #[test]
@@ -1064,7 +1067,10 @@ mod tests {
             task.stage = s;
         }
 
-        assert!(task.pause, "pause must be set when confirm is enabled and stage changes");
+        assert!(
+            task.pause,
+            "pause must be set when confirm is enabled and stage changes"
+        );
     }
 
     // --- Shared async test infrastructure ---
@@ -1112,8 +1118,12 @@ mod tests {
             self.tasks.lock().await.insert(id, task);
             Ok(id)
         }
-        async fn close_task(&self, _id: u64) -> anyhow::Result<()> { Ok(()) }
-        async fn is_task_closed(&self, _id: u64) -> anyhow::Result<bool> { Ok(false) }
+        async fn close_task(&self, _id: u64) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn is_task_closed(&self, _id: u64) -> anyhow::Result<bool> {
+            Ok(false)
+        }
         async fn modify_task(
             &self,
             id: u64,
@@ -1147,9 +1157,15 @@ mod tests {
         ) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn setup(&self, _force: bool) -> anyhow::Result<()> { Ok(()) }
-        async fn validate_connectivity(&self) -> anyhow::Result<()> { Ok(()) }
-        fn debug_state(&self) -> String { "dummy".to_string() }
+        async fn setup(&self, _force: bool) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn validate_connectivity(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn debug_state(&self) -> String {
+            "dummy".to_string()
+        }
     }
 
     struct DummyRepo;
@@ -1214,7 +1230,9 @@ mod tests {
         async fn validate_connectivity(&self) -> anyhow::Result<()> {
             Ok(())
         }
-        fn debug_state(&self) -> String { "dummy".to_string() }
+        fn debug_state(&self) -> String {
+            "dummy".to_string()
+        }
     }
 
     fn make_test_zbobr() -> crate::Zbobr {
@@ -1235,7 +1253,11 @@ mod tests {
             .await
             .unwrap();
         zbobr.task_session(id).set_confirm(true).await.unwrap();
-        zbobr.task_session(id).set_stage(Stage::Planning).await.unwrap();
+        zbobr
+            .task_session(id)
+            .set_stage(Stage::Planning)
+            .await
+            .unwrap();
         let t = zbobr.get_task(id).await.unwrap();
         assert!(t.pause);
     }
@@ -1251,10 +1273,18 @@ mod tests {
             .await
             .unwrap();
         // Use role_session which has the same set_signal/set_pause methods as MCP commands
-        zbobr.role_session(id).set_signal(Signal::GoWork).await.unwrap();
+        zbobr
+            .role_session(id)
+            .set_signal(Signal::GoWork)
+            .await
+            .unwrap();
         zbobr.role_session(id).set_pause(true).await.unwrap();
         let t = zbobr.get_task(id).await.unwrap();
-        assert_eq!(t.signal, Some(Signal::GoWork), "signal must not be cleared by set_pause");
+        assert_eq!(
+            t.signal,
+            Some(Signal::GoWork),
+            "signal must not be cleared by set_pause"
+        );
         assert!(t.pause);
     }
 

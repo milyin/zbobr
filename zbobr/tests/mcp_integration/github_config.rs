@@ -61,7 +61,9 @@ impl GitHubDispatcherSection {
 
 impl Default for GitHubDispatcherSection {
     fn default() -> Self {
-        Self { agent_token: Self::default_agent_token() }
+        Self {
+            agent_token: Self::default_agent_token(),
+        }
     }
 }
 
@@ -81,8 +83,8 @@ impl GitHubTestConfig {
             return None;
         }
 
-        let content = std::fs::read_to_string(&config_path)
-            .expect("failed to read zbobr_github_test.toml");
+        let content =
+            std::fs::read_to_string(&config_path).expect("failed to read zbobr_github_test.toml");
         let config: GitHubTestConfig =
             toml::from_str(&content).expect("failed to parse zbobr_github_test.toml");
         Some(config)

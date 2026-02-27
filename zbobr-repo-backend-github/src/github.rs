@@ -223,7 +223,9 @@ impl GitHubRepoBackend {
                 }
             }
 
-            tracing::info!("Successfully synced fork {fork_repo} with upstream destination branch '{destination_branch}'");
+            tracing::info!(
+                "Successfully synced fork {fork_repo} with upstream destination branch '{destination_branch}'"
+            );
         }
 
         Ok(fork_repo)
@@ -261,17 +263,14 @@ impl GitHubRepoBackend {
             .await
             .map_err(octocrab_to_anyhow)?;
 
-        prs.into_iter()
-            .next()
-            .map(|pr| pr.html_url)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "No existing open PR found for head '{}' -> base '{}' in {}",
-                    head,
-                    base,
-                    full_repo
-                )
-            })
+        prs.into_iter().next().map(|pr| pr.html_url).ok_or_else(|| {
+            anyhow::anyhow!(
+                "No existing open PR found for head '{}' -> base '{}' in {}",
+                head,
+                base,
+                full_repo
+            )
+        })
     }
 }
 
@@ -371,7 +370,12 @@ impl RepoBackend for GitHubRepoBackend {
             .await?;
         if !checkout_status.success() {
             let checkout_remote_status = tokio::process::Command::new("git")
-                .args(["checkout", "-b", work_branch, &format!("origin/{work_branch}")])
+                .args([
+                    "checkout",
+                    "-b",
+                    work_branch,
+                    &format!("origin/{work_branch}"),
+                ])
                 .current_dir(&work_dir)
                 .status()
                 .await?;
@@ -392,7 +396,9 @@ impl RepoBackend for GitHubRepoBackend {
         // In same-org mode (fork_owner == target repo owner), work directly on
         // the repo without forking.  In cross-org mode, ensure the fork exists,
         // sync the destination branch in the fork, and add a "fork" remote.
-        let same_org = repo.owner().eq_ignore_ascii_case(&self.backend_config.fork_owner);
+        let same_org = repo
+            .owner()
+            .eq_ignore_ascii_case(&self.backend_config.fork_owner);
         if same_org {
             tracing::info!("Same-org mode: skipping fork setup for {target_repo}");
         } else {
@@ -532,8 +538,8 @@ impl RepoBackend for GitHubRepoBackend {
             .await
             .context("Failed to check commits ahead of destination branch")?;
 
-        let has_commits_ahead = log_out.status.success()
-            && !String::from_utf8_lossy(&log_out.stdout).trim().is_empty();
+        let has_commits_ahead =
+            log_out.status.success() && !String::from_utf8_lossy(&log_out.stdout).trim().is_empty();
 
         if !has_commits_ahead {
             tracing::info!(
@@ -608,10 +614,10 @@ impl RepoBackend for GitHubRepoBackend {
 
         match create_result {
             Ok(pr) => Ok(pr.html_url),
-            Err(octocrab::Error::GitHub { ref source, .. }) if source.status_code.as_u16() == 422 => {
-                tracing::info!(
-                    "PR already exists for {work_branch}, looking up existing PR"
-                );
+            Err(octocrab::Error::GitHub { ref source, .. })
+                if source.status_code.as_u16() == 422 =>
+            {
+                tracing::info!("PR already exists for {work_branch}, looking up existing PR");
                 self.find_existing_pr(&pr_repo, work_branch, destination_branch)
                     .await
             }
@@ -771,13 +777,11 @@ impl RepoBackend for GitHubRepoBackend {
                         let pr_num = parts[1]
                             .parse::<u64>()
                             .map_err(|_| anyhow::anyhow!("Invalid PR number: {}", parts[1]))?;
-                        return Ok((
-                            repo_parts[0].to_string(),
-                            repo_parts[1].to_string(),
-                            pr_num,
-                        ));
+                        return Ok((repo_parts[0].to_string(), repo_parts[1].to_string(), pr_num));
                     }
-                    return Err(anyhow::anyhow!("Invalid repo format in PR reference: {pr_ref}"));
+                    return Err(anyhow::anyhow!(
+                        "Invalid repo format in PR reference: {pr_ref}"
+                    ));
                 }
                 return Err(anyhow::anyhow!("Invalid PR reference format: {pr_ref}"));
             }

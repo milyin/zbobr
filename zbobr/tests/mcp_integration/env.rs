@@ -13,14 +13,22 @@ use zbobr_dispatcher::Stage;
 
 #[allow(dead_code)]
 pub enum TaskBackendArgs {
-    Filesystem { tasks_dir: PathBuf },
-    GitHub { task_repo: String, task_token: String },
+    Filesystem {
+        tasks_dir: PathBuf,
+    },
+    GitHub {
+        task_repo: String,
+        task_token: String,
+    },
 }
 
 #[allow(dead_code)]
 pub enum RepoBackendArgs {
     Filesystem,
-    GitHub { fork_owner: String, repo_token: String },
+    GitHub {
+        fork_owner: String,
+        repo_token: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -72,7 +80,10 @@ impl IntegrationTestEnv {
         let base_path = make_base_path(name).await;
         let workspaces_dir = base_path.join("workspaces");
 
-        eprintln!("[IntegrationTestEnv/{name}] base path: {}", base_path.display());
+        eprintln!(
+            "[IntegrationTestEnv/{name}] base path: {}",
+            base_path.display()
+        );
 
         let env = Arc::new(IntegrationTestEnv {
             base_path,
@@ -223,11 +234,8 @@ impl IntegrationTestEnv {
 
     pub async fn update_task_signal(&self, task_id: u64, signal: &str) {
         let task_id_str = task_id.to_string();
-        self.run_zbobr(
-            "task",
-            &["update", &task_id_str, "--signal", signal],
-        )
-        .await;
+        self.run_zbobr("task", &["update", &task_id_str, "--signal", signal])
+            .await;
     }
 
     // -----------------------------------------------------------------------
@@ -293,7 +301,11 @@ impl IntegrationTestEnv {
         let work_dir = workspace_dir.join(repo_name);
 
         let clone_ok = tokio::process::Command::new("git")
-            .args(["clone", repo_path.to_str().unwrap(), work_dir.to_str().unwrap()])
+            .args([
+                "clone",
+                repo_path.to_str().unwrap(),
+                work_dir.to_str().unwrap(),
+            ])
             .status()
             .await
             .expect("failed to run git clone")
@@ -315,7 +327,11 @@ impl IntegrationTestEnv {
                 .await
                 .expect("failed to run git checkout -b")
                 .success();
-            assert!(ok, "[{}] failed to create branch '{work_branch}'", self.name);
+            assert!(
+                ok,
+                "[{}] failed to create branch '{work_branch}'",
+                self.name
+            );
         }
 
         work_dir
@@ -447,7 +463,10 @@ fn zbobr_config_args(env: &IntegrationTestEnv) -> Vec<String> {
         args.push(val.to_string());
     };
 
-    push("--dispatcher-workspaces", &env.workspaces_dir.to_string_lossy());
+    push(
+        "--dispatcher-workspaces",
+        &env.workspaces_dir.to_string_lossy(),
+    );
     push("--dispatcher-cli-tool", "mcp-tester");
     push("--dispatcher-git-user-name", "test-bot");
     push("--dispatcher-git-user-email", "test@example.com");
@@ -458,7 +477,10 @@ fn zbobr_config_args(env: &IntegrationTestEnv) -> Vec<String> {
             push("--dispatcher-task-backend", "filesystem");
             push("--tasks-fs-tasks-dir", &tasks_dir.to_string_lossy());
         }
-        TaskBackendArgs::GitHub { task_repo, task_token } => {
+        TaskBackendArgs::GitHub {
+            task_repo,
+            task_token,
+        } => {
             push("--dispatcher-task-backend", "github");
             push("--tasks-github-task-repo", task_repo);
             push("--tasks-github-token", task_token);
@@ -469,7 +491,10 @@ fn zbobr_config_args(env: &IntegrationTestEnv) -> Vec<String> {
         RepoBackendArgs::Filesystem => {
             push("--dispatcher-repo-backend", "filesystem");
         }
-        RepoBackendArgs::GitHub { fork_owner, repo_token } => {
+        RepoBackendArgs::GitHub {
+            fork_owner,
+            repo_token,
+        } => {
             push("--dispatcher-repo-backend", "github");
             push("--repo-github-fork-owner", fork_owner);
             push("--repo-github-token", repo_token);
