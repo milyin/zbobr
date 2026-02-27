@@ -431,7 +431,7 @@ async fn test_fs_github_repo_backend_planning_cross_org() {
     let task_id = env
         .create_task("Repo backend planning cross-org", "Dummy task description", Stage::Pending)
         .await;
-    let work_branch = format!("zbobr_fix-{task_id}-plan-xorg");
+    let work_branch = format!("zbobr_fix-{task_id}-xorg-plan-test");
     env.update_task_branches(task_id, target, "main", &work_branch).await;
     env.prepare_workspace_via_repo_backend(task_id, target, &work_branch).await;
 
@@ -455,7 +455,7 @@ async fn test_fs_github_repo_backend_working_cross_org() {
     let task_id = env
         .create_task("Repo backend working cross-org", "Dummy task description", Stage::Working)
         .await;
-    let work_branch = format!("zbobr_fix-{task_id}-work-xorg");
+    let work_branch = format!("zbobr_fix-{task_id}-xorg-work-test");
     env.update_task_branches(task_id, target, "main", &work_branch).await;
     env.prepare_workspace_via_repo_backend(task_id, target, &work_branch).await;
 
@@ -479,7 +479,7 @@ async fn test_fs_github_repo_backend_reviewing_cross_org() {
     let task_id = env
         .create_task("Repo backend reviewing cross-org", "Dummy task description", Stage::Reviewing)
         .await;
-    let work_branch = format!("zbobr_fix-{task_id}-review-xorg");
+    let work_branch = format!("zbobr_fix-{task_id}-xorg-review-test");
     env.update_task_branches(task_id, target, "main", &work_branch).await;
     env.prepare_workspace_via_repo_backend(task_id, target, &work_branch).await;
 
@@ -503,7 +503,7 @@ async fn test_fs_github_repo_backend_merging_cross_org() {
     let task_id = env
         .create_task("Repo backend merging cross-org", "Dummy task description", Stage::Merging)
         .await;
-    let work_branch = format!("zbobr_fix-{task_id}-merge-xorg");
+    let work_branch = format!("zbobr_fix-{task_id}-xorg-merge-test");
     env.update_task_branches(task_id, target, "main", &work_branch).await;
     env.prepare_workspace_via_repo_backend(task_id, target, &work_branch).await;
 
