@@ -201,15 +201,27 @@ impl GitHubRepoBackend {
                 destination_branch
             );
 
-            self.octocrab
+            match self
+                .octocrab
                 .post::<serde_json::Value, serde_json::Value>(endpoint, Some(&body))
                 .await
-                .with_context(|| {
-                    format!(
-                        "Failed to sync fork {fork_repo} with upstream {}/{destination_branch}",
+            {
+                Ok(response) => {
+                    tracing::debug!("merge-upstream response: {response}");
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to sync fork {fork_repo} with upstream {}/{destination_branch}: {e:#}",
                         repo.full_name
-                    )
-                })?;
+                    );
+                    return Err(e).with_context(|| {
+                        format!(
+                            "Failed to sync fork {fork_repo} with upstream {}/{destination_branch}",
+                            repo.full_name
+                        )
+                    });
+                }
+            }
 
             tracing::info!("Successfully synced fork {fork_repo} with upstream destination branch '{destination_branch}'");
         }

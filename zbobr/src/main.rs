@@ -1242,7 +1242,7 @@ async fn run_role_session(
             {
                 Ok(path) => path,
                 Err(e) => {
-                    let msg = format!("Failed to prepare workspace for task #{task_id}: {e}");
+                    let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
                     tracing::error!("{msg}");
                     let hostname = zbobr_dispatcher::mcp::common::get_hostname();
                     if let Err(post_err) = zbobr
