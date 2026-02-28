@@ -4,31 +4,243 @@ use anyhow::Context;
 use tokio::process::Command;
 
 use zbobr_dispatcher::{Signal, Stage, ToolExecutor, Zbobr, task::{Model, Parameter, Role, Tool}};
+
+// Prompt construction helpers used by run_role_session.  These were originally in
+// `main.rs` but have been moved here so that prompt preparation lives alongside
+// the session logic.  The `Prompts` struct is defined in `main.rs` and passed
+// in by callers.
+
+/// Load and concatenate multiple prompt files (additional user context).
+/// If base_path is provided, relative paths are resolved relative to it.
+/// Otherwise, relative paths are resolved relative to the current directory.
+/// Missing files are silently skipped (they are optional additional context).
+fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::Result<String> {
+    let mut combined = String::new();
+    for path in paths.iter() {
+        // Resolve path relative to base_path if provided and path is relative
+        let resolved_path = if let Some(base) = base_path {
+            if path.is_relative() {
+                base.join(path)
+            } else {
+                path.clone()
+            }
+        } else if path.is_relative() {
+            std::env::current_dir()?.join(path)
+        } else {
+            path.clone()
+        };
+
+        let content = match std::fs::read_to_string(&resolved_path) {
+            Ok(c) => c,
+            Err(_) => {
+                tracing::debug!(
+                    "Prompt file not found, skipping: {}",
+                    resolved_path.display()
+                );
+                continue;
+            }
+        };
+
+        let trimmed = content.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if !combined.is_empty() {
+            combined.push_str("\n\n");
+        }
+        combined.push_str(trimmed);
+    }
+    Ok(combined)
+}
+
+/// Build full prompt: hardcoded instructions + user context files + auto-generated API docs.
+fn build_full_prompt(user_context: &str, role: Role) -> String {
+    let hardcoded = match role {
+        Role::Preparator => zbobr_dispatcher::preparator_instructions(),
+        Role::Planner => zbobr_dispatcher::planner_instructions(),
+        Role::Worker => zbobr_dispatcher::worker_instructions(),
+        Role::Reviewer => zbobr_dispatcher::reviewer_instructions(),
+        Role::Merger => zbobr_dispatcher::merger_instructions(),
+    };
+
+    let api_docs = match role {
+        Role::Preparator => zbobr_dispatcher::PreparatorMcp::generate_api_docs(),
+        Role::Planner => zbobr_dispatcher::PlannerMcp::generate_api_docs(),
+        Role::Worker => zbobr_dispatcher::WorkerMcp::generate_api_docs(),
+        Role::Reviewer => zbobr_dispatcher::ReviewerMcp::generate_api_docs(),
+        Role::Merger => zbobr_dispatcher::MergerMcp::generate_api_docs(),
+    };
+
+    if user_context.is_empty() {
+        format!("{}\n\n---\n\n{}", hardcoded, api_docs)
+    } else {
+        format!(
+            "{}\n\n---\n\n{}\n\n---\n\n{}",
+            hardcoded, user_context, api_docs
+        )
+    }
+}
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
 
-/// High–level entry point moved out of `main.rs`.
-///
-/// The body was originally a monolithic function; it has been split into a few
-/// smaller helper routines for clarity and to keep `main.rs` manageable.  The
-/// previous version also included an internal `set_stage` helper that matched
-/// a `Role` to its corresponding `Stage`; this logic is now provided by the
-/// `From<Role> for Stage` implementation in the dispatcher crate, so callers
-/// can simply convert with `role.into()`.
+/// A lightweight object capturing all of the parameters needed to execute
+/// or inspect a role session.  By consolidating the data in one struct we can
+/// centralize prompt construction and make callers responsible for printing the
+/// prompt when `show_prompt` is requested.
+#[derive(Debug)]
+pub(crate) struct RoleSession<'a> {
+    zbobr: &'a Zbobr,
+    task_id: u64,
+    role: Role,
+    model: Option<Model>,
+    base_port: u16,
+    prompts: &'a crate::Prompts,
+    claude_executor_config: &'a ZbobrExecutorClaudeConfig,
+    copilot_executor_config: &'a ZbobrExecutorCopilotConfig,
+    mcp_tester_executor_config: &'a ZbobrExecutorMcpTesterConfig,
+}
+
+impl<'a> RoleSession<'a> {
+    pub(crate) fn new(
+        zbobr: &'a Zbobr,
+        task_id: u64,
+        role: Role,
+        model: Option<Model>,
+        base_port: u16,
+        prompts: &'a crate::Prompts,
+        claude_executor_config: &'a ZbobrExecutorClaudeConfig,
+        copilot_executor_config: &'a ZbobrExecutorCopilotConfig,
+        mcp_tester_executor_config: &'a ZbobrExecutorMcpTesterConfig,
+    ) -> Self {
+        Self {
+            zbobr,
+            task_id,
+            role,
+            model,
+            base_port,
+            prompts,
+            claude_executor_config,
+            copilot_executor_config,
+            mcp_tester_executor_config,
+        }
+    }
+
+    /// Construct the full prompt text that will be provided to the AI tool.
+    pub(crate) fn prompt(&self) -> anyhow::Result<String> {
+        let base_prompt = match self.role {
+            Role::Preparator => load_prompts(&self.prompts.preparator, self.prompts.base_path.as_ref())?,
+            Role::Planner => load_prompts(&self.prompts.planner, self.prompts.base_path.as_ref())?,
+            Role::Worker => load_prompts(&self.prompts.worker, self.prompts.base_path.as_ref())?,
+            Role::Reviewer => load_prompts(&self.prompts.reviewer, self.prompts.base_path.as_ref())?,
+            Role::Merger => load_prompts(&self.prompts.merger, self.prompts.base_path.as_ref())?,
+        };
+        Ok(build_full_prompt(&base_prompt, self.role))
+    }
+
+    /// Execute the session (assumes prompt already printed if requested).
+    pub(crate) async fn run(&self) -> anyhow::Result<()> {
+        // Adapted from previous run_role_session body, but without prompt
+        // generation/dumping or `show_prompt` handling.
+        let cli_tool = self.zbobr.config().cli_tool;
+        let model = resolve_model(cli_tool, self.model, self.claude_executor_config, self.copilot_executor_config);
+
+        // update task stage based on role; we implement `From<Role> for Stage`
+        self.zbobr.set_task_stage(self.task_id, self.role.into()).await?;
+
+        let task_dir = self
+            .zbobr
+            .config()
+            .workspaces
+            .join(format!("task#{}", self.task_id));
+        tokio::fs::create_dir_all(&task_dir).await?;
+
+        let work_dir = prepare_workspace(self.zbobr, self.task_id, self.role, &task_dir).await?;
+
+        if !matches!(self.role, Role::Preparator) {
+            ensure_pr_url(self.zbobr, self.task_id).await?;
+        }
+
+        if should_try_early_merge(self.role) {
+            if try_early_merge(self.zbobr, self.task_id, &work_dir).await? {
+                return Ok(());
+            }
+        }
+
+        let (assigned_port, server_handle) =
+            start_mcp_server(self.zbobr.clone(), self.base_port, self.role, self.task_id).await?;
+
+        let mcp_url = format!("http://127.0.0.1:{assigned_port}/{role}/{task_id}");
+
+        let prompt_text = self.prompt()?;
+        let (execution_interrupted, execution_error) = execute_tool(
+            cli_tool,
+            &self.claude_executor_config,
+            &self.copilot_executor_config,
+            &self.mcp_tester_executor_config,
+            self.task_id,
+            self.role,
+            &model,
+            assigned_port,
+            &prompt_text,
+            &work_dir,
+            &mcp_url,
+            &self.zbobr,
+        )
+        .await;
+
+        finalize_session(
+            self.zbobr,
+            self.task_id,
+            self.role,
+            &work_dir,
+            execution_interrupted,
+            execution_error.clone(),
+        )
+        .await?;
+
+        server_handle.abort();
+        if let Some(e) = execution_error {
+            return Err(e);
+        }
+
+        Ok(())
+    }
+}
+
+// keep original convenience function for backwards compatibility; it now
+// constructs a RoleSession and delegates to `run`.  This allows existing call
+// sites (if any remain) to continue working without change.
 pub(crate) async fn run_role_session(
     zbobr: &Zbobr,
     task_id: u64,
     role: Role,
     model: Option<Model>,
     base_port: u16,
-    prompt: &str,
+    prompts: &crate::Prompts,
+    show_prompt: bool,
     claude_executor_config: &ZbobrExecutorClaudeConfig,
     copilot_executor_config: &ZbobrExecutorCopilotConfig,
     mcp_tester_executor_config: &ZbobrExecutorMcpTesterConfig,
 ) -> anyhow::Result<()> {
-    let cli_tool = zbobr.config().cli_tool;
-    let model = resolve_model(cli_tool, model, claude_executor_config, copilot_executor_config);
+    let session = RoleSession::new(
+        zbobr,
+        task_id,
+        role,
+        model,
+        base_port,
+        prompts,
+        claude_executor_config,
+        copilot_executor_config,
+        mcp_tester_executor_config,
+    );
+    if show_prompt {
+        println!("{}", session.prompt()?);
+        return Ok(());
+    }
+    session.run().await
+}
 
     // update task stage based on role; we implement `From<Role> for Stage`
     zbobr.set_task_stage(task_id, role.into()).await?;

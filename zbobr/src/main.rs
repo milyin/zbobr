@@ -20,7 +20,7 @@ use zbobr_task_backend_fs::FilesystemTaskBackend;
 use zbobr_task_backend_github::GitHubTaskBackend;
 
 mod role_session;
-use crate::role_session::run_role_session;
+use crate::role_session::RoleSession;
 
 #[derive(Args, Clone)]
 struct GlobalArgs {
@@ -289,7 +289,11 @@ enum TaskSubcommand {
 }
 
 /// Resolved prompt file paths for planner, worker, and merger.
-struct Prompts {
+///
+/// This struct is passed to `run_role_session` so that the session logic can
+/// load the appropriate prompt text for the current role.  It needs to be
+/// visible to `role_session.rs` (a child module), hence `pub(crate)`.
+pub(crate) struct Prompts {
     base_path: Option<PathBuf>,
     preparator: Vec<PathBuf>,
     planner: Vec<PathBuf>,
@@ -355,77 +359,6 @@ fn resolve_prompts(cli: &Cli, config: &ZbobrDispatcherConfig) -> anyhow::Result<
     })
 }
 
-/// Load and concatenate multiple prompt files (additional user context).
-/// If base_path is provided, relative paths are resolved relative to it.
-/// Otherwise, relative paths are resolved relative to the current directory.
-/// Missing files are silently skipped (they are optional additional context).
-fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::Result<String> {
-    let mut combined = String::new();
-    for path in paths.iter() {
-        // Resolve path relative to base_path if provided and path is relative
-        let resolved_path = if let Some(base) = base_path {
-            if path.is_relative() {
-                base.join(path)
-            } else {
-                path.clone()
-            }
-        } else if path.is_relative() {
-            std::env::current_dir()?.join(path)
-        } else {
-            path.clone()
-        };
-
-        let content = match std::fs::read_to_string(&resolved_path) {
-            Ok(c) => c,
-            Err(_) => {
-                tracing::debug!(
-                    "Prompt file not found, skipping: {}",
-                    resolved_path.display()
-                );
-                continue;
-            }
-        };
-
-        let trimmed = content.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        if !combined.is_empty() {
-            combined.push_str("\n\n");
-        }
-        combined.push_str(trimmed);
-    }
-    Ok(combined)
-}
-
-/// Build full prompt: hardcoded instructions + user context files + auto-generated API docs.
-fn build_full_prompt(user_context: &str, role: Role) -> String {
-    let hardcoded = match role {
-        Role::Preparator => zbobr_dispatcher::preparator_instructions(),
-        Role::Planner => zbobr_dispatcher::planner_instructions(),
-        Role::Worker => zbobr_dispatcher::worker_instructions(),
-        Role::Reviewer => zbobr_dispatcher::reviewer_instructions(),
-        Role::Merger => zbobr_dispatcher::merger_instructions(),
-    };
-
-    let api_docs = match role {
-        Role::Preparator => zbobr_dispatcher::PreparatorMcp::generate_api_docs(),
-        Role::Planner => zbobr_dispatcher::PlannerMcp::generate_api_docs(),
-        Role::Worker => zbobr_dispatcher::WorkerMcp::generate_api_docs(),
-        Role::Reviewer => zbobr_dispatcher::ReviewerMcp::generate_api_docs(),
-        Role::Merger => zbobr_dispatcher::MergerMcp::generate_api_docs(),
-    };
-
-    if user_context.is_empty() {
-        format!("{}\n\n---\n\n{}", hardcoded, api_docs)
-    } else {
-        format!(
-            "{}\n\n---\n\n{}\n\n---\n\n{}",
-            hardcoded, user_context, api_docs
-        )
-    }
-}
 
 /// Print a task to stdout in a human-readable format.
 fn print_task(task: &zbobr_dispatcher::Task, discussion: &[String]) {
@@ -928,30 +861,26 @@ async fn main() -> anyhow::Result<()> {
                 port,
                 show_prompt,
             } => {
-                let base_prompt = load_prompts(&prompts.preparator, prompts.base_path.as_ref())?;
-                let full_prompt = build_full_prompt(&base_prompt, Role::Preparator);
-
-                if show_prompt {
-                    println!("{}", full_prompt);
-                    return Ok(());
-                }
-
                 let model_enum = model
                     .map(|m| m.parse::<Model>())
                     .transpose()
                     .context("Invalid model name")?;
-                run_role_session(
+                let session = RoleSession::new(
                     &zbobr,
                     task,
                     Role::Preparator,
                     model_enum,
                     port,
-                    &full_prompt,
+                    &prompts,
                     &claude_executor_config,
                     &copilot_executor_config,
                     &mcp_tester_executor_config,
-                )
-                .await?;
+                );
+                if show_prompt {
+                    println!("{}", session.prompt()?);
+                } else {
+                    session.run().await?;
+                }
             }
             TaskSubcommand::Plan {
                 task,
@@ -959,30 +888,26 @@ async fn main() -> anyhow::Result<()> {
                 port,
                 show_prompt,
             } => {
-                let base_prompt = load_prompts(&prompts.planner, prompts.base_path.as_ref())?;
-                let full_prompt = build_full_prompt(&base_prompt, Role::Planner);
-
-                if show_prompt {
-                    println!("{}", full_prompt);
-                    return Ok(());
-                }
-
                 let model_enum = model
                     .map(|m| m.parse::<Model>())
                     .transpose()
                     .context("Invalid model name")?;
-                run_role_session(
+                let session = RoleSession::new(
                     &zbobr,
                     task,
                     Role::Planner,
                     model_enum,
                     port,
-                    &full_prompt,
+                    &prompts,
                     &claude_executor_config,
                     &copilot_executor_config,
                     &mcp_tester_executor_config,
-                )
-                .await?;
+                );
+                if show_prompt {
+                    println!("{}", session.prompt()?);
+                } else {
+                    session.run().await?;
+                }
             }
             TaskSubcommand::Work {
                 task,
@@ -990,30 +915,26 @@ async fn main() -> anyhow::Result<()> {
                 port,
                 show_prompt,
             } => {
-                let base_prompt = load_prompts(&prompts.worker, prompts.base_path.as_ref())?;
-                let full_prompt = build_full_prompt(&base_prompt, Role::Worker);
-
-                if show_prompt {
-                    println!("{}", full_prompt);
-                    return Ok(());
-                }
-
                 let model_enum = model
                     .map(|m| m.parse::<Model>())
                     .transpose()
                     .context("Invalid model name")?;
-                run_role_session(
+                let session = RoleSession::new(
                     &zbobr,
                     task,
                     Role::Worker,
                     model_enum,
                     port,
-                    &full_prompt,
+                    &prompts,
                     &claude_executor_config,
                     &copilot_executor_config,
                     &mcp_tester_executor_config,
-                )
-                .await?;
+                );
+                if show_prompt {
+                    println!("{}", session.prompt()?);
+                } else {
+                    session.run().await?;
+                }
             }
             TaskSubcommand::Review {
                 task,
@@ -1021,30 +942,26 @@ async fn main() -> anyhow::Result<()> {
                 port,
                 show_prompt,
             } => {
-                let base_prompt = load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?;
-                let full_prompt = build_full_prompt(&base_prompt, Role::Reviewer);
-
-                if show_prompt {
-                    println!("{}", full_prompt);
-                    return Ok(());
-                }
-
                 let model_enum = model
                     .map(|m| m.parse::<Model>())
                     .transpose()
                     .context("Invalid model name")?;
-                run_role_session(
+                let session = RoleSession::new(
                     &zbobr,
                     task,
                     Role::Reviewer,
                     model_enum,
                     port,
-                    &full_prompt,
+                    &prompts,
                     &claude_executor_config,
                     &copilot_executor_config,
                     &mcp_tester_executor_config,
-                )
-                .await?;
+                );
+                if show_prompt {
+                    println!("{}", session.prompt()?);
+                } else {
+                    session.run().await?;
+                }
             }
             TaskSubcommand::Merge {
                 task,
@@ -1052,30 +969,26 @@ async fn main() -> anyhow::Result<()> {
                 port,
                 show_prompt,
             } => {
-                let base_prompt = load_prompts(&prompts.merger, prompts.base_path.as_ref())?;
-                let full_prompt = build_full_prompt(&base_prompt, Role::Merger);
-
-                if show_prompt {
-                    println!("{}", full_prompt);
-                    return Ok(());
-                }
-
                 let model_enum = model
                     .map(|m| m.parse::<Model>())
                     .transpose()
                     .context("Invalid model name")?;
-                run_role_session(
+                let session = RoleSession::new(
                     &zbobr,
                     task,
                     Role::Merger,
                     model_enum,
                     port,
-                    &full_prompt,
+                    &prompts,
                     &claude_executor_config,
                     &copilot_executor_config,
                     &mcp_tester_executor_config,
-                )
-                .await?;
+                );
+                if show_prompt {
+                    println!("{}", session.prompt()?);
+                } else {
+                    session.run().await?;
+                }
             }
             TaskSubcommand::Process {
                 task,
@@ -1184,21 +1097,19 @@ async fn process_task_by_stage(
             }
             if task.conflict {
                 // Conflict flag set → run merger
-                let base_prompt = load_prompts(&prompts.merger, prompts.base_path.as_ref())?;
-                let full_prompt = build_full_prompt(&base_prompt, Role::Merger);
                 let task_model = task.model.clone().or(model);
-                run_role_session(
+                let session = RoleSession::new(
                     zbobr,
                     task.id,
                     Role::Merger,
                     task_model,
                     port,
-                    &full_prompt,
+                    &prompts,
                     claude_executor_config,
                     copilot_executor_config,
                     mcp_tester_executor_config,
-                )
-                .await?;
+                );
+                session.run().await?;
             } else if task.signal.is_none() {
                 println!(
                     "Task #{} is PENDING (no signal, no conflict) — skipped",
@@ -1208,29 +1119,19 @@ async fn process_task_by_stage(
             } else {
                 let signal = task.signal.unwrap();
                 let role = signal.target_role();
-                let base_prompt = match role {
-                    Role::Preparator => {
-                        load_prompts(&prompts.preparator, prompts.base_path.as_ref())?
-                    }
-                    Role::Planner => load_prompts(&prompts.planner, prompts.base_path.as_ref())?,
-                    Role::Worker => load_prompts(&prompts.worker, prompts.base_path.as_ref())?,
-                    Role::Reviewer => load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?,
-                    Role::Merger => load_prompts(&prompts.merger, prompts.base_path.as_ref())?,
-                };
-                let full_prompt = build_full_prompt(&base_prompt, role);
                 let task_model = task.model.clone().or(model);
-                run_role_session(
+                let session = RoleSession::new(
                     zbobr,
                     task.id,
                     role,
                     task_model,
                     port,
-                    &full_prompt,
+                    &prompts,
                     claude_executor_config,
                     copilot_executor_config,
                     mcp_tester_executor_config,
-                )
-                .await?;
+                );
+                session.run().await?;
             }
         }
         Stage::Preparing | Stage::Planning | Stage::Working | Stage::Reviewing | Stage::Merging => {
@@ -1238,27 +1139,19 @@ async fn process_task_by_stage(
             // the preceding `if` ensures the value is one of the mapped stages so
             // `unwrap()` is safe.
             let role = Role::try_from(task.stage).unwrap();
-            let base_prompt = match role {
-                Role::Preparator => load_prompts(&prompts.preparator, prompts.base_path.as_ref())?,
-                Role::Planner => load_prompts(&prompts.planner, prompts.base_path.as_ref())?,
-                Role::Worker => load_prompts(&prompts.worker, prompts.base_path.as_ref())?,
-                Role::Reviewer => load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?,
-                Role::Merger => load_prompts(&prompts.merger, prompts.base_path.as_ref())?,
-            };
-            let full_prompt = build_full_prompt(&base_prompt, role);
             let task_model = task.model.clone().or(model);
-            run_role_session(
+            let session = RoleSession::new(
                 zbobr,
                 task.id,
                 role,
                 task_model,
                 port,
-                &full_prompt,
+                &prompts,
                 claude_executor_config,
                 copilot_executor_config,
                 mcp_tester_executor_config,
-            )
-            .await?;
+            );
+            session.run().await?;
         }
         Stage::Done => {
             println!("Task #{} is DONE — nothing to process", task.id);
@@ -1288,17 +1181,8 @@ async fn run_manager_loop(
         Tool::McpTester => Model::default(),
     });
 
-    // Load prompts once at loop start and append API docs
-    let preparator_base = load_prompts(&prompts.preparator, prompts.base_path.as_ref())?;
-    let planner_base = load_prompts(&prompts.planner, prompts.base_path.as_ref())?;
-    let worker_base = load_prompts(&prompts.worker, prompts.base_path.as_ref())?;
-    let reviewer_base = load_prompts(&prompts.reviewer, prompts.base_path.as_ref())?;
-    let merger_base = load_prompts(&prompts.merger, prompts.base_path.as_ref())?;
-    let preparator_prompt = build_full_prompt(&preparator_base, Role::Preparator);
-    let planner_prompt = build_full_prompt(&planner_base, Role::Planner);
-    let worker_prompt = build_full_prompt(&worker_base, Role::Worker);
-    let reviewer_prompt = build_full_prompt(&reviewer_base, Role::Reviewer);
-    let merger_prompt = build_full_prompt(&merger_base, Role::Merger);
+    // prompt text is prepared inside `run_role_session`; callers simply pass
+    // along the resolved prompt file paths via the `prompts` argument.
 
     tracing::info!("Manager loop started ({})", zbobr.debug_state());
     tracing::info!("Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s");
@@ -1408,19 +1292,18 @@ async fn run_manager_loop(
                     task.tool,
                     task_model
                 );
-                if let Err(e) = run_role_session(
+                let session = RoleSession::new(
                     zbobr,
                     task.id,
                     Role::Merger,
                     Some(task_model),
                     port,
-                    &merger_prompt,
+                    &prompts,
                     claude_executor_config,
                     copilot_executor_config,
                     mcp_tester_executor_config,
-                )
-                .await
-                {
+                );
+                if let Err(e) = session.run().await {
                     tracing::error!("Merger session failed: {e}");
                 }
                 session_run = true;
@@ -1433,13 +1316,6 @@ async fn run_manager_loop(
             };
             let role = signal.target_role();
             let task_model = task.model.clone().unwrap_or_else(|| model.clone());
-            let prompt = match role {
-                Role::Preparator => &preparator_prompt,
-                Role::Planner => &planner_prompt,
-                Role::Worker => &worker_prompt,
-                Role::Reviewer => &reviewer_prompt,
-                Role::Merger => &merger_prompt,
-            };
             tracing::info!(
                 "Found PENDING task #{} with signal {:?} (tool: {:?}, model: {}) - running {:?}",
                 task.id,
@@ -1448,19 +1324,18 @@ async fn run_manager_loop(
                 task_model,
                 role
             );
-            if let Err(e) = run_role_session(
+            let session = RoleSession::new(
                 zbobr,
                 task.id,
                 role,
                 Some(task_model),
                 port,
-                prompt,
+                &prompts,
                 claude_executor_config,
                 copilot_executor_config,
                 mcp_tester_executor_config,
-            )
-            .await
-            {
+            );
+            if let Err(e) = session.run().await {
                 tracing::error!("{:?} session failed: {e}", role);
             }
             session_run = true;
