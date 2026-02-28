@@ -75,10 +75,8 @@ pub struct ZbobrDispatcherConfig {
     pub agent_github_token: String,
     // NOTE: `copilot_github_token` has been moved to the Copilot executor
     // configuration; the dispatcher no longer tracks this value.
-    /// Backend to use for task storage (github or fs).
-    pub task_backend: BackendType,
-    /// Backend to use for repository operations (github or fs).
-    pub repo_backend: BackendType,
+    // NOTE: `task_backend` and `repo_backend` have been moved to binary-specific
+    // entry points (zbobr-github, zbobr-fs). The dispatcher is now backend-agnostic.
     /// CLI tool to use.
     pub cli_tool: Tool,
     /// Custom prompt files for preparator agent.
@@ -109,8 +107,6 @@ impl Default for ZbobrDispatcherConfig {
             workspaces: PathBuf::from("./workspaces"),
             base_port: 3000,
             agent_github_token: "not-configured".to_string(),
-            task_backend: BackendType::default(),
-            repo_backend: BackendType::default(),
             cli_tool: Tool::default(),
             preparator_prompts: vec!["prompts/preparator.md".into(), "prompts/common.md".into()],
             planner_prompts: vec!["prompts/planner.md".into(), "prompts/common.md".into()],
@@ -151,9 +147,6 @@ impl ZbobrDispatcherConfig {
             .unwrap_or(defaults.workspaces);
 
         let base_port = merged.base_port.unwrap_or(defaults.base_port);
-
-        let task_backend = merged.task_backend.unwrap_or(defaults.task_backend);
-        let repo_backend = merged.repo_backend.unwrap_or(defaults.repo_backend);
 
         let cli_tool = merged.cli_tool.unwrap_or(defaults.cli_tool);
 
@@ -227,8 +220,6 @@ impl ZbobrDispatcherConfig {
             workspaces,
             base_port,
             agent_github_token,
-            task_backend,
-            repo_backend,
             cli_tool,
             preparator_prompts,
             planner_prompts,

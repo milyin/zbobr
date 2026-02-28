@@ -1,12 +1,15 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use zbobr_dispatcher::{
-    Stage, ZbobrDispatcherDyn, ZbobrConfig, ZbobrConfigArgs, ZbobrConfigToml, ZbobrExecutorConfig,
+    Stage, ZbobrDispatcher, ZbobrDispatcherDyn, ZbobrConfig, ZbobrConfigArgs, ZbobrConfigToml, ZbobrExecutorConfig,
     task::{Model, Parameter, Role, Tool},
 };
+use zbobr_task_backend_github::ZbobrTaskBackendGithub;
+use zbobr_repo_backend_github::ZbobrRepoBackendGithub;
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 
 mod role_session;
@@ -435,7 +438,21 @@ async fn main() -> anyhow::Result<()> {
     let zbobr_config = ZbobrConfig::build(root_toml, cli.global.settings.clone(), &config_dir)?;
     zbobr_config.dispatcher.validate()?;
     let executor_config = zbobr_config.executor.clone();
-    let zbobr = ZbobrDispatcherDyn::new(zbobr_config)?;
+    
+    let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = 
+        Arc::new(ZbobrTaskBackendGithub::from_config(zbobr_config.tasks.github)?);
+    let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = 
+        Arc::new(ZbobrRepoBackendGithub::from_config(
+            zbobr_config.repo.github,
+            zbobr_config.dispatcher.git_user_name.clone(),
+            zbobr_config.dispatcher.git_user_email.clone(),
+        )?);
+    
+    let zbobr: ZbobrDispatcherDyn = ZbobrDispatcher::new_with_backends(
+        zbobr_config.dispatcher.clone(),
+        task_backend,
+        repo_backend,
+    );
     zbobr.validate_connectivity().await?;
     let prompts = resolve_prompts(&cli, zbobr.config())?;
 
@@ -998,9 +1015,7 @@ async fn run_manager_loop(
             .join("; ")
     );
     tracing::info!(
-        "Task backend: {:?}, Repo backend: {:?}",
-        zbobr.config().task_backend,
-        zbobr.config().repo_backend
+        "Task backend: GitHub, Repo backend: GitHub"
     );
 
     let mut last_cleanup = std::time::Instant::now();

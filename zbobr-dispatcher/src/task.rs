@@ -810,7 +810,7 @@ mod tests {
         }
     }
 
-    fn make_test_zbobr() -> crate::ZbobrDispatcher {
+    fn make_test_zbobr() -> crate::ZbobrDispatcherDyn {
         let backend: Arc<dyn crate::backend::TaskBackend> = Arc::new(DummyBackend {
             tasks: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(0),

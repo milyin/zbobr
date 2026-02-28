@@ -349,37 +349,6 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
 
 // Implementation specific to the dynamic dispatcher type.
 impl ZbobrDispatcherDyn {
-    /// Create a new Zbobr instance from the full aggregated config.
-    /// Selects and builds the correct task and repo backends based on config.
-    pub fn new(config: ZbobrConfig) -> anyhow::Result<Self> {
-        let task_backend: Arc<dyn TaskBackend> = match config.dispatcher.task_backend {
-            zbobr_api::config::BackendType::GitHub => {
-                Arc::new(zbobr_task_backend_github::ZbobrTaskBackendGithub::from_config(config.tasks.github)?)
-            }
-            zbobr_api::config::BackendType::Filesystem => {
-                Arc::new(zbobr_task_backend_fs::ZbobrTaskBackendFs::from_config(config.tasks.fs)?)
-            }
-        };
-        let repo_backend: Arc<dyn RepoBackend> = match config.dispatcher.repo_backend {
-            zbobr_api::config::BackendType::GitHub => Arc::new(
-                zbobr_repo_backend_github::ZbobrRepoBackendGithub::from_config(
-                    config.repo.github,
-                    config.dispatcher.git_user_name.clone(),
-                    config.dispatcher.git_user_email.clone(),
-                )?,
-            ),
-            zbobr_api::config::BackendType::Filesystem => {
-                Arc::new(zbobr_repo_backend_fs::ZbobrRepoBackendFs::from_config(config.repo.fs)?)
-            }
-        };
-        Ok(Self {
-            config: Arc::new(config.dispatcher),
-            task_backend,
-            repo_backend,
-            task_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
-        })
-    }
-
     /// Create a TaskSession bound to a specific task (full dispatcher access).
     pub fn task_session(&self, task_id: u64) -> TaskSession {
         TaskSession::new(self.clone(), task_id)
