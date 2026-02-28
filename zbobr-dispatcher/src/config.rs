@@ -63,6 +63,10 @@ pub struct TomlPrompts {
 pub struct ZbobrDispatcherConfig {
     /// Workspaces directory; each task gets a separate subdirectory.
     pub workspaces: PathBuf,
+    /// Base port for the MCP server; zbobr scans upward from this port to find
+    /// an available one.
+    #[arg(default_value = "3000")]
+    pub base_port: u16,
     /// Read-only GitHub token passed as GH_TOKEN/GITHUB_TOKEN to agent processes.
     /// This is a security boundary: it limits what agents can do on GitHub — agents must
     /// not have write access so that erroneous or misbehaving agents cannot modify remote
@@ -103,6 +107,7 @@ impl Default for ZbobrDispatcherConfig {
     fn default() -> Self {
         Self {
             workspaces: PathBuf::from("./workspaces"),
+            base_port: 3000,
             agent_github_token: "not-configured".to_string(),
             task_backend: BackendType::default(),
             repo_backend: BackendType::default(),
@@ -144,6 +149,8 @@ impl ZbobrDispatcherConfig {
             .workspaces
             .map(|p| zbobr_utility::resolve_path(p, config_dir))
             .unwrap_or(defaults.workspaces);
+
+        let base_port = merged.base_port.unwrap_or(defaults.base_port);
 
         let task_backend = merged.task_backend.unwrap_or(defaults.task_backend);
         let repo_backend = merged.repo_backend.unwrap_or(defaults.repo_backend);
@@ -218,6 +225,7 @@ impl ZbobrDispatcherConfig {
 
         Ok(Self {
             workspaces,
+            base_port,
             agent_github_token,
             task_backend,
             repo_backend,
@@ -328,6 +336,7 @@ mod tests {
     fn build_with_toml() {
         let toml = ZbobrDispatcherToml {
             workspaces: Some(PathBuf::from("/tmp/toml-ws")),
+            base_port: None,
             task_backend: None,
             repo_backend: None,
             agent_github_token: Some("toml-agent-token".into()),
@@ -429,6 +438,7 @@ mod tests {
         // When TOML has overwrite_author = true
         let toml = ZbobrDispatcherToml {
             workspaces: None,
+            base_port: None,
             task_backend: None,
             repo_backend: None,
             agent_github_token: None,
@@ -460,6 +470,7 @@ mod tests {
         // When TOML explicitly has overwrite_author = false
         let toml = ZbobrDispatcherToml {
             workspaces: None,
+            base_port: None,
             task_backend: None,
             repo_backend: None,
             agent_github_token: None,
@@ -491,6 +502,7 @@ mod tests {
         // When CLI flag is set, it should override TOML value
         let toml = ZbobrDispatcherToml {
             workspaces: None,
+            base_port: None,
             task_backend: None,
             repo_backend: None,
             agent_github_token: None,

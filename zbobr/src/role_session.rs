@@ -25,7 +25,6 @@ pub(crate) struct RoleSession<'a> {
     task_id: u64,
     role: Role,
     model: Option<Model>,
-    base_port: u16,
     prompts: &'a Prompts,
     executor_config: &'a ZbobrExecutorConfig,
 }
@@ -36,7 +35,6 @@ impl<'a> std::fmt::Debug for RoleSession<'a> {
             .field("task_id", &self.task_id)
             .field("role", &self.role)
             .field("model", &self.model)
-            .field("base_port", &self.base_port)
             // skip the reference fields that don't implement Debug
             .finish()
     }
@@ -48,7 +46,6 @@ impl<'a> RoleSession<'a> {
         task_id: u64,
         role: Role,
         model: Option<Model>,
-        base_port: u16,
         prompts: &'a Prompts,
         executor_config: &'a ZbobrExecutorConfig,
     ) -> Self {
@@ -57,7 +54,6 @@ impl<'a> RoleSession<'a> {
             task_id,
             role,
             model,
-            base_port,
             prompts,
             executor_config,
         }
@@ -102,7 +98,7 @@ impl<'a> RoleSession<'a> {
         }
 
         let (assigned_port, server_handle) =
-            start_mcp_server(self.zbobr.clone(), self.base_port, self.role, self.task_id).await?;
+            start_mcp_server(self.zbobr.clone(), self.role, self.task_id).await?;
 
         // Build the URL using explicit parameters; `role` and `task_id` are
         // fields on `self` and therefore not directly available to `format!`
@@ -293,7 +289,6 @@ async fn try_early_merge(
 
 async fn start_mcp_server(
     zbobr: Zbobr,
-    base_port: u16,
     role: Role,
     task_id: u64,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
@@ -301,7 +296,6 @@ async fn start_mcp_server(
     let server_handle = tokio::spawn(async move {
         match zbobr_dispatcher::mcp::run_role_mcp_server(
             zbobr,
-            base_port,
             role,
             task_id,
         )

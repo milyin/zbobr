@@ -308,10 +308,10 @@ pub(crate) async fn serve_mcp(
 /// Returns the actual port that was assigned (spawns server in background).
 pub async fn run_role_mcp_server(
     zbobr: Zbobr,
-    base_port: u16,
     role: Role,
     task_id: u64,
 ) -> anyhow::Result<u16> {
+    let base_port = zbobr.config().base_port;
     use rmcp::transport::streamable_http_server::{
         StreamableHttpService, session::local::LocalSessionManager,
     };

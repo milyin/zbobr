@@ -84,9 +84,6 @@ enum Command {
         /// AI model to use (e.g. "gpt-5-mini", "claude-3-5-sonnet")
         #[arg(long)]
         model: Option<String>,
-        /// Port for the MCP server that roles connect to
-        #[arg(long, default_value = "3000")]
-        port: u16,
     },
     /// Remove workspace directories for tasks that have been closed
     Cleanup {
@@ -200,9 +197,6 @@ enum TaskSubcommand {
         /// AI model to use (e.g. "gpt-5-mini", "claude-3-5-sonnet")
         #[arg(long)]
         model: Option<String>,
-        /// Port for the MCP server that the agent connects to
-        #[arg(long, default_value = "3000")]
-        port: u16,
         /// Show the prompt that would be sent to the model instead of running
         #[arg(long)]
         show_prompt: bool,
@@ -214,9 +208,6 @@ enum TaskSubcommand {
         /// AI model to use (e.g. "gpt-5-mini", "claude-3-5-sonnet")
         #[arg(long)]
         model: Option<String>,
-        /// Port for the MCP server that the agent connects to
-        #[arg(long, default_value = "3000")]
-        port: u16,
         /// Show the prompt that would be sent to the model instead of running
         #[arg(long)]
         show_prompt: bool,
@@ -228,9 +219,6 @@ enum TaskSubcommand {
         /// AI model to use (e.g. "gpt-5-mini", "claude-3-5-sonnet")
         #[arg(long)]
         model: Option<String>,
-        /// Port for the MCP server that the agent connects to
-        #[arg(long, default_value = "3000")]
-        port: u16,
         /// Show the prompt that would be sent to the model instead of running
         #[arg(long)]
         show_prompt: bool,
@@ -242,9 +230,6 @@ enum TaskSubcommand {
         /// AI model to use (e.g. "gpt-5-mini", "claude-3-5-sonnet")
         #[arg(long)]
         model: Option<String>,
-        /// Port for the MCP server that the agent connects to
-        #[arg(long, default_value = "3000")]
-        port: u16,
         /// Show the prompt that would be sent to the model instead of running
         #[arg(long)]
         show_prompt: bool,
@@ -256,9 +241,6 @@ enum TaskSubcommand {
         /// AI model to use (e.g. "gpt-5-mini", "claude-3-5-sonnet")
         #[arg(long)]
         model: Option<String>,
-        /// Port for the MCP server that the agent connects to
-        #[arg(long, default_value = "3000")]
-        port: u16,
         /// Show the prompt that would be sent to the model instead of running
         #[arg(long)]
         show_prompt: bool,
@@ -270,9 +252,6 @@ enum TaskSubcommand {
         /// AI model override to use when role execution is needed
         #[arg(long)]
         model: Option<String>,
-        /// Port for the MCP server when role execution is needed
-        #[arg(long, default_value = "3000")]
-        port: u16,
         /// MCP tester scenario file for preparation role
         #[arg(long)]
         executor_mcp_tester_preparation: Option<PathBuf>,
@@ -793,7 +772,6 @@ async fn main() -> anyhow::Result<()> {
             TaskSubcommand::Prepare {
                 task,
                 model,
-                port,
                 show_prompt,
             } => {
                 let model_enum = model
@@ -805,7 +783,6 @@ async fn main() -> anyhow::Result<()> {
                     task,
                     Role::Preparator,
                     model_enum,
-                    port,
                     &prompts,
                     &executor_config,
                 );
@@ -818,7 +795,6 @@ async fn main() -> anyhow::Result<()> {
             TaskSubcommand::Plan {
                 task,
                 model,
-                port,
                 show_prompt,
             } => {
                 let model_enum = model
@@ -830,7 +806,6 @@ async fn main() -> anyhow::Result<()> {
                     task,
                     Role::Planner,
                     model_enum,
-                    port,
                     &prompts,
                     &executor_config,
                 );
@@ -843,7 +818,6 @@ async fn main() -> anyhow::Result<()> {
             TaskSubcommand::Work {
                 task,
                 model,
-                port,
                 show_prompt,
             } => {
                 let model_enum = model
@@ -855,7 +829,6 @@ async fn main() -> anyhow::Result<()> {
                     task,
                     Role::Worker,
                     model_enum,
-                    port,
                     &prompts,
                     &executor_config,
                 );
@@ -868,7 +841,6 @@ async fn main() -> anyhow::Result<()> {
             TaskSubcommand::Review {
                 task,
                 model,
-                port,
                 show_prompt,
             } => {
                 let model_enum = model
@@ -880,7 +852,6 @@ async fn main() -> anyhow::Result<()> {
                     task,
                     Role::Reviewer,
                     model_enum,
-                    port,
                     &prompts,
                     &executor_config,
                 );
@@ -893,7 +864,6 @@ async fn main() -> anyhow::Result<()> {
             TaskSubcommand::Merge {
                 task,
                 model,
-                port,
                 show_prompt,
             } => {
                 let model_enum = model
@@ -905,7 +875,6 @@ async fn main() -> anyhow::Result<()> {
                     task,
                     Role::Merger,
                     model_enum,
-                    port,
                     &prompts,
                     &executor_config,
                 );
@@ -918,7 +887,6 @@ async fn main() -> anyhow::Result<()> {
             TaskSubcommand::Process {
                 task,
                 model,
-                port,
                 executor_mcp_tester_preparation,
                 executor_mcp_tester_planning,
                 executor_mcp_tester_working,
@@ -954,7 +922,6 @@ async fn main() -> anyhow::Result<()> {
                     &zbobr,
                     &task_obj,
                     model_enum,
-                    port,
                     &prompts,
                     &effective_executor_config,
                 )
@@ -965,7 +932,6 @@ async fn main() -> anyhow::Result<()> {
             interval,
             cleanup_interval,
             model,
-            port,
             ..
         } => {
             let model_enum = model
@@ -977,7 +943,6 @@ async fn main() -> anyhow::Result<()> {
                 interval,
                 cleanup_interval,
                 model_enum,
-                port,
                 &prompts,
                 &executor_config,
             )
@@ -996,12 +961,10 @@ async fn main() -> anyhow::Result<()> {
 
 
 
-#[allow(clippy::too_many_arguments)]
 async fn process_task_by_stage(
     zbobr: &Zbobr,
     task: &zbobr_dispatcher::Task,
     model: Option<Model>,
-    port: u16,
     prompts: &Prompts,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
@@ -1023,7 +986,6 @@ async fn process_task_by_stage(
                     task.id,
                     Role::Merger,
                     task_model,
-                    port,
                     &prompts,
                     executor_config,
                 );
@@ -1043,7 +1005,6 @@ async fn process_task_by_stage(
                     task.id,
                     role,
                     task_model,
-                    port,
                     &prompts,
                     executor_config,
                 );
@@ -1061,7 +1022,6 @@ async fn process_task_by_stage(
                 task.id,
                 role,
                 task_model,
-                port,
                 &prompts,
                 executor_config,
             );
@@ -1081,7 +1041,6 @@ async fn run_manager_loop(
     interval_secs: u64,
     cleanup_interval_secs: u64,
     model: Option<Model>,
-    port: u16,
     prompts: &Prompts,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
@@ -1208,7 +1167,6 @@ async fn run_manager_loop(
                     task.id,
                     Role::Merger,
                     Some(task_model),
-                    port,
                     &prompts,
                     executor_config,
                 );
@@ -1238,7 +1196,6 @@ async fn run_manager_loop(
                 task.id,
                 role,
                 Some(task_model),
-                port,
                 &prompts,
                 executor_config,
             );
