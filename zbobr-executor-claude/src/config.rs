@@ -1,4 +1,4 @@
-use zbobr_dispatcher::task::Model;
+use zbobr_api::task::Model;
 use zbobr_utility::config_struct;
 
 #[derive(Clone)]

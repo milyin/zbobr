@@ -8,7 +8,10 @@ pub mod tool_executor;
 
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-pub use config::{ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml};
+pub use config::{
+    ZbobrConfig, ZbobrConfigArgs, ZbobrConfigToml, ZbobrDispatcherArgs, ZbobrDispatcherConfig,
+    ZbobrDispatcherToml, ZbobrExecutorConfig, ZbobrRepoBackendConfig, ZbobrTaskBackendConfig,
+};
 pub use mcp::{
     MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, WorkerMcp, merger_instructions,
     planner_instructions, preparator_instructions, reviewer_instructions, worker_instructions,
@@ -19,6 +22,11 @@ pub use task::{
 pub use tool_executor::ToolExecutor;
 
 use crate::backend::{RepoBackend, TaskBackend};
+use zbobr_api::config::BackendType;
+use zbobr_repo_backend_fs::FilesystemRepoBackend;
+use zbobr_repo_backend_github::GitHubRepoBackend;
+use zbobr_task_backend_fs::FilesystemTaskBackend;
+use zbobr_task_backend_github::GitHubTaskBackend;
 
 /// Central struct holding configuration and backend.
 #[derive(Clone)]
@@ -32,8 +40,36 @@ pub struct Zbobr {
 }
 
 impl Zbobr {
+    /// Create a new Zbobr instance from the full aggregated config.
+    /// Selects and builds the correct task and repo backends based on config.
+    pub fn new(config: ZbobrConfig) -> anyhow::Result<Self> {
+        let task_backend: Arc<dyn TaskBackend> = match config.dispatcher.task_backend {
+            BackendType::GitHub => Arc::new(GitHubTaskBackend::from_config(config.tasks.github)?),
+            BackendType::Filesystem => {
+                Arc::new(FilesystemTaskBackend::from_config(config.tasks.fs)?)
+            }
+        };
+        let repo_backend: Arc<dyn RepoBackend> = match config.dispatcher.repo_backend {
+            BackendType::GitHub => Arc::new(GitHubRepoBackend::from_config(
+                config.repo.github,
+                config.dispatcher.git_user_name.clone(),
+                config.dispatcher.git_user_email.clone(),
+            )?),
+            BackendType::Filesystem => {
+                Arc::new(FilesystemRepoBackend::from_config(config.repo.fs)?)
+            }
+        };
+        Ok(Self {
+            config: Arc::new(config.dispatcher),
+            task_backend,
+            repo_backend,
+            task_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
+        })
+    }
+
     /// Create a new Zbobr instance from config and pre-built backends.
-    pub fn new(
+    /// Used primarily in tests.
+    pub fn new_with_backends(
         config: ZbobrDispatcherConfig,
         task_backend: Arc<dyn TaskBackend>,
         repo_backend: Arc<dyn RepoBackend>,

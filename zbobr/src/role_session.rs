@@ -7,7 +7,7 @@ use zbobr_dispatcher::{Signal, Stage, ToolExecutor, Zbobr, task::{Model, Paramet
 
 use crate::prompts::Prompts;
 
-use zbobr_config::ZbobrExecutorConfig;
+use zbobr_dispatcher::ZbobrExecutorConfig;
 use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::McpTesterExecutor;

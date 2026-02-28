@@ -14,7 +14,7 @@ pub struct ZbobrTaskBackendGithub {
 
 impl ZbobrTaskBackendGithubConfig {
     /// Build configuration by layering: defaults < TOML < args.
-    pub(crate) fn build(
+    pub fn build(
         toml: Option<ZbobrTaskBackendGithubToml>,
         args: ZbobrTaskBackendGithubArgs,
     ) -> Self {
@@ -28,7 +28,7 @@ impl ZbobrTaskBackendGithubConfig {
     }
 
     /// Validate that all required fields are set.
-    pub(crate) fn validate(&self) -> anyhow::Result<()> {
+    pub fn validate(&self) -> anyhow::Result<()> {
         if self.task_repo.is_empty() {
             anyhow::bail!(
                 "task repo not set. Use --tasks-github-task-repo owner/repo or set task_repo in the config file.\n  \
@@ -45,7 +45,7 @@ impl ZbobrTaskBackendGithubConfig {
     }
 
     /// Parse "owner/repo" into (owner, repo).
-    pub(crate) fn parse_repo(&self) -> anyhow::Result<(&str, &str)> {
+    pub fn parse_repo(&self) -> anyhow::Result<(&str, &str)> {
         let parts: Vec<&str> = self.task_repo.splitn(2, '/').collect();
         if parts.len() != 2 {
             anyhow::bail!(

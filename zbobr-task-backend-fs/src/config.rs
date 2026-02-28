@@ -22,7 +22,7 @@ impl Default for ZbobrTaskBackendFsConfig {
 impl ZbobrTaskBackendFsConfig {
     /// Build configuration by layering: defaults < TOML < args.
     /// Relative paths from TOML are resolved against `config_dir`.
-    pub(crate) fn build(
+    pub fn build(
         toml: Option<ZbobrTaskBackendFsToml>,
         args: ZbobrTaskBackendFsArgs,
         config_dir: &Path,
@@ -39,7 +39,7 @@ impl ZbobrTaskBackendFsConfig {
     }
 
     /// Validate that all required fields are set.
-    pub(crate) fn validate(&self) -> anyhow::Result<()> {
+    pub fn validate(&self) -> anyhow::Result<()> {
         // Tasks directory can be any path - we'll create it if it doesn't exist
         Ok(())
     }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use tempfile::TempDir;
-use zbobr_dispatcher::backend::TaskBackend;
+use zbobr_api::backend::TaskBackend;
 use zbobr_task_backend_fs::FilesystemTaskBackend;
 
 /// Test harness that holds a temporary directory and a configured fs backend.

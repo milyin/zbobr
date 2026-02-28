@@ -14,7 +14,7 @@ pub struct ZbobrRepoBackendGithub {
 
 impl ZbobrRepoBackendGithubConfig {
     /// Build configuration by layering: defaults < TOML < args.
-    pub(crate) fn build(
+    pub fn build(
         toml: Option<ZbobrRepoBackendGithubToml>,
         args: ZbobrRepoBackendGithubArgs,
     ) -> Self {
@@ -28,7 +28,7 @@ impl ZbobrRepoBackendGithubConfig {
     }
 
     /// Validate that all required fields are set.
-    pub(crate) fn validate(&self) -> anyhow::Result<()> {
+    pub fn validate(&self) -> anyhow::Result<()> {
         if self.fork_owner.is_empty() {
             anyhow::bail!(
                 "fork owner not set. Use --repo-github-fork-owner NAME or set fork_owner in [repo.github] config.\n  \

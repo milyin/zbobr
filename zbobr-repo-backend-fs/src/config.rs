@@ -22,7 +22,7 @@ impl Default for ZbobrRepoBackendFsConfig {
 impl ZbobrRepoBackendFsConfig {
     /// Build configuration by layering: defaults < TOML < args.
     /// Relative paths from TOML are resolved against `config_dir`.
-    pub(crate) fn build(
+    pub fn build(
         toml: Option<ZbobrRepoBackendFsToml>,
         args: ZbobrRepoBackendFsArgs,
         config_dir: &Path,
@@ -39,7 +39,7 @@ impl ZbobrRepoBackendFsConfig {
     }
 
     /// Validate that all required fields are set.
-    pub(crate) fn validate(&self) -> anyhow::Result<()> {
+    pub fn validate(&self) -> anyhow::Result<()> {
         // repos_dir can be any path — we'll create it if needed
         Ok(())
     }

@@ -2,7 +2,7 @@ use std::{path::Path, process::Stdio};
 
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use zbobr_dispatcher::{
+use zbobr_api::{
     task::{Model, Role, Tool},
     tool_executor::{ToolExecutor, format_command_for_log},
 };

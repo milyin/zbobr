@@ -16,11 +16,6 @@ zbobr-dispatcher = { workspace = true }
 zbobr-executor-copilot = { workspace = true }
 zbobr-executor-claude = { workspace = true }
 zbobr-executor-mcp-tester = { workspace = true }
-zbobr-task-backend-github = { workspace = true }
-zbobr-task-backend-fs = { workspace = true }
-zbobr-repo-backend-github = { workspace = true }
-zbobr-repo-backend-fs = { workspace = true }
-zbobr-config = { workspace = true }
 rmcp = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }

@@ -1,23 +1,13 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
-use zbobr_config::{ZbobrConfigArgs, ZbobrConfigToml, ZbobrExecutorConfig};
 use zbobr_dispatcher::{
-    Stage, Zbobr, ZbobrDispatcherConfig,
+    Stage, Zbobr, ZbobrConfig, ZbobrConfigArgs, ZbobrConfigToml, ZbobrExecutorConfig,
     task::{Model, Parameter, Role, Tool},
 };
-use zbobr_executor_claude::ZbobrExecutorClaudeConfig;
-use zbobr_executor_copilot::ZbobrExecutorCopilotConfig;
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
-use zbobr_repo_backend_fs::FilesystemRepoBackend;
-use zbobr_repo_backend_github::GitHubRepoBackend;
-use zbobr_task_backend_fs::FilesystemTaskBackend;
-use zbobr_task_backend_github::GitHubTaskBackend;
 
 mod role_session;
 mod prompts;
@@ -339,37 +329,6 @@ fn load_root_toml(cli: &Cli) -> anyhow::Result<Option<ZbobrConfigToml>> {
     }
 }
 
-fn load_config(
-    cli: &Cli,
-    root_toml: &Option<ZbobrConfigToml>,
-    config_dir: &Path,
-) -> anyhow::Result<ZbobrDispatcherConfig> {
-    // Build dispatcher config
-    let dispatcher_toml = root_toml.as_ref().and_then(|r| r.dispatcher.as_ref());
-    let mut config = ZbobrDispatcherConfig::build(
-        dispatcher_toml.cloned(),
-        cli.global.settings.dispatcher.clone(),
-        config_dir,
-    )?;
-
-    // CLI arg overrides (highest priority)
-    if let Some(ref ws) = cli.global.settings.dispatcher.workspaces {
-        config.workspaces = ws.clone();
-    }
-    if let Some(ref b) = cli.global.settings.dispatcher.task_backend {
-        config.task_backend = *b;
-    }
-    if let Some(ref b) = cli.global.settings.dispatcher.repo_backend {
-        config.repo_backend = *b;
-    }
-    if let Some(ref t) = cli.global.settings.dispatcher.cli_tool {
-        config.cli_tool = *t;
-    }
-    config.validate()?;
-
-    Ok(config)
-}
-
 /// Parse CLI, allowing global options both before and after the subcommand.
 ///
 /// Global options are defined without `global = true` so they only appear in
@@ -473,78 +432,10 @@ async fn main() -> anyhow::Result<()> {
         None => std::env::current_dir()?,
     };
 
-    let config = load_config(&cli, &root_toml, &config_dir)?;
-    let task_backend_github_toml = root_toml
-        .as_ref()
-        .and_then(|r| r.tasks.as_ref())
-        .and_then(|t| t.github.as_ref());
-    let task_backend_fs_toml = root_toml
-        .as_ref()
-        .and_then(|r| r.tasks.as_ref())
-        .and_then(|t| t.fs.as_ref());
-    let repo_backend_github_toml = root_toml
-        .as_ref()
-        .and_then(|r| r.repo.as_ref())
-        .and_then(|r| r.github.as_ref());
-    let repo_backend_fs_toml = root_toml
-        .as_ref()
-        .and_then(|r| r.repo.as_ref())
-        .and_then(|r| r.fs.as_ref());
-
-    let executor_toml = root_toml.as_ref().and_then(|r| r.executor.as_ref());
-    let executor_config = ZbobrExecutorConfig {
-        claude: ZbobrExecutorClaudeConfig::build(
-            executor_toml.and_then(|e| e.claude.clone()),
-            cli.global.settings.executor.claude.clone(),
-        ),
-        copilot: ZbobrExecutorCopilotConfig::build(
-            executor_toml.and_then(|e| e.copilot.clone()),
-            cli.global.settings.executor.copilot.clone(),
-        ),
-        mcp_tester: ZbobrExecutorMcpTesterConfig::build(
-            executor_toml.and_then(|e| e.mcp_tester.clone()),
-            cli.global.settings.executor.mcp_tester.clone(),
-            &config_dir,
-        ),
-    };
-
-    let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = match config.task_backend {
-        zbobr_dispatcher::config::BackendType::GitHub => Arc::new(
-            GitHubTaskBackend::new(
-                task_backend_github_toml.cloned(),
-                cli.global.settings.tasks.github.clone(),
-            )
-            .context("Failed to create GitHub task backend")?,
-        ),
-        zbobr_dispatcher::config::BackendType::Filesystem => Arc::new(
-            FilesystemTaskBackend::new(
-                task_backend_fs_toml.cloned(),
-                cli.global.settings.tasks.fs.clone(),
-                &config_dir,
-            )
-            .context("Failed to create filesystem task backend")?,
-        ),
-    };
-    let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = match config.repo_backend {
-        zbobr_dispatcher::config::BackendType::GitHub => Arc::new(
-            GitHubRepoBackend::new(
-                repo_backend_github_toml.cloned(),
-                cli.global.settings.repo.github.clone(),
-                config.git_user_name.clone(),
-                config.git_user_email.clone(),
-            )
-            .context("Failed to create GitHub repo backend")?,
-        ),
-        zbobr_dispatcher::config::BackendType::Filesystem => Arc::new(
-            FilesystemRepoBackend::new(
-                repo_backend_fs_toml.cloned(),
-                cli.global.settings.repo.fs.clone(),
-                &config_dir,
-            )
-            .context("Failed to create filesystem repo backend")?,
-        ),
-    };
-    let zbobr = Zbobr::new(config, task_backend, repo_backend);
+    let zbobr_config = ZbobrConfig::build(root_toml, cli.global.settings.clone(), &config_dir)?;
+    zbobr_config.dispatcher.validate()?;
+    let executor_config = zbobr_config.executor.clone();
+    let zbobr = Zbobr::new(zbobr_config)?;
     zbobr.validate_connectivity().await?;
     let prompts = resolve_prompts(&cli, zbobr.config())?;
 
@@ -1414,7 +1305,6 @@ mod tests {
                 TaskSubcommand::Process {
                     task,
                     model,
-                    port,
                     executor_mcp_tester_preparation: _,
                     executor_mcp_tester_planning: _,
                     executor_mcp_tester_working: _,
@@ -1423,7 +1313,6 @@ mod tests {
                 } => {
                     assert_eq!(task, 42);
                     assert_eq!(model.as_deref(), Some("gpt-5-mini"));
-                    assert_eq!(port, 3000);
                 }
                 _ => panic!("expected Process subcommand"),
             }

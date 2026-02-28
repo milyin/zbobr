@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 
 pub mod macros;
 pub use macros::config_struct;
@@ -42,6 +42,45 @@ fn sanitize_filename(name: &str) -> String {
             }
         })
         .collect()
+}
+
+/// Configure git user settings for a repository.
+/// Sets user.name and user.email at the repository level.
+pub async fn configure_git_user(
+    work_dir: &Path,
+    git_user_name: &str,
+    git_user_email: &str,
+) -> Result<()> {
+    let config_user_status = tokio::process::Command::new("git")
+        .args(["config", "--local", "user.name", git_user_name])
+        .current_dir(work_dir)
+        .status()
+        .await
+        .context("Failed to set git user.name")?;
+
+    if !config_user_status.success() {
+        anyhow::bail!("git config user.name failed");
+    }
+
+    let config_email_status = tokio::process::Command::new("git")
+        .args(["config", "--local", "user.email", git_user_email])
+        .current_dir(work_dir)
+        .status()
+        .await
+        .context("Failed to set git user.email")?;
+
+    if !config_email_status.success() {
+        anyhow::bail!("git config user.email failed");
+    }
+
+    tracing::info!(
+        "Configured git user '{}' <{}> in {}",
+        git_user_name,
+        git_user_email,
+        work_dir.display()
+    );
+
+    Ok(())
 }
 
 /// Create a placeholder file in a branch to ensure it has at least one commit.

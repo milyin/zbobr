@@ -4,7 +4,7 @@ use std::{
 };
 
 use tempfile::TempDir;
-use zbobr_dispatcher::backend::RepoBackend;
+use zbobr_api::backend::RepoBackend;
 use zbobr_repo_backend_fs::FilesystemRepoBackend;
 
 /// Test harness that holds a temporary directory, a bare "source" git repo, and

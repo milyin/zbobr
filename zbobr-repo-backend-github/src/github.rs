@@ -2,7 +2,7 @@ use std::{path::PathBuf, time::Duration};
 
 use anyhow::Context;
 use async_trait::async_trait;
-use zbobr_dispatcher::backend::RepoBackend;
+use zbobr_api::backend::RepoBackend;
 
 use crate::config::ZbobrRepoBackendGithubConfig;
 
@@ -124,6 +124,14 @@ impl GitHubRepoBackend {
         git_user_email: String,
     ) -> anyhow::Result<Self> {
         let backend_config = ZbobrRepoBackendGithubConfig::build(toml, args);
+        Self::from_config(backend_config, git_user_name, git_user_email)
+    }
+
+    pub fn from_config(
+        backend_config: ZbobrRepoBackendGithubConfig,
+        git_user_name: String,
+        git_user_email: String,
+    ) -> anyhow::Result<Self> {
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(backend_config.token.clone())
@@ -545,14 +553,14 @@ impl RepoBackend for GitHubRepoBackend {
             tracing::info!(
                 "No commits ahead of origin/{destination_branch} — creating placeholder commit"
             );
-            zbobr_dispatcher::backend::configure_git_user(
+            zbobr_utility::configure_git_user(
                 &work_dir,
                 &self.git_user_name,
                 &self.git_user_email,
             )
             .await
             .context("Failed to configure git user for placeholder commit")?;
-            zbobr_dispatcher::backend::create_placeholder_commit(&work_dir, work_branch)
+            zbobr_utility::create_placeholder_commit(&work_dir, work_branch)
                 .await
                 .context("Failed to create placeholder commit")?;
         }

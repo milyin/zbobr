@@ -1,7 +1,7 @@
 use std::{collections::HashMap, time::Duration};
 
 use async_trait::async_trait;
-use zbobr_dispatcher::{Model, Parameter, Signal, Stage, Task, Tool, backend::TaskBackend};
+use zbobr_api::{Model, Parameter, Signal, Stage, Task, Tool, backend::TaskBackend};
 
 use crate::{
     config::ZbobrTaskBackendGithubConfig,
@@ -118,6 +118,10 @@ impl GitHubTaskBackend {
         args: crate::config::ZbobrTaskBackendGithubArgs,
     ) -> anyhow::Result<Self> {
         let backend_config = ZbobrTaskBackendGithubConfig::build(toml, args);
+        Self::from_config(backend_config)
+    }
+
+    pub fn from_config(backend_config: ZbobrTaskBackendGithubConfig) -> anyhow::Result<Self> {
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(backend_config.token.clone())
@@ -913,7 +917,7 @@ fn stage_description(stage: Stage) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zbobr_dispatcher::{Model, Parameter, Signal, Stage, Tool};
+    use zbobr_api::{Model, Parameter, Signal, Stage, Tool};
 
     #[test]
     fn issue_to_task_includes_confirm_flag() {
@@ -932,20 +936,22 @@ mod tests {
         assert!(task.confirm, "confirm flag should be parsed from labels");
     }
 
-    #[test]
-    fn apply_flag_change_adds_and_removes_confirm_label() {
+    #[tokio::test]
+    async fn apply_flag_change_adds_and_removes_confirm_label() {
+        // Install TLS provider required by octocrab.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         // This test just exercises the label loop; we don't hit GitHub.
-        let backend =
-            GitHubTaskBackend::new(None, crate::config::ZbobrTaskBackendGithubArgs::default())
-                .expect("backend init");
+        let config = crate::config::ZbobrTaskBackendGithubConfig {
+            task_repo: "dummy/repo".to_string(),
+            token: "dummy-token".to_string(),
+        };
+        let backend = GitHubTaskBackend::from_config(config).expect("backend init");
 
         // the method returns Result<(), _>; call with dummy values to ensure no panics
         // since actual network calls are inside retry_github we simply drop the future.
         // We cannot easily verify labels without mocking; ensure the code compiles and runs
         // the loop by invoking with both true/false combinations.
-        futures::executor::block_on(async {
-            let _ = backend.apply_flag_change(1, true, false, true).await;
-            let _ = backend.apply_flag_change(1, false, true, false).await;
-        });
+        let _ = backend.apply_flag_change(1, true, false, true).await;
+        let _ = backend.apply_flag_change(1, false, true, false).await;
     }
 }

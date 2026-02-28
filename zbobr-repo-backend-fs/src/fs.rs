@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use zbobr_dispatcher::backend::RepoBackend;
+use zbobr_api::backend::RepoBackend;
 
 use crate::config::ZbobrRepoBackendFsConfig;
 
@@ -36,6 +36,10 @@ impl FilesystemRepoBackend {
         config_dir: &std::path::Path,
     ) -> anyhow::Result<Self> {
         let config = ZbobrRepoBackendFsConfig::build(toml, args, config_dir);
+        Self::from_config(config)
+    }
+
+    pub fn from_config(config: ZbobrRepoBackendFsConfig) -> anyhow::Result<Self> {
         config.validate()?;
         Ok(Self { config })
     }

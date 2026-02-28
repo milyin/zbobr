@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use zbobr_dispatcher::task::Role;
+use zbobr_api::task::Role;
 use zbobr_utility::{config_struct, resolve_path};
 
 #[derive(Clone, Default)]

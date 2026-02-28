@@ -56,7 +56,7 @@ async fn test_clone_and_setup() {
 
     let clone_dir = setup
         .backend
-        .clone_and_setup(&src, "main", &ws)
+        .clone_and_setup(&src, "main", "main", &ws)
         .await
         .expect("clone_and_setup should succeed");
 
@@ -83,14 +83,14 @@ async fn test_clone_and_setup_existing_dir() {
     // First clone
     let dir1 = setup
         .backend
-        .clone_and_setup(&src, "main", &ws)
+        .clone_and_setup(&src, "main", "main", &ws)
         .await
         .expect("first clone should succeed");
 
     // Second clone — should fetch instead of re-cloning
     let dir2 = setup
         .backend
-        .clone_and_setup(&src, "main", &ws)
+        .clone_and_setup(&src, "main", "main", &ws)
         .await
         .expect("second clone should succeed");
 
@@ -120,17 +120,25 @@ async fn test_clone_readonly() {
 }
 
 #[tokio::test]
-async fn test_clone_nonexistent_branch() {
+async fn test_clone_creates_branch_when_missing() {
     let setup = create_test_setup().await;
     let ws = workspace_path(&setup, "clone_noexist");
     let src = source_repo_str(&setup);
 
+    // FS backend creates the branch from HEAD when it does not exist in the remote.
     let result = setup
         .backend
-        .clone_and_setup(&src, "nonexistent-branch", &ws)
+        .clone_and_setup(&src, "new-work-branch", "main", &ws)
         .await;
 
-    assert!(result.is_err(), "cloning nonexistent branch should fail");
+    assert!(
+        result.is_ok(),
+        "clone_and_setup creates the work branch when missing, got: {:?}",
+        result.err()
+    );
+    let clone_dir = result.unwrap();
+    let branch = git_command(&clone_dir, &["rev-parse", "--abbrev-ref", "HEAD"]).await;
+    assert_eq!(branch, "new-work-branch");
 }
 
 // ---------------------------------------------------------------------------
@@ -146,7 +154,7 @@ async fn test_setup_fork_remote_and_push() {
     // Clone
     let clone_dir = setup
         .backend
-        .clone_and_setup(&src, "main", &ws)
+        .clone_and_setup(&src, "main", "main", &ws)
         .await
         .expect("clone should succeed");
 
@@ -218,18 +226,24 @@ async fn test_push_and_create_pr() {
     // Clone and create work branch
     let clone_dir = setup
         .backend
-        .clone_and_setup(&src, "main", &ws)
+        .clone_and_setup(&src, "main", "main", &ws)
         .await
         .expect("clone should succeed");
 
     create_work_branch(&clone_dir, "pr-branch").await;
 
-    // Push and create PR
+    // Push the branch, then create PR separately
+    setup
+        .backend
+        .setup_fork_remote_and_push(&clone_dir, &src, "pr-branch")
+        .await
+        .expect("push should succeed");
+
     let pr_path = setup
         .backend
-        .push_and_create_pr(&src, &ws, "PR Title", "PR Body")
+        .create_pr_in_fork("source.git", "pr-branch", "main", "PR Title", "PR Body")
         .await
-        .expect("push_and_create_pr should succeed");
+        .expect("create_pr should succeed");
 
     // Verify PR file
     let content = tokio::fs::read_to_string(&pr_path)
@@ -354,17 +368,18 @@ async fn test_pr_id_separate_repos() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_push_and_create_pr_no_work_dir() {
+async fn test_ensure_branch_and_pr_no_work_dir() {
     let setup = create_test_setup().await;
     let src = source_repo_str(&setup);
 
     let result = setup
         .backend
-        .push_and_create_pr(
+        .ensure_branch_and_pr(
             &src,
             Path::new("/tmp/nonexistent_zbobr_test"),
+            "work",
+            "main",
             "title",
-            "body",
         )
         .await;
 
@@ -401,7 +416,7 @@ async fn test_full_workflow() {
     // Step 1: Clone
     let clone_dir = setup
         .backend
-        .clone_and_setup(&src, "main", &ws)
+        .clone_and_setup(&src, "main", "main", &ws)
         .await
         .expect("clone should succeed");
 
@@ -418,9 +433,9 @@ async fn test_full_workflow() {
     // Step 4: Create PR
     let pr_path = setup
         .backend
-        .push_and_create_pr(&src, &ws, "Feature 42", "Implements feature #42")
+        .create_pr_in_fork("source.git", "zbobr-42-feature", "main", "Feature 42", "Implements feature #42")
         .await
-        .expect("push_and_create_pr should succeed");
+        .expect("create_pr should succeed");
 
     // Step 5: Parse PR back
     let (repo, branch) = setup
@@ -429,7 +444,7 @@ async fn test_full_workflow() {
         .await
         .expect("parse_pr should succeed");
 
-    assert_eq!(repo, src, "parsed repo should match source repo");
+    assert_eq!(repo, "source.git", "parsed repo should be the repo name");
     assert_eq!(branch, "zbobr-42-feature");
 
     // Step 6: Verify branch exists in bare repo
