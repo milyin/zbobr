@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use zbobr_api::config::BackendConfig;
 use zbobr_utility::{config_struct, resolve_path};
 
 #[derive(Clone)]
@@ -42,5 +43,13 @@ impl ZbobrTaskBackendFsConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
         // Tasks directory can be any path - we'll create it if it doesn't exist
         Ok(())
+    }
+}
+
+impl BackendConfig for ZbobrTaskBackendFsConfig {
+    type Toml = ZbobrTaskBackendFsToml;
+    type Args = ZbobrTaskBackendFsArgs;
+    fn build_config(toml: Option<Self::Toml>, args: Self::Args, config_dir: &Path) -> Self {
+        Self::build(toml, args, config_dir)
     }
 }

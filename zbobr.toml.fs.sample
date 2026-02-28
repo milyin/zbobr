@@ -8,16 +8,15 @@ git_user_email = "zbobr@example.com"
 work_branch_prefix = "zbobr"
 
 # Uncomment to rewrite commit authors after each stage completes
-# (useful for CI systems that verify committer identity)
 # overwrite_author = true
 
 # Filesystem task backend: tasks stored as YAML files
 [tasks]
-dir = "./tasks"
+tasks_dir = "./tasks"
 
 # Filesystem repo backend: clones from local git repos
 [repo]
-dir = "./repos"
+repos_dir = "./repos"
 
 # Executor configuration: per-executor default models
 [executor.claude]

@@ -6,11 +6,11 @@ cli_tool = "copilot"
 
 [tasks]
 # Filesystem task backend settings
-dir = "./tasks"
+tasks_dir = "./tasks"
 
 [repo]
 # Filesystem repo backend settings
-dir = "./repos"
+repos_dir = "./repos"
 
 [executor.copilot]
 # Copilot executor settings

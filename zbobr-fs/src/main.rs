@@ -1,18 +1,21 @@
-mod config;
-
 use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
 use zbobr_dispatcher::{
-    ZbobrDispatcher,
+    GenericConfig, GenericConfigArgs, GenericConfigToml, ZbobrDispatcher,
     cli::{Command, ConfigFileArg, parse_cli},
     prompts::resolve_prompts,
 };
-use zbobr_task_backend_fs::ZbobrTaskBackendFs;
-use zbobr_repo_backend_fs::ZbobrRepoBackendFs;
+use zbobr_repo_backend_fs::ZbobrRepoBackendFsConfig;
+use zbobr_task_backend_fs::ZbobrTaskBackendFsConfig;
 
-use config::{Config, ConfigArgs, ConfigToml};
+type Config = GenericConfig<ZbobrTaskBackendFsConfig, ZbobrRepoBackendFsConfig>;
+type ConfigToml = GenericConfigToml<ZbobrTaskBackendFsConfig, ZbobrRepoBackendFsConfig>;
+type ConfigArgs = GenericConfigArgs<
+    <ZbobrTaskBackendFsConfig as zbobr_dispatcher::BackendConfig>::Args,
+    <ZbobrRepoBackendFsConfig as zbobr_dispatcher::BackendConfig>::Args,
+>;
 
 #[derive(Parser)]
 #[command(
@@ -67,11 +70,11 @@ async fn main() -> anyhow::Result<()> {
     let executor_config = config.executor.clone();
 
     let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = Arc::new(
-        ZbobrTaskBackendFs::from_config(config.tasks)
+        zbobr_task_backend_fs::ZbobrTaskBackendFs::from_config(config.tasks)
             .context("Failed to initialize filesystem task backend")?,
     );
     let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = Arc::new(
-        ZbobrRepoBackendFs::from_config(config.repo)
+        zbobr_repo_backend_fs::ZbobrRepoBackendFs::from_config(config.repo)
             .context("Failed to initialize filesystem repo backend")?,
     );
 

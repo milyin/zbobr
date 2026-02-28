@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use zbobr_api::config::BackendConfig;
 use zbobr_utility::{config_struct, resolve_path};
 
 #[derive(Clone)]
@@ -42,5 +43,13 @@ impl ZbobrRepoBackendFsConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
         // repos_dir can be any path — we'll create it if needed
         Ok(())
+    }
+}
+
+impl BackendConfig for ZbobrRepoBackendFsConfig {
+    type Toml = ZbobrRepoBackendFsToml;
+    type Args = ZbobrRepoBackendFsArgs;
+    fn build_config(toml: Option<Self::Toml>, args: Self::Args, config_dir: &Path) -> Self {
+        Self::build(toml, args, config_dir)
     }
 }

@@ -122,6 +122,19 @@ impl Default for ZbobrDispatcherConfig {
     }
 }
 
+/// Connects a backend's resolved config type with its TOML and CLI argument types.
+///
+/// Implement this on your backend's resolved config type so it can be plugged into
+/// `GenericConfig` without any changes to the dispatcher or other library crates.
+pub trait BackendConfig: Sized {
+    /// TOML deserialization type for this backend's config section.
+    type Toml: Default + for<'de> serde::Deserialize<'de>;
+    /// CLI argument type for this backend's config options.
+    type Args: clap::Args + Default + Clone;
+    /// Build the resolved config from optional TOML values and CLI overrides.
+    fn build_config(toml: Option<Self::Toml>, args: Self::Args, config_dir: &Path) -> Self;
+}
+
 // Note: zbobr-specific env helpers were removed — configuration now comes
 // from TOML/CLI or explicit external GH env vars. `EnvSource` provides an
 // abstraction for reading environment variables in tests.

@@ -5,7 +5,7 @@ pub mod tool_executor;
 
 pub use backend::{RepoBackend, TaskBackend};
 pub use config::{
-    BackendType, ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
+    BackendConfig, BackendType, ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
 };
 pub use task::{
     ChecklistItem, Model, Parameter, Role, Signal, Stage, Task, Tool, extract_repo_name,
