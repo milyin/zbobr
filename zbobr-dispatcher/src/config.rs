@@ -1,62 +1,20 @@
 // Re-export all from zbobr-api so existing code still compiles.
 pub use zbobr_api::config::*;
 
-use std::path::Path;
+use zbobr_utility::config_struct;
 
-use anyhow::Context;
 use zbobr_executor_claude::{
-    ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeConfig, ZbobrExecutorClaudeToml,
+    ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeToml,
     config::ZbobrExecutorClaude,
 };
 use zbobr_executor_copilot::{
-    ZbobrExecutorCopilotArgs, ZbobrExecutorCopilotConfig, ZbobrExecutorCopilotToml,
+    ZbobrExecutorCopilotArgs, ZbobrExecutorCopilotToml,
     config::ZbobrExecutorCopilot,
 };
 use zbobr_executor_mcp_tester::{
-    ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterConfig, ZbobrExecutorMcpTesterToml,
+    ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterToml,
     config::ZbobrExecutorMcpTester,
 };
-use zbobr_repo_backend_fs::{
-    ZbobrRepoBackendFsArgs, ZbobrRepoBackendFsConfig, ZbobrRepoBackendFsToml,
-    config::ZbobrRepoBackendFs,
-};
-use zbobr_repo_backend_github::{
-    ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubConfig, ZbobrRepoBackendGithubToml,
-    config::ZbobrRepoBackendGithub,
-};
-use zbobr_task_backend_fs::{
-    ZbobrTaskBackendFsArgs, ZbobrTaskBackendFsConfig, ZbobrTaskBackendFsToml,
-    config::ZbobrTaskBackendFs,
-};
-use zbobr_task_backend_github::{
-    ZbobrTaskBackendGithubArgs, ZbobrTaskBackendGithubConfig, ZbobrTaskBackendGithubToml,
-    config::ZbobrTaskBackendGithub,
-};
-use zbobr_utility::config_struct;
-
-#[derive(Clone)]
-#[config_struct]
-/// Task backend configuration section.
-pub struct ZbobrTaskBackendConfig {
-    /// GitHub issues as the task source
-    #[config(nested)]
-    pub github: ZbobrTaskBackendGithub,
-    /// Filesystem task backend (YAML files in tasks/)
-    #[config(nested)]
-    pub fs: ZbobrTaskBackendFs,
-}
-
-#[derive(Clone)]
-#[config_struct]
-/// Repo backend configuration section.
-pub struct ZbobrRepoBackendConfig {
-    /// GitHub repo backend (fork + push via API)
-    #[config(nested)]
-    pub github: ZbobrRepoBackendGithub,
-    /// Filesystem repo backend (operate on local clones)
-    #[config(nested)]
-    pub fs: ZbobrRepoBackendFs,
-}
 
 #[derive(Clone)]
 #[config_struct]
@@ -71,108 +29,6 @@ pub struct ZbobrExecutorConfig {
     /// MCP tester scenarios for validating MCP servers
     #[config(nested)]
     pub mcp_tester: ZbobrExecutorMcpTester,
-}
-
-#[derive(Clone)]
-#[config_struct]
-/// Root configuration for zbobr.
-pub struct ZbobrConfig {
-    /// Dispatcher runtime: workspaces, prompts, tokens
-    #[config(nested)]
-    pub dispatcher: ZbobrDispatcherConfig,
-    /// Task storage backends: control where zbobr discovers tasks.
-    #[config(nested)]
-    pub tasks: ZbobrTaskBackendConfig,
-    /// Repo backends: where zbobr clones and pushes code.
-    #[config(nested)]
-    pub repo: ZbobrRepoBackendConfig,
-    /// Executor defaults and scenarios.
-    #[config(nested)]
-    pub executor: ZbobrExecutorConfig,
-}
-
-impl ZbobrConfigToml {
-    /// Load a TOML config from a file path.
-    /// Returns Ok(None) if the file does not exist.
-    pub fn load(path: &Path) -> anyhow::Result<Option<Self>> {
-        if !path.exists() {
-            return Ok(None);
-        }
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read {}", path.display()))?;
-        let config: ZbobrConfigToml = toml::from_str(&content)
-            .with_context(|| format!("Failed to parse {}", path.display()))?;
-        Ok(Some(config))
-    }
-}
-
-impl ZbobrConfig {
-    /// Build the full configuration from TOML and CLI args.
-    /// Relative paths are resolved against `config_dir`.
-    pub fn build(
-        toml: Option<ZbobrConfigToml>,
-        args: ZbobrConfigArgs,
-        config_dir: &Path,
-    ) -> anyhow::Result<Self> {
-        let toml = toml.unwrap_or_default();
-
-        let dispatcher =
-            ZbobrDispatcherConfig::build(toml.dispatcher, args.dispatcher, config_dir)?;
-
-        let tasks = {
-            let t = toml.tasks.unwrap_or_default();
-            ZbobrTaskBackendConfig {
-                github:
-                    <ZbobrTaskBackendGithubConfig as zbobr_api::config::BackendConfig>::build_config(
-                        t.github,
-                        args.tasks.github,
-                        config_dir,
-                    ),
-                fs: <ZbobrTaskBackendFsConfig as zbobr_api::config::BackendConfig>::build_config(
-                    t.fs,
-                    args.tasks.fs,
-                    config_dir,
-                ),
-            }
-        };
-
-        let repo = {
-            let t = toml.repo.unwrap_or_default();
-            ZbobrRepoBackendConfig {
-                github:
-                    <ZbobrRepoBackendGithubConfig as zbobr_api::config::BackendConfig>::build_config(
-                        t.github,
-                        args.repo.github,
-                        config_dir,
-                    ),
-                fs: <ZbobrRepoBackendFsConfig as zbobr_api::config::BackendConfig>::build_config(
-                    t.fs,
-                    args.repo.fs,
-                    config_dir,
-                ),
-            }
-        };
-
-        let executor = {
-            let t = toml.executor.unwrap_or_default();
-            ZbobrExecutorConfig {
-                claude: ZbobrExecutorClaudeConfig::build(t.claude, args.executor.claude),
-                copilot: ZbobrExecutorCopilotConfig::build(t.copilot, args.executor.copilot),
-                mcp_tester: ZbobrExecutorMcpTesterConfig::build(
-                    t.mcp_tester,
-                    args.executor.mcp_tester,
-                    config_dir,
-                ),
-            }
-        };
-
-        Ok(Self {
-            dispatcher,
-            tasks,
-            repo,
-            executor,
-        })
-    }
 }
 
 /*

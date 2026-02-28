@@ -12,7 +12,6 @@ use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig}
 
 use crate::{
     Signal, Stage, Task, ToolExecutor, ZbobrDispatcherDyn, ZbobrExecutorConfig,
-    config::ZbobrConfigArgs,
     mcp::common::get_hostname,
     prompts::Prompts,
     task::{Model, Parameter, Role, Tool},
@@ -30,7 +29,9 @@ pub struct ConfigFileArg {
     pub path: Option<PathBuf>,
 }
 
-/// Global arguments shared across all subcommands.
+/// Global arguments that should be hoisted before subcommands.
+/// This includes only dispatcher and executor config, not backend-specific settings.
+/// For a full CLI with backend-specific options, use GenericCli<TA, RA> instead.
 #[derive(Args, Clone)]
 pub struct GlobalArgs {
     #[command(
@@ -39,8 +40,11 @@ pub struct GlobalArgs {
     )]
     pub config_file: ConfigFileArg,
 
-    #[command(flatten)]
-    pub settings: ZbobrConfigArgs,
+    #[command(flatten, next_help_heading = "[dispatcher]")]
+    pub dispatcher: crate::ZbobrDispatcherArgs,
+
+    #[command(flatten, next_help_heading = "[executor]")]
+    pub executor: crate::ZbobrExecutorConfigArgs,
 }
 
 /// Top-level commands.
