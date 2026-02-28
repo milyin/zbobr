@@ -290,9 +290,9 @@ enum TaskSubcommand {
 
 /// Resolved prompt file paths for planner, worker, and merger.
 ///
-/// This struct is passed to `run_role_session` so that the session logic can
-/// load the appropriate prompt text for the current role.  It needs to be
-/// visible to `role_session.rs` (a child module), hence `pub(crate)`.
+/// This struct is passed to the role session code so that it can load the
+/// appropriate prompt text for the current role. It needs to be visible to
+/// `role_session.rs` (a child module), hence `pub(crate)`.
 pub(crate) struct Prompts {
     base_path: Option<PathBuf>,
     preparator: Vec<PathBuf>,
@@ -1067,10 +1067,10 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// Start MCP server, invoke CLI tool (copilot/claude/stub), and handle stage transitions.
-// The original `run_role_session` function was substantial and has been
-// refactored into its own module (`role_session.rs`).  The helpers there are
-// responsible for the bulk of the work; `main.rs` now just imports the entry
-// point so that the rest of the file stays focused on CLI handling.
+// The role session logic used to live in this file but has been refactored
+    // into `role_session.rs`.  The helpers there handle the bulk of the work;
+    // `main.rs` merely constructs `RoleSession` instances and drives them while
+    // keeping the CLI-focused code uncluttered.
 
 
 
@@ -1181,8 +1181,8 @@ async fn run_manager_loop(
         Tool::McpTester => Model::default(),
     });
 
-    // prompt text is prepared inside `run_role_session`; callers simply pass
-    // along the resolved prompt file paths via the `prompts` argument.
+    // prompt text is prepared inside the role-session module; callers simply
+    // pass along the resolved prompt file paths via the `prompts` argument.
 
     tracing::info!("Manager loop started ({})", zbobr.debug_state());
     tracing::info!("Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s");

@@ -5,10 +5,10 @@ use tokio::process::Command;
 
 use zbobr_dispatcher::{Signal, Stage, ToolExecutor, Zbobr, task::{Model, Parameter, Role, Tool}};
 
-// Prompt construction helpers used by run_role_session.  These were originally in
-// `main.rs` but have been moved here so that prompt preparation lives alongside
-// the session logic.  The `Prompts` struct is defined in `main.rs` and passed
-// in by callers.
+// Prompt construction helpers used by the role session implementation. These
+// were originally in `main.rs` but have been moved here so that prompt
+// preparation lives alongside the session logic. The `Prompts` struct is
+// defined in `main.rs` and passed in by callers.
 
 /// Load and concatenate multiple prompt files (additional user context).
 /// If base_path is provided, relative paths are resolved relative to it.
@@ -209,98 +209,6 @@ impl<'a> RoleSession<'a> {
     }
 }
 
-// keep original convenience function for backwards compatibility; it now
-// constructs a RoleSession and delegates to `run`.  This allows existing call
-// sites (if any remain) to continue working without change.
-pub(crate) async fn run_role_session(
-    zbobr: &Zbobr,
-    task_id: u64,
-    role: Role,
-    model: Option<Model>,
-    base_port: u16,
-    prompts: &crate::Prompts,
-    show_prompt: bool,
-    claude_executor_config: &ZbobrExecutorClaudeConfig,
-    copilot_executor_config: &ZbobrExecutorCopilotConfig,
-    mcp_tester_executor_config: &ZbobrExecutorMcpTesterConfig,
-) -> anyhow::Result<()> {
-    let session = RoleSession::new(
-        zbobr,
-        task_id,
-        role,
-        model,
-        base_port,
-        prompts,
-        claude_executor_config,
-        copilot_executor_config,
-        mcp_tester_executor_config,
-    );
-    if show_prompt {
-        println!("{}", session.prompt()?);
-        return Ok(());
-    }
-    session.run().await
-}
-
-    // update task stage based on role; we implement `From<Role> for Stage`
-    zbobr.set_task_stage(task_id, role.into()).await?;
-
-    let task_dir = zbobr.config().workspaces.join(format!("task#{task_id}"));
-    tokio::fs::create_dir_all(&task_dir).await?;
-
-    let work_dir = prepare_workspace(zbobr, task_id, role, &task_dir).await?;
-
-    if !matches!(role, Role::Preparator) {
-        ensure_pr_url(zbobr, task_id).await?;
-    }
-
-    if should_try_early_merge(role) {
-        if try_early_merge(zbobr, task_id, &work_dir).await? {
-            // conflict-handling path already executed and task bumped back to
-            // pending; nothing more to do.
-            return Ok(());
-        }
-    }
-
-    let (assigned_port, server_handle) =
-        start_mcp_server(zbobr.clone(), base_port, role, task_id).await?;
-
-    let mcp_url = format!("http://127.0.0.1:{assigned_port}/{role}/{task_id}");
-
-    let (execution_interrupted, execution_error) = execute_tool(
-        cli_tool,
-        &claude_executor_config,
-        &copilot_executor_config,
-        &mcp_tester_executor_config,
-        task_id,
-        role,
-        &model,
-        assigned_port,
-        prompt,
-        &work_dir,
-        &mcp_url,
-        &zbobr,
-    )
-    .await;
-
-    finalize_session(
-        zbobr,
-        task_id,
-        role,
-        &work_dir,
-        execution_interrupted,
-        execution_error.clone(),
-    )
-    .await?;
-
-    // shut down server before propagating errors
-    server_handle.abort();
-    if let Some(e) = execution_error {
-        return Err(e);
-    }
-
-    Ok(())
-}
 
 // ---------- helpers --------------------------------------------------------
 
