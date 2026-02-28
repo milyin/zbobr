@@ -1,15 +1,32 @@
 use zbobr_utility::config_struct;
 
 #[derive(Clone, Default)]
-#[config_struct(backend_config)]
+#[config_struct]
 /// Configuration for the GitHub repo backend.
-pub struct ZbobrRepoBackendGithub {
+pub struct ZbobrRepoBackendGithubConfig {
     /// Owner for forks (GitHub user or org).
     #[arg(long)]
     pub fork_owner: String,
     /// GitHub token with read/write access to fork org.
     #[arg(long, env = "ZBOBR_REPO_GITHUB_TOKEN")]
     pub token: String,
+}
+
+impl zbobr_api::config::BackendConfig for ZbobrRepoBackendGithubConfig {
+    type Toml = ZbobrRepoBackendGithubToml;
+    type Args = ZbobrRepoBackendGithubArgs;
+    fn build_config(
+        toml: Option<Self::Toml>,
+        args: Self::Args,
+        _config_dir: &std::path::Path,
+    ) -> Self {
+        let defaults = Self::default();
+        let merged = toml.unwrap_or_default().merge_with_args(args);
+        Self {
+            fork_owner: merged.fork_owner.unwrap_or(defaults.fork_owner),
+            token: merged.token.unwrap_or(defaults.token),
+        }
+    }
 }
 
 impl ZbobrRepoBackendGithubConfig {

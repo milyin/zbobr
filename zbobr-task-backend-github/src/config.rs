@@ -1,15 +1,32 @@
 use zbobr_utility::config_struct;
 
 #[derive(Clone, Default)]
-#[config_struct(backend_config)]
+#[config_struct]
 /// Configuration for the GitHub task backend.
-pub struct ZbobrTaskBackendGithub {
+pub struct ZbobrTaskBackendGithubConfig {
     /// Task project repository ("Org/repo").
     #[arg(long)]
     pub task_repo: String,
     /// GitHub token with read/write access to tasks repo.
     #[arg(long, env = "ZBOBR_TASK_GITHUB_TOKEN")]
     pub token: String,
+}
+
+impl zbobr_api::config::BackendConfig for ZbobrTaskBackendGithubConfig {
+    type Toml = ZbobrTaskBackendGithubToml;
+    type Args = ZbobrTaskBackendGithubArgs;
+    fn build_config(
+        toml: Option<Self::Toml>,
+        args: Self::Args,
+        _config_dir: &std::path::Path,
+    ) -> Self {
+        let defaults = Self::default();
+        let merged = toml.unwrap_or_default().merge_with_args(args);
+        Self {
+            task_repo: merged.task_repo.unwrap_or(defaults.task_repo),
+            token: merged.token.unwrap_or(defaults.token),
+        }
+    }
 }
 
 impl ZbobrTaskBackendGithubConfig {

@@ -4,16 +4,13 @@ pub use zbobr_api::config::*;
 use zbobr_utility::config_struct;
 
 use zbobr_executor_claude::{
-    ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeToml,
-    config::ZbobrExecutorClaude,
+    ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeConfig, ZbobrExecutorClaudeToml,
 };
 use zbobr_executor_copilot::{
-    ZbobrExecutorCopilotArgs, ZbobrExecutorCopilotToml,
-    config::ZbobrExecutorCopilot,
+    ZbobrExecutorCopilotArgs, ZbobrExecutorCopilotConfig, ZbobrExecutorCopilotToml,
 };
 use zbobr_executor_mcp_tester::{
-    ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterToml,
-    config::ZbobrExecutorMcpTester,
+    ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterConfig, ZbobrExecutorMcpTesterToml,
 };
 
 #[derive(Clone)]
@@ -21,14 +18,14 @@ use zbobr_executor_mcp_tester::{
 /// Executor configuration section.
 pub struct ZbobrExecutorConfig {
     /// Claude-specific defaults
-    #[config(nested)]
-    pub claude: ZbobrExecutorClaude,
+    #[config(nested, toml_type = ZbobrExecutorClaudeToml, args_type = ZbobrExecutorClaudeArgs)]
+    pub claude: ZbobrExecutorClaudeConfig,
     /// GitHub Copilot executor defaults
-    #[config(nested)]
-    pub copilot: ZbobrExecutorCopilot,
+    #[config(nested, toml_type = ZbobrExecutorCopilotToml, args_type = ZbobrExecutorCopilotArgs)]
+    pub copilot: ZbobrExecutorCopilotConfig,
     /// MCP tester scenarios for validating MCP servers
-    #[config(nested)]
-    pub mcp_tester: ZbobrExecutorMcpTester,
+    #[config(nested, toml_type = ZbobrExecutorMcpTesterToml, args_type = ZbobrExecutorMcpTesterArgs)]
+    pub mcp_tester: ZbobrExecutorMcpTesterConfig,
 }
 
 /*

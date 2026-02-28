@@ -6,7 +6,7 @@ use zbobr_utility::{config_struct, resolve_path};
 #[derive(Clone, Default)]
 #[config_struct]
 /// Configuration for the mcp-tester executor.
-pub struct ZbobrExecutorMcpTester {
+pub struct ZbobrExecutorMcpTesterConfig {
     pub preparation: Option<PathBuf>,
     pub planning: Option<PathBuf>,
     pub working: Option<PathBuf>,

@@ -3,7 +3,7 @@ use zbobr_utility::config_struct;
 
 #[derive(Clone)]
 #[config_struct]
-pub struct ZbobrExecutorClaude {
+pub struct ZbobrExecutorClaudeConfig {
     /// Default AI model for Claude executor.
     pub default_model: Model,
 }

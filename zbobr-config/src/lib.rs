@@ -6,25 +6,25 @@ use zbobr_dispatcher::{
     config::{ZbobrDispatcherConfigArgs, ZbobrDispatcherConfigToml},
 };
 use zbobr_executor_claude::{
-    ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeToml, config::ZbobrExecutorClaude,
+    ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeConfig, ZbobrExecutorClaudeToml,
 };
 use zbobr_executor_copilot::{
-    ZbobrExecutorCopilotArgs, ZbobrExecutorCopilotToml, config::ZbobrExecutorCopilot,
+    ZbobrExecutorCopilotArgs, ZbobrExecutorCopilotConfig, ZbobrExecutorCopilotToml,
 };
 use zbobr_executor_mcp_tester::{
-    ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterToml, config::ZbobrExecutorMcpTester,
+    ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterConfig, ZbobrExecutorMcpTesterToml,
 };
 use zbobr_repo_backend_fs::{
-    ZbobrRepoBackendFsArgs, ZbobrRepoBackendFsToml, config::ZbobrRepoBackendFs,
+    ZbobrRepoBackendFsArgs, ZbobrRepoBackendFsConfig, ZbobrRepoBackendFsToml,
 };
 use zbobr_repo_backend_github::{
-    ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubToml, config::ZbobrRepoBackendGithub,
+    ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubConfig, ZbobrRepoBackendGithubToml,
 };
 use zbobr_task_backend_fs::{
-    ZbobrTaskBackendFsArgs, ZbobrTaskBackendFsToml, config::ZbobrTaskBackendFs,
+    ZbobrTaskBackendFsArgs, ZbobrTaskBackendFsConfig, ZbobrTaskBackendFsToml,
 };
 use zbobr_task_backend_github::{
-    ZbobrTaskBackendGithubArgs, ZbobrTaskBackendGithubToml, config::ZbobrTaskBackendGithub,
+    ZbobrTaskBackendGithubArgs, ZbobrTaskBackendGithubConfig, ZbobrTaskBackendGithubToml,
 };
 use zbobr_utility::config_struct;
 
@@ -33,11 +33,11 @@ use zbobr_utility::config_struct;
 /// Task backend configuration section.
 pub struct ZbobrTaskBackendConfig {
     /// GitHub issues as the task source
-    #[config(nested)]
-    pub github: ZbobrTaskBackendGithub,
+    #[config(nested, toml_type = ZbobrTaskBackendGithubToml, args_type = ZbobrTaskBackendGithubArgs)]
+    pub github: ZbobrTaskBackendGithubConfig,
     /// Filesystem task backend (YAML files in tasks/)
-    #[config(nested)]
-    pub fs: ZbobrTaskBackendFs,
+    #[config(nested, toml_type = ZbobrTaskBackendFsToml, args_type = ZbobrTaskBackendFsArgs)]
+    pub fs: ZbobrTaskBackendFsConfig,
 }
 
 #[derive(Clone)]
@@ -45,11 +45,11 @@ pub struct ZbobrTaskBackendConfig {
 /// Repo backend configuration section.
 pub struct ZbobrRepoBackendConfig {
     /// GitHub repo backend (fork + push via API)
-    #[config(nested)]
-    pub github: ZbobrRepoBackendGithub,
+    #[config(nested, toml_type = ZbobrRepoBackendGithubToml, args_type = ZbobrRepoBackendGithubArgs)]
+    pub github: ZbobrRepoBackendGithubConfig,
     /// Filesystem repo backend (operate on local clones)
-    #[config(nested)]
-    pub fs: ZbobrRepoBackendFs,
+    #[config(nested, toml_type = ZbobrRepoBackendFsToml, args_type = ZbobrRepoBackendFsArgs)]
+    pub fs: ZbobrRepoBackendFsConfig,
 }
 
 #[derive(Clone)]
@@ -57,14 +57,14 @@ pub struct ZbobrRepoBackendConfig {
 /// Executor configuration section.
 pub struct ZbobrExecutorConfig {
     /// Claude-specific defaults
-    #[config(nested)]
-    pub claude: ZbobrExecutorClaude,
+    #[config(nested, toml_type = ZbobrExecutorClaudeToml, args_type = ZbobrExecutorClaudeArgs)]
+    pub claude: ZbobrExecutorClaudeConfig,
     /// GitHub Copilot executor defaults
-    #[config(nested)]
-    pub copilot: ZbobrExecutorCopilot,
+    #[config(nested, toml_type = ZbobrExecutorCopilotToml, args_type = ZbobrExecutorCopilotArgs)]
+    pub copilot: ZbobrExecutorCopilotConfig,
     /// MCP tester scenarios for validating MCP servers
-    #[config(nested)]
-    pub mcp_tester: ZbobrExecutorMcpTester,
+    #[config(nested, toml_type = ZbobrExecutorMcpTesterToml, args_type = ZbobrExecutorMcpTesterArgs)]
+    pub mcp_tester: ZbobrExecutorMcpTesterConfig,
 }
 
 #[derive(Clone)]
