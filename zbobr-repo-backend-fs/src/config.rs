@@ -37,3 +37,7 @@ impl zbobr_api::config::BuildableBackend for ZbobrRepoBackendFsConfig {
         crate::ZbobrRepoBackendFs::from_config(self)
     }
 }
+
+impl zbobr_api::config::BackendWithConfig for crate::ZbobrRepoBackendFs {
+    type Config = ZbobrRepoBackendFsConfig;
+}

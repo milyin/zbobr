@@ -102,6 +102,15 @@ pub trait BuildableBackend: BackendConfig {
     fn build_backend(self, dispatcher: &ZbobrDispatcherConfig) -> anyhow::Result<Self::Backend>;
 }
 
+/// Associates a runtime backend type with its canonical resolved config type.
+///
+/// This allows generic entry points to accept backend types only and derive
+/// config/TOML/CLI argument types from that mapping.
+pub trait BackendWithConfig {
+    /// Resolved config type for this backend.
+    type Config: BuildableBackend<Backend = Self>;
+}
+
 // Note: zbobr-specific env helpers were removed — configuration now comes
 // from TOML/CLI or explicit external GH env vars. `EnvSource` provides an
 // abstraction for reading environment variables in tests.

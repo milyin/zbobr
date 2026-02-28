@@ -53,3 +53,7 @@ impl zbobr_api::config::BuildableBackend for ZbobrTaskBackendGithubConfig {
         crate::ZbobrTaskBackendGithub::from_config(self)
     }
 }
+
+impl zbobr_api::config::BackendWithConfig for crate::ZbobrTaskBackendGithub {
+    type Config = ZbobrTaskBackendGithubConfig;
+}

@@ -45,3 +45,7 @@ impl zbobr_api::config::BuildableBackend for ZbobrRepoBackendGithubConfig {
         )
     }
 }
+
+impl zbobr_api::config::BackendWithConfig for crate::ZbobrRepoBackendGithub {
+    type Config = ZbobrRepoBackendGithubConfig;
+}

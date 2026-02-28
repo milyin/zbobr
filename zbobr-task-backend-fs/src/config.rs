@@ -37,3 +37,7 @@ impl zbobr_api::config::BuildableBackend for ZbobrTaskBackendFsConfig {
         crate::ZbobrTaskBackendFs::from_config(self)
     }
 }
+
+impl zbobr_api::config::BackendWithConfig for crate::ZbobrTaskBackendFs {
+    type Config = ZbobrTaskBackendFsConfig;
+}

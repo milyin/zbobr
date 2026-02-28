@@ -1,6 +1,3 @@
-use zbobr_repo_backend_fs::ZbobrRepoBackendFsConfig;
-use zbobr_task_backend_fs::ZbobrTaskBackendFsConfig;
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -14,8 +11,6 @@ async fn main() -> anyhow::Result<()> {
     zbobr_dispatcher::cli::run_zbobr::<
         zbobr_task_backend_fs::ZbobrTaskBackendFs,
         zbobr_repo_backend_fs::ZbobrRepoBackendFs,
-        ZbobrTaskBackendFsConfig,
-        ZbobrRepoBackendFsConfig,
     >(
         "zbobr-fs",
         "Filesystem-backed AI-powered task dispatcher",
