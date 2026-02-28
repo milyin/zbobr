@@ -15,6 +15,8 @@ pub struct ZbobrRepoBackendGithubConfig {
 impl zbobr_api::config::BackendConfig for ZbobrRepoBackendGithubConfig {
     type Toml = ZbobrRepoBackendGithubToml;
     type Args = ZbobrRepoBackendGithubArgs;
+    type Backend = crate::ZbobrRepoBackendGithub;
+
     fn build_config(
         toml: Option<Self::Toml>,
         args: Self::Args,
@@ -26,6 +28,17 @@ impl zbobr_api::config::BackendConfig for ZbobrRepoBackendGithubConfig {
             fork_owner: merged.fork_owner.unwrap_or(defaults.fork_owner),
             token: merged.token.unwrap_or(defaults.token),
         }
+    }
+
+    fn build_backend(
+        self,
+        dispatcher: &zbobr_api::config::ZbobrDispatcherConfig,
+    ) -> anyhow::Result<Self::Backend> {
+        crate::ZbobrRepoBackendGithub::from_config(
+            self,
+            dispatcher.git_user_name.clone(),
+            dispatcher.git_user_email.clone(),
+        )
     }
 }
 
@@ -45,21 +58,6 @@ impl ZbobrRepoBackendGithubConfig {
             );
         }
         Ok(())
-    }
-}
-
-impl zbobr_api::config::BuildableBackend for ZbobrRepoBackendGithubConfig {
-    type Backend = crate::ZbobrRepoBackendGithub;
-
-    fn build_backend(
-        self,
-        dispatcher: &zbobr_api::config::ZbobrDispatcherConfig,
-    ) -> anyhow::Result<Self::Backend> {
-        crate::ZbobrRepoBackendGithub::from_config(
-            self,
-            dispatcher.git_user_name.clone(),
-            dispatcher.git_user_email.clone(),
-        )
     }
 }
 

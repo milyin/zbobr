@@ -1619,7 +1619,7 @@ async fn rewrite_commit_authors(
 
 /// Standard entry point for a Zbobr CLI application, heavily parameterized
 /// to allow for different backends.
-use zbobr_api::config::{BackendConfig, BackendWithConfig, BuildableBackend};
+use zbobr_api::config::{BackendConfig, BackendWithConfig};
 
 pub async fn run_zbobr<
     TTaskBackend: crate::backend::TaskBackend + BackendWithConfig + 'static,
@@ -1631,8 +1631,6 @@ pub async fn run_zbobr<
     default_config_name: &'static str,
 ) -> anyhow::Result<()>
 where
-    <TTaskBackend as BackendWithConfig>::Config: BuildableBackend<Backend = TTaskBackend>,
-    <TRepoBackend as BackendWithConfig>::Config: BuildableBackend<Backend = TRepoBackend>,
     <<TTaskBackend as BackendWithConfig>::Config as BackendConfig>::Args:
         clap::Args + std::fmt::Debug + Clone,
     <<TRepoBackend as BackendWithConfig>::Config as BackendConfig>::Args:

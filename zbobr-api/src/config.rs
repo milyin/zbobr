@@ -90,14 +90,10 @@ pub trait BackendConfig: Sized {
     type Toml: Default + for<'de> serde::Deserialize<'de>;
     /// CLI argument type for this backend's config options.
     type Args: clap::Args + Default + Clone;
-    /// Build the resolved config from optional TOML values and CLI overrides.
-    fn build_config(toml: Option<Self::Toml>, args: Self::Args, config_dir: &Path) -> Self;
-}
-
-/// Allows a backend configuration to instantiate its corresponding backend backend.
-pub trait BuildableBackend: BackendConfig {
     /// The runtime backend type instantiated by this configuration.
     type Backend;
+    /// Build the resolved config from optional TOML values and CLI overrides.
+    fn build_config(toml: Option<Self::Toml>, args: Self::Args, config_dir: &Path) -> Self;
     /// Build the backend instance from the resolved configuration.
     fn build_backend(self, dispatcher: &ZbobrDispatcherConfig) -> anyhow::Result<Self::Backend>;
 }
@@ -108,7 +104,7 @@ pub trait BuildableBackend: BackendConfig {
 /// config/TOML/CLI argument types from that mapping.
 pub trait BackendWithConfig {
     /// Resolved config type for this backend.
-    type Config: BuildableBackend<Backend = Self>;
+    type Config: BackendConfig<Backend = Self>;
 }
 
 // Note: zbobr-specific env helpers were removed — configuration now comes

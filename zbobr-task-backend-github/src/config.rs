@@ -15,6 +15,8 @@ pub struct ZbobrTaskBackendGithubConfig {
 impl zbobr_api::config::BackendConfig for ZbobrTaskBackendGithubConfig {
     type Toml = ZbobrTaskBackendGithubToml;
     type Args = ZbobrTaskBackendGithubArgs;
+    type Backend = crate::ZbobrTaskBackendGithub;
+
     fn build_config(
         toml: Option<Self::Toml>,
         args: Self::Args,
@@ -26,6 +28,13 @@ impl zbobr_api::config::BackendConfig for ZbobrTaskBackendGithubConfig {
             task_repo: merged.task_repo.unwrap_or(defaults.task_repo),
             token: merged.token.unwrap_or(defaults.token),
         }
+    }
+
+    fn build_backend(
+        self,
+        _dispatcher: &zbobr_api::config::ZbobrDispatcherConfig,
+    ) -> anyhow::Result<Self::Backend> {
+        crate::ZbobrTaskBackendGithub::from_config(self)
     }
 }
 
@@ -57,17 +66,6 @@ impl ZbobrTaskBackendGithubConfig {
             );
         }
         Ok((parts[0], parts[1]))
-    }
-}
-
-impl zbobr_api::config::BuildableBackend for ZbobrTaskBackendGithubConfig {
-    type Backend = crate::ZbobrTaskBackendGithub;
-
-    fn build_backend(
-        self,
-        _dispatcher: &zbobr_api::config::ZbobrDispatcherConfig,
-    ) -> anyhow::Result<Self::Backend> {
-        crate::ZbobrTaskBackendGithub::from_config(self)
     }
 }
 

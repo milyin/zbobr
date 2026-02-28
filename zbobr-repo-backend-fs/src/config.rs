@@ -22,6 +22,8 @@ impl Default for ZbobrRepoBackendFsConfig {
 impl zbobr_api::config::BackendConfig for ZbobrRepoBackendFsConfig {
     type Toml = ZbobrRepoBackendFsToml;
     type Args = ZbobrRepoBackendFsArgs;
+    type Backend = crate::ZbobrRepoBackendFs;
+
     fn build_config(
         toml: Option<Self::Toml>,
         args: Self::Args,
@@ -36,6 +38,13 @@ impl zbobr_api::config::BackendConfig for ZbobrRepoBackendFsConfig {
                 .unwrap_or(defaults.repos_dir),
         }
     }
+
+    fn build_backend(
+        self,
+        _dispatcher: &zbobr_api::config::ZbobrDispatcherConfig,
+    ) -> anyhow::Result<Self::Backend> {
+        crate::ZbobrRepoBackendFs::from_config(self)
+    }
 }
 
 impl ZbobrRepoBackendFsConfig {
@@ -43,17 +52,6 @@ impl ZbobrRepoBackendFsConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
         // repos_dir can be any path — we'll create it if needed
         Ok(())
-    }
-}
-
-impl zbobr_api::config::BuildableBackend for ZbobrRepoBackendFsConfig {
-    type Backend = crate::ZbobrRepoBackendFs;
-
-    fn build_backend(
-        self,
-        _dispatcher: &zbobr_api::config::ZbobrDispatcherConfig,
-    ) -> anyhow::Result<Self::Backend> {
-        crate::ZbobrRepoBackendFs::from_config(self)
     }
 }
 
