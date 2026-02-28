@@ -4,47 +4,6 @@ use zbobr_utility::config_struct;
 
 use crate::task::Tool;
 
-/// Backend type to use.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    Default,
-    clap::ValueEnum,
-)]
-pub enum BackendType {
-    #[serde(rename = "github")]
-    #[clap(alias = "github")]
-    #[default]
-    GitHub,
-    #[serde(rename = "fs")]
-    Filesystem,
-}
-
-impl std::fmt::Display for BackendType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BackendType::GitHub => write!(f, "github"),
-            BackendType::Filesystem => write!(f, "fs"),
-        }
-    }
-}
-
-impl std::str::FromStr for BackendType {
-    type Err = anyhow::Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "github" => Ok(BackendType::GitHub),
-            "fs" | "filesystem" => Ok(BackendType::Filesystem),
-            _ => Err(anyhow::anyhow!("Unknown backend: {}", s)),
-        }
-    }
-}
-
 /// TOML prompts configuration section.
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
