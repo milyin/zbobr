@@ -9,20 +9,29 @@ use syn::{
 
 #[proc_macro_attribute]
 pub fn config_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
-    if !attr.is_empty() {
-        return syn::Error::new(Span::call_site(), "config_struct does not take arguments")
+    let generate_backend_config = if attr.is_empty() {
+        false
+    } else {
+        let ident = syn::parse_macro_input!(attr as syn::Ident);
+        if ident != "backend_config" {
+            return syn::Error::new(
+                ident.span(),
+                "config_struct only accepts `backend_config` as an argument",
+            )
             .to_compile_error()
             .into();
-    }
+        }
+        true
+    };
 
     let parsed = parse_macro_input!(item as ItemStruct);
-    match expand_config_struct(parsed) {
+    match expand_config_struct(parsed, generate_backend_config) {
         Ok(tokens) => tokens.into(),
         Err(err) => err.to_compile_error().into(),
     }
 }
 
-fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
+fn expand_config_struct(item: ItemStruct, generate_backend_config: bool) -> syn::Result<TokenStream2> {
     let ItemStruct {
         attrs,
         vis,
@@ -93,6 +102,10 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
     let mut into_config_setup = Vec::new();
     let mut into_config_required = Vec::new();
     let mut into_config_fields = Vec::new();
+    // Steps for the BackendConfig::build_config implementation (populated when generate_backend_config).
+    let mut build_config_steps: Vec<TokenStream2> = Vec::new();
+    // Field idents that appear in the generated build_config Self { ... } constructor.
+    let mut build_config_field_idents: Vec<TokenStream2> = Vec::new();
 
     for field in fields_named {
         let field_ident = field
@@ -142,6 +155,13 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
         let is_nested = config_meta.nested;
 
         if is_nested {
+            if generate_backend_config {
+                return Err(syn::Error::new_spanned(
+                    &field_ident,
+                    "config_struct(backend_config) does not support nested fields; \
+                     implement BackendConfig manually for structs with nested config",
+                ));
+            }
             let base_is_option = option_inner_type(&field_ty);
             let suffix_target_ty = base_is_option.as_ref().unwrap_or(&field_ty);
 
@@ -346,6 +366,62 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 into_config_fields.push(quote! {
                     #field_ident: #init_expr
                 });
+
+                if generate_backend_config {
+                    let step = if let Some(inner) = &base_is_option {
+                        // Original field is Option<inner>
+                        if is_path_buf(inner) {
+                            quote! {
+                                let #field_ident = __merged.#field_ident
+                                    .map(|__p| ::zbobr_utility::resolve_path(__p, config_dir));
+                            }
+                        } else if let Some(elem) = vec_inner_type(inner) {
+                            if is_path_buf(&elem) {
+                                quote! {
+                                    let #field_ident = __merged.#field_ident
+                                        .map(|__v| __v.into_iter()
+                                            .map(|__p| ::zbobr_utility::resolve_path(__p, config_dir))
+                                            .collect::<::std::vec::Vec<_>>());
+                                }
+                            } else {
+                                quote! { let #field_ident = __merged.#field_ident; }
+                            }
+                        } else {
+                            quote! { let #field_ident = __merged.#field_ident; }
+                        }
+                    } else {
+                        // Original field is value_ty (non-option)
+                        if is_path_buf(&value_ty) {
+                            quote! {
+                                let #field_ident = __merged.#field_ident
+                                    .map(|__p| ::zbobr_utility::resolve_path(__p, config_dir))
+                                    .unwrap_or(__defaults.#field_ident);
+                            }
+                        } else if let Some(elem) = vec_inner_type(&value_ty) {
+                            if is_path_buf(&elem) {
+                                quote! {
+                                    let #field_ident = __merged.#field_ident
+                                        .map(|__v| __v.into_iter()
+                                            .map(|__p| ::zbobr_utility::resolve_path(__p, config_dir))
+                                            .collect::<::std::vec::Vec<_>>())
+                                        .unwrap_or(__defaults.#field_ident);
+                                }
+                            } else {
+                                quote! {
+                                    let #field_ident = __merged.#field_ident
+                                        .unwrap_or(__defaults.#field_ident);
+                                }
+                            }
+                        } else {
+                            quote! {
+                                let #field_ident = __merged.#field_ident
+                                    .unwrap_or(__defaults.#field_ident);
+                            }
+                        }
+                    };
+                    build_config_steps.push(step);
+                    build_config_field_idents.push(quote!(#field_ident));
+                }
             }
         }
     }
@@ -367,6 +443,29 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
     // repeat them together in the generated PrefixedArgs impl.
     let (nested_augment_prefixes, nested_augment_tys): (Vec<_>, Vec<_>) =
         nested_augment_entries.into_iter().unzip();
+
+    let backend_config_impl = if generate_backend_config {
+        quote! {
+            impl #impl_generics ::zbobr_api::config::BackendConfig for #ident #ty_generics #where_clause {
+                type Toml = #toml_ident #ty_generics;
+                type Args = #args_ident #ty_generics;
+                fn build_config(
+                    toml: ::std::option::Option<Self::Toml>,
+                    args: Self::Args,
+                    config_dir: &::std::path::Path,
+                ) -> Self {
+                    let __defaults = <Self as ::std::default::Default>::default();
+                    let __merged = toml.unwrap_or_default().merge_with_args(args);
+                    #( #build_config_steps )*
+                    Self {
+                        #( #build_config_field_idents, )*
+                    }
+                }
+            }
+        }
+    } else {
+        TokenStream2::new()
+    };
 
     let tokens = quote! {
         #(#attrs)*
@@ -521,6 +620,8 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 merged.try_into_config()
             }
         }
+
+        #backend_config_impl
 
     };
 
@@ -754,4 +855,13 @@ fn format_help_heading(prefix_kebab: &str, description: Option<&str>) -> String 
     let _ = description;
     let prefix = prefix_kebab.replace('-', ".");
     format!("[{prefix}]")
+}
+
+fn is_path_buf(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty {
+        if let Some(last) = type_path.path.segments.last() {
+            return last.ident == "PathBuf";
+        }
+    }
+    false
 }

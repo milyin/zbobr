@@ -124,7 +124,7 @@ impl ZbobrConfig {
             let t = toml.tasks.unwrap_or_default();
             ZbobrTaskBackendConfig {
                 github: ZbobrTaskBackendGithubConfig::build(t.github, args.tasks.github),
-                fs: ZbobrTaskBackendFsConfig::build(t.fs, args.tasks.fs, config_dir),
+                fs: <ZbobrTaskBackendFsConfig as zbobr_api::config::BackendConfig>::build_config(t.fs, args.tasks.fs, config_dir),
             }
         };
 
@@ -132,7 +132,7 @@ impl ZbobrConfig {
             let t = toml.repo.unwrap_or_default();
             ZbobrRepoBackendConfig {
                 github: ZbobrRepoBackendGithubConfig::build(t.github, args.repo.github),
-                fs: ZbobrRepoBackendFsConfig::build(t.fs, args.repo.fs, config_dir),
+                fs: <ZbobrRepoBackendFsConfig as zbobr_api::config::BackendConfig>::build_config(t.fs, args.repo.fs, config_dir),
             }
         };
 

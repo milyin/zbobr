@@ -1,10 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use zbobr_api::config::BackendConfig;
-use zbobr_utility::{config_struct, resolve_path};
+use zbobr_utility::config_struct;
 
 #[derive(Clone)]
-#[config_struct]
+#[config_struct(backend_config)]
 /// Configuration for the filesystem task backend.
 pub struct ZbobrTaskBackendFs {
     #[arg(long)]
@@ -21,35 +20,9 @@ impl Default for ZbobrTaskBackendFsConfig {
 }
 
 impl ZbobrTaskBackendFsConfig {
-    /// Build configuration by layering: defaults < TOML < args.
-    /// Relative paths from TOML are resolved against `config_dir`.
-    pub fn build(
-        toml: Option<ZbobrTaskBackendFsToml>,
-        args: ZbobrTaskBackendFsArgs,
-        config_dir: &Path,
-    ) -> Self {
-        let defaults = Self::default();
-        let merged = toml.unwrap_or_default().merge_with_args(args);
-
-        let tasks_dir = merged
-            .tasks_dir
-            .map(|p| resolve_path(p, config_dir))
-            .unwrap_or(defaults.tasks_dir);
-
-        Self { tasks_dir }
-    }
-
     /// Validate that all required fields are set.
     pub fn validate(&self) -> anyhow::Result<()> {
         // Tasks directory can be any path - we'll create it if it doesn't exist
         Ok(())
-    }
-}
-
-impl BackendConfig for ZbobrTaskBackendFsConfig {
-    type Toml = ZbobrTaskBackendFsToml;
-    type Args = ZbobrTaskBackendFsArgs;
-    fn build_config(toml: Option<Self::Toml>, args: Self::Args, config_dir: &Path) -> Self {
-        Self::build(toml, args, config_dir)
     }
 }
