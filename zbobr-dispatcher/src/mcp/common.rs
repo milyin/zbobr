@@ -1,7 +1,7 @@
 use rmcp::handler::server::router::tool::ToolRouter;
 use serde_json::Value;
 
-use crate::{ZbobrDispatcher, task::Role};
+use crate::{ZbobrDispatcherDyn, task::Role};
 
 // Instruction shared across all role prompts explaining branch isolation rules.
 pub fn branch_isolation_instruction() -> String {
@@ -307,7 +307,7 @@ pub(crate) async fn serve_mcp(
 /// Run the MCP HTTP server scoped to a role (planner or worker) and task.
 /// Returns the actual port that was assigned (spawns server in background).
 pub async fn run_role_mcp_server(
-    zbobr: ZbobrDispatcher,
+    zbobr: ZbobrDispatcherDyn,
     role: Role,
     task_id: u64,
 ) -> anyhow::Result<u16> {

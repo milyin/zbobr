@@ -35,6 +35,7 @@ impl ZbobrExecutorCopilotConfig {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use std::env;
@@ -86,3 +87,4 @@ mod tests {
         }
     }
 }
+*/

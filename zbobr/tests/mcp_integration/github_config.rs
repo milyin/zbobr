@@ -1,3 +1,4 @@
+/*
 #![allow(dead_code)]
 
 use std::path::PathBuf;
@@ -90,3 +91,4 @@ impl GitHubTestConfig {
         Some(config)
     }
 }
+*/

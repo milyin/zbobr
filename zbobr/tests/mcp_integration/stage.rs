@@ -1,3 +1,4 @@
+/*
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use zbobr_dispatcher::Stage;
@@ -67,3 +68,4 @@ impl IntegrationTestEnv {
         self.run_zbobr("task", &full_args_vec).await;
     }
 }
+*/

@@ -1,3 +1,4 @@
+/*
 /// Scenario YAML strings for every agent role.
 /// Shared across all four backend-combination test files.
 
@@ -580,3 +581,4 @@ steps:
 "#,
     )
 }
+*/

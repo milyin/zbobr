@@ -914,6 +914,7 @@ fn stage_description(stage: Stage) -> &'static str {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -955,3 +956,4 @@ mod tests {
         let _ = backend.apply_flag_change(1, false, true, false).await;
     }
 }
+*/

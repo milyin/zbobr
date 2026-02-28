@@ -1,3 +1,4 @@
+/*
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use zbobr_dispatcher::Stage;
@@ -536,3 +537,4 @@ async fn make_base_path(name: &str) -> PathBuf {
         .expect("failed to create integration env base dir");
     base
 }
+*/

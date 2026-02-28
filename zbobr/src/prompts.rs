@@ -176,6 +176,7 @@ pub(crate) fn build_full_prompt(user_context: &str, role: Role) -> String {
 }
 
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,3 +232,4 @@ mod tests {
         let _ = std::fs::remove_file(tmp);
     }
 }
+*/

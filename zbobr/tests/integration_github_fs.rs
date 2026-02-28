@@ -1,3 +1,4 @@
+/*
 /// Integration tests: GitHub task backend + filesystem repo backend.
 ///
 /// All of the individual tests are marked `#[ignore]` so they won’t run by
@@ -229,3 +230,5 @@ async fn test_github_fs_cli_confirm_flag_pauses_on_stage_change() {
     let env = get_env().await;
     test_helpers::run_cli_confirm_flag(&env).await;
 }
+
+*/

@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::mpsc};
 use anyhow::Context;
 use tokio::process::Command;
 
-use zbobr_dispatcher::{Signal, Stage, ToolExecutor, ZbobrDispatcher, task::{Model, Parameter, Role, Tool}};
+use zbobr_dispatcher::{Signal, Stage, ToolExecutor, ZbobrDispatcherDyn, task::{Model, Parameter, Role, Tool}};
 
 use crate::prompts::Prompts;
 
@@ -21,7 +21,7 @@ use zbobr_executor_mcp_tester::McpTesterExecutor;
 // because several referenced config types do not implement `Debug`.  We
 // provide a manual implementation that only includes the simple fields.
 pub(crate) struct RoleSession<'a> {
-    zbobr: &'a ZbobrDispatcher,
+    zbobr: &'a ZbobrDispatcherDyn,
     task_id: u64,
     role: Role,
     model: Option<Model>,
@@ -42,7 +42,7 @@ impl<'a> std::fmt::Debug for RoleSession<'a> {
 
 impl<'a> RoleSession<'a> {
     pub(crate) fn new(
-        zbobr: &'a ZbobrDispatcher,
+        zbobr: &'a ZbobrDispatcherDyn,
         task_id: u64,
         role: Role,
         model: Option<Model>,
@@ -160,7 +160,7 @@ fn resolve_model(cli_tool: Tool, override_model: Option<Model>, executor_config:
 /// Prepare the workspace directory for the given role.  Returns the directory
 /// that the agent should operate in.
 async fn prepare_workspace(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
     role: Role,
     task_dir: &PathBuf,
@@ -223,7 +223,7 @@ async fn prepare_workspace(
     }
 }
 
-async fn ensure_pr_url(zbobr: &ZbobrDispatcher, task_id: u64) -> anyhow::Result<()> {
+async fn ensure_pr_url(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> anyhow::Result<()> {
     let role_session = zbobr.role_session(task_id);
     match role_session.ensure_pr_url().await {
         Ok(_pr_url) => Ok(()),
@@ -248,7 +248,7 @@ fn should_try_early_merge(role: Role) -> bool {
 /// catch conflicts early.  If a conflict is detected the task is moved back to
 /// PENDING, the conflict flag is set, and `Ok(true)` is returned.
 async fn try_early_merge(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
     work_dir: &PathBuf,
 ) -> anyhow::Result<bool> {
@@ -288,7 +288,7 @@ async fn try_early_merge(
 }
 
 async fn start_mcp_server(
-    zbobr: ZbobrDispatcher,
+    zbobr: ZbobrDispatcherDyn,
     role: Role,
     task_id: u64,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
@@ -329,7 +329,7 @@ async fn execute_tool(
     prompt: &str,
     work_dir: &PathBuf,
     mcp_url: &str,
-    zbobr: &ZbobrDispatcher,
+    zbobr: &ZbobrDispatcherDyn,
 ) -> (bool, Option<anyhow::Error>) {
     let executor: Box<dyn ToolExecutor> = match cli_tool {
         Tool::Copilot => Box::new(CopilotExecutor {
@@ -366,7 +366,7 @@ async fn execute_tool(
 }
 
 async fn finalize_session(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
     role: Role,
     work_dir: &PathBuf,
@@ -454,7 +454,7 @@ async fn finalize_session(
 }
 
 async fn perform_auto_commit_and_push(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
     work_dir: &PathBuf,
     role: Role,
@@ -511,7 +511,7 @@ async fn perform_auto_commit_and_push(
 }
 
 async fn rewrite_commit_authors(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
     work_dir: &PathBuf,
     _role: Role,
