@@ -44,7 +44,7 @@ pub struct GlobalArgs {
     pub dispatcher: crate::ZbobrDispatcherArgs,
 
     #[command(flatten, next_help_heading = "[executor]")]
-    pub executor: crate::ZbobrExecutorConfigArgs,
+    pub executor: crate::ZbobrExecutorArgs,
 }
 
 /// Top-level commands.

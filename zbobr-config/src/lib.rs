@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::Context;
 use zbobr_dispatcher::{
     ZbobrDispatcherConfig,
-    config::{ZbobrDispatcherConfigArgs, ZbobrDispatcherConfigToml},
+    config::{ZbobrDispatcherArgs, ZbobrDispatcherToml},
 };
 use zbobr_executor_claude::{
     ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeConfig, ZbobrExecutorClaudeToml,
@@ -33,10 +33,10 @@ use zbobr_utility::config_struct;
 /// Task backend configuration section.
 pub struct ZbobrTaskBackendConfig {
     /// GitHub issues as the task source
-    #[config(nested, toml_type = ZbobrTaskBackendGithubToml, args_type = ZbobrTaskBackendGithubArgs)]
+    #[config(nested)]
     pub github: ZbobrTaskBackendGithubConfig,
     /// Filesystem task backend (YAML files in tasks/)
-    #[config(nested, toml_type = ZbobrTaskBackendFsToml, args_type = ZbobrTaskBackendFsArgs)]
+    #[config(nested)]
     pub fs: ZbobrTaskBackendFsConfig,
 }
 
@@ -45,10 +45,10 @@ pub struct ZbobrTaskBackendConfig {
 /// Repo backend configuration section.
 pub struct ZbobrRepoBackendConfig {
     /// GitHub repo backend (fork + push via API)
-    #[config(nested, toml_type = ZbobrRepoBackendGithubToml, args_type = ZbobrRepoBackendGithubArgs)]
+    #[config(nested)]
     pub github: ZbobrRepoBackendGithubConfig,
     /// Filesystem repo backend (operate on local clones)
-    #[config(nested, toml_type = ZbobrRepoBackendFsToml, args_type = ZbobrRepoBackendFsArgs)]
+    #[config(nested)]
     pub fs: ZbobrRepoBackendFsConfig,
 }
 
@@ -57,13 +57,13 @@ pub struct ZbobrRepoBackendConfig {
 /// Executor configuration section.
 pub struct ZbobrExecutorConfig {
     /// Claude-specific defaults
-    #[config(nested, toml_type = ZbobrExecutorClaudeToml, args_type = ZbobrExecutorClaudeArgs)]
+    #[config(nested)]
     pub claude: ZbobrExecutorClaudeConfig,
     /// GitHub Copilot executor defaults
-    #[config(nested, toml_type = ZbobrExecutorCopilotToml, args_type = ZbobrExecutorCopilotArgs)]
+    #[config(nested)]
     pub copilot: ZbobrExecutorCopilotConfig,
     /// MCP tester scenarios for validating MCP servers
-    #[config(nested, toml_type = ZbobrExecutorMcpTesterToml, args_type = ZbobrExecutorMcpTesterArgs)]
+    #[config(nested)]
     pub mcp_tester: ZbobrExecutorMcpTesterConfig,
 }
 
@@ -85,7 +85,7 @@ pub struct ZbobrConfig {
     pub executor: ZbobrExecutorConfig,
 }
 
-impl ZbobrConfigToml {
+impl ZbobrToml {
     /// Load a TOML config from a file path.
     /// Returns Ok(None) if the file does not exist.
     pub fn load(path: &Path) -> anyhow::Result<Option<Self>> {
@@ -94,7 +94,7 @@ impl ZbobrConfigToml {
         }
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
-        let config: ZbobrConfigToml = toml::from_str(&content)
+        let config: ZbobrToml = toml::from_str(&content)
             .with_context(|| format!("Failed to parse {}", path.display()))?;
         Ok(Some(config))
     }

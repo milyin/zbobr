@@ -7,8 +7,8 @@ use zbobr_executor_copilot::ZbobrExecutorCopilotConfig;
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 
 use crate::config::{
-    ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorConfig,
-    ZbobrExecutorConfigArgs, ZbobrExecutorConfigToml,
+    ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs,
+    ZbobrExecutorConfig, ZbobrExecutorToml,
 };
 
 // ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ pub struct GenericConfigToml<TC: BackendConfig, RC: BackendConfig> {
     pub dispatcher: Option<ZbobrDispatcherToml>,
     pub tasks: Option<TC::Toml>,
     pub repo: Option<RC::Toml>,
-    pub executor: Option<ZbobrExecutorConfigToml>,
+    pub executor: Option<ZbobrExecutorToml>,
 }
 
 impl<TC: BackendConfig, RC: BackendConfig> Default for GenericConfigToml<TC, RC> {
@@ -89,7 +89,7 @@ where
     pub repo: RA,
 
     #[command(flatten)]
-    pub executor: ZbobrExecutorConfigArgs,
+    pub executor: ZbobrExecutorArgs,
 }
 
 // ---------------------------------------------------------------------------

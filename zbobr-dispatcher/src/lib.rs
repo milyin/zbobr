@@ -12,8 +12,8 @@ pub mod tool_executor;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 pub use config::{
-    ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorConfig,
-    ZbobrExecutorConfigArgs, ZbobrExecutorConfigToml,
+    ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs,
+    ZbobrExecutorConfig, ZbobrExecutorToml,
 };
 pub use generic_config::{GenericConfig, GenericConfigArgs, GenericConfigToml};
 pub use zbobr_api::config::BackendConfig;

@@ -656,7 +656,9 @@ fn type_with_suffix(ty: &Type, suffix: &str) -> syn::Result<TypePath> {
     if let Type::Path(type_path) = ty {
         let mut new_path = type_path.clone();
         if let Some(last) = new_path.path.segments.last_mut() {
-            last.ident = format_ident!("{}{}", last.ident, suffix);
+            let base = last.ident.to_string();
+            let stripped = base.strip_suffix("Config").unwrap_or(&base);
+            last.ident = format_ident!("{}{}", stripped, suffix);
         }
         return Ok(new_path);
     }

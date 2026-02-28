@@ -18,13 +18,13 @@ use zbobr_executor_mcp_tester::{
 /// Executor configuration section.
 pub struct ZbobrExecutorConfig {
     /// Claude-specific defaults
-    #[config(nested, toml_type = ZbobrExecutorClaudeToml, args_type = ZbobrExecutorClaudeArgs)]
+    #[config(nested)]
     pub claude: ZbobrExecutorClaudeConfig,
     /// GitHub Copilot executor defaults
-    #[config(nested, toml_type = ZbobrExecutorCopilotToml, args_type = ZbobrExecutorCopilotArgs)]
+    #[config(nested)]
     pub copilot: ZbobrExecutorCopilotConfig,
     /// MCP tester scenarios for validating MCP servers
-    #[config(nested, toml_type = ZbobrExecutorMcpTesterToml, args_type = ZbobrExecutorMcpTesterArgs)]
+    #[config(nested)]
     pub mcp_tester: ZbobrExecutorMcpTesterConfig,
 }
 
