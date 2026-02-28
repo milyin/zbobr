@@ -1,6 +1,6 @@
 pub use zbobr_api::task::*;
 
-use crate::ZbobrDispatcher;
+use crate::ZbobrDispatcherDyn;
 
 // ---------------------------------------------------------------------------
 // RoleSession — restricted access for MCP tools during agent sessions.
@@ -13,12 +13,12 @@ use crate::ZbobrDispatcher;
 /// Stage and conflict flag are protected — only the dispatcher may change them.
 #[derive(Clone)]
 pub struct RoleSession {
-    zbobr: ZbobrDispatcher,
+    zbobr: ZbobrDispatcherDyn,
     task_id: u64,
 }
 
 impl RoleSession {
-    pub(crate) fn new(zbobr: ZbobrDispatcher, task_id: u64) -> Self {
+    pub(crate) fn new(zbobr: ZbobrDispatcherDyn, task_id: u64) -> Self {
         Self { zbobr, task_id }
     }
 
@@ -379,12 +379,12 @@ impl RoleSession {
 /// Can change stage, conflict flag, and all other fields.
 #[derive(Clone)]
 pub struct TaskSession {
-    zbobr: ZbobrDispatcher,
+    zbobr: ZbobrDispatcherDyn,
     task_id: u64,
 }
 
 impl TaskSession {
-    pub(crate) fn new(zbobr: ZbobrDispatcher, task_id: u64) -> Self {
+    pub(crate) fn new(zbobr: ZbobrDispatcherDyn, task_id: u64) -> Self {
         Self { zbobr, task_id }
     }
 
