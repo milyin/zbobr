@@ -1,0 +1,17 @@
+[dispatcher]
+workspaces = "./workspaces"
+git_user_name = "Copilot"
+git_user_email = "copilot@example.com"
+cli_tool = "copilot"
+
+[repo.fs]
+# Filesystem repo backend settings
+repositories_dir = "./repositories"
+
+[task.fs]
+# Filesystem task backend settings
+tasks_dir = "./tasks"
+
+[executor.copilot]
+# Copilot executor settings
+api_endpoint = "http://localhost:8000"

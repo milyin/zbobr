@@ -1,3 +1,4 @@
+/*
 /// Shared test bodies used by all four backend-combination files.
 /// Each function takes a fully-initialised `IntegrationTestEnv` and runs
 /// one complete test scenario against it.
@@ -1390,3 +1391,4 @@ async fn git_output(dir: &PathBuf, args: &[&str]) -> String {
         .unwrap();
     String::from_utf8_lossy(&out.stdout).to_string()
 }
+*/

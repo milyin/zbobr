@@ -1,0 +1,17 @@
+[dispatcher]
+workspaces = "./workspaces"
+git_user_name = "Copilot"
+git_user_email = "copilot@example.com"
+cli_tool = "copilot"
+
+[repo.github]
+# GitHub repo backend settings
+token = "YOUR_GITHUB_TOKEN"
+
+[task.github]
+# GitHub task backend settings
+token = "YOUR_GITHUB_TOKEN"
+
+[executor.copilot]
+# Copilot executor settings
+api_endpoint = "http://localhost:8000"

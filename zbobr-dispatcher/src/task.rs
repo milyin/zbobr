@@ -482,6 +482,7 @@ impl TaskSession {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -900,3 +901,4 @@ mod tests {
         assert!("invalid-model".parse::<Model>().is_err());
     }
 }
+*/

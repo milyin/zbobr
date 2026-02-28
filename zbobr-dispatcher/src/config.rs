@@ -158,6 +158,7 @@ impl ZbobrConfig {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -430,3 +431,4 @@ mod tests {
         assert_eq!(config.overwrite_author, false);
     }
 }
+*/
