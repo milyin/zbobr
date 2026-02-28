@@ -107,12 +107,12 @@ struct MilestoneResponse {
 // GitHubTaskBackend
 // ============================================================================
 
-pub struct GitHubTaskBackend {
+pub struct ZbobrTaskBackendGithub {
     backend_config: ZbobrTaskBackendGithubConfig,
     octocrab: octocrab::Octocrab,
 }
 
-impl GitHubTaskBackend {
+impl ZbobrTaskBackendGithub {
     pub fn new(
         toml: Option<crate::config::ZbobrTaskBackendGithubToml>,
         args: crate::config::ZbobrTaskBackendGithubArgs,
@@ -610,7 +610,7 @@ impl GitHubTaskBackend {
 }
 
 #[async_trait]
-impl TaskBackend for GitHubTaskBackend {
+impl TaskBackend for ZbobrTaskBackendGithub {
     async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
         let (owner, repo) = self.parse_repo()?;
         let issue: IssueResponse = retry_github("get issue", || {
@@ -932,7 +932,7 @@ mod tests {
             }],
         };
 
-        let task = GitHubTaskBackend::issue_to_task(issue);
+        let task = ZbobrTaskBackendGithub::issue_to_task(issue);
         assert!(task.confirm, "confirm flag should be parsed from labels");
     }
 
@@ -945,7 +945,7 @@ mod tests {
             task_repo: "dummy/repo".to_string(),
             token: "dummy-token".to_string(),
         };
-        let backend = GitHubTaskBackend::from_config(config).expect("backend init");
+        let backend = ZbobrTaskBackendGithub::from_config(config).expect("backend init");
 
         // the method returns Result<(), _>; call with dummy values to ensure no panics
         // since actual network calls are inside retry_github we simply drop the future.

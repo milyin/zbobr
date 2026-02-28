@@ -5,7 +5,7 @@ use std::{
 
 use tempfile::TempDir;
 use zbobr_api::backend::RepoBackend;
-use zbobr_repo_backend_fs::FilesystemRepoBackend;
+use zbobr_repo_backend_fs::ZbobrRepoBackendFs;
 
 /// Test harness that holds a temporary directory, a bare "source" git repo, and
 /// a configured filesystem repo backend.
@@ -72,7 +72,7 @@ pub async fn create_test_setup() -> TestSetup {
     git_command_status(&bare_repo, &["symbolic-ref", "HEAD", "refs/heads/main"]).await;
 
     // 7. Create backend
-    let backend = FilesystemRepoBackend::new(
+    let backend = ZbobrRepoBackendFs::new(
         None,
         zbobr_repo_backend_fs::ZbobrRepoBackendFsArgs {
             repos_dir: Some(repos_dir.to_path_buf()),

@@ -25,11 +25,11 @@ struct PrFile {
 /// - `target_repo` is a local path to a git repository.
 /// - "Forking" is done by `git clone` from the local path.
 /// - PRs are stored as YAML files under `{repos_dir}/prs/{repo_name}/`.
-pub struct FilesystemRepoBackend {
+pub struct ZbobrRepoBackendFs {
     config: ZbobrRepoBackendFsConfig,
 }
 
-impl FilesystemRepoBackend {
+impl ZbobrRepoBackendFs {
     pub fn new(
         toml: Option<crate::config::ZbobrRepoBackendFsToml>,
         args: crate::config::ZbobrRepoBackendFsArgs,
@@ -143,7 +143,7 @@ fn chrono_now() -> String {
 }
 
 #[async_trait]
-impl RepoBackend for FilesystemRepoBackend {
+impl RepoBackend for ZbobrRepoBackendFs {
     async fn clone_and_setup(
         &self,
         target_repo: &str,
@@ -358,7 +358,7 @@ impl RepoBackend for FilesystemRepoBackend {
     }
 }
 
-impl FilesystemRepoBackend {
+impl ZbobrRepoBackendFs {
     /// Get the default branch of origin remote.
     #[allow(dead_code)]
     async fn default_branch(work_dir: &Path) -> anyhow::Result<String> {

@@ -1,4 +1,4 @@
 pub mod config;
 mod fs;
 pub use config::{ZbobrTaskBackendFsArgs, ZbobrTaskBackendFsConfig, ZbobrTaskBackendFsToml};
-pub use fs::FilesystemTaskBackend;
+pub use fs::ZbobrTaskBackendFs;

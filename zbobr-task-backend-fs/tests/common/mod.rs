@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tempfile::TempDir;
 use zbobr_api::backend::TaskBackend;
-use zbobr_task_backend_fs::FilesystemTaskBackend;
+use zbobr_task_backend_fs::ZbobrTaskBackendFs;
 
 /// Test harness that holds a temporary directory and a configured fs backend.
 pub struct TestSetup {
@@ -16,7 +16,7 @@ pub fn create_test_setup() -> TestSetup {
     let tmp = TempDir::new().expect("failed to create temp dir");
     let tasks_dir = tmp.path().join("tasks");
 
-    let backend = FilesystemTaskBackend::new(
+    let backend = ZbobrTaskBackendFs::new(
         None,
         zbobr_task_backend_fs::ZbobrTaskBackendFsArgs {
             tasks_dir: Some(tasks_dir.to_path_buf()),

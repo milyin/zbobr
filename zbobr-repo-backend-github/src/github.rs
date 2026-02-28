@@ -106,17 +106,17 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
 }
 
 // ============================================================================
-// GitHubRepoBackend
+// ZbobrRepoBackendGithub
 // ============================================================================
 
-pub struct GitHubRepoBackend {
+pub struct ZbobrRepoBackendGithub {
     backend_config: ZbobrRepoBackendGithubConfig,
     octocrab: octocrab::Octocrab,
     git_user_name: String,
     git_user_email: String,
 }
 
-impl GitHubRepoBackend {
+impl ZbobrRepoBackendGithub {
     pub fn new(
         toml: Option<crate::config::ZbobrRepoBackendGithubToml>,
         args: crate::config::ZbobrRepoBackendGithubArgs,
@@ -283,7 +283,7 @@ impl GitHubRepoBackend {
 }
 
 #[async_trait]
-impl RepoBackend for GitHubRepoBackend {
+impl RepoBackend for ZbobrRepoBackendGithub {
     async fn clone_and_setup(
         &self,
         target_repo: &str,

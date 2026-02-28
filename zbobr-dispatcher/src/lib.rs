@@ -23,10 +23,10 @@ pub use tool_executor::ToolExecutor;
 
 use crate::backend::{RepoBackend, TaskBackend};
 use zbobr_api::config::BackendType;
-use zbobr_repo_backend_fs::FilesystemRepoBackend;
-use zbobr_repo_backend_github::GitHubRepoBackend;
-use zbobr_task_backend_fs::FilesystemTaskBackend;
-use zbobr_task_backend_github::GitHubTaskBackend;
+use zbobr_repo_backend_fs::ZbobrRepoBackendFs;
+use zbobr_repo_backend_github::ZbobrRepoBackendGithub;
+use zbobr_task_backend_fs::ZbobrTaskBackendFs;
+use zbobr_task_backend_github::ZbobrTaskBackendGithub;
 
 /// Central struct holding configuration and backend.
 #[derive(Clone)]
@@ -44,19 +44,19 @@ impl ZbobrDispatcher {
     /// Selects and builds the correct task and repo backends based on config.
     pub fn new(config: ZbobrConfig) -> anyhow::Result<Self> {
         let task_backend: Arc<dyn TaskBackend> = match config.dispatcher.task_backend {
-            BackendType::GitHub => Arc::new(GitHubTaskBackend::from_config(config.tasks.github)?),
+            BackendType::GitHub => Arc::new(ZbobrTaskBackendGithub::from_config(config.tasks.github)?),
             BackendType::Filesystem => {
-                Arc::new(FilesystemTaskBackend::from_config(config.tasks.fs)?)
+                Arc::new(ZbobrTaskBackendFs::from_config(config.tasks.fs)?)
             }
         };
         let repo_backend: Arc<dyn RepoBackend> = match config.dispatcher.repo_backend {
-            BackendType::GitHub => Arc::new(GitHubRepoBackend::from_config(
+            BackendType::GitHub => Arc::new(ZbobrRepoBackendGithub::from_config(
                 config.repo.github,
                 config.dispatcher.git_user_name.clone(),
                 config.dispatcher.git_user_email.clone(),
             )?),
             BackendType::Filesystem => {
-                Arc::new(FilesystemRepoBackend::from_config(config.repo.fs)?)
+                Arc::new(ZbobrRepoBackendFs::from_config(config.repo.fs)?)
             }
         };
         Ok(Self {

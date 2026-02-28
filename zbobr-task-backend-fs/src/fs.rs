@@ -106,11 +106,11 @@ struct CommentsFile {
 }
 
 /// Filesystem-based task backend.
-pub struct FilesystemTaskBackend {
+pub struct ZbobrTaskBackendFs {
     config: ZbobrTaskBackendFsConfig,
 }
 
-impl FilesystemTaskBackend {
+impl ZbobrTaskBackendFs {
     pub fn new(
         toml: Option<crate::config::ZbobrTaskBackendFsToml>,
         args: crate::config::ZbobrTaskBackendFsArgs,
@@ -251,7 +251,7 @@ impl FilesystemTaskBackend {
 }
 
 #[async_trait]
-impl TaskBackend for FilesystemTaskBackend {
+impl TaskBackend for ZbobrTaskBackendFs {
     async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
         let task_file = self.read_task_file(id).await?;
         task_file.to_task()
