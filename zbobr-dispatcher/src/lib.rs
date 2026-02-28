@@ -1,7 +1,9 @@
 pub mod backend;
 pub mod cleanup;
+pub mod cli;
 pub mod config;
 pub mod mcp;
+pub mod prompts;
 pub mod setup;
 pub mod task;
 pub mod tool_executor;
@@ -20,6 +22,11 @@ pub use task::{
     ChecklistItem, Model, Parameter, RoleSession, Signal, Stage, Task, TaskSession, Tool,
 };
 pub use tool_executor::ToolExecutor;
+pub use cli::{
+    Command, ConfigFileArg, GlobalArgs, TaskSubcommand, parse_cli, print_task, process_task_by_stage,
+    run_command, run_manager_loop,
+};
+pub use prompts::{Prompts, build_full_prompt, load_prompts, resolve_prompts};
 
 use crate::backend::{RepoBackend, TaskBackend};
 

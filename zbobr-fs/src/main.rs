@@ -1,43 +1,25 @@
-#![allow(clippy::needless_borrows_for_generic_args)]
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
-use clap::{Args, Parser, Subcommand};
+use clap::Parser;
 use zbobr_dispatcher::{
-    ZbobrDispatcher, ZbobrConfig, ZbobrConfigArgs, ZbobrConfigToml,
+    ZbobrConfig, ZbobrConfigToml, ZbobrDispatcher,
+    cli::{Command, GlobalArgs, parse_cli},
+    prompts::resolve_prompts,
 };
 use zbobr_task_backend_fs::ZbobrTaskBackendFs;
 use zbobr_repo_backend_fs::ZbobrRepoBackendFs;
-
-#[derive(Args, Clone)]
-struct GlobalArgs {
-    #[command(
-        flatten,
-        next_help_heading = "[config] Meta options and config file overrides"
-    )]
-    config_file: ConfigFileArg,
-
-    #[command(flatten)]
-    settings: ZbobrConfigArgs,
-}
-
-#[derive(Args, Clone)]
-struct ConfigFileArg {
-    /// Path to TOML configuration file (default: zbobr-fs.toml in cwd)
-    #[arg(long = "config")]
-    pub path: Option<PathBuf>,
-}
 
 #[derive(Parser)]
 #[command(
     name = "zbobr-fs",
     about = "Filesystem-backed AI-powered task dispatcher",
     long_about = "Filesystem-backed AI-powered task dispatcher that manages tasks through automated stages.\n\n\
-        Tasks are stored in YAML files and work is done on local clones.\n\
+        Tasks are stored in YAML files and work is done on local git clones.\n\
         Tasks flow through: PENDING -> PREPARING -> PLANNING -> WORKING -> REVIEWING -> DONE.\n\
         Merge conflicts are handled by MERGING sessions when the conflict flag is set.\n\n\
-        Ideal for testing, local development, and offline scenarios."
+        Ideal for testing, local development, and offline scenarios.\n\n\
+        Default config file: zbobr-fs.toml in current directory."
 )]
 struct Cli {
     #[command(flatten)]
@@ -47,63 +29,49 @@ struct Cli {
     command: Command,
 }
 
-#[derive(Subcommand)]
-enum Command {
-    /// Initialize a task project
-    Setup {
-        /// Force overwrite existing configuration
-        #[arg(long, short = 'f')]
-        force: bool,
-    },
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let cli = Cli::parse();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
+        .init();
 
-    // Resolve config file path (default to zbobr-fs.toml)
-    let config_path = cli.global.config_file.path.clone().unwrap_or_else(|| {
-        PathBuf::from("zbobr-fs.toml")
-    });
+    let cli: Cli = parse_cli();
 
-    let config_dir = config_path
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .to_path_buf();
+    let config_path = cli.global.config_file.path.clone()
+        .unwrap_or_else(|| "zbobr-fs.toml".into());
 
-    // Load configuration
-    let toml = ZbobrConfigToml::load(&config_path)?;
-    let config = ZbobrConfig::build(toml, cli.global.settings, &config_dir)?;
+    let config_dir = if cli.global.config_file.path.is_some() {
+        std::fs::canonicalize(&config_path)
+            .with_context(|| format!("Cannot resolve config path: {}", config_path.display()))?
+            .parent()
+            .expect("config file must have a parent directory")
+            .to_path_buf()
+    } else {
+        std::env::current_dir()?
+    };
 
-    // Validate config
+    let root_toml = ZbobrConfigToml::load(&config_path)?;
+    let config = ZbobrConfig::build(root_toml, cli.global.settings.clone(), &config_dir)?;
     config.dispatcher.validate()?;
+    let executor_config = config.executor.clone();
 
-    // Create filesystem-backed dispatcher
-    let task_backend = Arc::new(
+    let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = Arc::new(
         ZbobrTaskBackendFs::from_config(config.tasks.fs)
-            .context("Failed to initialize filesystem task backend")?
+            .context("Failed to initialize filesystem task backend")?,
     );
-    let repo_backend = Arc::new(
+    let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = Arc::new(
         ZbobrRepoBackendFs::from_config(config.repo.fs)
-            .context("Failed to initialize filesystem repo backend")?
+            .context("Failed to initialize filesystem repo backend")?,
     );
 
-    let dispatcher = ZbobrDispatcher::new_with_backends(
-        config.dispatcher.clone(),
-        task_backend,
-        repo_backend,
-    );
+    let zbobr = ZbobrDispatcher::new_with_backends(config.dispatcher.clone(), task_backend, repo_backend);
+    zbobr.validate_connectivity().await?;
 
-    // Validate backends
-    dispatcher.validate_connectivity().await?;
+    let prompts = resolve_prompts(&cli.global.settings.dispatcher, zbobr.config());
 
-    match cli.command {
-        Command::Setup { force: _ } => {
-            println!("Filesystem backend initialized successfully");
-        }
-    }
-
-    Ok(())
+    zbobr_dispatcher::cli::run_command(zbobr, cli.command, &prompts, &executor_config).await
 }
