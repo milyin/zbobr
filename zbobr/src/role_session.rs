@@ -5,7 +5,7 @@ use tokio::process::Command;
 
 use zbobr_dispatcher::{Signal, Stage, ToolExecutor, Zbobr, task::{Model, Parameter, Role, Tool}};
 
-use crate::prompts::{load_prompts, build_full_prompt};
+use crate::prompts::Prompts;
 
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
@@ -15,17 +15,32 @@ use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig}
 /// or inspect a role session.  By consolidating the data in one struct we can
 /// centralize prompt construction and make callers responsible for printing the
 /// prompt when `show_prompt` is requested.
-#[derive(Debug)]
+// `RoleSession` is primarily a data carrier and isn't routinely
+// printed for debugging.  The original `#[derive(Debug)]` triggered errors
+// because several referenced config types do not implement `Debug`.  We
+// provide a manual implementation that only includes the simple fields.
 pub(crate) struct RoleSession<'a> {
     zbobr: &'a Zbobr,
     task_id: u64,
     role: Role,
     model: Option<Model>,
     base_port: u16,
-    prompts: &'a crate::prompts::Prompts,
+    prompts: &'a Prompts,
     claude_executor_config: &'a ZbobrExecutorClaudeConfig,
     copilot_executor_config: &'a ZbobrExecutorCopilotConfig,
     mcp_tester_executor_config: &'a ZbobrExecutorMcpTesterConfig,
+}
+
+impl<'a> std::fmt::Debug for RoleSession<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RoleSession")
+            .field("task_id", &self.task_id)
+            .field("role", &self.role)
+            .field("model", &self.model)
+            .field("base_port", &self.base_port)
+            // skip the reference fields that don't implement Debug
+            .finish()
+    }
 }
 
 impl<'a> RoleSession<'a> {
@@ -35,7 +50,7 @@ impl<'a> RoleSession<'a> {
         role: Role,
         model: Option<Model>,
         base_port: u16,
-        prompts: &'a crate::prompts::Prompts,
+        prompts: &'a Prompts,
         claude_executor_config: &'a ZbobrExecutorClaudeConfig,
         copilot_executor_config: &'a ZbobrExecutorCopilotConfig,
         mcp_tester_executor_config: &'a ZbobrExecutorMcpTesterConfig,
@@ -54,15 +69,11 @@ impl<'a> RoleSession<'a> {
     }
 
     /// Construct the full prompt text that will be provided to the AI tool.
+    ///
+    /// This implementation now simply forwards to the shared logic owned by
+    /// [`Prompts`].
     pub(crate) fn prompt(&self) -> anyhow::Result<String> {
-        let base_prompt = match self.role {
-            Role::Preparator => load_prompts(&self.prompts.preparator, self.prompts.base_path.as_ref())?,
-            Role::Planner => load_prompts(&self.prompts.planner, self.prompts.base_path.as_ref())?,
-            Role::Worker => load_prompts(&self.prompts.worker, self.prompts.base_path.as_ref())?,
-            Role::Reviewer => load_prompts(&self.prompts.reviewer, self.prompts.base_path.as_ref())?,
-            Role::Merger => load_prompts(&self.prompts.merger, self.prompts.base_path.as_ref())?,
-        };
-        Ok(build_full_prompt(&base_prompt, self.role))
+        self.prompts.build_prompt(self.role)
     }
 
     /// Execute the session (assumes prompt already printed if requested).
@@ -70,7 +81,13 @@ impl<'a> RoleSession<'a> {
         // Adapted from previous run_role_session body, but without prompt
         // generation/dumping or `show_prompt` handling.
         let cli_tool = self.zbobr.config().cli_tool;
-        let model = resolve_model(cli_tool, self.model, self.claude_executor_config, self.copilot_executor_config);
+        // `self.model` is an `Option<Model>`; clone it so we don't move out of `&self`
+        let model = resolve_model(
+            cli_tool,
+            self.model.clone(),
+            self.claude_executor_config,
+            self.copilot_executor_config,
+        );
 
         // update task stage based on role; we implement `From<Role> for Stage`
         self.zbobr.set_task_stage(self.task_id, self.role.into()).await?;
@@ -97,7 +114,15 @@ impl<'a> RoleSession<'a> {
         let (assigned_port, server_handle) =
             start_mcp_server(self.zbobr.clone(), self.base_port, self.role, self.task_id).await?;
 
-        let mcp_url = format!("http://127.0.0.1:{assigned_port}/{role}/{task_id}");
+        // Build the URL using explicit parameters; `role` and `task_id` are
+        // fields on `self` and therefore not directly available to `format!`
+        // named args.
+        let mcp_url = format!(
+            "http://127.0.0.1:{assigned_port}/{role}/{task_id}",
+            assigned_port = assigned_port,
+            role = self.role,
+            task_id = self.task_id
+        );
 
         let prompt_text = self.prompt()?;
         let (execution_interrupted, execution_error) = execute_tool(
@@ -116,13 +141,14 @@ impl<'a> RoleSession<'a> {
         )
         .await;
 
+        // Pass a reference to avoid attempting to clone `anyhow::Error`.
         finalize_session(
             self.zbobr,
             self.task_id,
             self.role,
             &work_dir,
             execution_interrupted,
-            execution_error.clone(),
+            execution_error.as_ref(),
         )
         .await?;
 
@@ -370,7 +396,7 @@ async fn finalize_session(
     role: Role,
     work_dir: &PathBuf,
     execution_interrupted: bool,
-    execution_error: Option<anyhow::Error>,
+    execution_error: Option<&anyhow::Error>,
 ) -> anyhow::Result<()> {
     let task_session = zbobr.task_session(task_id);
 
@@ -380,7 +406,7 @@ async fn finalize_session(
         return Ok(());
     }
 
-    if let Some(ref e) = execution_error {
+    if let Some(e) = execution_error {
         let error_msg = format!("Execution failed: {e}");
         let hostname = zbobr_dispatcher::mcp::common::get_hostname();
         if let Err(post_err) = task_session

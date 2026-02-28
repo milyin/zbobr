@@ -8,12 +8,12 @@ use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use zbobr_config::{ZbobrConfigArgs, ZbobrConfigToml};
 use zbobr_dispatcher::{
-    Signal, Stage, ToolExecutor, Zbobr, ZbobrDispatcherConfig,
+    Stage, Zbobr, ZbobrDispatcherConfig,
     task::{Model, Parameter, Role, Tool},
 };
-use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
-use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
-use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
+use zbobr_executor_claude::ZbobrExecutorClaudeConfig;
+use zbobr_executor_copilot::ZbobrExecutorCopilotConfig;
+use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_repo_backend_fs::FilesystemRepoBackend;
 use zbobr_repo_backend_github::GitHubRepoBackend;
 use zbobr_task_backend_fs::FilesystemTaskBackend;

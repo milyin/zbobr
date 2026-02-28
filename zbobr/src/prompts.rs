@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use anyhow::Context;
 
 use zbobr_dispatcher::{
     task::Role,
@@ -131,6 +130,22 @@ pub(crate) fn load_prompts(
     Ok(combined)
 }
 
+impl Prompts {
+    /// Construct the full prompt text for the given role by loading any user-\
+    /// supplied context files and combining them with the hardcoded
+    /// instructions and generated MCP API documentation.
+    pub(crate) fn build_prompt(&self, role: Role) -> anyhow::Result<String> {
+        let base_prompt = match role {
+            Role::Preparator => load_prompts(&self.preparator, self.base_path.as_ref())?,
+            Role::Planner => load_prompts(&self.planner, self.base_path.as_ref())?,
+            Role::Worker => load_prompts(&self.worker, self.base_path.as_ref())?,
+            Role::Reviewer => load_prompts(&self.reviewer, self.base_path.as_ref())?,
+            Role::Merger => load_prompts(&self.merger, self.base_path.as_ref())?,
+        };
+        Ok(build_full_prompt(&base_prompt, role))
+    }
+}
+
 /// Build full prompt: hardcoded instructions + user context files + auto-generated
 /// API docs.
 pub(crate) fn build_full_prompt(user_context: &str, role: Role) -> String {
@@ -190,5 +205,29 @@ mod tests {
         // should include both the user context and some known phrase from dispatcher instructions
         assert!(prompt.contains("user context"));
         assert!(prompt.contains("\n\n---\n\n"));
+    }
+
+    #[test]
+    fn prompts_build_prompt_delegates_and_loads_context() {
+        // create temporary context file and configure Prompts to point to it
+        let mut tmp = env::temp_dir();
+        tmp.push("zbobr_context.txt");
+        let mut f = File::create(&tmp).expect("cannot create temp file");
+        writeln!(f, "context line").unwrap();
+
+        let prompts = Prompts {
+            base_path: None,
+            preparator: vec![tmp.clone()],
+            planner: vec![],
+            worker: vec![],
+            reviewer: vec![],
+            merger: vec![],
+        };
+
+        let built = prompts.build_prompt(Role::Preparator).expect("build_prompt failed");
+        assert!(built.contains("context line"));
+        assert!(built.contains("---"));
+
+        let _ = std::fs::remove_file(tmp);
     }
 }
