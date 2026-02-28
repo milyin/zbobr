@@ -7,9 +7,10 @@ use zbobr_dispatcher::{Signal, Stage, ToolExecutor, Zbobr, task::{Model, Paramet
 
 use crate::prompts::Prompts;
 
-use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
-use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
-use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
+use zbobr_config::ZbobrExecutorConfig;
+use zbobr_executor_claude::ClaudeExecutor;
+use zbobr_executor_copilot::CopilotExecutor;
+use zbobr_executor_mcp_tester::McpTesterExecutor;
 
 /// A lightweight object capturing all of the parameters needed to execute
 /// or inspect a role session.  By consolidating the data in one struct we can
@@ -26,9 +27,7 @@ pub(crate) struct RoleSession<'a> {
     model: Option<Model>,
     base_port: u16,
     prompts: &'a Prompts,
-    claude_executor_config: &'a ZbobrExecutorClaudeConfig,
-    copilot_executor_config: &'a ZbobrExecutorCopilotConfig,
-    mcp_tester_executor_config: &'a ZbobrExecutorMcpTesterConfig,
+    executor_config: &'a ZbobrExecutorConfig,
 }
 
 impl<'a> std::fmt::Debug for RoleSession<'a> {
@@ -51,9 +50,7 @@ impl<'a> RoleSession<'a> {
         model: Option<Model>,
         base_port: u16,
         prompts: &'a Prompts,
-        claude_executor_config: &'a ZbobrExecutorClaudeConfig,
-        copilot_executor_config: &'a ZbobrExecutorCopilotConfig,
-        mcp_tester_executor_config: &'a ZbobrExecutorMcpTesterConfig,
+        executor_config: &'a ZbobrExecutorConfig,
     ) -> Self {
         Self {
             zbobr,
@@ -62,9 +59,7 @@ impl<'a> RoleSession<'a> {
             model,
             base_port,
             prompts,
-            claude_executor_config,
-            copilot_executor_config,
-            mcp_tester_executor_config,
+            executor_config,
         }
     }
 
@@ -82,12 +77,7 @@ impl<'a> RoleSession<'a> {
         // generation/dumping or `show_prompt` handling.
         let cli_tool = self.zbobr.config().cli_tool;
         // `self.model` is an `Option<Model>`; clone it so we don't move out of `&self`
-        let model = resolve_model(
-            cli_tool,
-            self.model.clone(),
-            self.claude_executor_config,
-            self.copilot_executor_config,
-        );
+        let model = resolve_model(cli_tool, self.model.clone(), self.executor_config);
 
         // update task stage based on role; we implement `From<Role> for Stage`
         self.zbobr.set_task_stage(self.task_id, self.role.into()).await?;
@@ -127,9 +117,7 @@ impl<'a> RoleSession<'a> {
         let prompt_text = self.prompt()?;
         let (execution_interrupted, execution_error) = execute_tool(
             cli_tool,
-            &self.claude_executor_config,
-            &self.copilot_executor_config,
-            &self.mcp_tester_executor_config,
+            self.executor_config,
             self.task_id,
             self.role,
             &model,
@@ -164,15 +152,10 @@ impl<'a> RoleSession<'a> {
 
 // ---------- helpers --------------------------------------------------------
 
-fn resolve_model(
-    cli_tool: Tool,
-    override_model: Option<Model>,
-    claude_executor_config: &ZbobrExecutorClaudeConfig,
-    copilot_executor_config: &ZbobrExecutorCopilotConfig,
-) -> Model {
+fn resolve_model(cli_tool: Tool, override_model: Option<Model>, executor_config: &ZbobrExecutorConfig) -> Model {
     override_model.unwrap_or_else(|| match cli_tool {
-        Tool::Claude => claude_executor_config.default_model.clone(),
-        Tool::Copilot => copilot_executor_config.default_model.clone(),
+        Tool::Claude => executor_config.claude.default_model.clone(),
+        Tool::Copilot => executor_config.copilot.default_model.clone(),
         Tool::McpTester => Model::default(),
     })
 }
@@ -344,9 +327,7 @@ async fn start_mcp_server(
 /// Run the selected tool executor and watch for Ctrl+C.
 async fn execute_tool(
     cli_tool: Tool,
-    claude_executor_config: &ZbobrExecutorClaudeConfig,
-    copilot_executor_config: &ZbobrExecutorCopilotConfig,
-    mcp_tester_executor_config: &ZbobrExecutorMcpTesterConfig,
+    executor_config: &ZbobrExecutorConfig,
     task_id: u64,
     role: Role,
     model: &Model,
@@ -358,18 +339,18 @@ async fn execute_tool(
 ) -> (bool, Option<anyhow::Error>) {
     let executor: Box<dyn ToolExecutor> = match cli_tool {
         Tool::Copilot => Box::new(CopilotExecutor {
-            config: copilot_executor_config.clone(),
+            config: executor_config.copilot.clone(),
         }),
         Tool::Claude => Box::new(ClaudeExecutor {
-            config: claude_executor_config.clone(),
+            config: executor_config.claude.clone(),
         }),
         Tool::McpTester => Box::new(McpTesterExecutor {
-            config: mcp_tester_executor_config.clone(),
+            config: executor_config.mcp_tester.clone(),
         }),
     };
     let agent_token = &zbobr.config().agent_github_token;
     let copilot_token = match cli_tool {
-        Tool::Copilot => &copilot_executor_config.copilot_github_token,
+        Tool::Copilot => &executor_config.copilot.copilot_github_token,
         _ => "",
     };
 

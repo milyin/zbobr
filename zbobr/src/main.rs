@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
-use zbobr_config::{ZbobrConfigArgs, ZbobrConfigToml};
+use zbobr_config::{ZbobrConfigArgs, ZbobrConfigToml, ZbobrExecutorConfig};
 use zbobr_dispatcher::{
     Stage, Zbobr, ZbobrDispatcherConfig,
     task::{Model, Parameter, Role, Tool},
@@ -513,19 +513,21 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|r| r.fs.as_ref());
 
     let executor_toml = root_toml.as_ref().and_then(|r| r.executor.as_ref());
-    let claude_executor_config = ZbobrExecutorClaudeConfig::build(
-        executor_toml.and_then(|e| e.claude.clone()),
-        cli.global.settings.executor.claude.clone(),
-    );
-    let copilot_executor_config = ZbobrExecutorCopilotConfig::build(
-        executor_toml.and_then(|e| e.copilot.clone()),
-        cli.global.settings.executor.copilot.clone(),
-    );
-    let mcp_tester_executor_config = ZbobrExecutorMcpTesterConfig::build(
-        executor_toml.and_then(|e| e.mcp_tester.clone()),
-        cli.global.settings.executor.mcp_tester.clone(),
-        &config_dir,
-    );
+    let executor_config = ZbobrExecutorConfig {
+        claude: ZbobrExecutorClaudeConfig::build(
+            executor_toml.and_then(|e| e.claude.clone()),
+            cli.global.settings.executor.claude.clone(),
+        ),
+        copilot: ZbobrExecutorCopilotConfig::build(
+            executor_toml.and_then(|e| e.copilot.clone()),
+            cli.global.settings.executor.copilot.clone(),
+        ),
+        mcp_tester: ZbobrExecutorMcpTesterConfig::build(
+            executor_toml.and_then(|e| e.mcp_tester.clone()),
+            cli.global.settings.executor.mcp_tester.clone(),
+            &config_dir,
+        ),
+    };
 
     let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = match config.task_backend {
         zbobr_dispatcher::config::BackendType::GitHub => Arc::new(
@@ -805,9 +807,7 @@ async fn main() -> anyhow::Result<()> {
                     model_enum,
                     port,
                     &prompts,
-                    &claude_executor_config,
-                    &copilot_executor_config,
-                    &mcp_tester_executor_config,
+                    &executor_config,
                 );
                 if show_prompt {
                     println!("{}", session.prompt()?);
@@ -832,9 +832,7 @@ async fn main() -> anyhow::Result<()> {
                     model_enum,
                     port,
                     &prompts,
-                    &claude_executor_config,
-                    &copilot_executor_config,
-                    &mcp_tester_executor_config,
+                    &executor_config,
                 );
                 if show_prompt {
                     println!("{}", session.prompt()?);
@@ -859,9 +857,7 @@ async fn main() -> anyhow::Result<()> {
                     model_enum,
                     port,
                     &prompts,
-                    &claude_executor_config,
-                    &copilot_executor_config,
-                    &mcp_tester_executor_config,
+                    &executor_config,
                 );
                 if show_prompt {
                     println!("{}", session.prompt()?);
@@ -886,9 +882,7 @@ async fn main() -> anyhow::Result<()> {
                     model_enum,
                     port,
                     &prompts,
-                    &claude_executor_config,
-                    &copilot_executor_config,
-                    &mcp_tester_executor_config,
+                    &executor_config,
                 );
                 if show_prompt {
                     println!("{}", session.prompt()?);
@@ -913,9 +907,7 @@ async fn main() -> anyhow::Result<()> {
                     model_enum,
                     port,
                     &prompts,
-                    &claude_executor_config,
-                    &copilot_executor_config,
-                    &mcp_tester_executor_config,
+                    &executor_config,
                 );
                 if show_prompt {
                     println!("{}", session.prompt()?);
@@ -954,18 +946,17 @@ async fn main() -> anyhow::Result<()> {
                 } else {
                     None
                 };
-                let effective_mcp_tester_config = mcp_tester_config_override
-                    .as_ref()
-                    .unwrap_or(&mcp_tester_executor_config);
+                let effective_executor_config = match mcp_tester_config_override {
+                    Some(mcp_tester) => ZbobrExecutorConfig { mcp_tester, ..executor_config.clone() },
+                    None => executor_config.clone(),
+                };
                 process_task_by_stage(
                     &zbobr,
                     &task_obj,
                     model_enum,
                     port,
                     &prompts,
-                    &claude_executor_config,
-                    &copilot_executor_config,
-                    effective_mcp_tester_config,
+                    &effective_executor_config,
                 )
                 .await?;
             }
@@ -988,9 +979,7 @@ async fn main() -> anyhow::Result<()> {
                 model_enum,
                 port,
                 &prompts,
-                &claude_executor_config,
-                &copilot_executor_config,
-                &mcp_tester_executor_config,
+                &executor_config,
             )
             .await?;
         }
@@ -1014,9 +1003,7 @@ async fn process_task_by_stage(
     model: Option<Model>,
     port: u16,
     prompts: &Prompts,
-    claude_executor_config: &ZbobrExecutorClaudeConfig,
-    copilot_executor_config: &ZbobrExecutorCopilotConfig,
-    mcp_tester_executor_config: &ZbobrExecutorMcpTesterConfig,
+    executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match task.stage {
         Stage::Pending => {
@@ -1038,9 +1025,7 @@ async fn process_task_by_stage(
                     task_model,
                     port,
                     &prompts,
-                    claude_executor_config,
-                    copilot_executor_config,
-                    mcp_tester_executor_config,
+                    executor_config,
                 );
                 session.run().await?;
             } else if task.signal.is_none() {
@@ -1060,9 +1045,7 @@ async fn process_task_by_stage(
                     task_model,
                     port,
                     &prompts,
-                    claude_executor_config,
-                    copilot_executor_config,
-                    mcp_tester_executor_config,
+                    executor_config,
                 );
                 session.run().await?;
             }
@@ -1080,9 +1063,7 @@ async fn process_task_by_stage(
                 task_model,
                 port,
                 &prompts,
-                claude_executor_config,
-                copilot_executor_config,
-                mcp_tester_executor_config,
+                executor_config,
             );
             session.run().await?;
         }
@@ -1095,7 +1076,6 @@ async fn process_task_by_stage(
 }
 
 /// Main manager loop: polls for tasks and spawns sessions.
-#[allow(clippy::too_many_arguments)]
 async fn run_manager_loop(
     zbobr: &Zbobr,
     interval_secs: u64,
@@ -1103,14 +1083,12 @@ async fn run_manager_loop(
     model: Option<Model>,
     port: u16,
     prompts: &Prompts,
-    claude_executor_config: &ZbobrExecutorClaudeConfig,
-    copilot_executor_config: &ZbobrExecutorCopilotConfig,
-    mcp_tester_executor_config: &ZbobrExecutorMcpTesterConfig,
+    executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     let cli_tool = zbobr.config().cli_tool;
     let model = model.unwrap_or_else(|| match cli_tool {
-        Tool::Claude => claude_executor_config.default_model.clone(),
-        Tool::Copilot => copilot_executor_config.default_model.clone(),
+        Tool::Claude => executor_config.claude.default_model.clone(),
+        Tool::Copilot => executor_config.copilot.default_model.clone(),
         Tool::McpTester => Model::default(),
     });
 
@@ -1232,9 +1210,7 @@ async fn run_manager_loop(
                     Some(task_model),
                     port,
                     &prompts,
-                    claude_executor_config,
-                    copilot_executor_config,
-                    mcp_tester_executor_config,
+                    executor_config,
                 );
                 if let Err(e) = session.run().await {
                     tracing::error!("Merger session failed: {e}");
@@ -1264,9 +1240,7 @@ async fn run_manager_loop(
                 Some(task_model),
                 port,
                 &prompts,
-                claude_executor_config,
-                copilot_executor_config,
-                mcp_tester_executor_config,
+                executor_config,
             );
             if let Err(e) = session.run().await {
                 tracing::error!("{:?} session failed: {e}", role);
