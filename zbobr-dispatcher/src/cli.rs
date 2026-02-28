@@ -252,12 +252,38 @@ pub enum TaskSubcommand {
 // CLI parsing
 // ---------------------------------------------------------------------------
 
+/// Standard CLI structure for Zbobr dispatcher apps
+#[derive(clap::Parser)]
+pub struct GenericCli<
+    TTaskArgs: clap::Args + Default + Clone + std::fmt::Debug,
+    TRepoArgs: clap::Args + Default + Clone + std::fmt::Debug,
+> {
+    #[command(
+        flatten,
+        next_help_heading = "[config] Meta options and config file overrides"
+    )]
+    pub config_file: ConfigFileArg,
+
+    #[command(flatten)]
+    pub settings: crate::GenericConfigArgs<TTaskArgs, TRepoArgs>,
+
+    #[command(subcommand)]
+    pub command: Command,
+}
+
 /// Parse CLI allowing global options both before and after the subcommand.
 ///
 /// Global options are hoisted to appear before the subcommand so clap can
 /// parse them regardless of where the user places them.
-pub fn parse_cli<C: Parser + clap::CommandFactory>() -> C {
-    let cmd = C::command();
+pub fn parse_cli<C: Parser + clap::CommandFactory>(
+    app_name: &'static str,
+    app_about: &'static str,
+    app_long_about: &'static str,
+) -> C {
+    let cmd = C::command()
+        .name(app_name)
+        .about(app_about)
+        .long_about(app_long_about);
 
     let subcommands: std::collections::HashSet<String> = cmd
         .get_subcommands()
@@ -279,6 +305,11 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>() -> C {
         .collect();
 
     let raw_args: Vec<String> = std::env::args().collect();
+    if raw_args.is_empty() {
+        let m = cmd.get_matches_from(raw_args);
+        return C::from_arg_matches(&m).unwrap_or_else(|e| e.exit());
+    }
+
     let mut before_sub = vec![raw_args[0].clone()];
     let mut sub_and_after: Vec<String> = Vec::new();
     let mut found_sub = false;
@@ -318,7 +349,8 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>() -> C {
     }
 
     before_sub.extend(sub_and_after);
-    C::parse_from(before_sub)
+    let m = cmd.get_matches_from(before_sub);
+    C::from_arg_matches(&m).unwrap_or_else(|e| e.exit())
 }
 
 // ---------------------------------------------------------------------------
@@ -1589,10 +1621,10 @@ pub async fn run_zbobr<
     TTaskConfig: crate::BackendConfig,
     TRepoConfig: crate::BackendConfig,
 >(
-    config_file: Option<std::path::PathBuf>,
-    settings: crate::GenericConfigArgs<TTaskConfig::Args, TRepoConfig::Args>,
-    command: Command,
-    default_config_name: &str,
+    app_name: &'static str,
+    app_about: &'static str,
+    app_long_about: &'static str,
+    default_config_name: &'static str,
     build_task_backend: impl FnOnce(TTaskConfig) -> anyhow::Result<TTaskBackend>,
     build_repo_backend: impl FnOnce(TRepoConfig) -> anyhow::Result<TRepoBackend>,
 ) -> anyhow::Result<()>
@@ -1600,11 +1632,16 @@ where
     TTaskConfig::Args: clap::Args + std::fmt::Debug + Clone,
     TRepoConfig::Args: clap::Args + std::fmt::Debug + Clone,
 {
-    let config_path = config_file
+    let cli: GenericCli<TTaskConfig::Args, TRepoConfig::Args> =
+        parse_cli(app_name, app_about, app_long_about);
+
+    let config_path = cli
+        .config_file
+        .path
         .clone()
         .unwrap_or_else(|| default_config_name.into());
 
-    let config_dir = if config_file.is_some() {
+    let config_dir = if cli.config_file.path.is_some() {
         std::fs::canonicalize(&config_path)
             .context(format!(
                 "Cannot resolve config path: {}",
@@ -1620,7 +1657,7 @@ where
     let root_toml = crate::GenericConfigToml::<TTaskConfig, TRepoConfig>::load(&config_path)?;
     let config = crate::GenericConfig::<TTaskConfig, TRepoConfig>::build(
         root_toml,
-        settings.clone(),
+        cli.settings.clone(),
         &config_dir,
     )?;
     config.dispatcher.validate()?;
@@ -1638,7 +1675,7 @@ where
     );
     zbobr.validate_connectivity().await?;
 
-    let prompts = crate::prompts::resolve_prompts(&settings.dispatcher, zbobr.config());
+    let prompts = crate::prompts::resolve_prompts(&cli.settings.dispatcher, zbobr.config());
 
-    run_command(zbobr, command, &prompts, &executor_config).await
+    run_command(zbobr, cli.command, &prompts, &executor_config).await
 }
