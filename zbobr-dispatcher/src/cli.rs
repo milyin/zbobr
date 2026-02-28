@@ -399,12 +399,25 @@ pub async fn run_command(
         Command::Task { subcommand } => {
             run_task_subcommand(&zbobr, subcommand, prompts, executor_config).await?;
         }
-        Command::Loop { interval, cleanup_interval, model, .. } => {
+        Command::Loop {
+            interval,
+            cleanup_interval,
+            model,
+            ..
+        } => {
             let model_enum = model
                 .map(|m| m.parse::<Model>())
                 .transpose()
                 .context("Invalid model name")?;
-            run_manager_loop(&zbobr, interval, cleanup_interval, model_enum, prompts, executor_config).await?;
+            run_manager_loop(
+                &zbobr,
+                interval,
+                cleanup_interval,
+                model_enum,
+                prompts,
+                executor_config,
+            )
+            .await?;
         }
     }
     Ok(())
@@ -438,7 +451,15 @@ async fn run_task_subcommand(
                 .transpose()
                 .context("Invalid model")?;
             let id = zbobr
-                .create_task(&title, &description, stage, tool, model, dest_repo, dest_branch)
+                .create_task(
+                    &title,
+                    &description,
+                    stage,
+                    tool,
+                    model,
+                    dest_repo,
+                    dest_branch,
+                )
                 .await?;
             if confirm {
                 zbobr.task_session(id).set_confirm(true).await?;
@@ -553,7 +574,8 @@ async fn run_task_subcommand(
                         if let Some(repo) = dest_repo {
                             match repo {
                                 Some(repo) => {
-                                    task.parameters.insert(Parameter::DestinationRepository, repo);
+                                    task.parameters
+                                        .insert(Parameter::DestinationRepository, repo);
                                 }
                                 None => {
                                     task.parameters.remove(&Parameter::DestinationRepository);
@@ -612,20 +634,85 @@ async fn run_task_subcommand(
                 .await?;
             println!("Cloned to {}", path.display());
         }
-        TaskSubcommand::Prepare { task, model, show_prompt } => {
-            run_role_command(zbobr, task, Role::Preparator, model, show_prompt, prompts, executor_config).await?;
+        TaskSubcommand::Prepare {
+            task,
+            model,
+            show_prompt,
+        } => {
+            run_role_command(
+                zbobr,
+                task,
+                Role::Preparator,
+                model,
+                show_prompt,
+                prompts,
+                executor_config,
+            )
+            .await?;
         }
-        TaskSubcommand::Plan { task, model, show_prompt } => {
-            run_role_command(zbobr, task, Role::Planner, model, show_prompt, prompts, executor_config).await?;
+        TaskSubcommand::Plan {
+            task,
+            model,
+            show_prompt,
+        } => {
+            run_role_command(
+                zbobr,
+                task,
+                Role::Planner,
+                model,
+                show_prompt,
+                prompts,
+                executor_config,
+            )
+            .await?;
         }
-        TaskSubcommand::Work { task, model, show_prompt } => {
-            run_role_command(zbobr, task, Role::Worker, model, show_prompt, prompts, executor_config).await?;
+        TaskSubcommand::Work {
+            task,
+            model,
+            show_prompt,
+        } => {
+            run_role_command(
+                zbobr,
+                task,
+                Role::Worker,
+                model,
+                show_prompt,
+                prompts,
+                executor_config,
+            )
+            .await?;
         }
-        TaskSubcommand::Review { task, model, show_prompt } => {
-            run_role_command(zbobr, task, Role::Reviewer, model, show_prompt, prompts, executor_config).await?;
+        TaskSubcommand::Review {
+            task,
+            model,
+            show_prompt,
+        } => {
+            run_role_command(
+                zbobr,
+                task,
+                Role::Reviewer,
+                model,
+                show_prompt,
+                prompts,
+                executor_config,
+            )
+            .await?;
         }
-        TaskSubcommand::Merge { task, model, show_prompt } => {
-            run_role_command(zbobr, task, Role::Merger, model, show_prompt, prompts, executor_config).await?;
+        TaskSubcommand::Merge {
+            task,
+            model,
+            show_prompt,
+        } => {
+            run_role_command(
+                zbobr,
+                task,
+                Role::Merger,
+                model,
+                show_prompt,
+                prompts,
+                executor_config,
+            )
+            .await?;
         }
         TaskSubcommand::Process {
             task,
@@ -658,10 +745,20 @@ async fn run_task_subcommand(
                 None
             };
             let effective_executor_config = match mcp_tester_config_override {
-                Some(mcp_tester) => ZbobrExecutorConfig { mcp_tester, ..executor_config.clone() },
+                Some(mcp_tester) => ZbobrExecutorConfig {
+                    mcp_tester,
+                    ..executor_config.clone()
+                },
                 None => executor_config.clone(),
             };
-            process_task_by_stage(zbobr, &task_obj, model_enum, prompts, &effective_executor_config).await?;
+            process_task_by_stage(
+                zbobr,
+                &task_obj,
+                model_enum,
+                prompts,
+                &effective_executor_config,
+            )
+            .await?;
         }
     }
     Ok(())
@@ -711,7 +808,14 @@ impl<'a> CliRoleRunner<'a> {
         prompts: &'a Prompts,
         executor_config: &'a ZbobrExecutorConfig,
     ) -> Self {
-        Self { zbobr, task_id, role, model, prompts, executor_config }
+        Self {
+            zbobr,
+            task_id,
+            role,
+            model,
+            prompts,
+            executor_config,
+        }
     }
 
     fn prompt(&self) -> anyhow::Result<String> {
@@ -722,7 +826,9 @@ impl<'a> CliRoleRunner<'a> {
         let cli_tool = self.zbobr.config().cli_tool;
         let model = resolve_model(cli_tool, self.model.clone(), self.executor_config);
 
-        self.zbobr.set_task_stage(self.task_id, self.role.into()).await?;
+        self.zbobr
+            .set_task_stage(self.task_id, self.role.into())
+            .await?;
 
         let task_dir = self
             .zbobr
@@ -807,23 +913,35 @@ pub async fn process_task_by_stage(
             }
             if task.conflict {
                 let task_model = task.model.clone().or(model);
-                let session = CliRoleRunner::new(zbobr, task.id, Role::Merger, task_model, prompts, executor_config);
+                let session = CliRoleRunner::new(
+                    zbobr,
+                    task.id,
+                    Role::Merger,
+                    task_model,
+                    prompts,
+                    executor_config,
+                );
                 session.run().await?;
             } else if task.signal.is_none() {
-                println!("Task #{} is PENDING (no signal, no conflict) — skipped", task.id);
+                println!(
+                    "Task #{} is PENDING (no signal, no conflict) — skipped",
+                    task.id
+                );
                 return Ok(());
             } else {
                 let signal = task.signal.unwrap();
                 let role = signal.target_role();
                 let task_model = task.model.clone().or(model);
-                let session = CliRoleRunner::new(zbobr, task.id, role, task_model, prompts, executor_config);
+                let session =
+                    CliRoleRunner::new(zbobr, task.id, role, task_model, prompts, executor_config);
                 session.run().await?;
             }
         }
         Stage::Preparing | Stage::Planning | Stage::Working | Stage::Reviewing | Stage::Merging => {
             let role = Role::try_from(task.stage).unwrap();
             let task_model = task.model.clone().or(model);
-            let session = CliRoleRunner::new(zbobr, task.id, role, task_model, prompts, executor_config);
+            let session =
+                CliRoleRunner::new(zbobr, task.id, role, task_model, prompts, executor_config);
             session.run().await?;
         }
         Stage::Done => {
@@ -858,23 +976,48 @@ pub async fn run_manager_loop(
     }
     tracing::info!(
         "Preparator prompt files: {}",
-        prompts.preparator.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("; ")
+        prompts
+            .preparator
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("; ")
     );
     tracing::info!(
         "Planner prompt files: {}",
-        prompts.planner.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("; ")
+        prompts
+            .planner
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("; ")
     );
     tracing::info!(
         "Worker prompt files: {}",
-        prompts.worker.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("; ")
+        prompts
+            .worker
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("; ")
     );
     tracing::info!(
         "Reviewer prompt files: {}",
-        prompts.reviewer.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("; ")
+        prompts
+            .reviewer
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("; ")
     );
     tracing::info!(
         "Merger prompt files: {}",
-        prompts.merger.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("; ")
+        prompts
+            .merger
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("; ")
     );
 
     let mut last_cleanup = std::time::Instant::now();
@@ -891,7 +1034,10 @@ pub async fn run_manager_loop(
         }
 
         let current_tool = zbobr.config().cli_tool;
-        let pending_tasks = match zbobr.list_tasks_by_stage(Stage::Pending, Some(current_tool)).await {
+        let pending_tasks = match zbobr
+            .list_tasks_by_stage(Stage::Pending, Some(current_tool))
+            .await
+        {
             Ok(tasks) => tasks,
             Err(e) => {
                 tracing::error!("Failed to check PENDING tasks: {e}");
@@ -909,9 +1055,18 @@ pub async fn run_manager_loop(
                 let task_model = task.model.clone().unwrap_or_else(|| model.clone());
                 tracing::info!(
                     "Found PENDING task #{} with conflict flag - running merger (tool: {:?}, model: {})",
-                    task.id, task.tool, task_model
+                    task.id,
+                    task.tool,
+                    task_model
                 );
-                let session = CliRoleRunner::new(zbobr, task.id, Role::Merger, Some(task_model), prompts, executor_config);
+                let session = CliRoleRunner::new(
+                    zbobr,
+                    task.id,
+                    Role::Merger,
+                    Some(task_model),
+                    prompts,
+                    executor_config,
+                );
                 if let Err(e) = session.run().await {
                     tracing::error!("Merger session failed: {e}");
                 }
@@ -924,9 +1079,20 @@ pub async fn run_manager_loop(
             let task_model = task.model.clone().unwrap_or_else(|| model.clone());
             tracing::info!(
                 "Found PENDING task #{} with signal {:?} (tool: {:?}, model: {}) - running {:?}",
-                task.id, signal, task.tool, task_model, role
+                task.id,
+                signal,
+                task.tool,
+                task_model,
+                role
             );
-            let session = CliRoleRunner::new(zbobr, task.id, role, Some(task_model), prompts, executor_config);
+            let session = CliRoleRunner::new(
+                zbobr,
+                task.id,
+                role,
+                Some(task_model),
+                prompts,
+                executor_config,
+            );
             if let Err(e) = session.run().await {
                 tracing::error!("{:?} session failed: {e}", role);
             }
@@ -967,7 +1133,9 @@ pub async fn run_manager_loop(
         let elapsed = loop_start.elapsed();
         let sleep_dur = std::time::Duration::from_secs(interval_secs).saturating_sub(elapsed);
         if sleep_dur.is_zero() {
-            tracing::info!("No processable tasks. Interval already elapsed, continuing immediately.");
+            tracing::info!(
+                "No processable tasks. Interval already elapsed, continuing immediately."
+            );
         } else {
             tracing::info!("No processable tasks. Sleeping {}s...", sleep_dur.as_secs());
             tokio::select! {
@@ -988,7 +1156,11 @@ pub async fn run_manager_loop(
 // Low-level helpers
 // ---------------------------------------------------------------------------
 
-fn resolve_model(cli_tool: Tool, override_model: Option<Model>, executor_config: &ZbobrExecutorConfig) -> Model {
+fn resolve_model(
+    cli_tool: Tool,
+    override_model: Option<Model>,
+    executor_config: &ZbobrExecutorConfig,
+) -> Model {
     override_model.unwrap_or_else(|| match cli_tool {
         Tool::Claude => executor_config.claude.default_model.clone(),
         Tool::Copilot => executor_config.copilot.default_model.clone(),
@@ -1035,7 +1207,10 @@ async fn prepare_workspace(
                 .get(&Parameter::DestinationBranch)
                 .cloned()
                 .unwrap_or_else(|| "main".to_string());
-            match zbobr.clone_and_setup(&dest_repo, &work_branch, &dest_branch, task_id).await {
+            match zbobr
+                .clone_and_setup(&dest_repo, &work_branch, &dest_branch, task_id)
+                .await
+            {
                 Ok(path) => Ok(path),
                 Err(e) => {
                     let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
@@ -1154,9 +1329,15 @@ async fn execute_tool(
     zbobr: &ZbobrDispatcherDyn,
 ) -> (bool, Option<anyhow::Error>) {
     let executor: Box<dyn ToolExecutor> = match cli_tool {
-        Tool::Copilot => Box::new(CopilotExecutor { config: executor_config.copilot.clone() }),
-        Tool::Claude => Box::new(ClaudeExecutor { config: executor_config.claude.clone() }),
-        Tool::McpTester => Box::new(McpTesterExecutor { config: executor_config.mcp_tester.clone() }),
+        Tool::Copilot => Box::new(CopilotExecutor {
+            config: executor_config.copilot.clone(),
+        }),
+        Tool::Claude => Box::new(ClaudeExecutor {
+            config: executor_config.claude.clone(),
+        }),
+        Tool::McpTester => Box::new(McpTesterExecutor {
+            config: executor_config.mcp_tester.clone(),
+        }),
     };
     let agent_token = &zbobr.config().agent_github_token;
     let copilot_token = match cli_tool {
@@ -1200,10 +1381,18 @@ async fn finalize_session(
     if let Some(e) = execution_error {
         let error_msg = format!("Execution failed: {e}");
         let hostname = get_hostname();
-        if let Err(post_err) = task_session.post_message(&error_msg, "error", &hostname).await {
+        if let Err(post_err) = task_session
+            .post_message(&error_msg, "error", &hostname)
+            .await
+        {
             tracing::error!("Failed to post error to task #{task_id}: {post_err}");
         }
-        if let Err(pause_err) = task_session.modify_task(|task| { task.pause = true; }).await {
+        if let Err(pause_err) = task_session
+            .modify_task(|task| {
+                task.pause = true;
+            })
+            .await
+        {
             tracing::error!("Failed to set pause for task #{task_id}: {pause_err}");
         }
         task_session.set_stage(Stage::Pending).await?;
@@ -1275,7 +1464,9 @@ async fn perform_auto_commit_and_push(
         .await
     {
         Ok(status_output) if status_output.status.success() => {
-            let uncommitted = String::from_utf8_lossy(&status_output.stdout).trim().to_string();
+            let uncommitted = String::from_utf8_lossy(&status_output.stdout)
+                .trim()
+                .to_string();
             if !uncommitted.is_empty() {
                 tracing::info!("Found uncommitted changes, auto-committing...");
                 let _ = TokioCommand::new("git")
@@ -1357,7 +1548,12 @@ async fn rewrite_commit_authors(
             match rebase_output {
                 Ok(output) if output.status.success() => {
                     tracing::info!("Successfully rewrote commit authors");
-                    if let Err(e) = zbobr.task_session(task_id).role_session().push_branch_commits().await {
+                    if let Err(e) = zbobr
+                        .task_session(task_id)
+                        .role_session()
+                        .push_branch_commits()
+                        .await
+                    {
                         tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
                     }
                 }
@@ -1379,4 +1575,70 @@ async fn rewrite_commit_authors(
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// run_zbobr
+// ---------------------------------------------------------------------------
+
+/// Standard entry point for a Zbobr CLI application, heavily parameterized
+/// to allow for different backends.
+pub async fn run_zbobr<
+    TTaskBackend: crate::backend::TaskBackend + 'static,
+    TRepoBackend: crate::backend::RepoBackend + 'static,
+    TTaskConfig: crate::BackendConfig,
+    TRepoConfig: crate::BackendConfig,
+>(
+    config_file: Option<std::path::PathBuf>,
+    settings: crate::GenericConfigArgs<TTaskConfig::Args, TRepoConfig::Args>,
+    command: Command,
+    default_config_name: &str,
+    build_task_backend: impl FnOnce(TTaskConfig) -> anyhow::Result<TTaskBackend>,
+    build_repo_backend: impl FnOnce(TRepoConfig) -> anyhow::Result<TRepoBackend>,
+) -> anyhow::Result<()>
+where
+    TTaskConfig::Args: clap::Args + std::fmt::Debug + Clone,
+    TRepoConfig::Args: clap::Args + std::fmt::Debug + Clone,
+{
+    let config_path = config_file
+        .clone()
+        .unwrap_or_else(|| default_config_name.into());
+
+    let config_dir = if config_file.is_some() {
+        std::fs::canonicalize(&config_path)
+            .context(format!(
+                "Cannot resolve config path: {}",
+                config_path.display()
+            ))?
+            .parent()
+            .expect("config file must have a parent directory")
+            .to_path_buf()
+    } else {
+        std::env::current_dir()?
+    };
+
+    let root_toml = crate::GenericConfigToml::<TTaskConfig, TRepoConfig>::load(&config_path)?;
+    let config = crate::GenericConfig::<TTaskConfig, TRepoConfig>::build(
+        root_toml,
+        settings.clone(),
+        &config_dir,
+    )?;
+    config.dispatcher.validate()?;
+    let executor_config = config.executor.clone();
+
+    let task_backend: std::sync::Arc<dyn crate::backend::TaskBackend> =
+        std::sync::Arc::new(build_task_backend(config.tasks)?);
+    let repo_backend: std::sync::Arc<dyn crate::backend::RepoBackend> =
+        std::sync::Arc::new(build_repo_backend(config.repo)?);
+
+    let zbobr = crate::ZbobrDispatcher::new_with_backends(
+        config.dispatcher.clone(),
+        task_backend,
+        repo_backend,
+    );
+    zbobr.validate_connectivity().await?;
+
+    let prompts = crate::prompts::resolve_prompts(&settings.dispatcher, zbobr.config());
+
+    run_command(zbobr, command, &prompts, &executor_config).await
 }

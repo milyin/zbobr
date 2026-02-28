@@ -1,17 +1,12 @@
-use std::sync::Arc;
-
 use anyhow::Context;
 use clap::Parser;
 use zbobr_dispatcher::{
-    GenericConfig, GenericConfigArgs, GenericConfigToml, ZbobrDispatcher,
+    GenericConfigArgs,
     cli::{Command, ConfigFileArg, parse_cli},
-    prompts::resolve_prompts,
 };
 use zbobr_repo_backend_fs::ZbobrRepoBackendFsConfig;
 use zbobr_task_backend_fs::ZbobrTaskBackendFsConfig;
 
-type Config = GenericConfig<ZbobrTaskBackendFsConfig, ZbobrRepoBackendFsConfig>;
-type ConfigToml = GenericConfigToml<ZbobrTaskBackendFsConfig, ZbobrRepoBackendFsConfig>;
 type ConfigArgs = GenericConfigArgs<
     <ZbobrTaskBackendFsConfig as zbobr_dispatcher::BackendConfig>::Args,
     <ZbobrRepoBackendFsConfig as zbobr_dispatcher::BackendConfig>::Args,
@@ -29,7 +24,10 @@ type ConfigArgs = GenericConfigArgs<
         Default config file: zbobr-fs.toml in current directory."
 )]
 struct Cli {
-    #[command(flatten, next_help_heading = "[config] Meta options and config file overrides")]
+    #[command(
+        flatten,
+        next_help_heading = "[config] Meta options and config file overrides"
+    )]
     config_file: ConfigFileArg,
 
     #[command(flatten)]
@@ -51,37 +49,19 @@ async fn main() -> anyhow::Result<()> {
 
     let cli: Cli = parse_cli();
 
-    let config_path = cli.config_file.path.clone()
-        .unwrap_or_else(|| "zbobr-fs.toml".into());
-
-    let config_dir = if cli.config_file.path.is_some() {
-        std::fs::canonicalize(&config_path)
-            .with_context(|| format!("Cannot resolve config path: {}", config_path.display()))?
-            .parent()
-            .expect("config file must have a parent directory")
-            .to_path_buf()
-    } else {
-        std::env::current_dir()?
-    };
-
-    let root_toml = ConfigToml::load(&config_path)?;
-    let config = Config::build(root_toml, cli.settings.clone(), &config_dir)?;
-    config.dispatcher.validate()?;
-    let executor_config = config.executor.clone();
-
-    let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = Arc::new(
-        zbobr_task_backend_fs::ZbobrTaskBackendFs::from_config(config.tasks)
-            .context("Failed to initialize filesystem task backend")?,
-    );
-    let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = Arc::new(
-        zbobr_repo_backend_fs::ZbobrRepoBackendFs::from_config(config.repo)
-            .context("Failed to initialize filesystem repo backend")?,
-    );
-
-    let zbobr = ZbobrDispatcher::new_with_backends(config.dispatcher.clone(), task_backend, repo_backend);
-    zbobr.validate_connectivity().await?;
-
-    let prompts = resolve_prompts(&cli.settings.dispatcher, zbobr.config());
-
-    zbobr_dispatcher::cli::run_command(zbobr, cli.command, &prompts, &executor_config).await
+    zbobr_dispatcher::cli::run_zbobr(
+        cli.config_file.path,
+        cli.settings,
+        cli.command,
+        "zbobr-fs.toml",
+        |config| {
+            zbobr_task_backend_fs::ZbobrTaskBackendFs::from_config(config)
+                .context("Failed to initialize filesystem task backend")
+        },
+        |config| {
+            zbobr_repo_backend_fs::ZbobrRepoBackendFs::from_config(config)
+                .context("Failed to initialize filesystem repo backend")
+        },
+    )
+    .await
 }
