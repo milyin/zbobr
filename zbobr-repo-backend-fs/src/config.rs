@@ -26,3 +26,14 @@ impl ZbobrRepoBackendFsConfig {
         Ok(())
     }
 }
+
+impl zbobr_api::config::BuildableBackend for ZbobrRepoBackendFsConfig {
+    type Backend = crate::ZbobrRepoBackendFs;
+
+    fn build_backend(
+        self,
+        _dispatcher: &zbobr_api::config::ZbobrDispatcherConfig,
+    ) -> anyhow::Result<Self::Backend> {
+        crate::ZbobrRepoBackendFs::from_config(self)
+    }
+}

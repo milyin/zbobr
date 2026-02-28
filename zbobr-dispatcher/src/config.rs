@@ -34,7 +34,6 @@ use zbobr_task_backend_github::{
 };
 use zbobr_utility::config_struct;
 
-
 #[derive(Clone)]
 #[config_struct]
 /// Task backend configuration section.
@@ -123,16 +122,34 @@ impl ZbobrConfig {
         let tasks = {
             let t = toml.tasks.unwrap_or_default();
             ZbobrTaskBackendConfig {
-                github: ZbobrTaskBackendGithubConfig::build(t.github, args.tasks.github),
-                fs: <ZbobrTaskBackendFsConfig as zbobr_api::config::BackendConfig>::build_config(t.fs, args.tasks.fs, config_dir),
+                github:
+                    <ZbobrTaskBackendGithubConfig as zbobr_api::config::BackendConfig>::build_config(
+                        t.github,
+                        args.tasks.github,
+                        config_dir,
+                    ),
+                fs: <ZbobrTaskBackendFsConfig as zbobr_api::config::BackendConfig>::build_config(
+                    t.fs,
+                    args.tasks.fs,
+                    config_dir,
+                ),
             }
         };
 
         let repo = {
             let t = toml.repo.unwrap_or_default();
             ZbobrRepoBackendConfig {
-                github: ZbobrRepoBackendGithubConfig::build(t.github, args.repo.github),
-                fs: <ZbobrRepoBackendFsConfig as zbobr_api::config::BackendConfig>::build_config(t.fs, args.repo.fs, config_dir),
+                github:
+                    <ZbobrRepoBackendGithubConfig as zbobr_api::config::BackendConfig>::build_config(
+                        t.github,
+                        args.repo.github,
+                        config_dir,
+                    ),
+                fs: <ZbobrRepoBackendFsConfig as zbobr_api::config::BackendConfig>::build_config(
+                    t.fs,
+                    args.repo.fs,
+                    config_dir,
+                ),
             }
         };
 

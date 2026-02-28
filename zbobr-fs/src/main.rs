@@ -1,4 +1,3 @@
-use anyhow::Context;
 use zbobr_repo_backend_fs::ZbobrRepoBackendFsConfig;
 use zbobr_task_backend_fs::ZbobrTaskBackendFsConfig;
 
@@ -27,14 +26,6 @@ async fn main() -> anyhow::Result<()> {
         Ideal for testing, local development, and offline scenarios.\n\n\
         Default config file: zbobr-fs.toml in current directory.",
         "zbobr-fs.toml",
-        |config| {
-            zbobr_task_backend_fs::ZbobrTaskBackendFs::from_config(config)
-                .context("Failed to initialize filesystem task backend")
-        },
-        |config| {
-            zbobr_repo_backend_fs::ZbobrRepoBackendFs::from_config(config)
-                .context("Failed to initialize filesystem repo backend")
-        },
     )
     .await
 }

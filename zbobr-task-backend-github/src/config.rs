@@ -1,7 +1,7 @@
 use zbobr_utility::config_struct;
 
 #[derive(Clone, Default)]
-#[config_struct]
+#[config_struct(backend_config)]
 /// Configuration for the GitHub task backend.
 pub struct ZbobrTaskBackendGithub {
     /// Task project repository ("Org/repo").
@@ -13,20 +13,6 @@ pub struct ZbobrTaskBackendGithub {
 }
 
 impl ZbobrTaskBackendGithubConfig {
-    /// Build configuration by layering: defaults < TOML < args.
-    pub fn build(
-        toml: Option<ZbobrTaskBackendGithubToml>,
-        args: ZbobrTaskBackendGithubArgs,
-    ) -> Self {
-        let defaults = Self::default();
-        let merged = toml.unwrap_or_default().merge_with_args(args);
-
-        let task_repo = merged.task_repo.unwrap_or(defaults.task_repo);
-        let token = merged.token.unwrap_or(defaults.token);
-
-        Self { task_repo, token }
-    }
-
     /// Validate that all required fields are set.
     pub fn validate(&self) -> anyhow::Result<()> {
         if self.task_repo.is_empty() {
@@ -54,5 +40,16 @@ impl ZbobrTaskBackendGithubConfig {
             );
         }
         Ok((parts[0], parts[1]))
+    }
+}
+
+impl zbobr_api::config::BuildableBackend for ZbobrTaskBackendGithubConfig {
+    type Backend = crate::ZbobrTaskBackendGithub;
+
+    fn build_backend(
+        self,
+        _dispatcher: &zbobr_api::config::ZbobrDispatcherConfig,
+    ) -> anyhow::Result<Self::Backend> {
+        crate::ZbobrTaskBackendGithub::from_config(self)
     }
 }

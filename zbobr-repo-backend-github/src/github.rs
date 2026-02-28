@@ -123,7 +123,12 @@ impl ZbobrRepoBackendGithub {
         git_user_name: String,
         git_user_email: String,
     ) -> anyhow::Result<Self> {
-        let backend_config = ZbobrRepoBackendGithubConfig::build(toml, args);
+        let backend_config =
+            <ZbobrRepoBackendGithubConfig as zbobr_api::config::BackendConfig>::build_config(
+                toml,
+                args,
+                std::path::Path::new("."),
+            );
         Self::from_config(backend_config, git_user_name, git_user_email)
     }
 
@@ -553,13 +558,9 @@ impl RepoBackend for ZbobrRepoBackendGithub {
             tracing::info!(
                 "No commits ahead of origin/{destination_branch} — creating placeholder commit"
             );
-            zbobr_utility::configure_git_user(
-                &work_dir,
-                &self.git_user_name,
-                &self.git_user_email,
-            )
-            .await
-            .context("Failed to configure git user for placeholder commit")?;
+            zbobr_utility::configure_git_user(&work_dir, &self.git_user_name, &self.git_user_email)
+                .await
+                .context("Failed to configure git user for placeholder commit")?;
             zbobr_utility::create_placeholder_commit(&work_dir, work_branch)
                 .await
                 .context("Failed to create placeholder commit")?;

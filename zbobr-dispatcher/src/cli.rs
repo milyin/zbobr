@@ -1615,18 +1615,18 @@ async fn rewrite_commit_authors(
 
 /// Standard entry point for a Zbobr CLI application, heavily parameterized
 /// to allow for different backends.
+use zbobr_api::config::BuildableBackend;
+
 pub async fn run_zbobr<
     TTaskBackend: crate::backend::TaskBackend + 'static,
     TRepoBackend: crate::backend::RepoBackend + 'static,
-    TTaskConfig: crate::BackendConfig,
-    TRepoConfig: crate::BackendConfig,
+    TTaskConfig: BuildableBackend<Backend = TTaskBackend>,
+    TRepoConfig: BuildableBackend<Backend = TRepoBackend>,
 >(
     app_name: &'static str,
     app_about: &'static str,
     app_long_about: &'static str,
     default_config_name: &'static str,
-    build_task_backend: impl FnOnce(TTaskConfig) -> anyhow::Result<TTaskBackend>,
-    build_repo_backend: impl FnOnce(TRepoConfig) -> anyhow::Result<TRepoBackend>,
 ) -> anyhow::Result<()>
 where
     TTaskConfig::Args: clap::Args + std::fmt::Debug + Clone,
@@ -1664,9 +1664,9 @@ where
     let executor_config = config.executor.clone();
 
     let task_backend: std::sync::Arc<dyn crate::backend::TaskBackend> =
-        std::sync::Arc::new(build_task_backend(config.tasks)?);
+        std::sync::Arc::new(config.tasks.build_backend(&config.dispatcher)?);
     let repo_backend: std::sync::Arc<dyn crate::backend::RepoBackend> =
-        std::sync::Arc::new(build_repo_backend(config.repo)?);
+        std::sync::Arc::new(config.repo.build_backend(&config.dispatcher)?);
 
     let zbobr = crate::ZbobrDispatcher::new_with_backends(
         config.dispatcher.clone(),

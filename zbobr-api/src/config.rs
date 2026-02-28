@@ -135,6 +135,14 @@ pub trait BackendConfig: Sized {
     fn build_config(toml: Option<Self::Toml>, args: Self::Args, config_dir: &Path) -> Self;
 }
 
+/// Allows a backend configuration to instantiate its corresponding backend backend.
+pub trait BuildableBackend: BackendConfig {
+    /// The runtime backend type instantiated by this configuration.
+    type Backend;
+    /// Build the backend instance from the resolved configuration.
+    fn build_backend(self, dispatcher: &ZbobrDispatcherConfig) -> anyhow::Result<Self::Backend>;
+}
+
 // Note: zbobr-specific env helpers were removed — configuration now comes
 // from TOML/CLI or explicit external GH env vars. `EnvSource` provides an
 // abstraction for reading environment variables in tests.
