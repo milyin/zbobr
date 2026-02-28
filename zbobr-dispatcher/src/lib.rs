@@ -12,7 +12,8 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 pub use config::{
     ZbobrConfig, ZbobrConfigArgs, ZbobrConfigToml, ZbobrDispatcherArgs, ZbobrDispatcherConfig,
-    ZbobrDispatcherToml, ZbobrExecutorConfig, ZbobrRepoBackendConfig, ZbobrTaskBackendConfig,
+    ZbobrDispatcherToml, ZbobrExecutorConfig, ZbobrExecutorConfigArgs, ZbobrExecutorConfigToml,
+    ZbobrRepoBackendConfig, ZbobrTaskBackendConfig,
 };
 pub use mcp::{
     MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, WorkerMcp, merger_instructions,

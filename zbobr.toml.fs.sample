@@ -1,5 +1,5 @@
-# zbobr configuration file example with filesystem task backend
-# Save this as zbobr.toml in your project root
+# zbobr-fs configuration file example (filesystem backends)
+# Save this as zbobr-fs.toml in your project root
 
 [dispatcher]
 workspaces = "./workspaces"
@@ -11,15 +11,13 @@ work_branch_prefix = "zbobr"
 # (useful for CI systems that verify committer identity)
 # overwrite_author = true
 
-# Filesystem task backend configuration
-# Tasks are stored as YAML files in a configurable directory
-[tasks.fs]
-tasks_dir = "./tasks"
+# Filesystem task backend: tasks stored as YAML files
+[tasks]
+dir = "./tasks"
 
-# Filesystem repo backend configuration
-# Clones from local git repos, stores PRs as YAML files
-[repo.fs]
-repos_dir = "./repos"
+# Filesystem repo backend: clones from local git repos
+[repo]
+dir = "./repos"
 
 # Executor configuration: per-executor default models
 [executor.claude]

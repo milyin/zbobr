@@ -4,14 +4,13 @@ git_user_name = "Copilot"
 git_user_email = "copilot@example.com"
 cli_tool = "copilot"
 
-[repo.fs]
-# Filesystem repo backend settings
-repositories_dir = "./repositories"
-
-[task.fs]
+[tasks]
 # Filesystem task backend settings
-tasks_dir = "./tasks"
+dir = "./tasks"
+
+[repo]
+# Filesystem repo backend settings
+dir = "./repos"
 
 [executor.copilot]
 # Copilot executor settings
-api_endpoint = "http://localhost:8000"
