@@ -5,82 +5,8 @@ use tokio::process::Command;
 
 use zbobr_dispatcher::{Signal, Stage, ToolExecutor, Zbobr, task::{Model, Parameter, Role, Tool}};
 
-// Prompt construction helpers used by the role session implementation. These
-// were originally in `main.rs` but have been moved here so that prompt
-// preparation lives alongside the session logic. The `Prompts` struct is
-// defined in `main.rs` and passed in by callers.
+use crate::prompts::{load_prompts, build_full_prompt};
 
-/// Load and concatenate multiple prompt files (additional user context).
-/// If base_path is provided, relative paths are resolved relative to it.
-/// Otherwise, relative paths are resolved relative to the current directory.
-/// Missing files are silently skipped (they are optional additional context).
-fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::Result<String> {
-    let mut combined = String::new();
-    for path in paths.iter() {
-        // Resolve path relative to base_path if provided and path is relative
-        let resolved_path = if let Some(base) = base_path {
-            if path.is_relative() {
-                base.join(path)
-            } else {
-                path.clone()
-            }
-        } else if path.is_relative() {
-            std::env::current_dir()?.join(path)
-        } else {
-            path.clone()
-        };
-
-        let content = match std::fs::read_to_string(&resolved_path) {
-            Ok(c) => c,
-            Err(_) => {
-                tracing::debug!(
-                    "Prompt file not found, skipping: {}",
-                    resolved_path.display()
-                );
-                continue;
-            }
-        };
-
-        let trimmed = content.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        if !combined.is_empty() {
-            combined.push_str("\n\n");
-        }
-        combined.push_str(trimmed);
-    }
-    Ok(combined)
-}
-
-/// Build full prompt: hardcoded instructions + user context files + auto-generated API docs.
-fn build_full_prompt(user_context: &str, role: Role) -> String {
-    let hardcoded = match role {
-        Role::Preparator => zbobr_dispatcher::preparator_instructions(),
-        Role::Planner => zbobr_dispatcher::planner_instructions(),
-        Role::Worker => zbobr_dispatcher::worker_instructions(),
-        Role::Reviewer => zbobr_dispatcher::reviewer_instructions(),
-        Role::Merger => zbobr_dispatcher::merger_instructions(),
-    };
-
-    let api_docs = match role {
-        Role::Preparator => zbobr_dispatcher::PreparatorMcp::generate_api_docs(),
-        Role::Planner => zbobr_dispatcher::PlannerMcp::generate_api_docs(),
-        Role::Worker => zbobr_dispatcher::WorkerMcp::generate_api_docs(),
-        Role::Reviewer => zbobr_dispatcher::ReviewerMcp::generate_api_docs(),
-        Role::Merger => zbobr_dispatcher::MergerMcp::generate_api_docs(),
-    };
-
-    if user_context.is_empty() {
-        format!("{}\n\n---\n\n{}", hardcoded, api_docs)
-    } else {
-        format!(
-            "{}\n\n---\n\n{}\n\n---\n\n{}",
-            hardcoded, user_context, api_docs
-        )
-    }
-}
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
@@ -96,7 +22,7 @@ pub(crate) struct RoleSession<'a> {
     role: Role,
     model: Option<Model>,
     base_port: u16,
-    prompts: &'a crate::Prompts,
+    prompts: &'a crate::prompts::Prompts,
     claude_executor_config: &'a ZbobrExecutorClaudeConfig,
     copilot_executor_config: &'a ZbobrExecutorCopilotConfig,
     mcp_tester_executor_config: &'a ZbobrExecutorMcpTesterConfig,
@@ -109,7 +35,7 @@ impl<'a> RoleSession<'a> {
         role: Role,
         model: Option<Model>,
         base_port: u16,
-        prompts: &'a crate::Prompts,
+        prompts: &'a crate::prompts::Prompts,
         claude_executor_config: &'a ZbobrExecutorClaudeConfig,
         copilot_executor_config: &'a ZbobrExecutorCopilotConfig,
         mcp_tester_executor_config: &'a ZbobrExecutorMcpTesterConfig,

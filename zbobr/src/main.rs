@@ -20,7 +20,10 @@ use zbobr_task_backend_fs::FilesystemTaskBackend;
 use zbobr_task_backend_github::GitHubTaskBackend;
 
 mod role_session;
+mod prompts;
+
 use crate::role_session::RoleSession;
+use crate::prompts::{Prompts, resolve_prompts};
 
 #[derive(Args, Clone)]
 struct GlobalArgs {
@@ -288,76 +291,6 @@ enum TaskSubcommand {
     },
 }
 
-/// Resolved prompt file paths for planner, worker, and merger.
-///
-/// This struct is passed to the role session code so that it can load the
-/// appropriate prompt text for the current role. It needs to be visible to
-/// `role_session.rs` (a child module), hence `pub(crate)`.
-pub(crate) struct Prompts {
-    base_path: Option<PathBuf>,
-    preparator: Vec<PathBuf>,
-    planner: Vec<PathBuf>,
-    worker: Vec<PathBuf>,
-    reviewer: Vec<PathBuf>,
-    merger: Vec<PathBuf>,
-}
-
-/// Resolve prompt paths: CLI arg > config values.
-/// Paths are resolved relative to prompts_path if provided, otherwise relative to current directory.
-fn resolve_prompts(cli: &Cli, config: &ZbobrDispatcherConfig) -> anyhow::Result<Prompts> {
-    // Use CLI args if provided, otherwise use config (which came from TOML/env/defaults)
-    let planner = cli
-        .global
-        .settings
-        .dispatcher
-        .planner_prompts
-        .clone()
-        .unwrap_or_else(|| config.planner_prompts.clone());
-
-    let preparator = cli
-        .global
-        .settings
-        .dispatcher
-        .preparator_prompts
-        .clone()
-        .unwrap_or_else(|| config.preparator_prompts.clone());
-
-    let worker = cli
-        .global
-        .settings
-        .dispatcher
-        .worker_prompts
-        .clone()
-        .unwrap_or_else(|| config.worker_prompts.clone());
-
-    let reviewer = cli
-        .global
-        .settings
-        .dispatcher
-        .reviewer_prompts
-        .clone()
-        .unwrap_or_else(|| config.reviewer_prompts.clone());
-
-    let merger = config.merger_prompts.clone();
-
-    // CLI prompts_path > config.prompts_path (which came from TOML/env)
-    let base_path = cli
-        .global
-        .settings
-        .dispatcher
-        .prompts_path
-        .clone()
-        .or_else(|| config.prompts_path.clone());
-
-    Ok(Prompts {
-        base_path,
-        preparator,
-        planner,
-        worker,
-        reviewer,
-        merger,
-    })
-}
 
 
 /// Print a task to stdout in a human-readable format.
