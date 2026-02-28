@@ -1,6 +1,6 @@
 pub use zbobr_api::task::*;
 
-use crate::Zbobr;
+use crate::ZbobrDispatcher;
 
 // ---------------------------------------------------------------------------
 // RoleSession — restricted access for MCP tools during agent sessions.
@@ -13,12 +13,12 @@ use crate::Zbobr;
 /// Stage and conflict flag are protected — only the dispatcher may change them.
 #[derive(Clone)]
 pub struct RoleSession {
-    zbobr: Zbobr,
+    zbobr: ZbobrDispatcher,
     task_id: u64,
 }
 
 impl RoleSession {
-    pub(crate) fn new(zbobr: Zbobr, task_id: u64) -> Self {
+    pub(crate) fn new(zbobr: ZbobrDispatcher, task_id: u64) -> Self {
         Self { zbobr, task_id }
     }
 
@@ -379,12 +379,12 @@ impl RoleSession {
 /// Can change stage, conflict flag, and all other fields.
 #[derive(Clone)]
 pub struct TaskSession {
-    zbobr: Zbobr,
+    zbobr: ZbobrDispatcher,
     task_id: u64,
 }
 
 impl TaskSession {
-    pub(crate) fn new(zbobr: Zbobr, task_id: u64) -> Self {
+    pub(crate) fn new(zbobr: ZbobrDispatcher, task_id: u64) -> Self {
         Self { zbobr, task_id }
     }
 
@@ -810,13 +810,13 @@ mod tests {
         }
     }
 
-    fn make_test_zbobr() -> crate::Zbobr {
+    fn make_test_zbobr() -> crate::ZbobrDispatcher {
         let backend: Arc<dyn crate::backend::TaskBackend> = Arc::new(DummyBackend {
             tasks: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(0),
         });
         let repo: Arc<dyn crate::backend::RepoBackend> = Arc::new(DummyRepo);
-        crate::Zbobr::new_with_backends(ZbobrDispatcherConfig::default(), backend, repo)
+        crate::ZbobrDispatcher::new_with_backends(ZbobrDispatcherConfig::default(), backend, repo)
     }
 
     // asynchronous tests require a runtime; use tokio for the following

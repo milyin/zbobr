@@ -6,7 +6,7 @@ use rmcp::{
 };
 
 use crate::{
-    Zbobr,
+    ZbobrDispatcher,
     mcp::{
         common::MessageParam,
         traits::{CommonMcpImpl, MergerMcpImpl},
@@ -34,7 +34,7 @@ impl MergerMcpImpl for MergerMcp {}
 
 #[tool_router]
 impl MergerMcp {
-    pub fn new(zbobr: Zbobr, task_id: u64) -> Self {
+    pub fn new(zbobr: ZbobrDispatcher, task_id: u64) -> Self {
         Self {
             session: zbobr.role_session(task_id),
             tool_router: Self::tool_router(),

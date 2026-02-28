@@ -30,7 +30,7 @@ use zbobr_task_backend_github::GitHubTaskBackend;
 
 /// Central struct holding configuration and backend.
 #[derive(Clone)]
-pub struct Zbobr {
+pub struct ZbobrDispatcher {
     config: Arc<ZbobrDispatcherConfig>,
     pub(crate) task_backend: Arc<dyn TaskBackend>,
     pub(crate) repo_backend: Arc<dyn RepoBackend>,
@@ -39,7 +39,7 @@ pub struct Zbobr {
     task_locks: Arc<std::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
-impl Zbobr {
+impl ZbobrDispatcher {
     /// Create a new Zbobr instance from the full aggregated config.
     /// Selects and builds the correct task and repo backends based on config.
     pub fn new(config: ZbobrConfig) -> anyhow::Result<Self> {

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use zbobr_dispatcher::{
-    Stage, Zbobr, ZbobrConfig, ZbobrConfigArgs, ZbobrConfigToml, ZbobrExecutorConfig,
+    Stage, ZbobrDispatcher, ZbobrConfig, ZbobrConfigArgs, ZbobrConfigToml, ZbobrExecutorConfig,
     task::{Model, Parameter, Role, Tool},
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
@@ -435,7 +435,7 @@ async fn main() -> anyhow::Result<()> {
     let zbobr_config = ZbobrConfig::build(root_toml, cli.global.settings.clone(), &config_dir)?;
     zbobr_config.dispatcher.validate()?;
     let executor_config = zbobr_config.executor.clone();
-    let zbobr = Zbobr::new(zbobr_config)?;
+    let zbobr = ZbobrDispatcher::new(zbobr_config)?;
     zbobr.validate_connectivity().await?;
     let prompts = resolve_prompts(&cli, zbobr.config())?;
 
@@ -853,7 +853,7 @@ async fn main() -> anyhow::Result<()> {
 
 
 async fn process_task_by_stage(
-    zbobr: &Zbobr,
+    zbobr: &ZbobrDispatcher,
     task: &zbobr_dispatcher::Task,
     model: Option<Model>,
     prompts: &Prompts,
@@ -928,7 +928,7 @@ async fn process_task_by_stage(
 
 /// Main manager loop: polls for tasks and spawns sessions.
 async fn run_manager_loop(
-    zbobr: &Zbobr,
+    zbobr: &ZbobrDispatcher,
     interval_secs: u64,
     cleanup_interval_secs: u64,
     model: Option<Model>,
