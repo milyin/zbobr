@@ -1,7 +1,5 @@
 [workspace]
-members = ["zbobr-dispatcher", "zbobr-executor-copilot", "zbobr-executor-claude", "zbobr-executor-mcp-tester", "zbobr-task-backend-github", "zbobr-task-backend-fs", "zbobr-repo-backend-github", "zbobr-repo-backend-fs", "zbobr-api", "zbobr-macros", "zbobr-utility", "zbobr", "zbobr", "zbobr-fs"]
-default-members = ["zbobr-dispatcher", "zbobr-fs"]
-resolver = "2"
+members = ["zbobr-dispatcher", "zbobr-executor-copilot", "zbobr-executor-claude", "zbobr-executor-mcp-tester", "zbobr-task-backend-github", "zbobr-task-backend-fs", "zbobr-repo-backend-github", "zbobr-repo-backend-fs", "zbobr-api", "zbobr-macros", "zbobr-utility", "zbobr"]
 
 [workspace.package]
 edition = "2024"
@@ -24,14 +22,14 @@ serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = "0.1.89"
-rmcp = { version = "0.15", features = ["server", "macros", "transport-streamable-http-server"] }
+rmcp = { version = "0.17", features = ["server", "macros", "transport-streamable-http-server"] }
 axum = "0.8"
 schemars = "1"
-anyhow = "1"
-clap = { version = "4.5.58", features = ["derive", "env"] }
+anyhow = "1.0.102"
+clap = { version = "4.5.60", features = ["derive", "env"] }
 reqwest = { version = "0.13.2", features = ["json", "blocking", "cookies"] }
-rustls = { version = "0.23", features = ["ring"] }
+rustls = { version = "0.23.37", features = ["ring"] }
 toml = "0.9.8"
-tempfile = "3.25"
+tempfile = "3.26"
 hostname = "0.4"
 paste = "1.0"

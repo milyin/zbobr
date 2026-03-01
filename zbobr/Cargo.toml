@@ -8,11 +8,14 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/milyin/zbobr"
 keywords = ["github", "automation", "copilot", "ai", "orchestration"]
 categories = ["command-line-utilities", "development-tools"]
+default-run = "zbobr"
 
 [dependencies]
 zbobr-dispatcher = { workspace = true }
 zbobr-task-backend-github = { workspace = true }
 zbobr-repo-backend-github = { workspace = true }
+zbobr-task-backend-fs = { workspace = true }
+zbobr-repo-backend-fs = { workspace = true }
 zbobr-executor-copilot = { workspace = true }
 zbobr-executor-claude = { workspace = true }
 zbobr-executor-mcp-tester = { workspace = true }
@@ -26,4 +29,5 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }
 anyhow = { workspace = true }
+toml = { workspace = true }
 rustls = { workspace = true }
