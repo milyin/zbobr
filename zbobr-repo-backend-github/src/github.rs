@@ -138,7 +138,7 @@ impl ZbobrRepoBackendGithub {
     ) -> anyhow::Result<Self> {
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
-            .personal_token(backend_config.token.clone())
+            .personal_token(backend_config.github_token.clone())
             .build()
             .map_err(|e| anyhow::anyhow!("Failed to build octocrab client: {e}"))?;
         Ok(Self {
@@ -323,8 +323,8 @@ impl RepoBackend for ZbobrRepoBackendGithub {
                     "--depth",
                     "1",
                 ])
-                .env("GH_TOKEN", &self.backend_config.token)
-                .env("GITHUB_TOKEN", &self.backend_config.token)
+                .env("GH_TOKEN", &self.backend_config.github_token)
+                .env("GITHUB_TOKEN", &self.backend_config.github_token)
                 .status()
                 .await?;
             if !status.success() {
@@ -475,8 +475,8 @@ impl RepoBackend for ZbobrRepoBackendGithub {
                     "--depth",
                     "1",
                 ])
-                .env("GH_TOKEN", &self.backend_config.token)
-                .env("GITHUB_TOKEN", &self.backend_config.token)
+                .env("GH_TOKEN", &self.backend_config.github_token)
+                .env("GITHUB_TOKEN", &self.backend_config.github_token)
                 .status()
                 .await?;
             if !status.success() {

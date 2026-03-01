@@ -28,9 +28,9 @@ pub struct GitHubTasksSection {
 #[derive(serde::Deserialize, Clone)]
 pub struct GitHubTasksGithub {
     /// GitHub repository used as the task tracker in `owner/repo` format.
-    pub task_repo: String,
+    pub github_repo: String,
     /// GitHub token with read/write access to the tasks repository.
-    pub token: String,
+    pub github_token: String,
 }
 
 #[derive(serde::Deserialize, Clone)]
@@ -43,7 +43,7 @@ pub struct GitHubRepoGithub {
     /// GitHub user or organisation where target repos are forked.
     pub fork_owner: String,
     /// GitHub token with read/write access to the fork organisation.
-    pub token: String,
+    pub github_token: String,
 }
 
 #[derive(serde::Deserialize, Clone)]

@@ -37,8 +37,8 @@ async fn get_env() -> Arc<IntegrationTestEnv> {
         IntegrationTestEnv::init(
             "github_fs",
             TaskBackendArgs::GitHub {
-                task_repo: tasks.github.task_repo,
-                task_token: tasks.github.token,
+                task_repo: tasks.github.github_repo,
+                task_token: tasks.github.github_token,
             },
             RepoBackendArgs::Filesystem,
             cfg.dispatcher.agent_token,

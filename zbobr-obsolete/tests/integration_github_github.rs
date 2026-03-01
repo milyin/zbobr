@@ -33,16 +33,16 @@ async fn get_env() -> Arc<IntegrationTestEnv> {
             .repo
             .expect("[repo.github] section missing in zbobr_github_test.toml");
 
-        let target_repo = Some(tasks.github.task_repo.clone());
+        let target_repo = Some(tasks.github.github_repo.clone());
         IntegrationTestEnv::init(
             "github_github",
             TaskBackendArgs::GitHub {
-                task_repo: tasks.github.task_repo,
-                task_token: tasks.github.token,
+                task_repo: tasks.github.github_repo,
+                task_token: tasks.github.github_token,
             },
             RepoBackendArgs::GitHub {
                 fork_owner: repo.github.fork_owner,
-                repo_token: repo.github.token,
+                repo_token: repo.github.github_token,
             },
             cfg.dispatcher.agent_token,
             target_repo,

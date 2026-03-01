@@ -14,9 +14,9 @@
 #
 # [tasks.github]
 # # GitHub repository whose issues are used as the task tracker (owner/repo).
-# task_repo = "owner/zbobr-test-tasks"
+# github_repo = "owner/zbobr-test-tasks"
 # # GitHub token with read/write access to the tasks repository.
-# token = "ghp_your_task_github_token_here"
+# github_token = "ghp_your_task_github_token_here"
 
 # Uncomment to enable GitHub repo-backend tests (integration_fs_github,
 # integration_github_github):
@@ -25,7 +25,7 @@
 # # GitHub user or organisation where target repos are forked.
 # fork_owner = "owner"
 # # GitHub token with read/write access to the fork organisation.
-# token = "ghp_your_repo_github_token_here"
+# github_token = "ghp_your_repo_github_token_here"
 
 # Optional: GitHub token passed as GH_TOKEN to agent processes.
 # Defaults to "dummy-not-used" which is fine when mcp-tester is the executor.

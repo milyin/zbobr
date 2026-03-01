@@ -37,13 +37,13 @@ async fn get_env() -> Arc<IntegrationTestEnv> {
         };
         let tasks_dir = base.join("tasks");
 
-        let target_repo = cfg.tasks.as_ref().map(|t| t.github.task_repo.clone());
+        let target_repo = cfg.tasks.as_ref().map(|t| t.github.github_repo.clone());
         IntegrationTestEnv::init(
             "fs_github",
             TaskBackendArgs::Filesystem { tasks_dir },
             RepoBackendArgs::GitHub {
                 fork_owner: repo.github.fork_owner,
-                repo_token: repo.github.token,
+                repo_token: repo.github.github_token,
             },
             cfg.dispatcher.agent_token,
             target_repo,

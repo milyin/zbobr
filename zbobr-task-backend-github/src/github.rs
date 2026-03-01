@@ -128,7 +128,7 @@ impl ZbobrTaskBackendGithub {
     pub fn from_config(backend_config: ZbobrTaskBackendGithubConfig) -> anyhow::Result<Self> {
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
-            .personal_token(backend_config.token.clone())
+            .personal_token(backend_config.github_token.clone())
             .build()
             .map_err(|e| anyhow::anyhow!("Failed to build octocrab client: {e}"))?;
         Ok(Self {
@@ -411,7 +411,7 @@ impl ZbobrTaskBackendGithub {
     async fn setup(&self, force: bool) -> anyhow::Result<()> {
         tracing::info!(
             "Setting up GitHub repo: {} (force: {})",
-            self.backend_config.task_repo,
+            self.backend_config.github_repo,
             force
         );
 
@@ -524,7 +524,7 @@ impl ZbobrTaskBackendGithub {
 
         tracing::info!(
             "GitHub setup complete for {}",
-            self.backend_config.task_repo
+            self.backend_config.github_repo
         );
         Ok(())
     }
@@ -891,8 +891,8 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         .is_ok();
         if !task_repo_exists {
             anyhow::bail!(
-                "task_repo '{owner}/{repo}' is not accessible on GitHub.\n  \
-                 Check your task_repo setting and ensure the repository exists \
+                "github_repo '{owner}/{repo}' is not accessible on GitHub.\n  \
+                 Check your github_repo setting and ensure the repository exists \
                  and your token has access to it."
             );
         }
@@ -901,7 +901,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
     }
 
     fn debug_state(&self) -> String {
-        format!("GitHubTaskBackend({})", self.backend_config.task_repo)
+        format!("GitHubTaskBackend({})", self.backend_config.github_repo)
     }
 }
 
@@ -947,8 +947,8 @@ mod tests {
         let _ = rustls::crypto::ring::default_provider().install_default();
         // This test just exercises the label loop; we don't hit GitHub.
         let config = crate::config::ZbobrTaskBackendGithubConfig {
-            task_repo: "dummy/repo".to_string(),
-            token: "dummy-token".to_string(),
+            github_repo: "dummy/repo".to_string(),
+            github_token: "dummy-token".to_string(),
         };
         let backend = ZbobrTaskBackendGithub::from_config(config).expect("backend init");
 
