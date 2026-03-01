@@ -2,13 +2,28 @@
 name = "zbobr"
 version = "0.1.0"
 edition = "2024"
-default-run = "zbobr"
-description = "AI-powered issue management automation using GitHub Copilot agents (deprecated: use zbobr-fs or zbobr-github)"
+description = "GitHub-backed zbobr instance: AI-powered task dispatcher using GitHub issues and repos"
 authors = ["milyin"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/milyin/zbobr"
-readme = "../README.md"
 keywords = ["github", "automation", "copilot", "ai", "orchestration"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
+zbobr-dispatcher = { workspace = true }
+zbobr-task-backend-github = { workspace = true }
+zbobr-repo-backend-github = { workspace = true }
+zbobr-executor-copilot = { workspace = true }
+zbobr-executor-claude = { workspace = true }
+zbobr-executor-mcp-tester = { workspace = true }
+rmcp = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+anyhow = { workspace = true }
+rustls = { workspace = true }

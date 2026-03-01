@@ -29,7 +29,7 @@ pub struct ZbobrDispatcherConfig {
     // NOTE: `copilot_github_token` has been moved to the Copilot executor
     // configuration; the dispatcher no longer tracks this value.
     // NOTE: `task_backend` and `repo_backend` have been moved to binary-specific
-    // entry points (zbobr-github, zbobr-fs). The dispatcher is now backend-agnostic.
+    // entry points (zbobr, zbobr-fs). The dispatcher is now backend-agnostic.
     /// CLI tool to use.
     pub cli_tool: Tool,
     /// Custom prompt files for preparator agent.

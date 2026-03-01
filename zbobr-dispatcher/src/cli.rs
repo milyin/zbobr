@@ -1653,10 +1653,15 @@ where
         std::env::current_dir()?
     };
 
-    let root_toml = crate::GenericConfigToml::<TC, RC>::load(&config_path)?;
+    let root_toml = crate::GenericConfigToml::<TC, RC>::load(&config_path)
+        .with_context(|| format!("Config file: {}", config_path.display()))?;
     let config =
-        crate::GenericConfig::<TC, RC>::build(root_toml, cli.settings.clone(), &config_dir)?;
-    config.dispatcher.validate()?;
+        crate::GenericConfig::<TC, RC>::build(root_toml, cli.settings.clone(), &config_dir)
+            .with_context(|| format!("Config file: {}", config_path.display()))?;
+    config
+        .dispatcher
+        .validate()
+        .with_context(|| format!("Config file: {}", config_path.display()))?;
     let executor_config = config.executor.clone();
 
     let task_backend: std::sync::Arc<dyn crate::backend::TaskBackend> =
