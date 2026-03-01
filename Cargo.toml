@@ -1,4 +1,5 @@
 [workspace]
+resolver = "3"
 members = ["zbobr-dispatcher", "zbobr-executor-copilot", "zbobr-executor-claude", "zbobr-executor-mcp-tester", "zbobr-task-backend-github", "zbobr-task-backend-fs", "zbobr-repo-backend-github", "zbobr-repo-backend-fs", "zbobr-api", "zbobr-macros", "zbobr-utility", "zbobr"]
 
 [workspace.package]
