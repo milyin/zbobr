@@ -184,6 +184,40 @@ steps:
     )
 }
 
+/// Minimal working scenario that leaves one unchecked checklist item.
+/// Used to verify that exit rule 2.3 sets GoWork (has_unchecked=true).
+pub fn working_scenario_with_unchecked_item() -> String {
+    use zbobr_dispatcher::mcp::worker_tools::{INSERT_CHECKLIST_ITEM, REPORT_RESULTS};
+
+    format!(
+        r#"name: Worker With Unchecked Item
+description: Insert an unchecked item and finish
+timeout: 60
+stop_on_failure: true
+
+steps:
+- name: Insert unchecked checklist item
+  operation:
+    type: tool_call
+    tool: {INSERT_CHECKLIST_ITEM}
+    arguments:
+      id: "u1"
+      text: "Unchecked work item"
+  assertions:
+    - type: success
+
+- name: Report results without checking item
+  operation:
+    type: tool_call
+    tool: {REPORT_RESULTS}
+    arguments:
+      message: "Work reported with unchecked item."
+  assertions:
+    - type: success
+"#,
+    )
+}
+
 pub fn working_scenario() -> String {
     use zbobr_dispatcher::mcp::worker_tools::{
         CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST, GET_DESCRIPTION,
@@ -441,6 +475,31 @@ steps:
     tool: {REPORT_RESULTS}
     arguments:
       message: "Reviewer approved. No issues found."
+  assertions:
+    - type: success
+"#,
+    )
+}
+
+/// Planning scenario where the planner reports an error (calls report_error).
+/// Used to verify that the retry signal (GoPlan) overrides the normal exit
+/// signal (GoWork) when the agent sets a signal mid-session.
+pub fn planning_report_error_scenario() -> String {
+    use zbobr_dispatcher::mcp::planner_tools::REPORT_ERROR;
+
+    format!(
+        r#"name: Planner Report Error Test
+description: Planner reports an error to verify retry signal
+timeout: 60
+stop_on_failure: true
+
+steps:
+- name: Report error
+  operation:
+    type: tool_call
+    tool: {REPORT_ERROR}
+    arguments:
+      message: "Something went wrong during planning"
   assertions:
     - type: success
 "#,

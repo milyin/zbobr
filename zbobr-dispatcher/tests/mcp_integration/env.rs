@@ -384,6 +384,24 @@ impl IntegrationTestEnv {
             });
     }
 
+    pub async fn set_task_conflict(&self, task_id: u64, conflict: bool) {
+        self.zbobr
+            .modify_task(
+                task_id,
+                Box::new(move |mut task| {
+                    task.conflict = conflict;
+                    task
+                }),
+            )
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "[{}] failed to set conflict on task #{task_id}: {e}",
+                    self.name
+                )
+            });
+    }
+
     pub async fn update_task_signal(&self, task_id: u64, signal: &str) {
         let signal: Signal = signal
             .parse()

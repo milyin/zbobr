@@ -1357,6 +1357,223 @@ async fn assert_github_pr_has_commits(env: &IntegrationTestEnv, pr_url: &str, de
     );
 }
 
+// ---------------------------------------------------------------------------
+// Entry signal / conflict clearing tests
+// ---------------------------------------------------------------------------
+
+/// Rule 1: entering a non-Merger stage clears the triggering signal.
+///
+/// Strategy: pre-set GoReview (a "wrong" signal) on a Working task, then run
+/// the Worker with an unchecked checklist item.  If the signal is cleared on
+/// entry, Rule 2.3 fires and sets GoWork (has_unchecked=true).  If the signal
+/// were *not* cleared, Rule 2 would see `signal.is_some()` and preserve the
+/// pre-set GoReview instead.
+pub async fn run_entry_clears_signal_for_worker(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_entry_clear_worker").await;
+    let dest_repo = env
+        .target_repo
+        .as_deref()
+        .map(|r| format!("https://github.com/{r}"))
+        .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
+    let task_id = env
+        .create_task(
+            "Entry Clear Worker",
+            "Dummy task description",
+            Stage::Working,
+        )
+        .await;
+    let work_branch = format!("zbobr_fix-{task_id}-entry-test");
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
+
+    // Pre-set a GoReview signal — the Worker should clear this on entry.
+    env.update_task_signal(task_id, "go_review").await;
+
+    env.run_stage(
+        task_id,
+        Stage::Working,
+        scenarios::working_scenario_with_unchecked_item(),
+    )
+    .await;
+
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.signal,
+        Some(Signal::GoWork),
+        "[{}] Entry should have cleared GoReview; exit with unchecked item should set GoWork",
+        env.name()
+    );
+}
+
+/// Rule 1: entering Merging clears the conflict flag but NOT the signal.
+///
+/// Verify that after a Merger session:
+///   - conflict == false (cleared on entry)
+///   - signal == Some(GoWork) (preserved; Merger entry must not clear it)
+pub async fn run_entry_clears_conflict_preserves_signal_for_merger(
+    env: &IntegrationTestEnv,
+) {
+    let repo_path = env.create_git_repo("repo_entry_clear_merger").await;
+    let dest_repo = env
+        .target_repo
+        .as_deref()
+        .map(|r| format!("https://github.com/{r}"))
+        .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
+    let repo_name = dest_repo
+        .rsplit('/')
+        .next()
+        .unwrap_or(&dest_repo)
+        .to_string();
+    let task_id = env
+        .create_task(
+            "Entry Clear Merger",
+            "Dummy task description",
+            Stage::Merging,
+        )
+        .await;
+    let work_branch = format!("zbobr_fix-{task_id}-merger-entry-test");
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
+
+    if let Some(target) = env.target_repo.as_deref() {
+        env.prepare_workspace_via_repo_backend(task_id, target, &work_branch)
+            .await;
+    } else {
+        env.prepare_workspace(task_id, &repo_path, &work_branch)
+            .await;
+    }
+
+    // Add a placeholder commit so the PR can be created.
+    let work_dir = env
+        .workspaces_dir
+        .join(format!("task#{task_id}"))
+        .join(&repo_name);
+    write_and_commit(
+        &work_dir,
+        "ZBOBR_PLACEHOLDER.md",
+        &format!("placeholder for task #{task_id}\n"),
+        "chore: add placeholder for PR",
+    )
+    .await;
+
+    // Set both conflict=true and GoWork signal — Merger must clear conflict only.
+    env.set_task_conflict(task_id, true).await;
+    env.update_task_signal(task_id, "go_work").await;
+
+    env.run_stage(
+        task_id,
+        Stage::Merging,
+        scenarios::merging_scenario("report"),
+    )
+    .await;
+
+    let task = env.get_task(task_id).await;
+    assert!(
+        !task.conflict,
+        "[{}] Entry to Merging must clear the conflict flag",
+        env.name()
+    );
+    assert_eq!(
+        task.signal,
+        Some(Signal::GoWork),
+        "[{}] Entry to Merging must NOT clear the signal",
+        env.name()
+    );
+}
+
+/// Rule 2.2: Planner exit sets GoWork when no signal is already set.
+///
+/// Runs Planning from a clean state (no pre-set signal) and verifies that
+/// GoWork is emitted afterwards.  This is a focused test for the fix to the
+/// Planner exit path (it previously emitted no signal at all).
+pub async fn run_planner_sets_go_work_on_exit(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_planner_exit").await;
+    let dest_repo = env
+        .target_repo
+        .as_deref()
+        .map(|r| format!("https://github.com/{r}"))
+        .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
+    let task_id = env
+        .create_task(
+            "Planner Exit Test",
+            "Dummy task description",
+            Stage::Preparing,
+        )
+        .await;
+    let work_branch = format!("zbobr_fix-{task_id}-planner-exit");
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
+
+    // No signal pre-set; Planner should emit GoWork on exit.
+    env.run_stage(task_id, Stage::Planning, scenarios::planning_scenario())
+        .await;
+
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.signal,
+        Some(Signal::GoWork),
+        "[{}] Planner exit (Rule 2.2) must set GoWork when no signal is already present",
+        env.name()
+    );
+}
+
+/// Rule 2: if the agent already set a signal, the exit logic must not override it.
+///
+/// Uses the Preparator with `ask_planner` (which sets GoPlan signal via the
+/// retry mechanism) to verify that, even though Preparator's default exit
+/// signal is also GoPlan, the pre-set signal is respected and preserved.
+///
+/// A more direct test: pre-set a higher-priority signal (GoPrepare) on a
+/// Planning task.  If Rule 2 works, GoPrepare is preserved; if the exit logic
+/// erroneously overrides it, GoWork appears instead.
+pub async fn run_exit_preserves_agent_set_signal(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_exit_preserve").await;
+    let dest_repo = env
+        .target_repo
+        .as_deref()
+        .map(|r| format!("https://github.com/{r}"))
+        .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
+    let task_id = env
+        .create_task(
+            "Exit Preserve Test",
+            "Dummy task description",
+            Stage::Preparing,
+        )
+        .await;
+    let work_branch = format!("zbobr_fix-{task_id}-exit-preserve");
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
+
+    // Use planning_scenario which calls report_results — it does NOT set a
+    // signal.  We manually pre-set GoPrepare AFTER the stage entry so it
+    // simulates the agent having set it mid-session.
+    //
+    // To keep this test self-contained (and avoid the need for a custom
+    // scenario that calls a signal-setting MCP tool), we instead rely on the
+    // fact that report_error sets the retry signal.  Run the planning stage
+    // with a report_error scenario and check that GoPlan (the Planner's retry
+    // signal) is set, NOT GoWork (the normal Planner exit signal).
+    env.run_stage(
+        task_id,
+        Stage::Planning,
+        scenarios::planning_report_error_scenario(),
+    )
+    .await;
+
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.signal,
+        Some(Signal::GoPlan),
+        "[{}] Agent-set signal (GoPlan via report_error retry) must not be overridden by exit logic",
+        env.name()
+    );
+    assert!(
+        task.pause,
+        "[{}] report_error must still set the pause flag",
+        env.name()
+    );
+}
+
 async fn git_output(dir: &PathBuf, args: &[&str]) -> String {
     let out = tokio::process::Command::new("git")
         .args(args)
