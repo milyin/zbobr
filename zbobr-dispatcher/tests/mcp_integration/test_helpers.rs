@@ -682,6 +682,8 @@ pub async fn run_signal_preservation_during_conflict(env: &IntegrationTestEnv) {
         .await;
 
     // Set the task to have a go_work signal BEFORE running the worker.
+    // Because conflict detection exits BEFORE the signal-clearing step,
+    // this signal must survive intact through the early-merge exit path.
     env.update_task_signal(task_id, "go_work").await;
 
     env.run_stage(task_id, Stage::Working, scenarios::working_scenario())
@@ -696,7 +698,7 @@ pub async fn run_signal_preservation_during_conflict(env: &IntegrationTestEnv) {
     assert_eq!(
         task.signal,
         Some(Signal::GoWork),
-        "[{}] Signal should be preserved (restored) after conflict detection",
+        "[{}] Signal must be preserved when conflict detection exits before clearing step",
         env.name()
     );
 

@@ -865,24 +865,6 @@ impl<'a> CliRoleRunner<'a> {
             .set_task_stage(self.task_id, self.role.into())
             .await?;
 
-        // Rule 1: clear the triggering condition when entering a stage.
-        // For Merger: clear the conflict flag but NOT the signal.
-        // For all other roles: clear the signal that caused entry.
-        {
-            let task_session = self.zbobr.task_session(self.task_id);
-            if self.role == Role::Merger {
-                task_session
-                    .set_conflict(false)
-                    .await
-                    .context("Failed to clear conflict flag on entry to Merger")?;
-            } else {
-                task_session
-                    .set_signal(None)
-                    .await
-                    .context("Failed to clear signal on stage entry")?;
-            }
-        }
-
         let task_dir = self
             .zbobr
             .config()
@@ -896,9 +878,32 @@ impl<'a> CliRoleRunner<'a> {
             ensure_pr_url(self.zbobr, self.task_id).await?;
         }
 
+        // Early-merge check must run BEFORE clearing the triggering condition.
+        // If a conflict is detected the session exits here — the signal is left
+        // intact so the Merger can return to the same stage after resolving it.
         if should_try_early_merge(self.role) {
             if try_early_merge(self.zbobr, self.task_id, &work_dir).await? {
                 return Ok(());
+            }
+        }
+
+        // Rule 1: clear the triggering condition right before the agent session
+        // starts (no conflict was detected above).
+        // For Merger: clear the conflict flag but NOT the signal — the signal
+        //   carries the original stage to return to after merging.
+        // For all other roles: clear the signal that caused entry.
+        {
+            let task_session = self.zbobr.task_session(self.task_id);
+            if self.role == Role::Merger {
+                task_session
+                    .set_conflict(false)
+                    .await
+                    .context("Failed to clear conflict flag on entry to Merger")?;
+            } else {
+                task_session
+                    .set_signal(None)
+                    .await
+                    .context("Failed to clear signal on stage entry")?;
             }
         }
 
@@ -1334,12 +1339,6 @@ async fn try_early_merge(
             .set_conflict(true)
             .await
             .context("Failed to set conflict flag")?;
-        // Re-set GoWork so the task returns to the Worker after conflict resolution.
-        zbobr
-            .task_session(task_id)
-            .set_signal(Some(Signal::GoWork))
-            .await
-            .context("Failed to set GoWork signal after conflict detection")?;
         zbobr
             .set_task_stage(task_id, Stage::Pending)
             .await
