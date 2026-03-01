@@ -29,10 +29,11 @@ Read the task description and set the required parameters for the implementation
 1. Call `{GET_DESCRIPTION}` to read the user task description
 2. Call `{GET_DISCUSSION}` for context and prior comments
 3. **Set task parameters** that will guide the implementation:
-    - Call `{SET_PARAM_DESTINATION_REPOSITORY}` with the target repository (full git URL, local path, or owner/repo format)
-    - Call `{SET_PARAM_DESTINATION_BRANCH}` (e.g., "main", "develop")
+    - Call `{GET_PARAM_DESTINATION_REPOSITORY}` and `{GET_PARAM_DESTINATION_BRANCH}` first — they may already be pre-populated with defaults from the configuration. Keep the defaults unless the task description clearly specifies a different repository or branch.
+    - Call `{SET_PARAM_DESTINATION_REPOSITORY}` only if the value is missing or incorrect (full git URL, local path, or owner/repo format)
+    - Call `{SET_PARAM_DESTINATION_BRANCH}` only if the value is missing or incorrect (e.g., "main", "develop")
     - Call `{SET_PARAM_WORK_BRANCH_POSTFIX}` with the work branch postfix (e.g., "implement-feature") — the full work branch will be formed from prefix, task id and this postfix
-    - Use `{GET_PARAM_DESTINATION_REPOSITORY}`, `{GET_PARAM_DESTINATION_BRANCH}`, `{GET_PARAM_WORK_BRANCH}` to read current values
+    - Use `{GET_PARAM_WORK_BRANCH}` to confirm the resulting work branch name
 4. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report takes part in the context for further agent calls, so it MUST be compact.
 5. When finished, the task will move to the planning stage.
 "#,

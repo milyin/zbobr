@@ -58,6 +58,14 @@ pub struct ZbobrDispatcherConfig {
     pub git_user_email: String,
     /// Rewrite commit authors after each stage completes to match configured git user.
     pub overwrite_author: bool,
+    /// Default destination repository pre-populated into task parameters before the
+    /// preparator agent runs (e.g. "owner/repo" or a full git URL). The preparator
+    /// may still override this value. When unset the agent must determine the
+    /// repository from the task description alone.
+    pub default_destination_repository: Option<String>,
+    /// Default destination branch pre-populated into task parameters before the
+    /// preparator agent runs (e.g. "main"). The preparator may still override this.
+    pub default_destination_branch: Option<String>,
 }
 
 impl Default for ZbobrDispatcherConfig {
@@ -77,6 +85,8 @@ impl Default for ZbobrDispatcherConfig {
             git_user_name: String::new(),
             git_user_email: String::new(),
             overwrite_author: false,
+            default_destination_repository: None,
+            default_destination_branch: None,
         }
     }
 }
