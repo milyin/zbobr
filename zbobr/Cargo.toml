@@ -2,25 +2,20 @@
 name = "zbobr"
 version = "0.1.0"
 edition = "2024"
-default-run = "zbobr"
-description = "AI-powered issue management automation using GitHub Copilot agents"
+description = "GitHub-backed zbobr instance: AI-powered task dispatcher using GitHub issues and repos"
 authors = ["milyin"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/milyin/zbobr"
-readme = "../README.md"
 keywords = ["github", "automation", "copilot", "ai", "orchestration"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 zbobr-dispatcher = { workspace = true }
+zbobr-task-backend-github = { workspace = true }
+zbobr-repo-backend-github = { workspace = true }
 zbobr-executor-copilot = { workspace = true }
 zbobr-executor-claude = { workspace = true }
 zbobr-executor-mcp-tester = { workspace = true }
-zbobr-task-backend-github = { workspace = true }
-zbobr-task-backend-fs = { workspace = true }
-zbobr-repo-backend-github = { workspace = true }
-zbobr-repo-backend-fs = { workspace = true }
-zbobr-config = { workspace = true }
 rmcp = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
@@ -32,11 +27,3 @@ serde_json = { workspace = true }
 schemars = { workspace = true }
 anyhow = { workspace = true }
 rustls = { workspace = true }
-
-[dev-dependencies]
-zbobr-task-backend-fs = { workspace = true }
-zbobr-dispatcher = { workspace = true }
-serde = { workspace = true }
-toml = { workspace = true }
-tempfile = "3.8"
-

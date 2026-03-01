@@ -1,6 +1,6 @@
 [workspace]
-members = ["zbobr-dispatcher", "zbobr-executor-copilot", "zbobr-executor-claude", "zbobr-executor-mcp-tester", "zbobr-task-backend-github", "zbobr-task-backend-fs", "zbobr-repo-backend-github", "zbobr-repo-backend-fs", "zbobr-config", "zbobr-macros", "zbobr-utility", "zbobr"]
-default-members = ["zbobr"]
+members = ["zbobr-dispatcher", "zbobr-executor-copilot", "zbobr-executor-claude", "zbobr-executor-mcp-tester", "zbobr-task-backend-github", "zbobr-task-backend-fs", "zbobr-repo-backend-github", "zbobr-repo-backend-fs", "zbobr-api", "zbobr-macros", "zbobr-utility", "zbobr", "zbobr", "zbobr-fs"]
+default-members = ["zbobr-dispatcher", "zbobr-fs"]
 resolver = "2"
 
 [workspace.package]
@@ -12,7 +12,7 @@ zbobr-task-backend-github = { path = "zbobr-task-backend-github" }
 zbobr-task-backend-fs = { path = "zbobr-task-backend-fs" }
 zbobr-repo-backend-github = { path = "zbobr-repo-backend-github" }
 zbobr-repo-backend-fs = { path = "zbobr-repo-backend-fs" }
-zbobr-config = { path = "zbobr-config" }
+zbobr-api = { path = "zbobr-api" }
 zbobr-executor-copilot = { path = "zbobr-executor-copilot" }
 zbobr-executor-claude = { path = "zbobr-executor-claude" }
 zbobr-executor-mcp-tester = { path = "zbobr-executor-mcp-tester" }

@@ -3,28 +3,28 @@ use std::path::Path;
 use anyhow::Context;
 use zbobr_dispatcher::{
     ZbobrDispatcherConfig,
-    config::{ZbobrDispatcherConfigArgs, ZbobrDispatcherConfigToml},
+    config::{ZbobrDispatcherArgs, ZbobrDispatcherToml},
 };
 use zbobr_executor_claude::{
-    ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeToml, config::ZbobrExecutorClaude,
+    ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeConfig, ZbobrExecutorClaudeToml,
 };
 use zbobr_executor_copilot::{
-    ZbobrExecutorCopilotArgs, ZbobrExecutorCopilotToml, config::ZbobrExecutorCopilot,
+    ZbobrExecutorCopilotArgs, ZbobrExecutorCopilotConfig, ZbobrExecutorCopilotToml,
 };
 use zbobr_executor_mcp_tester::{
-    ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterToml, config::ZbobrExecutorMcpTester,
+    ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterConfig, ZbobrExecutorMcpTesterToml,
 };
 use zbobr_repo_backend_fs::{
-    ZbobrRepoBackendFsArgs, ZbobrRepoBackendFsToml, config::ZbobrRepoBackendFs,
+    ZbobrRepoBackendFsArgs, ZbobrRepoBackendFsConfig, ZbobrRepoBackendFsToml,
 };
 use zbobr_repo_backend_github::{
-    ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubToml, config::ZbobrRepoBackendGithub,
+    ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubConfig, ZbobrRepoBackendGithubToml,
 };
 use zbobr_task_backend_fs::{
-    ZbobrTaskBackendFsArgs, ZbobrTaskBackendFsToml, config::ZbobrTaskBackendFs,
+    ZbobrTaskBackendFsArgs, ZbobrTaskBackendFsConfig, ZbobrTaskBackendFsToml,
 };
 use zbobr_task_backend_github::{
-    ZbobrTaskBackendGithubArgs, ZbobrTaskBackendGithubToml, config::ZbobrTaskBackendGithub,
+    ZbobrTaskBackendGithubArgs, ZbobrTaskBackendGithubConfig, ZbobrTaskBackendGithubToml,
 };
 use zbobr_utility::config_struct;
 
@@ -34,10 +34,10 @@ use zbobr_utility::config_struct;
 pub struct ZbobrTaskBackendConfig {
     /// GitHub issues as the task source
     #[config(nested)]
-    pub github: ZbobrTaskBackendGithub,
+    pub github: ZbobrTaskBackendGithubConfig,
     /// Filesystem task backend (YAML files in tasks/)
     #[config(nested)]
-    pub fs: ZbobrTaskBackendFs,
+    pub fs: ZbobrTaskBackendFsConfig,
 }
 
 #[derive(Clone)]
@@ -46,10 +46,10 @@ pub struct ZbobrTaskBackendConfig {
 pub struct ZbobrRepoBackendConfig {
     /// GitHub repo backend (fork + push via API)
     #[config(nested)]
-    pub github: ZbobrRepoBackendGithub,
+    pub github: ZbobrRepoBackendGithubConfig,
     /// Filesystem repo backend (operate on local clones)
     #[config(nested)]
-    pub fs: ZbobrRepoBackendFs,
+    pub fs: ZbobrRepoBackendFsConfig,
 }
 
 #[derive(Clone)]
@@ -58,13 +58,13 @@ pub struct ZbobrRepoBackendConfig {
 pub struct ZbobrExecutorConfig {
     /// Claude-specific defaults
     #[config(nested)]
-    pub claude: ZbobrExecutorClaude,
+    pub claude: ZbobrExecutorClaudeConfig,
     /// GitHub Copilot executor defaults
     #[config(nested)]
-    pub copilot: ZbobrExecutorCopilot,
+    pub copilot: ZbobrExecutorCopilotConfig,
     /// MCP tester scenarios for validating MCP servers
     #[config(nested)]
-    pub mcp_tester: ZbobrExecutorMcpTester,
+    pub mcp_tester: ZbobrExecutorMcpTesterConfig,
 }
 
 #[derive(Clone)]
@@ -85,7 +85,7 @@ pub struct ZbobrConfig {
     pub executor: ZbobrExecutorConfig,
 }
 
-impl ZbobrConfigToml {
+impl ZbobrToml {
     /// Load a TOML config from a file path.
     /// Returns Ok(None) if the file does not exist.
     pub fn load(path: &Path) -> anyhow::Result<Option<Self>> {
@@ -94,7 +94,7 @@ impl ZbobrConfigToml {
         }
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
-        let config: ZbobrConfigToml = toml::from_str(&content)
+        let config: ZbobrToml = toml::from_str(&content)
             .with_context(|| format!("Failed to parse {}", path.display()))?;
         Ok(Some(config))
     }

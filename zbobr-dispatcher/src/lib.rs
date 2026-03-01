@@ -1,42 +1,69 @@
 pub mod backend;
 pub mod cleanup;
+pub mod cli;
 pub mod config;
+pub mod generic_config;
 pub mod mcp;
+pub mod prompts;
 pub mod setup;
 pub mod task;
 pub mod tool_executor;
 
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-pub use config::{ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml};
+pub use cli::{
+    Command, ConfigFileArg, GlobalArgs, TaskSubcommand, parse_cli, print_task,
+    process_task_by_stage, run_command, run_manager_loop, run_zbobr,
+};
+pub use config::{
+    ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs,
+    ZbobrExecutorConfig, ZbobrExecutorToml,
+};
+pub use generic_config::{GenericConfig, GenericConfigArgs, GenericConfigToml};
 pub use mcp::{
     MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, WorkerMcp, merger_instructions,
     planner_instructions, preparator_instructions, reviewer_instructions, worker_instructions,
 };
+pub use prompts::{Prompts, build_full_prompt, load_prompts, resolve_prompts};
 pub use task::{
     ChecklistItem, Model, Parameter, RoleSession, Signal, Stage, Task, TaskSession, Tool,
 };
 pub use tool_executor::ToolExecutor;
+pub use zbobr_api::config::{BackendConfig, Config};
 
 use crate::backend::{RepoBackend, TaskBackend};
 
 /// Central struct holding configuration and backend.
-#[derive(Clone)]
-pub struct Zbobr {
+pub struct ZbobrDispatcher<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> {
     config: Arc<ZbobrDispatcherConfig>,
-    pub(crate) task_backend: Arc<dyn TaskBackend>,
-    pub(crate) repo_backend: Arc<dyn RepoBackend>,
+    pub(crate) task_backend: Arc<T>,
+    pub(crate) repo_backend: Arc<R>,
     /// Per-task mutexes to serialize concurrent read-modify-write cycles
     /// for the same task within this process.
     task_locks: Arc<std::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
-impl Zbobr {
+impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> Clone for ZbobrDispatcher<T, R> {
+    fn clone(&self) -> Self {
+        Self {
+            config: Arc::clone(&self.config),
+            task_backend: Arc::clone(&self.task_backend),
+            repo_backend: Arc::clone(&self.repo_backend),
+            task_locks: Arc::clone(&self.task_locks),
+        }
+    }
+}
+
+/// Convenience type alias for using the dispatcher with dynamic dispatch.
+pub type ZbobrDispatcherDyn = ZbobrDispatcher<dyn TaskBackend, dyn RepoBackend>;
+
+impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
     /// Create a new Zbobr instance from config and pre-built backends.
-    pub fn new(
+    /// Used primarily in tests.
+    pub fn new_with_backends(
         config: ZbobrDispatcherConfig,
-        task_backend: Arc<dyn TaskBackend>,
-        repo_backend: Arc<dyn RepoBackend>,
+        task_backend: Arc<T>,
+        repo_backend: Arc<R>,
     ) -> Self {
         Self {
             config: Arc::new(config),
@@ -57,16 +84,6 @@ impl Zbobr {
             .entry(task_id)
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
             .clone()
-    }
-
-    /// Create a TaskSession bound to a specific task (full dispatcher access).
-    pub fn task_session(&self, task_id: u64) -> TaskSession {
-        TaskSession::new(self.clone(), task_id)
-    }
-
-    /// Create a RoleSession bound to a specific task (restricted MCP tool access).
-    pub fn role_session(&self, task_id: u64) -> RoleSession {
-        RoleSession::new(self.clone(), task_id)
     }
 
     /// Validate that both backends can reach required resources.
@@ -133,7 +150,14 @@ impl Zbobr {
                 .await?
         };
         if confirm {
-            self.task_session(id).set_confirm(true).await?;
+            self.modify_task(
+                id,
+                Box::new(|mut task| {
+                    task.confirm = true;
+                    task
+                }),
+            )
+            .await?;
         }
         Ok(id)
     }
@@ -330,5 +354,18 @@ impl Zbobr {
             self.task_backend.debug_state(),
             self.repo_backend.debug_state()
         )
+    }
+}
+
+// Implementation specific to the dynamic dispatcher type.
+impl ZbobrDispatcherDyn {
+    /// Create a TaskSession bound to a specific task (full dispatcher access).
+    pub fn task_session(&self, task_id: u64) -> TaskSession {
+        TaskSession::new(self.clone(), task_id)
+    }
+
+    /// Create a RoleSession bound to a specific task (restricted MCP tool access).
+    pub fn role_session(&self, task_id: u64) -> RoleSession {
+        RoleSession::new(self.clone(), task_id)
     }
 }

@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use zbobr_dispatcher::backend::RepoBackend;
+use zbobr_api::backend::RepoBackend;
 
 use crate::config::ZbobrRepoBackendFsConfig;
 
@@ -25,17 +25,22 @@ struct PrFile {
 /// - `target_repo` is a local path to a git repository.
 /// - "Forking" is done by `git clone` from the local path.
 /// - PRs are stored as YAML files under `{repos_dir}/prs/{repo_name}/`.
-pub struct FilesystemRepoBackend {
+pub struct ZbobrRepoBackendFs {
     config: ZbobrRepoBackendFsConfig,
 }
 
-impl FilesystemRepoBackend {
+impl ZbobrRepoBackendFs {
     pub fn new(
         toml: Option<crate::config::ZbobrRepoBackendFsToml>,
         args: crate::config::ZbobrRepoBackendFsArgs,
         config_dir: &std::path::Path,
     ) -> anyhow::Result<Self> {
-        let config = ZbobrRepoBackendFsConfig::build(toml, args, config_dir);
+        let config =
+            <ZbobrRepoBackendFsConfig as zbobr_api::config::Config>::build(toml, args, config_dir);
+        Self::from_config(config)
+    }
+
+    pub fn from_config(config: ZbobrRepoBackendFsConfig) -> anyhow::Result<Self> {
         config.validate()?;
         Ok(Self { config })
     }
@@ -139,7 +144,7 @@ fn chrono_now() -> String {
 }
 
 #[async_trait]
-impl RepoBackend for FilesystemRepoBackend {
+impl RepoBackend for ZbobrRepoBackendFs {
     async fn clone_and_setup(
         &self,
         target_repo: &str,
@@ -354,7 +359,7 @@ impl RepoBackend for FilesystemRepoBackend {
     }
 }
 
-impl FilesystemRepoBackend {
+impl ZbobrRepoBackendFs {
     /// Get the default branch of origin remote.
     #[allow(dead_code)]
     async fn default_branch(work_dir: &Path) -> anyhow::Result<String> {

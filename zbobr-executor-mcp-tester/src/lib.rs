@@ -2,7 +2,7 @@ use std::{path::Path, process::Stdio};
 
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use zbobr_dispatcher::{
+use zbobr_api::{
     task::{Model, Role},
     tool_executor::{ToolExecutor, format_command_for_log},
 };
@@ -109,9 +109,11 @@ impl ToolExecutor for McpTesterExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::Path;
-    use zbobr_dispatcher::task::{Model, Role};
+
+    use zbobr_api::task::{Model, Role};
+
+    use super::*;
 
     #[tokio::test]
     async fn execute_without_scenario_fails() {

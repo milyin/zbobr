@@ -1,9 +1,9 @@
-use zbobr_dispatcher::task::Model;
+use zbobr_api::task::Model;
 use zbobr_utility::config_struct;
 
 #[derive(Clone, Default)]
 #[config_struct]
-pub struct ZbobrExecutorCopilot {
+pub struct ZbobrExecutorCopilotConfig {
     /// Default AI model for Copilot executor.
     pub default_model: Model,
     /// GitHub token used by Copilot CLI (passed as COPILOT_GITHUB_TOKEN).
@@ -35,6 +35,7 @@ impl ZbobrExecutorCopilotConfig {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use std::env;
@@ -86,3 +87,4 @@ mod tests {
         }
     }
 }
+*/

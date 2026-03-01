@@ -1,0 +1,16 @@
+[dispatcher]
+workspaces = "./workspaces"
+git_user_name = "Copilot"
+git_user_email = "copilot@example.com"
+cli_tool = "copilot"
+
+[tasks]
+# Filesystem task backend settings
+tasks_dir = "./tasks"
+
+[repo]
+# Filesystem repo backend settings
+repos_dir = "./repos"
+
+[executor.copilot]
+# Copilot executor settings

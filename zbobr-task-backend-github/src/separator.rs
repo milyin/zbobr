@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use zbobr_dispatcher::ChecklistItem;
+use zbobr_api::task::ChecklistItem;
 
 // -- Plan and Checklist parsing and serialization helpers --
 

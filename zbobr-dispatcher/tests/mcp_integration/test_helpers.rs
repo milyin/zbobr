@@ -1,8 +1,11 @@
-/// Shared test bodies used by all four backend-combination files.
-/// Each function takes a fully-initialised `IntegrationTestEnv` and runs
-/// one complete test scenario against it.
+//! Shared test bodies used by all backend-combination test files.
+//! Each function takes a fully-initialised `IntegrationTestEnv` and runs
+//! one complete test scenario against it.
+#![allow(dead_code)]
+
 use std::path::PathBuf;
-use zbobr_dispatcher::Stage;
+
+use zbobr_dispatcher::{Signal, Stage, task::Parameter};
 
 use super::env::IntegrationTestEnv;
 use super::scenarios;
@@ -24,9 +27,10 @@ pub async fn run_preparation(env: &IntegrationTestEnv) {
     )
     .await;
 
-    let output = env.show_task(task_id).await;
-    assert!(
-        output.contains("Signal:      go_plan"),
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.signal,
+        Some(Signal::GoPlan),
         "[{}] Preparator should emit go_plan after setting repo/branches",
         env.name()
     );
@@ -59,18 +63,19 @@ pub async fn run_planning(env: &IntegrationTestEnv) {
     env.run_stage(task_id, Stage::Planning, scenarios::planning_scenario())
         .await;
 
-    let output = env.show_task(task_id).await;
-    assert!(
-        output.contains("Signal:      go_work"),
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.signal,
+        Some(Signal::GoWork),
         "[{}] Planner should emit go_work after posting plan",
         env.name()
     );
     assert!(
-        output.contains("pr_url:"),
-        "[{}] PR URL should be stored after planning stage:\n{output}",
+        task.parameters.contains_key(&Parameter::PrUrl),
+        "[{}] PR URL should be stored after planning stage",
         env.name()
     );
-    assert_pr_url_points_to_branch(env, &output, &work_branch).await;
+    assert_pr_url_points_to_branch(env, &task, &work_branch).await;
 
     assert_workspace_ok(env, task_id, &repo_name, &work_branch).await;
 }
@@ -102,28 +107,32 @@ pub async fn run_working(env: &IntegrationTestEnv) {
     env.run_stage(task_id, Stage::Working, scenarios::working_scenario())
         .await;
 
-    let output = env.show_task(task_id).await;
+    let task = env.get_task(task_id).await;
+    let comments = env.get_comments(task_id).await;
     assert!(
-        output.contains("Worker complete."),
+        comments.iter().any(|c| c.contains("Worker complete.")),
         "[{}] Worker report not found in discussion",
         env.name()
     );
-    assert!(
-        output.contains("Signal:      go_review"),
+    assert_eq!(
+        task.signal,
+        Some(Signal::GoReview),
         "[{}] Worker should emit go_review when all checklist items are checked",
         env.name()
     );
     assert!(
-        output.contains("[x] Implement and validate worker stage integration coverage"),
+        task.checklist
+            .iter()
+            .any(|i| i.checked && i.text.contains("Implement and validate worker stage")),
         "[{}] Expected checked checklist item not found",
         env.name()
     );
     assert!(
-        output.contains("pr_url:"),
-        "[{}] PR URL should be stored after working stage:\n{output}",
+        task.parameters.contains_key(&Parameter::PrUrl),
+        "[{}] PR URL should be stored after working stage",
         env.name()
     );
-    assert_pr_url_points_to_branch(env, &output, &work_branch).await;
+    assert_pr_url_points_to_branch(env, &task, &work_branch).await;
 
     assert_workspace_ok(env, task_id, &repo_name, &work_branch).await;
 }
@@ -155,28 +164,32 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
     env.run_stage(task_id, Stage::Reviewing, scenarios::reviewing_scenario())
         .await;
 
-    let output = env.show_task(task_id).await;
+    let task = env.get_task(task_id).await;
+    let comments = env.get_comments(task_id).await;
     assert!(
-        output.contains("Reviewer complete."),
+        comments.iter().any(|c| c.contains("Reviewer complete.")),
         "[{}] Reviewer report not found in discussion",
         env.name()
     );
-    assert!(
-        output.contains("Signal:      go_work"),
+    assert_eq!(
+        task.signal,
+        Some(Signal::GoWork),
         "[{}] Reviewer should emit go_work when checklist has unchecked items",
         env.name()
     );
     assert!(
-        output.contains("[ ] Fix review issue: adjust edge-case handling"),
+        task.checklist
+            .iter()
+            .any(|i| !i.checked && i.text.contains("Fix review issue")),
         "[{}] Expected unchecked review item not found",
         env.name()
     );
     assert!(
-        output.contains("pr_url:"),
-        "[{}] PR URL should be stored after reviewing stage:\n{output}",
+        task.parameters.contains_key(&Parameter::PrUrl),
+        "[{}] PR URL should be stored after reviewing stage",
         env.name()
     );
-    assert_pr_url_points_to_branch(env, &output, &work_branch).await;
+    assert_pr_url_points_to_branch(env, &task, &work_branch).await;
 
     assert_workspace_ok(env, task_id, &repo_name, &work_branch).await;
 }
@@ -233,19 +246,20 @@ pub async fn run_reviewing_approval(env: &IntegrationTestEnv) {
     )
     .await;
 
-    let output = env.show_task(task_id).await;
-    assert!(
-        output.contains("Stage:       DONE"),
-        "[{}] Reviewer approval should move task to done:\n{output}",
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.stage,
+        Stage::Done,
+        "[{}] Reviewer approval should move task to done",
         env.name()
     );
     assert!(
-        output.contains("pr_url:"),
-        "[{}] PR URL should be stored after reviewer approval:\n{output}",
+        task.parameters.contains_key(&Parameter::PrUrl),
+        "[{}] PR URL should be stored after reviewer approval",
         env.name()
     );
-    assert_pr_url_points_to_branch(env, &output, &work_branch).await;
-    assert_pr_has_commits(env, &output, "main").await;
+    assert_pr_url_points_to_branch(env, &task, &work_branch).await;
+    assert_pr_has_commits(env, &task, "main").await;
 }
 
 // ---------------------------------------------------------------------------
@@ -300,25 +314,25 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
     )
     .await;
 
-    let output = env.show_task(task_report).await;
+    let task = env.get_task(task_report).await;
+    let comments = env.get_comments(task_report).await;
     assert!(
-        output.contains("Merger complete."),
+        comments.iter().any(|c| c.contains("Merger complete.")),
         "[{}] Merger report not found in discussion",
         env.name()
     );
     assert!(
-        output.contains("Signal:      (none)"),
+        task.signal.is_none(),
         "[{}] Merger should not set a follow-up signal",
         env.name()
     );
-    // The PR URL is stored at workspace setup time (ensure_pr_url in run_role_session).
     assert!(
-        output.contains("pr_url:"),
-        "[{}] PR URL should be stored in task parameters after merger:\n{output}",
+        task.parameters.contains_key(&Parameter::PrUrl),
+        "[{}] PR URL should be stored in task parameters after merger",
         env.name()
     );
-    assert_pr_url_points_to_branch(env, &output, &branch_report).await;
-    assert_pr_has_commits(env, &output, "main").await;
+    assert_pr_url_points_to_branch(env, &task, &branch_report).await;
+    assert_pr_has_commits(env, &task, "main").await;
 
     assert_workspace_ok(env, task_report, &repo_name, &branch_report).await;
 
@@ -340,14 +354,17 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
     env.run_stage(task_ask, Stage::Merging, scenarios::merging_scenario("ask"))
         .await;
 
-    let output = env.show_task(task_ask).await;
+    let task_ask_data = env.get_task(task_ask).await;
+    let comments_ask = env.get_comments(task_ask).await;
     assert!(
-        output.contains("Need guidance on merge"),
+        comments_ask
+            .iter()
+            .any(|c| c.contains("Need guidance on merge")),
         "[{}] Ask-user message not found in discussion",
         env.name()
     );
     assert!(
-        output.contains("Pause:       true"),
+        task_ask_data.pause,
         "[{}] ask_user should set the pause flag",
         env.name()
     );
@@ -379,16 +396,11 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
         .await;
 
     // Set up workspace with a live merge conflict.
-    // When a real GitHub repo backend is configured, clone via the backend so
-    // that origin/fork remotes are correctly set up (PR creation can succeed).
-    // Otherwise fall back to the cp -r approach with a local bare repo.
     let work_dir = if let Some(target) = env.target_repo.as_deref() {
         let wd = env
             .prepare_workspace_via_repo_backend(task_id, target, &work_branch)
             .await;
 
-        // Inject conflicting changes locally (conflict_file.txt does not exist
-        // on the remote, so both branches adding it differently is an add/add conflict).
         write_and_commit(
             &wd,
             "conflict_file.txt",
@@ -452,7 +464,7 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
         wd
     };
 
-    // merge should produce conflict markers
+    // Confirm there is a merge conflict.
     let merge = tokio::process::Command::new("git")
         .args(["merge", "main", "--no-edit"])
         .current_dir(&work_dir)
@@ -472,14 +484,15 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
     )
     .await;
 
-    let output = env.show_task(task_id).await;
+    let task = env.get_task(task_id).await;
+    let comments = env.get_comments(task_id).await;
     assert!(
-        output.contains("Detected merge conflicts"),
+        comments.iter().any(|c| c.contains("Detected merge conflicts")),
         "[{}] Merger should report detected conflicts",
         env.name()
     );
     assert!(
-        output.contains("Conflict:    false"),
+        !task.conflict,
         "[{}] Merger should clear the conflict flag",
         env.name()
     );
@@ -489,17 +502,8 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
 // Conflict detection
 // ---------------------------------------------------------------------------
 
-/// Verify the automatic conflict-detection path in `run_role_session`:
-///
-/// 1. The dispatcher clones the work branch.
-/// 2. It tries `git merge <dest_branch>` and finds a conflict.
-/// 3. It sets `conflict = true`, reverts the task to Pending, and returns
-///    without launching the agent.
-/// 4. The Merger is then run on the already-conflicted workspace and clears
-///    the flag.
-///
-/// This test relies on a purely local git repo and is skipped when a GitHub
-/// repo backend is configured (`env.target_repo.is_some()`).
+/// Verify the automatic conflict-detection path executed by the role session
+/// code.
 pub async fn run_conflict_detection(env: &IntegrationTestEnv) {
     if env.target_repo.is_some() {
         eprintln!(
@@ -514,8 +518,6 @@ pub async fn run_conflict_detection(env: &IntegrationTestEnv) {
     let repo_name = repo_path.file_name().unwrap().to_str().unwrap().to_string();
     let work_branch = "zbobr_conflict-detect-work";
 
-    // Build conflicting histories: both main and work_branch add different
-    // content to conflict_file.txt after their common ancestor.
     git_in(&repo_path, &["checkout", "-b", work_branch]).await;
     write_and_commit(
         &repo_path,
@@ -549,10 +551,10 @@ pub async fn run_conflict_detection(env: &IntegrationTestEnv) {
     env.run_stage(task_id, Stage::Working, scenarios::working_scenario())
         .await;
 
-    let output = env.show_task(task_id).await;
+    let task = env.get_task(task_id).await;
     assert!(
-        output.contains("Conflict:    true"),
-        "[{}] Conflict flag should be set after automatic conflict detection:\n{output}",
+        task.conflict,
+        "[{}] Conflict flag should be set after automatic conflict detection",
         env.name()
     );
 
@@ -576,10 +578,10 @@ pub async fn run_conflict_detection(env: &IntegrationTestEnv) {
     )
     .await;
 
-    let output = env.show_task(task_id).await;
+    let task = env.get_task(task_id).await;
     assert!(
-        output.contains("Conflict:    false"),
-        "[{}] Conflict flag should be cleared after Merger session:\n{output}",
+        !task.conflict,
+        "[{}] Conflict flag should be cleared after Merger session",
         env.name()
     );
 }
@@ -588,9 +590,6 @@ pub async fn run_conflict_detection(env: &IntegrationTestEnv) {
 // report_error signal preservation
 // ---------------------------------------------------------------------------
 
-/// Verify that `report_error` sets the pause flag but does NOT clear the
-/// pre-existing signal on the task.  The dispatcher must be able to resume
-/// routing after the user acknowledges the error.
 pub async fn run_report_error_preserves_signal(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_report_error").await;
     let dest_repo = env
@@ -615,20 +614,24 @@ pub async fn run_report_error_preserves_signal(env: &IntegrationTestEnv) {
     )
     .await;
 
-    let output = env.show_task(task_id).await;
+    let task = env.get_task(task_id).await;
+    let comments = env.get_comments(task_id).await;
     assert!(
-        output.contains("Something went wrong during work"),
-        "[{}] report_error message should appear in discussion:\n{output}",
+        comments
+            .iter()
+            .any(|c| c.contains("Something went wrong during work")),
+        "[{}] report_error message should appear in discussion",
         env.name()
     );
     assert!(
-        output.contains("Pause:       true"),
-        "[{}] report_error must set the pause flag:\n{output}",
+        task.pause,
+        "[{}] report_error must set the pause flag",
         env.name()
     );
-    assert!(
-        output.contains("Signal:      go_work"),
-        "[{}] report_error must not clear the signal:\n{output}",
+    assert_eq!(
+        task.signal,
+        Some(Signal::GoWork),
+        "[{}] report_error must not clear the signal",
         env.name()
     );
 }
@@ -637,9 +640,6 @@ pub async fn run_report_error_preserves_signal(env: &IntegrationTestEnv) {
 // Signal Preservation During Conflict Resolution
 // ---------------------------------------------------------------------------
 
-/// Test that when a conflict is detected during a role session (e.g., Worker),
-/// the task's signal is preserved and restored after the Merger completes.
-/// This verifies the fix for https://github.com/milyin-zenoh-zbobr/zbobr/issues/...
 pub async fn run_signal_preservation_during_conflict(env: &IntegrationTestEnv) {
     if env.target_repo.is_some() {
         eprintln!(
@@ -653,8 +653,6 @@ pub async fn run_signal_preservation_during_conflict(env: &IntegrationTestEnv) {
     let repo_path_str = repo_path.to_string_lossy().to_string();
     let work_branch = "zbobr_signal-preserve-work";
 
-    // Build conflicting histories: both main and work_branch add different
-    // content to a file after their common ancestor.
     git_in(&repo_path, &["checkout", "-b", work_branch]).await;
     write_and_commit(
         &repo_path,
@@ -683,32 +681,26 @@ pub async fn run_signal_preservation_during_conflict(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &repo_path_str, "main", work_branch)
         .await;
 
-    // Set the task to have a go_work signal BEFORE running the worker
+    // Set the task to have a go_work signal BEFORE running the worker.
     env.update_task_signal(task_id, "go_work").await;
 
-    // Run the Worker stage. The dispatcher will:
-    // 1. Start a Worker session
-    // 2. Clear the signal at session start
-    // 3. Attempt `git merge main`
-    // 4. Detect the conflict
-    // 5. Set conflict=true and restore the signal (the fix)
-    // 6. Exit successfully
     env.run_stage(task_id, Stage::Working, scenarios::working_scenario())
         .await;
 
-    let output = env.show_task(task_id).await;
+    let task = env.get_task(task_id).await;
     assert!(
-        output.contains("Conflict:    true"),
-        "[{}] Conflict flag should be set after automatic conflict detection:\n{output}",
+        task.conflict,
+        "[{}] Conflict flag should be set after automatic conflict detection",
         env.name()
     );
-    assert!(
-        output.contains("Signal:      go_work"),
-        "[{}] Signal should be preserved (restored) after conflict detection:\n{output}",
+    assert_eq!(
+        task.signal,
+        Some(Signal::GoWork),
+        "[{}] Signal should be preserved (restored) after conflict detection",
         env.name()
     );
 
-    // Run the Merger stage to resolve the conflict
+    // Run the Merger stage to resolve the conflict.
     env.run_stage(
         task_id,
         Stage::Merging,
@@ -716,19 +708,18 @@ pub async fn run_signal_preservation_during_conflict(env: &IntegrationTestEnv) {
     )
     .await;
 
-    let output = env.show_task(task_id).await;
+    let task = env.get_task(task_id).await;
     assert!(
-        output.contains("Conflict:    false"),
-        "[{}] Conflict flag should be cleared after Merger session:\n{output}",
+        !task.conflict,
+        "[{}] Conflict flag should be cleared after Merger session",
         env.name()
     );
 
     // CRITICAL: The signal should STILL be present after Merger finishes!
-    // This is the key requirement: the signal must be available for the next
-    // dispatcher iteration to route the task to the correct stage.
-    assert!(
-        output.contains("Signal:      go_work"),
-        "[{}] Signal should be preserved after Merger completes:\n{output}",
+    assert_eq!(
+        task.signal,
+        Some(Signal::GoWork),
+        "[{}] Signal should be preserved after Merger completes",
         env.name()
     );
 }
@@ -739,9 +730,6 @@ pub async fn run_signal_preservation_during_conflict(env: &IntegrationTestEnv) {
 const CROSS_ORG_DEST_REPO: &str = "octocat/Spoon-Knife";
 
 /// Test `clone_and_setup` against a same-org target (`env.target_repo`).
-/// Verifies the workspace is cloned and that no "fork" remote is created
-/// (same-org mode: `fork_owner` == target repo owner).
-///
 /// Skipped when the repo backend is not GitHub or `target_repo` is not set.
 pub async fn run_repo_backend_clone(env: &IntegrationTestEnv) {
     let Some(target) = env.target_repo.as_deref() else {
@@ -771,8 +759,21 @@ pub async fn run_repo_backend_clone(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, target, "main", &work_branch)
         .await;
 
-    env.run_zbobr("task", &["clone", &task_id.to_string()])
-        .await;
+    let task = env.get_task(task_id).await;
+    let dest_repo = task
+        .parameters
+        .get(&Parameter::DestinationRepository)
+        .cloned()
+        .unwrap();
+    let dest_branch = task
+        .parameters
+        .get(&Parameter::DestinationBranch)
+        .cloned()
+        .unwrap_or_else(|| "main".to_string());
+    env.zbobr
+        .clone_and_setup(&dest_repo, &work_branch, &dest_branch, task_id)
+        .await
+        .unwrap();
 
     let workspace_dir = env
         .workspaces_dir
@@ -810,7 +811,7 @@ pub async fn run_repo_backend_clone(env: &IntegrationTestEnv) {
         repo_name
     );
 
-    // Same-org mode: no fork remote expected
+    // Same-org mode: no fork remote expected.
     let fork_check = tokio::process::Command::new("git")
         .args(["remote", "get-url", "fork"])
         .current_dir(&workspace_dir)
@@ -825,9 +826,6 @@ pub async fn run_repo_backend_clone(env: &IntegrationTestEnv) {
 }
 
 /// Test `clone_and_setup` against `octocat/Spoon-Knife` (cross-org).
-/// Verifies the workspace is cloned and that a "fork" remote IS created
-/// (cross-org mode: `fork_owner` != `octocat`).
-///
 /// Skipped when the repo backend is not GitHub.
 pub async fn run_repo_backend_clone_cross_org(env: &IntegrationTestEnv) {
     if env.fork_owner().is_none() {
@@ -852,8 +850,21 @@ pub async fn run_repo_backend_clone_cross_org(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, target, "main", &work_branch)
         .await;
 
-    env.run_zbobr("task", &["clone", &task_id.to_string()])
-        .await;
+    let task = env.get_task(task_id).await;
+    let dest_repo = task
+        .parameters
+        .get(&Parameter::DestinationRepository)
+        .cloned()
+        .unwrap();
+    let dest_branch = task
+        .parameters
+        .get(&Parameter::DestinationBranch)
+        .cloned()
+        .unwrap_or_else(|| "main".to_string());
+    env.zbobr
+        .clone_and_setup(&dest_repo, &work_branch, &dest_branch, task_id)
+        .await
+        .unwrap();
 
     let workspace_dir = env
         .workspaces_dir
@@ -891,7 +902,7 @@ pub async fn run_repo_backend_clone_cross_org(env: &IntegrationTestEnv) {
         repo_name
     );
 
-    // Cross-org mode: fork remote must exist
+    // Cross-org mode: fork remote must exist.
     let fork_out = tokio::process::Command::new("git")
         .args(["remote", "get-url", "fork"])
         .current_dir(&workspace_dir)
@@ -921,8 +932,6 @@ pub async fn run_repo_backend_clone_cross_org(env: &IntegrationTestEnv) {
 // Repo backend — same-org planning / working / reviewing / merging
 // ---------------------------------------------------------------------------
 
-/// Run the Planning stage against `env.target_repo` via the GitHub repo backend.
-/// Skipped when the repo backend is not GitHub or `target_repo` is not set.
 pub async fn run_repo_backend_planning(env: &IntegrationTestEnv) {
     let Some(target) = env.target_repo.as_deref() else {
         eprintln!(
@@ -941,8 +950,6 @@ pub async fn run_repo_backend_planning(env: &IntegrationTestEnv) {
     repo_backend_planning_for(env, target, "plan").await;
 }
 
-/// Run the Working stage against `env.target_repo` via the GitHub repo backend.
-/// Skipped when the repo backend is not GitHub or `target_repo` is not set.
 pub async fn run_repo_backend_working(env: &IntegrationTestEnv) {
     let Some(target) = env.target_repo.as_deref() else {
         eprintln!(
@@ -961,8 +968,6 @@ pub async fn run_repo_backend_working(env: &IntegrationTestEnv) {
     repo_backend_working_for(env, target, "work").await;
 }
 
-/// Run the Reviewing stage against `env.target_repo` via the GitHub repo backend.
-/// Skipped when the repo backend is not GitHub or `target_repo` is not set.
 pub async fn run_repo_backend_reviewing(env: &IntegrationTestEnv) {
     let Some(target) = env.target_repo.as_deref() else {
         eprintln!(
@@ -981,8 +986,6 @@ pub async fn run_repo_backend_reviewing(env: &IntegrationTestEnv) {
     repo_backend_reviewing_for(env, target, "review").await;
 }
 
-/// Run the Merging stage against `env.target_repo` via the GitHub repo backend.
-/// Skipped when the repo backend is not GitHub or `target_repo` is not set.
 pub async fn run_repo_backend_merging(env: &IntegrationTestEnv) {
     let Some(target) = env.target_repo.as_deref() else {
         eprintln!(
@@ -1005,8 +1008,6 @@ pub async fn run_repo_backend_merging(env: &IntegrationTestEnv) {
 // Repo backend — cross-org planning / working / reviewing / merging
 // ---------------------------------------------------------------------------
 
-/// Run the Planning stage against `octocat/Spoon-Knife` (cross-org fork path).
-/// Skipped when the repo backend is not GitHub.
 pub async fn run_repo_backend_planning_cross_org(env: &IntegrationTestEnv) {
     if env.fork_owner().is_none() {
         eprintln!(
@@ -1018,8 +1019,6 @@ pub async fn run_repo_backend_planning_cross_org(env: &IntegrationTestEnv) {
     repo_backend_planning_for(env, CROSS_ORG_DEST_REPO, "xorg-plan").await;
 }
 
-/// Run the Working stage against `octocat/Spoon-Knife` (cross-org fork path).
-/// Skipped when the repo backend is not GitHub.
 pub async fn run_repo_backend_working_cross_org(env: &IntegrationTestEnv) {
     if env.fork_owner().is_none() {
         eprintln!(
@@ -1031,8 +1030,6 @@ pub async fn run_repo_backend_working_cross_org(env: &IntegrationTestEnv) {
     repo_backend_working_for(env, CROSS_ORG_DEST_REPO, "xorg-work").await;
 }
 
-/// Run the Reviewing stage against `octocat/Spoon-Knife` (cross-org fork path).
-/// Skipped when the repo backend is not GitHub.
 pub async fn run_repo_backend_reviewing_cross_org(env: &IntegrationTestEnv) {
     if env.fork_owner().is_none() {
         eprintln!(
@@ -1044,8 +1041,6 @@ pub async fn run_repo_backend_reviewing_cross_org(env: &IntegrationTestEnv) {
     repo_backend_reviewing_for(env, CROSS_ORG_DEST_REPO, "xorg-review").await;
 }
 
-/// Run the Merging stage against `octocat/Spoon-Knife` (cross-org fork path).
-/// Skipped when the repo backend is not GitHub.
 pub async fn run_repo_backend_merging_cross_org(env: &IntegrationTestEnv) {
     if env.fork_owner().is_none() {
         eprintln!(
@@ -1061,21 +1056,18 @@ pub async fn run_repo_backend_merging_cross_org(env: &IntegrationTestEnv) {
 // Confirm flag
 // ---------------------------------------------------------------------------
 
-/// Verify that `--confirm` causes an automatic pause on stage transition.
+/// Verify that a stage change with `confirm=true` triggers an automatic pause.
 pub async fn run_cli_confirm_flag(env: &IntegrationTestEnv) {
     let task_id = env
         .create_task_with_confirm("Confirm test", "desc", Stage::Pending, true)
         .await;
 
-    env.run_zbobr(
-        "task",
-        &["update", &task_id.to_string(), "--stage", "PLANNING"],
-    )
-    .await;
-    let output2 = env.show_task(task_id).await;
+    env.update_task_stage(task_id, Stage::Planning).await;
+
+    let task = env.get_task(task_id).await;
     assert!(
-        output2.contains("Pause:       true"),
-        "[{}] task should be paused after stage change with confirm\n{output2}",
+        task.pause,
+        "[{}] task should be paused after stage change with confirm",
         env.name()
     );
 }
@@ -1083,134 +1075,6 @@ pub async fn run_cli_confirm_flag(env: &IntegrationTestEnv) {
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
-
-/// Extract the `pr_url` value from `zbobr task show` output.
-fn extract_pr_url(output: &str) -> Option<String> {
-    output
-        .lines()
-        .find(|l| l.trim_start().starts_with("pr_url:"))
-        .and_then(|l| l.splitn(2, ':').nth(1))
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-}
-
-/// Validate that the PR reference stored in the task output is correct:
-/// - The path exists as a git repository.
-/// - The currently checked-out branch matches `expected_branch`.
-///
-/// For the FS backend, `pr_url` is the work directory path, so these checks
-/// exercise the full chain: workspace setup → ensure_branch_and_pr → stored URL.
-async fn assert_pr_url_points_to_branch(
-    env: &IntegrationTestEnv,
-    output: &str,
-    expected_branch: &str,
-) {
-    let pr_url = extract_pr_url(output).unwrap_or_else(|| {
-        panic!(
-            "[{}] pr_url not found in task output:\n{output}",
-            env.name()
-        )
-    });
-
-    // For the GitHub backend the pr_url is an https:// URL — skip git checks.
-    if pr_url.starts_with("http") {
-        return;
-    }
-
-    let pr_path = PathBuf::from(&pr_url);
-    assert!(
-        pr_path.join(".git").exists(),
-        "[{}] pr_url '{}' is not a git repository",
-        env.name(),
-        pr_url
-    );
-
-    let current = git_output(&pr_path, &["branch", "--show-current"]).await;
-    assert_eq!(
-        current.trim(),
-        expected_branch,
-        "[{}] pr_url '{}' is not on the expected branch",
-        env.name(),
-        pr_url
-    );
-}
-
-/// Verify the work branch in the pr_url directory has at least one commit
-/// ahead of `origin/main` (i.e., real work was pushed into the PR).
-async fn assert_pr_has_commits(env: &IntegrationTestEnv, output: &str, dest_branch: &str) {
-    let pr_url = match extract_pr_url(output) {
-        Some(u) => u,
-        None => return, // already asserted elsewhere
-    };
-
-    if pr_url.starts_with("http") {
-        // GitHub backend: verify the PR via the API.
-        assert_github_pr_has_commits(env, &pr_url, dest_branch).await;
-        return;
-    }
-
-    let pr_path = PathBuf::from(&pr_url);
-    let log = git_output(
-        &pr_path,
-        &["log", &format!("origin/{}..HEAD", dest_branch), "--oneline"],
-    )
-    .await;
-
-    assert!(
-        !log.trim().is_empty(),
-        "[{}] pr_url '{}' work branch has no commits ahead of origin/{} — expected at least one",
-        env.name(),
-        pr_url,
-        dest_branch
-    );
-}
-
-/// Parse a GitHub PR URL (`https://github.com/{owner}/{repo}/pull/{number}`)
-/// and use `gh api` to verify the PR exists, has at least one commit, and
-/// targets `dest_branch`.
-async fn assert_github_pr_has_commits(env: &IntegrationTestEnv, pr_url: &str, dest_branch: &str) {
-    // Split: ["https:", "", "github.com", owner, repo, "pull", number, ...]
-    let parts: Vec<&str> = pr_url.trim_end_matches('/').splitn(8, '/').collect();
-    assert!(
-        parts.len() >= 7 && parts[5] == "pull",
-        "[{}] Cannot parse GitHub PR URL: {pr_url}",
-        env.name()
-    );
-    let (owner, repo, pr_number) = (parts[3], parts[4], parts[6]);
-
-    let api_path = format!("repos/{owner}/{repo}/pulls/{pr_number}");
-    let out = tokio::process::Command::new("gh")
-        .args(["api", &api_path])
-        .output()
-        .await
-        .unwrap_or_else(|e| panic!("[{}] failed to run `gh api`: {e}", env.name()));
-
-    assert!(
-        out.status.success(),
-        "[{}] `gh api {api_path}` failed:\n{}",
-        env.name(),
-        String::from_utf8_lossy(&out.stderr)
-    );
-
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout)
-        .unwrap_or_else(|e| panic!("[{}] failed to parse gh api response: {e}", env.name()));
-
-    let commits = json["commits"].as_u64().unwrap_or(0);
-    assert!(
-        commits > 0,
-        "[{}] GitHub PR {pr_url} has 0 commits — expected at least one",
-        env.name()
-    );
-
-    let base_ref = json["base"]["ref"].as_str().unwrap_or("unknown");
-    assert_eq!(
-        base_ref,
-        dest_branch,
-        "[{}] GitHub PR {pr_url} targets branch '{}', expected '{dest_branch}'",
-        env.name(),
-        base_ref
-    );
-}
 
 async fn repo_backend_planning_for(env: &IntegrationTestEnv, target: &str, suffix: &str) {
     let task_id = env
@@ -1229,9 +1093,10 @@ async fn repo_backend_planning_for(env: &IntegrationTestEnv, target: &str, suffi
     env.run_stage(task_id, Stage::Planning, scenarios::planning_scenario())
         .await;
 
-    let output = env.show_task(task_id).await;
-    assert!(
-        output.contains("Signal:      go_work"),
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.signal,
+        Some(Signal::GoWork),
         "[{}] Planner should emit go_work after posting plan",
         env.name()
     );
@@ -1254,9 +1119,10 @@ async fn repo_backend_working_for(env: &IntegrationTestEnv, target: &str, suffix
     env.run_stage(task_id, Stage::Working, scenarios::working_scenario())
         .await;
 
-    let output = env.show_task(task_id).await;
-    assert!(
-        output.contains("Signal:      go_review"),
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.signal,
+        Some(Signal::GoReview),
         "[{}] Worker should emit go_review",
         env.name()
     );
@@ -1279,9 +1145,10 @@ async fn repo_backend_reviewing_for(env: &IntegrationTestEnv, target: &str, suff
     env.run_stage(task_id, Stage::Reviewing, scenarios::reviewing_scenario())
         .await;
 
-    let output = env.show_task(task_id).await;
-    assert!(
-        output.contains("Signal:      go_work"),
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.signal,
+        Some(Signal::GoWork),
         "[{}] Reviewer should emit go_work when checklist has unchecked items",
         env.name()
     );
@@ -1308,9 +1175,9 @@ async fn repo_backend_merging_for(env: &IntegrationTestEnv, target: &str, suffix
     )
     .await;
 
-    let output = env.show_task(task_id).await;
+    let comments = env.get_comments(task_id).await;
     assert!(
-        output.contains("Merger complete."),
+        comments.iter().any(|c| c.contains("Merger complete.")),
         "[{}] Merger report not found in discussion",
         env.name()
     );
@@ -1376,6 +1243,117 @@ async fn assert_workspace_ok(
         work_branch,
         "[{}] Current branch is not the work branch",
         env.name()
+    );
+}
+
+/// Validate that the PR reference stored in the task parameters is correct:
+/// for the FS backend the `pr_url` is the work directory path.
+async fn assert_pr_url_points_to_branch(
+    env: &IntegrationTestEnv,
+    task: &zbobr_dispatcher::Task,
+    expected_branch: &str,
+) {
+    let pr_url = task
+        .parameters
+        .get(&Parameter::PrUrl)
+        .unwrap_or_else(|| panic!("[{}] pr_url not found in task parameters", env.name()));
+
+    // For the GitHub backend the pr_url is an https:// URL — skip git checks.
+    if pr_url.starts_with("http") {
+        return;
+    }
+
+    let pr_path = PathBuf::from(pr_url);
+    assert!(
+        pr_path.join(".git").exists(),
+        "[{}] pr_url '{}' is not a git repository",
+        env.name(),
+        pr_url
+    );
+
+    let current = git_output(&pr_path, &["branch", "--show-current"]).await;
+    assert_eq!(
+        current.trim(),
+        expected_branch,
+        "[{}] pr_url '{}' is not on the expected branch",
+        env.name(),
+        pr_url
+    );
+}
+
+/// Verify the work branch in the pr_url directory has at least one commit
+/// ahead of `origin/main`.
+async fn assert_pr_has_commits(
+    env: &IntegrationTestEnv,
+    task: &zbobr_dispatcher::Task,
+    dest_branch: &str,
+) {
+    let pr_url = match task.parameters.get(&Parameter::PrUrl) {
+        Some(u) => u,
+        None => return,
+    };
+
+    if pr_url.starts_with("http") {
+        assert_github_pr_has_commits(env, pr_url, dest_branch).await;
+        return;
+    }
+
+    let pr_path = PathBuf::from(pr_url);
+    let log = git_output(
+        &pr_path,
+        &["log", &format!("origin/{}..HEAD", dest_branch), "--oneline"],
+    )
+    .await;
+
+    assert!(
+        !log.trim().is_empty(),
+        "[{}] pr_url '{}' work branch has no commits ahead of origin/{} — expected at least one",
+        env.name(),
+        pr_url,
+        dest_branch
+    );
+}
+
+async fn assert_github_pr_has_commits(env: &IntegrationTestEnv, pr_url: &str, dest_branch: &str) {
+    let parts: Vec<&str> = pr_url.trim_end_matches('/').splitn(8, '/').collect();
+    assert!(
+        parts.len() >= 7 && parts[5] == "pull",
+        "[{}] Cannot parse GitHub PR URL: {pr_url}",
+        env.name()
+    );
+    let (owner, repo, pr_number) = (parts[3], parts[4], parts[6]);
+
+    let api_path = format!("repos/{owner}/{repo}/pulls/{pr_number}");
+    let out = tokio::process::Command::new("gh")
+        .args(["api", &api_path])
+        .output()
+        .await
+        .unwrap_or_else(|e| panic!("[{}] failed to run `gh api`: {e}", env.name()));
+
+    assert!(
+        out.status.success(),
+        "[{}] `gh api {api_path}` failed:\n{}",
+        env.name(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|e| panic!("[{}] failed to parse gh api response: {e}", env.name()));
+
+    let commits = json["commits"].as_u64().unwrap_or(0);
+    assert!(
+        commits > 0,
+        "[{}] GitHub PR {pr_url} has 0 commits — expected at least one",
+        env.name()
+    );
+
+    let base_ref = json["base"]["ref"].as_str().unwrap_or("unknown");
+    assert_eq!(
+        base_ref,
+        dest_branch,
+        "[{}] GitHub PR {pr_url} targets branch '{}', expected '{dest_branch}'",
+        env.name(),
+        base_ref
     );
 }
 

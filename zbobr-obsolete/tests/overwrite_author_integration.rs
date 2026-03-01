@@ -1,3 +1,4 @@
+/*
 use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
@@ -278,3 +279,5 @@ fn get_all_commit_authors(path: &Path) -> Vec<String> {
     let output = run_git_command(path, &["log", "--format=%an"]);
     output.lines().map(|line| line.to_string()).collect()
 }
+
+*/

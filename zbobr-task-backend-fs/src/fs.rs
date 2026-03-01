@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use zbobr_dispatcher::{ChecklistItem, Model, Parameter, Stage, Task, Tool, backend::TaskBackend};
+use zbobr_api::{ChecklistItem, Model, Parameter, Stage, Task, Tool, backend::TaskBackend};
 
 use crate::config::ZbobrTaskBackendFsConfig;
 
@@ -106,17 +106,22 @@ struct CommentsFile {
 }
 
 /// Filesystem-based task backend.
-pub struct FilesystemTaskBackend {
+pub struct ZbobrTaskBackendFs {
     config: ZbobrTaskBackendFsConfig,
 }
 
-impl FilesystemTaskBackend {
+impl ZbobrTaskBackendFs {
     pub fn new(
         toml: Option<crate::config::ZbobrTaskBackendFsToml>,
         args: crate::config::ZbobrTaskBackendFsArgs,
         config_dir: &std::path::Path,
     ) -> anyhow::Result<Self> {
-        let config = ZbobrTaskBackendFsConfig::build(toml, args, config_dir);
+        let config =
+            <ZbobrTaskBackendFsConfig as zbobr_api::config::Config>::build(toml, args, config_dir);
+        Self::from_config(config)
+    }
+
+    pub fn from_config(config: ZbobrTaskBackendFsConfig) -> anyhow::Result<Self> {
         config.validate()?;
         Ok(Self { config })
     }
@@ -247,7 +252,7 @@ impl FilesystemTaskBackend {
 }
 
 #[async_trait]
-impl TaskBackend for FilesystemTaskBackend {
+impl TaskBackend for ZbobrTaskBackendFs {
     async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
         let task_file = self.read_task_file(id).await?;
         task_file.to_task()

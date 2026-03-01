@@ -2,7 +2,7 @@ use std::{path::PathBuf, time::Duration};
 
 use anyhow::Context;
 use async_trait::async_trait;
-use zbobr_dispatcher::backend::RepoBackend;
+use zbobr_api::backend::RepoBackend;
 
 use crate::config::ZbobrRepoBackendGithubConfig;
 
@@ -106,27 +106,39 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
 }
 
 // ============================================================================
-// GitHubRepoBackend
+// ZbobrRepoBackendGithub
 // ============================================================================
 
-pub struct GitHubRepoBackend {
+pub struct ZbobrRepoBackendGithub {
     backend_config: ZbobrRepoBackendGithubConfig,
     octocrab: octocrab::Octocrab,
     git_user_name: String,
     git_user_email: String,
 }
 
-impl GitHubRepoBackend {
+impl ZbobrRepoBackendGithub {
     pub fn new(
         toml: Option<crate::config::ZbobrRepoBackendGithubToml>,
         args: crate::config::ZbobrRepoBackendGithubArgs,
         git_user_name: String,
         git_user_email: String,
     ) -> anyhow::Result<Self> {
-        let backend_config = ZbobrRepoBackendGithubConfig::build(toml, args);
+        let backend_config = <ZbobrRepoBackendGithubConfig as zbobr_api::config::Config>::build(
+            toml,
+            args,
+            std::path::Path::new("."),
+        );
+        Self::from_config(backend_config, git_user_name, git_user_email)
+    }
+
+    pub fn from_config(
+        backend_config: ZbobrRepoBackendGithubConfig,
+        git_user_name: String,
+        git_user_email: String,
+    ) -> anyhow::Result<Self> {
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
-            .personal_token(backend_config.token.clone())
+            .personal_token(backend_config.github_token.clone())
             .build()
             .map_err(|e| anyhow::anyhow!("Failed to build octocrab client: {e}"))?;
         Ok(Self {
@@ -275,7 +287,7 @@ impl GitHubRepoBackend {
 }
 
 #[async_trait]
-impl RepoBackend for GitHubRepoBackend {
+impl RepoBackend for ZbobrRepoBackendGithub {
     async fn clone_and_setup(
         &self,
         target_repo: &str,
@@ -311,8 +323,8 @@ impl RepoBackend for GitHubRepoBackend {
                     "--depth",
                     "1",
                 ])
-                .env("GH_TOKEN", &self.backend_config.token)
-                .env("GITHUB_TOKEN", &self.backend_config.token)
+                .env("GH_TOKEN", &self.backend_config.github_token)
+                .env("GITHUB_TOKEN", &self.backend_config.github_token)
                 .status()
                 .await?;
             if !status.success() {
@@ -463,8 +475,8 @@ impl RepoBackend for GitHubRepoBackend {
                     "--depth",
                     "1",
                 ])
-                .env("GH_TOKEN", &self.backend_config.token)
-                .env("GITHUB_TOKEN", &self.backend_config.token)
+                .env("GH_TOKEN", &self.backend_config.github_token)
+                .env("GITHUB_TOKEN", &self.backend_config.github_token)
                 .status()
                 .await?;
             if !status.success() {
@@ -545,14 +557,10 @@ impl RepoBackend for GitHubRepoBackend {
             tracing::info!(
                 "No commits ahead of origin/{destination_branch} — creating placeholder commit"
             );
-            zbobr_dispatcher::backend::configure_git_user(
-                &work_dir,
-                &self.git_user_name,
-                &self.git_user_email,
-            )
-            .await
-            .context("Failed to configure git user for placeholder commit")?;
-            zbobr_dispatcher::backend::create_placeholder_commit(&work_dir, work_branch)
+            zbobr_utility::configure_git_user(&work_dir, &self.git_user_name, &self.git_user_email)
+                .await
+                .context("Failed to configure git user for placeholder commit")?;
+            zbobr_utility::create_placeholder_commit(&work_dir, work_branch)
                 .await
                 .context("Failed to create placeholder commit")?;
         }

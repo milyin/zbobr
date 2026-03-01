@@ -1,4 +1,6 @@
 pub mod config;
 mod github;
-pub use config::{ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubToml};
-pub use github::GitHubRepoBackend;
+pub use config::{
+    ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubConfig, ZbobrRepoBackendGithubToml,
+};
+pub use github::ZbobrRepoBackendGithub;

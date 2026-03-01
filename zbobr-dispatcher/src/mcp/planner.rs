@@ -6,7 +6,7 @@ use rmcp::{
 };
 
 use crate::{
-    Zbobr,
+    ZbobrDispatcherDyn,
     mcp::{
         common::DescriptionParam,
         traits::{CommonMcpImpl, PlannerMcpImpl},
@@ -34,7 +34,7 @@ impl PlannerMcpImpl for PlannerMcp {}
 
 #[tool_router]
 impl PlannerMcp {
-    pub fn new(zbobr: Zbobr, task_id: u64) -> Self {
+    pub fn new(zbobr: ZbobrDispatcherDyn, task_id: u64) -> Self {
         Self {
             session: zbobr.role_session(task_id),
             tool_router: Self::tool_router(),

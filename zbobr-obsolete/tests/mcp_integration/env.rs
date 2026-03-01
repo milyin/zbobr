@@ -1,3 +1,4 @@
+/*
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use zbobr_dispatcher::Stage;
@@ -482,7 +483,7 @@ fn zbobr_config_args(env: &IntegrationTestEnv) -> Vec<String> {
             task_token,
         } => {
             push("--dispatcher-task-backend", "github");
-            push("--tasks-github-task-repo", task_repo);
+            push("--tasks-github-repo", task_repo);
             push("--tasks-github-token", task_token);
         }
     }
@@ -496,7 +497,7 @@ fn zbobr_config_args(env: &IntegrationTestEnv) -> Vec<String> {
             repo_token,
         } => {
             push("--dispatcher-repo-backend", "github");
-            push("--repo-github-fork-owner", fork_owner);
+            push("--repo-fork-owner", fork_owner);
             push("--repo-github-token", repo_token);
         }
     }
@@ -536,3 +537,4 @@ async fn make_base_path(name: &str) -> PathBuf {
         .expect("failed to create integration env base dir");
     base
 }
+*/

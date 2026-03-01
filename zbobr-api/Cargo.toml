@@ -1,0 +1,13 @@
+[package]
+name = "zbobr-api"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+zbobr-utility = { workspace = true }
+serde = { workspace = true }
+async-trait = { workspace = true }
+schemars = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+paste = { workspace = true }

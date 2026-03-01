@@ -6,7 +6,7 @@ use rmcp::{
 };
 
 use crate::{
-    Zbobr,
+    ZbobrDispatcherDyn,
     mcp::{
         common::{
             CheckChecklistItemParam, DeleteChecklistItemParam, InsertChecklistItemParam,
@@ -37,7 +37,7 @@ impl WorkerMcpImpl for WorkerMcp {}
 
 #[tool_router]
 impl WorkerMcp {
-    pub fn new(zbobr: Zbobr, task_id: u64) -> Self {
+    pub fn new(zbobr: ZbobrDispatcherDyn, task_id: u64) -> Self {
         Self {
             session: zbobr.role_session(task_id),
             tool_router: Self::tool_router(),
