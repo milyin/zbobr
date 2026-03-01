@@ -116,8 +116,7 @@ where
     ) -> anyhow::Result<Self> {
         let toml = toml.unwrap_or_default();
 
-        let dispatcher =
-            ZbobrDispatcherConfig::build(toml.dispatcher, args.dispatcher, config_dir);
+        let dispatcher = ZbobrDispatcherConfig::build(toml.dispatcher, args.dispatcher, config_dir);
 
         let tasks = TC::build(toml.tasks, args.tasks, config_dir);
         let repo = RC::build(toml.repo, args.repo, config_dir);

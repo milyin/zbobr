@@ -117,12 +117,11 @@ impl ZbobrTaskBackendGithub {
         toml: Option<crate::config::ZbobrTaskBackendGithubToml>,
         args: crate::config::ZbobrTaskBackendGithubArgs,
     ) -> anyhow::Result<Self> {
-        let backend_config =
-            <ZbobrTaskBackendGithubConfig as zbobr_api::config::Config>::build(
-                toml,
-                args,
-                std::path::Path::new("."),
-            );
+        let backend_config = <ZbobrTaskBackendGithubConfig as zbobr_api::config::Config>::build(
+            toml,
+            args,
+            std::path::Path::new("."),
+        );
         Self::from_config(backend_config)
     }
 

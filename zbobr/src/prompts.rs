@@ -1,10 +1,6 @@
 use std::path::PathBuf;
 
-
-use zbobr_dispatcher::{
-    task::Role,
-    ZbobrDispatcherConfig,
-};
+use zbobr_dispatcher::{ZbobrDispatcherConfig, task::Role};
 
 /// Resolved prompt file paths for planner, worker, and merger.
 ///
@@ -174,7 +170,6 @@ pub(crate) fn build_full_prompt(user_context: &str, role: Role) -> String {
         )
     }
 }
-
 
 /*
 #[cfg(test)]

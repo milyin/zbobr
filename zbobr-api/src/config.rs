@@ -98,7 +98,11 @@ impl ZbobrDispatcherConfig {
     pub fn from_env() -> anyhow::Result<Self> {
         let cwd = std::env::current_dir()
             .map_err(|e| anyhow::anyhow!("Cannot get current directory: {e}"))?;
-        Ok(<Self as Config>::build(None, ZbobrDispatcherArgs::default(), &cwd))
+        Ok(<Self as Config>::build(
+            None,
+            ZbobrDispatcherArgs::default(),
+            &cwd,
+        ))
     }
 
     /// Validate that all required fields are set.

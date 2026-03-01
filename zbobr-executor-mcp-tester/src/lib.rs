@@ -109,9 +109,11 @@ impl ToolExecutor for McpTesterExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::Path;
+
     use zbobr_api::task::{Model, Role};
+
+    use super::*;
 
     #[tokio::test]
     async fn execute_without_scenario_fails() {

@@ -1,8 +1,5 @@
 // Re-export all from zbobr-api so existing code still compiles.
 pub use zbobr_api::config::*;
-
-use zbobr_utility::config_struct;
-
 use zbobr_executor_claude::{
     ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeConfig, ZbobrExecutorClaudeToml,
 };
@@ -12,6 +9,7 @@ use zbobr_executor_copilot::{
 use zbobr_executor_mcp_tester::{
     ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterConfig, ZbobrExecutorMcpTesterToml,
 };
+use zbobr_utility::config_struct;
 
 #[derive(Clone, Default)]
 #[config_struct]

@@ -2,15 +2,15 @@ use std::{path::PathBuf, sync::mpsc};
 
 use anyhow::Context;
 use tokio::process::Command;
-
-use zbobr_dispatcher::{Signal, Stage, ToolExecutor, ZbobrDispatcherDyn, task::{Model, Parameter, Role, Tool}};
-
-use crate::prompts::Prompts;
-
-use zbobr_dispatcher::ZbobrExecutorConfig;
+use zbobr_dispatcher::{
+    Signal, Stage, ToolExecutor, ZbobrDispatcherDyn, ZbobrExecutorConfig,
+    task::{Model, Parameter, Role, Tool},
+};
 use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::McpTesterExecutor;
+
+use crate::prompts::Prompts;
 
 /// A lightweight object capturing all of the parameters needed to execute
 /// or inspect a role session.  By consolidating the data in one struct we can
@@ -76,7 +76,9 @@ impl<'a> RoleSession<'a> {
         let model = resolve_model(cli_tool, self.model.clone(), self.executor_config);
 
         // update task stage based on role; we implement `From<Role> for Stage`
-        self.zbobr.set_task_stage(self.task_id, self.role.into()).await?;
+        self.zbobr
+            .set_task_stage(self.task_id, self.role.into())
+            .await?;
 
         let task_dir = self
             .zbobr
@@ -145,17 +147,19 @@ impl<'a> RoleSession<'a> {
     }
 }
 
-
 // ---------- helpers --------------------------------------------------------
 
-fn resolve_model(cli_tool: Tool, override_model: Option<Model>, executor_config: &ZbobrExecutorConfig) -> Model {
+fn resolve_model(
+    cli_tool: Tool,
+    override_model: Option<Model>,
+    executor_config: &ZbobrExecutorConfig,
+) -> Model {
     override_model.unwrap_or_else(|| match cli_tool {
         Tool::Claude => executor_config.claude.default_model.clone(),
         Tool::Copilot => executor_config.copilot.default_model.clone(),
         Tool::McpTester => Model::default(),
     })
 }
-
 
 /// Prepare the workspace directory for the given role.  Returns the directory
 /// that the agent should operate in.
@@ -294,13 +298,7 @@ async fn start_mcp_server(
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = mpsc::channel();
     let server_handle = tokio::spawn(async move {
-        match zbobr_dispatcher::mcp::run_role_mcp_server(
-            zbobr,
-            role,
-            task_id,
-        )
-        .await
-        {
+        match zbobr_dispatcher::mcp::run_role_mcp_server(zbobr, role, task_id).await {
             Ok(assigned_port) => {
                 let _ = port_tx.send(assigned_port);
                 tracing::info!("MCP server assigned port {assigned_port}");
@@ -558,10 +556,13 @@ async fn rewrite_commit_authors(
             match rebase_output {
                 Ok(output) if output.status.success() => {
                     tracing::info!("Successfully rewrote commit authors");
-                    if let Err(e) = zbobr.task_session(task_id).role_session().push_branch_commits().await {
-                        tracing::warn!(
-                            "Could not push rewritten commits for task #{task_id}: {e}"
-                        );
+                    if let Err(e) = zbobr
+                        .task_session(task_id)
+                        .role_session()
+                        .push_branch_commits()
+                        .await
+                    {
+                        tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
                     }
                 }
                 Ok(output) => {
@@ -571,9 +572,7 @@ async fn rewrite_commit_authors(
                     );
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "Error running git rebase for author rewriting: {e}"
-                    );
+                    tracing::warn!("Error running git rebase for author rewriting: {e}");
                 }
             }
         } else {

@@ -5,7 +5,6 @@ use std::{path::PathBuf, sync::mpsc};
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
 use tokio::process::Command as TokioCommand;
-
 use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
@@ -1621,10 +1620,7 @@ async fn rewrite_commit_authors(
 /// to allow for different backends.
 use zbobr_api::config::BackendConfig;
 
-pub async fn run_zbobr<
-    TC: BackendConfig + 'static,
-    RC: BackendConfig + 'static,
->(
+pub async fn run_zbobr<TC: BackendConfig + 'static, RC: BackendConfig + 'static>(
     app_name: &'static str,
     app_about: &'static str,
     app_long_about: &'static str,
@@ -1658,7 +1654,8 @@ where
     };
 
     let root_toml = crate::GenericConfigToml::<TC, RC>::load(&config_path)?;
-    let config = crate::GenericConfig::<TC, RC>::build(root_toml, cli.settings.clone(), &config_dir)?;
+    let config =
+        crate::GenericConfig::<TC, RC>::build(root_toml, cli.settings.clone(), &config_dir)?;
     config.dispatcher.validate()?;
     let executor_config = config.executor.clone();
 

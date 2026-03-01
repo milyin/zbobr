@@ -123,12 +123,11 @@ impl ZbobrRepoBackendGithub {
         git_user_name: String,
         git_user_email: String,
     ) -> anyhow::Result<Self> {
-        let backend_config =
-            <ZbobrRepoBackendGithubConfig as zbobr_api::config::Config>::build(
-                toml,
-                args,
-                std::path::Path::new("."),
-            );
+        let backend_config = <ZbobrRepoBackendGithubConfig as zbobr_api::config::Config>::build(
+            toml,
+            args,
+            std::path::Path::new("."),
+        );
         Self::from_config(backend_config, git_user_name, git_user_email)
     }
 

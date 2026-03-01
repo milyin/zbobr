@@ -35,7 +35,8 @@ impl ZbobrRepoBackendFs {
         args: crate::config::ZbobrRepoBackendFsArgs,
         config_dir: &std::path::Path,
     ) -> anyhow::Result<Self> {
-        let config = <ZbobrRepoBackendFsConfig as zbobr_api::config::Config>::build(toml, args, config_dir);
+        let config =
+            <ZbobrRepoBackendFsConfig as zbobr_api::config::Config>::build(toml, args, config_dir);
         Self::from_config(config)
     }
 

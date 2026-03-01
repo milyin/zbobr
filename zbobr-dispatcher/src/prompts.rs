@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
-use crate::config::{ZbobrDispatcherArgs, ZbobrDispatcherConfig};
-use crate::task::Role;
+use crate::{
+    config::{ZbobrDispatcherArgs, ZbobrDispatcherConfig},
+    task::Role,
+};
 
 /// Resolved prompt file paths for each role.
 #[derive(Debug, Clone)]
@@ -56,7 +58,11 @@ pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::R
     let mut combined = String::new();
     for path in paths.iter() {
         let resolved_path = if let Some(base) = base_path {
-            if path.is_relative() { base.join(path) } else { path.clone() }
+            if path.is_relative() {
+                base.join(path)
+            } else {
+                path.clone()
+            }
         } else if path.is_relative() {
             std::env::current_dir()?.join(path)
         } else {
@@ -66,7 +72,10 @@ pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::R
         let content = match std::fs::read_to_string(&resolved_path) {
             Ok(c) => c,
             Err(_) => {
-                tracing::debug!("Prompt file not found, skipping: {}", resolved_path.display());
+                tracing::debug!(
+                    "Prompt file not found, skipping: {}",
+                    resolved_path.display()
+                );
                 continue;
             }
         };
@@ -104,7 +113,10 @@ pub fn build_full_prompt(user_context: &str, role: Role) -> String {
     if user_context.is_empty() {
         format!("{}\n\n---\n\n{}", hardcoded, api_docs)
     } else {
-        format!("{}\n\n---\n\n{}\n\n---\n\n{}", hardcoded, user_context, api_docs)
+        format!(
+            "{}\n\n---\n\n{}\n\n---\n\n{}",
+            hardcoded, user_context, api_docs
+        )
     }
 }
 
