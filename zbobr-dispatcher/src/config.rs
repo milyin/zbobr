@@ -13,7 +13,7 @@ use zbobr_executor_mcp_tester::{
     ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterConfig, ZbobrExecutorMcpTesterToml,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 #[config_struct]
 /// Executor configuration section.
 pub struct ZbobrExecutorConfig {

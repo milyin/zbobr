@@ -13,22 +13,7 @@ pub struct ZbobrRepoBackendGithubConfig {
 }
 
 impl zbobr_api::config::BackendConfig for ZbobrRepoBackendGithubConfig {
-    type Toml = ZbobrRepoBackendGithubToml;
-    type Args = ZbobrRepoBackendGithubArgs;
     type Backend = crate::ZbobrRepoBackendGithub;
-
-    fn build_config(
-        toml: Option<Self::Toml>,
-        args: Self::Args,
-        _config_dir: &std::path::Path,
-    ) -> Self {
-        let defaults = Self::default();
-        let merged = toml.unwrap_or_default().merge_with_args(args);
-        Self {
-            fork_owner: merged.fork_owner.unwrap_or(defaults.fork_owner),
-            token: merged.token.unwrap_or(defaults.token),
-        }
-    }
 
     fn build_backend(
         self,
@@ -59,8 +44,4 @@ impl ZbobrRepoBackendGithubConfig {
         }
         Ok(())
     }
-}
-
-impl zbobr_api::config::BackendWithConfig for crate::ZbobrRepoBackendGithub {
-    type Config = ZbobrRepoBackendGithubConfig;
 }

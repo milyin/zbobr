@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::Context;
-use zbobr_api::config::BackendConfig;
+use zbobr_api::config::{BackendConfig, Config};
 use zbobr_executor_claude::ZbobrExecutorClaudeConfig;
 use zbobr_executor_copilot::ZbobrExecutorCopilotConfig;
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
@@ -30,14 +30,14 @@ use crate::config::{
         deserialize = "TC::Toml: serde::de::DeserializeOwned, RC::Toml: serde::de::DeserializeOwned"
     )
 )]
-pub struct GenericConfigToml<TC: BackendConfig, RC: BackendConfig> {
+pub struct GenericConfigToml<TC: Config, RC: Config> {
     pub dispatcher: Option<ZbobrDispatcherToml>,
     pub tasks: Option<TC::Toml>,
     pub repo: Option<RC::Toml>,
     pub executor: Option<ZbobrExecutorToml>,
 }
 
-impl<TC: BackendConfig, RC: BackendConfig> Default for GenericConfigToml<TC, RC> {
+impl<TC: Config, RC: Config> Default for GenericConfigToml<TC, RC> {
     fn default() -> Self {
         Self {
             dispatcher: None,
@@ -48,7 +48,7 @@ impl<TC: BackendConfig, RC: BackendConfig> Default for GenericConfigToml<TC, RC>
     }
 }
 
-impl<TC: BackendConfig, RC: BackendConfig> GenericConfigToml<TC, RC> {
+impl<TC: Config, RC: Config> GenericConfigToml<TC, RC> {
     /// Load from a TOML file. Returns `Ok(None)` if the file does not exist.
     pub fn load(path: &Path) -> anyhow::Result<Option<Self>> {
         if !path.exists() {
@@ -70,7 +70,7 @@ impl<TC: BackendConfig, RC: BackendConfig> GenericConfigToml<TC, RC> {
 ///
 /// The dispatcher and executor args are always included. Task and repo backend
 /// args are provided by the caller via `TA` and `RA` type parameters, which are
-/// the `Args` associated types of the respective `BackendConfig` implementations.
+/// the `Args` associated types of the respective `Config` implementations.
 ///
 /// Help headings: `[tasks]` is applied to `TA` args, `[repo]` to `RA` args.
 #[derive(clap::Args, Clone, Default, Debug)]
@@ -97,14 +97,14 @@ where
 // ---------------------------------------------------------------------------
 
 /// Resolved configuration parametrized by task and repo backend config types.
-pub struct GenericConfig<TC: BackendConfig, RC: BackendConfig> {
+pub struct GenericConfig<TC: Config + BackendConfig, RC: Config + BackendConfig> {
     pub dispatcher: ZbobrDispatcherConfig,
     pub tasks: TC,
     pub repo: RC,
     pub executor: ZbobrExecutorConfig,
 }
 
-impl<TC: BackendConfig, RC: BackendConfig> GenericConfig<TC, RC>
+impl<TC: Config + BackendConfig, RC: Config + BackendConfig> GenericConfig<TC, RC>
 where
     TC::Args: std::fmt::Debug,
     RC::Args: std::fmt::Debug,
@@ -117,10 +117,10 @@ where
         let toml = toml.unwrap_or_default();
 
         let dispatcher =
-            ZbobrDispatcherConfig::build(toml.dispatcher, args.dispatcher, config_dir)?;
+            ZbobrDispatcherConfig::build(toml.dispatcher, args.dispatcher, config_dir);
 
-        let tasks = TC::build_config(toml.tasks, args.tasks, config_dir);
-        let repo = RC::build_config(toml.repo, args.repo, config_dir);
+        let tasks = TC::build(toml.tasks, args.tasks, config_dir);
+        let repo = RC::build(toml.repo, args.repo, config_dir);
 
         let executor = {
             let t = toml.executor.unwrap_or_default();

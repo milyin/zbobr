@@ -1619,11 +1619,11 @@ async fn rewrite_commit_authors(
 
 /// Standard entry point for a Zbobr CLI application, heavily parameterized
 /// to allow for different backends.
-use zbobr_api::config::{BackendConfig, BackendWithConfig};
+use zbobr_api::config::{BackendConfig, Config};
 
 pub async fn run_zbobr<
-    TTaskBackend: crate::backend::TaskBackend + BackendWithConfig + 'static,
-    TRepoBackend: crate::backend::RepoBackend + BackendWithConfig + 'static,
+    TC: Config + BackendConfig + 'static,
+    RC: Config + BackendConfig + 'static,
 >(
     app_name: &'static str,
     app_about: &'static str,
@@ -1631,15 +1631,12 @@ pub async fn run_zbobr<
     default_config_name: &'static str,
 ) -> anyhow::Result<()>
 where
-    <<TTaskBackend as BackendWithConfig>::Config as BackendConfig>::Args:
-        clap::Args + std::fmt::Debug + Clone,
-    <<TRepoBackend as BackendWithConfig>::Config as BackendConfig>::Args:
-        clap::Args + std::fmt::Debug + Clone,
+    TC::Backend: crate::backend::TaskBackend + 'static,
+    RC::Backend: crate::backend::RepoBackend + 'static,
+    TC::Args: std::fmt::Debug + Clone,
+    RC::Args: std::fmt::Debug + Clone,
 {
-    let cli: GenericCli<
-        <<TTaskBackend as BackendWithConfig>::Config as BackendConfig>::Args,
-        <<TRepoBackend as BackendWithConfig>::Config as BackendConfig>::Args,
-    > = parse_cli(app_name, app_about, app_long_about);
+    let cli: GenericCli<TC::Args, RC::Args> = parse_cli(app_name, app_about, app_long_about);
 
     let config_path = cli
         .config_file
@@ -1660,18 +1657,8 @@ where
         std::env::current_dir()?
     };
 
-    let root_toml = crate::GenericConfigToml::<
-        <TTaskBackend as BackendWithConfig>::Config,
-        <TRepoBackend as BackendWithConfig>::Config,
-    >::load(&config_path)?;
-    let config = crate::GenericConfig::<
-        <TTaskBackend as BackendWithConfig>::Config,
-        <TRepoBackend as BackendWithConfig>::Config,
-    >::build(
-        root_toml,
-        cli.settings.clone(),
-        &config_dir,
-    )?;
+    let root_toml = crate::GenericConfigToml::<TC, RC>::load(&config_path)?;
+    let config = crate::GenericConfig::<TC, RC>::build(root_toml, cli.settings.clone(), &config_dir)?;
     config.dispatcher.validate()?;
     let executor_config = config.executor.clone();
 

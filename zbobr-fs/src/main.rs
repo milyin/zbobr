@@ -9,8 +9,8 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     zbobr_dispatcher::cli::run_zbobr::<
-        zbobr_task_backend_fs::ZbobrTaskBackendFs,
-        zbobr_repo_backend_fs::ZbobrRepoBackendFs,
+        zbobr_task_backend_fs::ZbobrTaskBackendFsConfig,
+        zbobr_repo_backend_fs::ZbobrRepoBackendFsConfig,
     >(
         "zbobr-fs",
         "Filesystem-backed AI-powered task dispatcher",

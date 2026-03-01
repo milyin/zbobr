@@ -86,6 +86,8 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
     let mut into_config_setup = Vec::new();
     let mut into_config_required = Vec::new();
     let mut into_config_fields = Vec::new();
+    // Fields for the Config::build impl.
+    let mut config_build_fields: Vec<TokenStream2> = Vec::new();
 
     for field in fields_named {
         let field_ident = field
@@ -133,6 +135,7 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             .unwrap_or_else(|| LitStr::new(&field_kebab, Span::call_site()));
 
         let is_nested = config_meta.nested;
+        let is_path = config_meta.path;
 
         if is_nested {
             let base_is_option = option_inner_type(&field_ty);
@@ -225,6 +228,11 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                     #field_ident: #init_expr
                 });
             }
+
+            // For nested fields in Config::build, use defaults.
+            config_build_fields.push(quote! {
+                #field_ident: defaults.#field_ident
+            });
         } else {
             let arg_name_value = config_meta
                 .heading_prefix
@@ -339,8 +347,42 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 into_config_fields.push(quote! {
                     #field_ident: #init_expr
                 });
-
             }
+
+            // Generate Config::build field assignment.
+            let build_expr = if is_path {
+                if base_is_option.is_some() {
+                    // Option<PathBuf>: merged.field.map(|p| resolve_path(p, config_dir))
+                    quote! {
+                        #field_ident: __merged.#field_ident.map(|p| ::zbobr_utility::resolve_path(p, config_dir))
+                    }
+                } else if vec_inner_type(&value_ty).is_some() {
+                    // Vec<PathBuf>: merged.field.map(|v| ...).unwrap_or(defaults.field)
+                    quote! {
+                        #field_ident: __merged.#field_ident
+                            .map(|v| v.into_iter().map(|p| ::zbobr_utility::resolve_path(p, config_dir)).collect())
+                            .unwrap_or(defaults.#field_ident)
+                    }
+                } else {
+                    // PathBuf: merged.field.map(|p| resolve_path(p, config_dir)).unwrap_or(defaults.field)
+                    quote! {
+                        #field_ident: __merged.#field_ident
+                            .map(|p| ::zbobr_utility::resolve_path(p, config_dir))
+                            .unwrap_or(defaults.#field_ident)
+                    }
+                }
+            } else if base_is_option.is_some() {
+                // Option<T>: merged.field (already Option)
+                quote! {
+                    #field_ident: __merged.#field_ident
+                }
+            } else {
+                // T: merged.field.unwrap_or(defaults.field)
+                quote! {
+                    #field_ident: __merged.#field_ident.unwrap_or(defaults.#field_ident)
+                }
+            };
+            config_build_fields.push(build_expr);
         }
     }
 
@@ -512,6 +554,19 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             }
         }
 
+        impl #impl_generics ::zbobr_api::config::Config for #ident #ty_generics #where_clause {
+            type Toml = #toml_ident #ty_generics;
+            type Args = #args_ident #ty_generics;
+            fn build(toml: ::std::option::Option<Self::Toml>, args: Self::Args, config_dir: &::std::path::Path) -> Self {
+                let defaults = Self::default();
+                let __merged = toml.unwrap_or_default().merge_with_args(args);
+                let _ = &__merged;
+                Self {
+                    #(#config_build_fields,)*
+                }
+            }
+        }
+
     };
 
     Ok(tokens)
@@ -520,6 +575,7 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
 #[derive(Default)]
 struct FieldConfig {
     nested: bool,
+    path: bool,
     help_heading: Option<String>,
     skip_toml: bool,
     nested_args_ty: Option<TypePath>,
@@ -557,6 +613,7 @@ fn parse_config_meta(attr: &Attribute, config: &mut FieldConfig) -> syn::Result<
         match meta {
             Meta::Path(path) if path.is_ident("nested") => config.nested = true,
             Meta::Path(path) if path.is_ident("skip_toml") => config.skip_toml = true,
+            Meta::Path(path) if path.is_ident("path") => config.path = true,
             Meta::NameValue(name_value) if name_value.path.is_ident("help_heading") => {
                 if let syn::Expr::Lit(syn::ExprLit {
                     lit: Lit::Str(lit), ..
@@ -747,4 +804,3 @@ fn format_help_heading(prefix_kebab: &str, description: Option<&str>) -> String 
     let prefix = prefix_kebab.replace('-', ".");
     format!("[{prefix}]")
 }
-

@@ -7,10 +7,10 @@ use zbobr_utility::config_struct;
 /// Configuration for the filesystem repo backend.
 pub struct ZbobrRepoBackendFsConfig {
     #[arg(long)]
+    #[config(path)]
     pub repos_dir: PathBuf,
 }
 
-/// Resolved configuration for the filesystem repo backend.
 impl Default for ZbobrRepoBackendFsConfig {
     fn default() -> Self {
         Self {
@@ -20,24 +20,7 @@ impl Default for ZbobrRepoBackendFsConfig {
 }
 
 impl zbobr_api::config::BackendConfig for ZbobrRepoBackendFsConfig {
-    type Toml = ZbobrRepoBackendFsToml;
-    type Args = ZbobrRepoBackendFsArgs;
     type Backend = crate::ZbobrRepoBackendFs;
-
-    fn build_config(
-        toml: Option<Self::Toml>,
-        args: Self::Args,
-        config_dir: &std::path::Path,
-    ) -> Self {
-        let defaults = Self::default();
-        let merged = toml.unwrap_or_default().merge_with_args(args);
-        Self {
-            repos_dir: merged
-                .repos_dir
-                .map(|p| zbobr_utility::resolve_path(p, config_dir))
-                .unwrap_or(defaults.repos_dir),
-        }
-    }
 
     fn build_backend(
         self,
@@ -53,8 +36,4 @@ impl ZbobrRepoBackendFsConfig {
         // repos_dir can be any path — we'll create it if needed
         Ok(())
     }
-}
-
-impl zbobr_api::config::BackendWithConfig for crate::ZbobrRepoBackendFs {
-    type Config = ZbobrRepoBackendFsConfig;
 }

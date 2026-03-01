@@ -16,7 +16,7 @@ pub use config::{
     ZbobrExecutorConfig, ZbobrExecutorToml,
 };
 pub use generic_config::{GenericConfig, GenericConfigArgs, GenericConfigToml};
-pub use zbobr_api::config::BackendConfig;
+pub use zbobr_api::config::{BackendConfig, Config};
 pub use mcp::{
     MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, WorkerMcp, merger_instructions,
     planner_instructions, preparator_instructions, reviewer_instructions, worker_instructions,

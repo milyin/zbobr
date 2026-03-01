@@ -13,22 +13,7 @@ pub struct ZbobrTaskBackendGithubConfig {
 }
 
 impl zbobr_api::config::BackendConfig for ZbobrTaskBackendGithubConfig {
-    type Toml = ZbobrTaskBackendGithubToml;
-    type Args = ZbobrTaskBackendGithubArgs;
     type Backend = crate::ZbobrTaskBackendGithub;
-
-    fn build_config(
-        toml: Option<Self::Toml>,
-        args: Self::Args,
-        _config_dir: &std::path::Path,
-    ) -> Self {
-        let defaults = Self::default();
-        let merged = toml.unwrap_or_default().merge_with_args(args);
-        Self {
-            task_repo: merged.task_repo.unwrap_or(defaults.task_repo),
-            token: merged.token.unwrap_or(defaults.token),
-        }
-    }
 
     fn build_backend(
         self,
@@ -67,8 +52,4 @@ impl ZbobrTaskBackendGithubConfig {
         }
         Ok((parts[0], parts[1]))
     }
-}
-
-impl zbobr_api::config::BackendWithConfig for crate::ZbobrTaskBackendGithub {
-    type Config = ZbobrTaskBackendGithubConfig;
 }

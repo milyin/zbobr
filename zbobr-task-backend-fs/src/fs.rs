@@ -116,7 +116,7 @@ impl ZbobrTaskBackendFs {
         args: crate::config::ZbobrTaskBackendFsArgs,
         config_dir: &std::path::Path,
     ) -> anyhow::Result<Self> {
-        let config = <ZbobrTaskBackendFsConfig as zbobr_api::config::BackendConfig>::build_config(toml, args, config_dir);
+        let config = <ZbobrTaskBackendFsConfig as zbobr_api::config::Config>::build(toml, args, config_dir);
         Self::from_config(config)
     }
 
