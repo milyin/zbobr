@@ -1,3 +1,4 @@
+#![allow(clippy::await_holding_lock)]
 /// Integration tests: filesystem task backend + filesystem repo backend.
 ///
 /// These tests are always active (no GitHub credentials required).
@@ -5,15 +6,16 @@
 /// or filter by prefix: `cargo test test_fs_fs_`
 mod mcp_integration;
 
-use std::sync::{Arc, Mutex};
+
+use std::sync::Arc;
 use tokio::sync::OnceCell;
 
 use mcp_integration::IntegrationTestEnv;
 use mcp_integration::test_helpers;
 
 static ENV: OnceCell<Option<Arc<IntegrationTestEnv>>> = OnceCell::const_new();
-// std::sync::Mutex serializes across multiple tokio runtimes (one per #[tokio::test]).
-static TEST_LOCK: Mutex<()> = Mutex::new(());
+// tokio::sync::Mutex serializes tests — no poison semantics, works across runtimes.
+static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 async fn get_env() -> Option<Arc<IntegrationTestEnv>> {
     ENV.get_or_init(|| async { IntegrationTestEnv::init_fs_fs("fs_fs").await })
@@ -27,7 +29,7 @@ async fn get_env() -> Option<Arc<IntegrationTestEnv>> {
 
 #[tokio::test]
 async fn test_fs_fs_preparation() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -36,7 +38,7 @@ async fn test_fs_fs_preparation() {
 
 #[tokio::test]
 async fn test_fs_fs_planning() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -45,7 +47,7 @@ async fn test_fs_fs_planning() {
 
 #[tokio::test]
 async fn test_fs_fs_working() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -54,7 +56,7 @@ async fn test_fs_fs_working() {
 
 #[tokio::test]
 async fn test_fs_fs_reviewing() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -63,7 +65,7 @@ async fn test_fs_fs_reviewing() {
 
 #[tokio::test]
 async fn test_fs_fs_merging() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -72,7 +74,7 @@ async fn test_fs_fs_merging() {
 
 #[tokio::test]
 async fn test_fs_fs_merging_with_real_conflict() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -81,7 +83,7 @@ async fn test_fs_fs_merging_with_real_conflict() {
 
 #[tokio::test]
 async fn test_fs_fs_conflict_detection() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -90,7 +92,7 @@ async fn test_fs_fs_conflict_detection() {
 
 #[tokio::test]
 async fn test_fs_fs_report_error_preserves_signal() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -99,7 +101,7 @@ async fn test_fs_fs_report_error_preserves_signal() {
 
 #[tokio::test]
 async fn test_fs_fs_signal_preservation_during_conflict() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -108,7 +110,7 @@ async fn test_fs_fs_signal_preservation_during_conflict() {
 
 #[tokio::test]
 async fn test_fs_fs_reviewing_approval() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -121,7 +123,7 @@ async fn test_fs_fs_reviewing_approval() {
 
 #[tokio::test]
 async fn test_fs_fs_repo_backend_clone() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -130,7 +132,7 @@ async fn test_fs_fs_repo_backend_clone() {
 
 #[tokio::test]
 async fn test_fs_fs_repo_backend_planning() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -139,7 +141,7 @@ async fn test_fs_fs_repo_backend_planning() {
 
 #[tokio::test]
 async fn test_fs_fs_repo_backend_working() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -148,7 +150,7 @@ async fn test_fs_fs_repo_backend_working() {
 
 #[tokio::test]
 async fn test_fs_fs_repo_backend_reviewing() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -157,7 +159,7 @@ async fn test_fs_fs_repo_backend_reviewing() {
 
 #[tokio::test]
 async fn test_fs_fs_repo_backend_merging() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -170,7 +172,7 @@ async fn test_fs_fs_repo_backend_merging() {
 
 #[tokio::test]
 async fn test_fs_fs_repo_backend_clone_cross_org() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -179,7 +181,7 @@ async fn test_fs_fs_repo_backend_clone_cross_org() {
 
 #[tokio::test]
 async fn test_fs_fs_repo_backend_planning_cross_org() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -188,7 +190,7 @@ async fn test_fs_fs_repo_backend_planning_cross_org() {
 
 #[tokio::test]
 async fn test_fs_fs_repo_backend_working_cross_org() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -197,7 +199,7 @@ async fn test_fs_fs_repo_backend_working_cross_org() {
 
 #[tokio::test]
 async fn test_fs_fs_repo_backend_reviewing_cross_org() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -206,7 +208,7 @@ async fn test_fs_fs_repo_backend_reviewing_cross_org() {
 
 #[tokio::test]
 async fn test_fs_fs_repo_backend_merging_cross_org() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };
@@ -219,7 +221,7 @@ async fn test_fs_fs_repo_backend_merging_cross_org() {
 
 #[tokio::test]
 async fn test_fs_fs_cli_confirm_flag_pauses_on_stage_change() {
-    let _guard = TEST_LOCK.lock().unwrap();
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
         return;
     };

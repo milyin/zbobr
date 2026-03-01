@@ -97,6 +97,7 @@ impl IntegrationTestEnv {
         task_repo: String,
         task_token: String,
     ) -> Option<Arc<Self>> {
+        install_rustls_provider();
         if !check_mcp_tester().await {
             return None;
         }
@@ -159,6 +160,7 @@ impl IntegrationTestEnv {
         repo_token: String,
         target_repo: Option<String>,
     ) -> Option<Arc<Self>> {
+        install_rustls_provider();
         if !check_mcp_tester().await {
             return None;
         }
@@ -228,6 +230,7 @@ impl IntegrationTestEnv {
         fork_owner: String,
         repo_token: String,
     ) -> Option<Arc<Self>> {
+        install_rustls_provider();
         if !check_mcp_tester().await {
             return None;
         }
@@ -655,6 +658,14 @@ impl IntegrationTestEnv {
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+fn install_rustls_provider() {
+    // Octocrab (via reqwest/rustls) requires a global CryptoProvider to be
+    // installed before any HTTPS connection is made.  Installing the ring
+    // provider is idempotent; the error is silently ignored if another caller
+    // already installed one.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
 
 async fn check_mcp_tester() -> bool {
     let result = tokio::process::Command::new("mcp-tester")
