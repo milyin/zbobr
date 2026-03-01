@@ -1,6 +1,8 @@
-/// Shared test bodies used by all backend-combination test files.
-/// Each function takes a fully-initialised `IntegrationTestEnv` and runs
-/// one complete test scenario against it.
+//! Shared test bodies used by all backend-combination test files.
+//! Each function takes a fully-initialised `IntegrationTestEnv` and runs
+//! one complete test scenario against it.
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 
 use zbobr_dispatcher::{Signal, Stage, task::Parameter};

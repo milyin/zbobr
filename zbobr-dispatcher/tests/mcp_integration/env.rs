@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -10,20 +12,24 @@ use zbobr_dispatcher::{
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_repo_backend_fs::{ZbobrRepoBackendFs, ZbobrRepoBackendFsConfig};
+use zbobr_repo_backend_github::{ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig};
 use zbobr_task_backend_fs::{ZbobrTaskBackendFs, ZbobrTaskBackendFsConfig};
+use zbobr_task_backend_github::{ZbobrTaskBackendGithub, ZbobrTaskBackendGithubConfig};
 
 static SCENARIO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Shared environment for integration tests.  Holds a live `ZbobrDispatcher`
-/// backed by in-process filesystem backends — no CLI binary involved.
+/// backed by in-process backends — no CLI binary involved.
 pub struct IntegrationTestEnv {
     pub base_path: PathBuf,
     pub workspaces_dir: PathBuf,
     pub name: &'static str,
     pub zbobr: ZbobrDispatcherDyn,
-    /// Optional remote repository slug used by GitHub repo-backend tests.
-    /// Always `None` for the filesystem backend.
+    /// Optional remote repository slug (`owner/repo`) used by GitHub repo-backend tests.
+    /// `None` for the filesystem repo backend.
     pub target_repo: Option<String>,
+    /// Fork owner for the GitHub repo backend; `None` for the filesystem repo backend.
+    fork_owner: Option<String>,
 }
 
 impl IntegrationTestEnv {
@@ -79,6 +85,206 @@ impl IntegrationTestEnv {
             name,
             zbobr,
             target_repo: None,
+            fork_owner: None,
+        }))
+    }
+
+    /// Construct an environment backed by a GitHub task backend and filesystem repo backend.
+    ///
+    /// Returns `None` when `mcp-tester` is not installed (tests are skipped).
+    pub async fn init_github_fs(
+        name: &'static str,
+        task_repo: String,
+        task_token: String,
+    ) -> Option<Arc<Self>> {
+        if !check_mcp_tester().await {
+            return None;
+        }
+
+        let base_path = make_base_path(name).await;
+        let workspaces_dir = base_path.join("workspaces");
+
+        eprintln!(
+            "[IntegrationTestEnv/{name}] base path: {}",
+            base_path.display()
+        );
+
+        let dispatcher_config = ZbobrDispatcherConfig {
+            workspaces: workspaces_dir.clone(),
+            cli_tool: Tool::McpTester,
+            git_user_name: "test-bot".to_string(),
+            git_user_email: "test@example.com".to_string(),
+            preparator_prompts: vec![],
+            planner_prompts: vec![],
+            worker_prompts: vec![],
+            reviewer_prompts: vec![],
+            merger_prompts: vec![],
+            ..ZbobrDispatcherConfig::default()
+        };
+
+        let task_backend_config = ZbobrTaskBackendGithubConfig {
+            github_repo: task_repo.clone(),
+            github_token: task_token,
+        };
+        let repo_backend_config = ZbobrRepoBackendFsConfig {
+            repos_dir: base_path.join("repos"),
+        };
+
+        let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
+            Arc::new(ZbobrTaskBackendGithub::from_config(task_backend_config).ok()?);
+        let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> =
+            Arc::new(ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?);
+
+        let zbobr =
+            ZbobrDispatcher::new_with_backends(dispatcher_config, task_backend, repo_backend);
+
+        zbobr.setup_repository(false).await.ok()?;
+
+        Some(Arc::new(IntegrationTestEnv {
+            base_path,
+            workspaces_dir,
+            name,
+            zbobr,
+            target_repo: Some(task_repo),
+            fork_owner: None,
+        }))
+    }
+
+    /// Construct an environment backed by a filesystem task backend and GitHub repo backend.
+    ///
+    /// Returns `None` when `mcp-tester` is not installed (tests are skipped).
+    pub async fn init_fs_github(
+        name: &'static str,
+        fork_owner: String,
+        repo_token: String,
+        target_repo: Option<String>,
+    ) -> Option<Arc<Self>> {
+        if !check_mcp_tester().await {
+            return None;
+        }
+
+        let base_path = make_base_path(name).await;
+        let workspaces_dir = base_path.join("workspaces");
+
+        eprintln!(
+            "[IntegrationTestEnv/{name}] base path: {}",
+            base_path.display()
+        );
+
+        let dispatcher_config = ZbobrDispatcherConfig {
+            workspaces: workspaces_dir.clone(),
+            cli_tool: Tool::McpTester,
+            git_user_name: "test-bot".to_string(),
+            git_user_email: "test@example.com".to_string(),
+            preparator_prompts: vec![],
+            planner_prompts: vec![],
+            worker_prompts: vec![],
+            reviewer_prompts: vec![],
+            merger_prompts: vec![],
+            ..ZbobrDispatcherConfig::default()
+        };
+
+        let task_backend_config = ZbobrTaskBackendFsConfig {
+            tasks_dir: base_path.join("tasks"),
+        };
+        let repo_backend_config = ZbobrRepoBackendGithubConfig {
+            fork_owner: fork_owner.clone(),
+            github_token: repo_token,
+        };
+
+        let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
+            Arc::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?);
+        let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = Arc::new(
+            ZbobrRepoBackendGithub::from_config(
+                repo_backend_config,
+                "test-bot".to_string(),
+                "test@example.com".to_string(),
+            )
+            .ok()?,
+        );
+
+        let zbobr =
+            ZbobrDispatcher::new_with_backends(dispatcher_config, task_backend, repo_backend);
+
+        zbobr.setup_repository(false).await.ok()?;
+
+        Some(Arc::new(IntegrationTestEnv {
+            base_path,
+            workspaces_dir,
+            name,
+            zbobr,
+            target_repo,
+            fork_owner: Some(fork_owner),
+        }))
+    }
+
+    /// Construct an environment backed by GitHub task and repo backends.
+    ///
+    /// Returns `None` when `mcp-tester` is not installed (tests are skipped).
+    pub async fn init_github_github(
+        name: &'static str,
+        task_repo: String,
+        task_token: String,
+        fork_owner: String,
+        repo_token: String,
+    ) -> Option<Arc<Self>> {
+        if !check_mcp_tester().await {
+            return None;
+        }
+
+        let base_path = make_base_path(name).await;
+        let workspaces_dir = base_path.join("workspaces");
+
+        eprintln!(
+            "[IntegrationTestEnv/{name}] base path: {}",
+            base_path.display()
+        );
+
+        let dispatcher_config = ZbobrDispatcherConfig {
+            workspaces: workspaces_dir.clone(),
+            cli_tool: Tool::McpTester,
+            git_user_name: "test-bot".to_string(),
+            git_user_email: "test@example.com".to_string(),
+            preparator_prompts: vec![],
+            planner_prompts: vec![],
+            worker_prompts: vec![],
+            reviewer_prompts: vec![],
+            merger_prompts: vec![],
+            ..ZbobrDispatcherConfig::default()
+        };
+
+        let task_backend_config = ZbobrTaskBackendGithubConfig {
+            github_repo: task_repo.clone(),
+            github_token: task_token,
+        };
+        let repo_backend_config = ZbobrRepoBackendGithubConfig {
+            fork_owner: fork_owner.clone(),
+            github_token: repo_token,
+        };
+
+        let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
+            Arc::new(ZbobrTaskBackendGithub::from_config(task_backend_config).ok()?);
+        let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = Arc::new(
+            ZbobrRepoBackendGithub::from_config(
+                repo_backend_config,
+                "test-bot".to_string(),
+                "test@example.com".to_string(),
+            )
+            .ok()?,
+        );
+
+        let zbobr =
+            ZbobrDispatcher::new_with_backends(dispatcher_config, task_backend, repo_backend);
+
+        zbobr.setup_repository(false).await.ok()?;
+
+        Some(Arc::new(IntegrationTestEnv {
+            base_path,
+            workspaces_dir,
+            name,
+            zbobr,
+            target_repo: Some(task_repo),
+            fork_owner: Some(fork_owner),
         }))
     }
 
@@ -92,7 +298,7 @@ impl IntegrationTestEnv {
 
     /// Return the fork owner for a GitHub repo backend, or `None` for FS.
     pub fn fork_owner(&self) -> Option<&str> {
-        None
+        self.fork_owner.as_deref()
     }
 
     // -----------------------------------------------------------------------
