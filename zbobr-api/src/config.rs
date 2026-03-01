@@ -82,7 +82,7 @@ impl Default for ZbobrDispatcherConfig {
 }
 
 /// Manually implemented; only contains build_backend.
-pub trait BackendConfig: Sized {
+pub trait BackendConfig: Config {
     /// The runtime backend type instantiated by this configuration.
     type Backend;
     /// Build the backend instance from the resolved configuration.

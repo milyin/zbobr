@@ -1619,11 +1619,11 @@ async fn rewrite_commit_authors(
 
 /// Standard entry point for a Zbobr CLI application, heavily parameterized
 /// to allow for different backends.
-use zbobr_api::config::{BackendConfig, Config};
+use zbobr_api::config::BackendConfig;
 
 pub async fn run_zbobr<
-    TC: Config + BackendConfig + 'static,
-    RC: Config + BackendConfig + 'static,
+    TC: BackendConfig + 'static,
+    RC: BackendConfig + 'static,
 >(
     app_name: &'static str,
     app_about: &'static str,

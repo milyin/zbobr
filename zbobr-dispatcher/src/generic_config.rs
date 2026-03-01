@@ -97,14 +97,14 @@ where
 // ---------------------------------------------------------------------------
 
 /// Resolved configuration parametrized by task and repo backend config types.
-pub struct GenericConfig<TC: Config + BackendConfig, RC: Config + BackendConfig> {
+pub struct GenericConfig<TC: BackendConfig, RC: BackendConfig> {
     pub dispatcher: ZbobrDispatcherConfig,
     pub tasks: TC,
     pub repo: RC,
     pub executor: ZbobrExecutorConfig,
 }
 
-impl<TC: Config + BackendConfig, RC: Config + BackendConfig> GenericConfig<TC, RC>
+impl<TC: BackendConfig, RC: BackendConfig> GenericConfig<TC, RC>
 where
     TC::Args: std::fmt::Debug,
     RC::Args: std::fmt::Debug,
