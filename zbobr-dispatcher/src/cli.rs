@@ -1,6 +1,6 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
-use std::{path::PathBuf, sync::mpsc};
+use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
@@ -1331,7 +1331,7 @@ async fn start_mcp_server(
     role: Role,
     task_id: u64,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
-    let (port_tx, port_rx) = mpsc::channel();
+    let (port_tx, port_rx) = tokio::sync::oneshot::channel();
     let server_handle = tokio::spawn(async move {
         match crate::mcp::run_role_mcp_server(zbobr, role, task_id).await {
             Ok(assigned_port) => {
@@ -1344,9 +1344,10 @@ async fn start_mcp_server(
         }
     });
 
-    let assigned_port = port_rx
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .context("MCP server failed to report assigned port in time")?;
+    let assigned_port = tokio::time::timeout(std::time::Duration::from_secs(5), port_rx)
+        .await
+        .context("MCP server failed to report assigned port in time")?
+        .context("MCP server task dropped before sending port")?;
 
     Ok((assigned_port, server_handle))
 }
