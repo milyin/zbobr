@@ -1,4 +1,5 @@
 use crate::{
+    Signal,
     mcp::common::get_hostname,
     task::{ChecklistItem, Parameter, Role, RoleSession},
 };
@@ -11,6 +12,18 @@ pub trait CommonMcpImpl: Send + Sync {
 
     fn role_name(&self) -> &'static str {
         self.role().as_str()
+    }
+
+    /// Returns the signal that should re-trigger this role after an interruption
+    /// (e.g. after `report_error` or `ask_user` pauses the task).
+    fn retry_signal(&self) -> Signal {
+        match self.role() {
+            Role::Preparator => Signal::GoPrepare,
+            Role::Planner => Signal::GoPlan,
+            Role::Worker => Signal::GoWork,
+            Role::Reviewer => Signal::GoReview,
+            Role::Merger => Signal::GoWork,
+        }
     }
 
     async fn get_description_impl(&self) -> String {
@@ -63,13 +76,21 @@ pub trait CommonMcpImpl: Send + Sync {
             return format!("Error posting error message: {e}");
         }
 
-        // Set pause flag to stop task processing and wait for user response
+        // Set pause flag to stop task processing and wait for user response.
         if let Err(e) = self.session().set_pause(true).await {
             tracing::error!(
                 "Failed to set pause for task {} after reporting error: {e}",
                 self.session().task_id()
             );
             return format!("Error reporting error but error pausing task: {e}");
+        }
+
+        // Set the retry signal so the task returns to this role after the user intervenes.
+        if let Err(e) = self.session().set_signal(self.retry_signal()).await {
+            tracing::warn!(
+                "Failed to set retry signal for task {} after reporting error: {e}",
+                self.session().task_id()
+            );
         }
 
         "Error reported to user - task paused pending response".to_string()
@@ -118,13 +139,21 @@ pub trait CommonMcpImpl: Send + Sync {
             return format!("Error posting ask_user message: {e}");
         }
 
-        // Set pause flag to stop task processing and wait for user response
+        // Set pause flag to stop task processing and wait for user response.
         if let Err(e) = self.session().set_pause(true).await {
             tracing::error!(
                 "Failed to set pause for task {} after asking user: {e}",
                 self.session().task_id()
             );
             return format!("Error asking user but error pausing task: {e}");
+        }
+
+        // Set the retry signal so the task returns to this role after the user responds.
+        if let Err(e) = self.session().set_signal(self.retry_signal()).await {
+            tracing::warn!(
+                "Failed to set retry signal for task {} after asking user: {e}",
+                self.session().task_id()
+            );
         }
 
         "User asked for guidance".to_string()

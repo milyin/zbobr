@@ -878,9 +878,32 @@ impl<'a> CliRoleRunner<'a> {
             ensure_pr_url(self.zbobr, self.task_id).await?;
         }
 
+        // Early-merge check must run BEFORE clearing the triggering condition.
+        // If a conflict is detected the session exits here — the signal is left
+        // intact so the Merger can return to the same stage after resolving it.
         if should_try_early_merge(self.role) {
             if try_early_merge(self.zbobr, self.task_id, &work_dir).await? {
                 return Ok(());
+            }
+        }
+
+        // Rule 1: clear the triggering condition right before the agent session
+        // starts (no conflict was detected above).
+        // For Merger: clear the conflict flag but NOT the signal — the signal
+        //   carries the original stage to return to after merging.
+        // For all other roles: clear the signal that caused entry.
+        {
+            let task_session = self.zbobr.task_session(self.task_id);
+            if self.role == Role::Merger {
+                task_session
+                    .set_conflict(false)
+                    .await
+                    .context("Failed to clear conflict flag on entry to Merger")?;
+            } else {
+                task_session
+                    .set_signal(None)
+                    .await
+                    .context("Failed to clear signal on stage entry")?;
             }
         }
 
@@ -1452,6 +1475,10 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Planner => {
+            // Rule 2.2: Planning → go work (if no signal already set by the agent).
+            if current_task.signal.is_none() && !current_task.pause {
+                task_session.set_signal(Some(Signal::GoWork)).await?;
+            }
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Worker => {
@@ -1477,7 +1504,8 @@ async fn finalize_session(
             }
         }
         Role::Merger => {
-            task_session.set_conflict(false).await?;
+            // Conflict was already cleared on entry (Rule 1); just return to Pending.
+            // Any signal set before or during the session is preserved per Rule 2.
             task_session.set_stage(Stage::Pending).await?;
         }
     }

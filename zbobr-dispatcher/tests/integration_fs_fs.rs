@@ -227,3 +227,43 @@ async fn test_fs_fs_cli_confirm_flag_pauses_on_stage_change() {
     };
     test_helpers::run_cli_confirm_flag(&env).await;
 }
+
+// ---------------------------------------------------------------------------
+// Entry/exit signal logic tests (Rules 1 & 2)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_fs_fs_entry_clears_signal_for_worker() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(env) = get_env().await else {
+        return;
+    };
+    test_helpers::run_entry_clears_signal_for_worker(&env).await;
+}
+
+#[tokio::test]
+async fn test_fs_fs_entry_clears_conflict_preserves_signal_for_merger() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(env) = get_env().await else {
+        return;
+    };
+    test_helpers::run_entry_clears_conflict_preserves_signal_for_merger(&env).await;
+}
+
+#[tokio::test]
+async fn test_fs_fs_planner_sets_go_work_on_exit() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(env) = get_env().await else {
+        return;
+    };
+    test_helpers::run_planner_sets_go_work_on_exit(&env).await;
+}
+
+#[tokio::test]
+async fn test_fs_fs_exit_preserves_agent_set_signal() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(env) = get_env().await else {
+        return;
+    };
+    test_helpers::run_exit_preserves_agent_set_signal(&env).await;
+}
