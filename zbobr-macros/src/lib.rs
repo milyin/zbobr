@@ -445,39 +445,36 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
 
         impl #impl_generics ::zbobr_utility::PrefixedArgs for #args_ident #ty_generics #where_clause {
             fn augment_args_prefixed(mut cmd: ::clap::Command, prefix: &str) -> ::clap::Command {
-                // Build a temporary sub-command from the derived (leaf-only) struct to
-                // obtain correctly-typed clap::Arg definitions.  We then rename every
-                // arg's id and --long form to include the supplied prefix.
-                let __tmp = <#derived_args_ident as ::clap::Args>::augment_args(
-                    ::clap::Command::new("__prefixed_tmp")
-                );
-                let __tmp_args: ::std::vec::Vec<::clap::Arg> =
-                    __tmp.get_arguments().cloned().collect();
-                for __arg in &__tmp_args {
-                    let __base_id = __arg.get_id().as_str();
-                    let __new_id: ::std::string::String = if prefix.is_empty() {
-                        __base_id.to_string()
-                    } else {
-                        format!("{}{}", prefix, __base_id)
-                    };
-                    let __new_long = __new_id.replace('.', "-");
-                    let __heading: ::std::option::Option<&'static str> = if prefix.is_empty() {
-                        ::std::option::Option::None
-                    } else {
-                        ::std::option::Option::Some(::std::boxed::Box::leak(
+                if prefix.is_empty() {
+                    // Augment directly so args inherit the parent command's
+                    // current_help_heading (set via next_help_heading on the flatten field).
+                    // Going through a temp command would lock help_heading to Some(None),
+                    // preventing the parent heading from being applied.
+                    cmd = <#derived_args_ident as ::clap::Args>::augment_args(cmd);
+                } else {
+                    // Build a temporary sub-command from the derived (leaf-only) struct to
+                    // obtain correctly-typed clap::Arg definitions.  We then rename every
+                    // arg's id and --long form to include the supplied prefix.
+                    let __tmp = <#derived_args_ident as ::clap::Args>::augment_args(
+                        ::clap::Command::new("__prefixed_tmp")
+                    );
+                    let __tmp_args: ::std::vec::Vec<::clap::Arg> =
+                        __tmp.get_arguments().cloned().collect();
+                    for __arg in &__tmp_args {
+                        let __base_id = __arg.get_id().as_str();
+                        let __new_id: ::std::string::String = format!("{}{}", prefix, __base_id);
+                        let __new_long = __new_id.replace('.', "-");
+                        let __heading: &'static str = ::std::boxed::Box::leak(
                             format!("[{}]", prefix.trim_end_matches('.')).into_boxed_str(),
-                        ))
-                    };
-                    let __id_s: &'static str =
-                        ::std::boxed::Box::leak(__new_id.into_boxed_str());
-                    let __long_s: &'static str =
-                        ::std::boxed::Box::leak(__new_long.into_boxed_str());
-                    let __new_arg = __arg.clone().id(__id_s).long(__long_s);
-                    let __new_arg = match __heading {
-                        ::std::option::Option::Some(__h) => __new_arg.help_heading(::std::option::Option::Some(__h)),
-                        ::std::option::Option::None => __new_arg,
-                    };
-                    cmd = cmd.arg(__new_arg);
+                        );
+                        let __id_s: &'static str =
+                            ::std::boxed::Box::leak(__new_id.into_boxed_str());
+                        let __long_s: &'static str =
+                            ::std::boxed::Box::leak(__new_long.into_boxed_str());
+                        let __new_arg = __arg.clone().id(__id_s).long(__long_s)
+                            .help_heading(::std::option::Option::Some(__heading));
+                        cmd = cmd.arg(__new_arg);
+                    }
                 }
                 // Recurse into nested structs.
                 #(
