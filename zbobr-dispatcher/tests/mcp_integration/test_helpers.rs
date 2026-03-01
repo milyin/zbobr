@@ -1502,7 +1502,7 @@ pub async fn run_planner_sets_go_work_on_exit(env: &IntegrationTestEnv) {
             Stage::Preparing,
         )
         .await;
-    let work_branch = format!("zbobr_fix-{task_id}-planner-exit");
+    let work_branch = format!("zbobr_fix-{task_id}-test");
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
