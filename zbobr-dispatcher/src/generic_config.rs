@@ -73,23 +73,59 @@ impl<TC: Config, RC: Config> GenericConfigToml<TC, RC> {
 /// the `Args` associated types of the respective `Config` implementations.
 ///
 /// Help headings: `[tasks]` is applied to `TA` args, `[repo]` to `RA` args.
-#[derive(clap::Args, Clone, Default, Debug)]
+/// Task and repo args are registered with `"tasks."` and `"repo."` prefixes via
+/// `PrefixedArgs` so that fields with the same name (e.g. `token`) do not
+/// collide when both backends are active.
+#[derive(Clone, Default, Debug)]
 pub struct GenericConfigArgs<TA, RA>
 where
-    TA: clap::Args + Default + Clone + std::fmt::Debug,
-    RA: clap::Args + Default + Clone + std::fmt::Debug,
+    TA: zbobr_utility::PrefixedArgs + Default + Clone + std::fmt::Debug,
+    RA: zbobr_utility::PrefixedArgs + Default + Clone + std::fmt::Debug,
 {
-    #[command(flatten)]
     pub dispatcher: ZbobrDispatcherArgs,
-
-    #[command(flatten, next_help_heading = "[tasks]")]
     pub tasks: TA,
-
-    #[command(flatten, next_help_heading = "[repo]")]
     pub repo: RA,
-
-    #[command(flatten)]
     pub executor: ZbobrExecutorArgs,
+}
+
+impl<TA, RA> clap::FromArgMatches for GenericConfigArgs<TA, RA>
+where
+    TA: zbobr_utility::PrefixedArgs + Default + Clone + std::fmt::Debug,
+    RA: zbobr_utility::PrefixedArgs + Default + Clone + std::fmt::Debug,
+{
+    fn from_arg_matches(matches: &clap::ArgMatches) -> clap::error::Result<Self> {
+        use zbobr_utility::PrefixedArgs as _;
+        Ok(Self {
+            dispatcher: ZbobrDispatcherArgs::from_matches_prefixed(matches, "")?,
+            tasks: TA::from_matches_prefixed(matches, "tasks.")?,
+            repo: RA::from_matches_prefixed(matches, "repo.")?,
+            executor: ZbobrExecutorArgs::from_matches_prefixed(matches, "")?,
+        })
+    }
+
+    fn update_from_arg_matches(&mut self, matches: &clap::ArgMatches) -> clap::error::Result<()> {
+        *self = Self::from_arg_matches(matches)?;
+        Ok(())
+    }
+}
+
+impl<TA, RA> clap::Args for GenericConfigArgs<TA, RA>
+where
+    TA: zbobr_utility::PrefixedArgs + Default + Clone + std::fmt::Debug,
+    RA: zbobr_utility::PrefixedArgs + Default + Clone + std::fmt::Debug,
+{
+    fn augment_args(mut cmd: clap::Command) -> clap::Command {
+        use zbobr_utility::PrefixedArgs as _;
+        cmd = ZbobrDispatcherArgs::augment_args_prefixed(cmd, "");
+        cmd = TA::augment_args_prefixed(cmd, "tasks.");
+        cmd = RA::augment_args_prefixed(cmd, "repo.");
+        cmd = ZbobrExecutorArgs::augment_args_prefixed(cmd, "");
+        cmd
+    }
+
+    fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
+        Self::augment_args(cmd)
+    }
 }
 
 // ---------------------------------------------------------------------------

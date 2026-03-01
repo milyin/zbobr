@@ -8,7 +8,7 @@ pub struct ZbobrTaskBackendGithubConfig {
     #[arg(long)]
     pub task_repo: String,
     /// GitHub token with read/write access to tasks repo.
-    #[arg(name = "task-github-token", long = "task-github-token", env = "ZBOBR_TASK_GITHUB_TOKEN")]
+    #[arg(long, env = "ZBOBR_TASK_GITHUB_TOKEN")]
     pub token: String,
 }
 

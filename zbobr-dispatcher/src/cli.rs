@@ -258,8 +258,8 @@ pub enum TaskSubcommand {
 /// Standard CLI structure for Zbobr dispatcher apps
 #[derive(clap::Parser)]
 pub struct GenericCli<
-    TTaskArgs: clap::Args + Default + Clone + std::fmt::Debug,
-    TRepoArgs: clap::Args + Default + Clone + std::fmt::Debug,
+    TTaskArgs: zbobr_utility::PrefixedArgs + Default + Clone + std::fmt::Debug,
+    TRepoArgs: zbobr_utility::PrefixedArgs + Default + Clone + std::fmt::Debug,
 > {
     #[command(
         flatten,
@@ -1629,8 +1629,8 @@ pub async fn run_zbobr<TC: BackendConfig + 'static, RC: BackendConfig + 'static>
 where
     TC::Backend: crate::backend::TaskBackend + 'static,
     RC::Backend: crate::backend::RepoBackend + 'static,
-    TC::Args: std::fmt::Debug + Clone,
-    RC::Args: std::fmt::Debug + Clone,
+    TC::Args: zbobr_utility::PrefixedArgs + std::fmt::Debug + Clone,
+    RC::Args: zbobr_utility::PrefixedArgs + std::fmt::Debug + Clone,
 {
     let cli: GenericCli<TC::Args, RC::Args> = parse_cli(app_name, app_about, app_long_about);
 
