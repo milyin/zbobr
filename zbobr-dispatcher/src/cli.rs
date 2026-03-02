@@ -1094,7 +1094,7 @@ pub async fn run_manager_loop(
         }
 
         let current_tool = zbobr.config().cli_tool;
-        let pending_tasks = match zbobr
+        let mut pending_tasks = match zbobr
             .list_tasks_by_stage(Stage::Pending, Some(current_tool))
             .await
         {
@@ -1104,6 +1104,34 @@ pub async fn run_manager_loop(
                 vec![]
             }
         };
+
+        // Retry mechanism to handle GitHub API eventual consistency
+        // If no pending tasks found, retry a few times with short delays
+        if pending_tasks.is_empty() {
+            const MAX_RETRIES: u32 = 3;
+            const RETRY_DELAY_MS: u64 = 500;
+
+            for attempt in 1..=MAX_RETRIES {
+                tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS)).await;
+                tracing::debug!("Retry attempt {}/{} to fetch PENDING tasks", attempt, MAX_RETRIES);
+
+                match zbobr
+                    .list_tasks_by_stage(Stage::Pending, Some(current_tool))
+                    .await
+                {
+                    Ok(tasks) => {
+                        if !tasks.is_empty() {
+                            tracing::debug!("Found {} pending tasks on retry attempt {}", tasks.len(), attempt);
+                            pending_tasks = tasks;
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Retry attempt {} failed: {e}", attempt);
+                    }
+                }
+            }
+        }
 
         let mut session_run = false;
         for task in pending_tasks {
