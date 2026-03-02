@@ -26,7 +26,7 @@ pub use mcp::{
 };
 pub use prompts::{Prompts, build_full_prompt, load_prompts, resolve_prompts};
 pub use task::{
-    ChecklistItem, Model, Parameter, RoleSession, Signal, Stage, Task, TaskSession, Tool,
+    ChecklistItem, Comment, Model, Parameter, RoleSession, Signal, Stage, Task, TaskSession, Tool,
 };
 pub use tool_executor::ToolExecutor;
 pub use zbobr_api::config::{BackendConfig, Config};
@@ -168,6 +168,10 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
 
     pub async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<String>> {
         self.task_backend.get_task_comments(id).await
+    }
+
+    pub async fn get_task_comments_structured(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
+        self.task_backend.get_task_comments_structured(id).await
     }
 
     pub async fn post_task_comment(

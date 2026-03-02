@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use zbobr_api::{ChecklistItem, Model, Parameter, Stage, Task, Tool, backend::TaskBackend};
+use zbobr_api::{ChecklistItem, Comment, CommentAuthor, CommentType, Model, Parameter, Role, Stage, Task, Tool, backend::TaskBackend};
 
 use crate::config::ZbobrTaskBackendFsConfig;
 
@@ -97,6 +97,52 @@ impl TaskFile {
             closed,
         }
     }
+}
+
+/// Parse tag from comment start: `// REPORT role:host:model` or `// ERROR role:host[:<model>]` or `// REPLY`
+/// Returns (CommentType, role_opt, host, model_opt, remaining_text)
+fn parse_comment_tag(text: &str) -> (CommentType, Option<String>, String, Option<String>, String) {
+    let trimmed = text.trim_start();
+    
+    // Check for tags like "// REPORT role:host:model"
+    if let Some(rest) = trimmed.strip_prefix("// ") {
+        let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+        if let Some(tag_part) = parts.get(0) {
+            let tag_and_meta: Vec<&str> = tag_part.splitn(2, ' ').collect();
+            let tag_str = tag_and_meta[0];
+            
+            if let Some(comment_type) = CommentType::from_str(tag_str) {
+                // For REPORT and ERROR, parse role:host:model format
+                if comment_type != CommentType::Reply {
+                    if let Some(meta_part) = tag_and_meta.get(1) {
+                        let meta_parts: Vec<&str> = meta_part.split(':').collect();
+                        let role = meta_parts.get(0).map(|s| s.to_string());
+                        let host = meta_parts.get(1).map(|s| s.to_string()).unwrap_or_default();
+                        let model = meta_parts.get(2).map(|s| s.to_string());
+                        
+                        let remaining = if let Some(body_rest) = parts.get(1) {
+                            body_rest.to_string()
+                        } else {
+                            String::new()
+                        };
+                        
+                        return (comment_type, role, host, model, remaining);
+                    }
+                }
+                
+                // For REPLY, just extract the text after
+                let remaining = if let Some(body_part) = parts.get(1) {
+                    body_part.to_string()
+                } else {
+                    String::new()
+                };
+                return (CommentType::Reply, None, String::new(), None, remaining);
+            }
+        }
+    }
+    
+    // No tag found, treat as reply
+    (CommentType::Reply, None, String::new(), None, text.to_string())
 }
 
 /// Comments storage structure.
@@ -390,6 +436,81 @@ impl TaskBackend for ZbobrTaskBackendFs {
         self.write_comments(id, comments).await?;
 
         tracing::debug!("Posted comment to task {}", id);
+        Ok(())
+    }
+
+    async fn get_task_comments_structured(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
+        let comments_str = self.read_comments(id).await?;
+        
+        Ok(comments_str
+            .into_iter()
+            .map(|text| {
+                // Parse tag from comment
+                let (comment_type, role_opt, _host, _model_opt, body_text) = parse_comment_tag(&text);
+                
+                // Determine author
+                let author = if let Some(role_str) = role_opt {
+                    match role_str.parse::<Role>() {
+                        Ok(role) => CommentAuthor::Role(role),
+                        Err(_) => CommentAuthor::User,
+                    }
+                } else {
+                    CommentAuthor::User
+                };
+                
+                Comment {
+                    comment_type,
+                    timestamp: format!("{:?}", std::time::SystemTime::now()),
+                    author,
+                    text: body_text,
+                }
+            })
+            .collect())
+    }
+
+    async fn post_task_comment_structured(
+        &self,
+        id: u64,
+        comment_type: CommentType,
+        body: &str,
+        role: Option<&str>,
+        hostname: &str,
+        model: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let mut comments = self.read_comments(id).await?;
+        
+        // Generate tag
+        let tag = match comment_type {
+            CommentType::Error => {
+                if let Some(role_str) = role {
+                    if let Some(model_str) = model {
+                        format!("// ERROR {}:{}:{}", role_str, hostname, model_str)
+                    } else {
+                        format!("// ERROR {}:{}", role_str, hostname)
+                    }
+                } else {
+                    format!("// ERROR :{}", hostname)
+                }
+            }
+            CommentType::Report => {
+                if let Some(role_str) = role {
+                    if let Some(model_str) = model {
+                        format!("// REPORT {}:{}:{}", role_str, hostname, model_str)
+                    } else {
+                        format!("// REPORT {}:{}:unknown", role_str, hostname)
+                    }
+                } else {
+                    format!("// REPORT :{}:unknown", hostname)
+                }
+            }
+            CommentType::Reply => "// REPLY".to_string(),
+        };
+        
+        let formatted_comment = format!("{}\n\n{}", tag, body);
+        comments.push(formatted_comment);
+        self.write_comments(id, comments).await?;
+        
+        tracing::debug!("Posted structured comment to task {}", id);
         Ok(())
     }
 

@@ -57,6 +57,67 @@ pub struct ChecklistItem {
     pub text: String,
 }
 
+// -- Comment types --
+
+/// Comment type classification.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+pub enum CommentType {
+    #[serde(rename = "error")]
+    Error,
+    #[serde(rename = "report")]
+    Report,
+    #[serde(rename = "reply")]
+    Reply,
+}
+
+impl CommentType {
+    /// Returns the comment type as a string.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CommentType::Error => "error",
+            CommentType::Report => "report",
+            CommentType::Reply => "reply",
+        }
+    }
+
+    /// Parse from string representation.
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "error" => Some(CommentType::Error),
+            "report" => Some(CommentType::Report),
+            "reply" => Some(CommentType::Reply),
+            _ => None,
+        }
+    }
+}
+
+/// Author of a comment (either a role or user).
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+#[serde(untagged)]
+pub enum CommentAuthor {
+    Role(Role),
+    User,
+}
+
+/// A structured comment with metadata.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+pub struct Comment {
+    #[schemars(description = "Comment type (error, report, or reply)")]
+    pub comment_type: CommentType,
+    #[schemars(description = "Timestamp when comment was created (ISO 8601 format)")]
+    pub timestamp: String,
+    #[schemars(description = "Author of the comment (role or user)")]
+    pub author: CommentAuthor,
+    #[schemars(description = "Comment text without signature/tag")]
+    pub text: String,
+}
+
 /// Workflow stage (maps to GitHub milestones internally).
 #[derive(
     Debug,

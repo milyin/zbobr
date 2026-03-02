@@ -101,6 +101,11 @@ impl RoleSession {
         self.zbobr.get_task_comments(self.task_id).await
     }
 
+    /// Get all comments as structured Comment objects (includes all types: error, report, reply).
+    pub async fn get_history(&self) -> anyhow::Result<Vec<Comment>> {
+        self.zbobr.get_task_comments_structured(self.task_id).await
+    }
+
     /// Post a message to the task discussion with role and hostname metadata.
     pub async fn post_message(&self, msg: &str, role: &str, hostname: &str) -> anyhow::Result<()> {
         self.zbobr

@@ -51,6 +51,11 @@ impl PlannerMcp {
         self.get_discussion_impl().await
     }
 
+    #[tool(description = "Get all comments with full metadata (error, report, reply) in JSON format")]
+    async fn get_history(&self) -> String {
+        self.get_history_impl().await
+    }
+
     #[tool(description = "Report an error to the user and pause task processing")]
     async fn report_error(
         &self,

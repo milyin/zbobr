@@ -56,6 +56,27 @@ pub trait CommonMcpImpl: Send + Sync {
         }
     }
 
+    async fn get_history_impl(&self) -> String {
+        tracing::info!(
+            "[{}#{}] get_history",
+            self.role_name(),
+            self.session().task_id()
+        );
+        match self.session().get_history().await {
+            Ok(comments) => {
+                if comments.is_empty() {
+                    "No comments yet.".to_string()
+                } else {
+                    match serde_json::to_string_pretty(&comments) {
+                        Ok(json) => json,
+                        Err(e) => format!("Error serializing comments: {e}"),
+                    }
+                }
+            }
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
     async fn report_error_impl(&self, message: &str) -> String {
         tracing::info!(
             "[{}#{}] report_error",
