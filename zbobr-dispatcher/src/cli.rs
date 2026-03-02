@@ -1789,48 +1789,74 @@ async fn rewrite_commit_authors(
         .await;
 
     if let (Ok(user_out), Ok(email_out)) = (config_user, config_email) {
-        if user_out.status.success() && email_out.status.success() {
-            let rebase_cmd = format!(
-                "git rebase --exec 'git commit --amend --no-edit --reset-author' '{}'",
-                dest_branch
-            );
-            let rebase_output = TokioCommand::new("sh")
-                .arg("-c")
-                .arg(&rebase_cmd)
-                .env("GIT_AUTHOR_NAME", git_user_name)
-                .env("GIT_AUTHOR_EMAIL", git_user_email)
-                .env("GIT_COMMITTER_NAME", git_user_name)
-                .env("GIT_COMMITTER_EMAIL", git_user_email)
-                .current_dir(&git_root_path)
-                .output()
-                .await;
-            match rebase_output {
-                Ok(output) if output.status.success() => {
-                    tracing::info!("Successfully rewrote commit authors");
-                    if let Err(e) = zbobr
-                        .task_session(task_id)
-                        .role_session()
-                        .push_branch_commits()
-                        .await
-                    {
-                        tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
+        if !user_out.status.success() || !email_out.status.success() {
+            return Err(anyhow::anyhow!(
+                "Failed to set up git config for author rewriting"
+            ));
+        }
+
+        let rebase_cmd = format!(
+            "git rebase --exec 'git commit --amend --no-edit --reset-author' '{}'",
+            dest_branch
+        );
+        let rebase_output = TokioCommand::new("sh")
+            .arg("-c")
+            .arg(&rebase_cmd)
+            .env("GIT_AUTHOR_NAME", git_user_name)
+            .env("GIT_AUTHOR_EMAIL", git_user_email)
+            .env("GIT_COMMITTER_NAME", git_user_name)
+            .env("GIT_COMMITTER_EMAIL", git_user_email)
+            .current_dir(&git_root_path)
+            .output()
+            .await;
+
+        match rebase_output {
+            Ok(output) if output.status.success() => {
+                println!("Successfully rewrote commit authors");
+                
+                // Show post-rebase log to verify changes
+                let post_log_cmd = TokioCommand::new("git")
+                    .args(["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"])
+                    .current_dir(&git_root_path)
+                    .output()
+                    .await;
+                
+                if let Ok(log_output) = post_log_cmd {
+                    if log_output.status.success() {
+                        let updated_commits = String::from_utf8_lossy(&log_output.stdout);
+                        println!("Updated commits:");
+                        for commit in updated_commits.lines() {
+                            println!("  {}", commit);
+                        }
                     }
                 }
-                Ok(output) => {
-                    tracing::warn!(
-                        "Failed to rewrite commit authors: {}",
-                        String::from_utf8_lossy(&output.stderr)
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!("Error running git rebase for author rewriting: {e}");
+
+                if let Err(e) = zbobr
+                    .task_session(task_id)
+                    .role_session()
+                    .push_branch_commits()
+                    .await
+                {
+                    tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
                 }
             }
-        } else {
-            tracing::warn!("Failed to set up git config for author rewriting");
+            Ok(output) => {
+                return Err(anyhow::anyhow!(
+                    "Failed to rewrite commit authors: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Error running git rebase for author rewriting: {}",
+                    e
+                ));
+            }
         }
     } else {
-        tracing::warn!("Error executing git config commands for author rewriting");
+        return Err(anyhow::anyhow!(
+            "Error executing git config commands for author rewriting"
+        ));
     }
 
     Ok(())
