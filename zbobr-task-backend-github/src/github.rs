@@ -66,23 +66,18 @@ fn parse_comment_tag(text: &str) -> (CommentType, Option<String>, String, Option
     if let Some(rest) = trimmed.strip_prefix("// ") {
         let parts: Vec<&str> = rest.splitn(2, ' ').collect();
         if let Some(tag_part) = parts.get(0) {
-            let tag_and_meta: Vec<&str> = tag_part.splitn(2, ' ').collect();
-            let tag_str = tag_and_meta[0];
+            let tag_str = *tag_part;
             
             if let Some(comment_type) = CommentType::from_str(tag_str) {
                 // For REPORT and ERROR, parse role:host:model format
                 if comment_type != CommentType::Reply {
-                    if let Some(meta_part) = tag_and_meta.get(1) {
+                    if let Some(meta_part) = parts.get(1) {
                         let meta_parts: Vec<&str> = meta_part.split(':').collect();
                         let role = meta_parts.get(0).map(|s| s.to_string());
                         let host = meta_parts.get(1).map(|s| s.to_string()).unwrap_or_default();
                         let model = meta_parts.get(2).map(|s| s.to_string());
                         
-                        let remaining = if let Some(body_rest) = parts.get(1) {
-                            body_rest.to_string()
-                        } else {
-                            String::new()
-                        };
+                        let remaining = String::new();
                         
                         return (comment_type, role, host, model, remaining);
                     }
