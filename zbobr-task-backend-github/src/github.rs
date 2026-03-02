@@ -921,10 +921,12 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         id: u64,
         body: &str,
         role: &str,
+        tool: &str,
+        model: &str,
         hostname: &str,
     ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
-        let formatted_body = format!("**[{role}@{hostname}]**\n\n{body}");
+        let formatted_body = format!("**[{role}:{tool}:{model}@{hostname}]**\n\n{body}");
         retry_github("create issue comment", || async {
             self.octocrab
                 .issues(owner, repo)

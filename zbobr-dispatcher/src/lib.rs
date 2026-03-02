@@ -175,10 +175,12 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
         id: u64,
         body: &str,
         role: &str,
+        tool: &str,
+        model: &str,
         hostname: &str,
     ) -> anyhow::Result<()> {
         self.task_backend
-            .post_task_comment(id, body, role, hostname)
+            .post_task_comment(id, body, role, tool, model, hostname)
             .await
     }
 
