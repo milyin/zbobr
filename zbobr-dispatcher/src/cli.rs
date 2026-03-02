@@ -828,58 +828,65 @@ async fn run_task_subcommand(
             let work_dir = zbobr.config().workspaces.join(format!("task#{}", id));
             
             // Ensure task has destination repo and branch
-            let _dest_repo = task
+            let dest_repo = task
                 .parameters
                 .get(&Parameter::DestinationRepository)
                 .ok_or_else(|| {
                     anyhow::anyhow!("Task #{} has no destination repository", id)
                 })?
                 .clone();
-            
+
+            // Derive the actual git repo directory (work_dir/<repo_name>)
+            let repo_name = std::path::Path::new(&dest_repo)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| anyhow::anyhow!("Cannot extract repo name from: {}", dest_repo))?;
+            let repo_dir = work_dir.join(repo_name);
+
             // Fetch latest to ensure we have the destination branch
             let dest_branch = task
                 .parameters
                 .get(&Parameter::DestinationBranch)
                 .cloned()
                 .unwrap_or_else(|| "main".to_string());
-            
+
             // Ensure workspace exists and is set up
-            if !work_dir.exists() {
+            if !repo_dir.exists() {
                 return Err(anyhow::anyhow!(
-                    "Task workspace not found at {}. Run 'zbobr task clone {}' first.",
-                    work_dir.display(),
+                    "Task repo not found at {}. Run 'zbobr task clone {}' first.",
+                    repo_dir.display(),
                     id
                 ));
             }
-            
+
             // Fetch the latest from remote
             let fetch_cmd = TokioCommand::new("git")
                 .args(["fetch", "origin", &dest_branch])
-                .current_dir(&work_dir)
+                .current_dir(&repo_dir)
                 .output()
                 .await;
-            
+
             match fetch_cmd {
                 Ok(output) if !output.status.success() => {
                     return Err(anyhow::anyhow!(
                         "Failed to fetch '{}' from remote in '{}': {}",
                         dest_branch,
-                        work_dir.display(),
+                        repo_dir.display(),
                         String::from_utf8_lossy(&output.stderr).trim()
                     ));
                 }
                 Err(e) => {
                     return Err(anyhow::anyhow!(
                         "Failed to run git fetch in '{}': {}",
-                        work_dir.display(),
+                        repo_dir.display(),
                         e
                     ));
                 }
                 Ok(_) => {}
             }
-            
+
             // Call the rewrite_commit_authors function
-            rewrite_commit_authors(zbobr, id, &work_dir, dry_run).await?;
+            rewrite_commit_authors(zbobr, id, &repo_dir, dry_run).await?;
             if dry_run {
                 println!("Dry run completed. No commits were modified.");
             } else {
