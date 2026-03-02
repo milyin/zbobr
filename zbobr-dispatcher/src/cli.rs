@@ -1464,12 +1464,24 @@ async fn finalize_session(
     let task_session = zbobr.task_session(task_id);
 
     if execution_interrupted {
+        if role == Role::Worker || role == Role::Merger {
+            let role_session = zbobr.task_session(task_id).role_session();
+            if let Err(e) = role_session.push_branch_commits().await {
+                tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
+            }
+        }
         task_session.set_stage(Stage::Pending).await?;
         tracing::info!("Session interrupted for task #{task_id}, moved to PENDING");
         return Ok(());
     }
 
     if let Some(e) = execution_error {
+        if role == Role::Worker || role == Role::Merger {
+            let role_session = zbobr.task_session(task_id).role_session();
+            if let Err(e) = role_session.push_branch_commits().await {
+                tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
+            }
+        }
         let error_msg = format!("Execution failed: {e}");
         let hostname = get_hostname();
         if let Err(post_err) = task_session
