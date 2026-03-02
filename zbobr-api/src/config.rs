@@ -33,19 +33,14 @@ pub struct ZbobrDispatcherConfig {
     /// CLI tool to use.
     pub cli_tool: Tool,
     /// Custom prompt files for preparator agent.
-    #[config(path)]
     pub preparator_prompts: Vec<std::path::PathBuf>,
     /// Custom prompt files for planner agent.
-    #[config(path)]
     pub planner_prompts: Vec<std::path::PathBuf>,
     /// Custom prompt files for worker agent.
-    #[config(path)]
     pub worker_prompts: Vec<std::path::PathBuf>,
     /// Custom prompt files for reviewer agent.
-    #[config(path)]
     pub reviewer_prompts: Vec<std::path::PathBuf>,
     /// Custom prompt files for merger agent.
-    #[config(path)]
     pub merger_prompts: Vec<std::path::PathBuf>,
     /// Prefix for work branches (default: "zbobr_fix").
     pub work_branch_prefix: String,
