@@ -35,7 +35,10 @@ pub fn resolve_prompts(args: &ZbobrDispatcherArgs, config: &ZbobrDispatcherConfi
         .reviewer_prompts
         .clone()
         .unwrap_or_else(|| config.reviewer_prompts.clone());
-    let merger = config.merger_prompts.clone();
+    let merger = args
+        .merger_prompts
+        .clone()
+        .unwrap_or_else(|| config.merger_prompts.clone());
     let base_path = args
         .prompts_path
         .clone()
@@ -131,5 +134,208 @@ impl Prompts {
             Role::Merger => load_prompts(&self.merger, self.base_path.as_ref())?,
         };
         Ok(build_full_prompt(&base_prompt, role))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
+        let path = dir.path().join(name);
+        let mut f = fs::File::create(&path).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        path
+    }
+
+    fn default_config() -> ZbobrDispatcherConfig {
+        ZbobrDispatcherConfig {
+            preparator_prompts: vec![PathBuf::from("prompts/preparator.md")],
+            planner_prompts: vec![PathBuf::from("prompts/planner.md")],
+            worker_prompts: vec![PathBuf::from("prompts/worker.md")],
+            reviewer_prompts: vec![PathBuf::from("prompts/reviewer.md")],
+            merger_prompts: vec![PathBuf::from("prompts/merger.md")],
+            prompts_path: None,
+            ..ZbobrDispatcherConfig::default()
+        }
+    }
+
+    // --- load_prompts ---
+
+    #[test]
+    fn load_prompts_reads_existing_file() {
+        let dir = TempDir::new().unwrap();
+        let path = write_file(&dir, "p.md", "  hello world  ");
+        let result = load_prompts(&[path], None).unwrap();
+        assert_eq!(result, "hello world");
+    }
+
+    #[test]
+    fn load_prompts_skips_missing_file_silently() {
+        let result = load_prompts(&[PathBuf::from("/nonexistent/path/prompt.md")], None).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn load_prompts_concatenates_multiple_files() {
+        let dir = TempDir::new().unwrap();
+        let a = write_file(&dir, "a.md", "first");
+        let b = write_file(&dir, "b.md", "second");
+        let result = load_prompts(&[a, b], None).unwrap();
+        assert_eq!(result, "first\n\nsecond");
+    }
+
+    #[test]
+    fn load_prompts_skips_empty_files() {
+        let dir = TempDir::new().unwrap();
+        let empty = write_file(&dir, "empty.md", "   \n  \n");
+        let real = write_file(&dir, "real.md", "content");
+        let result = load_prompts(&[empty, real], None).unwrap();
+        assert_eq!(result, "content");
+    }
+
+    #[test]
+    fn load_prompts_resolves_relative_path_with_base_path() {
+        let dir = TempDir::new().unwrap();
+        write_file(&dir, "custom.md", "custom content");
+        let relative = PathBuf::from("custom.md");
+        let base = dir.path().to_path_buf();
+        let result = load_prompts(&[relative], Some(&base)).unwrap();
+        assert_eq!(result, "custom content");
+    }
+
+    #[test]
+    fn load_prompts_absolute_path_ignores_base_path() {
+        let dir = TempDir::new().unwrap();
+        let abs = write_file(&dir, "abs.md", "absolute content");
+        let fake_base = PathBuf::from("/nonexistent/base");
+        let result = load_prompts(&[abs], Some(&fake_base)).unwrap();
+        assert_eq!(result, "absolute content");
+    }
+
+    // --- resolve_prompts ---
+
+    #[test]
+    fn resolve_prompts_uses_config_when_args_empty() {
+        let config = default_config();
+        let args = ZbobrDispatcherArgs::default();
+        let prompts = resolve_prompts(&args, &config);
+        assert_eq!(prompts.preparator, config.preparator_prompts);
+        assert_eq!(prompts.planner, config.planner_prompts);
+        assert_eq!(prompts.worker, config.worker_prompts);
+        assert_eq!(prompts.reviewer, config.reviewer_prompts);
+        assert_eq!(prompts.merger, config.merger_prompts);
+        assert_eq!(prompts.base_path, None);
+    }
+
+    #[test]
+    fn resolve_prompts_args_override_config() {
+        let config = default_config();
+        let mut args = ZbobrDispatcherArgs::default();
+        args.preparator_prompts = Some(vec![PathBuf::from("override.md")]);
+        args.planner_prompts = Some(vec![PathBuf::from("plan_override.md")]);
+        let prompts = resolve_prompts(&args, &config);
+        assert_eq!(prompts.preparator, vec![PathBuf::from("override.md")]);
+        assert_eq!(prompts.planner, vec![PathBuf::from("plan_override.md")]);
+        // Other roles still use config
+        assert_eq!(prompts.worker, config.worker_prompts);
+    }
+
+    #[test]
+    fn resolve_prompts_merger_args_override_config() {
+        let config = default_config();
+        let mut args = ZbobrDispatcherArgs::default();
+        args.merger_prompts = Some(vec![PathBuf::from("merger_override.md")]);
+        let prompts = resolve_prompts(&args, &config);
+        assert_eq!(prompts.merger, vec![PathBuf::from("merger_override.md")]);
+    }
+
+    #[test]
+    fn resolve_prompts_base_path_from_args_overrides_config() {
+        let mut config = default_config();
+        config.prompts_path = Some(PathBuf::from("/config/prompts"));
+        let mut args = ZbobrDispatcherArgs::default();
+        args.prompts_path = Some(PathBuf::from("/args/prompts"));
+        let prompts = resolve_prompts(&args, &config);
+        assert_eq!(prompts.base_path, Some(PathBuf::from("/args/prompts")));
+    }
+
+    #[test]
+    fn resolve_prompts_base_path_falls_back_to_config() {
+        let mut config = default_config();
+        config.prompts_path = Some(PathBuf::from("/config/prompts"));
+        let args = ZbobrDispatcherArgs::default();
+        let prompts = resolve_prompts(&args, &config);
+        assert_eq!(prompts.base_path, Some(PathBuf::from("/config/prompts")));
+    }
+
+    // --- build_full_prompt ---
+
+    #[test]
+    fn build_full_prompt_includes_user_context() {
+        let prompt = build_full_prompt("my custom instructions", Role::Worker);
+        assert!(prompt.contains("my custom instructions"));
+    }
+
+    #[test]
+    fn build_full_prompt_empty_context_omits_user_section() {
+        let prompt_empty = build_full_prompt("", Role::Worker);
+        let prompt_with = build_full_prompt("UNIQUE_MARKER", Role::Worker);
+        assert!(!prompt_empty.contains("UNIQUE_MARKER"));
+        // With context is longer (has the extra context section)
+        assert!(prompt_with.len() > prompt_empty.len());
+    }
+
+    // --- Prompts::build_prompt ---
+
+    #[test]
+    fn prompts_build_prompt_loads_content_from_file() {
+        let dir = TempDir::new().unwrap();
+        let path = write_file(&dir, "worker.md", "do the work carefully");
+        let prompts = Prompts {
+            base_path: None,
+            preparator: vec![],
+            planner: vec![],
+            worker: vec![path],
+            reviewer: vec![],
+            merger: vec![],
+        };
+        let result = prompts.build_prompt(Role::Worker).unwrap();
+        assert!(result.contains("do the work carefully"));
+    }
+
+    #[test]
+    fn prompts_build_prompt_no_custom_content_when_no_files() {
+        let prompts = Prompts {
+            base_path: None,
+            preparator: vec![],
+            planner: vec![],
+            worker: vec![],
+            reviewer: vec![],
+            merger: vec![],
+        };
+        let result = prompts.build_prompt(Role::Worker).unwrap();
+        // Result should equal build_full_prompt with empty context
+        let expected = build_full_prompt("", Role::Worker);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn prompts_build_prompt_uses_base_path_for_relative_files() {
+        let dir = TempDir::new().unwrap();
+        write_file(&dir, "reviewer.md", "review carefully");
+        let prompts = Prompts {
+            base_path: Some(dir.path().to_path_buf()),
+            preparator: vec![],
+            planner: vec![],
+            worker: vec![],
+            reviewer: vec![PathBuf::from("reviewer.md")],
+            merger: vec![],
+        };
+        let result = prompts.build_prompt(Role::Reviewer).unwrap();
+        assert!(result.contains("review carefully"));
     }
 }
