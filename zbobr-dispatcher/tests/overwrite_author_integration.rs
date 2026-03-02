@@ -241,7 +241,11 @@ fn test_git_repo_discovery_from_nested_directory() {
     let discovered_root = String::from_utf8_lossy(&output.stdout)
         .trim()
         .to_string();
-    let expected_root = repo_path.to_string_lossy().to_string();
+    let expected_root = repo_path
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
 
     assert_eq!(
         discovered_root, expected_root,
@@ -388,7 +392,11 @@ fn test_author_rewriting_from_nested_directory() {
     let discovered_root = String::from_utf8_lossy(&repo_root_output.stdout)
         .trim()
         .to_string();
-    let expected_root = repo_path.to_string_lossy().to_string();
+    let expected_root = repo_path
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
     assert_eq!(discovered_root, expected_root);
 
     // Now run rebase from the nested directory using the discovered root
