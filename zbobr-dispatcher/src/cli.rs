@@ -1378,9 +1378,15 @@ async fn prepare_workspace(
                     let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
                     tracing::error!("{msg}");
                     let hostname = get_hostname();
-                    if let Err(post_err) = zbobr
-                        .task_session(task_id)
-                        .post_message(&msg, "error", &hostname)
+                    let task_session = zbobr.task_session(task_id);
+                    let task = match task_session.get_task().await {
+                        Ok(t) => t,
+                        Err(_) => return Err(anyhow::anyhow!(msg)),
+                    };
+                    let tool = task.tool.map(|t| t.to_string()).unwrap_or_else(|| "unknown".to_string());
+                    let model = task.model.as_ref().map(|m| m.to_string()).unwrap_or_else(|| "unknown".to_string());
+                    if let Err(post_err) = task_session
+                        .post_message(&msg, "error", &tool, &model, &hostname)
                         .await
                     {
                         tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -1401,7 +1407,13 @@ async fn ensure_pr_url(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> anyhow::Resu
             tracing::error!("{msg}");
             let hostname = get_hostname();
             let task_session = zbobr.task_session(task_id);
-            if let Err(post_err) = task_session.post_message(&msg, "error", &hostname).await {
+            let task = match task_session.get_task().await {
+                Ok(t) => t,
+                Err(_) => return Err(anyhow::anyhow!(msg)),
+            };
+            let tool = task.tool.map(|t| t.to_string()).unwrap_or_else(|| "unknown".to_string());
+            let model = task.model.as_ref().map(|m| m.to_string()).unwrap_or_else(|| "unknown".to_string());
+            if let Err(post_err) = task_session.post_message(&msg, "error", &tool, &model, &hostname).await {
                 tracing::warn!("Failed to post error to task discussion: {post_err}");
             }
             Err(anyhow::anyhow!(msg))
@@ -1586,8 +1598,17 @@ async fn finalize_session(
         }
         let error_msg = format!("Execution failed: {e}");
         let hostname = get_hostname();
+        let task = match task_session.get_task().await {
+            Ok(t) => t,
+            Err(_) => {
+                tracing::error!("Failed to get task for error reporting");
+                return Err(anyhow::anyhow!(error_msg));
+            }
+        };
+        let tool = task.tool.map(|t| t.to_string()).unwrap_or_else(|| "unknown".to_string());
+        let model = task.model.as_ref().map(|m| m.to_string()).unwrap_or_else(|| "unknown".to_string());
         if let Err(post_err) = task_session
-            .post_message(&error_msg, "error", &hostname)
+            .post_message(&error_msg, "error", &tool, &model, &hostname)
             .await
         {
             tracing::error!("Failed to post error to task #{task_id}: {post_err}");

@@ -101,10 +101,10 @@ impl RoleSession {
         self.zbobr.get_task_comments(self.task_id).await
     }
 
-    /// Post a message to the task discussion with role and hostname metadata.
-    pub async fn post_message(&self, msg: &str, role: &str, hostname: &str) -> anyhow::Result<()> {
+    /// Post a message to the task discussion with role, tool, model, and hostname metadata.
+    pub async fn post_message(&self, msg: &str, role: &str, tool: &str, model: &str, hostname: &str) -> anyhow::Result<()> {
         self.zbobr
-            .post_task_comment(self.task_id, msg, role, hostname)
+            .post_task_comment(self.task_id, msg, role, tool, model, hostname)
             .await
     }
 
@@ -474,10 +474,10 @@ impl TaskSession {
         .await
     }
 
-    /// Post a message to the task discussion with role and hostname metadata.
-    pub async fn post_message(&self, msg: &str, role: &str, hostname: &str) -> anyhow::Result<()> {
+    /// Post a message to the task discussion with role, tool, model, and hostname metadata.
+    pub async fn post_message(&self, msg: &str, role: &str, tool: &str, model: &str, hostname: &str) -> anyhow::Result<()> {
         self.zbobr
-            .post_task_comment(self.task_id, msg, role, hostname)
+            .post_task_comment(self.task_id, msg, role, tool, model, hostname)
             .await
     }
 }
@@ -729,6 +729,8 @@ mod tests {
             _id: u64,
             _body: &str,
             _role: &str,
+            _tool: &str,
+            _model: &str,
             _hostname: &str,
         ) -> anyhow::Result<()> {
             Ok(())

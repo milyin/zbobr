@@ -382,10 +382,12 @@ impl TaskBackend for ZbobrTaskBackendFs {
         id: u64,
         body: &str,
         role: &str,
+        tool: &str,
+        model: &str,
         hostname: &str,
     ) -> anyhow::Result<()> {
         let mut comments = self.read_comments(id).await?;
-        let formatted_comment = format!("[{}@{}] {}", role, hostname, body);
+        let formatted_comment = format!("[{role}:{tool}:{model}@{hostname}] {body}");
         comments.push(formatted_comment);
         self.write_comments(id, comments).await?;
 

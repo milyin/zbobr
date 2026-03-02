@@ -26,6 +26,22 @@ pub trait CommonMcpImpl: Send + Sync {
         }
     }
 
+    /// Get tool information for this task (for report signatures).
+    async fn get_tool_name(&self) -> String {
+        match self.session().get_task().await {
+            Ok(task) => task.tool.map(|t| t.to_string()).unwrap_or_else(|| "unknown".to_string()),
+            Err(_) => "unknown".to_string(),
+        }
+    }
+
+    /// Get model information for this task (for report signatures).
+    async fn get_model_name(&self) -> String {
+        match self.session().get_task().await {
+            Ok(task) => task.model.as_ref().map(|m| m.to_string()).unwrap_or_else(|| "unknown".to_string()),
+            Err(_) => "unknown".to_string(),
+        }
+    }
+
     async fn get_description_impl(&self) -> String {
         tracing::info!(
             "[{}#{}] get_description",
@@ -63,10 +79,12 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
         let hostname = get_hostname();
+        let tool = self.get_tool_name().await;
+        let model = self.get_model_name().await;
 
         if let Err(e) = self
             .session()
-            .post_message(message, "error", &hostname)
+            .post_message(message, "error", &tool, &model, &hostname)
             .await
         {
             tracing::error!(
@@ -103,10 +121,12 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
         let hostname = get_hostname();
+        let tool = self.get_tool_name().await;
+        let model = self.get_model_name().await;
 
         if let Err(e) = self
             .session()
-            .post_message(message, self.role().as_str(), &hostname)
+            .post_message(message, self.role().as_str(), &tool, &model, &hostname)
             .await
         {
             tracing::error!(
@@ -126,10 +146,12 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
         let hostname = get_hostname();
+        let tool = self.get_tool_name().await;
+        let model = self.get_model_name().await;
 
         if let Err(e) = self
             .session()
-            .post_message(message, self.role().as_str(), &hostname)
+            .post_message(message, self.role().as_str(), &tool, &model, &hostname)
             .await
         {
             tracing::error!(
@@ -447,10 +469,12 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
     async fn ask_planner_impl(&self, message: &str) -> String {
         tracing::info!("[worker#{}] ask_planner", self.session().task_id());
         let hostname = get_hostname();
+        let tool = self.get_tool_name().await;
+        let model = self.get_model_name().await;
 
         if let Err(e) = self
             .session()
-            .post_message(message, self.role().as_str(), &hostname)
+            .post_message(message, self.role().as_str(), &tool, &model, &hostname)
             .await
         {
             tracing::error!(
