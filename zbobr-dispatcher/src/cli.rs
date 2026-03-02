@@ -809,12 +809,13 @@ async fn run_task_subcommand(
         TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
             let task = zbobr.get_task(id).await?;
             let git_user_name = &zbobr.config().git_user_name;
-            
+            let git_user_email = &zbobr.config().git_user_email;
+
             if !force {
                 let action = if dry_run { "preview" } else { "rewrite commit authors to" };
                 println!(
-                    "This will {} '{}'. Continue? (yes/no)",
-                    action, git_user_name
+                    "This will {} '{} <{}>'. Continue? (yes/no)",
+                    action, git_user_name, git_user_email
                 );
                 let mut input = String::new();
                 std::io::stdin().read_line(&mut input)?;
@@ -858,13 +859,23 @@ async fn run_task_subcommand(
                 .output()
                 .await;
             
-            if let Ok(output) = fetch_cmd {
-                if !output.status.success() {
+            match fetch_cmd {
+                Ok(output) if !output.status.success() => {
                     return Err(anyhow::anyhow!(
-                        "Failed to fetch from remote: {}",
-                        String::from_utf8_lossy(&output.stderr)
+                        "Failed to fetch '{}' from remote in '{}': {}",
+                        dest_branch,
+                        work_dir.display(),
+                        String::from_utf8_lossy(&output.stderr).trim()
                     ));
                 }
+                Err(e) => {
+                    return Err(anyhow::anyhow!(
+                        "Failed to run git fetch in '{}': {}",
+                        work_dir.display(),
+                        e
+                    ));
+                }
+                Ok(_) => {}
             }
             
             // Call the rewrite_commit_authors function
