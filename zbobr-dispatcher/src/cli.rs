@@ -811,22 +811,6 @@ async fn run_task_subcommand(
             let git_user_name = &zbobr.config().git_user_name;
             let git_user_email = &zbobr.config().git_user_email;
 
-            if !force {
-                let action = if dry_run { "preview" } else { "rewrite commit authors to" };
-                println!(
-                    "This will {} '{} <{}>'. Continue? (yes/no)",
-                    action, git_user_name, git_user_email
-                );
-                let mut input = String::new();
-                std::io::stdin().read_line(&mut input)?;
-                if !input.trim().eq_ignore_ascii_case("yes") {
-                    println!("Cancelled");
-                    return Ok(());
-                }
-            }
-            
-            let work_dir = zbobr.config().workspaces.join(format!("task#{}", id));
-            
             // Ensure task has destination repo and branch
             let dest_repo = task
                 .parameters
@@ -835,6 +819,26 @@ async fn run_task_subcommand(
                     anyhow::anyhow!("Task #{} has no destination repository", id)
                 })?
                 .clone();
+
+            if dry_run {
+                println!(
+                    "Dry run: would rewrite commit authors to '{} <{}>' in repo '{}' (PR: '{}')",
+                    git_user_name, git_user_email, dest_repo, task.title
+                );
+            } else if !force {
+                println!(
+                    "This will rewrite commit authors to '{} <{}>' in repo '{}' (PR: '{}'). Continue? (yes/no)",
+                    git_user_name, git_user_email, dest_repo, task.title
+                );
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input)?;
+                if !input.trim().eq_ignore_ascii_case("yes") {
+                    println!("Cancelled");
+                    return Ok(());
+                }
+            }
+
+            let work_dir = zbobr.config().workspaces.join(format!("task#{}", id));
 
             // Derive the actual git repo directory (work_dir/<repo_name>)
             let repo_name = std::path::Path::new(&dest_repo)
