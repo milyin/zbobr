@@ -3,6 +3,9 @@ workspaces = "./workspaces"
 git_user_name = "Copilot"
 git_user_email = "copilot@example.com"
 cli_tool = "copilot"
+# Default destination repository pre-populated for preparator agent (e.g. "owner/repo")
+# default_destination_repository = "milyin/zbobr"
+# default_destination_branch = "main"
 
 [repo.github]
 # GitHub repo backend settings

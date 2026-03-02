@@ -874,7 +874,9 @@ impl<'a> CliRoleRunner<'a> {
 
         let work_dir = prepare_workspace(self.zbobr, self.task_id, self.role, &task_dir).await?;
 
-        if !matches!(self.role, Role::Preparator) {
+        if matches!(self.role, Role::Preparator) {
+            seed_preparator_defaults(self.zbobr, self.task_id).await?;
+        } else {
             ensure_pr_url(self.zbobr, self.task_id).await?;
         }
 
@@ -1303,6 +1305,36 @@ async fn ensure_pr_url(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> anyhow::Resu
             Err(anyhow::anyhow!(msg))
         }
     }
+}
+
+/// Pre-populate task parameters from dispatcher config defaults before the
+/// preparator agent runs. Only sets a parameter if it is not already present,
+/// so a previously prepared task (e.g. re-run) keeps its values unchanged.
+async fn seed_preparator_defaults(
+    zbobr: &ZbobrDispatcherDyn,
+    task_id: u64,
+) -> anyhow::Result<()> {
+    let config = zbobr.config();
+    let task = zbobr.get_task(task_id).await?;
+    let role_session = zbobr.role_session(task_id);
+
+    if let Some(default_repo) = &config.default_destination_repository {
+        if !task.parameters.contains_key(&Parameter::DestinationRepository) {
+            role_session
+                .set_parameter(Parameter::DestinationRepository, Some(default_repo.clone()))
+                .await?;
+        }
+    }
+
+    if let Some(default_branch) = &config.default_destination_branch {
+        if !task.parameters.contains_key(&Parameter::DestinationBranch) {
+            role_session
+                .set_parameter(Parameter::DestinationBranch, Some(default_branch.clone()))
+                .await?;
+        }
+    }
+
+    Ok(())
 }
 
 fn should_try_early_merge(role: Role) -> bool {
