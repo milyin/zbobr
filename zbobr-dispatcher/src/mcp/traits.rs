@@ -1,5 +1,5 @@
 use crate::{
-    Signal,
+    Signal, CommentType,
     mcp::common::get_hostname,
     task::{ChecklistItem, Parameter, Role, RoleSession},
 };
@@ -90,7 +90,13 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_message(message, "error", &hostname)
+            .post_message_structured(
+                CommentType::Error,
+                message,
+                Some(self.role().as_str()),
+                &hostname,
+                None,
+            )
             .await
         {
             tracing::error!(
@@ -130,7 +136,13 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_message(message, self.role().as_str(), &hostname)
+            .post_message_structured(
+                CommentType::Report,
+                message,
+                Some(self.role().as_str()),
+                &hostname,
+                None,
+            )
             .await
         {
             tracing::error!(

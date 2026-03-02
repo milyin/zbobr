@@ -117,6 +117,19 @@ impl RoleSession {
             .await
     }
 
+    pub async fn post_message_structured(
+        &self,
+        comment_type: CommentType,
+        body: &str,
+        role: Option<&str>,
+        hostname: &str,
+        model: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.zbobr
+            .post_task_comment_structured(self.task_id, comment_type, body, role, hostname, model)
+            .await
+    }
+
     /// Get the current signal on the task.
     pub async fn get_signal(&self) -> anyhow::Result<Option<Signal>> {
         let task = self.zbobr.get_task(self.task_id).await?;
@@ -487,6 +500,20 @@ impl TaskSession {
     pub async fn post_message(&self, msg: &str, role: &str, hostname: &str) -> anyhow::Result<()> {
         self.zbobr
             .post_task_comment(self.task_id, msg, role, hostname)
+            .await
+    }
+
+    /// Post a structured comment with type, body, and optional role/model metadata.
+    pub async fn post_message_structured(
+        &self,
+        comment_type: CommentType,
+        body: &str,
+        role: Option<&str>,
+        hostname: &str,
+        model: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.zbobr
+            .post_task_comment_structured(self.task_id, comment_type, body, role, hostname, model)
             .await
     }
 }
