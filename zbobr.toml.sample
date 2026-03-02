@@ -71,3 +71,24 @@ fork_owner = "{{FORK_OWNER}}"
 # Filesystem repo backend: clones from local git repos, stores PRs as YAML files
 # Uncomment this section to use filesystem backend instead of GitHub
 # repos_dir = "./repos"
+
+[executor.claude]
+# Default model for Claude executor (default: "claude-opus-4.6")
+# default_model = "claude-opus-4.6"
+
+[executor.copilot]
+# Default model for Copilot executor (default: "gpt-5-mini")
+# default_model = "gpt-5-mini"
+
+# GitHub token for Copilot CLI with Copilot's access rights (passed as COPILOT_GITHUB_TOKEN).
+# Priority: ZBOBR_COPILOT_GITHUB_TOKEN > COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN > $(gh auth token)
+# Prefer env vars instead of storing in config.
+# copilot_github_token = ""
+
+[executor.mcp_tester]
+# YAML scenario files for mcp-tester, one per stage.
+# Use with --cli-tool mcp-tester to validate MCP servers.
+# planning = "scenarios/planning.yml"
+# working = "scenarios/working.yml"
+# reviewing = "scenarios/reviewing.yml"
+# merging = "scenarios/merging.yml"

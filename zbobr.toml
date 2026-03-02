@@ -14,3 +14,7 @@ token = "YOUR_GITHUB_TOKEN"
 [task.github]
 # GitHub task backend settings
 token = "YOUR_GITHUB_TOKEN"
+
+[executor.copilot]
+# Copilot executor settings
+api_endpoint = "http://localhost:8000"

@@ -17,3 +17,10 @@ tasks_dir = "./tasks"
 # Filesystem repo backend: clones from local git repos
 [repo]
 repos_dir = "./repos"
+
+# Executor configuration: per-executor default models
+[executor.claude]
+default_model = "claude-opus-4.6"
+
+[executor.copilot]
+default_model = "gpt-5-mini"
