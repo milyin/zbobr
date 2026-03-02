@@ -3,7 +3,7 @@
 
 pub fn preparation_scenario(repo_path: &str) -> String {
     use zbobr_dispatcher::mcp::preparator_tools::{
-        GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH,
+        GET_DESCRIPTION, GET_DISCUSSION_WHOLE, GET_PARAM_DESTINATION_BRANCH,
         GET_PARAM_DESTINATION_REPOSITORY, GET_PARAM_WORK_BRANCH, SET_PARAM_DESTINATION_BRANCH,
         SET_PARAM_DESTINATION_REPOSITORY, SET_PARAM_WORK_BRANCH_POSTFIX,
     };
@@ -28,7 +28,7 @@ steps:
 - name: Get task discussion
   operation:
     type: tool_call
-    tool: {GET_DISCUSSION}
+    tool: {GET_DISCUSSION_WHOLE}
   assertions:
     - type: success
     - type: contains
@@ -98,7 +98,7 @@ steps:
 
 pub fn planning_scenario() -> String {
     use zbobr_dispatcher::mcp::planner_tools::{
-        GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
+        GET_DESCRIPTION, GET_DISCUSSION_WHOLE, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
         GET_PLAN, POST_PLAN, REPORT_RESULTS,
     };
 
@@ -122,7 +122,7 @@ steps:
 - name: Get task discussion
   operation:
     type: tool_call
-    tool: {GET_DISCUSSION}
+    tool: {GET_DISCUSSION_WHOLE}
   assertions:
     - type: success
 
@@ -221,7 +221,7 @@ steps:
 pub fn working_scenario() -> String {
     use zbobr_dispatcher::mcp::worker_tools::{
         CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST, GET_DESCRIPTION,
-        GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN,
+        GET_DISCUSSION_WHOLE, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN,
         INSERT_CHECKLIST_ITEM, REPORT_RESULTS, UPDATE_CHECKLIST_ITEM,
     };
 
@@ -248,7 +248,7 @@ steps:
 - name: Get task discussion
   operation:
     type: tool_call
-    tool: {GET_DISCUSSION}
+    tool: {GET_DISCUSSION_WHOLE}
   assertions:
     - type: success
     - type: contains
@@ -508,7 +508,7 @@ steps:
 
 pub fn merging_scenario(ending: &str) -> String {
     use zbobr_dispatcher::mcp::merger_tools::{
-        ASK_USER, GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH,
+        ASK_USER, GET_DESCRIPTION, GET_DISCUSSION_WHOLE, GET_PARAM_DESTINATION_BRANCH,
         GET_PARAM_WORK_BRANCH, REPORT_RESULTS,
     };
 
@@ -560,7 +560,7 @@ steps:
 - name: Get task discussion
   operation:
     type: tool_call
-    tool: {GET_DISCUSSION}
+    tool: {GET_DISCUSSION_WHOLE}
   assertions:
     - type: success
 

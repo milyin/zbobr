@@ -474,6 +474,10 @@ pub struct Task {
     /// the task's stage is changed.  This gives human operators an opportunity to
     /// review a transition before the next processing step occurs.
     pub confirm: bool,
+    /// Timestamp of the latest discussion element read by the task.
+    /// Used to track which discussion messages have been processed for unread discussion queries.
+    /// ISO 8601 format. None indicates no messages have been read yet.
+    pub latest_discussion_read: Option<String>,
     /// ETag for optimistic locking to prevent concurrent update conflicts.
     /// Used to detect if the task has been modified between read and write operations.
     #[serde(skip)]

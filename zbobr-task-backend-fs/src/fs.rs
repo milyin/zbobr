@@ -27,6 +27,8 @@ struct TaskFile {
     confirm: bool,
     checklist: Vec<ChecklistItem>,
     signal: Option<String>,
+    #[serde(default)]
+    latest_discussion_read: Option<String>,
     closed: bool,
 }
 
@@ -71,6 +73,7 @@ impl TaskFile {
             conflict: self.conflict,
             pause: self.pause,
             confirm: self.confirm,
+            latest_discussion_read: self.latest_discussion_read.clone(),
             etag: None,
         })
     }
@@ -94,6 +97,7 @@ impl TaskFile {
             confirm: task.confirm,
             checklist: task.checklist.clone(),
             signal: task.signal.map(|s| s.name().to_string()),
+            latest_discussion_read: task.latest_discussion_read.clone(),
             closed,
         }
     }
@@ -283,6 +287,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             conflict: false,
             pause: false,
             confirm: false,
+            latest_discussion_read: None,
             etag: None,
         };
 

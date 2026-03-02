@@ -125,7 +125,8 @@ macro_rules! mcp_tools {
 mcp_tools! {
     preparator_tools,
     GET_DESCRIPTION = "get_description",
-    GET_DISCUSSION = "get_discussion",
+    GET_DISCUSSION_WHOLE = "get_discussion_whole",
+    GET_DISCUSSION_UNREAD = "get_discussion_unread",
     REPORT_ERROR = "report_error",
     SET_PARAM_DESTINATION_REPOSITORY = "set_param_destination_repository",
     SET_PARAM_DESTINATION_BRANCH = "set_param_destination_branch",
@@ -139,7 +140,8 @@ mcp_tools! {
 mcp_tools! {
     planner_tools,
     GET_DESCRIPTION = "get_description",
-    GET_DISCUSSION = "get_discussion",
+    GET_DISCUSSION_WHOLE = "get_discussion_whole",
+    GET_DISCUSSION_UNREAD = "get_discussion_unread",
     GET_PLAN = "get_plan",
     POST_PLAN = "post_plan",
     REPORT_ERROR = "report_error",
@@ -151,7 +153,8 @@ mcp_tools! {
 mcp_tools! {
     worker_tools,
     GET_DESCRIPTION = "get_description",
-    GET_DISCUSSION = "get_discussion",
+    GET_DISCUSSION_WHOLE = "get_discussion_whole",
+    GET_DISCUSSION_UNREAD = "get_discussion_unread",
     GET_PLAN = "get_plan",
     REPORT_ERROR = "report_error",
     ASK_USER = "ask_user",
@@ -180,7 +183,8 @@ mcp_tools! {
 mcp_tools! {
     merger_tools,
     GET_DESCRIPTION = "get_description",
-    GET_DISCUSSION = "get_discussion",
+    GET_DISCUSSION_WHOLE = "get_discussion_whole",
+    GET_DISCUSSION_UNREAD = "get_discussion_unread",
     REPORT_ERROR = "report_error",
     ASK_USER = "ask_user",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",

@@ -38,9 +38,9 @@ pub trait CommonMcpImpl: Send + Sync {
         }
     }
 
-    async fn get_discussion_impl(&self) -> String {
+    async fn get_discussion_whole_impl(&self) -> String {
         tracing::info!(
-            "[{}#{}] get_discussion",
+            "[{}#{}] get_discussion_whole",
             self.role_name(),
             self.session().task_id()
         );
@@ -48,6 +48,24 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(msgs) => {
                 if msgs.is_empty() {
                     "No messages yet.".to_string()
+                } else {
+                    msgs.join("\n\n---\n\n")
+                }
+            }
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    async fn get_discussion_unread_impl(&self) -> String {
+        tracing::info!(
+            "[{}#{}] get_discussion_unread",
+            self.role_name(),
+            self.session().task_id()
+        );
+        match self.session().get_discussion_unread().await {
+            Ok(msgs) => {
+                if msgs.is_empty() {
+                    "No new messages.".to_string()
                 } else {
                     msgs.join("\n\n---\n\n")
                 }

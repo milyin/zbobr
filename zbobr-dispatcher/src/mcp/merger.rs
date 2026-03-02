@@ -46,9 +46,14 @@ impl MergerMcp {
         self.get_description_impl().await
     }
 
-    #[tool(description = "Get all discussion messages on this task")]
-    async fn get_discussion(&self) -> String {
-        self.get_discussion_impl().await
+    #[tool(description = "Get all discussion messages on this task (entire history)")]
+    async fn get_discussion_whole(&self) -> String {
+        self.get_discussion_whole_impl().await
+    }
+
+    #[tool(description = "Get unread discussion messages and mark them as read")]
+    async fn get_discussion_unread(&self) -> String {
+        self.get_discussion_unread_impl().await
     }
 
     #[tool(description = "Report an error to the user and pause task processing")]

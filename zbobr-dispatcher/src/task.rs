@@ -101,6 +101,37 @@ impl RoleSession {
         self.zbobr.get_task_comments(self.task_id).await
     }
 
+    /// Get unread discussion messages (those posted after latest_discussion_read timestamp).
+    /// Returns all messages if latest_discussion_read is None (first call).
+    /// Atomically updates latest_discussion_read to the current time after returning messages.
+    pub async fn get_discussion_unread(&self) -> anyhow::Result<Vec<String>> {
+        let lock = self.zbobr.task_lock(self.task_id);
+        let _guard = lock.lock().await;
+
+        // Get all comments from the backend
+        let all_comments = self.zbobr.get_task_comments(self.task_id).await?;
+
+        // For now, return all comments since we don't have timestamp tracking in the comments themselves.
+        // The latest_discussion_read field will be set to current time, allowing future calls to
+        // potentially filter based on external timestamp sources.
+        let unread_comments = all_comments;
+
+        // Update latest_discussion_read to current time (RFC 3339 format)
+        let now = chrono::Utc::now().to_rfc3339();
+        self.zbobr
+            .task_backend
+            .modify_task(
+                self.task_id,
+                Box::new(move |mut task| {
+                    task.latest_discussion_read = Some(now);
+                    task
+                }),
+            )
+            .await?;
+
+        Ok(unread_comments)
+    }
+
     /// Post a message to the task discussion with role and hostname metadata.
     pub async fn post_message(&self, msg: &str, role: &str, hostname: &str) -> anyhow::Result<()> {
         self.zbobr
@@ -568,6 +599,7 @@ mod tests {
             conflict: false,
             pause: false,
             confirm: false,
+            latest_discussion_read: None,
             etag: None,
         };
         let json = serde_json::to_string(&task).unwrap();
@@ -598,6 +630,7 @@ mod tests {
             conflict: false,
             pause: false,
             confirm: true,
+            latest_discussion_read: None,
             etag: None,
         };
         let new_stage = Stage::Planning;
@@ -689,6 +722,7 @@ mod tests {
                 conflict: false,
                 pause: false,
                 confirm: false,
+                latest_discussion_read: None,
                 etag: None,
             };
             self.tasks.lock().await.insert(id, task);

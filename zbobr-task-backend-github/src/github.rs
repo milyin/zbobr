@@ -614,6 +614,7 @@ impl ZbobrTaskBackendGithub {
             conflict,
             pause,
             confirm,
+            latest_discussion_read: None,
             etag: Some(body),
         }
     }

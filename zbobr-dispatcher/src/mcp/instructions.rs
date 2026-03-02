@@ -5,7 +5,7 @@ use crate::mcp::common::{
 /// Generate hardcoded preparator instructions using tool name constants.
 pub fn preparator_instructions() -> String {
     use preparator_tools::{
-        GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH,
+        GET_DESCRIPTION, GET_DISCUSSION_UNREAD, GET_DISCUSSION_WHOLE, GET_PARAM_DESTINATION_BRANCH,
         GET_PARAM_DESTINATION_REPOSITORY, GET_PARAM_WORK_BRANCH, REPORT_ERROR, REPORT_RESULTS,
         SET_PARAM_DESTINATION_BRANCH, SET_PARAM_DESTINATION_REPOSITORY,
         SET_PARAM_WORK_BRANCH_POSTFIX,
@@ -27,15 +27,16 @@ Read the task description and set the required parameters for the implementation
 ## Workflow
 
 1. Call `{GET_DESCRIPTION}` to read the user task description
-2. Call `{GET_DISCUSSION}` for context and prior comments
-3. **Set task parameters** that will guide the implementation:
+2. Call `{GET_DISCUSSION_UNREAD}` to get new comments/instructions in the discussion
+3. If something is unclear, call `{GET_DISCUSSION_WHOLE}` to read the entire discussion history
+4. **Set task parameters** that will guide the implementation:
     - Call `{GET_PARAM_DESTINATION_REPOSITORY}` and `{GET_PARAM_DESTINATION_BRANCH}` first — they may already be pre-populated with defaults from the configuration. Keep the defaults unless the task description clearly specifies a different repository or branch.
     - Call `{SET_PARAM_DESTINATION_REPOSITORY}` only if the value is missing or incorrect (full git URL, local path, or owner/repo format)
     - Call `{SET_PARAM_DESTINATION_BRANCH}` only if the value is missing or incorrect (e.g., "main", "develop")
     - Call `{SET_PARAM_WORK_BRANCH_POSTFIX}` with the work branch postfix (e.g., "implement-feature") — the full work branch will be formed from prefix, task id and this postfix
     - Use `{GET_PARAM_WORK_BRANCH}` to confirm the resulting work branch name
-4. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report takes part in the context for further agent calls, so it MUST be compact.
-5. When finished, the task will move to the planning stage.
+5. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report takes part in the context for further agent calls, so it MUST be compact.
+6. When finished, the task will move to the planning stage.
 "#,
     )
 }
@@ -43,12 +44,12 @@ Read the task description and set the required parameters for the implementation
 /// Generate hardcoded planner instructions using tool name constants.
 pub fn planner_instructions() -> String {
     use planner_tools::{
-        GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
-        GET_PLAN, POST_PLAN, REPORT_ERROR, REPORT_RESULTS,
+        GET_DESCRIPTION, GET_DISCUSSION_UNREAD, GET_DISCUSSION_WHOLE, GET_PARAM_DESTINATION_BRANCH,
+        GET_PARAM_WORK_BRANCH, GET_PLAN, POST_PLAN, REPORT_ERROR, REPORT_RESULTS,
     };
     use worker_tools::ASK_USER;
     let branch_isolation = crate::mcp::common::branch_isolation_instruction();
-    format!(
+     format!(
         r#"# Planner Agent
 
 Investigate a task and create an implementation plan with actionable steps.
@@ -71,17 +72,18 @@ Work autonomously. Do not ask the user for anything.
 
 1. Call `{GET_DESCRIPTION}` to read the user task description
 2. Call `{GET_PLAN}` to read an existing plan if there is one
-3. Call `{GET_DISCUSSION}` for context and prior comments and questions to existing plan
-4. **Task parameters** have already been set by the preparation stage:
+3. Call `{GET_DISCUSSION_UNREAD}` to get new comments/instructions in the discussion
+4. If something is unclear, call `{GET_DISCUSSION_WHOLE}` to read the entire discussion history
+5. **Task parameters** have already been set by the preparation stage:
     - Use `{GET_PARAM_DESTINATION_BRANCH}`, `{GET_PARAM_WORK_BRANCH}` to read branch names if needed.
-5. Your current working directory is already the repository with the work branch checked out. Explore the codebase, identify and document the files, crates, modules, and keywords relevant to the task. These help define the scope and guide the worker:
+6. Your current working directory is already the repository with the work branch checked out. Explore the codebase, identify and document the files, crates, modules, and keywords relevant to the task. These help define the scope and guide the worker:
    - List specific files that need to be modified or created
    - Identify crates/modules that contain related functionality
    - Include keywords/concepts the worker should focus on (e.g., "async/await", "error handling", "API compatibility")
    - This context narrows the worker's scope and prevents unnecessary exploration
-6. Design a solution.
-7. Post a solution in the form of a text plan with `{POST_PLAN}`. Use planning mode if available.
-8. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report takes part in the context for further agent calls, so it MUST be compact.
+7. Design a solution.
+8. Post a solution in the form of a text plan with `{POST_PLAN}`. Use planning mode if available.
+9. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report takes part in the context for further agent calls, so it MUST be compact.
 "#,
     )
 }
@@ -90,8 +92,9 @@ Work autonomously. Do not ask the user for anything.
 pub fn worker_instructions() -> String {
     use worker_tools::{
         ASK_PLANNER, ASK_USER, CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST,
-        GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
-        GET_PLAN, INSERT_CHECKLIST_ITEM, REPORT_ERROR, REPORT_RESULTS, UPDATE_CHECKLIST_ITEM,
+        GET_DESCRIPTION, GET_DISCUSSION_UNREAD, GET_DISCUSSION_WHOLE, GET_PARAM_DESTINATION_BRANCH,
+        GET_PARAM_WORK_BRANCH, GET_PLAN, INSERT_CHECKLIST_ITEM, REPORT_ERROR, REPORT_RESULTS,
+        UPDATE_CHECKLIST_ITEM,
     };
     let branch_isolation = crate::mcp::common::branch_isolation_instruction();
     let instructions = format!(
@@ -133,15 +136,16 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 2. Call `{GET_PLAN}` to retrieve the approved implementation plan (posted by the planner)
 3. Call `{GET_CHECKLIST}` to read the implementation steps
 4. **If checklist is empty**: Create it using `{INSERT_CHECKLIST_ITEM}` to break down the plan into clear, actionable steps (task-focused items only)
-5. Call `{GET_DISCUSSION}` if you need additional context from comments
-6. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
-7. Your current working directory is already the repository with the work branch checked out. Consult `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` for branch names if needed.
-8. Implement the plan in your working directory
-8a. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality.
-9. Commit all your changes locally to the work branch with clear messages (describe what the change does, why, and reference relevant checklist item). ALWAYS ensure that you have no uncommitted changes before marking your checklist items as done.
-10. When implementation for an item is complete, mark the item done with `{CHECK_CHECKLIST_ITEM}`, and update or insert follow-up items as needed
-11. If you need human clarification or intervention, call `{ASK_USER}` or `{ASK_PLANNER}` as appropriate; use `{REPORT_ERROR}` only to report technical errors
-12. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact."#,
+5. Call `{GET_DISCUSSION_UNREAD}` to get new comments/instructions in the discussion
+6. If something is unclear, call `{GET_DISCUSSION_WHOLE}` to read the entire discussion history
+7. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
+8. Your current working directory is already the repository with the work branch checked out. Consult `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` for branch names if needed.
+9. Implement the plan in your working directory
+10. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality.
+11. Commit all your changes locally to the work branch with clear messages (describe what the change does, why, and reference relevant checklist item). ALWAYS ensure that you have no uncommitted changes before marking your checklist items as done.
+12. When implementation for an item is complete, mark the item done with `{CHECK_CHECKLIST_ITEM}`, and update or insert follow-up items as needed
+13. If you need human clarification or intervention, call `{ASK_USER}` or `{ASK_PLANNER}` as appropriate; use `{REPORT_ERROR}` only to report technical errors
+14. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact."#,
     );
 
     instructions
@@ -182,7 +186,10 @@ Review the implementation changes and ensure they meet coding standards and task
 
 /// Generate hardcoded merger instructions using tool name constants.
 pub fn merger_instructions() -> String {
-    use merger_tools::{ASK_USER, GET_DESCRIPTION, GET_DISCUSSION, REPORT_ERROR, REPORT_RESULTS};
+    use merger_tools::{
+        ASK_USER, GET_DESCRIPTION, GET_DISCUSSION_UNREAD, GET_DISCUSSION_WHOLE, REPORT_ERROR,
+        REPORT_RESULTS,
+    };
     let branch_isolation = crate::mcp::common::branch_isolation_instruction();
     let instructions = format!(
         r#"# Merger Agent
@@ -197,7 +204,8 @@ A merge conflict occurred when trying to automatically merge the destination bra
 
 You have read access to the task and repository:
 - Use `{GET_DESCRIPTION}` to understand the task context
-- Use `{GET_DISCUSSION}` to see prior comments and what happened
+- Use `{GET_DISCUSSION_UNREAD}` to get new comments about the merge situation
+- Use `{GET_DISCUSSION_WHOLE}` to see prior comments and what happened
 - Your current working directory is already the repository with the work branch checked out and merge conflicts present
 - Use `{ASK_USER}` to ask the user for clarification on conflict resolution
 - Use `{REPORT_ERROR}` to report when conflicts cannot be resolved
@@ -209,19 +217,20 @@ You have read access to the task and repository:
 ## Workflow
 
 1. Call `{GET_DESCRIPTION}` to understand the task being worked on
-2. Call `{GET_DISCUSSION}` for context about what work was being done
-3. Your current working directory is the repository (the work branch currently has merge conflicts). Examine the conflicts:
+2. Call `{GET_DISCUSSION_UNREAD}` to get new comments about the merge situation
+3. If needed, call `{GET_DISCUSSION_WHOLE}` for context about what work was being done
+4. Your current working directory is the repository (the work branch currently has merge conflicts). Examine the conflicts:
    - `git status` to see which files have conflicts
    - `git diff` to examine conflict markers and understand what changed in each branch
    - Review the code in both branches to understand the intent
-4. **Attempt automatic resolution:**
+5. **Attempt automatic resolution:**
    - For simple, non-overlapping changes (e.g., formatting, imports, unrelated edits), apply manual fixes that combine both changes
    - Use `git add` to resolve simple conflicts, then `git commit -m "chore: merge conflicts resolved"`
    - If you can create a reasonable merged version, do so and ensure all changes are committed
-5. **If automatic resolution is not possible:**
+6. **If automatic resolution is not possible:**
    - Use `{ASK_USER}` to describe the conflicts and ask which version should be preferred, or ask for guidance
    - Wait for user input before proceeding
-6. **After successful resolution:**
+7. **After successful resolution:**
    - Ensure all your changes are explicitly committed using `git commit` to the local work branch
    - The framework will automatically push the resolved branch and open a pull request
 7. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact.
