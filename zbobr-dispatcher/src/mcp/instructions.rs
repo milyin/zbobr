@@ -137,6 +137,7 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 6. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
 7. Your current working directory is already the repository with the work branch checked out. Consult `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` for branch names if needed.
 8. Implement the plan in your working directory
+8a. **Write tests for new functionality** unless explicitly specified to omit tests or the change is minor (e.g., output messages, documentation updates). Tests should validate the added functionality.
 9. Commit all your changes locally to the work branch with clear messages (describe what the change does, why, and reference relevant checklist item). ALWAYS ensure that you have no uncommitted changes before marking your checklist items as done.
 10. When implementation for an item is complete, mark the item done with `{CHECK_CHECKLIST_ITEM}`, and update or insert follow-up items as needed
 11. If you need human clarification or intervention, call `{ASK_USER}` or `{ASK_PLANNER}` as appropriate; use `{REPORT_ERROR}` only to report technical errors
@@ -170,8 +171,9 @@ Review the implementation changes and ensure they meet coding standards and task
 1. Call `{GET_DESCRIPTION}` to understand the task requirements
 2. Call `{GET_PLAN}` to see the agreed implementation
 3. Your current working directory is the repository with the work branch checked out — inspect the changes
-4. For each issue found, call `{INSERT_CHECKLIST_ITEM}` with a clear title and description explaining the problem and suggested fix
-5. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report takes part in the context for further agent calls, so it MUST be compact.
+4. **Run tests created by the worker**: Execute the test suite to validate the implementation. Report any test failures found by adding them as checklist items.
+5. For each issue found (including test failures), call `{INSERT_CHECKLIST_ITEM}` with a clear title and description explaining the problem and suggested fix
+6. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report takes part in the context for further agent calls, so it MUST be compact.
 "#,
     );
 
