@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, sync::Mutex, time::Duration};
 
 use async_trait::async_trait;
 use zbobr_api::{Model, Parameter, Signal, Stage, Task, Tool, backend::TaskBackend};
@@ -107,9 +107,14 @@ struct MilestoneResponse {
 // GitHubTaskBackend
 // ============================================================================
 
+/// Duration to wait after writing to a GitHub issue before allowing reads.
+/// This handles GitHub API eventual consistency for list/filter queries.
+const COOLING_DURATION: Duration = Duration::from_secs(3);
+
 pub struct ZbobrTaskBackendGithub {
     backend_config: ZbobrTaskBackendGithubConfig,
     octocrab: octocrab::Octocrab,
+    cooling_deadlines: Mutex<HashMap<u64, tokio::time::Instant>>,
 }
 
 impl ZbobrTaskBackendGithub {
@@ -134,6 +139,7 @@ impl ZbobrTaskBackendGithub {
         Ok(Self {
             backend_config,
             octocrab,
+            cooling_deadlines: Mutex::new(HashMap::new()),
         })
     }
 
@@ -611,19 +617,69 @@ impl ZbobrTaskBackendGithub {
             etag: Some(body),
         }
     }
-}
 
-#[async_trait]
-impl TaskBackend for ZbobrTaskBackendGithub {
-    async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
+    /// Record that an issue was just written to and needs a cooling period.
+    fn record_cooling(&self, id: u64) {
+        let deadline = tokio::time::Instant::now() + COOLING_DURATION;
+        let mut map = self.cooling_deadlines.lock().unwrap();
+        map.insert(id, deadline);
+    }
+
+    /// Wait until the cooling period expires for a specific issue.
+    async fn await_cooling_for(&self, id: u64) {
+        let deadline = {
+            let mut map = self.cooling_deadlines.lock().unwrap();
+            match map.get(&id).copied() {
+                Some(d) if d > tokio::time::Instant::now() => Some(d),
+                Some(_) => {
+                    map.remove(&id);
+                    None
+                }
+                None => None,
+            }
+        };
+        if let Some(deadline) = deadline {
+            tracing::debug!("Issue #{id}: waiting for cooling period to expire");
+            tokio::time::sleep_until(deadline).await;
+            let mut map = self.cooling_deadlines.lock().unwrap();
+            map.remove(&id);
+        }
+    }
+
+    /// Wait until all cooling periods expire (used before list queries).
+    async fn await_all_cooling(&self) {
+        let latest_deadline = {
+            let map = self.cooling_deadlines.lock().unwrap();
+            map.values().max().copied()
+        };
+        if let Some(deadline) = latest_deadline {
+            if deadline > tokio::time::Instant::now() {
+                tracing::debug!("Waiting for cooling period to expire before listing issues");
+                tokio::time::sleep_until(deadline).await;
+            }
+            let mut map = self.cooling_deadlines.lock().unwrap();
+            let now = tokio::time::Instant::now();
+            map.retain(|_, d| *d > now);
+        }
+    }
+
+    /// Internal: fetch task from GitHub without cooling check.
+    async fn fetch_task(&self, id: u64) -> anyhow::Result<Task> {
         let (owner, repo) = self.parse_repo()?;
         let issue: IssueResponse = retry_github("get issue", || {
             self.octocrab
                 .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
         })
         .await?;
-
         Ok(Self::issue_to_task(issue))
+    }
+}
+
+#[async_trait]
+impl TaskBackend for ZbobrTaskBackendGithub {
+    async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
+        self.await_cooling_for(id).await;
+        self.fetch_task(id).await
     }
 
     async fn create_task(
@@ -709,7 +765,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         id: u64,
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
     ) -> anyhow::Result<()> {
-        let task = self.get_task(id).await?;
+        let task = self.fetch_task(id).await?;
         let original_stage = task.stage;
         let original_signal = task.signal;
         let original_conflict = task.conflict;
@@ -754,7 +810,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                 Err(_) => {}
             }
             // Re-read to check for concurrent modifications
-            let current_task = self.get_task(id).await?;
+            let current_task = self.fetch_task(id).await?;
             let current_body = current_task.etag.unwrap_or_else(|| {
                 let sp: HashMap<String, String> = current_task
                     .parameters
@@ -794,6 +850,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                 .await?;
         }
 
+        self.record_cooling(id);
         Ok(())
     }
 
@@ -802,6 +859,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         stage: Stage,
         tool: Option<Tool>,
     ) -> anyhow::Result<Vec<Task>> {
+        self.await_all_cooling().await;
         let stage_number = match self.find_stage_number(stage).await? {
             Some(n) => n,
             None => return Ok(vec![]),
