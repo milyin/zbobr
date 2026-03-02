@@ -249,6 +249,14 @@ pub enum TaskSubcommand {
         #[arg(long)]
         executor_mcp_tester_merging: Option<PathBuf>,
     },
+    /// Rewrite commit authors on the task's PR branch and push back
+    OverwriteAuthor {
+        /// Task ID
+        id: u64,
+        /// Skip confirmation and force execution
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -794,6 +802,70 @@ async fn run_task_subcommand(
                 &effective_executor_config,
             )
             .await?;
+        }
+        TaskSubcommand::OverwriteAuthor { id, force } => {
+            let task = zbobr.get_task(id).await?;
+            let git_user_name = &zbobr.config().git_user_name;
+            
+            if !force {
+                println!(
+                    "This will rewrite commit authors to '{}'. Continue? (yes/no)",
+                    git_user_name
+                );
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input)?;
+                if !input.trim().eq_ignore_ascii_case("yes") {
+                    println!("Cancelled");
+                    return Ok(());
+                }
+            }
+            
+            let work_dir = zbobr.config().workspaces.join(format!("task#{}", id));
+            
+            // Ensure task has destination repo and branch
+            let _dest_repo = task
+                .parameters
+                .get(&Parameter::DestinationRepository)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Task #{} has no destination repository", id)
+                })?
+                .clone();
+            
+            // Fetch latest to ensure we have the destination branch
+            let dest_branch = task
+                .parameters
+                .get(&Parameter::DestinationBranch)
+                .cloned()
+                .unwrap_or_else(|| "main".to_string());
+            
+            // Ensure workspace exists and is set up
+            if !work_dir.exists() {
+                return Err(anyhow::anyhow!(
+                    "Task workspace not found at {}. Run 'zbobr task clone {}' first.",
+                    work_dir.display(),
+                    id
+                ));
+            }
+            
+            // Fetch the latest from remote
+            let fetch_cmd = TokioCommand::new("git")
+                .args(["fetch", "origin", &dest_branch])
+                .current_dir(&work_dir)
+                .output()
+                .await;
+            
+            if let Ok(output) = fetch_cmd {
+                if !output.status.success() {
+                    return Err(anyhow::anyhow!(
+                        "Failed to fetch from remote: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    ));
+                }
+            }
+            
+            // Call the rewrite_commit_authors function
+            rewrite_commit_authors(zbobr, id, &work_dir).await?;
+            println!("Successfully rewrote commit authors and pushed");
         }
     }
     Ok(())
