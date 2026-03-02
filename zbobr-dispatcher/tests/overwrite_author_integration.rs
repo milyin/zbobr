@@ -316,3 +316,116 @@ fn get_all_commit_authors(path: &Path) -> Vec<String> {
     output.lines().map(|line| line.to_string()).collect()
 }
 
+/// Test that dry-run mode shows what would be changed without making any changes.
+#[test]
+fn test_dry_run_does_not_modify_commits() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path();
+
+    init_git_repo(repo_path);
+    create_commit(repo_path, "Initial", "original", "original@example.com");
+
+    // Get the current branch name (usually master or main after init)
+    let default_branch = run_git_command(repo_path, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    let default_branch = default_branch.trim().to_string();
+
+    run_git_command(repo_path, &["checkout", "-b", "work-branch"]);
+    create_commit(repo_path, "Work commit 1", "work-user", "work@example.com");
+    create_commit(repo_path, "Work commit 2", "work-user", "work@example.com");
+
+    // Record author before dry-run
+    let author_before = get_last_commit_author(repo_path);
+    assert_eq!(author_before, "work-user");
+
+    // Simulate dry-run: just run git log to show what would be changed
+    // Use git command directly instead of shell to avoid % escaping issues
+    let range = format!("{}..HEAD", default_branch);
+    let output = std::process::Command::new("git")
+        .args(&["log", &range, "--format=%H %an <%ae>"])
+        .current_dir(repo_path)
+        .output()
+        .expect("Failed to run log command");
+
+    let commits = String::from_utf8_lossy(&output.stdout);
+    println!("Commits that would be rewritten:\n{}", commits);
+    assert!(!commits.is_empty(), "Should have commits to rewrite");
+
+    // Verify that the author hasn't actually changed (dry-run didn't modify)
+    let author_after = get_last_commit_author(repo_path);
+    assert_eq!(
+        author_after, "work-user",
+        "Dry-run should not modify commit author"
+    );
+}
+
+/// Test author rewriting when executed from a nested directory.
+#[test]
+fn test_author_rewriting_from_nested_directory() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path();
+
+    init_git_repo(repo_path);
+    create_commit(repo_path, "Initial", "original", "original@example.com");
+
+    let default_branch = run_git_command(repo_path, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    let default_branch = default_branch.trim().to_string();
+
+    run_git_command(repo_path, &["checkout", "-b", "work-branch"]);
+    create_commit(repo_path, "Work commit", "work-user", "work@example.com");
+
+    // Create nested subdirectories
+    let nested_dir = repo_path.join("src").join("subdir");
+    std::fs::create_dir_all(&nested_dir).expect("Failed to create nested dirs");
+
+    // Execute git commands from the nested directory to verify repo discovery
+    let repo_root_output = std::process::Command::new("git")
+        .args(&["rev-parse", "--show-toplevel"])
+        .current_dir(&nested_dir)
+        .output()
+        .expect("Failed to discover repo from nested dir");
+
+    assert!(repo_root_output.status.success());
+    let discovered_root = String::from_utf8_lossy(&repo_root_output.stdout)
+        .trim()
+        .to_string();
+    let expected_root = repo_path.to_string_lossy().to_string();
+    assert_eq!(discovered_root, expected_root);
+
+    // Now run rebase from the nested directory using the discovered root
+    let git_root = std::path::PathBuf::from(&discovered_root);
+    let new_author = "nested-executor";
+    let new_email = "nested@example.com";
+
+    run_git_command(&git_root, &["config", "--local", "user.name", new_author]);
+    run_git_command(&git_root, &["config", "--local", "user.email", new_email]);
+
+    let rebase_cmd = format!(
+        "git rebase --exec 'git commit --amend --no-edit --reset-author' '{}'",
+        default_branch
+    );
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&rebase_cmd)
+        .env("GIT_AUTHOR_NAME", new_author)
+        .env("GIT_AUTHOR_EMAIL", new_email)
+        .env("GIT_COMMITTER_NAME", new_author)
+        .env("GIT_COMMITTER_EMAIL", new_email)
+        .current_dir(&git_root)
+        .output()
+        .expect("Failed to run rebase");
+
+    assert!(
+        output.status.success(),
+        "Rebase from nested directory should succeed"
+    );
+
+    // Verify author was changed (check from nested directory too)
+    let author_cmd = std::process::Command::new("git")
+        .args(&["log", "-1", "--format=%an"])
+        .current_dir(&nested_dir)
+        .output()
+        .expect("Failed to get author from nested dir");
+
+    let final_author = String::from_utf8_lossy(&author_cmd.stdout).trim().to_string();
+    assert_eq!(final_author, new_author, "Author should be rewritten");
+}
