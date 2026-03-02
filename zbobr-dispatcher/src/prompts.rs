@@ -56,7 +56,7 @@ pub fn resolve_prompts(args: &ZbobrDispatcherArgs, config: &ZbobrDispatcherConfi
 
 /// Load and concatenate multiple prompt files.
 /// Relative paths are resolved relative to `base_path` if provided, otherwise cwd.
-/// Missing files are silently skipped.
+/// Returns an error if any file cannot be read.
 pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::Result<String> {
     let mut combined = String::new();
     for path in paths.iter() {
@@ -72,16 +72,8 @@ pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::R
             path.clone()
         };
 
-        let content = match std::fs::read_to_string(&resolved_path) {
-            Ok(c) => c,
-            Err(_) => {
-                tracing::debug!(
-                    "Prompt file not found, skipping: {}",
-                    resolved_path.display()
-                );
-                continue;
-            }
-        };
+        let content = std::fs::read_to_string(&resolved_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read prompt file '{}': {}", resolved_path.display(), e))?;
 
         let trimmed = content.trim();
         if trimmed.is_empty() {
