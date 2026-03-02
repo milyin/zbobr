@@ -45,11 +45,14 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
         match self.session().get_discussion().await {
-            Ok(msgs) => {
-                if msgs.is_empty() {
+            Ok(comments) => {
+                if comments.is_empty() {
                     "No messages yet.".to_string()
                 } else {
-                    msgs.join("\n\n---\n\n")
+                    match serde_json::to_string_pretty(&comments) {
+                        Ok(json) => json,
+                        Err(e) => format!("Error serializing comments: {e}"),
+                    }
                 }
             }
             Err(e) => format!("Error: {e}"),
