@@ -113,7 +113,7 @@ fn parse_comment_tag(text: &str) -> (CommentType, Option<String>, String, Option
         // Extract the tag type (first word before space or end of line)
         let tag_parts: Vec<&str> = tag_line.splitn(2, ' ').collect();
         if let Some(tag_str) = tag_parts.get(0) {
-            if let Some(comment_type) = CommentType::from_str(tag_str) {
+            if let Some(comment_type) = CommentType::from_str(&tag_str.to_lowercase()) {
                 // For REPORT and ERROR, parse role:host:model format
                 if comment_type != CommentType::Reply {
                     if let Some(meta_part) = tag_parts.get(1) {
@@ -141,7 +141,7 @@ fn parse_comment_tag(text: &str) -> (CommentType, Option<String>, String, Option
                     // If REPLY tag has no inline text, check for text after tag line
                     let body_start = tag_line_end + 1;
                     if body_start < rest.len() {
-                        rest[body_start..].to_string()
+                        rest[body_start..].trim_start().to_string()
                     } else {
                         String::new()
                     }
@@ -569,5 +569,70 @@ impl TaskBackend for ZbobrTaskBackendFs {
             "FilesystemTaskBackend(tasks_dir: {})",
             self.config.tasks_dir.display()
         )
+    }
+}
+
+#[cfg(test)]
+mod parse_tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_comment_tag_report_with_body() {
+        let input = "// REPORT worker:localhost:claude-opus\n\nThis is the report body\nWith multiple lines";
+        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        
+        assert_eq!(comment_type, CommentType::Report);
+        assert_eq!(role, Some("worker".to_string()));
+        assert_eq!(host, "localhost");
+        assert_eq!(model, Some("claude-opus".to_string()));
+        assert_eq!(body, "This is the report body\nWith multiple lines");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_error_with_body() {
+        let input = "// ERROR planner:skynet:gpt-4\n\nAn error occurred";
+        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        
+        assert_eq!(comment_type, CommentType::Error);
+        assert_eq!(role, Some("planner".to_string()));
+        assert_eq!(host, "skynet");
+        assert_eq!(model, Some("gpt-4".to_string()));
+        assert_eq!(body, "An error occurred");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_reply_with_body() {
+        let input = "// REPLY\n\nThis is a user reply";
+        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        
+        assert_eq!(comment_type, CommentType::Reply);
+        assert_eq!(role, None);
+        assert_eq!(host, "");
+        assert_eq!(model, None);
+        assert_eq!(body, "This is a user reply");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_report_no_model() {
+        let input = "// REPORT reviewer:host\n\nBody text";
+        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        
+        assert_eq!(comment_type, CommentType::Report);
+        assert_eq!(role, Some("reviewer".to_string()));
+        assert_eq!(host, "host");
+        assert_eq!(model, None);
+        assert_eq!(body, "Body text");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_no_tag_treated_as_reply() {
+        let input = "This is just text without a tag";
+        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        
+        assert_eq!(comment_type, CommentType::Reply);
+        assert_eq!(role, None);
+        assert_eq!(host, "");
+        assert_eq!(model, None);
+        assert_eq!(body, "This is just text without a tag");
     }
 }
