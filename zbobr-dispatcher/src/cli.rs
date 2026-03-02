@@ -256,6 +256,9 @@ pub enum TaskSubcommand {
         /// Skip confirmation and force execution
         #[arg(long)]
         force: bool,
+        /// Show what would be done without making changes
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -803,14 +806,15 @@ async fn run_task_subcommand(
             )
             .await?;
         }
-        TaskSubcommand::OverwriteAuthor { id, force } => {
+        TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
             let task = zbobr.get_task(id).await?;
             let git_user_name = &zbobr.config().git_user_name;
             
             if !force {
+                let action = if dry_run { "preview" } else { "rewrite commit authors to" };
                 println!(
-                    "This will rewrite commit authors to '{}'. Continue? (yes/no)",
-                    git_user_name
+                    "This will {} '{}'. Continue? (yes/no)",
+                    action, git_user_name
                 );
                 let mut input = String::new();
                 std::io::stdin().read_line(&mut input)?;
@@ -864,8 +868,12 @@ async fn run_task_subcommand(
             }
             
             // Call the rewrite_commit_authors function
-            rewrite_commit_authors(zbobr, id, &work_dir).await?;
-            println!("Successfully rewrote commit authors and pushed");
+            rewrite_commit_authors(zbobr, id, &work_dir, dry_run).await?;
+            if dry_run {
+                println!("Dry run completed. No commits were modified.");
+            } else {
+                println!("Successfully rewrote commit authors and pushed");
+            }
         }
     }
     Ok(())
@@ -1677,7 +1685,7 @@ async fn perform_auto_commit_and_push(
     }
 
     if zbobr.config().overwrite_author {
-        rewrite_commit_authors(zbobr, task_id, work_dir).await?;
+        rewrite_commit_authors(zbobr, task_id, work_dir, false).await?;
     }
 
     Ok(())
@@ -1687,6 +1695,7 @@ async fn rewrite_commit_authors(
     zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
     work_dir: &PathBuf,
+    dry_run: bool,
 ) -> anyhow::Result<()> {
     let task = zbobr.get_task(task_id).await?;
     let dest_branch = task
@@ -1698,14 +1707,84 @@ async fn rewrite_commit_authors(
     let git_user_name = &zbobr.config().git_user_name;
     let git_user_email = &zbobr.config().git_user_email;
 
+    // Get absolute path to the git repository
+    let git_root_cmd = TokioCommand::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(work_dir)
+        .output()
+        .await;
+    
+    let git_root = match git_root_cmd {
+        Ok(output) => {
+            if output.status.success() {
+                String::from_utf8_lossy(&output.stdout)
+                    .trim()
+                    .to_string()
+            } else {
+                return Err(anyhow::anyhow!(
+                    "Failed to determine git repository root: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "Error executing git rev-parse: {}",
+                e
+            ));
+        }
+    };
+
+    let git_root_path = std::path::PathBuf::from(&git_root);
+    
+    // Get list of commits that will be rewritten
+    let log_cmd = TokioCommand::new("git")
+        .args(["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"])
+        .current_dir(&git_root_path)
+        .output()
+        .await;
+    
+    let commits_to_rewrite = match log_cmd {
+        Ok(output) => {
+            if output.status.success() {
+                String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+            } else {
+                return Err(anyhow::anyhow!(
+                    "Failed to list commits: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "Error executing git log: {}",
+                e
+            ));
+        }
+    };
+
+    println!("Commits to be rewritten ({}):", commits_to_rewrite.len());
+    for commit in &commits_to_rewrite {
+        println!("  {}", commit);
+    }
+
+    if dry_run {
+        println!("\n[DRY-RUN] Skipping actual rebase. These commits would be rewritten with author: {} <{}>",
+                 git_user_name, git_user_email);
+        return Ok(());
+    }
+
     let config_user = TokioCommand::new("git")
         .args(["config", "--local", "user.name", git_user_name])
-        .current_dir(work_dir)
+        .current_dir(&git_root_path)
         .output()
         .await;
     let config_email = TokioCommand::new("git")
         .args(["config", "--local", "user.email", git_user_email])
-        .current_dir(work_dir)
+        .current_dir(&git_root_path)
         .output()
         .await;
 
@@ -1722,7 +1801,7 @@ async fn rewrite_commit_authors(
                 .env("GIT_AUTHOR_EMAIL", git_user_email)
                 .env("GIT_COMMITTER_NAME", git_user_name)
                 .env("GIT_COMMITTER_EMAIL", git_user_email)
-                .current_dir(work_dir)
+                .current_dir(&git_root_path)
                 .output()
                 .await;
             match rebase_output {
