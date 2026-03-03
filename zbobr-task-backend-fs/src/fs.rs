@@ -101,6 +101,7 @@ impl TaskFile {
 
 /// Parse tag from comment start: `// REPORT role:host:model` or `// ERROR role:host[:<model>]` or `// REQUEST`
 /// Returns (CommentType, role_opt, host, model_opt, remaining_text)
+#[cfg(test)]
 fn parse_comment_tag(text: &str) -> (CommentType, Option<String>, String, Option<String>, String) {
     let trimmed = text.trim_start();
 
@@ -306,40 +307,6 @@ impl ZbobrTaskBackendFs {
             .context("Failed to write comments file")
     }
 
-    /// Write comments to disk (for backward compatibility).
-    async fn write_comments(&self, id: u64, comments: Vec<String>) -> anyhow::Result<()> {
-        // Convert string comments back to structured format (best effort)
-        let structured_comments = comments
-            .into_iter()
-            .map(|text| {
-                // Try to parse tag, fall back to User author
-                let (comment_type, role_opt, host, model_str_opt, body_text) = parse_comment_tag(&text);
-                let author = if let Some(role_str) = role_opt {
-                    match role_str.parse::<Role>() {
-                        Ok(role) => CommentAuthor::Role(role),
-                        Err(_) => CommentAuthor::User,
-                    }
-                } else {
-                    CommentAuthor::User
-                };
-                
-                // Convert model string to Model enum if present
-                let model = model_str_opt.and_then(|s| s.parse::<Model>().ok());
-                
-                Comment {
-                    comment_type,
-                    timestamp: format!("{:?}", std::time::SystemTime::now()),
-                    author,
-                    hostname: host,
-                    model,
-                    text: body_text,
-                }
-            })
-            .collect();
-
-        self.write_comments_structured(id, structured_comments).await
-    }
-
     /// List all task files in the directory.
     async fn list_task_files(&self) -> anyhow::Result<Vec<u64>> {
         let mut task_ids = Vec::new();
@@ -499,22 +466,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
 
     async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<String>> {
         self.read_comments(id).await
-    }
-
-    async fn post_task_comment(
-        &self,
-        id: u64,
-        body: &str,
-        role: &str,
-        hostname: &str,
-    ) -> anyhow::Result<()> {
-        let mut comments = self.read_comments(id).await?;
-        let formatted_comment = format!("[{}@{}] {}", role, hostname, body);
-        comments.push(formatted_comment);
-        self.write_comments(id, comments).await?;
-
-        tracing::debug!("Posted comment to task {}", id);
-        Ok(())
     }
 
     async fn get_task_comments_structured(&self, id: u64) -> anyhow::Result<Vec<Comment>> {

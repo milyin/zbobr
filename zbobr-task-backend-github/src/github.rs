@@ -991,25 +991,6 @@ impl TaskBackend for ZbobrTaskBackendGithub {
             .collect())
     }
 
-    async fn post_task_comment(
-        &self,
-        id: u64,
-        body: &str,
-        role: &str,
-        hostname: &str,
-    ) -> anyhow::Result<()> {
-        let (owner, repo) = self.parse_repo()?;
-        let formatted_body = format!("**[{role}@{hostname}]**\n\n{body}");
-        retry_github("create issue comment", || async {
-            self.octocrab
-                .issues(owner, repo)
-                .create_comment(id, &formatted_body)
-                .await
-        })
-        .await?;
-        Ok(())
-    }
-
     async fn get_task_comments_structured(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
         let (owner, repo) = self.parse_repo()?;
         let comments: Vec<CommentResponse> = retry_github("list issue comments", || {

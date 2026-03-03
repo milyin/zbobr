@@ -61,15 +61,6 @@ pub trait TaskBackend: Send + Sync {
     /// Get all comments on a task as formatted discussion.
     async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<String>>;
 
-    /// Post a comment on a task with role and hostname metadata.
-    async fn post_task_comment(
-        &self,
-        id: u64,
-        body: &str,
-        role: &str,
-        hostname: &str,
-    ) -> anyhow::Result<()>;
-
     /// Get all comments on a task as structured Comment objects.
     async fn get_task_comments_structured(&self, id: u64) -> anyhow::Result<Vec<Comment>>;
 

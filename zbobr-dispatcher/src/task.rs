@@ -110,13 +110,6 @@ impl RoleSession {
         self.zbobr.get_task_comments_structured(self.task_id).await
     }
 
-    /// Post a message to the task discussion with role and hostname metadata.
-    pub async fn post_message(&self, msg: &str, role: &str, hostname: &str) -> anyhow::Result<()> {
-        self.zbobr
-            .post_task_comment(self.task_id, msg, role, hostname)
-            .await
-    }
-
     pub async fn post_message_structured(
         &self,
         comment_type: CommentType,
@@ -494,13 +487,6 @@ impl TaskSession {
             task.signal = None;
         })
         .await
-    }
-
-    /// Post a message to the task discussion with role and hostname metadata.
-    pub async fn post_message(&self, msg: &str, role: &str, hostname: &str) -> anyhow::Result<()> {
-        self.zbobr
-            .post_task_comment(self.task_id, msg, role, hostname)
-            .await
     }
 
     /// Post a structured comment with type, body, and optional role/model metadata.

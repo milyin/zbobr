@@ -515,7 +515,7 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
 
         if let Err(e) = self
             .session()
-            .post_message(message, self.role().as_str(), &hostname)
+            .post_message_structured(CommentType::Request, message, Some(self.role()), &hostname, None)
             .await
         {
             tracing::error!(
