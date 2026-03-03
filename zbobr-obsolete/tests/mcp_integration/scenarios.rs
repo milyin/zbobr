@@ -4,7 +4,7 @@
 
 pub fn preparation_scenario(repo_path: &str) -> String {
     use zbobr_dispatcher::mcp::preparator_tools::{
-        GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH,
+        GET_DESCRIPTION, GET_PARAM_DESTINATION_BRANCH,
         GET_PARAM_DESTINATION_REPOSITORY, GET_PARAM_WORK_BRANCH, SET_PARAM_DESTINATION_BRANCH,
         SET_PARAM_DESTINATION_REPOSITORY, SET_PARAM_WORK_BRANCH_POSTFIX,
     };
@@ -25,16 +25,6 @@ steps:
     - type: contains
       path: result
       value: "Dummy task description"
-
-- name: Get task discussion
-  operation:
-    type: tool_call
-    tool: {GET_DISCUSSION}
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "No messages yet."
 
 - name: Set destination repository
   operation:
@@ -99,7 +89,7 @@ steps:
 
 pub fn planning_scenario() -> String {
     use zbobr_dispatcher::mcp::planner_tools::{
-        GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
+        GET_DESCRIPTION, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
         GET_PLAN, POST_PLAN, REPORT_RESULTS,
     };
 
@@ -119,13 +109,6 @@ steps:
     - type: contains
       path: result
       value: "Dummy task description"
-
-- name: Get task discussion
-  operation:
-    type: tool_call
-    tool: {GET_DISCUSSION}
-  assertions:
-    - type: success
 
 - name: Get plan (initially empty)
   operation:
@@ -188,7 +171,7 @@ steps:
 pub fn working_scenario() -> String {
     use zbobr_dispatcher::mcp::worker_tools::{
         CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST, GET_DESCRIPTION,
-        GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN,
         INSERT_CHECKLIST_ITEM, REPORT_RESULTS, UPDATE_CHECKLIST_ITEM,
     };
 
@@ -211,16 +194,6 @@ steps:
     - type: contains
       path: result
       value: "Dummy task description"
-
-- name: Get task discussion
-  operation:
-    type: tool_call
-    tool: {GET_DISCUSSION}
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "No messages yet."
 
 - name: Get plan
   operation:
@@ -450,7 +423,7 @@ steps:
 
 pub fn merging_scenario(ending: &str) -> String {
     use zbobr_dispatcher::mcp::merger_tools::{
-        ASK_USER, GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH,
+        ASK_USER, GET_DESCRIPTION, GET_PARAM_DESTINATION_BRANCH,
         GET_PARAM_WORK_BRANCH, REPORT_RESULTS,
     };
 
@@ -498,13 +471,6 @@ steps:
     - type: contains
       path: result
       value: "Dummy task description"
-
-- name: Get task discussion
-  operation:
-    type: tool_call
-    tool: {GET_DISCUSSION}
-  assertions:
-    - type: success
 
 - name: Get destination branch
   operation:

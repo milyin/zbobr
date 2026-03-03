@@ -96,14 +96,6 @@ impl RoleSession {
             .await
     }
 
-    /// Get all discussion messages on the task (structured format, filtered to Request type only).
-    pub async fn get_discussion(&self) -> anyhow::Result<Vec<Comment>> {
-        let all_comments = self.zbobr.get_task_comments_structured(self.task_id).await?;
-        Ok(all_comments
-            .into_iter()
-            .filter(|c| c.comment_type == CommentType::Request)
-            .collect())
-    }
 
     /// Get all comments as structured Comment objects (includes all types: error, report, reply).
     pub async fn get_history(&self) -> anyhow::Result<Vec<Comment>> {
