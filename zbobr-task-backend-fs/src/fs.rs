@@ -259,6 +259,7 @@ impl ZbobrTaskBackendFs {
                 match c.comment_type {
                     CommentType::Error => result.push_str("// ERROR"),
                     CommentType::Report => result.push_str("// REPORT"),
+                    CommentType::Plan => result.push_str("// PLAN"),
                     CommentType::Reply => result.push_str("// REPLY"),
                 }
                 
