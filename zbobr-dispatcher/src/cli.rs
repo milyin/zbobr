@@ -1646,14 +1646,13 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Reviewer => {
-            // After review we either route back to the planner or settinng staget to DONE depending on if all checklist items are checked.
-            if current_task.signal.is_none() && !current_task.pause {
-                if has_unchecked {
-                    task_session.set_signal(Some(Signal::GoPlan)).await?;
-                } else {
-                    task_session.mark_done().await?;
-                    return Ok(());
-                }
+            // Routing is driven by the signal set during the session:
+            //   None (review_accept called)  → mark task done
+            //   GoPlan (review_reject called) → route back to planner
+            //   GoReview (report_error)        → preserved as-is (task paused)
+            if !current_task.pause && current_task.signal.is_none() {
+                task_session.mark_done().await?;
+                return Ok(());
             }
             task_session.set_stage(Stage::Pending).await?;
         }

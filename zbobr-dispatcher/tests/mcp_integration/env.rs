@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use zbobr_dispatcher::{
     ZbobrDispatcher, ZbobrDispatcherConfig, ZbobrDispatcherDyn, ZbobrExecutorConfig,
-    Comment, Signal, Stage, Task, process_task_by_stage,
+    ChecklistItem, Comment, Signal, Stage, Task, process_task_by_stage,
     prompts::Prompts,
     task::{Parameter, Tool},
 };
@@ -351,6 +351,20 @@ impl IntegrationTestEnv {
             .unwrap_or_else(|e| {
                 panic!("[{}] failed to get comments for task #{task_id}: {e}", self.name)
             })
+    }
+
+    pub async fn insert_checklist_item(&self, task_id: u64, id: &str, text: &str) {
+        let id = id.to_string();
+        let text = text.to_string();
+        self.zbobr
+            .task_session(task_id)
+            .modify_task(move |task| {
+                task.checklist.push(ChecklistItem { id, checked: false, text });
+            })
+            .await
+            .unwrap_or_else(|e| {
+                panic!("[{}] failed to insert checklist item for task #{task_id}: {e}", self.name)
+            });
     }
 
     pub async fn update_task_branches(

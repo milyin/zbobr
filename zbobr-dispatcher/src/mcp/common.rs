@@ -177,7 +177,8 @@ mcp_tools! {
     REPORT_ERROR = "report_error",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
-    REPORT_RESULTS = "report_results",
+    REVIEW_ACCEPT = "review_accept",
+    REVIEW_REJECT = "review_reject",
 }
 
 mcp_tools! {

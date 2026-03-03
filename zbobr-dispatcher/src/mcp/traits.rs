@@ -533,6 +533,59 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
     async fn get_param_work_branch_impl(&self) -> String {
         self.get_param_impl(Parameter::WorkBranch).await
     }
+
+    async fn review_accept_impl(&self, message: &str) -> String {
+        tracing::info!(
+            "[{}#{}] review_accept",
+            self.role_name(),
+            self.session().task_id()
+        );
+        let hostname = get_hostname();
+        if let Err(e) = self
+            .session()
+            .post_comment(
+                CommentType::Report,
+                message,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
+            .await
+        {
+            return format!("Error posting review acceptance: {e}");
+        }
+        // No signal set — finalize_session will call mark_done when signal is None.
+        "Review accepted — task will be marked done".to_string()
+    }
+
+    async fn review_reject_impl(&self, message: &str) -> String {
+        tracing::info!(
+            "[{}#{}] review_reject",
+            self.role_name(),
+            self.session().task_id()
+        );
+        let hostname = get_hostname();
+        if let Err(e) = self
+            .session()
+            .post_comment(
+                CommentType::Report,
+                message,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
+            .await
+        {
+            return format!("Error posting review rejection: {e}");
+        }
+        if let Err(e) = self.session().set_signal(crate::Signal::GoPlan).await {
+            tracing::warn!(
+                "Failed to set GoPlan signal for task {}: {e}",
+                self.session().task_id()
+            );
+        }
+        "Review rejected — task routed back to planner".to_string()
+    }
 }
 
 // -- Merger MCP service --
