@@ -406,8 +406,12 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     if !task.description.is_empty() {
         println!("Description:\n{}", task.description);
     }
-    if !task.plan.is_empty() {
-        println!("Plan:\n{}", task.plan);
+    // show latest plan comment if present (old tasks used to store this in
+    // `task.plan` so we try to mimic that behaviour for convenience)
+    if !discussion.is_empty() {
+        if let Some(plan_comment) = discussion.iter().rev().find(|c| c.comment_type == CommentType::Plan) {
+            println!("Plan (from comment):\n{}", plan_comment.text);
+        }
     }
     if !task.checklist.is_empty() {
         println!("Checklist:");

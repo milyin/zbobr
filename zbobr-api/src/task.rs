@@ -644,7 +644,6 @@ pub struct Task {
     pub id: u64,
     pub title: String,
     pub description: String,
-    pub plan: String,
     pub stage: Stage,
     pub tool: Option<Tool>,
     pub model: Option<Model>,

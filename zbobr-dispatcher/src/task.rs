@@ -6,7 +6,7 @@ use crate::ZbobrDispatcherDyn;
 // RoleSession — restricted access for MCP tools during agent sessions.
 //
 // Cannot modify: stage, conflict, confirm (those are dispatcher-only transitions).
-// Can modify: description, plan, checklist, parameters, signal, pause.
+// Can modify: description, checklist, parameters, signal, pause.
 // ---------------------------------------------------------------------------
 
 /// Restricted task session for MCP tool operations.
@@ -56,9 +56,19 @@ impl RoleSession {
         Ok(self.get_task().await?.description)
     }
 
-    /// Get the current task plan.
+    /// Get the current task plan (latest `PLAN` comment).
+    ///
+    /// Since plans are now stored as comments, this walks the task's comment
+    /// history from newest to oldest and returns the first `Plan`-typed entry.
+    /// Returns an empty string if no plan comment exists.
     pub async fn get_plan(&self) -> anyhow::Result<String> {
-        Ok(self.get_task().await?.plan)
+        let comments = self.get_comments().await?;
+        for c in comments.iter().rev() {
+            if c.comment_type == CommentType::Plan {
+                return Ok(c.text.clone());
+            }
+        }
+        Ok(String::new())
     }
 
     /// Get the current task checklist.
@@ -69,7 +79,7 @@ impl RoleSession {
     /// Atomically read-modify-write the task body.
     ///
     /// The closure receives a mutable `Task` reference and may modify `description`,
-    /// `parameters`, `plan`, `checklist`, `signal`, and `pause`.
+    /// `parameters`, `checklist`, `signal`, and `pause`.
     ///
     /// **Protected fields**: `stage` and `conflict` are saved before the mutation
     /// and restored afterwards, so MCP tools cannot change them.
@@ -573,7 +583,6 @@ mod tests {
             id: 42,
             title: "Test task".to_string(),
             description: "Do something".to_string(),
-            plan: String::new(),
             stage: Stage::Planning,
             tool: Some(Tool::Claude),
             model: Some(Model::Claude3Opus),
@@ -603,7 +612,6 @@ mod tests {
             id: 1,
             title: "x".into(),
             description: "".into(),
-            plan: String::new(),
             stage: Stage::Pending,
             tool: None,
             model: None,
@@ -633,7 +641,6 @@ mod tests {
             id: 2,
             title: "x".into(),
             description: "".into(),
-            plan: String::new(),
             stage: Stage::Pending,
             tool: None,
             model: None,
@@ -694,7 +701,6 @@ mod tests {
                 id,
                 title: title.to_string(),
                 description: description.to_string(),
-                plan: String::new(),
                 stage,
                 tool,
                 model,

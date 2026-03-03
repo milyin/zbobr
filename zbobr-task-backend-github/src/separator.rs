@@ -2,9 +2,10 @@ use std::collections::HashMap;
 
 use zbobr_api::task::ChecklistItem;
 
-// -- Plan and Checklist parsing and serialization helpers --
+// -- Checklist parsing and serialization helpers --
 
 const PARAMETERS_SEPARATOR: &str = "\n\n---PARAMETERS---\n";
+// legacy separator; used only to strip out plan text from existing descriptions
 const PLAN_SEPARATOR: &str = "\n\n---PLAN---\n";
 const CHECKLIST_SEPARATOR: &str = "\n\n---CHECKLIST---\n";
 
@@ -35,11 +36,12 @@ pub(crate) fn serialize_parameters(params: &HashMap<String, String>) -> String {
     result
 }
 
-/// Parse a task description into (description, parameters, plan, checklist).
-/// Format: description | ---PARAMETERS--- | params | ---PLAN--- | plan text | ---CHECKLIST--- | checklist
+/// Parse a task description into (description, parameters, checklist).
+/// Legacy `---PLAN---` sections are stripped and not returned; plan text should
+/// now be stored as a comment.
 pub(crate) fn parse_description_full(
     full_text: &str,
-) -> (String, HashMap<String, String>, String, Vec<ChecklistItem>) {
+) -> (String, HashMap<String, String>, Vec<ChecklistItem>) {
     // Normalize line endings so separators match regardless of \r\n vs \n.
     let normalized = if full_text.contains("\r\n") {
         full_text.replace("\r\n", "\n")
@@ -55,11 +57,12 @@ pub(crate) fn parse_description_full(
         _ => (parts[0], parts[1]),
     };
 
-    // Now split by plan separator
-    let plan_parts: Vec<&str> = before_checklist.split(PLAN_SEPARATOR).collect();
-    let (before_plan, plan) = match plan_parts.len() {
-        1 => (plan_parts[0], ""),
-        _ => (plan_parts[0], plan_parts[1].trim()),
+    // Drop any legacy plan section by splitting on PLAN_SEPARATOR and taking the
+    // portion before it.
+    let before_plan = if let Some(idx) = before_checklist.find(PLAN_SEPARATOR) {
+        &before_checklist[..idx]
+    } else {
+        before_checklist
     };
 
     // Now split by parameters separator
@@ -97,19 +100,18 @@ pub(crate) fn parse_description_full(
         }
     }
 
-    (description, parameters, plan.to_string(), items)
+    (description, parameters, items)
 }
 
-/// Serialize description, parameters, plan and checklist items back into the full format.
-/// Format: description | ---PARAMETERS--- | params | ---PLAN--- | plan | ---CHECKLIST--- | checklist
+/// Serialize description, parameters, and checklist items back into the full format.
+/// Legacy plan sections are not included; they should be managed via Plan comments.
 pub(crate) fn serialize_description_full(
     original_description: &str,
     parameters: &HashMap<String, String>,
-    plan: &str,
     items: &[ChecklistItem],
 ) -> String {
     // Strip everything from the description first
-    let (clean_description, _, _, _) = parse_description_full(original_description);
+    let (clean_description, _, _) = parse_description_full(original_description);
 
     let mut result = clean_description;
 
@@ -117,12 +119,6 @@ pub(crate) fn serialize_description_full(
     if !parameters.is_empty() {
         result.push_str(PARAMETERS_SEPARATOR);
         result.push_str(&serialize_parameters(parameters));
-    }
-
-    // Add plan if present
-    if !plan.is_empty() {
-        result.push_str(PLAN_SEPARATOR);
-        result.push_str(plan);
     }
 
     // Add checklist if present
@@ -160,14 +156,13 @@ pub(crate) fn merge_concurrent_description_updates(
     our_new: &str,
 ) -> String {
     // Parse all three versions
-    let (orig_desc, orig_params, orig_plan, orig_checklist) = parse_description_full(original);
-    let (curr_desc, curr_params, curr_plan, curr_checklist) = parse_description_full(current);
-    let (new_desc, new_params, new_plan, new_checklist) = parse_description_full(our_new);
+    let (orig_desc, orig_params, orig_checklist) = parse_description_full(original);
+    let (curr_desc, curr_params, curr_checklist) = parse_description_full(current);
+    let (new_desc, new_params, new_checklist) = parse_description_full(our_new);
 
     // Determine what we changed
     let we_changed_desc = new_desc != orig_desc;
     let we_changed_params = new_params != orig_params;
-    let we_changed_plan = new_plan != orig_plan;
     let we_changed_checklist = serde_json::to_string(&new_checklist).unwrap_or_default()
         != serde_json::to_string(&orig_checklist).unwrap_or_default();
 
@@ -178,7 +173,6 @@ pub(crate) fn merge_concurrent_description_updates(
     } else {
         curr_params
     };
-    let merged_plan = if we_changed_plan { new_plan } else { curr_plan };
     let merged_checklist = if we_changed_checklist {
         new_checklist
     } else {
@@ -189,7 +183,6 @@ pub(crate) fn merge_concurrent_description_updates(
     serialize_description_full(
         &merged_desc,
         &merged_params,
-        &merged_plan,
         &merged_checklist,
     )
 }

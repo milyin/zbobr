@@ -14,6 +14,7 @@ struct TaskFile {
     id: u64,
     title: String,
     description: String,
+    #[serde(default)]
     plan: String,
     stage: String,
     tool: Option<String>,
@@ -61,7 +62,6 @@ impl TaskFile {
             id: self.id,
             title: self.title.clone(),
             description: self.description.clone(),
-            plan: self.plan.clone(),
             stage,
             tool,
             model,
@@ -80,7 +80,7 @@ impl TaskFile {
             id: task.id,
             title: task.title.clone(),
             description: task.description.clone(),
-            plan: task.plan.clone(),
+            plan: String::new(),
             stage: task.stage.milestone_name().to_string(),
             tool: task.tool.map(|t| t.to_string()),
             model: task.model.as_ref().map(|m| m.to_string()),
@@ -311,8 +311,26 @@ impl ZbobrTaskBackendFs {
 #[async_trait]
 impl TaskBackend for ZbobrTaskBackendFs {
     async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
-        let task_file = self.read_task_file(id).await?;
-        task_file.to_task()
+        let mut task_file = self.read_task_file(id).await?;
+        let legacy_plan = task_file.plan.clone();
+        let task = task_file.to_task()?;
+        // if there was a legacy plan stored in the YAML, migrate it to a Plan comment
+        if !legacy_plan.is_empty() {
+            let comments = self.read_comments_structured(id).await?;
+            let has_plan_comment = comments
+                .iter()
+                .any(|c| c.comment_type == CommentType::Plan);
+            if !has_plan_comment {
+                // post the migrated plan and remove it from the file
+                let _ = self
+                    .post_task_comment(id, CommentType::Plan, None, "", None, &legacy_plan)
+                    .await;
+                // clear and rewrite file
+                task_file.plan.clear();
+                let _ = self.write_task_file(&task_file).await;
+            }
+        }
+        Ok(task)
     }
 
     async fn create_task(
@@ -330,7 +348,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
             id,
             title: title.to_string(),
             description: description.to_string(),
-            plan: String::new(),
             stage,
             tool,
             model,

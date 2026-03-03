@@ -612,7 +612,7 @@ impl ZbobrTaskBackendGithub {
         };
 
         let body = issue.body.unwrap_or_default();
-        let (description, params_map, plan, checklist) = parse_description_full(&body);
+        let (description, params_map, checklist) = parse_description_full(&body);
 
         let tool = issue.labels.iter().find_map(|l| {
             if let Some(name) = l.name.strip_prefix("tool:") {
@@ -673,7 +673,6 @@ impl ZbobrTaskBackendGithub {
             id: issue.number,
             title: issue.title,
             description,
-            plan,
             stage,
             tool,
             model,
@@ -777,7 +776,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         if let Some(v) = parameters.get(&Parameter::PrUrl) {
             params_text.insert(Parameter::PrUrl.name().to_string(), v.clone());
         }
-        let body = serialize_description_full(description, &params_text, "", &[]);
+        let body = serialize_description_full(description, &params_text, &[]);
 
         let stage_number = self.find_stage_number(stage).await?;
 
@@ -849,7 +848,6 @@ impl TaskBackend for ZbobrTaskBackendGithub {
             serialize_description_full(
                 &task.description,
                 &string_params,
-                &task.plan,
                 &task.checklist,
             )
         });
@@ -864,7 +862,6 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         let new_description = serialize_description_full(
             &task.description,
             &string_params,
-            &task.plan,
             &task.checklist,
         );
 
@@ -889,7 +886,6 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                 serialize_description_full(
                     &current_task.description,
                     &sp,
-                    &current_task.plan,
                     &current_task.checklist,
                 )
             });

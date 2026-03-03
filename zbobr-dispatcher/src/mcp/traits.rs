@@ -471,20 +471,6 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
             return format!("Error posting plan: {e}");
         }
 
-        // Also store in task.plan for backward compatibility
-        let plan_text = plan.to_string();
-        if let Err(e) = self
-            .session()
-            .modify_task(move |task| {
-                task.plan = plan_text;
-            })
-            .await
-        {
-            tracing::warn!(
-                "Failed to update task.plan field for task {}: {e}",
-                self.session().task_id()
-            );
-        }
 
         "Plan posted and task ready for worker implementation".to_string()
     }
