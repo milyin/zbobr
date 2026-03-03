@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use zbobr_api::{ChecklistItem, Comment, CommentAuthor, CommentType, Model, Parameter, TaskComment, Role, Stage, Task, Tool, backend::TaskBackend};
+use zbobr_api::{ChecklistItem, Comment, CommentAuthor, CommentType, Model, Parameter, Role, Stage, Task, Tool, backend::TaskBackend};
 
 use crate::config::ZbobrTaskBackendFsConfig;
 
@@ -524,22 +524,24 @@ impl TaskBackend for ZbobrTaskBackendFs {
     async fn post_task_comment_structured(
         &self,
         id: u64,
-        comment: TaskComment,
+        comment_type: CommentType,
+        role: Option<Role>,
+        hostname: &str,
+        model: Option<Model>,
+        body: &str,
     ) -> anyhow::Result<()> {
         let mut comments = self.read_comments_structured(id).await?;
         
-        // Create structured comment from TaskComment
-        // Store hostname and model as separate fields, no tag formatting
         let new_comment = Comment {
-            comment_type: comment.comment_type,
+            comment_type,
             timestamp: format!("{:?}", std::time::SystemTime::now()),
-            author: match comment.role {
-                Some(role) => CommentAuthor::Role(role),
+            author: match role {
+                Some(r) => CommentAuthor::Role(r),
                 None => CommentAuthor::User,
             },
-            hostname: comment.hostname,
-            model: comment.model,
-            text: comment.content,
+            hostname: hostname.to_string(),
+            model,
+            text: body.to_string(),
         };
         
         comments.push(new_comment);

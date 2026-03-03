@@ -520,21 +520,105 @@ impl std::str::FromStr for Model {
     }
 }
 
-/// Structured comment for posting task comments (combines metadata and content).
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
-)]
-pub struct TaskComment {
-    #[schemars(description = "Comment type (error, report, or reply)")]
+/// Tag for GitHub-specific comment formatting (e.g., `// REPORT role:host:model`).
+/// This type encapsulates the tag serialization/deserialization logic for GitHub comments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommentTag {
     pub comment_type: CommentType,
-    #[schemars(description = "Author role (e.g., worker, reviewer)")]
     pub role: Option<Role>,
-    #[schemars(description = "Hostname of the system posting the comment")]
     pub hostname: String,
-    #[schemars(description = "AI model used (if applicable)")]
     pub model: Option<Model>,
-    #[schemars(description = "Comment content")]
-    pub content: String,
+}
+
+impl CommentTag {
+    /// Create a new CommentTag.
+    pub fn new(
+        comment_type: CommentType,
+        role: Option<Role>,
+        hostname: String,
+        model: Option<Model>,
+    ) -> Self {
+        Self {
+            comment_type,
+            role,
+            hostname,
+            model,
+        }
+    }
+}
+
+impl std::fmt::Display for CommentTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let tag_type = match self.comment_type {
+            CommentType::Error => "ERROR",
+            CommentType::Report => "REPORT",
+            CommentType::Reply => "REPLY",
+        };
+
+        if tag_type == "REPLY" {
+            write!(f, "// REPLY")
+        } else if let Some(role) = self.role {
+            if let Some(model) = &self.model {
+                write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, model)
+            } else {
+                write!(f, "// {} {}:{}", tag_type, role, self.hostname)
+            }
+        } else {
+            write!(f, "// {} :{}", tag_type, self.hostname)
+        }
+    }
+}
+
+impl std::str::FromStr for CommentTag {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim_start_matches("//").trim_start();
+
+        if s.starts_with("REPLY") {
+            return Ok(CommentTag {
+                comment_type: CommentType::Reply,
+                role: None,
+                hostname: String::new(),
+                model: None,
+            });
+        }
+
+        let (tag_type_str, rest) = if let Some(pos) = s.find(' ') {
+            (&s[..pos], &s[pos + 1..])
+        } else {
+            return Err(anyhow::anyhow!("Invalid comment tag format: {}", s));
+        };
+
+        let comment_type = CommentType::from_str(tag_type_str)
+            .ok_or_else(|| anyhow::anyhow!("Unknown comment type: {}", tag_type_str))?;
+
+        let parts: Vec<&str> = rest.split(':').collect();
+        if parts.len() < 2 {
+            return Err(anyhow::anyhow!("Invalid tag format: {}", s));
+        }
+
+        let role = if parts[0].is_empty() {
+            None
+        } else {
+            Some(Role::from_str(parts[0])?)
+        };
+
+        let hostname = parts[1].to_string();
+
+        let model = if parts.len() > 2 && !parts[2].is_empty() && parts[2] != "unknown" {
+            Some(Model::from_str(parts[2])?)
+        } else {
+            None
+        };
+
+        Ok(CommentTag {
+            comment_type,
+            role,
+            hostname,
+            model,
+        })
+    }
 }
 
 /// A task in the abstract domain (generic, backed by GitHub or Filesystem).

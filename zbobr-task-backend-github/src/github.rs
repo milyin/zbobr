@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Mutex, time::Duration};
 
 use async_trait::async_trait;
-use zbobr_api::{Comment, CommentAuthor, CommentType, Model, Parameter, TaskComment, Role, Signal, Stage, Task, Tool, backend::TaskBackend};
+use zbobr_api::{Comment, CommentAuthor, CommentTag, CommentType, Model, Parameter, Role, Signal, Stage, Task, Tool, backend::TaskBackend};
 
 use crate::{
     config::ZbobrTaskBackendGithubConfig,
@@ -1039,38 +1039,17 @@ impl TaskBackend for ZbobrTaskBackendGithub {
     async fn post_task_comment_structured(
         &self,
         id: u64,
-        comment: TaskComment,
+        comment_type: CommentType,
+        role: Option<Role>,
+        hostname: &str,
+        model: Option<Model>,
+        body: &str,
     ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
         
-        // Generate tag format for GitHub API (GitHub-specific formatting)
-        let tag = match comment.comment_type {
-            CommentType::Error => {
-                if let Some(role) = comment.role {
-                    if let Some(model) = &comment.model {
-                        format!("// ERROR {}:{}:{}", role, comment.hostname, model)
-                    } else {
-                        format!("// ERROR {}:{}", role, comment.hostname)
-                    }
-                } else {
-                    format!("// ERROR :{}", comment.hostname)
-                }
-            }
-            CommentType::Report => {
-                if let Some(role) = comment.role {
-                    if let Some(model) = &comment.model {
-                        format!("// REPORT {}:{}:{}", role, comment.hostname, model)
-                    } else {
-                        format!("// REPORT {}:{}:unknown", role, comment.hostname)
-                    }
-                } else {
-                    format!("// REPORT :{}:unknown", comment.hostname)
-                }
-            }
-            CommentType::Reply => "// REPLY".to_string(),
-        };
+        let tag = CommentTag::new(comment_type, role, hostname.to_string(), model);
+        let formatted_body = format!("{}\n\n{}", tag, body);
         
-        let formatted_body = format!("{}\n\n{}", tag, comment.content);
         retry_github("create issue comment", || async {
             self.octocrab
                 .issues(owner, repo)
