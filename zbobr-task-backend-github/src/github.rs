@@ -88,13 +88,13 @@ fn parse_comment_tag(text: &str) -> (CommentType, Option<String>, String, Option
 
         // Extract the tag type (first word before space or end of line)
         let tag_parts: Vec<&str> = tag_line.splitn(2, ' ').collect();
-        if let Some(tag_str) = tag_parts.get(0) {
-            if let Some(comment_type) = CommentType::from_str(&tag_str.to_lowercase()) {
+        if let Some(tag_str) = tag_parts.first()
+            && let Some(comment_type) = CommentType::parse(&tag_str.to_lowercase()) {
                 // For REPORT and ERROR, parse role:host:model format
-                if comment_type != CommentType::Request {
-                    if let Some(meta_part) = tag_parts.get(1) {
+                if comment_type != CommentType::Request
+                    && let Some(meta_part) = tag_parts.get(1) {
                         let meta_parts: Vec<&str> = meta_part.split(':').collect();
-                        let role = meta_parts.get(0).map(|s| s.to_string());
+                        let role = meta_parts.first().map(|s| s.to_string());
                         let host = meta_parts.get(1).map(|s| s.to_string()).unwrap_or_default();
                         let model = meta_parts.get(2).map(|s| s.to_string());
 
@@ -108,7 +108,6 @@ fn parse_comment_tag(text: &str) -> (CommentType, Option<String>, String, Option
 
                         return (comment_type, role, host, model, body);
                     }
-                }
 
                 // For REQUEST, extract text after the tag type
                 let remaining = if let Some(body_part) = tag_parts.get(1) {
@@ -124,7 +123,6 @@ fn parse_comment_tag(text: &str) -> (CommentType, Option<String>, String, Option
                 };
                 return (CommentType::Request, None, String::new(), None, remaining);
             }
-        }
     }
 
     // No tag found, treat as request

@@ -63,11 +63,11 @@ pub struct ChecklistItem {
 ///
 /// Variants:
 /// - `Error`   — posted by `report_error` MCP tool when an agent encounters an unrecoverable
-///               problem; also posted by the dispatcher/CLI on execution failure.
+///   problem; also posted by the dispatcher/CLI on execution failure.
 /// - `Report`  — posted by `report_results` MCP tool to deliver a role's completion output.
 /// - `Plan`    — posted by `post_plan` MCP tool (planner role) to record the implementation plan.
 /// - `Request` — posted for user-originated messages and for questions raised by `ask_user` (and
-///               similar ASK_xxx MCP tools) that pause the task waiting for a human response.
+///   similar ASK_xxx MCP tools) that pause the task waiting for a human response.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
@@ -97,8 +97,8 @@ impl CommentType {
         }
     }
 
-    /// Parse from string representation.
-    pub fn from_str(s: &str) -> Option<Self> {
+    /// Parse from string representation, returning `None` on unknown input.
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "error" => Some(CommentType::Error),
             "report" => Some(CommentType::Report),
@@ -106,6 +106,18 @@ impl CommentType {
             "request" | "reply" => Some(CommentType::Request),
             _ => None,
         }
+    }
+}
+
+// Implement the standard `FromStr` trait so callers can use `.parse()` and to
+// appease the `clippy::should_implement_trait` lint.  The inherent `from_str`
+// method above remains available for callers who prefer an `Option`-returning
+// convenience.
+impl std::str::FromStr for CommentType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        CommentType::parse(s).ok_or(())
     }
 }
 
@@ -607,7 +619,7 @@ impl std::str::FromStr for CommentTag {
             return Err(anyhow::anyhow!("Invalid comment tag format: {}", s));
         };
 
-        let comment_type = CommentType::from_str(tag_type_str)
+        let comment_type = CommentType::parse(tag_type_str)
             .ok_or_else(|| anyhow::anyhow!("Unknown comment type: {}", tag_type_str))?;
 
         let parts: Vec<&str> = rest.split(':').collect();

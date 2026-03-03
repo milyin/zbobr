@@ -111,7 +111,7 @@ fn parse_comment_tag(text: &str) -> (CommentType, Option<String>, String, Option
         // Extract the tag type (first word before space or end of line)
         let tag_parts: Vec<&str> = tag_line.splitn(2, ' ').collect();
         if let Some(tag_str) = tag_parts.get(0) {
-            if let Some(comment_type) = CommentType::from_str(&tag_str.to_lowercase()) {
+            if let Some(comment_type) = CommentType::parse(&tag_str.to_lowercase()) {
                 // For REPORT and ERROR, parse role:host:model format
                 if comment_type != CommentType::Request {
                     if let Some(meta_part) = tag_parts.get(1) {

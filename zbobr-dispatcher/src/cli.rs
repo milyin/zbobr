@@ -1,6 +1,6 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
@@ -408,11 +408,10 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     }
     // show latest plan comment if present (old tasks used to store this in
     // `task.plan` so we try to mimic that behaviour for convenience)
-    if !discussion.is_empty() {
-        if let Some(plan_comment) = discussion.iter().rev().find(|c| c.comment_type == CommentType::Plan) {
+    if !discussion.is_empty()
+        && let Some(plan_comment) = discussion.iter().rev().find(|c| c.comment_type == CommentType::Plan) {
             println!("Plan (from comment):\n{}", plan_comment.text);
         }
-    }
     if !task.checklist.is_empty() {
         println!("Checklist:");
         for item in &task.checklist {
@@ -993,11 +992,10 @@ impl<'a> CliRoleRunner<'a> {
         // Early-merge check must run BEFORE clearing the triggering condition.
         // If a conflict is detected the session exits here — the signal is left
         // intact so the Merger can return to the same stage after resolving it.
-        if should_try_early_merge(self.role) {
-            if try_early_merge(self.zbobr, self.task_id, &work_dir).await? {
+        if should_try_early_merge(self.role)
+            && try_early_merge(self.zbobr, self.task_id, &work_dir).await? {
                 return Ok(());
             }
-        }
 
         // Rule 1: clear the triggering condition right before the agent session
         // starts (no conflict was detected above).
@@ -1342,10 +1340,10 @@ async fn prepare_workspace(
     zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
     role: Role,
-    task_dir: &PathBuf,
+    task_dir: &Path,
 ) -> anyhow::Result<PathBuf> {
     match role {
-        Role::Preparator => Ok(task_dir.clone()),
+        Role::Preparator => Ok(task_dir.to_path_buf()),
         Role::Merger => {
             let task = zbobr.get_task(task_id).await?;
             let dest_repo = task
@@ -1431,21 +1429,19 @@ async fn seed_preparator_defaults(
     let task = zbobr.get_task(task_id).await?;
     let role_session = zbobr.role_session(task_id);
 
-    if let Some(default_repo) = &config.default_destination_repository {
-        if !task.parameters.contains_key(&Parameter::DestinationRepository) {
+    if let Some(default_repo) = &config.default_destination_repository
+        && !task.parameters.contains_key(&Parameter::DestinationRepository) {
             role_session
                 .set_parameter(Parameter::DestinationRepository, Some(default_repo.clone()))
                 .await?;
         }
-    }
 
-    if let Some(default_branch) = &config.default_destination_branch {
-        if !task.parameters.contains_key(&Parameter::DestinationBranch) {
+    if let Some(default_branch) = &config.default_destination_branch
+        && !task.parameters.contains_key(&Parameter::DestinationBranch) {
             role_session
                 .set_parameter(Parameter::DestinationBranch, Some(default_branch.clone()))
                 .await?;
         }
-    }
 
     Ok(())
 }
@@ -1457,7 +1453,7 @@ fn should_try_early_merge(role: Role) -> bool {
 async fn try_early_merge(
     zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
-    work_dir: &PathBuf,
+    work_dir: &Path,
 ) -> anyhow::Result<bool> {
     let task = zbobr.get_task(task_id).await?;
     let dest_branch = task
@@ -1520,6 +1516,7 @@ async fn start_mcp_server(
     Ok((assigned_port, server_handle))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn execute_tool(
     cli_tool: Tool,
     executor_config: &ZbobrExecutorConfig,
@@ -1528,7 +1525,7 @@ async fn execute_tool(
     model: &Model,
     assigned_port: u16,
     prompt: &str,
-    work_dir: &PathBuf,
+    work_dir: &Path,
     mcp_url: &str,
     zbobr: &ZbobrDispatcherDyn,
 ) -> (bool, Option<anyhow::Error>) {
@@ -1854,15 +1851,14 @@ async fn rewrite_commit_authors(
                     .output()
                     .await;
                 
-                if let Ok(log_output) = post_log_cmd {
-                    if log_output.status.success() {
+                if let Ok(log_output) = post_log_cmd
+                    && log_output.status.success() {
                         let updated_commits = String::from_utf8_lossy(&log_output.stdout);
                         println!("Updated commits:");
                         for commit in updated_commits.lines() {
                             println!("  {}", commit);
                         }
                     }
-                }
 
                 if let Err(e) = zbobr
                     .task_session(task_id)
