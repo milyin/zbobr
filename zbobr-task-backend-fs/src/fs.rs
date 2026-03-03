@@ -484,7 +484,7 @@ mod parse_tests {
                 eprintln!("split_tag_body: parse error={:?}", err);
                 // parsing failed, keep entire input as body
                 (
-                    CommentTag::new(CommentType::Request, Role::User, String::new(), None),
+                    CommentTag::new(CommentType::Request,None, String::new(), None),
                     input.to_string(),
                 )
             }
@@ -503,7 +503,7 @@ mod parse_tests {
         let model = tag.model;
         
         assert_eq!(comment_type, CommentType::Report);
-        assert_eq!(role, Role::Worker);
+        assert_eq!(role, Some(Role::Worker));
         assert_eq!(host, "localhost");
         assert_eq!(model, Some(Model::from_str("claude-opus-4.6").unwrap()));
         assert_eq!(body, "This is the report body\nWith multiple lines");
@@ -519,7 +519,7 @@ mod parse_tests {
         let model = tag.model;
         
         assert_eq!(comment_type, CommentType::Error);
-        assert_eq!(role, Role::Planner);
+        assert_eq!(role, Some(Role::Planner));
         assert_eq!(host, "skynet");
         assert_eq!(model, Some(Model::from_str("gpt-4o").unwrap()));
         assert_eq!(body, "An error occurred");
@@ -535,7 +535,7 @@ mod parse_tests {
         let model = tag.model;
 
         assert_eq!(comment_type, CommentType::Request);
-        assert_eq!(role, Role::User);
+        assert_eq!(role, None);
         assert_eq!(host, "");
         assert_eq!(model, None);
         assert_eq!(body, "This is a user request");
@@ -552,7 +552,7 @@ mod parse_tests {
         let model = tag.model;
 
         assert_eq!(comment_type, CommentType::Request);
-        assert_eq!(role, Role::User);
+        assert_eq!(role, None);
         assert_eq!(host, "");
         assert_eq!(model, None);
         assert_eq!(body, "This is a legacy reply");
@@ -568,7 +568,7 @@ mod parse_tests {
         let model = tag.model;
         
         assert_eq!(comment_type, CommentType::Report);
-        assert_eq!(role, Role::Reviewer);
+        assert_eq!(role, Some(Role::Reviewer));
         assert_eq!(host, "host");
         assert_eq!(model, None);
         assert_eq!(body, "Body text");
@@ -581,7 +581,7 @@ mod parse_tests {
         let input = "This is just text without a tag";
         let (tag, body) = split_tag_body(input);
         assert_eq!(tag.comment_type, CommentType::Request);
-        assert_eq!(tag.role, Role::User);
+        assert_eq!(tag.role, None);
         assert_eq!(tag.hostname, "");
         assert_eq!(tag.model, None);
         assert_eq!(body, "This is just text without a tag");
@@ -594,7 +594,7 @@ mod parse_tests {
         let input = "// NOTATAG\nfull body goes here";
         let (tag, body) = split_tag_body(input);
         assert_eq!(tag.comment_type, CommentType::Request);
-        assert_eq!(tag.role, Role::User);
+        assert_eq!(tag.role, None);
         assert_eq!(tag.hostname, "");
         assert_eq!(tag.model, None);
         assert_eq!(body, "// NOTATAG\nfull body goes here");
@@ -605,7 +605,7 @@ mod parse_tests {
         let input = "// REQUEST planner:skynet:gpt-4o\n\nPlease respond";
         let (tag, body) = split_tag_body(input);
         assert_eq!(tag.comment_type, CommentType::Request);
-        assert_eq!(tag.role, Role::Planner);
+        assert_eq!(tag.role, Some(Role::Planner));
         assert_eq!(tag.hostname, "skynet");
         assert_eq!(tag.model, Some(Model::from_str("gpt-4o").unwrap()));
         assert_eq!(body, "Please respond");
@@ -616,7 +616,7 @@ mod parse_tests {
         let input = "// PLAN planner:localhost:claude-opus-4.6\n\nStep 1: analyse\nStep 2: implement";
         let (tag, body) = split_tag_body(input);
         assert_eq!(tag.comment_type, CommentType::Plan);
-        assert_eq!(tag.role, Role::Planner);
+        assert_eq!(tag.role, Some(Role::Planner));
         assert_eq!(tag.hostname, "localhost");
         assert_eq!(tag.model, Some(Model::from_str("claude-opus-4.6").unwrap()));
         assert_eq!(body, "Step 1: analyse\nStep 2: implement");
