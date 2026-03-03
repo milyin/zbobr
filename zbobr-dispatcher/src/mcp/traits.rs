@@ -93,7 +93,7 @@ pub trait CommonMcpImpl: Send + Sync {
             .post_message_structured(
                 CommentType::Error,
                 message,
-                Some(self.role().as_str()),
+                Some(self.role()),
                 &hostname,
                 None,
             )
@@ -139,7 +139,7 @@ pub trait CommonMcpImpl: Send + Sync {
             .post_message_structured(
                 CommentType::Report,
                 message,
-                Some(self.role().as_str()),
+                Some(self.role()),
                 &hostname,
                 None,
             )

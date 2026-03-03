@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use zbobr_api::{ChecklistItem, Comment, CommentAuthor, CommentType, Model, Parameter, Role, Stage, Task, Tool, backend::TaskBackend};
+use zbobr_api::{ChecklistItem, Comment, CommentAuthor, CommentType, Model, Parameter, PostTaskCommentStructure, Role, Stage, Task, Tool, backend::TaskBackend};
 
 use crate::config::ZbobrTaskBackendFsConfig;
 
@@ -481,36 +481,33 @@ impl TaskBackend for ZbobrTaskBackendFs {
     async fn post_task_comment_structured(
         &self,
         id: u64,
-        comment_type: CommentType,
+        params: PostTaskCommentStructure,
         body: &str,
-        role: Option<&str>,
-        hostname: &str,
-        model: Option<&str>,
     ) -> anyhow::Result<()> {
         let mut comments = self.read_comments(id).await?;
         
-        // Generate tag
-        let tag = match comment_type {
+        // Generate tag from structured parameters
+        let tag = match params.comment_type {
             CommentType::Error => {
-                if let Some(role_str) = role {
-                    if let Some(model_str) = model {
-                        format!("// ERROR {}:{}:{}", role_str, hostname, model_str)
+                if let Some(role) = params.role {
+                    if let Some(model) = &params.model {
+                        format!("// ERROR {}:{}:{}", role, params.hostname, model)
                     } else {
-                        format!("// ERROR {}:{}", role_str, hostname)
+                        format!("// ERROR {}:{}", role, params.hostname)
                     }
                 } else {
-                    format!("// ERROR :{}", hostname)
+                    format!("// ERROR :{}", params.hostname)
                 }
             }
             CommentType::Report => {
-                if let Some(role_str) = role {
-                    if let Some(model_str) = model {
-                        format!("// REPORT {}:{}:{}", role_str, hostname, model_str)
+                if let Some(role) = params.role {
+                    if let Some(model) = &params.model {
+                        format!("// REPORT {}:{}:{}", role, params.hostname, model)
                     } else {
-                        format!("// REPORT {}:{}:unknown", role_str, hostname)
+                        format!("// REPORT {}:{}:unknown", role, params.hostname)
                     }
                 } else {
-                    format!("// REPORT :{}:unknown", hostname)
+                    format!("// REPORT :{}:unknown", params.hostname)
                 }
             }
             CommentType::Reply => "// REPLY".to_string(),

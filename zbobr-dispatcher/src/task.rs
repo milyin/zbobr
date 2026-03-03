@@ -121,12 +121,18 @@ impl RoleSession {
         &self,
         comment_type: CommentType,
         body: &str,
-        role: Option<&str>,
+        role: Option<Role>,
         hostname: &str,
-        model: Option<&str>,
+        model: Option<Model>,
     ) -> anyhow::Result<()> {
+        let params = PostTaskCommentStructure {
+            comment_type,
+            role,
+            hostname: hostname.to_string(),
+            model,
+        };
         self.zbobr
-            .post_task_comment_structured(self.task_id, comment_type, body, role, hostname, model)
+            .post_task_comment_structured(self.task_id, params, body)
             .await
     }
 
@@ -508,12 +514,18 @@ impl TaskSession {
         &self,
         comment_type: CommentType,
         body: &str,
-        role: Option<&str>,
+        role: Option<Role>,
         hostname: &str,
-        model: Option<&str>,
+        model: Option<Model>,
     ) -> anyhow::Result<()> {
+        let params = PostTaskCommentStructure {
+            comment_type,
+            role,
+            hostname: hostname.to_string(),
+            model,
+        };
         self.zbobr
-            .post_task_comment_structured(self.task_id, comment_type, body, role, hostname, model)
+            .post_task_comment_structured(self.task_id, params, body)
             .await
     }
 }

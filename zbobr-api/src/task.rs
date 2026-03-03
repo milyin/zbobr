@@ -516,6 +516,30 @@ impl std::str::FromStr for Model {
     }
 }
 
+/// Structured comment parameters for posting task comments.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+pub struct PostTaskCommentStructure {
+    #[schemars(description = "Comment type (error, report, or reply)")]
+    pub comment_type: CommentType,
+    #[schemars(description = "Author role (e.g., worker, reviewer)")]
+    pub role: Option<Role>,
+    #[schemars(description = "Hostname of the system posting the comment")]
+    pub hostname: String,
+    #[schemars(description = "AI model used (if applicable)")]
+    pub model: Option<Model>,
+}
+
+/// Structured message content for posting task messages.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+pub struct PostTaskMessage {
+    #[schemars(description = "Message content")]
+    pub content: String,
+}
+
 /// A task in the abstract domain (generic, backed by GitHub or Filesystem).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Task {
