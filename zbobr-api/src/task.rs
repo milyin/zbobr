@@ -188,6 +188,19 @@ impl Stage {
             _ => None,
         }
     }
+
+    /// Returns the priority for task selection (higher = closer to completion, should be processed first).
+    /// Used for prioritizing which task to run when multiple are in active stages.
+    pub fn selection_priority(&self) -> u32 {
+        match self {
+            Stage::Reviewing => 5,
+            Stage::Merging => 4,
+            Stage::Working => 3,
+            Stage::Planning => 2,
+            Stage::Preparing => 1,
+            Stage::Pending | Stage::Done => 0,
+        }
+    }
 }
 
 impl std::fmt::Display for Stage {

@@ -1275,15 +1275,18 @@ pub async fn run_manager_loop(
             continue;
         }
 
-        let active_stages = [
-            Stage::Preparing,
-            Stage::Planning,
-            Stage::Working,
+        // Check active stages in priority order (closest to completion first)
+        let active_stages_by_priority = [
             Stage::Reviewing,
             Stage::Merging,
+            Stage::Working,
+            Stage::Planning,
+            Stage::Preparing,
         ];
+        
+        // First, collect counts for logging
         let mut active_counts = std::collections::HashMap::new();
-        for stage in &active_stages {
+        for stage in &active_stages_by_priority {
             let count = zbobr
                 .list_tasks_by_stage(*stage, Some(current_tool))
                 .await
@@ -1300,6 +1303,53 @@ pub async fn run_manager_loop(
             active_counts[&Stage::Reviewing],
             active_counts[&Stage::Merging],
         );
+
+        // Try to find a task in active stages, prioritizing by stage
+        let mut task_found = false;
+        for stage in &active_stages_by_priority {
+            let tasks = zbobr
+                .list_tasks_by_stage(*stage, Some(current_tool))
+                .await
+                .unwrap_or_default();
+            
+            if let Some(task) = tasks.first() {
+                let task_model = task.model.clone().unwrap_or_else(|| model.clone());
+                let role = match stage {
+                    Stage::Preparing => Role::Planner,
+                    Stage::Planning => Role::Planner,
+                    Stage::Working => Role::Worker,
+                    Stage::Reviewing => Role::Reviewer,
+                    Stage::Merging => Role::Merger,
+                    _ => continue,
+                };
+                
+                tracing::info!(
+                    "Found {} task #{} - running {:?} (model: {})",
+                    stage,
+                    task.id,
+                    role,
+                    task_model
+                );
+                
+                let session = CliRoleRunner::new(
+                    zbobr,
+                    task.id,
+                    role,
+                    Some(task_model),
+                    prompts,
+                    executor_config,
+                );
+                if let Err(e) = session.run().await {
+                    tracing::error!("{:?} session failed: {e}", role);
+                }
+                task_found = true;
+                break;
+            }
+        }
+
+        if task_found {
+            continue;
+        }
 
         let elapsed = loop_start.elapsed();
         let sleep_dur = std::time::Duration::from_secs(interval_secs).saturating_sub(elapsed);
