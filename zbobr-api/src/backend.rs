@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use async_trait::async_trait;
 
-use crate::task::{Comment, CommentType, Model, Parameter, Stage, Task, Tool};
+use crate::task::{Comment, CommentType, Model, Parameter, Role, Stage, Task, Tool};
 
 /// TaskBackend: stores and manages tasks, their metadata, comments, and lifecycle.
 ///
@@ -78,10 +78,10 @@ pub trait TaskBackend: Send + Sync {
         &self,
         id: u64,
         comment_type: CommentType,
-        body: &str,
-        role: Option<&str>,
+        role: Option<Role>,
         hostname: &str,
-        model: Option<&str>,
+        model: Option<Model>,
+        body: &str,
     ) -> anyhow::Result<()>;
 
     // -- Lifecycle --

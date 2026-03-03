@@ -190,13 +190,13 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
         &self,
         id: u64,
         comment_type: CommentType,
-        body: &str,
-        role: Option<&str>,
+        role: Option<zbobr_api::Role>,
         hostname: &str,
-        model: Option<&str>,
+        model: Option<Model>,
+        body: &str,
     ) -> anyhow::Result<()> {
         self.task_backend
-            .post_task_comment_structured(id, comment_type, body, role, hostname, model)
+            .post_task_comment_structured(id, comment_type, role, hostname, model, body)
             .await
     }
 

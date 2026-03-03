@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Mutex, time::Duration};
 
 use async_trait::async_trait;
-use zbobr_api::{Comment, CommentAuthor, CommentType, Model, Parameter, Role, Signal, Stage, Task, Tool, backend::TaskBackend};
+use zbobr_api::{Comment, CommentAuthor, CommentTag, CommentType, Model, Parameter, Role, Signal, Stage, Task, Tool, backend::TaskBackend};
 
 use crate::{
     config::ZbobrTaskBackendGithubConfig,
@@ -1009,7 +1009,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                 let timestamp = c.created_at.unwrap_or_default();
                 
                 // Parse tag from comment
-                let (comment_type, role_opt, _host, _model_opt, text) = parse_comment_tag(&body);
+                let (comment_type, role_opt, host, model_str_opt, text) = parse_comment_tag(&body);
                 
                 // Determine author
                 let author = if let Some(role_str) = role_opt {
@@ -1021,10 +1021,15 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                     CommentAuthor::User
                 };
                 
+                // Convert model string to Model enum if present
+                let model = model_str_opt.and_then(|s| s.parse::<Model>().ok());
+                
                 Comment {
                     comment_type,
                     timestamp,
                     author,
+                    hostname: host,
+                    model,
                     text,
                 }
             })
@@ -1035,41 +1040,16 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         &self,
         id: u64,
         comment_type: CommentType,
-        body: &str,
-        role: Option<&str>,
+        role: Option<Role>,
         hostname: &str,
-        model: Option<&str>,
+        model: Option<Model>,
+        body: &str,
     ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
         
-        // Generate tag
-        let tag = match comment_type {
-            CommentType::Error => {
-                if let Some(role_str) = role {
-                    if let Some(model_str) = model {
-                        format!("// ERROR {}:{}:{}", role_str, hostname, model_str)
-                    } else {
-                        format!("// ERROR {}:{}", role_str, hostname)
-                    }
-                } else {
-                    format!("// ERROR :{}", hostname)
-                }
-            }
-            CommentType::Report => {
-                if let Some(role_str) = role {
-                    if let Some(model_str) = model {
-                        format!("// REPORT {}:{}:{}", role_str, hostname, model_str)
-                    } else {
-                        format!("// REPORT {}:{}:unknown", role_str, hostname)
-                    }
-                } else {
-                    format!("// REPORT :{}:unknown", hostname)
-                }
-            }
-            CommentType::Reply => "// REPLY".to_string(),
-        };
-        
+        let tag = CommentTag::new(comment_type, role, hostname.to_string(), model);
         let formatted_body = format!("{}\n\n{}", tag, body);
+        
         retry_github("create issue comment", || async {
             self.octocrab
                 .issues(owner, repo)
