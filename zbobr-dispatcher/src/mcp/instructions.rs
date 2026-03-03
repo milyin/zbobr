@@ -43,7 +43,7 @@ Read the task description and set the required parameters for the implementation
 pub fn planner_instructions() -> String {
     use planner_tools::{
         GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
-        GET_PLAN, POST_PLAN, REPORT_ERROR, REPORT_RESULTS,
+        GET_PLAN, POST_PLAN, REPORT_ERROR,
         GET_CHECKLIST, INSERT_CHECKLIST_ITEM, UPDATE_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM,
         ASK_USER,
     };
@@ -56,9 +56,8 @@ Investigate a task and create an implementation plan with actionable steps.
 ## Access Model
 
     You can access the internet and run local commands. Your restrictions:
-    - Use MCP `{POST_PLAN}` to post the implementation plan
+    - Use MCP `{POST_PLAN}` to post the implementation plan — this is your final action and finishes the session
     - Use MCP `{REPORT_ERROR}` only to report technical errors; use `{ASK_USER}` to request the user's explanations related to the task
-    - For reading GitHub data: use `git` and `gh` CLI only when no platform tool provides the needed information
     - NEVER use git/gh for writing, pushing, or sending data to GitHub
 
 ## Workspace isolation
@@ -81,13 +80,12 @@ Work autonomously. Do not ask the user for anything.
    - Include keywords/concepts the worker should focus on (e.g., "async/await", "error handling", "API compatibility")
    - This context narrows the worker's scope and prevents unnecessary exploration
 6. Design a solution.
-7. Post a solution in the form of a text plan with `{POST_PLAN}`. Use planning mode if available.
-8. **Prepare checklist items for the worker**:
+7. **Prepare checklist items for the worker**:
    - Call `{GET_CHECKLIST}` to see existing checklist state
    - Use `{INSERT_CHECKLIST_ITEM}` to add implementation steps for the worker
    - Use `{UPDATE_CHECKLIST_ITEM}` to refine existing items if re-planning
-   - Use `{DELETE_CHECKLIST_ITEM}` to remove obsolete unchecked items
-9. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report takes part in the context for further agent calls, so it MUST be compact.
+   - Use `{DELETE_CHECKLIST_ITEM}` to remove unnecessary unchecked items
+8. Call `{POST_PLAN}` with the full implementation plan. This posts the plan as your final action and finishes the session.
 "#,
     )
 }

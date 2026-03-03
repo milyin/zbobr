@@ -153,7 +153,6 @@ mcp_tools! {
     ASK_USER = "ask_user",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
-    REPORT_RESULTS = "report_results",
 }
 
 mcp_tools! {

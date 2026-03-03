@@ -49,7 +49,7 @@ impl PlannerMcp {
         self.get_plan_impl(params.offset.unwrap_or(0)).await
     }
 
-    #[tool(description = "Post or replace the implementation plan for this task")]
+    #[tool(description = "Post the implementation plan for this task and finish your session")]
     async fn post_plan(&self, Parameters(params): Parameters<DescriptionParam>) -> String {
         self.post_plan_impl(&params.description).await
     }
@@ -107,13 +107,6 @@ impl PlannerMcp {
     #[tool(description = "Get the work branch name for this task (read-only)")]
     async fn get_param_work_branch(&self) -> String {
         self.get_param_work_branch_impl().await
-    }
-
-    #[tool(
-        description = "Provide a brief and concise report of your results and finish your work. These reports add up to discussion and shorten the context for further agent calls, so they MUST be compact."
-    )]
-    async fn report_results(&self, Parameters(params): Parameters<MessageParam>) -> String {
-        self.report_results_impl(&params.message).await
     }
 }
 

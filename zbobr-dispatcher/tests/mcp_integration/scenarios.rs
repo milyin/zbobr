@@ -89,7 +89,7 @@ steps:
 pub fn planning_scenario() -> String {
     use zbobr_dispatcher::mcp::planner_tools::{
         GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
-        GET_PLAN, INSERT_CHECKLIST_ITEM, POST_PLAN, REPORT_RESULTS,
+        GET_PLAN, INSERT_CHECKLIST_ITEM, POST_PLAN,
     };
 
     format!(
@@ -155,12 +155,12 @@ steps:
       path: result
       value: "test"
 
-- name: Report results and finish
+- name: Post plan as final action (finishes session)
   operation:
     type: tool_call
-    tool: {REPORT_RESULTS}
+    tool: {POST_PLAN}
     arguments:
-      message: "Planning complete. Implementation plan posted."
+      description: "Final plan: analyse codebase, implement feature, write tests."
   assertions:
     - type: success
 "#,
