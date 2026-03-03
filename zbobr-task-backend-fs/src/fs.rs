@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use zbobr_api::{ChecklistItem, Comment, CommentAuthor, CommentType, Model, Parameter, PostTaskCommentStructure, Role, Stage, Task, Tool, backend::TaskBackend};
+use zbobr_api::{ChecklistItem, Comment, CommentAuthor, CommentType, Model, Parameter, TaskComment, Role, Stage, Task, Tool, backend::TaskBackend};
 
 use crate::config::ZbobrTaskBackendFsConfig;
 
@@ -155,10 +155,10 @@ fn parse_comment_tag(text: &str) -> (CommentType, Option<String>, String, Option
     (CommentType::Reply, None, String::new(), None, text.to_string())
 }
 
-/// Comments storage structure.
+/// Comments storage structure - stores structured comments as YAML.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct CommentsFile {
-    comments: Vec<String>,
+    comments: Vec<Comment>,
 }
 
 /// Filesystem-based task backend.
@@ -248,7 +248,35 @@ impl ZbobrTaskBackendFs {
     }
 
     /// Read comments from disk.
-    async fn read_comments(&self, id: u64) -> anyhow::Result<Vec<String>> {
+    /// Read raw comment strings from disk for backward compatibility.
+    async fn read_comments_raw(&self, id: u64) -> anyhow::Result<Vec<String>> {
+        let comments = self.read_comments_structured(id).await?;
+        Ok(comments
+            .into_iter()
+            .map(|c| {
+                // Convert structured comment back to string format for backward compatibility
+                let mut result = String::new();
+                match c.comment_type {
+                    CommentType::Error => result.push_str("// ERROR"),
+                    CommentType::Report => result.push_str("// REPORT"),
+                    CommentType::Reply => result.push_str("// REPLY"),
+                }
+                
+                if let CommentAuthor::Role(role) = c.author {
+                    result.push_str(&format!(" {}:{}", role, c.hostname));
+                    if let Some(model) = c.model {
+                        result.push_str(&format!(":{}", model));
+                    }
+                }
+                
+                result.push_str(&format!("\n\n{}", c.text));
+                result
+            })
+            .collect())
+    }
+
+    /// Read structured comments from disk.
+    async fn read_comments_structured(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
         let path = self.comments_path(id);
         match fs::read_to_string(&path).await {
             Ok(content) => {
@@ -260,8 +288,13 @@ impl ZbobrTaskBackendFs {
         }
     }
 
-    /// Write comments to disk.
-    async fn write_comments(&self, id: u64, comments: Vec<String>) -> anyhow::Result<()> {
+    /// Read comments from disk (for backward compatibility with string format).
+    async fn read_comments(&self, id: u64) -> anyhow::Result<Vec<String>> {
+        self.read_comments_raw(id).await
+    }
+
+    /// Write structured comments to disk.
+    async fn write_comments_structured(&self, id: u64, comments: Vec<Comment>) -> anyhow::Result<()> {
         let path = self.comments_path(id);
 
         let comments_file = CommentsFile { comments };
@@ -270,6 +303,40 @@ impl ZbobrTaskBackendFs {
         fs::write(&path, yaml)
             .await
             .context("Failed to write comments file")
+    }
+
+    /// Write comments to disk (for backward compatibility).
+    async fn write_comments(&self, id: u64, comments: Vec<String>) -> anyhow::Result<()> {
+        // Convert string comments back to structured format (best effort)
+        let structured_comments = comments
+            .into_iter()
+            .map(|text| {
+                // Try to parse tag, fall back to User author
+                let (comment_type, role_opt, host, model_str_opt, body_text) = parse_comment_tag(&text);
+                let author = if let Some(role_str) = role_opt {
+                    match role_str.parse::<Role>() {
+                        Ok(role) => CommentAuthor::Role(role),
+                        Err(_) => CommentAuthor::User,
+                    }
+                } else {
+                    CommentAuthor::User
+                };
+                
+                // Convert model string to Model enum if present
+                let model = model_str_opt.and_then(|s| s.parse::<Model>().ok());
+                
+                Comment {
+                    comment_type,
+                    timestamp: format!("{:?}", std::time::SystemTime::now()),
+                    author,
+                    hostname: host,
+                    model,
+                    text: body_text,
+                }
+            })
+            .collect();
+
+        self.write_comments_structured(id, structured_comments).await
     }
 
     /// List all task files in the directory.
@@ -450,72 +517,33 @@ impl TaskBackend for ZbobrTaskBackendFs {
     }
 
     async fn get_task_comments_structured(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
-        let comments_str = self.read_comments(id).await?;
-        
-        Ok(comments_str
-            .into_iter()
-            .map(|text| {
-                // Parse tag from comment
-                let (comment_type, role_opt, _host, _model_opt, body_text) = parse_comment_tag(&text);
-                
-                // Determine author
-                let author = if let Some(role_str) = role_opt {
-                    match role_str.parse::<Role>() {
-                        Ok(role) => CommentAuthor::Role(role),
-                        Err(_) => CommentAuthor::User,
-                    }
-                } else {
-                    CommentAuthor::User
-                };
-                
-                Comment {
-                    comment_type,
-                    timestamp: format!("{:?}", std::time::SystemTime::now()),
-                    author,
-                    text: body_text,
-                }
-            })
-            .collect())
+        // Now that we store structured comments, return them directly
+        self.read_comments_structured(id).await
     }
 
     async fn post_task_comment_structured(
         &self,
         id: u64,
-        params: PostTaskCommentStructure,
-        body: &str,
+        comment: TaskComment,
     ) -> anyhow::Result<()> {
-        let mut comments = self.read_comments(id).await?;
+        let mut comments = self.read_comments_structured(id).await?;
         
-        // Generate tag from structured parameters
-        let tag = match params.comment_type {
-            CommentType::Error => {
-                if let Some(role) = params.role {
-                    if let Some(model) = &params.model {
-                        format!("// ERROR {}:{}:{}", role, params.hostname, model)
-                    } else {
-                        format!("// ERROR {}:{}", role, params.hostname)
-                    }
-                } else {
-                    format!("// ERROR :{}", params.hostname)
-                }
-            }
-            CommentType::Report => {
-                if let Some(role) = params.role {
-                    if let Some(model) = &params.model {
-                        format!("// REPORT {}:{}:{}", role, params.hostname, model)
-                    } else {
-                        format!("// REPORT {}:{}:unknown", role, params.hostname)
-                    }
-                } else {
-                    format!("// REPORT :{}:unknown", params.hostname)
-                }
-            }
-            CommentType::Reply => "// REPLY".to_string(),
+        // Create structured comment from TaskComment
+        // Store hostname and model as separate fields, no tag formatting
+        let new_comment = Comment {
+            comment_type: comment.comment_type,
+            timestamp: format!("{:?}", std::time::SystemTime::now()),
+            author: match comment.role {
+                Some(role) => CommentAuthor::Role(role),
+                None => CommentAuthor::User,
+            },
+            hostname: comment.hostname,
+            model: comment.model,
+            text: comment.content,
         };
         
-        let formatted_comment = format!("{}\n\n{}", tag, body);
-        comments.push(formatted_comment);
-        self.write_comments(id, comments).await?;
+        comments.push(new_comment);
+        self.write_comments_structured(id, comments).await?;
         
         tracing::debug!("Posted structured comment to task {}", id);
         Ok(())

@@ -125,14 +125,15 @@ impl RoleSession {
         hostname: &str,
         model: Option<Model>,
     ) -> anyhow::Result<()> {
-        let params = PostTaskCommentStructure {
+        let comment = TaskComment {
             comment_type,
             role,
             hostname: hostname.to_string(),
             model,
+            content: body.to_string(),
         };
         self.zbobr
-            .post_task_comment_structured(self.task_id, params, body)
+            .post_task_comment_structured(self.task_id, comment)
             .await
     }
 
@@ -518,14 +519,15 @@ impl TaskSession {
         hostname: &str,
         model: Option<Model>,
     ) -> anyhow::Result<()> {
-        let params = PostTaskCommentStructure {
+        let comment = TaskComment {
             comment_type,
             role,
             hostname: hostname.to_string(),
             model,
+            content: body.to_string(),
         };
         self.zbobr
-            .post_task_comment_structured(self.task_id, params, body)
+            .post_task_comment_structured(self.task_id, comment)
             .await
     }
 }

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Mutex, time::Duration};
 
 use async_trait::async_trait;
-use zbobr_api::{Comment, CommentAuthor, CommentType, Model, Parameter, PostTaskCommentStructure, Role, Signal, Stage, Task, Tool, backend::TaskBackend};
+use zbobr_api::{Comment, CommentAuthor, CommentType, Model, Parameter, TaskComment, Role, Signal, Stage, Task, Tool, backend::TaskBackend};
 
 use crate::{
     config::ZbobrTaskBackendGithubConfig,
@@ -1009,7 +1009,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                 let timestamp = c.created_at.unwrap_or_default();
                 
                 // Parse tag from comment
-                let (comment_type, role_opt, _host, _model_opt, text) = parse_comment_tag(&body);
+                let (comment_type, role_opt, host, model_str_opt, text) = parse_comment_tag(&body);
                 
                 // Determine author
                 let author = if let Some(role_str) = role_opt {
@@ -1021,10 +1021,15 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                     CommentAuthor::User
                 };
                 
+                // Convert model string to Model enum if present
+                let model = model_str_opt.and_then(|s| s.parse::<Model>().ok());
+                
                 Comment {
                     comment_type,
                     timestamp,
                     author,
+                    hostname: host,
+                    model,
                     text,
                 }
             })
@@ -1034,39 +1039,38 @@ impl TaskBackend for ZbobrTaskBackendGithub {
     async fn post_task_comment_structured(
         &self,
         id: u64,
-        params: PostTaskCommentStructure,
-        body: &str,
+        comment: TaskComment,
     ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
         
-        // Generate tag from structured parameters
-        let tag = match params.comment_type {
+        // Generate tag format for GitHub API (GitHub-specific formatting)
+        let tag = match comment.comment_type {
             CommentType::Error => {
-                if let Some(role) = params.role {
-                    if let Some(model) = &params.model {
-                        format!("// ERROR {}:{}:{}", role, params.hostname, model)
+                if let Some(role) = comment.role {
+                    if let Some(model) = &comment.model {
+                        format!("// ERROR {}:{}:{}", role, comment.hostname, model)
                     } else {
-                        format!("// ERROR {}:{}", role, params.hostname)
+                        format!("// ERROR {}:{}", role, comment.hostname)
                     }
                 } else {
-                    format!("// ERROR :{}", params.hostname)
+                    format!("// ERROR :{}", comment.hostname)
                 }
             }
             CommentType::Report => {
-                if let Some(role) = params.role {
-                    if let Some(model) = &params.model {
-                        format!("// REPORT {}:{}:{}", role, params.hostname, model)
+                if let Some(role) = comment.role {
+                    if let Some(model) = &comment.model {
+                        format!("// REPORT {}:{}:{}", role, comment.hostname, model)
                     } else {
-                        format!("// REPORT {}:{}:unknown", role, params.hostname)
+                        format!("// REPORT {}:{}:unknown", role, comment.hostname)
                     }
                 } else {
-                    format!("// REPORT :{}:unknown", params.hostname)
+                    format!("// REPORT :{}:unknown", comment.hostname)
                 }
             }
             CommentType::Reply => "// REPLY".to_string(),
         };
         
-        let formatted_body = format!("{}\n\n{}", tag, body);
+        let formatted_body = format!("{}\n\n{}", tag, comment.content);
         retry_github("create issue comment", || async {
             self.octocrab
                 .issues(owner, repo)

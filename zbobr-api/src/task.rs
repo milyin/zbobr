@@ -114,6 +114,10 @@ pub struct Comment {
     pub timestamp: String,
     #[schemars(description = "Author of the comment (role or user)")]
     pub author: CommentAuthor,
+    #[schemars(description = "Hostname of the system posting the comment")]
+    pub hostname: String,
+    #[schemars(description = "AI model used (if applicable)")]
+    pub model: Option<Model>,
     #[schemars(description = "Comment text without signature/tag")]
     pub text: String,
 }
@@ -516,11 +520,11 @@ impl std::str::FromStr for Model {
     }
 }
 
-/// Structured comment parameters for posting task comments.
+/// Structured comment for posting task comments (combines metadata and content).
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
-pub struct PostTaskCommentStructure {
+pub struct TaskComment {
     #[schemars(description = "Comment type (error, report, or reply)")]
     pub comment_type: CommentType,
     #[schemars(description = "Author role (e.g., worker, reviewer)")]
@@ -529,14 +533,7 @@ pub struct PostTaskCommentStructure {
     pub hostname: String,
     #[schemars(description = "AI model used (if applicable)")]
     pub model: Option<Model>,
-}
-
-/// Structured message content for posting task messages.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
-)]
-pub struct PostTaskMessage {
-    #[schemars(description = "Message content")]
+    #[schemars(description = "Comment content")]
     pub content: String,
 }
 
