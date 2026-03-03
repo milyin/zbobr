@@ -113,6 +113,12 @@ pub struct SetWorkBranchParam {
     pub value: Option<String>,
 }
 
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct GetPlanParam {
+    #[schemars(description = "Plan history offset: 0 or omitted = latest plan, -1 = previous plan, -2 = plan before that, etc.")]
+    pub offset: Option<i32>,
+}
+
 macro_rules! mcp_tools {
     ($mod_name:ident, $($name:ident = $val:expr),* $(,)?) => {
         pub mod $mod_name {
@@ -124,9 +130,7 @@ macro_rules! mcp_tools {
 
 mcp_tools! {
     preparator_tools,
-    GET_DESCRIPTION = "get_description",
-    GET_DISCUSSION = "get_discussion",
-    GET_HISTORY = "get_history",
+    GET_PLAN = "get_plan",
     REPORT_ERROR = "report_error",
     SET_PARAM_DESTINATION_REPOSITORY = "set_param_destination_repository",
     SET_PARAM_DESTINATION_BRANCH = "set_param_destination_branch",
@@ -139,12 +143,14 @@ mcp_tools! {
 
 mcp_tools! {
     planner_tools,
-    GET_DESCRIPTION = "get_description",
-    GET_DISCUSSION = "get_discussion",
-    GET_HISTORY = "get_history",
     GET_PLAN = "get_plan",
     POST_PLAN = "post_plan",
+    GET_CHECKLIST = "get_checklist",
+    INSERT_CHECKLIST_ITEM = "insert_checklist_item",
+    UPDATE_CHECKLIST_ITEM = "update_checklist_item",
+    DELETE_CHECKLIST_ITEM = "delete_checklist_item",
     REPORT_ERROR = "report_error",
+    ASK_USER = "ask_user",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
     REPORT_RESULTS = "report_results",
@@ -152,9 +158,6 @@ mcp_tools! {
 
 mcp_tools! {
     worker_tools,
-    GET_DESCRIPTION = "get_description",
-    GET_DISCUSSION = "get_discussion",
-    GET_HISTORY = "get_history",
     GET_PLAN = "get_plan",
     REPORT_ERROR = "report_error",
     ASK_USER = "ask_user",
@@ -171,10 +174,8 @@ mcp_tools! {
 
 mcp_tools! {
     reviewer_tools,
-    GET_DESCRIPTION = "get_description",
     GET_PLAN = "get_plan",
     REPORT_ERROR = "report_error",
-    INSERT_CHECKLIST_ITEM = "insert_checklist_item",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
     REPORT_RESULTS = "report_results",
@@ -182,8 +183,7 @@ mcp_tools! {
 
 mcp_tools! {
     merger_tools,
-    GET_DESCRIPTION = "get_description",
-    GET_DISCUSSION = "get_discussion",
+    GET_PLAN = "get_plan",
     REPORT_ERROR = "report_error",
     ASK_USER = "ask_user",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",

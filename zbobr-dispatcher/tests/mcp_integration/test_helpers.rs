@@ -173,15 +173,8 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
     );
     assert_eq!(
         task.signal,
-        Some(Signal::GoWork),
-        "[{}] Reviewer should emit go_work when checklist has unchecked items",
-        env.name()
-    );
-    assert!(
-        task.checklist
-            .iter()
-            .any(|i| !i.checked && i.text.contains("Fix review issue")),
-        "[{}] Expected unchecked review item not found",
+        Some(Signal::GoPlan),
+        "[{}] Reviewer should emit go_plan to route to planner",
         env.name()
     );
     assert!(
@@ -248,9 +241,9 @@ pub async fn run_reviewing_approval(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert_eq!(
-        task.stage,
-        Stage::Done,
-        "[{}] Reviewer approval should move task to done",
+        task.signal,
+        Some(Signal::GoPlan),
+        "[{}] Reviewer approval should route to planner via go_plan",
         env.name()
     );
     assert!(
@@ -1150,8 +1143,8 @@ async fn repo_backend_reviewing_for(env: &IntegrationTestEnv, target: &str, suff
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some(Signal::GoWork),
-        "[{}] Reviewer should emit go_work when checklist has unchecked items",
+        Some(Signal::GoPlan),
+        "[{}] Reviewer should emit go_plan to route to planner",
         env.name()
     );
 }
