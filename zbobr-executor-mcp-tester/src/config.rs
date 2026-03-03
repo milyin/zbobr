@@ -55,8 +55,6 @@ impl ZbobrExecutorMcpTesterConfig {
             Role::Worker => self.working.as_ref(),
             Role::Reviewer => self.reviewing.as_ref(),
             Role::Merger => self.merging.as_ref(),
-            // user role has no scenario
-            _ => None,
         }
     }
 }

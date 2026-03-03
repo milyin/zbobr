@@ -422,8 +422,14 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     if !discussion.is_empty() {
         println!("Discussion ({} comment(s)):", discussion.len());
         for (i, c) in discussion.iter().enumerate() {
-            let author = c.author.as_str().to_string();
-            println!("  [{}] [{:?}] {}@{}: {}", i + 1, c.comment_type, author, c.hostname, c.text);
+            let tag = CommentTag {
+                comment_type: c.comment_type,
+                role: c.role,
+                hostname: c.hostname.clone(),
+                model: c.model.clone(),
+            };
+            println!("  [{}] {}\n{}", i + 1, tag, c.text);
+
         }
     }
 }
@@ -1659,10 +1665,6 @@ async fn finalize_session(
             // Any signal set before or during the session is preserved per Rule 2.
             task_session.set_stage(Stage::Pending).await?;
         }
-        _ => {
-            // other roles (e.g. user) don't participate in the normal pipeline;
-            // leave everything as-is.
-        }
     }
 
     Ok(())
@@ -1898,7 +1900,7 @@ async fn rewrite_commit_authors(
 
 /// Standard entry point for a Zbobr CLI application, heavily parameterized
 /// to allow for different backends.
-use zbobr_api::config::BackendConfig;
+use zbobr_api::{CommentTag, config::BackendConfig};
 
 pub async fn run_zbobr<TC: BackendConfig + 'static, RC: BackendConfig + 'static>(
     app_name: &'static str,

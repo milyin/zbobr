@@ -387,7 +387,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
         &self,
         id: u64,
         comment_type: CommentType,
-        role: Role,
+        role: Option<Role>,
         hostname: &str,
         model: Option<Model>,
         body: &str,
@@ -397,7 +397,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
         let new_comment = Comment {
             comment_type,
             timestamp: format!("{:?}", std::time::SystemTime::now()),
-            author: role,
+            role: role,
             hostname: hostname.to_string(),
             model,
             text: body.to_string(),

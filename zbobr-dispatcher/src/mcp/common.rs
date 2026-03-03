@@ -384,10 +384,6 @@ pub async fn run_role_mcp_server(
             );
             axum::Router::new().nest_service(&path, svc)
         }
-        _ => {
-            // Role::User (or any future role) should never host an MCP server.
-            unreachable!("MCP server not supported for role {:?}", role);
-        }
     };
 
     serve_mcp(base_port, &path, router).await

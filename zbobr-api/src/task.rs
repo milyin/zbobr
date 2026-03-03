@@ -122,11 +122,6 @@ impl std::str::FromStr for CommentType {
     }
 }
 
-/// Author of a comment.  We previously had a separate `User` variant
-/// in order to distinguish human-originated messages, but with the addition of
-/// `Role::User` we no longer need the extra enum.
-pub type CommentAuthor = Role;
-
 /// A structured comment with metadata.
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
@@ -136,8 +131,8 @@ pub struct Comment {
     pub comment_type: CommentType,
     #[schemars(description = "Timestamp when comment was created (ISO 8601 format)")]
     pub timestamp: String,
-    #[schemars(description = "Author of the comment (role or user)")]
-    pub author: CommentAuthor,
+    #[schemars(description = "Role of the comment author (None if user-originated)")]
+    pub role: Option<Role>,
     #[schemars(description = "Hostname of the system posting the comment")]
     pub hostname: String,
     #[schemars(description = "AI model used (if applicable)")]
@@ -202,10 +197,6 @@ impl std::fmt::Display for Stage {
 }
 
 /// Role for task execution (planner, worker, reviewer, merger, or user).
-///
-/// The `User` variant is used when a request originates from a human rather than
-/// an agent role; it shows up in comment tags as `user` and allows the UI to
-/// render the origin of a request explicitly.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -220,8 +211,6 @@ pub enum Role {
     Reviewer,
     #[serde(rename = "merger")]
     Merger,
-    #[serde(rename = "user")]
-    User,
 }
 
 impl Role {
@@ -233,7 +222,6 @@ impl Role {
             Role::Worker => "worker",
             Role::Reviewer => "reviewer",
             Role::Merger => "merger",
-            Role::User => "user",
         }
     }
 }
@@ -250,10 +238,6 @@ impl From<Role> for Stage {
             Role::Worker => Stage::Working,
             Role::Reviewer => Stage::Reviewing,
             Role::Merger => Stage::Merging,
-            // the "user" role doesn't map to a real pipeline stage; we treat it
-            // as PENDING so that `Stage::from(Role::User)` is defined and tests
-            // can exercise it.
-            Role::User => Stage::Pending,
         }
     }
 }
@@ -291,7 +275,6 @@ impl std::str::FromStr for Role {
             "worker" => Ok(Role::Worker),
             "reviewer" => Ok(Role::Reviewer),
             "merger" => Ok(Role::Merger),
-            "user" => Ok(Role::User),
             _ => Err(anyhow::anyhow!("Unknown role: {}", s)),
         }
     }
@@ -561,7 +544,7 @@ impl std::str::FromStr for Model {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommentTag {
     pub comment_type: CommentType,
-    pub role: Role,
+    pub role: Option<Role>,
     pub hostname: String,
     pub model: Option<Model>,
 }
@@ -570,7 +553,7 @@ impl CommentTag {
     /// Create a new CommentTag.
     pub fn new(
         comment_type: CommentType,
-        role: Role,
+        role: Option<Role>,
         hostname: String,
         model: Option<Model>,
     ) -> Self {
@@ -597,7 +580,7 @@ impl std::fmt::Display for CommentTag {
         // and we want to be able to see `// REQUEST planner:foo:bar` or
         // `// REQUEST user:host` in the log.
         // role is always present now
-        let role = self.role;
+        let role = self.role.as_ref().map(|r| r.to_string()).unwrap_or_else(|| "user".to_string());
         if let Some(model) = &self.model {
             write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, model)
         } else {
@@ -635,18 +618,14 @@ impl std::str::FromStr for CommentTag {
 
         let (role, hostname, model) = if rest.is_empty() {
             // no metadata supplied; default to user/request with empty host
-            (Role::User, String::new(), None)
+            (None, String::new(), None)
         } else {
             let parts: Vec<&str> = rest.split(':').collect();
             if parts.len() < 2 {
                 return Err(anyhow::anyhow!("Invalid tag format: {}", s));
             }
 
-            let role = if parts[0].is_empty() {
-                Role::User
-            } else {
-                Role::from_str(parts[0]).unwrap_or(Role::User)
-            };
+            let role = Role::from_str(parts[0]).ok();
 
             let hostname = parts[1].to_string();
 

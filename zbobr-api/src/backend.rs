@@ -66,7 +66,7 @@ pub trait TaskBackend: Send + Sync {
         &self,
         id: u64,
         comment_type: CommentType,
-        role: Role,
+        role: Option<Role>,
         hostname: &str,
         model: Option<Model>,
         body: &str,

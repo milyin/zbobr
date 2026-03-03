@@ -941,20 +941,17 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                         (t, body_text)
                     }
                     Err(_) => (
-                        CommentTag::new(CommentType::Request, Role::User, String::new(), None),
+                        CommentTag::new(CommentType::Request, None, String::new(), None),
                         body.clone(),
                     ),
                 };
 
-                let author = tag.role;
-                let model = tag.model.clone();
-
                 Comment {
                     comment_type: tag.comment_type,
                     timestamp,
-                    author,
+                    role: tag.role,
                     hostname: tag.hostname,
-                    model,
+                    model: tag.model,
                     text,
                 }
             })
@@ -965,7 +962,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         &self,
         id: u64,
         comment_type: CommentType,
-        role: Role,
+        role: Option<Role>,
         hostname: &str,
         model: Option<Model>,
         body: &str,
