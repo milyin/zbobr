@@ -1389,7 +1389,7 @@ async fn prepare_workspace(
                     let hostname = get_hostname();
                     if let Err(post_err) = zbobr
                         .task_session(task_id)
-                        .post_message_structured(CommentType::Error, &msg, None, &hostname, None)
+                        .post_comment(CommentType::Error, &msg, None, &hostname, None)
                         .await
                     {
                         tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -1411,7 +1411,7 @@ async fn ensure_pr_url(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> anyhow::Resu
             let hostname = get_hostname();
             let task_session = zbobr.task_session(task_id);
             if let Err(post_err) = task_session
-                .post_message_structured(CommentType::Error, &msg, None, &hostname, None)
+                .post_comment(CommentType::Error, &msg, None, &hostname, None)
                 .await
             {
                 tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -1598,7 +1598,7 @@ async fn finalize_session(
         let error_msg = format!("Execution failed: {e}");
         let hostname = get_hostname();
         if let Err(post_err) = task_session
-            .post_message_structured(CommentType::Error, &error_msg, None, &hostname, None)
+            .post_comment(CommentType::Error, &error_msg, None, &hostname, None)
             .await
         {
             tracing::error!("Failed to post error to task #{task_id}: {post_err}");

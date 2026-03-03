@@ -109,7 +109,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_message_structured(
+            .post_comment(
                 CommentType::Error,
                 message,
                 Some(self.role()),
@@ -155,7 +155,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_message_structured(
+            .post_comment(
                 CommentType::Report,
                 message,
                 Some(self.role()),
@@ -184,7 +184,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_message_structured(
+            .post_comment(
                 CommentType::Request,
                 message,
                 Some(self.role()),
@@ -455,7 +455,7 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
         // Post the plan as a PLAN comment to preserve history
         if let Err(e) = self
             .session()
-            .post_message_structured(
+            .post_comment(
                 CommentType::Plan,
                 plan,
                 Some(self.role()),
@@ -501,7 +501,7 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
 
         if let Err(e) = self
             .session()
-            .post_message_structured(CommentType::Request, message, Some(self.role()), &hostname, None)
+            .post_comment(CommentType::Request, message, Some(self.role()), &hostname, None)
             .await
         {
             tracing::error!(

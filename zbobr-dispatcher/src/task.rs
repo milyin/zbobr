@@ -113,7 +113,7 @@ impl RoleSession {
         self.zbobr.get_task_comments(self.task_id).await
     }
 
-    pub async fn post_message_structured(
+    pub async fn post_comment(
         &self,
         comment_type: CommentType,
         body: &str,
@@ -493,7 +493,7 @@ impl TaskSession {
     }
 
     /// Post a structured comment with type, body, and optional role/model metadata.
-    pub async fn post_message_structured(
+    pub async fn post_comment(
         &self,
         comment_type: CommentType,
         body: &str,
