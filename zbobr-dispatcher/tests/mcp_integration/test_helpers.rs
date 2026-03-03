@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use zbobr_dispatcher::{Signal, Stage, task::Parameter};
+use zbobr_dispatcher::{CommentType, Signal, Stage, task::Parameter};
 
 use super::env::IntegrationTestEnv;
 use super::scenarios;
@@ -715,6 +715,117 @@ pub async fn run_signal_preservation_during_conflict(env: &IntegrationTestEnv) {
         task.signal,
         Some(Signal::GoWork),
         "[{}] Signal should be preserved after Merger completes",
+        env.name()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Plan history with index (GET_PLAN offset parameter)
+// ---------------------------------------------------------------------------
+
+/// Verify that GET_PLAN:
+///  - returns the task description as a user Reply comment when no plan exists
+///  - returns only the plan and subsequent comments up to the next plan for each offset
+///  - returns an error for an out-of-range offset
+pub async fn run_plan_history_with_index(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_plan_history").await;
+    const TASK_DESCRIPTION: &str = "Plan history MCP test description";
+
+    let dest_repo = env
+        .target_repo
+        .as_deref()
+        .map(|r| format!("https://github.com/{r}"))
+        .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
+    let task_id = env
+        .create_task("Plan History Task", TASK_DESCRIPTION, Stage::Planning)
+        .await;
+    let work_branch = format!("zbobr_fix-{task_id}-plan-history");
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
+
+    env.run_stage(
+        task_id,
+        Stage::Planning,
+        scenarios::multiple_plans_scenario(TASK_DESCRIPTION),
+    )
+    .await;
+
+    // Directly verify the structured comment history in the backend.
+    let comments = env
+        .zbobr
+        .get_task_comments_structured(task_id)
+        .await
+        .unwrap_or_else(|e| panic!("[{}] failed to get structured comments: {e}", env.name()));
+
+    // Should have exactly 3 comments: plan-1, error, plan-2
+    let plan_comments: Vec<_> = comments
+        .iter()
+        .filter(|c| c.comment_type == CommentType::Plan)
+        .collect();
+    assert_eq!(
+        plan_comments.len(),
+        2,
+        "[{}] Expected exactly 2 Plan comments, got {} (comments: {:?})",
+        env.name(),
+        plan_comments.len(),
+        comments
+            .iter()
+            .map(|c| format!("{:?}: {}", c.comment_type, &c.text[..c.text.len().min(40)]))
+            .collect::<Vec<_>>()
+    );
+
+    assert!(
+        plan_comments[0].text.contains("First plan"),
+        "[{}] First plan comment should contain 'First plan', got: {}",
+        env.name(),
+        plan_comments[0].text
+    );
+    assert!(
+        plan_comments[1].text.contains("Second plan"),
+        "[{}] Second plan comment should contain 'Second plan', got: {}",
+        env.name(),
+        plan_comments[1].text
+    );
+
+    // Verify the error comment (between the two plans) is present
+    let error_comments: Vec<_> = comments
+        .iter()
+        .filter(|c| c.comment_type == CommentType::Error)
+        .collect();
+    assert_eq!(
+        error_comments.len(),
+        1,
+        "[{}] Expected exactly 1 Error comment between plans",
+        env.name()
+    );
+    assert!(
+        error_comments[0].text.contains("Issue found after first plan"),
+        "[{}] Error comment should contain expected text, got: {}",
+        env.name(),
+        error_comments[0].text
+    );
+
+    // Verify the ordering: plan-1, error, plan-2
+    let plan1_pos = comments.iter().position(|c| {
+        c.comment_type == CommentType::Plan && c.text.contains("First plan")
+    });
+    let error_pos = comments.iter().position(|c| c.comment_type == CommentType::Error);
+    let plan2_pos = comments.iter().position(|c| {
+        c.comment_type == CommentType::Plan && c.text.contains("Second plan")
+    });
+
+    assert!(
+        plan1_pos < error_pos && error_pos < plan2_pos,
+        "[{}] Comments must be ordered: plan-1 ({plan1_pos:?}) < error ({error_pos:?}) < plan-2 ({plan2_pos:?})",
+        env.name()
+    );
+
+    // plan-2 (latest) is at the end, so there should be no comments after it
+    let plan2_idx = plan2_pos.unwrap();
+    assert_eq!(
+        plan2_idx,
+        comments.len() - 1,
+        "[{}] plan-2 should be the last comment (no trailing comments after it)",
         env.name()
     );
 }

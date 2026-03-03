@@ -48,13 +48,23 @@ pub trait CommonMcpImpl: Send + Sync {
             .collect();
 
         if plan_indices.is_empty() {
-            // No plan posted yet — return the task description as context
-            return match self.session().get_description().await {
-                Ok(desc) if !desc.is_empty() => {
-                    format!("No plan has been posted yet.\n\n## Task Description\n\n{desc}")
-                }
-                Ok(_) => "No plan has been posted yet and task description is empty.".to_string(),
-                Err(e) => format!("Error fetching description: {e}"),
+            // No plan posted yet — return task description as a user Reply comment
+            let desc = match self.session().get_description().await {
+                Ok(d) if !d.is_empty() => d,
+                Ok(_) => "No task description provided.".to_string(),
+                Err(e) => return format!("Error fetching description: {e}"),
+            };
+            let synthetic = vec![zbobr_api::Comment {
+                comment_type: CommentType::Reply,
+                timestamp: String::new(),
+                author: zbobr_api::CommentAuthor::User,
+                hostname: String::new(),
+                model: None,
+                text: desc,
+            }];
+            return match serde_json::to_string_pretty(&synthetic) {
+                Ok(json) => json,
+                Err(e) => format!("Error serializing: {e}"),
             };
         }
 
@@ -63,14 +73,14 @@ pub trait CommonMcpImpl: Send + Sync {
             plan_indices.len() - 1
         } else {
             let back = (-offset) as usize;
-            if back > plan_indices.len() {
+            if back >= plan_indices.len() {
                 return format!(
-                    "Error: offset {} out of range, only {} plan(s) available",
+                    "offset {} out of range: only {} plan(s) available",
                     offset,
                     plan_indices.len()
                 );
             }
-            plan_indices.len() - back
+            plan_indices.len() - 1 - back
         };
 
         let plan_comment_idx = plan_indices[target_idx];
@@ -80,29 +90,13 @@ pub trait CommonMcpImpl: Send + Sync {
             .copied()
             .unwrap_or(comments.len());
 
-        // Build the output: the plan comment + all following comments until next plan
-        let mut output = String::new();
-        for c in &comments[plan_comment_idx..end_idx] {
-            if !output.is_empty() {
-                output.push_str("\n\n---\n\n");
-            }
-            let type_label = match c.comment_type {
-                CommentType::Plan => "PLAN",
-                CommentType::Report => "REPORT",
-                CommentType::Error => "ERROR",
-                CommentType::Reply => "REPLY",
-            };
-            let author = match &c.author {
-                zbobr_api::CommentAuthor::Role(r) => r.as_str().to_string(),
-                zbobr_api::CommentAuthor::User => "user".to_string(),
-            };
-            output.push_str(&format!(
-                "// {} {} [{}]\n\n{}",
-                type_label, author, c.timestamp, c.text
-            ));
+        // Return the plan comment + all following comments until next plan as JSON
+        let result_comments: Vec<zbobr_api::Comment> =
+            comments[plan_comment_idx..end_idx].to_vec();
+        match serde_json::to_string_pretty(&result_comments) {
+            Ok(json) => json,
+            Err(e) => format!("Error serializing: {e}"),
         }
-
-        output
     }
 
     async fn report_error_impl(&self, message: &str) -> String {

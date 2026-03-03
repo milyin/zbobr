@@ -216,6 +216,19 @@ async fn test_fs_fs_repo_backend_merging_cross_org() {
 }
 
 // ---------------------------------------------------------------------------
+// Plan history with GET_PLAN index parameter
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_fs_fs_plan_history_with_index() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(env) = get_env().await else {
+        return;
+    };
+    test_helpers::run_plan_history_with_index(&env).await;
+}
+
+// ---------------------------------------------------------------------------
 // Confirm flag behaviour
 // ---------------------------------------------------------------------------
 

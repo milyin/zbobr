@@ -521,6 +521,95 @@ steps:
     )
 }
 
+/// Scenario for testing multiple plan postings and GET_PLAN with offset parameter.
+///
+/// The `description` parameter is the task description, used to verify that
+/// GET_PLAN returns it as a user reply comment when no plan has been posted.
+pub fn multiple_plans_scenario(description: &str) -> String {
+    use zbobr_dispatcher::mcp::planner_tools::{GET_PLAN, POST_PLAN, REPORT_ERROR};
+
+    format!(
+        r#"name: Multiple Plans History Test
+description: Verify GET_PLAN with offset parameter and plan isolation
+timeout: 60
+stop_on_failure: true
+
+steps:
+- name: Get plan before any plan exists (returns task description as user reply comment)
+  operation:
+    type: tool_call
+    tool: {GET_PLAN}
+  assertions:
+    - type: success
+    - type: contains
+      path: result
+      value: "{description}"
+
+- name: Post first plan
+  operation:
+    type: tool_call
+    tool: {POST_PLAN}
+    arguments:
+      description: "First plan: step A, then step B"
+  assertions:
+    - type: success
+
+- name: Add error comment between plans (simulates activity between plan versions)
+  operation:
+    type: tool_call
+    tool: {REPORT_ERROR}
+    arguments:
+      message: "Issue found after first plan: needs revision"
+  assertions:
+    - type: success
+
+- name: Post second plan
+  operation:
+    type: tool_call
+    tool: {POST_PLAN}
+    arguments:
+      description: "Second plan: revised step X, then step Y"
+  assertions:
+    - type: success
+
+- name: Get latest plan (default offset 0) - should return second plan
+  operation:
+    type: tool_call
+    tool: {GET_PLAN}
+  assertions:
+    - type: success
+    - type: contains
+      path: result
+      value: "Second plan"
+
+- name: Get previous plan (offset -1) - should return first plan
+  operation:
+    type: tool_call
+    tool: {GET_PLAN}
+    arguments:
+      offset: -1
+  assertions:
+    - type: success
+    - type: contains
+      path: result
+      value: "First plan"
+
+- name: Get out-of-range offset (-2) - should return out-of-range message
+  operation:
+    type: tool_call
+    tool: {GET_PLAN}
+    arguments:
+      offset: -2
+  assertions:
+    - type: success
+    - type: contains
+      path: result
+      value: "out of range"
+"#,
+        description = description,
+    )
+}
+
 pub fn merging_conflict_scenario() -> String {
     use zbobr_dispatcher::mcp::merger_tools::{GET_PLAN, REPORT_RESULTS};
 

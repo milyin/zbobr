@@ -69,20 +69,27 @@ impl ToolExecutor for McpTesterExecutor {
         let stdout = child.stdout.take().expect("stdout was piped");
         let stderr = child.stderr.take().expect("stderr was piped");
 
+        let stdout_buf = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
+        let stderr_buf = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
+
         // Spawn tasks to stream stdout and stderr
+        let stdout_buf2 = stdout_buf.clone();
         let stdout_task = tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 tracing::info!("[mcp-tester] {}", line);
+                stdout_buf2.lock().await.push(line);
             }
         });
 
+        let stderr_buf2 = stderr_buf.clone();
         let stderr_task = tokio::spawn(async move {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 tracing::warn!("[mcp-tester] {}", line);
+                stderr_buf2.lock().await.push(line);
             }
         });
 
@@ -96,6 +103,14 @@ impl ToolExecutor for McpTesterExecutor {
 
         if !status.success() {
             tracing::error!("mcp-tester exited with status: {status}");
+            eprintln!("=== mcp-tester stdout ===");
+            for line in stdout_buf.lock().await.iter() {
+                eprintln!("{line}");
+            }
+            eprintln!("=== mcp-tester stderr ===");
+            for line in stderr_buf.lock().await.iter() {
+                eprintln!("{line}");
+            }
             anyhow::bail!("mcp-tester exited with status: {status}");
         }
 
