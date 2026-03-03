@@ -1,5 +1,5 @@
 use crate::{
-    Signal,
+    Signal, CommentType,
     mcp::common::get_hostname,
     task::{ChecklistItem, Parameter, Role, RoleSession},
 };
@@ -45,11 +45,35 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
         match self.session().get_discussion().await {
-            Ok(msgs) => {
-                if msgs.is_empty() {
+            Ok(comments) => {
+                if comments.is_empty() {
                     "No messages yet.".to_string()
                 } else {
-                    msgs.join("\n\n---\n\n")
+                    match serde_json::to_string_pretty(&comments) {
+                        Ok(json) => json,
+                        Err(e) => format!("Error serializing comments: {e}"),
+                    }
+                }
+            }
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    async fn get_history_impl(&self) -> String {
+        tracing::info!(
+            "[{}#{}] get_history",
+            self.role_name(),
+            self.session().task_id()
+        );
+        match self.session().get_history().await {
+            Ok(comments) => {
+                if comments.is_empty() {
+                    "No comments yet.".to_string()
+                } else {
+                    match serde_json::to_string_pretty(&comments) {
+                        Ok(json) => json,
+                        Err(e) => format!("Error serializing comments: {e}"),
+                    }
                 }
             }
             Err(e) => format!("Error: {e}"),
@@ -66,7 +90,13 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_message(message, "error", &hostname)
+            .post_message_structured(
+                CommentType::Error,
+                message,
+                Some(self.role().as_str()),
+                &hostname,
+                None,
+            )
             .await
         {
             tracing::error!(
@@ -106,7 +136,13 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_message(message, self.role().as_str(), &hostname)
+            .post_message_structured(
+                CommentType::Report,
+                message,
+                Some(self.role().as_str()),
+                &hostname,
+                None,
+            )
             .await
         {
             tracing::error!(

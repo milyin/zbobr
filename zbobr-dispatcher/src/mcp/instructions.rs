@@ -5,7 +5,7 @@ use crate::mcp::common::{
 /// Generate hardcoded preparator instructions using tool name constants.
 pub fn preparator_instructions() -> String {
     use preparator_tools::{
-        GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH,
+        GET_DESCRIPTION, GET_DISCUSSION, GET_HISTORY, GET_PARAM_DESTINATION_BRANCH,
         GET_PARAM_DESTINATION_REPOSITORY, GET_PARAM_WORK_BRANCH, REPORT_ERROR, REPORT_RESULTS,
         SET_PARAM_DESTINATION_BRANCH, SET_PARAM_DESTINATION_REPOSITORY,
         SET_PARAM_WORK_BRANCH_POSTFIX,
@@ -28,6 +28,7 @@ Read the task description and set the required parameters for the implementation
 
 1. Call `{GET_DESCRIPTION}` to read the user task description
 2. Call `{GET_DISCUSSION}` for context and prior comments
+3. If needed, call `{GET_HISTORY}` to see full comment history with metadata — use this only for debugging
 3. **Set task parameters** that will guide the implementation:
     - Call `{GET_PARAM_DESTINATION_REPOSITORY}` and `{GET_PARAM_DESTINATION_BRANCH}` first — they may already be pre-populated with defaults from the configuration. Keep the defaults unless the task description clearly specifies a different repository or branch.
     - Call `{SET_PARAM_DESTINATION_REPOSITORY}` only if the value is missing or incorrect (full git URL, local path, or owner/repo format)
@@ -43,7 +44,7 @@ Read the task description and set the required parameters for the implementation
 /// Generate hardcoded planner instructions using tool name constants.
 pub fn planner_instructions() -> String {
     use planner_tools::{
-        GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
+        GET_DESCRIPTION, GET_DISCUSSION, GET_HISTORY, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
         GET_PLAN, POST_PLAN, REPORT_ERROR, REPORT_RESULTS,
     };
     use worker_tools::ASK_USER;
@@ -72,6 +73,7 @@ Work autonomously. Do not ask the user for anything.
 1. Call `{GET_DESCRIPTION}` to read the user task description
 2. Call `{GET_PLAN}` to read an existing plan if there is one
 3. Call `{GET_DISCUSSION}` for context and prior comments and questions to existing plan
+4. If you need to investigate errors or debates from prior agents, call `{GET_HISTORY}` (returns all comments with metadata) — use this only for debugging
 4. **Task parameters** have already been set by the preparation stage:
     - Use `{GET_PARAM_DESTINATION_BRANCH}`, `{GET_PARAM_WORK_BRANCH}` to read branch names if needed.
 5. Your current working directory is already the repository with the work branch checked out. Explore the codebase, identify and document the files, crates, modules, and keywords relevant to the task. These help define the scope and guide the worker:
@@ -90,7 +92,7 @@ Work autonomously. Do not ask the user for anything.
 pub fn worker_instructions() -> String {
     use worker_tools::{
         ASK_PLANNER, ASK_USER, CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST,
-        GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
+        GET_DESCRIPTION, GET_DISCUSSION, GET_HISTORY, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
         GET_PLAN, INSERT_CHECKLIST_ITEM, REPORT_ERROR, REPORT_RESULTS, UPDATE_CHECKLIST_ITEM,
     };
     let branch_isolation = crate::mcp::common::branch_isolation_instruction();
@@ -134,14 +136,15 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 3. Call `{GET_CHECKLIST}` to read the implementation steps
 4. **If checklist is empty**: Create it using `{INSERT_CHECKLIST_ITEM}` to break down the plan into clear, actionable steps (task-focused items only)
 5. Call `{GET_DISCUSSION}` if you need additional context from comments
-6. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
-7. Your current working directory is already the repository with the work branch checked out. Consult `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` for branch names if needed.
-8. Implement the plan in your working directory
-8a. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality.
-9. Commit all your changes locally to the work branch with clear messages (describe what the change does, why, and reference relevant checklist item). ALWAYS ensure that you have no uncommitted changes before marking your checklist items as done.
-10. When implementation for an item is complete, mark the item done with `{CHECK_CHECKLIST_ITEM}`, and update or insert follow-up items as needed
-11. If you need human clarification or intervention, call `{ASK_USER}` or `{ASK_PLANNER}` as appropriate; use `{REPORT_ERROR}` only to report technical errors
-12. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact."#,
+6. If you need to investigate errors or debates from prior agents, call `{GET_HISTORY}` (returns all comments with metadata) — use this only for debugging
+7. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
+8. Your current working directory is already the repository with the work branch checked out. Consult `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` for branch names if needed.
+9. Implement the plan in your working directory
+9a. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality.
+10. Commit all your changes locally to the work branch with clear messages (describe what the change does, why, and reference relevant checklist item). ALWAYS ensure that you have no uncommitted changes before marking your checklist items as done.
+11. When implementation for an item is complete, mark the item done with `{CHECK_CHECKLIST_ITEM}`, and update or insert follow-up items as needed
+12. If you need human clarification or intervention, call `{ASK_USER}` or `{ASK_PLANNER}` as appropriate; use `{REPORT_ERROR}` only to report technical errors
+13. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact."#,
     );
 
     instructions

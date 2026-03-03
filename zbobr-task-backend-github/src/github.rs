@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Mutex, time::Duration};
 
 use async_trait::async_trait;
-use zbobr_api::{Model, Parameter, Signal, Stage, Task, Tool, backend::TaskBackend};
+use zbobr_api::{Comment, CommentAuthor, CommentType, Model, Parameter, Role, Signal, Stage, Task, Tool, backend::TaskBackend};
 
 use crate::{
     config::ZbobrTaskBackendGithubConfig,
@@ -57,6 +57,62 @@ where
     }
 }
 
+/// Parse tag from comment start: `// REPORT role:host:model` or `// ERROR role:host[:<model>]` or `// REPLY`
+/// Returns (CommentType, role_opt, host, model_opt, remaining_text)
+fn parse_comment_tag(text: &str) -> (CommentType, Option<String>, String, Option<String>, String) {
+    let trimmed = text.trim_start();
+    
+    // Check for tags like "// REPORT role:host:model" or "// REPLY"
+    if let Some(rest) = trimmed.strip_prefix("// ") {
+        // Find the end of the tag line
+        let tag_line_end = rest.find('\n').unwrap_or(rest.len());
+        let tag_line = &rest[..tag_line_end];
+        
+        // Extract the tag type (first word before space or end of line)
+        let tag_parts: Vec<&str> = tag_line.splitn(2, ' ').collect();
+        if let Some(tag_str) = tag_parts.get(0) {
+            if let Some(comment_type) = CommentType::from_str(&tag_str.to_lowercase()) {
+                // For REPORT and ERROR, parse role:host:model format
+                if comment_type != CommentType::Reply {
+                    if let Some(meta_part) = tag_parts.get(1) {
+                        let meta_parts: Vec<&str> = meta_part.split(':').collect();
+                        let role = meta_parts.get(0).map(|s| s.to_string());
+                        let host = meta_parts.get(1).map(|s| s.to_string()).unwrap_or_default();
+                        let model = meta_parts.get(2).map(|s| s.to_string());
+                        
+                        // Extract body: skip tag line and the blank line that follows
+                        let body_start = tag_line_end + 1;
+                        let body = if body_start < rest.len() {
+                            rest[body_start..].trim_start().to_string()
+                        } else {
+                            String::new()
+                        };
+                        
+                        return (comment_type, role, host, model, body);
+                    }
+                }
+                
+                // For REPLY, extract text after the tag type
+                let remaining = if let Some(body_part) = tag_parts.get(1) {
+                    body_part.to_string()
+                } else {
+                    // If REPLY tag has no inline text, check for text after tag line
+                    let body_start = tag_line_end + 1;
+                    if body_start < rest.len() {
+                        rest[body_start..].trim_start().to_string()
+                    } else {
+                        String::new()
+                    }
+                };
+                return (CommentType::Reply, None, String::new(), None, remaining);
+            }
+        }
+    }
+    
+    // No tag found, treat as reply
+    (CommentType::Reply, None, String::new(), None, text.to_string())
+}
+
 // -- Shared response types --
 
 #[derive(Debug, serde::Deserialize)]
@@ -84,6 +140,7 @@ struct IssueLabel {
 struct CommentResponse {
     user: Option<CommentUser>,
     body: Option<String>,
+    created_at: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -935,6 +992,94 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         Ok(())
     }
 
+    async fn get_task_comments_structured(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
+        let (owner, repo) = self.parse_repo()?;
+        let comments: Vec<CommentResponse> = retry_github("list issue comments", || {
+            self.octocrab.get(
+                format!("/repos/{owner}/{repo}/issues/{id}/comments"),
+                None::<&()>,
+            )
+        })
+        .await?;
+
+        Ok(comments
+            .into_iter()
+            .map(|c| {
+                let body = c.body.unwrap_or_default();
+                let timestamp = c.created_at.unwrap_or_default();
+                
+                // Parse tag from comment
+                let (comment_type, role_opt, _host, _model_opt, text) = parse_comment_tag(&body);
+                
+                // Determine author
+                let author = if let Some(role_str) = role_opt {
+                    match role_str.parse::<Role>() {
+                        Ok(role) => CommentAuthor::Role(role),
+                        Err(_) => CommentAuthor::User,
+                    }
+                } else {
+                    CommentAuthor::User
+                };
+                
+                Comment {
+                    comment_type,
+                    timestamp,
+                    author,
+                    text,
+                }
+            })
+            .collect())
+    }
+
+    async fn post_task_comment_structured(
+        &self,
+        id: u64,
+        comment_type: CommentType,
+        body: &str,
+        role: Option<&str>,
+        hostname: &str,
+        model: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let (owner, repo) = self.parse_repo()?;
+        
+        // Generate tag
+        let tag = match comment_type {
+            CommentType::Error => {
+                if let Some(role_str) = role {
+                    if let Some(model_str) = model {
+                        format!("// ERROR {}:{}:{}", role_str, hostname, model_str)
+                    } else {
+                        format!("// ERROR {}:{}", role_str, hostname)
+                    }
+                } else {
+                    format!("// ERROR :{}", hostname)
+                }
+            }
+            CommentType::Report => {
+                if let Some(role_str) = role {
+                    if let Some(model_str) = model {
+                        format!("// REPORT {}:{}:{}", role_str, hostname, model_str)
+                    } else {
+                        format!("// REPORT {}:{}:unknown", role_str, hostname)
+                    }
+                } else {
+                    format!("// REPORT :{}:unknown", hostname)
+                }
+            }
+            CommentType::Reply => "// REPLY".to_string(),
+        };
+        
+        let formatted_body = format!("{}\n\n{}", tag, body);
+        retry_github("create issue comment", || async {
+            self.octocrab
+                .issues(owner, repo)
+                .create_comment(id, &formatted_body)
+                .await
+        })
+        .await?;
+        Ok(())
+    }
+
     async fn setup(&self, force: bool) -> anyhow::Result<()> {
         self.setup(force).await
     }
@@ -1019,3 +1164,68 @@ mod tests {
     }
 }
 */
+
+#[cfg(test)]
+mod parse_tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_comment_tag_report_with_body() {
+        let input = "// REPORT worker:localhost:claude-opus\n\nThis is the report body\nWith multiple lines";
+        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        
+        assert_eq!(comment_type, CommentType::Report);
+        assert_eq!(role, Some("worker".to_string()));
+        assert_eq!(host, "localhost");
+        assert_eq!(model, Some("claude-opus".to_string()));
+        assert_eq!(body, "This is the report body\nWith multiple lines");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_error_with_body() {
+        let input = "// ERROR planner:skynet:gpt-4\n\nAn error occurred";
+        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        
+        assert_eq!(comment_type, CommentType::Error);
+        assert_eq!(role, Some("planner".to_string()));
+        assert_eq!(host, "skynet");
+        assert_eq!(model, Some("gpt-4".to_string()));
+        assert_eq!(body, "An error occurred");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_reply_with_body() {
+        let input = "// REPLY\n\nThis is a user reply";
+        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        
+        assert_eq!(comment_type, CommentType::Reply);
+        assert_eq!(role, None);
+        assert_eq!(host, "");
+        assert_eq!(model, None);
+        assert_eq!(body, "This is a user reply");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_report_no_model() {
+        let input = "// REPORT reviewer:host\n\nBody text";
+        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        
+        assert_eq!(comment_type, CommentType::Report);
+        assert_eq!(role, Some("reviewer".to_string()));
+        assert_eq!(host, "host");
+        assert_eq!(model, None);
+        assert_eq!(body, "Body text");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_no_tag_treated_as_reply() {
+        let input = "This is just text without a tag";
+        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        
+        assert_eq!(comment_type, CommentType::Reply);
+        assert_eq!(role, None);
+        assert_eq!(host, "");
+        assert_eq!(model, None);
+        assert_eq!(body, "This is just text without a tag");
+    }
+}

@@ -96,15 +96,37 @@ impl RoleSession {
             .await
     }
 
-    /// Get all discussion messages on the task.
-    pub async fn get_discussion(&self) -> anyhow::Result<Vec<String>> {
-        self.zbobr.get_task_comments(self.task_id).await
+    /// Get all discussion messages on the task (structured format, filtered to Reply type only).
+    pub async fn get_discussion(&self) -> anyhow::Result<Vec<Comment>> {
+        let all_comments = self.zbobr.get_task_comments_structured(self.task_id).await?;
+        Ok(all_comments
+            .into_iter()
+            .filter(|c| c.comment_type == CommentType::Reply)
+            .collect())
+    }
+
+    /// Get all comments as structured Comment objects (includes all types: error, report, reply).
+    pub async fn get_history(&self) -> anyhow::Result<Vec<Comment>> {
+        self.zbobr.get_task_comments_structured(self.task_id).await
     }
 
     /// Post a message to the task discussion with role and hostname metadata.
     pub async fn post_message(&self, msg: &str, role: &str, hostname: &str) -> anyhow::Result<()> {
         self.zbobr
             .post_task_comment(self.task_id, msg, role, hostname)
+            .await
+    }
+
+    pub async fn post_message_structured(
+        &self,
+        comment_type: CommentType,
+        body: &str,
+        role: Option<&str>,
+        hostname: &str,
+        model: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.zbobr
+            .post_task_comment_structured(self.task_id, comment_type, body, role, hostname, model)
             .await
     }
 
@@ -478,6 +500,20 @@ impl TaskSession {
     pub async fn post_message(&self, msg: &str, role: &str, hostname: &str) -> anyhow::Result<()> {
         self.zbobr
             .post_task_comment(self.task_id, msg, role, hostname)
+            .await
+    }
+
+    /// Post a structured comment with type, body, and optional role/model metadata.
+    pub async fn post_message_structured(
+        &self,
+        comment_type: CommentType,
+        body: &str,
+        role: Option<&str>,
+        hostname: &str,
+        model: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.zbobr
+            .post_task_comment_structured(self.task_id, comment_type, body, role, hostname, model)
             .await
     }
 }
