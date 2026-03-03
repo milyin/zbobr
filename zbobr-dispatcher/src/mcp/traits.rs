@@ -34,7 +34,7 @@ pub trait CommonMcpImpl: Send + Sync {
             offset
         );
 
-        let comments = match self.session().get_history().await {
+        let comments = match self.session().get_comments().await {
             Ok(c) => c,
             Err(e) => return format!("Error: {e}"),
         };
