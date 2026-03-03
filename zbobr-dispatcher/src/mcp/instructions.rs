@@ -154,7 +154,7 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 /// Generate hardcoded reviewer instructions using tool name constants.
 pub fn reviewer_instructions() -> String {
     use reviewer_tools::{
-        GET_PLAN, REPORT_ERROR, REPORT_RESULTS,
+        GET_PLAN, REPORT_ERROR, REVIEW_ACCEPT, REVIEW_REJECT,
     };
     let instructions = format!(
         r#"# Reviewer Agent
@@ -173,8 +173,10 @@ Review the implementation changes and ensure they meet coding standards and task
 1. Call `{GET_PLAN}` to understand the task requirements and agreed implementation plan
 2. Your current working directory is the repository with the work branch checked out — inspect the changes
 3. **Run tests created by the worker**: Execute the test suite to validate the implementation. Report any test failures found.
-4. Make a detailed review report describing issues found (including test failures), suggested fixes, and overall assessment.
-5. Call `{REPORT_RESULTS}` to provide a detailed review report. If the checklist contains no unchecked items when you finish, the task will be marked DONE automatically; otherwise the planner will plan next steps based on your report. In all cases the report is critical context for the planner, so it MUST be thorough but concise.
+4. Prepare a detailed review report describing issues found (including test failures), suggested fixes, and overall assessment.
+5. Call `{REVIEW_ACCEPT}` if the implementation is correct and complete, or `{REVIEW_REJECT}` if issues were found. Pass the review report as a parameter to these tools. This finishes the session and routes the task accordingly:
+   - Accept → task is marked done
+   - Reject → task is routed back to the planner for re-planning with the review report included in the context
 "#,
     );
 

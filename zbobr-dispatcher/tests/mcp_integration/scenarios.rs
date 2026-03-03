@@ -321,7 +321,7 @@ steps:
 
 pub fn reviewing_scenario() -> String {
     use zbobr_dispatcher::mcp::reviewer_tools::{
-        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, REPORT_RESULTS,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, REVIEW_REJECT,
     };
 
     format!(
@@ -358,12 +358,12 @@ steps:
       path: result
       value: "test"
 
-- name: Report results and finish
+- name: Reject review (simulate discovered issue)
   operation:
     type: tool_call
-    tool: {REPORT_RESULTS}
+    tool: {REVIEW_REJECT}
     arguments:
-      message: "Reviewer complete."
+      message: "Found a problem during review."
   assertions:
     - type: success
 "#,
@@ -373,7 +373,7 @@ steps:
 /// Scenario where the reviewer finds no issues — task should be marked DONE instead
 /// of routing back to the planner.
 pub fn reviewing_approval_scenario() -> String {
-    use zbobr_dispatcher::mcp::reviewer_tools::{GET_PLAN, REPORT_RESULTS};
+    use zbobr_dispatcher::mcp::reviewer_tools::{GET_PLAN, REVIEW_ACCEPT};
 
     format!(
         r#"name: Reviewer Approval Test
@@ -389,10 +389,10 @@ steps:
   assertions:
     - type: success
 
-- name: Report results and finish (no checklist items inserted)
+- name: Accept review (no issues found)
   operation:
     type: tool_call
-    tool: {REPORT_RESULTS}
+    tool: {REVIEW_ACCEPT}
     arguments:
       message: "Reviewer approved. No issues found."
   assertions:
