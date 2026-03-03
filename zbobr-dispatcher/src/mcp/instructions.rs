@@ -80,12 +80,13 @@ Work autonomously. Do not ask the user for anything.
    - Include keywords/concepts the worker should focus on (e.g., "async/await", "error handling", "API compatibility")
    - This context narrows the worker's scope and prevents unnecessary exploration
 6. Design a solution.
-7. **Prepare checklist items for the worker**:
+7. If some instrument is required and you can't istall it yourself, ask the user to install it with `{ASK_USER}`.
+8. **Prepare checklist items for the worker**:
    - Call `{GET_CHECKLIST}` to see existing checklist state
    - Use `{INSERT_CHECKLIST_ITEM}` to add implementation steps for the worker
    - Use `{UPDATE_CHECKLIST_ITEM}` to refine existing items if re-planning
    - Use `{DELETE_CHECKLIST_ITEM}` to remove unnecessary unchecked items
-8. Call `{POST_PLAN}` with the full implementation plan. This posts the plan as your final action and finishes the session.
+9. Call `{POST_PLAN}` with the full implementation plan. This posts the plan as your final action and finishes the session.
 "#,
     )
 }
@@ -142,8 +143,9 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 6a. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality.
 7. Commit all your changes locally to the work branch with clear messages (describe what the change does, why, and reference relevant checklist item). ALWAYS ensure that you have no uncommitted changes before marking your checklist items as done.
 8. When implementation for an item is complete, mark the item done with `{CHECK_CHECKLIST_ITEM}`, and update or insert follow-up items as needed
-9. If you need human clarification or intervention, call `{ASK_USER}` or `{ASK_PLANNER}` as appropriate; use `{REPORT_ERROR}` only to report technical errors
-10. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact."#,
+9. If you need human clarification or intervention, call `{ASK_USER}`. If it was found that the plan proposed is unclear or requires adjustment, call `{ASK_PLANNER}`. In case of technical errors use `{REPORT_ERROR}`.
+10. If some instrument is required and you can't istall it yourself, ask the user to install it with `{ASK_USER}`.
+11. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact."#,
     );
 
     instructions
