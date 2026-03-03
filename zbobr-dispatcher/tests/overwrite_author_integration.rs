@@ -228,7 +228,7 @@ fn test_git_repo_discovery_from_nested_directory() {
 
     // Run git rev-parse from nested directory to verify repository discovery
     let output = std::process::Command::new("git")
-        .args(&["rev-parse", "--show-toplevel"])
+        .args(["rev-parse", "--show-toplevel"])
         .current_dir(&nested_dir)
         .output()
         .expect("Failed to run git rev-parse");
@@ -273,7 +273,7 @@ fn create_commit(path: &Path, message: &str, author_name: &str, author_email: &s
 
     // Commit with specific author using -c which is safer
     let commit_output = std::process::Command::new("git")
-        .args(&[
+        .args([
             "commit",
             "-m",
             message,
@@ -345,7 +345,7 @@ fn test_dry_run_does_not_modify_commits() {
     // Use git command directly instead of shell to avoid % escaping issues
     let range = format!("{}..HEAD", default_branch);
     let output = std::process::Command::new("git")
-        .args(&["log", &range, "--format=%H %an <%ae>"])
+        .args(["log", &range, "--format=%H %an <%ae>"])
         .current_dir(repo_path)
         .output()
         .expect("Failed to run log command");
@@ -383,7 +383,7 @@ fn test_author_rewriting_from_nested_directory() {
 
     // Execute git commands from the nested directory to verify repo discovery
     let repo_root_output = std::process::Command::new("git")
-        .args(&["rev-parse", "--show-toplevel"])
+        .args(["rev-parse", "--show-toplevel"])
         .current_dir(&nested_dir)
         .output()
         .expect("Failed to discover repo from nested dir");
@@ -429,7 +429,7 @@ fn test_author_rewriting_from_nested_directory() {
 
     // Verify author was changed (check from nested directory too)
     let author_cmd = std::process::Command::new("git")
-        .args(&["log", "-1", "--format=%an"])
+        .args(["log", "-1", "--format=%an"])
         .current_dir(&nested_dir)
         .output()
         .expect("Failed to get author from nested dir");

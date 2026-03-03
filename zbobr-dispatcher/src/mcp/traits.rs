@@ -1,5 +1,5 @@
 use crate::{
-    Signal,
+    Signal, CommentType,
     mcp::common::get_hostname,
     task::{ChecklistItem, Parameter, Role, RoleSession},
 };
@@ -26,33 +26,76 @@ pub trait CommonMcpImpl: Send + Sync {
         }
     }
 
-    async fn get_description_impl(&self) -> String {
+    async fn get_plan_impl(&self, offset: i32) -> String {
         tracing::info!(
-            "[{}#{}] get_description",
+            "[{}#{}] get_plan offset={}",
             self.role_name(),
-            self.session().task_id()
+            self.session().task_id(),
+            offset
         );
-        match self.session().get_description().await {
-            Ok(desc) => desc,
-            Err(e) => format!("Error: {e}"),
-        }
-    }
 
-    async fn get_discussion_impl(&self) -> String {
-        tracing::info!(
-            "[{}#{}] get_discussion",
-            self.role_name(),
-            self.session().task_id()
-        );
-        match self.session().get_discussion().await {
-            Ok(msgs) => {
-                if msgs.is_empty() {
-                    "No messages yet.".to_string()
-                } else {
-                    msgs.join("\n\n---\n\n")
-                }
+        let comments = match self.session().get_comments().await {
+            Ok(c) => c,
+            Err(e) => return format!("Error: {e}"),
+        };
+
+        // Find indices of all PLAN comments
+        let plan_indices: Vec<usize> = comments
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.comment_type == CommentType::Plan)
+            .map(|(i, _)| i)
+            .collect();
+
+        if plan_indices.is_empty() {
+            // No plan posted yet — return task description as a user Request comment
+            let desc = match self.session().get_description().await {
+                Ok(d) if !d.is_empty() => d,
+                Ok(_) => "No task description provided.".to_string(),
+                Err(e) => return format!("Error fetching description: {e}"),
+            };
+            let synthetic = vec![zbobr_api::Comment {
+                comment_type: CommentType::Request,
+                timestamp: String::new(),
+                role: None,
+                hostname: String::new(),
+                model: None,
+                text: desc,
+            }];
+            return match serde_json::to_string_pretty(&synthetic) {
+                Ok(json) => json,
+                Err(e) => format!("Error serializing: {e}"),
+            };
+        }
+
+        // Select plan by offset (0 = last, -1 = second-to-last, etc.)
+        let target_idx = if offset >= 0 {
+            plan_indices.len() - 1
+        } else {
+            let back = (-offset) as usize;
+            if back >= plan_indices.len() {
+                return format!(
+                    "offset {} out of range: only {} plan(s) available",
+                    offset,
+                    plan_indices.len()
+                );
             }
-            Err(e) => format!("Error: {e}"),
+            plan_indices.len() - 1 - back
+        };
+
+        let plan_comment_idx = plan_indices[target_idx];
+        // End boundary: the next plan comment (exclusive) or end of comments
+        let end_idx = plan_indices
+            .get(target_idx + 1)
+            .copied()
+            .unwrap_or(comments.len());
+
+        // Return the plan comment + all following comments until next plan as JSON
+        let result_comments: Vec<zbobr_api::Comment> =
+            comments[plan_comment_idx..end_idx].to_vec();
+        match serde_json::to_string_pretty(&result_comments) {
+            Ok(json) => json,
+            Err(e) => format!("Error serializing: {e}"),
         }
     }
 
@@ -66,7 +109,13 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_message(message, "error", &hostname)
+            .post_comment(
+                CommentType::Error,
+                message,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
             .await
         {
             tracing::error!(
@@ -106,7 +155,13 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_message(message, self.role().as_str(), &hostname)
+            .post_comment(
+                CommentType::Report,
+                message,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
             .await
         {
             tracing::error!(
@@ -129,7 +184,13 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_message(message, self.role().as_str(), &hostname)
+            .post_comment(
+                CommentType::Request,
+                message,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
             .await
         {
             tracing::error!(
@@ -157,18 +218,6 @@ pub trait CommonMcpImpl: Send + Sync {
         }
 
         "User asked for guidance".to_string()
-    }
-
-    async fn get_plan_impl(&self) -> String {
-        tracing::info!(
-            "[{}#{}] get_plan",
-            self.role_name(),
-            self.session().task_id()
-        );
-        match self.session().get_plan().await {
-            Ok(plan) => plan,
-            Err(e) => format!("Error: {e}"),
-        }
     }
 
     async fn get_checklist_impl(&self) -> String {
@@ -401,27 +450,29 @@ pub trait PreparatorMcpImpl: CommonMcpImpl {
 pub trait PlannerMcpImpl: CommonMcpImpl {
     async fn post_plan_impl(&self, plan: &str) -> String {
         tracing::info!("[planner#{}] post_plan", self.session().task_id());
-        let plan_text = plan.to_string();
-        match self
+        let hostname = get_hostname();
+
+        // Post the plan as a PLAN comment to preserve history
+        if let Err(e) = self
             .session()
-            .modify_task(move |task| {
-                task.plan = plan_text;
-            })
+            .post_comment(
+                CommentType::Plan,
+                plan,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
             .await
         {
-            Ok(()) => {
-                // Mark plan as ready for worker to implement
-                if let Err(e) = self.session().set_signal(crate::Signal::GoWork).await {
-                    tracing::error!(
-                        "Failed to set signal GoWork for task {} after posting plan: {e}",
-                        self.session().task_id()
-                    );
-                    return format!("Plan posted but error marking task ready for work: {e}");
-                }
-                "Plan posted and task ready for worker implementation".to_string()
-            }
-            Err(e) => format!("Error updating task: {e}"),
+            tracing::error!(
+                "Failed to post plan comment for task {}: {e}",
+                self.session().task_id()
+            );
+            return format!("Error posting plan: {e}");
         }
+
+
+        "Plan posted and task ready for worker implementation".to_string()
     }
 
     async fn get_param_destination_branch_impl(&self) -> String {
@@ -450,7 +501,7 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
 
         if let Err(e) = self
             .session()
-            .post_message(message, self.role().as_str(), &hostname)
+            .post_comment(CommentType::Request, message, Some(self.role()), &hostname, None)
             .await
         {
             tracing::error!(

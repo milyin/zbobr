@@ -6,7 +6,7 @@ use crate::ZbobrDispatcherDyn;
 // RoleSession — restricted access for MCP tools during agent sessions.
 //
 // Cannot modify: stage, conflict, confirm (those are dispatcher-only transitions).
-// Can modify: description, plan, checklist, parameters, signal, pause.
+// Can modify: description, checklist, parameters, signal, pause.
 // ---------------------------------------------------------------------------
 
 /// Restricted task session for MCP tool operations.
@@ -56,9 +56,19 @@ impl RoleSession {
         Ok(self.get_task().await?.description)
     }
 
-    /// Get the current task plan.
+    /// Get the current task plan (latest `PLAN` comment).
+    ///
+    /// Since plans are now stored as comments, this walks the task's comment
+    /// history from newest to oldest and returns the first `Plan`-typed entry.
+    /// Returns an empty string if no plan comment exists.
     pub async fn get_plan(&self) -> anyhow::Result<String> {
-        Ok(self.get_task().await?.plan)
+        let comments = self.get_comments().await?;
+        for c in comments.iter().rev() {
+            if c.comment_type == CommentType::Plan {
+                return Ok(c.text.clone());
+            }
+        }
+        Ok(String::new())
     }
 
     /// Get the current task checklist.
@@ -69,7 +79,7 @@ impl RoleSession {
     /// Atomically read-modify-write the task body.
     ///
     /// The closure receives a mutable `Task` reference and may modify `description`,
-    /// `parameters`, `plan`, `checklist`, `signal`, and `pause`.
+    /// `parameters`, `checklist`, `signal`, and `pause`.
     ///
     /// **Protected fields**: `stage` and `conflict` are saved before the mutation
     /// and restored afterwards, so MCP tools cannot change them.
@@ -96,15 +106,23 @@ impl RoleSession {
             .await
     }
 
-    /// Get all discussion messages on the task.
-    pub async fn get_discussion(&self) -> anyhow::Result<Vec<String>> {
+
+    /// Get all comments as structured `Comment` objects (includes all
+    /// types: error, report, request, reply, etc.).
+    pub async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
         self.zbobr.get_task_comments(self.task_id).await
     }
 
-    /// Post a message to the task discussion with role and hostname metadata.
-    pub async fn post_message(&self, msg: &str, role: &str, hostname: &str) -> anyhow::Result<()> {
+    pub async fn post_comment(
+        &self,
+        comment_type: CommentType,
+        body: &str,
+        role: Option<Role>,
+        hostname: &str,
+        model: Option<Model>,
+    ) -> anyhow::Result<()> {
         self.zbobr
-            .post_task_comment(self.task_id, msg, role, hostname)
+            .post_task_comment(self.task_id, comment_type, role, hostname, model, body)
             .await
     }
 
@@ -474,10 +492,17 @@ impl TaskSession {
         .await
     }
 
-    /// Post a message to the task discussion with role and hostname metadata.
-    pub async fn post_message(&self, msg: &str, role: &str, hostname: &str) -> anyhow::Result<()> {
+    /// Post a structured comment with type, body, and optional role/model metadata.
+    pub async fn post_comment(
+        &self,
+        comment_type: CommentType,
+        body: &str,
+        role: Option<Role>,
+        hostname: &str,
+        model: Option<Model>,
+    ) -> anyhow::Result<()> {
         self.zbobr
-            .post_task_comment(self.task_id, msg, role, hostname)
+            .post_task_comment(self.task_id, comment_type, role, hostname, model, body)
             .await
     }
 }
@@ -531,6 +556,29 @@ mod tests {
         assert_eq!(Stage::from(Role::Worker), Stage::Working);
         assert_eq!(Stage::from(Role::Reviewer), Stage::Reviewing);
         assert_eq!(Stage::from(Role::Merger), Stage::Merging);
+        // user is mapped to a neutral stage so conversions remain total
+        assert_eq!(Stage::from(Role::User), Stage::Pending);
+    }
+
+    #[test]
+    fn comment_tag_roundtrip() {
+        let tag = CommentTag::new(
+            CommentType::Request,
+            Role::Planner,
+            "host".to_string(),
+            Some(Model::Claude3Opus),
+        );
+        assert_eq!(tag.to_string(), "// REQUEST planner:host:claude-opus");
+        let parsed: CommentTag = tag.to_string().parse().unwrap();
+        assert_eq!(parsed, tag);
+
+        let tag_user = CommentTag::new(
+            CommentType::Request,
+            Role::User,
+            "web".to_string(),
+            None,
+        );
+        assert_eq!(tag_user.to_string(), "// REQUEST user:web");
     }
 
     #[test]
@@ -553,12 +601,20 @@ mod tests {
     }
 
     #[test]
+    fn role_serde_user() {
+        let role = Role::User;
+        let json = serde_json::to_string(&role).unwrap();
+        assert_eq!(json, "\"user\"");
+        let back: Role = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, role);
+    }
+
+    #[test]
     fn task_serde() {
         let task = Task {
             id: 42,
             title: "Test task".to_string(),
             description: "Do something".to_string(),
-            plan: String::new(),
             stage: Stage::Planning,
             tool: Some(Tool::Claude),
             model: Some(Model::Claude3Opus),
@@ -588,7 +644,6 @@ mod tests {
             id: 1,
             title: "x".into(),
             description: "".into(),
-            plan: String::new(),
             stage: Stage::Pending,
             tool: None,
             model: None,
@@ -618,7 +673,6 @@ mod tests {
             id: 2,
             title: "x".into(),
             description: "".into(),
-            plan: String::new(),
             stage: Stage::Pending,
             tool: None,
             model: None,
@@ -679,7 +733,6 @@ mod tests {
                 id,
                 title: title.to_string(),
                 description: description.to_string(),
-                plan: String::new(),
                 stage,
                 tool,
                 model,
@@ -728,8 +781,9 @@ mod tests {
             &self,
             _id: u64,
             _body: &str,
-            _role: &str,
+            _role: Role,
             _hostname: &str,
+            _model: Option<Model>,
         ) -> anyhow::Result<()> {
             Ok(())
         }

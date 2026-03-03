@@ -166,9 +166,11 @@ mod tests {
     }
 
     #[test]
-    fn load_prompts_skips_missing_file_silently() {
-        let result = load_prompts(&[PathBuf::from("/nonexistent/path/prompt.md")], None).unwrap();
-        assert!(result.is_empty());
+    fn load_prompts_errors_on_missing_file() {
+        let result = load_prompts(&[PathBuf::from("/nonexistent/path/prompt.md")], None);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Failed to read prompt file"));
     }
 
     #[test]
@@ -226,9 +228,11 @@ mod tests {
     #[test]
     fn resolve_prompts_args_override_config() {
         let config = default_config();
-        let mut args = ZbobrDispatcherArgs::default();
-        args.preparator_prompts = Some(vec![PathBuf::from("override.md")]);
-        args.planner_prompts = Some(vec![PathBuf::from("plan_override.md")]);
+        let args = ZbobrDispatcherArgs {
+            preparator_prompts: Some(vec![PathBuf::from("override.md")]),
+            planner_prompts: Some(vec![PathBuf::from("plan_override.md")]),
+            ..Default::default()
+        };
         let prompts = resolve_prompts(&args, &config);
         assert_eq!(prompts.preparator, vec![PathBuf::from("override.md")]);
         assert_eq!(prompts.planner, vec![PathBuf::from("plan_override.md")]);
@@ -239,8 +243,10 @@ mod tests {
     #[test]
     fn resolve_prompts_merger_args_override_config() {
         let config = default_config();
-        let mut args = ZbobrDispatcherArgs::default();
-        args.merger_prompts = Some(vec![PathBuf::from("merger_override.md")]);
+        let args = ZbobrDispatcherArgs {
+            merger_prompts: Some(vec![PathBuf::from("merger_override.md")]),
+            ..Default::default()
+        };
         let prompts = resolve_prompts(&args, &config);
         assert_eq!(prompts.merger, vec![PathBuf::from("merger_override.md")]);
     }
@@ -249,8 +255,10 @@ mod tests {
     fn resolve_prompts_base_path_from_args_overrides_config() {
         let mut config = default_config();
         config.prompts_path = Some(PathBuf::from("/config/prompts"));
-        let mut args = ZbobrDispatcherArgs::default();
-        args.prompts_path = Some(PathBuf::from("/args/prompts"));
+        let args = ZbobrDispatcherArgs {
+            prompts_path: Some(PathBuf::from("/args/prompts")),
+            ..Default::default()
+        };
         let prompts = resolve_prompts(&args, &config);
         assert_eq!(prompts.base_path, Some(PathBuf::from("/args/prompts")));
     }

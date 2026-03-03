@@ -9,8 +9,8 @@ use crate::{
     ZbobrDispatcherDyn,
     mcp::{
         common::{
-            CheckChecklistItemParam, DeleteChecklistItemParam, InsertChecklistItemParam,
-            MessageParam, UpdateChecklistItemParam,
+            CheckChecklistItemParam, DeleteChecklistItemParam, GetPlanParam,
+            InsertChecklistItemParam, MessageParam, UpdateChecklistItemParam,
         },
         traits::{CommonMcpImpl, WorkerMcpImpl},
     },
@@ -44,14 +44,9 @@ impl WorkerMcp {
         }
     }
 
-    #[tool(description = "Get the current description for this task")]
-    async fn get_description(&self) -> String {
-        self.get_description_impl().await
-    }
-
-    #[tool(description = "Get all discussion messages on this task")]
-    async fn get_discussion(&self) -> String {
-        self.get_discussion_impl().await
+    #[tool(description = "Get the plan and following comments. Optional offset: 0 = latest plan (default), -1 = previous plan, etc.")]
+    async fn get_plan(&self, Parameters(params): Parameters<GetPlanParam>) -> String {
+        self.get_plan_impl(params.offset.unwrap_or(0)).await
     }
 
     #[tool(description = "Report an error to the user and pause task processing")]
@@ -71,11 +66,6 @@ impl WorkerMcp {
     )]
     async fn ask_planner(&self, Parameters(params): Parameters<MessageParam>) -> String {
         self.ask_planner_impl(&params.message).await
-    }
-
-    #[tool(description = "Get the current implementation plan for this task")]
-    async fn get_plan(&self) -> String {
-        self.get_plan_impl().await
     }
 
     #[tool(description = "Get the task checklist as a list of checkbox items")]

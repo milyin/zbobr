@@ -35,7 +35,6 @@ async fn create_read_modify_task() {
     assert_eq!(task.id, id);
     assert_eq!(task.title, "Test task title");
     assert_eq!(task.description, "Test task description");
-    assert_eq!(task.plan, "");
     assert_eq!(task.stage, Stage::Pending);
     assert_eq!(task.tool, Some(Tool::Claude));
     assert_eq!(task.model, Some(Model::ClaudeOpus4_6));
@@ -60,7 +59,6 @@ async fn create_read_modify_task() {
             Box::new(|mut t| {
                 t.title = "Updated title".to_string();
                 t.description = "Updated description".to_string();
-                t.plan = "Step 1: do stuff\nStep 2: profit".to_string();
                 t.stage = Stage::Working;
                 t.conflict = true;
                 t.pause = true;
@@ -94,7 +92,6 @@ async fn create_read_modify_task() {
 
     assert_eq!(task.title, "Updated title");
     assert_eq!(task.description, "Updated description");
-    assert_eq!(task.plan, "Step 1: do stuff\nStep 2: profit");
     assert_eq!(task.stage, Stage::Working);
     assert!(task.conflict);
     assert!(task.pause);

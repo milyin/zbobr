@@ -1,6 +1,6 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
@@ -10,7 +10,7 @@ use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
 
 use crate::{
-    Signal, Stage, Task, ToolExecutor, ZbobrDispatcherDyn, ZbobrExecutorConfig,
+    Comment, CommentType, Signal, Stage, Task, ToolExecutor, ZbobrDispatcherDyn, ZbobrExecutorConfig,
     mcp::common::get_hostname,
     prompts::Prompts,
     task::{Model, Parameter, Role, Tool},
@@ -372,7 +372,7 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
 // ---------------------------------------------------------------------------
 
 /// Print a task to stdout in a human-readable format.
-pub fn print_task(task: &Task, discussion: &[String]) {
+pub fn print_task(task: &Task, discussion: &[Comment]) {
     println!("ID:          {}", task.id);
     println!("Title:       {}", task.title);
     println!("Stage:       {}", task.stage);
@@ -406,9 +406,12 @@ pub fn print_task(task: &Task, discussion: &[String]) {
     if !task.description.is_empty() {
         println!("Description:\n{}", task.description);
     }
-    if !task.plan.is_empty() {
-        println!("Plan:\n{}", task.plan);
-    }
+    // show latest plan comment if present (old tasks used to store this in
+    // `task.plan` so we try to mimic that behaviour for convenience)
+    if !discussion.is_empty()
+        && let Some(plan_comment) = discussion.iter().rev().find(|c| c.comment_type == CommentType::Plan) {
+            println!("Plan (from comment):\n{}", plan_comment.text);
+        }
     if !task.checklist.is_empty() {
         println!("Checklist:");
         for item in &task.checklist {
@@ -418,8 +421,15 @@ pub fn print_task(task: &Task, discussion: &[String]) {
     }
     if !discussion.is_empty() {
         println!("Discussion ({} comment(s)):", discussion.len());
-        for (i, msg) in discussion.iter().enumerate() {
-            println!("  [{}] {}", i + 1, msg);
+        for (i, c) in discussion.iter().enumerate() {
+            let tag = CommentTag {
+                comment_type: c.comment_type,
+                role: c.role,
+                hostname: c.hostname.clone(),
+                model: c.model.clone(),
+            };
+            println!("  [{}] {}\n{}", i + 1, tag, c.text);
+
         }
     }
 }
@@ -985,11 +995,10 @@ impl<'a> CliRoleRunner<'a> {
         // Early-merge check must run BEFORE clearing the triggering condition.
         // If a conflict is detected the session exits here — the signal is left
         // intact so the Merger can return to the same stage after resolving it.
-        if should_try_early_merge(self.role) {
-            if try_early_merge(self.zbobr, self.task_id, &work_dir).await? {
+        if should_try_early_merge(self.role)
+            && try_early_merge(self.zbobr, self.task_id, &work_dir).await? {
                 return Ok(());
             }
-        }
 
         // Rule 1: clear the triggering condition right before the agent session
         // starts (no conflict was detected above).
@@ -1334,10 +1343,10 @@ async fn prepare_workspace(
     zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
     role: Role,
-    task_dir: &PathBuf,
+    task_dir: &Path,
 ) -> anyhow::Result<PathBuf> {
     match role {
-        Role::Preparator => Ok(task_dir.clone()),
+        Role::Preparator => Ok(task_dir.to_path_buf()),
         Role::Merger => {
             let task = zbobr.get_task(task_id).await?;
             let dest_repo = task
@@ -1380,7 +1389,7 @@ async fn prepare_workspace(
                     let hostname = get_hostname();
                     if let Err(post_err) = zbobr
                         .task_session(task_id)
-                        .post_message(&msg, "error", &hostname)
+                        .post_comment(CommentType::Error, &msg, None, &hostname, None)
                         .await
                     {
                         tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -1401,7 +1410,10 @@ async fn ensure_pr_url(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> anyhow::Resu
             tracing::error!("{msg}");
             let hostname = get_hostname();
             let task_session = zbobr.task_session(task_id);
-            if let Err(post_err) = task_session.post_message(&msg, "error", &hostname).await {
+            if let Err(post_err) = task_session
+                .post_comment(CommentType::Error, &msg, None, &hostname, None)
+                .await
+            {
                 tracing::warn!("Failed to post error to task discussion: {post_err}");
             }
             Err(anyhow::anyhow!(msg))
@@ -1420,21 +1432,19 @@ async fn seed_preparator_defaults(
     let task = zbobr.get_task(task_id).await?;
     let role_session = zbobr.role_session(task_id);
 
-    if let Some(default_repo) = &config.default_destination_repository {
-        if !task.parameters.contains_key(&Parameter::DestinationRepository) {
+    if let Some(default_repo) = &config.default_destination_repository
+        && !task.parameters.contains_key(&Parameter::DestinationRepository) {
             role_session
                 .set_parameter(Parameter::DestinationRepository, Some(default_repo.clone()))
                 .await?;
         }
-    }
 
-    if let Some(default_branch) = &config.default_destination_branch {
-        if !task.parameters.contains_key(&Parameter::DestinationBranch) {
+    if let Some(default_branch) = &config.default_destination_branch
+        && !task.parameters.contains_key(&Parameter::DestinationBranch) {
             role_session
                 .set_parameter(Parameter::DestinationBranch, Some(default_branch.clone()))
                 .await?;
         }
-    }
 
     Ok(())
 }
@@ -1446,7 +1456,7 @@ fn should_try_early_merge(role: Role) -> bool {
 async fn try_early_merge(
     zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
-    work_dir: &PathBuf,
+    work_dir: &Path,
 ) -> anyhow::Result<bool> {
     let task = zbobr.get_task(task_id).await?;
     let dest_branch = task
@@ -1509,6 +1519,7 @@ async fn start_mcp_server(
     Ok((assigned_port, server_handle))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn execute_tool(
     cli_tool: Tool,
     executor_config: &ZbobrExecutorConfig,
@@ -1517,7 +1528,7 @@ async fn execute_tool(
     model: &Model,
     assigned_port: u16,
     prompt: &str,
-    work_dir: &PathBuf,
+    work_dir: &Path,
     mcp_url: &str,
     zbobr: &ZbobrDispatcherDyn,
 ) -> (bool, Option<anyhow::Error>) {
@@ -1587,7 +1598,7 @@ async fn finalize_session(
         let error_msg = format!("Execution failed: {e}");
         let hostname = get_hostname();
         if let Err(post_err) = task_session
-            .post_message(&error_msg, "error", &hostname)
+            .post_comment(CommentType::Error, &error_msg, None, &hostname, None)
             .await
         {
             tracing::error!("Failed to post error to task #{task_id}: {post_err}");
@@ -1621,10 +1632,7 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Planner => {
-            // Rule 2.2: Planning → go work (if no signal already set by the agent).
-            if current_task.signal.is_none() && !current_task.pause {
-                task_session.set_signal(Some(Signal::GoWork)).await?;
-            }
+            task_session.set_signal(Some(Signal::GoWork)).await?;
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Worker => {
@@ -1638,16 +1646,16 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Reviewer => {
+            // After review we either route back to the planner or settinng staget to DONE depending on if all checklist items are checked.
             if current_task.signal.is_none() && !current_task.pause {
                 if has_unchecked {
-                    task_session.set_signal(Some(Signal::GoWork)).await?;
-                    task_session.set_stage(Stage::Pending).await?;
+                    task_session.set_signal(Some(Signal::GoPlan)).await?;
                 } else {
                     task_session.mark_done().await?;
+                    return Ok(());
                 }
-            } else {
-                task_session.set_stage(Stage::Pending).await?;
             }
+            task_session.set_stage(Stage::Pending).await?;
         }
         Role::Merger => {
             // Conflict was already cleared on entry (Rule 1); just return to Pending.
@@ -1843,15 +1851,14 @@ async fn rewrite_commit_authors(
                     .output()
                     .await;
                 
-                if let Ok(log_output) = post_log_cmd {
-                    if log_output.status.success() {
+                if let Ok(log_output) = post_log_cmd
+                    && log_output.status.success() {
                         let updated_commits = String::from_utf8_lossy(&log_output.stdout);
                         println!("Updated commits:");
                         for commit in updated_commits.lines() {
                             println!("  {}", commit);
                         }
                     }
-                }
 
                 if let Err(e) = zbobr
                     .task_session(task_id)
@@ -1890,7 +1897,7 @@ async fn rewrite_commit_authors(
 
 /// Standard entry point for a Zbobr CLI application, heavily parameterized
 /// to allow for different backends.
-use zbobr_api::config::BackendConfig;
+use zbobr_api::{CommentTag, config::BackendConfig};
 
 pub async fn run_zbobr<TC: BackendConfig + 'static, RC: BackendConfig + 'static>(
     app_name: &'static str,

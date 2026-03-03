@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use zbobr_api::{ChecklistItem, Model, Parameter, Stage, Task, Tool, backend::TaskBackend};
+use zbobr_api::{ChecklistItem, Comment, CommentType, Model, Parameter, Role, Stage, Task, Tool, backend::TaskBackend};
 
 use crate::config::ZbobrTaskBackendFsConfig;
 
@@ -14,7 +14,6 @@ struct TaskFile {
     id: u64,
     title: String,
     description: String,
-    plan: String,
     stage: String,
     tool: Option<String>,
     model: Option<String>,
@@ -61,7 +60,6 @@ impl TaskFile {
             id: self.id,
             title: self.title.clone(),
             description: self.description.clone(),
-            plan: self.plan.clone(),
             stage,
             tool,
             model,
@@ -80,7 +78,6 @@ impl TaskFile {
             id: task.id,
             title: task.title.clone(),
             description: task.description.clone(),
-            plan: task.plan.clone(),
             stage: task.stage.milestone_name().to_string(),
             tool: task.tool.map(|t| t.to_string()),
             model: task.model.as_ref().map(|m| m.to_string()),
@@ -99,10 +96,18 @@ impl TaskFile {
     }
 }
 
-/// Comments storage structure.
+/// Parse tag from comment start: `// REPORT role:host:model`,
+/// `// ERROR role:host[:<model>]`, or `// REQUEST [role:host[:model]]`.
+/// Returns (CommentType, role, host, model_opt, remaining_text).
+///
+/// The behaviour is intentionally lenient because user-written requests may
+/// omit the tag entirely; in that case we default the role to `Role::User` so
+/// that downstream code can annotate the request origin.
+
+/// Comments storage structure - stores structured comments as YAML.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct CommentsFile {
-    comments: Vec<String>,
+    comments: Vec<Comment>,
 }
 
 /// Filesystem-based task backend.
@@ -191,8 +196,8 @@ impl ZbobrTaskBackendFs {
             .context("Failed to write task file")
     }
 
-    /// Read comments from disk.
-    async fn read_comments(&self, id: u64) -> anyhow::Result<Vec<String>> {
+    /// Read structured comments from disk.
+    async fn read_comments_structured(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
         let path = self.comments_path(id);
         match fs::read_to_string(&path).await {
             Ok(content) => {
@@ -204,8 +209,8 @@ impl ZbobrTaskBackendFs {
         }
     }
 
-    /// Write comments to disk.
-    async fn write_comments(&self, id: u64, comments: Vec<String>) -> anyhow::Result<()> {
+    /// Write structured comments to disk.
+    async fn write_comments_structured(&self, id: u64, comments: Vec<Comment>) -> anyhow::Result<()> {
         let path = self.comments_path(id);
 
         let comments_file = CommentsFile { comments };
@@ -255,7 +260,8 @@ impl ZbobrTaskBackendFs {
 impl TaskBackend for ZbobrTaskBackendFs {
     async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
         let task_file = self.read_task_file(id).await?;
-        task_file.to_task()
+        let task = task_file.to_task()?;
+        Ok(task)
     }
 
     async fn create_task(
@@ -273,7 +279,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
             id,
             title: title.to_string(),
             description: description.to_string(),
-            plan: String::new(),
             stage,
             tool,
             model,
@@ -373,23 +378,35 @@ impl TaskBackend for ZbobrTaskBackendFs {
         Ok(matching_tasks)
     }
 
-    async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<String>> {
-        self.read_comments(id).await
+    async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
+        // Now that we store structured comments, return them directly
+        self.read_comments_structured(id).await
     }
 
     async fn post_task_comment(
         &self,
         id: u64,
-        body: &str,
-        role: &str,
+        comment_type: CommentType,
+        role: Option<Role>,
         hostname: &str,
+        model: Option<Model>,
+        body: &str,
     ) -> anyhow::Result<()> {
-        let mut comments = self.read_comments(id).await?;
-        let formatted_comment = format!("[{}@{}] {}", role, hostname, body);
-        comments.push(formatted_comment);
-        self.write_comments(id, comments).await?;
-
-        tracing::debug!("Posted comment to task {}", id);
+        let mut comments = self.read_comments_structured(id).await?;
+        
+        let new_comment = Comment {
+            comment_type,
+            timestamp: format!("{:?}", std::time::SystemTime::now()),
+            role: role,
+            hostname: hostname.to_string(),
+            model,
+            text: body.to_string(),
+        };
+        
+        comments.push(new_comment);
+        self.write_comments_structured(id, comments).await?;
+        
+        tracing::debug!("Posted structured comment to task {}", id);
         Ok(())
     }
 
@@ -438,5 +455,170 @@ impl TaskBackend for ZbobrTaskBackendFs {
             "FilesystemTaskBackend(tasks_dir: {})",
             self.config.tasks_dir.display()
         )
+    }
+}
+
+#[cfg(test)]
+mod parse_tests {
+    use super::*;
+    use std::str::FromStr;
+    use zbobr_api::task::CommentTag;
+
+    fn split_tag_body(input: &str) -> (CommentTag, String) {
+        let mut parts = input.splitn(2, '\n');
+        let tag_line = parts.next().unwrap_or("");
+        let rest = parts.next();
+
+        // debug for failing tests
+        eprintln!("split_tag_body: tag_line={:?}", tag_line);
+        let result = match tag_line.parse::<CommentTag>() {
+            Ok(tag) => {
+                eprintln!("split_tag_body: parsed tag={:?}", tag);
+                let body = rest
+                    .unwrap_or("")
+                    .trim_start()
+                    .to_string();
+                (tag, body)
+            }
+            Err(err) => {
+                eprintln!("split_tag_body: parse error={:?}", err);
+                // parsing failed, keep entire input as body
+                (
+                    CommentTag::new(CommentType::Request,None, String::new(), None),
+                    input.to_string(),
+                )
+            }
+        };
+        result
+    }
+
+    #[test]
+    fn test_parse_comment_tag_report_with_body() {
+        // use a concrete model that `Model::from_str` knows about
+        let input = "// REPORT worker:localhost:claude-opus-4.6\n\nThis is the report body\nWith multiple lines";
+        let (tag, body) = split_tag_body(input);
+        let comment_type = tag.comment_type;
+        let role = tag.role;
+        let host = tag.hostname;
+        let model = tag.model;
+        
+        assert_eq!(comment_type, CommentType::Report);
+        assert_eq!(role, Some(Role::Worker));
+        assert_eq!(host, "localhost");
+        assert_eq!(model, Some(Model::from_str("claude-opus-4.6").unwrap()));
+        assert_eq!(body, "This is the report body\nWith multiple lines");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_error_with_body() {
+        let input = "// ERROR planner:skynet:gpt-4o\n\nAn error occurred";
+        let (tag, body) = split_tag_body(input);
+        let comment_type = tag.comment_type;
+        let role = tag.role;
+        let host = tag.hostname;
+        let model = tag.model;
+        
+        assert_eq!(comment_type, CommentType::Error);
+        assert_eq!(role, Some(Role::Planner));
+        assert_eq!(host, "skynet");
+        assert_eq!(model, Some(Model::from_str("gpt-4o").unwrap()));
+        assert_eq!(body, "An error occurred");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_request_with_body() {
+        let input = "// REQUEST\n\nThis is a user request";
+        let (tag, body) = split_tag_body(input);
+        let comment_type = tag.comment_type;
+        let role = tag.role;
+        let host = tag.hostname;
+        let model = tag.model;
+
+        assert_eq!(comment_type, CommentType::Request);
+        assert_eq!(role, None);
+        assert_eq!(host, "");
+        assert_eq!(model, None);
+        assert_eq!(body, "This is a user request");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_reply_backward_compat() {
+        // Old "// REPLY" tag should still parse as Request for backward compatibility
+        let input = "// REPLY\n\nThis is a legacy reply";
+        let (tag, body) = split_tag_body(input);
+        let comment_type = tag.comment_type;
+        let role = tag.role;
+        let host = tag.hostname;
+        let model = tag.model;
+
+        assert_eq!(comment_type, CommentType::Request);
+        assert_eq!(role, None);
+        assert_eq!(host, "");
+        assert_eq!(model, None);
+        assert_eq!(body, "This is a legacy reply");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_report_no_model() {
+        let input = "// REPORT reviewer:host\n\nBody text";
+        let (tag, body) = split_tag_body(input);
+        let comment_type = tag.comment_type;
+        let role = tag.role;
+        let host = tag.hostname;
+        let model = tag.model;
+        
+        assert_eq!(comment_type, CommentType::Report);
+        assert_eq!(role, Some(Role::Reviewer));
+        assert_eq!(host, "host");
+        assert_eq!(model, None);
+        assert_eq!(body, "Body text");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_no_tag_treated_as_request() {
+        // when there is no `//` prefix we shouldn't try to treat the first
+        // line as a tag; the entire input becomes the body.
+        let input = "This is just text without a tag";
+        let (tag, body) = split_tag_body(input);
+        assert_eq!(tag.comment_type, CommentType::Request);
+        assert_eq!(tag.role, None);
+        assert_eq!(tag.hostname, "");
+        assert_eq!(tag.model, None);
+        assert_eq!(body, "This is just text without a tag");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_bogus_tag_preserves_first_line() {
+        // if we try to parse a seemingly-tagged first line and it doesn't
+        // conform to the expected format we fall back to request/whole-text.
+        let input = "// NOTATAG\nfull body goes here";
+        let (tag, body) = split_tag_body(input);
+        assert_eq!(tag.comment_type, CommentType::Request);
+        assert_eq!(tag.role, None);
+        assert_eq!(tag.hostname, "");
+        assert_eq!(tag.model, None);
+        assert_eq!(body, "// NOTATAG\nfull body goes here");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_request_with_meta() {
+        let input = "// REQUEST planner:skynet:gpt-4o\n\nPlease respond";
+        let (tag, body) = split_tag_body(input);
+        assert_eq!(tag.comment_type, CommentType::Request);
+        assert_eq!(tag.role, Some(Role::Planner));
+        assert_eq!(tag.hostname, "skynet");
+        assert_eq!(tag.model, Some(Model::from_str("gpt-4o").unwrap()));
+        assert_eq!(body, "Please respond");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_plan_with_body() {
+        let input = "// PLAN planner:localhost:claude-opus-4.6\n\nStep 1: analyse\nStep 2: implement";
+        let (tag, body) = split_tag_body(input);
+        assert_eq!(tag.comment_type, CommentType::Plan);
+        assert_eq!(tag.role, Some(Role::Planner));
+        assert_eq!(tag.hostname, "localhost");
+        assert_eq!(tag.model, Some(Model::from_str("claude-opus-4.6").unwrap()));
+        assert_eq!(body, "Step 1: analyse\nStep 2: implement");
     }
 }

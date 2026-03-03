@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use zbobr_dispatcher::{
     ZbobrDispatcher, ZbobrDispatcherConfig, ZbobrDispatcherDyn, ZbobrExecutorConfig,
-    Signal, Stage, Task, process_task_by_stage,
+    Comment, Signal, Stage, Task, process_task_by_stage,
     prompts::Prompts,
     task::{Parameter, Tool},
 };
@@ -344,7 +344,7 @@ impl IntegrationTestEnv {
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name))
     }
 
-    pub async fn get_comments(&self, task_id: u64) -> Vec<String> {
+    pub async fn get_comments(&self, task_id: u64) -> Vec<Comment> {
         self.zbobr
             .get_task_comments(task_id)
             .await

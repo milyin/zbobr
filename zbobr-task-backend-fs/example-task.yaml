@@ -1,11 +1,6 @@
 id: 42
 title: "Implement new feature X"
 description: "This task involves implementing feature X with all the necessary components."
-plan: |
-  1. Design the API
-  2. Implement core logic
-  3. Add tests
-  4. Update documentation
 stage: "WORKING"
 tool: "copilot"
 model: "gpt-5-mini"

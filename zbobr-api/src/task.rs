@@ -57,6 +57,90 @@ pub struct ChecklistItem {
     pub text: String,
 }
 
+// -- Comment types --
+
+/// Comment type classification.
+///
+/// Variants:
+/// - `Error`   — posted by `report_error` MCP tool when an agent encounters an unrecoverable
+///   problem; also posted by the dispatcher/CLI on execution failure.
+/// - `Report`  — posted by `report_results` MCP tool to deliver a role's completion output.
+/// - `Plan`    — posted by `post_plan` MCP tool (planner role) to record the implementation plan.
+/// - `Request` — posted for user-originated messages and for questions raised by `ask_user` (and
+///   similar ASK_xxx MCP tools) that pause the task waiting for a human response.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+pub enum CommentType {
+    /// Unrecoverable error from an agent or the dispatcher.
+    #[serde(rename = "error")]
+    Error,
+    /// Completion report from an agent role.
+    #[serde(rename = "report")]
+    Report,
+    /// Implementation plan posted by the planner role.
+    #[serde(rename = "plan")]
+    Plan,
+    /// User message or agent request awaiting a human response (ASK_xxx operations).
+    #[serde(rename = "request")]
+    Request,
+}
+
+impl CommentType {
+    /// Returns the comment type as a string.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CommentType::Error => "error",
+            CommentType::Report => "report",
+            CommentType::Plan => "plan",
+            CommentType::Request => "request",
+        }
+    }
+
+    /// Parse from string representation, returning `None` on unknown input.
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.to_ascii_lowercase();
+        match s.as_str() {
+            "error" => Some(CommentType::Error),
+            "report" => Some(CommentType::Report),
+            "plan" => Some(CommentType::Plan),
+            "request" => Some(CommentType::Request),
+            _ => None,
+        }
+    }
+}
+
+// Implement the standard `FromStr` trait so callers can use `.parse()` and to
+// appease the `clippy::should_implement_trait` lint.  The inherent `from_str`
+// method above remains available for callers who prefer an `Option`-returning
+// convenience.
+impl std::str::FromStr for CommentType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        CommentType::parse(s).ok_or(())
+    }
+}
+
+/// A structured comment with metadata.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+pub struct Comment {
+    #[schemars(description = "Comment type (error, report, plan, or request)")]
+    pub comment_type: CommentType,
+    #[schemars(description = "Timestamp when comment was created (ISO 8601 format)")]
+    pub timestamp: String,
+    #[schemars(description = "Role of the comment author (None if user-originated)")]
+    pub role: Option<Role>,
+    #[schemars(description = "Hostname of the system posting the comment")]
+    pub hostname: String,
+    #[schemars(description = "AI model used (if applicable)")]
+    pub model: Option<Model>,
+    #[schemars(description = "Comment text without signature/tag")]
+    pub text: String,
+}
+
 /// Workflow stage (maps to GitHub milestones internally).
 #[derive(
     Debug,
@@ -112,7 +196,7 @@ impl std::fmt::Display for Stage {
     }
 }
 
-/// Role for task execution (planner, worker, reviewer, or merger).
+/// Role for task execution (planner, worker, reviewer, merger, or user).
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -455,13 +539,107 @@ impl std::str::FromStr for Model {
     }
 }
 
+/// Tag for GitHub-specific comment formatting (e.g., `// REPORT role:host:model`).
+/// This type encapsulates the tag serialization/deserialization logic for GitHub comments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommentTag {
+    pub comment_type: CommentType,
+    pub role: Option<Role>,
+    pub hostname: String,
+    pub model: Option<Model>,
+}
+
+impl CommentTag {
+    /// Create a new CommentTag.
+    pub fn new(
+        comment_type: CommentType,
+        role: Option<Role>,
+        hostname: String,
+        model: Option<Model>,
+    ) -> Self {
+        Self {
+            comment_type,
+            role,
+            hostname,
+            model,
+        }
+    }
+}
+
+impl std::fmt::Display for CommentTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let tag_type = match self.comment_type {
+            CommentType::Error => "ERROR",
+            CommentType::Report => "REPORT",
+            CommentType::Plan => "PLAN",
+            CommentType::Request => "REQUEST",
+        };
+
+        // All tag types now follow the same serialization rules.  REQUEST no
+        // longer has special handling because it may carry a role/host/model,
+        // and we want to be able to see `// REQUEST planner:foo:bar` or
+        // `// REQUEST user:host` in the log.
+        // role is always present now
+        let role = self.role.as_ref().map(|r| r.to_string()).unwrap_or_else(|| "user".to_string());
+        if let Some(model) = &self.model {
+            write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, model)
+        } else {
+            write!(f, "// {} {}:{}", tag_type, role, self.hostname)
+        }
+    }
+}
+
+impl std::str::FromStr for CommentTag {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim_start_matches("//").trim_start();
+        let (tag_type_str, rest) = if let Some(pos) = s.find(' ') {
+            (&s[..pos], &s[pos + 1..])
+        } else {
+            (s, "")
+        };
+
+        let comment_type = CommentType::parse(tag_type_str)
+            .ok_or_else(|| anyhow::anyhow!("Unknown comment type: {}", tag_type_str))?;
+
+        let (role, hostname, model) = if rest.is_empty() {
+            // no metadata supplied; default to user/request with empty host
+            (None, String::new(), None)
+        } else {
+            let parts: Vec<&str> = rest.split(':').collect();
+            if parts.len() < 2 {
+                return Err(anyhow::anyhow!("Invalid tag format: {}", s));
+            }
+
+            let role = Role::from_str(parts[0]).ok();
+
+            let hostname = parts[1].to_string();
+
+            let model = if parts.len() > 2 && !parts[2].is_empty() && parts[2] != "unknown" {
+                Some(Model::from_str(parts[2])?)
+            } else {
+                None
+            };
+
+            (role, hostname, model)
+        };
+
+        Ok(CommentTag {
+            comment_type,
+            role,
+            hostname,
+            model,
+        })
+    }
+}
+
 /// A task in the abstract domain (generic, backed by GitHub or Filesystem).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Task {
     pub id: u64,
     pub title: String,
     pub description: String,
-    pub plan: String,
     pub stage: Stage,
     pub tool: Option<Tool>,
     pub model: Option<Model>,
