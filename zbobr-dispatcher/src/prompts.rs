@@ -166,9 +166,11 @@ mod tests {
     }
 
     #[test]
-    fn load_prompts_skips_missing_file_silently() {
-        let result = load_prompts(&[PathBuf::from("/nonexistent/path/prompt.md")], None).unwrap();
-        assert!(result.is_empty());
+    fn load_prompts_errors_on_missing_file() {
+        let result = load_prompts(&[PathBuf::from("/nonexistent/path/prompt.md")], None);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Failed to read prompt file"));
     }
 
     #[test]
