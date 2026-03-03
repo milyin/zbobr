@@ -10,19 +10,36 @@ use crate::{
     },
 };
 
-/// Convert an octocrab error into an anyhow::Error with detailed information.
-fn octocrab_to_anyhow(e: octocrab::Error) -> anyhow::Error {
+/// Format an octocrab error as a concise human-readable string without snafu backtraces.
+///
+/// Using `{e}` directly in log macros triggers snafu's Display which includes a full
+/// `Backtrace` (containing `std::panicking` frames from the Rust runtime), making logs
+/// look like panics. This function extracts just the meaningful message.
+fn format_octocrab_error(e: &octocrab::Error) -> String {
     match e {
         octocrab::Error::GitHub { source, .. } => {
-            anyhow::anyhow!(
-                "GitHub API error: {} (status: {}) -- details: {:?}",
-                source.message,
-                source.status_code,
-                source
-            )
+            format!("HTTP {} - {}", source.status_code, source.message)
         }
-        other => anyhow::anyhow!("GitHub API error: {:?}", other),
+        octocrab::Error::Serde { source, .. } => {
+            // A Serde error here typically means GitHub returned a non-JSON body
+            // (e.g. an HTML error page from a 502 Bad Gateway).
+            format!("GitHub returned a non-JSON response (server may be returning an error page): {source}")
+        }
+        other => {
+            // For other variants, walk the std::error::Error source chain to get the
+            // underlying message without the snafu wrapper's backtrace in Display.
+            use std::error::Error;
+            other
+                .source()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "unknown GitHub client error".to_string())
+        }
     }
+}
+
+/// Convert an octocrab error into an anyhow::Error with detailed information.
+fn octocrab_to_anyhow(e: octocrab::Error) -> anyhow::Error {
+    anyhow::anyhow!("GitHub API error: {}", format_octocrab_error(&e))
 }
 
 fn is_transient_octocrab_error(error: &octocrab::Error) -> bool {
@@ -46,7 +63,8 @@ where
             Err(e) => {
                 if attempt < 3 && is_transient_octocrab_error(&e) {
                     tracing::warn!(
-                        "Transient GitHub error during {op_name} (attempt {attempt}/3): {e}"
+                        "Transient GitHub error during {op_name} (attempt {attempt}/3): {}",
+                        format_octocrab_error(&e)
                     );
                     tokio::time::sleep(Duration::from_millis(250 * attempt)).await;
                     continue;
