@@ -924,17 +924,26 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                 let timestamp = c.created_at.unwrap_or_default();
                 
                         // Split first line (tag) from body text so we can parse metadata.
+                // split into first line (possible tag) plus the rest of the text
                 let mut parts = body.splitn(2, '\n');
                 let tag_line = parts.next().unwrap_or("");
-                let remaining_body = parts
-                    .next()
-                    .unwrap_or("")
-                    .trim_start()
-                    .to_string();
+                let rest = parts.next();
 
-                let tag: CommentTag = match tag_line.parse() {
-                    Ok(t) => t,
-                    Err(_) => CommentTag::new(CommentType::Request, Role::User, String::new(), None),
+                // if the first line parses as a tag we drop it and keep the trailing
+                // body.  otherwise we treat the entire comment as a simple request
+                // and retain the original text verbatim.
+                let (tag, text) = match tag_line.parse::<CommentTag>() {
+                    Ok(t) => {
+                        let body_text = rest
+                            .unwrap_or("")
+                            .trim_start()
+                            .to_string();
+                        (t, body_text)
+                    }
+                    Err(_) => (
+                        CommentTag::new(CommentType::Request, Role::User, String::new(), None),
+                        body.clone(),
+                    ),
                 };
 
                 let author = tag.role;
@@ -946,7 +955,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                     author,
                     hostname: tag.hostname,
                     model,
-                    text: remaining_body,
+                    text,
                 }
             })
             .collect())
@@ -1070,18 +1079,29 @@ mod parse_tests {
     fn split_tag_body(input: &str) -> (CommentTag, String) {
         let mut parts = input.splitn(2, '\n');
         let tag_line = parts.next().unwrap_or("");
-        let body = parts
-            .next()
-            .unwrap_or("")
-            .trim_start()
-            .to_string();
-        let tag: CommentTag = tag_line.parse().unwrap();
-        (tag, body)
+        let rest = parts.next();
+
+        let result = match tag_line.parse::<CommentTag>() {
+            Ok(tag) => {
+                let body = rest
+                    .unwrap_or("")
+                    .trim_start()
+                    .to_string();
+                (tag, body)
+            }
+            Err(_) => {
+                (
+                    CommentTag::new(CommentType::Request, Role::User, String::new(), None),
+                    input.to_string(),
+                )
+            }
+        };
+        result
     }
 
     #[test]
     fn test_parse_comment_tag_report_with_body() {
-        let input = "// REPORT worker:localhost:claude-opus\n\nThis is the report body\nWith multiple lines";
+        let input = "// REPORT worker:localhost:claude-opus-4.6\n\nThis is the report body\nWith multiple lines";
         let (tag, body) = split_tag_body(input);
         let comment_type = tag.comment_type;
         let role = tag.role;
@@ -1091,13 +1111,13 @@ mod parse_tests {
         assert_eq!(comment_type, CommentType::Report);
         assert_eq!(role, Role::Worker);
         assert_eq!(host, "localhost");
-        assert_eq!(model, Some(Model::from_str("claude-opus").unwrap()));
+        assert_eq!(model, Some(Model::from_str("claude-opus-4.6").unwrap()));
         assert_eq!(body, "This is the report body\nWith multiple lines");
     }
 
     #[test]
     fn test_parse_comment_tag_error_with_body() {
-        let input = "// ERROR planner:skynet:gpt-4\n\nAn error occurred";
+        let input = "// ERROR planner:skynet:gpt-4o\n\nAn error occurred";
         let (tag, body) = split_tag_body(input);
         let comment_type = tag.comment_type;
         let role = tag.role;
@@ -1107,7 +1127,7 @@ mod parse_tests {
         assert_eq!(comment_type, CommentType::Error);
         assert_eq!(role, Role::Planner);
         assert_eq!(host, "skynet");
-        assert_eq!(model, Some(Model::from_str("gpt-4").unwrap()));
+        assert_eq!(model, Some(Model::from_str("gpt-4o").unwrap()));
         assert_eq!(body, "An error occurred");
     }
 
@@ -1164,21 +1184,27 @@ mod parse_tests {
     fn test_parse_comment_tag_no_tag_treated_as_request() {
         let input = "This is just text without a tag";
         let (tag, body) = split_tag_body(input);
-        let comment_type = tag.comment_type;
-        let role = tag.role;
-        let host = tag.hostname;
-        let model = tag.model;
-
-        assert_eq!(comment_type, CommentType::Request);
-        assert_eq!(role, Role::User);
-        assert_eq!(host, "");
-        assert_eq!(model, None);
+        assert_eq!(tag.comment_type, CommentType::Request);
+        assert_eq!(tag.role, Role::User);
+        assert_eq!(tag.hostname, "");
+        assert_eq!(tag.model, None);
         assert_eq!(body, "This is just text without a tag");
     }
 
     #[test]
+    fn test_parse_comment_tag_bogus_tag_preserves_first_line() {
+        let input = "// NOTATAG\nbody text";
+        let (tag, body) = split_tag_body(input);
+        assert_eq!(tag.comment_type, CommentType::Request);
+        assert_eq!(tag.role, Role::User);
+        assert_eq!(tag.hostname, "");
+        assert_eq!(tag.model, None);
+        assert_eq!(body, "// NOTATAG\nbody text");
+    }
+
+    #[test]
     fn test_parse_comment_tag_request_with_meta() {
-        let input = "// REQUEST planner:skynet:gpt-4\n\nPlease respond";
+        let input = "// REQUEST planner:skynet:gpt-4o\n\nPlease respond";
         let (tag, body) = split_tag_body(input);
         let comment_type = tag.comment_type;
         let role = tag.role;
@@ -1188,13 +1214,13 @@ mod parse_tests {
         assert_eq!(comment_type, CommentType::Request);
         assert_eq!(role, Role::Planner);
         assert_eq!(host, "skynet");
-        assert_eq!(model, Some(Model::from_str("gpt-4").unwrap()));
+        assert_eq!(model, Some(Model::from_str("gpt-4o").unwrap()));
         assert_eq!(body, "Please respond");
     }
 
     #[test]
     fn test_parse_comment_tag_plan_with_body() {
-        let input = "// PLAN planner:localhost:claude-opus\n\nStep 1: analyse\nStep 2: implement";
+        let input = "// PLAN planner:localhost:claude-opus-4.6\n\nStep 1: analyse\nStep 2: implement";
         let (tag, body) = split_tag_body(input);
         let comment_type = tag.comment_type;
         let role = tag.role;
@@ -1204,7 +1230,7 @@ mod parse_tests {
         assert_eq!(comment_type, CommentType::Plan);
         assert_eq!(role, Role::Planner);
         assert_eq!(host, "localhost");
-        assert_eq!(model, Some(Model::from_str("claude-opus").unwrap()));
+        assert_eq!(model, Some(Model::from_str("claude-opus-4.6").unwrap()));
         assert_eq!(body, "Step 1: analyse\nStep 2: implement");
     }
 }

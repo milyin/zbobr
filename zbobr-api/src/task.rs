@@ -82,7 +82,7 @@ pub enum CommentType {
     #[serde(rename = "plan")]
     Plan,
     /// User message or agent request awaiting a human response (ASK_xxx operations).
-    #[serde(rename = "request", alias = "reply")]
+    #[serde(rename = "request")]
     Request,
 }
 
@@ -99,11 +99,12 @@ impl CommentType {
 
     /// Parse from string representation, returning `None` on unknown input.
     pub fn parse(s: &str) -> Option<Self> {
-        match s {
+        let s = s.to_ascii_lowercase();
+        match s.as_str() {
             "error" => Some(CommentType::Error),
             "report" => Some(CommentType::Report),
             "plan" => Some(CommentType::Plan),
-            "request" | "reply" => Some(CommentType::Request),
+            "request" => Some(CommentType::Request),
             _ => None,
         }
     }
@@ -617,32 +618,45 @@ impl std::str::FromStr for CommentTag {
         // the general parsing logic below handle these cases.  We still
         // support REPLY as a synonym for request via `CommentType::parse`.
 
+        // allow an entirely bare tag like "// REQUEST" (no trailing
+        // metadata).  previous versions of the parser special‑cased
+        // REQUEST/REPLY and tolerated this, but the current implementation
+        // accidentally rejected it.  for compatibility we keep the relaxed
+        // behaviour: if there is no space, treat the rest as empty and fall
+        // back to defaults.
         let (tag_type_str, rest) = if let Some(pos) = s.find(' ') {
             (&s[..pos], &s[pos + 1..])
         } else {
-            return Err(anyhow::anyhow!("Invalid comment tag format: {}", s));
+            (s, "")
         };
 
         let comment_type = CommentType::parse(tag_type_str)
             .ok_or_else(|| anyhow::anyhow!("Unknown comment type: {}", tag_type_str))?;
 
-        let parts: Vec<&str> = rest.split(':').collect();
-        if parts.len() < 2 {
-            return Err(anyhow::anyhow!("Invalid tag format: {}", s));
-        }
-
-        let role = if parts[0].is_empty() {
-            Role::User
+        let (role, hostname, model) = if rest.is_empty() {
+            // no metadata supplied; default to user/request with empty host
+            (Role::User, String::new(), None)
         } else {
-            Role::from_str(parts[0]).unwrap_or(Role::User)
-        };
+            let parts: Vec<&str> = rest.split(':').collect();
+            if parts.len() < 2 {
+                return Err(anyhow::anyhow!("Invalid tag format: {}", s));
+            }
 
-        let hostname = parts[1].to_string();
+            let role = if parts[0].is_empty() {
+                Role::User
+            } else {
+                Role::from_str(parts[0]).unwrap_or(Role::User)
+            };
 
-        let model = if parts.len() > 2 && !parts[2].is_empty() && parts[2] != "unknown" {
-            Some(Model::from_str(parts[2])?)
-        } else {
-            None
+            let hostname = parts[1].to_string();
+
+            let model = if parts.len() > 2 && !parts[2].is_empty() && parts[2] != "unknown" {
+                Some(Model::from_str(parts[2])?)
+            } else {
+                None
+            };
+
+            (role, hostname, model)
         };
 
         Ok(CommentTag {

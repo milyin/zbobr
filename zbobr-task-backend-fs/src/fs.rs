@@ -467,18 +467,35 @@ mod parse_tests {
     fn split_tag_body(input: &str) -> (CommentTag, String) {
         let mut parts = input.splitn(2, '\n');
         let tag_line = parts.next().unwrap_or("");
-        let body = parts
-            .next()
-            .unwrap_or("")
-            .trim_start()
-            .to_string();
-        let tag: CommentTag = tag_line.parse().unwrap();
-        (tag, body)
+        let rest = parts.next();
+
+        // debug for failing tests
+        eprintln!("split_tag_body: tag_line={:?}", tag_line);
+        let result = match tag_line.parse::<CommentTag>() {
+            Ok(tag) => {
+                eprintln!("split_tag_body: parsed tag={:?}", tag);
+                let body = rest
+                    .unwrap_or("")
+                    .trim_start()
+                    .to_string();
+                (tag, body)
+            }
+            Err(err) => {
+                eprintln!("split_tag_body: parse error={:?}", err);
+                // parsing failed, keep entire input as body
+                (
+                    CommentTag::new(CommentType::Request, Role::User, String::new(), None),
+                    input.to_string(),
+                )
+            }
+        };
+        result
     }
 
     #[test]
     fn test_parse_comment_tag_report_with_body() {
-        let input = "// REPORT worker:localhost:claude-opus\n\nThis is the report body\nWith multiple lines";
+        // use a concrete model that `Model::from_str` knows about
+        let input = "// REPORT worker:localhost:claude-opus-4.6\n\nThis is the report body\nWith multiple lines";
         let (tag, body) = split_tag_body(input);
         let comment_type = tag.comment_type;
         let role = tag.role;
@@ -488,13 +505,13 @@ mod parse_tests {
         assert_eq!(comment_type, CommentType::Report);
         assert_eq!(role, Role::Worker);
         assert_eq!(host, "localhost");
-        assert_eq!(model, Some(Model::from_str("claude-opus").unwrap()));
+        assert_eq!(model, Some(Model::from_str("claude-opus-4.6").unwrap()));
         assert_eq!(body, "This is the report body\nWith multiple lines");
     }
 
     #[test]
     fn test_parse_comment_tag_error_with_body() {
-        let input = "// ERROR planner:skynet:gpt-4\n\nAn error occurred";
+        let input = "// ERROR planner:skynet:gpt-4o\n\nAn error occurred";
         let (tag, body) = split_tag_body(input);
         let comment_type = tag.comment_type;
         let role = tag.role;
@@ -504,7 +521,7 @@ mod parse_tests {
         assert_eq!(comment_type, CommentType::Error);
         assert_eq!(role, Role::Planner);
         assert_eq!(host, "skynet");
-        assert_eq!(model, Some(Model::from_str("gpt-4").unwrap()));
+        assert_eq!(model, Some(Model::from_str("gpt-4o").unwrap()));
         assert_eq!(body, "An error occurred");
     }
 
@@ -559,49 +576,49 @@ mod parse_tests {
 
     #[test]
     fn test_parse_comment_tag_no_tag_treated_as_request() {
+        // when there is no `//` prefix we shouldn't try to treat the first
+        // line as a tag; the entire input becomes the body.
         let input = "This is just text without a tag";
         let (tag, body) = split_tag_body(input);
-        let comment_type = tag.comment_type;
-        let role = tag.role;
-        let host = tag.hostname;
-        let model = tag.model;
-
-        assert_eq!(comment_type, CommentType::Request);
-        assert_eq!(role, Role::User);
-        assert_eq!(host, "");
-        assert_eq!(model, None);
+        assert_eq!(tag.comment_type, CommentType::Request);
+        assert_eq!(tag.role, Role::User);
+        assert_eq!(tag.hostname, "");
+        assert_eq!(tag.model, None);
         assert_eq!(body, "This is just text without a tag");
     }
 
     #[test]
-    fn test_parse_comment_tag_request_with_meta() {
-        let input = "// REQUEST planner:skynet:gpt-4\n\nPlease respond";
+    fn test_parse_comment_tag_bogus_tag_preserves_first_line() {
+        // if we try to parse a seemingly-tagged first line and it doesn't
+        // conform to the expected format we fall back to request/whole-text.
+        let input = "// NOTATAG\nfull body goes here";
         let (tag, body) = split_tag_body(input);
-        let comment_type = tag.comment_type;
-        let role = tag.role;
-        let host = tag.hostname;
-        let model = tag.model;
+        assert_eq!(tag.comment_type, CommentType::Request);
+        assert_eq!(tag.role, Role::User);
+        assert_eq!(tag.hostname, "");
+        assert_eq!(tag.model, None);
+        assert_eq!(body, "// NOTATAG\nfull body goes here");
+    }
 
-        assert_eq!(comment_type, CommentType::Request);
-        assert_eq!(role, Role::Planner);
-        assert_eq!(host, "skynet");
-        assert_eq!(model, Some(Model::from_str("gpt-4").unwrap()));
+    #[test]
+    fn test_parse_comment_tag_request_with_meta() {
+        let input = "// REQUEST planner:skynet:gpt-4o\n\nPlease respond";
+        let (tag, body) = split_tag_body(input);
+        assert_eq!(tag.comment_type, CommentType::Request);
+        assert_eq!(tag.role, Role::Planner);
+        assert_eq!(tag.hostname, "skynet");
+        assert_eq!(tag.model, Some(Model::from_str("gpt-4o").unwrap()));
         assert_eq!(body, "Please respond");
     }
 
     #[test]
     fn test_parse_comment_tag_plan_with_body() {
-        let input = "// PLAN planner:localhost:claude-opus\n\nStep 1: analyse\nStep 2: implement";
+        let input = "// PLAN planner:localhost:claude-opus-4.6\n\nStep 1: analyse\nStep 2: implement";
         let (tag, body) = split_tag_body(input);
-        let comment_type = tag.comment_type;
-        let role = tag.role;
-        let host = tag.hostname;
-        let model = tag.model;
-
-        assert_eq!(comment_type, CommentType::Plan);
-        assert_eq!(role, Role::Planner);
-        assert_eq!(host, "localhost");
-        assert_eq!(model, Some(Model::from_str("claude-opus").unwrap()));
+        assert_eq!(tag.comment_type, CommentType::Plan);
+        assert_eq!(tag.role, Role::Planner);
+        assert_eq!(tag.hostname, "localhost");
+        assert_eq!(tag.model, Some(Model::from_str("claude-opus-4.6").unwrap()));
         assert_eq!(body, "Step 1: analyse\nStep 2: implement");
     }
 }
