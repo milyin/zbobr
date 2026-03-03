@@ -13,7 +13,7 @@ use crate::{
     Comment, CommentType, Signal, Stage, Task, ToolExecutor, ZbobrDispatcherDyn, ZbobrExecutorConfig,
     mcp::common::get_hostname,
     prompts::Prompts,
-    task::{CommentAuthor, Model, Parameter, Role, Tool},
+    task::{Model, Parameter, Role, Tool},
 };
 
 // ---------------------------------------------------------------------------
@@ -422,10 +422,7 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     if !discussion.is_empty() {
         println!("Discussion ({} comment(s)):", discussion.len());
         for (i, c) in discussion.iter().enumerate() {
-            let author = match &c.author {
-                CommentAuthor::Role(r) => r.as_str().to_string(),
-                CommentAuthor::User => "user".to_string(),
-            };
+            let author = c.author.as_str().to_string();
             println!("  [{}] [{:?}] {}@{}: {}", i + 1, c.comment_type, author, c.hostname, c.text);
         }
     }
@@ -1661,6 +1658,10 @@ async fn finalize_session(
             // Conflict was already cleared on entry (Rule 1); just return to Pending.
             // Any signal set before or during the session is preserved per Rule 2.
             task_session.set_stage(Stage::Pending).await?;
+        }
+        _ => {
+            // other roles (e.g. user) don't participate in the normal pipeline;
+            // leave everything as-is.
         }
     }
 

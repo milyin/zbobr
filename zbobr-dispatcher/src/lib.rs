@@ -179,6 +179,7 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
         model: Option<Model>,
         body: &str,
     ) -> anyhow::Result<()> {
+        let role = role.unwrap_or(zbobr_api::Role::User);
         self.task_backend
             .post_task_comment(id, comment_type, role, hostname, model, body)
             .await

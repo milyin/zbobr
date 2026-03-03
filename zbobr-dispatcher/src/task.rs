@@ -556,6 +556,29 @@ mod tests {
         assert_eq!(Stage::from(Role::Worker), Stage::Working);
         assert_eq!(Stage::from(Role::Reviewer), Stage::Reviewing);
         assert_eq!(Stage::from(Role::Merger), Stage::Merging);
+        // user is mapped to a neutral stage so conversions remain total
+        assert_eq!(Stage::from(Role::User), Stage::Pending);
+    }
+
+    #[test]
+    fn comment_tag_roundtrip() {
+        let tag = CommentTag::new(
+            CommentType::Request,
+            Role::Planner,
+            "host".to_string(),
+            Some(Model::Claude3Opus),
+        );
+        assert_eq!(tag.to_string(), "// REQUEST planner:host:claude-opus");
+        let parsed: CommentTag = tag.to_string().parse().unwrap();
+        assert_eq!(parsed, tag);
+
+        let tag_user = CommentTag::new(
+            CommentType::Request,
+            Role::User,
+            "web".to_string(),
+            None,
+        );
+        assert_eq!(tag_user.to_string(), "// REQUEST user:web");
     }
 
     #[test]
@@ -575,6 +598,15 @@ mod tests {
         let json = serde_json::to_string(&stage).unwrap();
         let back: Stage = serde_json::from_str(&json).unwrap();
         assert_eq!(back, stage);
+    }
+
+    #[test]
+    fn role_serde_user() {
+        let role = Role::User;
+        let json = serde_json::to_string(&role).unwrap();
+        assert_eq!(json, "\"user\"");
+        let back: Role = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, role);
     }
 
     #[test]
@@ -749,8 +781,9 @@ mod tests {
             &self,
             _id: u64,
             _body: &str,
-            _role: &str,
+            _role: Role,
             _hostname: &str,
+            _model: Option<Model>,
         ) -> anyhow::Result<()> {
             Ok(())
         }

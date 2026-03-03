@@ -121,15 +121,10 @@ impl std::str::FromStr for CommentType {
     }
 }
 
-/// Author of a comment (either a role or user).
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
-)]
-#[serde(untagged)]
-pub enum CommentAuthor {
-    Role(Role),
-    User,
-}
+/// Author of a comment.  We previously had a separate `User` variant
+/// in order to distinguish human-originated messages, but with the addition of
+/// `Role::User` we no longer need the extra enum.
+pub type CommentAuthor = Role;
 
 /// A structured comment with metadata.
 #[derive(
@@ -205,7 +200,11 @@ impl std::fmt::Display for Stage {
     }
 }
 
-/// Role for task execution (planner, worker, reviewer, or merger).
+/// Role for task execution (planner, worker, reviewer, merger, or user).
+///
+/// The `User` variant is used when a request originates from a human rather than
+/// an agent role; it shows up in comment tags as `user` and allows the UI to
+/// render the origin of a request explicitly.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -220,6 +219,8 @@ pub enum Role {
     Reviewer,
     #[serde(rename = "merger")]
     Merger,
+    #[serde(rename = "user")]
+    User,
 }
 
 impl Role {
@@ -231,6 +232,7 @@ impl Role {
             Role::Worker => "worker",
             Role::Reviewer => "reviewer",
             Role::Merger => "merger",
+            Role::User => "user",
         }
     }
 }
@@ -247,6 +249,10 @@ impl From<Role> for Stage {
             Role::Worker => Stage::Working,
             Role::Reviewer => Stage::Reviewing,
             Role::Merger => Stage::Merging,
+            // the "user" role doesn't map to a real pipeline stage; we treat it
+            // as PENDING so that `Stage::from(Role::User)` is defined and tests
+            // can exercise it.
+            Role::User => Stage::Pending,
         }
     }
 }
@@ -284,6 +290,7 @@ impl std::str::FromStr for Role {
             "worker" => Ok(Role::Worker),
             "reviewer" => Ok(Role::Reviewer),
             "merger" => Ok(Role::Merger),
+            "user" => Ok(Role::User),
             _ => Err(anyhow::anyhow!("Unknown role: {}", s)),
         }
     }
@@ -553,7 +560,7 @@ impl std::str::FromStr for Model {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommentTag {
     pub comment_type: CommentType,
-    pub role: Option<Role>,
+    pub role: Role,
     pub hostname: String,
     pub model: Option<Model>,
 }
@@ -562,7 +569,7 @@ impl CommentTag {
     /// Create a new CommentTag.
     pub fn new(
         comment_type: CommentType,
-        role: Option<Role>,
+        role: Role,
         hostname: String,
         model: Option<Model>,
     ) -> Self {
@@ -584,16 +591,16 @@ impl std::fmt::Display for CommentTag {
             CommentType::Request => "REQUEST",
         };
 
-        if tag_type == "REQUEST" {
-            write!(f, "// REQUEST")
-        } else if let Some(role) = self.role {
-            if let Some(model) = &self.model {
-                write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, model)
-            } else {
-                write!(f, "// {} {}:{}", tag_type, role, self.hostname)
-            }
+        // All tag types now follow the same serialization rules.  REQUEST no
+        // longer has special handling because it may carry a role/host/model,
+        // and we want to be able to see `// REQUEST planner:foo:bar` or
+        // `// REQUEST user:host` in the log.
+        // role is always present now
+        let role = self.role;
+        if let Some(model) = &self.model {
+            write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, model)
         } else {
-            write!(f, "// {} :{}", tag_type, self.hostname)
+            write!(f, "// {} {}:{}", tag_type, role, self.hostname)
         }
     }
 }
@@ -604,14 +611,11 @@ impl std::str::FromStr for CommentTag {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.trim_start_matches("//").trim_start();
 
-        if s.starts_with("REQUEST") || s.starts_with("REPLY") {
-            return Ok(CommentTag {
-                comment_type: CommentType::Request,
-                role: None,
-                hostname: String::new(),
-                model: None,
-            });
-        }
+        // previously we short‑circuited REQUEST/REPLY tags and ignored
+        // any following metadata; that's no longer acceptable because a
+        // request may be issued by a specific role or even by the user.  Let
+        // the general parsing logic below handle these cases.  We still
+        // support REPLY as a synonym for request via `CommentType::parse`.
 
         let (tag_type_str, rest) = if let Some(pos) = s.find(' ') {
             (&s[..pos], &s[pos + 1..])
@@ -628,9 +632,9 @@ impl std::str::FromStr for CommentTag {
         }
 
         let role = if parts[0].is_empty() {
-            None
+            Role::User
         } else {
-            Some(Role::from_str(parts[0])?)
+            Role::from_str(parts[0]).unwrap_or(Role::User)
         };
 
         let hostname = parts[1].to_string();

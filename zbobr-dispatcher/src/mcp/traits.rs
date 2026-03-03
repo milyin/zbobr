@@ -23,6 +23,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Role::Worker => Signal::GoWork,
             Role::Reviewer => Signal::GoReview,
             Role::Merger => Signal::GoWork,
+            _ => Signal::GoWork, // User or future roles default to worker signal
         }
     }
 
@@ -57,7 +58,7 @@ pub trait CommonMcpImpl: Send + Sync {
             let synthetic = vec![zbobr_api::Comment {
                 comment_type: CommentType::Request,
                 timestamp: String::new(),
-                author: zbobr_api::CommentAuthor::User,
+                author: zbobr_api::Role::User,
                 hostname: String::new(),
                 model: None,
                 text: desc,

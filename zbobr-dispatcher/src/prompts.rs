@@ -95,6 +95,9 @@ pub fn build_full_prompt(user_context: &str, role: Role) -> String {
         Role::Worker => crate::worker_instructions(),
         Role::Reviewer => crate::reviewer_instructions(),
         Role::Merger => crate::merger_instructions(),
+        // user is not an agent; fall back to preparator instructions as a
+        // reasonable default.
+        _ => crate::preparator_instructions(),
     };
 
     let api_docs = match role {
@@ -103,6 +106,7 @@ pub fn build_full_prompt(user_context: &str, role: Role) -> String {
         Role::Worker => crate::WorkerMcp::generate_api_docs(),
         Role::Reviewer => crate::ReviewerMcp::generate_api_docs(),
         Role::Merger => crate::MergerMcp::generate_api_docs(),
+        _ => crate::PreparatorMcp::generate_api_docs(),
     };
 
     if user_context.is_empty() {
@@ -124,6 +128,7 @@ impl Prompts {
             Role::Worker => load_prompts(&self.worker, self.base_path.as_ref())?,
             Role::Reviewer => load_prompts(&self.reviewer, self.base_path.as_ref())?,
             Role::Merger => load_prompts(&self.merger, self.base_path.as_ref())?,
+            _ => load_prompts(&self.preparator, self.base_path.as_ref())?,
         };
         Ok(build_full_prompt(&base_prompt, role))
     }

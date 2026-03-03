@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use zbobr_api::{ChecklistItem, Comment, CommentAuthor, CommentType, Model, Parameter, Role, Stage, Task, Tool, backend::TaskBackend};
+use zbobr_api::{ChecklistItem, Comment, CommentType, Model, Parameter, Role, Stage, Task, Tool, backend::TaskBackend};
 
 use crate::config::ZbobrTaskBackendFsConfig;
 
@@ -96,57 +96,13 @@ impl TaskFile {
     }
 }
 
-/// Parse tag from comment start: `// REPORT role:host:model` or `// ERROR role:host[:<model>]` or `// REQUEST`
-/// Returns (CommentType, role_opt, host, model_opt, remaining_text)
-#[cfg(test)]
-fn parse_comment_tag(text: &str) -> (CommentType, Option<String>, String, Option<String>, String) {
-    let trimmed = text.trim_start();
-
-    if let Some(rest) = trimmed.strip_prefix("// ") {
-        // Find the end of the tag line
-        let tag_line_end = rest.find('\n').unwrap_or(rest.len());
-        let tag_line = &rest[..tag_line_end];
-
-        let mut tag_parts = tag_line.splitn(2, ' ');
-        if let Some(tag_str) = tag_parts.next()
-            && let Some(comment_type) = CommentType::parse(&tag_str.to_lowercase())
-        {
-            if comment_type != CommentType::Request
-                && let Some(meta_part) = tag_parts.next()
-            {
-                let meta_parts: Vec<&str> = meta_part.split(':').collect();
-                let role = meta_parts.first().map(|s| s.to_string());
-                let host = meta_parts.get(1).map(|s| s.to_string()).unwrap_or_default();
-                let model = meta_parts.get(2).map(|s| s.to_string());
-
-                let body_start = tag_line_end + 1;
-                let body = if body_start < rest.len() {
-                    rest[body_start..].trim_start().to_string()
-                } else {
-                    String::new()
-                };
-
-                return (comment_type, role, host, model, body);
-            }
-
-            // treat as request (or fallback when metadata missing)
-            let remaining = if let Some(body_part) = tag_parts.next() {
-                body_part.to_string()
-            } else {
-                let body_start = tag_line_end + 1;
-                if body_start < rest.len() {
-                    rest[body_start..].trim_start().to_string()
-                } else {
-                    String::new()
-                }
-            };
-            return (CommentType::Request, None, String::new(), None, remaining);
-        }
-    }
-
-    // No tag found, treat as request
-    (CommentType::Request, None, String::new(), None, text.to_string())
-}
+/// Parse tag from comment start: `// REPORT role:host:model`,
+/// `// ERROR role:host[:<model>]`, or `// REQUEST [role:host[:model]]`.
+/// Returns (CommentType, role, host, model_opt, remaining_text).
+///
+/// The behaviour is intentionally lenient because user-written requests may
+/// omit the tag entirely; in that case we default the role to `Role::User` so
+/// that downstream code can annotate the request origin.
 
 /// Comments storage structure - stores structured comments as YAML.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -431,7 +387,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
         &self,
         id: u64,
         comment_type: CommentType,
-        role: Option<Role>,
+        role: Role,
         hostname: &str,
         model: Option<Model>,
         body: &str,
@@ -441,10 +397,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
         let new_comment = Comment {
             comment_type,
             timestamp: format!("{:?}", std::time::SystemTime::now()),
-            author: match role {
-                Some(r) => CommentAuthor::Role(r),
-                None => CommentAuthor::User,
-            },
+            author: role,
             hostname: hostname.to_string(),
             model,
             text: body.to_string(),
@@ -508,38 +461,64 @@ impl TaskBackend for ZbobrTaskBackendFs {
 #[cfg(test)]
 mod parse_tests {
     use super::*;
+    use std::str::FromStr;
+    use zbobr_api::task::CommentTag;
+
+    fn split_tag_body(input: &str) -> (CommentTag, String) {
+        let mut parts = input.splitn(2, '\n');
+        let tag_line = parts.next().unwrap_or("");
+        let body = parts
+            .next()
+            .unwrap_or("")
+            .trim_start()
+            .to_string();
+        let tag: CommentTag = tag_line.parse().unwrap();
+        (tag, body)
+    }
 
     #[test]
     fn test_parse_comment_tag_report_with_body() {
         let input = "// REPORT worker:localhost:claude-opus\n\nThis is the report body\nWith multiple lines";
-        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        let (tag, body) = split_tag_body(input);
+        let comment_type = tag.comment_type;
+        let role = tag.role;
+        let host = tag.hostname;
+        let model = tag.model;
         
         assert_eq!(comment_type, CommentType::Report);
-        assert_eq!(role, Some("worker".to_string()));
+        assert_eq!(role, Role::Worker);
         assert_eq!(host, "localhost");
-        assert_eq!(model, Some("claude-opus".to_string()));
+        assert_eq!(model, Some(Model::from_str("claude-opus").unwrap()));
         assert_eq!(body, "This is the report body\nWith multiple lines");
     }
 
     #[test]
     fn test_parse_comment_tag_error_with_body() {
         let input = "// ERROR planner:skynet:gpt-4\n\nAn error occurred";
-        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        let (tag, body) = split_tag_body(input);
+        let comment_type = tag.comment_type;
+        let role = tag.role;
+        let host = tag.hostname;
+        let model = tag.model;
         
         assert_eq!(comment_type, CommentType::Error);
-        assert_eq!(role, Some("planner".to_string()));
+        assert_eq!(role, Role::Planner);
         assert_eq!(host, "skynet");
-        assert_eq!(model, Some("gpt-4".to_string()));
+        assert_eq!(model, Some(Model::from_str("gpt-4").unwrap()));
         assert_eq!(body, "An error occurred");
     }
 
     #[test]
     fn test_parse_comment_tag_request_with_body() {
         let input = "// REQUEST\n\nThis is a user request";
-        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        let (tag, body) = split_tag_body(input);
+        let comment_type = tag.comment_type;
+        let role = tag.role;
+        let host = tag.hostname;
+        let model = tag.model;
 
         assert_eq!(comment_type, CommentType::Request);
-        assert_eq!(role, None);
+        assert_eq!(role, Role::User);
         assert_eq!(host, "");
         assert_eq!(model, None);
         assert_eq!(body, "This is a user request");
@@ -549,10 +528,14 @@ mod parse_tests {
     fn test_parse_comment_tag_reply_backward_compat() {
         // Old "// REPLY" tag should still parse as Request for backward compatibility
         let input = "// REPLY\n\nThis is a legacy reply";
-        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        let (tag, body) = split_tag_body(input);
+        let comment_type = tag.comment_type;
+        let role = tag.role;
+        let host = tag.hostname;
+        let model = tag.model;
 
         assert_eq!(comment_type, CommentType::Request);
-        assert_eq!(role, None);
+        assert_eq!(role, Role::User);
         assert_eq!(host, "");
         assert_eq!(model, None);
         assert_eq!(body, "This is a legacy reply");
@@ -561,10 +544,14 @@ mod parse_tests {
     #[test]
     fn test_parse_comment_tag_report_no_model() {
         let input = "// REPORT reviewer:host\n\nBody text";
-        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        let (tag, body) = split_tag_body(input);
+        let comment_type = tag.comment_type;
+        let role = tag.role;
+        let host = tag.hostname;
+        let model = tag.model;
         
         assert_eq!(comment_type, CommentType::Report);
-        assert_eq!(role, Some("reviewer".to_string()));
+        assert_eq!(role, Role::Reviewer);
         assert_eq!(host, "host");
         assert_eq!(model, None);
         assert_eq!(body, "Body text");
@@ -573,24 +560,48 @@ mod parse_tests {
     #[test]
     fn test_parse_comment_tag_no_tag_treated_as_request() {
         let input = "This is just text without a tag";
-        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        let (tag, body) = split_tag_body(input);
+        let comment_type = tag.comment_type;
+        let role = tag.role;
+        let host = tag.hostname;
+        let model = tag.model;
 
         assert_eq!(comment_type, CommentType::Request);
-        assert_eq!(role, None);
+        assert_eq!(role, Role::User);
         assert_eq!(host, "");
         assert_eq!(model, None);
         assert_eq!(body, "This is just text without a tag");
     }
 
     #[test]
+    fn test_parse_comment_tag_request_with_meta() {
+        let input = "// REQUEST planner:skynet:gpt-4\n\nPlease respond";
+        let (tag, body) = split_tag_body(input);
+        let comment_type = tag.comment_type;
+        let role = tag.role;
+        let host = tag.hostname;
+        let model = tag.model;
+
+        assert_eq!(comment_type, CommentType::Request);
+        assert_eq!(role, Role::Planner);
+        assert_eq!(host, "skynet");
+        assert_eq!(model, Some(Model::from_str("gpt-4").unwrap()));
+        assert_eq!(body, "Please respond");
+    }
+
+    #[test]
     fn test_parse_comment_tag_plan_with_body() {
         let input = "// PLAN planner:localhost:claude-opus\n\nStep 1: analyse\nStep 2: implement";
-        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+        let (tag, body) = split_tag_body(input);
+        let comment_type = tag.comment_type;
+        let role = tag.role;
+        let host = tag.hostname;
+        let model = tag.model;
 
         assert_eq!(comment_type, CommentType::Plan);
-        assert_eq!(role, Some("planner".to_string()));
+        assert_eq!(role, Role::Planner);
         assert_eq!(host, "localhost");
-        assert_eq!(model, Some("claude-opus".to_string()));
+        assert_eq!(model, Some(Model::from_str("claude-opus").unwrap()));
         assert_eq!(body, "Step 1: analyse\nStep 2: implement");
     }
 }
