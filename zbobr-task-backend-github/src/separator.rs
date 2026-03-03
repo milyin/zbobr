@@ -4,10 +4,8 @@ use zbobr_api::task::ChecklistItem;
 
 // -- Checklist parsing and serialization helpers --
 
-const PARAMETERS_SEPARATOR: &str = "\n\n---PARAMETERS---\n";
-// legacy separator; used only to strip out plan text from existing descriptions
-const PLAN_SEPARATOR: &str = "\n\n---PLAN---\n";
-const CHECKLIST_SEPARATOR: &str = "\n\n---CHECKLIST---\n";
+pub(crate) const PARAMETERS_SEPARATOR: &str = "\n\n---PARAMETERS---\n";
+pub(crate) const CHECKLIST_SEPARATOR: &str = "\n\n---CHECKLIST---\n";
 
 /// Parse parameters from the PARAMETERS section.
 /// Returns a map of parameter names to values.
@@ -57,16 +55,8 @@ pub(crate) fn parse_description_full(
         _ => (parts[0], parts[1]),
     };
 
-    // Drop any legacy plan section by splitting on PLAN_SEPARATOR and taking the
-    // portion before it.
-    let before_plan = if let Some(idx) = before_checklist.find(PLAN_SEPARATOR) {
-        &before_checklist[..idx]
-    } else {
-        before_checklist
-    };
-
     // Now split by parameters separator
-    let param_parts: Vec<&str> = before_plan.split(PARAMETERS_SEPARATOR).collect();
+    let param_parts: Vec<&str> = before_checklist.split(PARAMETERS_SEPARATOR).collect();
     let (description, params_text) = match param_parts.len() {
         1 => (param_parts[0].to_string(), ""),
         _ => (param_parts[0].to_string(), param_parts[1].trim()),
