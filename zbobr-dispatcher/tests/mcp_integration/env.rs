@@ -346,7 +346,7 @@ impl IntegrationTestEnv {
 
     pub async fn get_comments(&self, task_id: u64) -> Vec<Comment> {
         self.zbobr
-            .get_task_comments_structured(task_id)
+            .get_task_comments(task_id)
             .await
             .unwrap_or_else(|e| {
                 panic!("[{}] failed to get comments for task #{task_id}: {e}", self.name)

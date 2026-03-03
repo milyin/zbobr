@@ -562,7 +562,7 @@ async fn run_task_subcommand(
         }
         TaskSubcommand::Show { id } => {
             let task = zbobr.get_task(id).await?;
-            let discussion = zbobr.get_task_comments_structured(id).await?;
+            let discussion = zbobr.get_task_comments(id).await?;
             print_task(&task, &discussion);
         }
         TaskSubcommand::Update {

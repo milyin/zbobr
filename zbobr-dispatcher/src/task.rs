@@ -100,7 +100,7 @@ impl RoleSession {
     /// Get all comments as structured `Comment` objects (includes all
     /// types: error, report, request, reply, etc.).
     pub async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
-        self.zbobr.get_task_comments_structured(self.task_id).await
+        self.zbobr.get_task_comments(self.task_id).await
     }
 
     pub async fn post_message_structured(
@@ -112,7 +112,7 @@ impl RoleSession {
         model: Option<Model>,
     ) -> anyhow::Result<()> {
         self.zbobr
-            .post_task_comment_structured(self.task_id, comment_type, role, hostname, model, body)
+            .post_task_comment(self.task_id, comment_type, role, hostname, model, body)
             .await
     }
 
@@ -492,7 +492,7 @@ impl TaskSession {
         model: Option<Model>,
     ) -> anyhow::Result<()> {
         self.zbobr
-            .post_task_comment_structured(self.task_id, comment_type, role, hostname, model, body)
+            .post_task_comment(self.task_id, comment_type, role, hostname, model, body)
             .await
     }
 }

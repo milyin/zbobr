@@ -753,7 +753,7 @@ pub async fn run_plan_history_with_index(env: &IntegrationTestEnv) {
     // Directly verify the structured comment history in the backend.
     let comments = env
         .zbobr
-        .get_task_comments_structured(task_id)
+        .get_task_comments(task_id)
         .await
         .unwrap_or_else(|e| panic!("[{}] failed to get structured comments: {e}", env.name()));
 

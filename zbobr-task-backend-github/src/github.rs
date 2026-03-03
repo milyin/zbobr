@@ -965,7 +965,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         Ok(tasks)
     }
 
-    async fn get_task_comments_structured(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
+    async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
         let (owner, repo) = self.parse_repo()?;
         let comments: Vec<CommentResponse> = retry_github("list issue comments", || {
             self.octocrab.get(
@@ -1009,7 +1009,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
             .collect())
     }
 
-    async fn post_task_comment_structured(
+    async fn post_task_comment(
         &self,
         id: u64,
         comment_type: CommentType,

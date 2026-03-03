@@ -430,12 +430,12 @@ impl TaskBackend for ZbobrTaskBackendFs {
         Ok(matching_tasks)
     }
 
-    async fn get_task_comments_structured(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
+    async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
         // Now that we store structured comments, return them directly
         self.read_comments_structured(id).await
     }
 
-    async fn post_task_comment_structured(
+    async fn post_task_comment(
         &self,
         id: u64,
         comment_type: CommentType,
