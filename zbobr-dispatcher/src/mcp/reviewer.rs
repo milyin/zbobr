@@ -64,14 +64,20 @@ impl ReviewerMcp {
         self.get_param_work_branch_impl().await
     }
 
-    #[tool(
-        description = "Provide a brief and concise report of your results and finish your work. These reports add up to discussion and shorten the context for further agent calls, so they MUST be compact."
-    )]
-    async fn report_results(
+    #[tool(description = "Accept the review: the implementation is correct and the task is done. Provide a concise summary of what was reviewed and confirmed.")]
+    async fn review_accept(
         &self,
         Parameters(params): Parameters<crate::mcp::common::MessageParam>,
     ) -> String {
-        self.report_results_impl(&params.message).await
+        self.review_accept_impl(&params.message).await
+    }
+
+    #[tool(description = "Reject the review: the implementation has issues that need to be addressed. Provide a concise description of the problems found.")]
+    async fn review_reject(
+        &self,
+        Parameters(params): Parameters<crate::mcp::common::MessageParam>,
+    ) -> String {
+        self.review_reject_impl(&params.message).await
     }
 }
 
