@@ -10,10 +10,10 @@ use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
 
 use crate::{
-    CommentType, Signal, Stage, Task, ToolExecutor, ZbobrDispatcherDyn, ZbobrExecutorConfig,
+    Comment, CommentType, Signal, Stage, Task, ToolExecutor, ZbobrDispatcherDyn, ZbobrExecutorConfig,
     mcp::common::get_hostname,
     prompts::Prompts,
-    task::{Model, Parameter, Role, Tool},
+    task::{CommentAuthor, Model, Parameter, Role, Tool},
 };
 
 // ---------------------------------------------------------------------------
@@ -372,7 +372,7 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
 // ---------------------------------------------------------------------------
 
 /// Print a task to stdout in a human-readable format.
-pub fn print_task(task: &Task, discussion: &[String]) {
+pub fn print_task(task: &Task, discussion: &[Comment]) {
     println!("ID:          {}", task.id);
     println!("Title:       {}", task.title);
     println!("Stage:       {}", task.stage);
@@ -418,8 +418,12 @@ pub fn print_task(task: &Task, discussion: &[String]) {
     }
     if !discussion.is_empty() {
         println!("Discussion ({} comment(s)):", discussion.len());
-        for (i, msg) in discussion.iter().enumerate() {
-            println!("  [{}] {}", i + 1, msg);
+        for (i, c) in discussion.iter().enumerate() {
+            let author = match &c.author {
+                CommentAuthor::Role(r) => r.as_str().to_string(),
+                CommentAuthor::User => "user".to_string(),
+            };
+            println!("  [{}] [{:?}] {}@{}: {}", i + 1, c.comment_type, author, c.hostname, c.text);
         }
     }
 }
@@ -558,7 +562,7 @@ async fn run_task_subcommand(
         }
         TaskSubcommand::Show { id } => {
             let task = zbobr.get_task(id).await?;
-            let discussion = zbobr.get_task_comments(id).await?;
+            let discussion = zbobr.get_task_comments_structured(id).await?;
             print_task(&task, &discussion);
         }
         TaskSubcommand::Update {

@@ -156,14 +156,8 @@ struct IssueLabel {
 
 #[derive(Debug, serde::Deserialize)]
 struct CommentResponse {
-    user: Option<CommentUser>,
     body: Option<String>,
     created_at: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct CommentUser {
-    login: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -969,26 +963,6 @@ impl TaskBackend for ZbobrTaskBackendGithub {
             tasks.push(task);
         }
         Ok(tasks)
-    }
-
-    async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<String>> {
-        let (owner, repo) = self.parse_repo()?;
-        let comments: Vec<CommentResponse> = retry_github("list issue comments", || {
-            self.octocrab.get(
-                format!("/repos/{owner}/{repo}/issues/{id}/comments"),
-                None::<&()>,
-            )
-        })
-        .await?;
-
-        Ok(comments
-            .into_iter()
-            .map(|c| {
-                let user = c.user.map(|u| u.login).unwrap_or_else(|| "unknown".into());
-                let body = c.body.unwrap_or_default();
-                format!("{user}: {body}")
-            })
-            .collect())
     }
 
     async fn get_task_comments_structured(&self, id: u64) -> anyhow::Result<Vec<Comment>> {

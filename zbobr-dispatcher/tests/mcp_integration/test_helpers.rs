@@ -110,7 +110,7 @@ pub async fn run_working(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     let comments = env.get_comments(task_id).await;
     assert!(
-        comments.iter().any(|c| c.contains("Worker complete.")),
+        comments.iter().any(|c| c.text.contains("Worker complete.")),
         "[{}] Worker report not found in discussion",
         env.name()
     );
@@ -167,7 +167,7 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     let comments = env.get_comments(task_id).await;
     assert!(
-        comments.iter().any(|c| c.contains("Reviewer complete.")),
+        comments.iter().any(|c| c.text.contains("Reviewer complete.")),
         "[{}] Reviewer report not found in discussion",
         env.name()
     );
@@ -310,7 +310,7 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
     let task = env.get_task(task_report).await;
     let comments = env.get_comments(task_report).await;
     assert!(
-        comments.iter().any(|c| c.contains("Merger complete.")),
+        comments.iter().any(|c| c.text.contains("Merger complete.")),
         "[{}] Merger report not found in discussion",
         env.name()
     );
@@ -352,7 +352,7 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
     assert!(
         comments_ask
             .iter()
-            .any(|c| c.contains("Need guidance on merge")),
+            .any(|c| c.text.contains("Need guidance on merge")),
         "[{}] Ask-user message not found in discussion",
         env.name()
     );
@@ -480,7 +480,7 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     let comments = env.get_comments(task_id).await;
     assert!(
-        comments.iter().any(|c| c.contains("Detected merge conflicts")),
+        comments.iter().any(|c| c.text.contains("Detected merge conflicts")),
         "[{}] Merger should report detected conflicts",
         env.name()
     );
@@ -612,7 +612,7 @@ pub async fn run_report_error_preserves_signal(env: &IntegrationTestEnv) {
     assert!(
         comments
             .iter()
-            .any(|c| c.contains("Something went wrong during work")),
+            .any(|c| c.text.contains("Something went wrong during work")),
         "[{}] report_error message should appear in discussion",
         env.name()
     );
@@ -1283,7 +1283,7 @@ async fn repo_backend_merging_for(env: &IntegrationTestEnv, target: &str, suffix
 
     let comments = env.get_comments(task_id).await;
     assert!(
-        comments.iter().any(|c| c.contains("Merger complete.")),
+        comments.iter().any(|c| c.text.contains("Merger complete.")),
         "[{}] Merger report not found in discussion",
         env.name()
     );

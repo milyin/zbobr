@@ -248,35 +248,6 @@ impl ZbobrTaskBackendFs {
             .context("Failed to write task file")
     }
 
-    /// Read comments from disk.
-    /// Read raw comment strings from disk for backward compatibility.
-    async fn read_comments_raw(&self, id: u64) -> anyhow::Result<Vec<String>> {
-        let comments = self.read_comments_structured(id).await?;
-        Ok(comments
-            .into_iter()
-            .map(|c| {
-                // Convert structured comment back to string format for backward compatibility
-                let mut result = String::new();
-                match c.comment_type {
-                    CommentType::Error => result.push_str("// ERROR"),
-                    CommentType::Report => result.push_str("// REPORT"),
-                    CommentType::Plan => result.push_str("// PLAN"),
-                    CommentType::Request => result.push_str("// REQUEST"),
-                }
-                
-                if let CommentAuthor::Role(role) = c.author {
-                    result.push_str(&format!(" {}:{}", role, c.hostname));
-                    if let Some(model) = c.model {
-                        result.push_str(&format!(":{}", model));
-                    }
-                }
-                
-                result.push_str(&format!("\n\n{}", c.text));
-                result
-            })
-            .collect())
-    }
-
     /// Read structured comments from disk.
     async fn read_comments_structured(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
         let path = self.comments_path(id);
@@ -288,11 +259,6 @@ impl ZbobrTaskBackendFs {
             }
             Err(_) => Ok(vec![]), // No comments file yet
         }
-    }
-
-    /// Read comments from disk (for backward compatibility with string format).
-    async fn read_comments(&self, id: u64) -> anyhow::Result<Vec<String>> {
-        self.read_comments_raw(id).await
     }
 
     /// Write structured comments to disk.
@@ -462,10 +428,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
         }
 
         Ok(matching_tasks)
-    }
-
-    async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<String>> {
-        self.read_comments(id).await
     }
 
     async fn get_task_comments_structured(&self, id: u64) -> anyhow::Result<Vec<Comment>> {

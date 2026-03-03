@@ -166,10 +166,6 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
         self.task_backend.close_task(id).await
     }
 
-    pub async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<String>> {
-        self.task_backend.get_task_comments(id).await
-    }
-
     pub async fn get_task_comments_structured(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
         self.task_backend.get_task_comments_structured(id).await
     }
