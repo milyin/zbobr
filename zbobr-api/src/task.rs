@@ -594,19 +594,6 @@ impl std::str::FromStr for CommentTag {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.trim_start_matches("//").trim_start();
-
-        // previously we short‑circuited REQUEST/REPLY tags and ignored
-        // any following metadata; that's no longer acceptable because a
-        // request may be issued by a specific role or even by the user.  Let
-        // the general parsing logic below handle these cases.  We still
-        // support REPLY as a synonym for request via `CommentType::parse`.
-
-        // allow an entirely bare tag like "// REQUEST" (no trailing
-        // metadata).  previous versions of the parser special‑cased
-        // REQUEST/REPLY and tolerated this, but the current implementation
-        // accidentally rejected it.  for compatibility we keep the relaxed
-        // behaviour: if there is no space, treat the rest as empty and fall
-        // back to defaults.
         let (tag_type_str, rest) = if let Some(pos) = s.find(' ') {
             (&s[..pos], &s[pos + 1..])
         } else {
