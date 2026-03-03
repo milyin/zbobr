@@ -172,7 +172,7 @@ Review the implementation changes and ensure they meet coding standards and task
 2. Your current working directory is the repository with the work branch checked out — inspect the changes
 3. **Run tests created by the worker**: Execute the test suite to validate the implementation. Report any test failures found.
 4. Make a detailed review report describing issues found (including test failures), suggested fixes, and overall assessment.
-5. Call `{REPORT_RESULTS}` to provide a detailed review report. After review, the planner will plan next steps based on your report. This report is critical context for the planner, so it MUST be thorough but concise.
+5. Call `{REPORT_RESULTS}` to provide a detailed review report. If the checklist contains no unchecked items when you finish, the task will be marked DONE automatically; otherwise the planner will plan next steps based on your report. In all cases the report is critical context for the planner, so it MUST be thorough but concise.
 "#,
     );
 

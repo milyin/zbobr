@@ -1632,15 +1632,7 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Planner => {
-            // After planning, route to worker. If no pending work items, task is done.
-            if current_task.signal.is_none() && !current_task.pause {
-                if has_unchecked {
-                    task_session.set_signal(Some(Signal::GoWork)).await?;
-                } else {
-                    task_session.mark_done().await?;
-                    return Ok(());
-                }
-            }
+            task_session.set_signal(Some(Signal::GoWork)).await?;
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Worker => {
@@ -1654,9 +1646,14 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Reviewer => {
-            // After review, route to planner for re-planning/approval based on review report
+            // After review we either route back to the planner or settinng staget to DONE depending on if all checklist items are checked.
             if current_task.signal.is_none() && !current_task.pause {
-                task_session.set_signal(Some(Signal::GoPlan)).await?;
+                if has_unchecked {
+                    task_session.set_signal(Some(Signal::GoPlan)).await?;
+                } else {
+                    task_session.mark_done().await?;
+                    return Ok(());
+                }
             }
             task_session.set_stage(Stage::Pending).await?;
         }

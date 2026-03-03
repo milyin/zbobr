@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 
 use zbobr_dispatcher::{CommentType, Signal, Stage, task::Parameter};
+use zbobr_api::task::ChecklistItem;
 
 use super::env::IntegrationTestEnv;
 use super::scenarios;
@@ -161,6 +162,29 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
+    // insert a dummy unchecked checklist item so the reviewer has something to
+    // report and therefore will route back to the planner.  This mirrors the
+    // behaviour of actual workflows where a review usually discovers issues.
+    env.zbobr
+        .modify_task(
+            task_id,
+            Box::new(|mut task| {
+                task.checklist.push(ChecklistItem {
+                    id: "issue".to_string(),
+                    text: "issue found during review".to_string(),
+                    checked: false,
+                });
+                task
+            }),
+        )
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "[{}] failed to add review checklist item: {e}",
+                env.name()
+            )
+        });
+
     env.run_stage(task_id, Stage::Reviewing, scenarios::reviewing_scenario())
         .await;
 
@@ -240,10 +264,16 @@ pub async fn run_reviewing_approval(env: &IntegrationTestEnv) {
     .await;
 
     let task = env.get_task(task_id).await;
+    // approval path should mark the task done instead of signalling planner
     assert_eq!(
-        task.signal,
-        Some(Signal::GoPlan),
-        "[{}] Reviewer approval should route to planner via go_plan",
+        task.stage,
+        Stage::Done,
+        "[{}] Reviewer approval should mark task DONE when no checklist items remain",
+        env.name()
+    );
+    assert!(
+        task.signal.is_none(),
+        "[{}] DONE task should not have any follow-up signal",
         env.name()
     );
     assert!(
