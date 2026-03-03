@@ -35,8 +35,6 @@ pub(crate) fn serialize_parameters(params: &HashMap<String, String>) -> String {
 }
 
 /// Parse a task description into (description, parameters, checklist).
-/// Legacy `---PLAN---` sections are stripped and not returned; plan text should
-/// now be stored as a comment.
 pub(crate) fn parse_description_full(
     full_text: &str,
 ) -> (String, HashMap<String, String>, Vec<ChecklistItem>) {
