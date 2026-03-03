@@ -75,29 +75,29 @@ where
     }
 }
 
-/// Parse tag from comment start: `// REPORT role:host:model` or `// ERROR role:host[:<model>]` or `// REPLY`
+/// Parse tag from comment start: `// REPORT role:host:model` or `// ERROR role:host[:<model>]` or `// REQUEST`
 /// Returns (CommentType, role_opt, host, model_opt, remaining_text)
 fn parse_comment_tag(text: &str) -> (CommentType, Option<String>, String, Option<String>, String) {
     let trimmed = text.trim_start();
-    
-    // Check for tags like "// REPORT role:host:model" or "// REPLY"
+
+    // Check for tags like "// REPORT role:host:model" or "// REQUEST"
     if let Some(rest) = trimmed.strip_prefix("// ") {
         // Find the end of the tag line
         let tag_line_end = rest.find('\n').unwrap_or(rest.len());
         let tag_line = &rest[..tag_line_end];
-        
+
         // Extract the tag type (first word before space or end of line)
         let tag_parts: Vec<&str> = tag_line.splitn(2, ' ').collect();
         if let Some(tag_str) = tag_parts.get(0) {
             if let Some(comment_type) = CommentType::from_str(&tag_str.to_lowercase()) {
                 // For REPORT and ERROR, parse role:host:model format
-                if comment_type != CommentType::Reply {
+                if comment_type != CommentType::Request {
                     if let Some(meta_part) = tag_parts.get(1) {
                         let meta_parts: Vec<&str> = meta_part.split(':').collect();
                         let role = meta_parts.get(0).map(|s| s.to_string());
                         let host = meta_parts.get(1).map(|s| s.to_string()).unwrap_or_default();
                         let model = meta_parts.get(2).map(|s| s.to_string());
-                        
+
                         // Extract body: skip tag line and the blank line that follows
                         let body_start = tag_line_end + 1;
                         let body = if body_start < rest.len() {
@@ -105,16 +105,16 @@ fn parse_comment_tag(text: &str) -> (CommentType, Option<String>, String, Option
                         } else {
                             String::new()
                         };
-                        
+
                         return (comment_type, role, host, model, body);
                     }
                 }
-                
-                // For REPLY, extract text after the tag type
+
+                // For REQUEST, extract text after the tag type
                 let remaining = if let Some(body_part) = tag_parts.get(1) {
                     body_part.to_string()
                 } else {
-                    // If REPLY tag has no inline text, check for text after tag line
+                    // If REQUEST tag has no inline text, check for text after tag line
                     let body_start = tag_line_end + 1;
                     if body_start < rest.len() {
                         rest[body_start..].trim_start().to_string()
@@ -122,13 +122,13 @@ fn parse_comment_tag(text: &str) -> (CommentType, Option<String>, String, Option
                         String::new()
                     }
                 };
-                return (CommentType::Reply, None, String::new(), None, remaining);
+                return (CommentType::Request, None, String::new(), None, remaining);
             }
         }
     }
-    
-    // No tag found, treat as reply
-    (CommentType::Reply, None, String::new(), None, text.to_string())
+
+    // No tag found, treat as request
+    (CommentType::Request, None, String::new(), None, text.to_string())
 }
 
 // -- Shared response types --
@@ -1192,15 +1192,28 @@ mod parse_tests {
     }
 
     #[test]
-    fn test_parse_comment_tag_reply_with_body() {
-        let input = "// REPLY\n\nThis is a user reply";
+    fn test_parse_comment_tag_request_with_body() {
+        let input = "// REQUEST\n\nThis is a user request";
         let (comment_type, role, host, model, body) = parse_comment_tag(input);
-        
-        assert_eq!(comment_type, CommentType::Reply);
+
+        assert_eq!(comment_type, CommentType::Request);
         assert_eq!(role, None);
         assert_eq!(host, "");
         assert_eq!(model, None);
-        assert_eq!(body, "This is a user reply");
+        assert_eq!(body, "This is a user request");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_reply_backward_compat() {
+        // Old "// REPLY" tag should still parse as Request for backward compatibility
+        let input = "// REPLY\n\nThis is a legacy reply";
+        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+
+        assert_eq!(comment_type, CommentType::Request);
+        assert_eq!(role, None);
+        assert_eq!(host, "");
+        assert_eq!(model, None);
+        assert_eq!(body, "This is a legacy reply");
     }
 
     #[test]
@@ -1216,11 +1229,11 @@ mod parse_tests {
     }
 
     #[test]
-    fn test_parse_comment_tag_no_tag_treated_as_reply() {
+    fn test_parse_comment_tag_no_tag_treated_as_request() {
         let input = "This is just text without a tag";
         let (comment_type, role, host, model, body) = parse_comment_tag(input);
-        
-        assert_eq!(comment_type, CommentType::Reply);
+
+        assert_eq!(comment_type, CommentType::Request);
         assert_eq!(role, None);
         assert_eq!(host, "");
         assert_eq!(model, None);

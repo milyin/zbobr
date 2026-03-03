@@ -10,7 +10,7 @@ use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
 
 use crate::{
-    Signal, Stage, Task, ToolExecutor, ZbobrDispatcherDyn, ZbobrExecutorConfig,
+    CommentType, Signal, Stage, Task, ToolExecutor, ZbobrDispatcherDyn, ZbobrExecutorConfig,
     mcp::common::get_hostname,
     prompts::Prompts,
     task::{Model, Parameter, Role, Tool},
@@ -1380,7 +1380,7 @@ async fn prepare_workspace(
                     let hostname = get_hostname();
                     if let Err(post_err) = zbobr
                         .task_session(task_id)
-                        .post_message(&msg, "error", &hostname)
+                        .post_message_structured(CommentType::Error, &msg, None, &hostname, None)
                         .await
                     {
                         tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -1401,7 +1401,10 @@ async fn ensure_pr_url(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> anyhow::Resu
             tracing::error!("{msg}");
             let hostname = get_hostname();
             let task_session = zbobr.task_session(task_id);
-            if let Err(post_err) = task_session.post_message(&msg, "error", &hostname).await {
+            if let Err(post_err) = task_session
+                .post_message_structured(CommentType::Error, &msg, None, &hostname, None)
+                .await
+            {
                 tracing::warn!("Failed to post error to task discussion: {post_err}");
             }
             Err(anyhow::anyhow!(msg))
@@ -1587,7 +1590,7 @@ async fn finalize_session(
         let error_msg = format!("Execution failed: {e}");
         let hostname = get_hostname();
         if let Err(post_err) = task_session
-            .post_message(&error_msg, "error", &hostname)
+            .post_message_structured(CommentType::Error, &error_msg, None, &hostname, None)
             .await
         {
             tracing::error!("Failed to post error to task #{task_id}: {post_err}");

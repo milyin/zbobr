@@ -96,12 +96,12 @@ impl RoleSession {
             .await
     }
 
-    /// Get all discussion messages on the task (structured format, filtered to Reply type only).
+    /// Get all discussion messages on the task (structured format, filtered to Request type only).
     pub async fn get_discussion(&self) -> anyhow::Result<Vec<Comment>> {
         let all_comments = self.zbobr.get_task_comments_structured(self.task_id).await?;
         Ok(all_comments
             .into_iter()
-            .filter(|c| c.comment_type == CommentType::Reply)
+            .filter(|c| c.comment_type == CommentType::Request)
             .collect())
     }
 

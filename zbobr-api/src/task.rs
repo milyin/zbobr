@@ -60,18 +60,30 @@ pub struct ChecklistItem {
 // -- Comment types --
 
 /// Comment type classification.
+///
+/// Variants:
+/// - `Error`   — posted by `report_error` MCP tool when an agent encounters an unrecoverable
+///               problem; also posted by the dispatcher/CLI on execution failure.
+/// - `Report`  — posted by `report_results` MCP tool to deliver a role's completion output.
+/// - `Plan`    — posted by `post_plan` MCP tool (planner role) to record the implementation plan.
+/// - `Request` — posted for user-originated messages and for questions raised by `ask_user` (and
+///               similar ASK_xxx MCP tools) that pause the task waiting for a human response.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
 pub enum CommentType {
+    /// Unrecoverable error from an agent or the dispatcher.
     #[serde(rename = "error")]
     Error,
+    /// Completion report from an agent role.
     #[serde(rename = "report")]
     Report,
+    /// Implementation plan posted by the planner role.
     #[serde(rename = "plan")]
     Plan,
-    #[serde(rename = "reply")]
-    Reply,
+    /// User message or agent request awaiting a human response (ASK_xxx operations).
+    #[serde(rename = "request", alias = "reply")]
+    Request,
 }
 
 impl CommentType {
@@ -81,7 +93,7 @@ impl CommentType {
             CommentType::Error => "error",
             CommentType::Report => "report",
             CommentType::Plan => "plan",
-            CommentType::Reply => "reply",
+            CommentType::Request => "request",
         }
     }
 
@@ -91,7 +103,7 @@ impl CommentType {
             "error" => Some(CommentType::Error),
             "report" => Some(CommentType::Report),
             "plan" => Some(CommentType::Plan),
-            "reply" => Some(CommentType::Reply),
+            "request" | "reply" => Some(CommentType::Request),
             _ => None,
         }
     }
@@ -112,7 +124,7 @@ pub enum CommentAuthor {
     Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
 pub struct Comment {
-    #[schemars(description = "Comment type (error, report, plan, or reply)")]
+    #[schemars(description = "Comment type (error, report, plan, or request)")]
     pub comment_type: CommentType,
     #[schemars(description = "Timestamp when comment was created (ISO 8601 format)")]
     pub timestamp: String,
@@ -557,11 +569,11 @@ impl std::fmt::Display for CommentTag {
             CommentType::Error => "ERROR",
             CommentType::Report => "REPORT",
             CommentType::Plan => "PLAN",
-            CommentType::Reply => "REPLY",
+            CommentType::Request => "REQUEST",
         };
 
-        if tag_type == "REPLY" {
-            write!(f, "// REPLY")
+        if tag_type == "REQUEST" {
+            write!(f, "// REQUEST")
         } else if let Some(role) = self.role {
             if let Some(model) = &self.model {
                 write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, model)
@@ -580,9 +592,9 @@ impl std::str::FromStr for CommentTag {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.trim_start_matches("//").trim_start();
 
-        if s.starts_with("REPLY") {
+        if s.starts_with("REQUEST") || s.starts_with("REPLY") {
             return Ok(CommentTag {
-                comment_type: CommentType::Reply,
+                comment_type: CommentType::Request,
                 role: None,
                 hostname: String::new(),
                 model: None,

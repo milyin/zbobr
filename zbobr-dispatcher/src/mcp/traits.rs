@@ -48,14 +48,14 @@ pub trait CommonMcpImpl: Send + Sync {
             .collect();
 
         if plan_indices.is_empty() {
-            // No plan posted yet — return task description as a user Reply comment
+            // No plan posted yet — return task description as a user Request comment
             let desc = match self.session().get_description().await {
                 Ok(d) if !d.is_empty() => d,
                 Ok(_) => "No task description provided.".to_string(),
                 Err(e) => return format!("Error fetching description: {e}"),
             };
             let synthetic = vec![zbobr_api::Comment {
-                comment_type: CommentType::Reply,
+                comment_type: CommentType::Request,
                 timestamp: String::new(),
                 author: zbobr_api::CommentAuthor::User,
                 hostname: String::new(),
@@ -184,7 +184,13 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_message(message, self.role().as_str(), &hostname)
+            .post_message_structured(
+                CommentType::Request,
+                message,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
             .await
         {
             tracing::error!(
