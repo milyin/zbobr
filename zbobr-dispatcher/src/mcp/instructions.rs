@@ -51,7 +51,9 @@ pub fn planner_instructions() -> String {
     format!(
         r#"# Planner Agent
 
-Investigate a task and create an implementation plan with actionable steps.
+Get the task description and comments to it with `{GET_PLAN}`, design an implementation plan, and prepare checklist items for the worker. See more detailed workflow instructions below.
+
+Work autonomously, try to solve problems independently. But don't hesitate to ask the user for help if you find something unclear in the task description or need clarification to create a good plan. Use `{ASK_USER}` for this purpose.
 
 ## Access Model
 
@@ -64,12 +66,10 @@ Investigate a task and create an implementation plan with actionable steps.
 
     {branch_isolation}
 
-Work autonomously. Do not ask the user for anything.
-
 ## Workflow
 
-1. Call `{GET_PLAN}` to read the latest plan and any follow-up comments. If no plan exists yet, this returns the task description.
-   - Use `{GET_PLAN}` with offset -1, -2, etc. to read previous plans if needed for context.
+1. Call `{GET_PLAN}` to read the latest plan and any follow-up comments. If no plan exists yet, this returns the initial task description. If a plan already exists, it was probably already implemented and the following comments contain important feedback to this implementation.
+   - Use `{GET_PLAN}` with offset -1, -2, etc. to read previous plans and discussion if needed for context.
 2. **Prepend your plan with the user request it addresses** (literally copied from the task description or comment).
 3. If a previous plan exists, iterate on it based on current work branch state and comments to the previous plan.
 4. **Task parameters** have already been set by the preparation stage:
