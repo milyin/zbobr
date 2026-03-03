@@ -3,8 +3,8 @@
 
 pub fn preparation_scenario(repo_path: &str) -> String {
     use zbobr_dispatcher::mcp::preparator_tools::{
-        GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH,
-        GET_PARAM_DESTINATION_REPOSITORY, GET_PARAM_WORK_BRANCH, SET_PARAM_DESTINATION_BRANCH,
+        GET_PARAM_DESTINATION_BRANCH,
+        GET_PARAM_DESTINATION_REPOSITORY, GET_PARAM_WORK_BRANCH, GET_PLAN, SET_PARAM_DESTINATION_BRANCH,
         SET_PARAM_DESTINATION_REPOSITORY, SET_PARAM_WORK_BRANCH_POSTFIX,
     };
 
@@ -15,25 +15,15 @@ timeout: 60
 stop_on_failure: true
 
 steps:
-- name: Get task description
+- name: Get plan (returns task description when no plan exists)
   operation:
     type: tool_call
-    tool: {GET_DESCRIPTION}
+    tool: {GET_PLAN}
   assertions:
     - type: success
     - type: contains
       path: result
       value: "Dummy task description"
-
-- name: Get task discussion
-  operation:
-    type: tool_call
-    tool: {GET_DISCUSSION}
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "No messages yet."
 
 - name: Set destination repository
   operation:
@@ -98,8 +88,8 @@ steps:
 
 pub fn planning_scenario() -> String {
     use zbobr_dispatcher::mcp::planner_tools::{
-        GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
-        GET_PLAN, POST_PLAN, REPORT_RESULTS,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
+        GET_PLAN, INSERT_CHECKLIST_ITEM, POST_PLAN, REPORT_RESULTS,
     };
 
     format!(
@@ -109,24 +99,7 @@ timeout: 60
 stop_on_failure: true
 
 steps:
-- name: Get task description
-  operation:
-    type: tool_call
-    tool: {GET_DESCRIPTION}
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "Dummy task description"
-
-- name: Get task discussion
-  operation:
-    type: tool_call
-    tool: {GET_DISCUSSION}
-  assertions:
-    - type: success
-
-- name: Get plan (initially empty)
+- name: Get plan (initially returns task description)
   operation:
     type: tool_call
     tool: {GET_PLAN}
@@ -151,6 +124,16 @@ steps:
     - type: contains
       path: result
       value: "analyse the codebase"
+
+- name: Insert checklist item for worker
+  operation:
+    type: tool_call
+    tool: {INSERT_CHECKLIST_ITEM}
+    arguments:
+      id: "step-1"
+      text: "Analyse the codebase"
+  assertions:
+    - type: success
 
 - name: Get destination branch
   operation:
@@ -220,8 +203,8 @@ steps:
 
 pub fn working_scenario() -> String {
     use zbobr_dispatcher::mcp::worker_tools::{
-        CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST, GET_DESCRIPTION,
-        GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN,
+        CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN,
         INSERT_CHECKLIST_ITEM, REPORT_RESULTS, UPDATE_CHECKLIST_ITEM,
     };
 
@@ -235,26 +218,6 @@ timeout: 60
 stop_on_failure: true
 
 steps:
-- name: Get task description
-  operation:
-    type: tool_call
-    tool: {GET_DESCRIPTION}
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "Dummy task description"
-
-- name: Get task discussion
-  operation:
-    type: tool_call
-    tool: {GET_DISCUSSION}
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "No messages yet."
-
 - name: Get plan
   operation:
     type: tool_call
@@ -358,12 +321,9 @@ steps:
 
 pub fn reviewing_scenario() -> String {
     use zbobr_dispatcher::mcp::reviewer_tools::{
-        GET_DESCRIPTION, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN,
-        INSERT_CHECKLIST_ITEM, REPORT_RESULTS,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN,
+        REPORT_RESULTS,
     };
-
-    const GET_CHECKLIST: &str = "get_checklist";
-    const REVIEW_ITEM_ID: &str = "r1";
 
     format!(
         r#"name: Reviewer Comprehensive Test
@@ -372,16 +332,6 @@ timeout: 60
 stop_on_failure: true
 
 steps:
-- name: Get task description
-  operation:
-    type: tool_call
-    tool: {GET_DESCRIPTION}
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "Dummy task description"
-
 - name: Get plan
   operation:
     type: tool_call
@@ -409,26 +359,6 @@ steps:
       path: result
       value: "test"
 
-- name: Get checklist (initially empty)
-  operation:
-    type: tool_call
-    tool: {GET_CHECKLIST}
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "[]"
-
-- name: Insert review remark
-  operation:
-    type: tool_call
-    tool: {INSERT_CHECKLIST_ITEM}
-    arguments:
-      id: "{REVIEW_ITEM_ID}"
-      text: "Fix review issue: adjust edge-case handling"
-  assertions:
-    - type: success
-
 - name: Report results and finish
   operation:
     type: tool_call
@@ -441,27 +371,17 @@ steps:
     )
 }
 
-/// Scenario where the reviewer finds no issues (empty checklist → DONE + PR creation).
+/// Scenario where the reviewer finds no issues — triggers routing to planner.
 pub fn reviewing_approval_scenario() -> String {
-    use zbobr_dispatcher::mcp::reviewer_tools::{GET_DESCRIPTION, GET_PLAN, REPORT_RESULTS};
+    use zbobr_dispatcher::mcp::reviewer_tools::{GET_PLAN, REPORT_RESULTS};
 
     format!(
         r#"name: Reviewer Approval Test
-description: Reviewer finds no issues — triggers DONE and PR creation
+description: Reviewer finds no issues — triggers routing to planner
 timeout: 60
 stop_on_failure: true
 
 steps:
-- name: Get task description
-  operation:
-    type: tool_call
-    tool: {GET_DESCRIPTION}
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "Dummy task description"
-
 - name: Get plan
   operation:
     type: tool_call
@@ -508,8 +428,8 @@ steps:
 
 pub fn merging_scenario(ending: &str) -> String {
     use zbobr_dispatcher::mcp::merger_tools::{
-        ASK_USER, GET_DESCRIPTION, GET_DISCUSSION, GET_PARAM_DESTINATION_BRANCH,
-        GET_PARAM_WORK_BRANCH, REPORT_RESULTS,
+        ASK_USER, GET_PARAM_DESTINATION_BRANCH,
+        GET_PARAM_WORK_BRANCH, GET_PLAN, REPORT_RESULTS,
     };
 
     let ending_step = match ending {
@@ -547,20 +467,10 @@ timeout: 60
 stop_on_failure: true
 
 steps:
-- name: Get task description
+- name: Get plan
   operation:
     type: tool_call
-    tool: {GET_DESCRIPTION}
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "Dummy task description"
-
-- name: Get task discussion
-  operation:
-    type: tool_call
-    tool: {GET_DISCUSSION}
+    tool: {GET_PLAN}
   assertions:
     - type: success
 
@@ -612,7 +522,7 @@ steps:
 }
 
 pub fn merging_conflict_scenario() -> String {
-    use zbobr_dispatcher::mcp::merger_tools::{GET_DESCRIPTION, REPORT_RESULTS};
+    use zbobr_dispatcher::mcp::merger_tools::{GET_PLAN, REPORT_RESULTS};
 
     format!(
         r#"name: Merger Conflict Resolution Test
@@ -621,10 +531,10 @@ timeout: 60
 stop_on_failure: true
 
 steps:
-- name: Get task description
+- name: Get plan
   operation:
     type: tool_call
-    tool: {GET_DESCRIPTION}
+    tool: {GET_PLAN}
   assertions:
     - type: success
 

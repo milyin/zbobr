@@ -68,6 +68,8 @@ pub enum CommentType {
     Error,
     #[serde(rename = "report")]
     Report,
+    #[serde(rename = "plan")]
+    Plan,
     #[serde(rename = "reply")]
     Reply,
 }
@@ -78,6 +80,7 @@ impl CommentType {
         match self {
             CommentType::Error => "error",
             CommentType::Report => "report",
+            CommentType::Plan => "plan",
             CommentType::Reply => "reply",
         }
     }
@@ -87,6 +90,7 @@ impl CommentType {
         match s {
             "error" => Some(CommentType::Error),
             "report" => Some(CommentType::Report),
+            "plan" => Some(CommentType::Plan),
             "reply" => Some(CommentType::Reply),
             _ => None,
         }
@@ -108,7 +112,7 @@ pub enum CommentAuthor {
     Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
 pub struct Comment {
-    #[schemars(description = "Comment type (error, report, or reply)")]
+    #[schemars(description = "Comment type (error, report, plan, or reply)")]
     pub comment_type: CommentType,
     #[schemars(description = "Timestamp when comment was created (ISO 8601 format)")]
     pub timestamp: String,
@@ -552,6 +556,7 @@ impl std::fmt::Display for CommentTag {
         let tag_type = match self.comment_type {
             CommentType::Error => "ERROR",
             CommentType::Report => "REPORT",
+            CommentType::Plan => "PLAN",
             CommentType::Reply => "REPLY",
         };
 

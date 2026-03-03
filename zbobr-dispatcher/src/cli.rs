@@ -1621,9 +1621,14 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Planner => {
-            // Rule 2.2: Planning → go work (if no signal already set by the agent).
+            // After planning, route to worker. If no pending work items, task is done.
             if current_task.signal.is_none() && !current_task.pause {
-                task_session.set_signal(Some(Signal::GoWork)).await?;
+                if has_unchecked {
+                    task_session.set_signal(Some(Signal::GoWork)).await?;
+                } else {
+                    task_session.mark_done().await?;
+                    return Ok(());
+                }
             }
             task_session.set_stage(Stage::Pending).await?;
         }
@@ -1638,16 +1643,11 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Reviewer => {
+            // After review, route to planner for re-planning/approval based on review report
             if current_task.signal.is_none() && !current_task.pause {
-                if has_unchecked {
-                    task_session.set_signal(Some(Signal::GoWork)).await?;
-                    task_session.set_stage(Stage::Pending).await?;
-                } else {
-                    task_session.mark_done().await?;
-                }
-            } else {
-                task_session.set_stage(Stage::Pending).await?;
+                task_session.set_signal(Some(Signal::GoPlan)).await?;
             }
+            task_session.set_stage(Stage::Pending).await?;
         }
         Role::Merger => {
             // Conflict was already cleared on entry (Rule 1); just return to Pending.

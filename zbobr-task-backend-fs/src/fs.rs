@@ -259,6 +259,7 @@ impl ZbobrTaskBackendFs {
                 match c.comment_type {
                     CommentType::Error => result.push_str("// ERROR"),
                     CommentType::Report => result.push_str("// REPORT"),
+                    CommentType::Plan => result.push_str("// PLAN"),
                     CommentType::Reply => result.push_str("// REPLY"),
                 }
                 
@@ -661,5 +662,17 @@ mod parse_tests {
         assert_eq!(host, "");
         assert_eq!(model, None);
         assert_eq!(body, "This is just text without a tag");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_plan_with_body() {
+        let input = "// PLAN planner:localhost:claude-opus\n\nStep 1: analyse\nStep 2: implement";
+        let (comment_type, role, host, model, body) = parse_comment_tag(input);
+
+        assert_eq!(comment_type, CommentType::Plan);
+        assert_eq!(role, Some("planner".to_string()));
+        assert_eq!(host, "localhost");
+        assert_eq!(model, Some("claude-opus".to_string()));
+        assert_eq!(body, "Step 1: analyse\nStep 2: implement");
     }
 }

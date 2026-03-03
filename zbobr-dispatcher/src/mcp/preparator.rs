@@ -8,7 +8,7 @@ use rmcp::{
 use crate::{
     ZbobrDispatcherDyn,
     mcp::{
-        common::{MessageParam, SetDestinationBranchParam, SetDestinationRepositoryParam},
+        common::{GetPlanParam, MessageParam, SetDestinationBranchParam, SetDestinationRepositoryParam},
         traits::{CommonMcpImpl, PreparatorMcpImpl},
     },
     task::RoleSession,
@@ -41,19 +41,9 @@ impl PreparatorMcp {
         }
     }
 
-    #[tool(description = "Get the current description for this task (read-only)")]
-    async fn get_description(&self) -> String {
-        self.get_description_impl().await
-    }
-
-    #[tool(description = "Get all discussion messages on this task")]
-    async fn get_discussion(&self) -> String {
-        self.get_discussion_impl().await
-    }
-
-    #[tool(description = "Get all comments with full metadata (error, report, reply) in JSON format")]
-    async fn get_history(&self) -> String {
-        self.get_history_impl().await
+    #[tool(description = "Get the plan and following comments. Optional offset: 0 = latest plan (default), -1 = previous plan, etc. Returns task description if no plan exists yet.")]
+    async fn get_plan(&self, Parameters(params): Parameters<GetPlanParam>) -> String {
+        self.get_plan_impl(params.offset.unwrap_or(0)).await
     }
 
     #[tool(description = "Report an error to the user and pause task processing")]
