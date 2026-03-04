@@ -164,6 +164,8 @@ pub enum Stage {
     Preparing,
     Analysing,
     Planning,
+    DecomposePlanning,
+    Decomposing,
     Working,
     Reviewing,
     Merging,
@@ -177,6 +179,8 @@ impl Stage {
             Stage::Preparing => "PREPARING",
             Stage::Analysing => "ANALYSING",
             Stage::Planning => "PLANNING",
+            Stage::DecomposePlanning => "DECOMPOSE_PLANNING",
+            Stage::Decomposing => "DECOMPOSING",
             Stage::Working => "WORKING",
             Stage::Reviewing => "REVIEWING",
             Stage::Merging => "MERGING",
@@ -190,6 +194,8 @@ impl Stage {
             "PREPARING" | "PREPARATION" => Some(Stage::Preparing),
             "ANALYSING" => Some(Stage::Analysing),
             "PLANNING" => Some(Stage::Planning),
+            "DECOMPOSE_PLANNING" => Some(Stage::DecomposePlanning),
+            "DECOMPOSING" => Some(Stage::Decomposing),
             "WORKING" => Some(Stage::Working),
             "REVIEWING" => Some(Stage::Reviewing),
             "MERGING" => Some(Stage::Merging),
@@ -205,11 +211,13 @@ impl Stage {
             Stage::Reviewing => 0,
             Stage::Merging => 1,
             Stage::Working => 2,
-            Stage::Planning => 3,
-            Stage::Preparing => 4,
-            Stage::Analysing => 5,
-            Stage::Pending => 6,
-            Stage::Done => 7,
+            Stage::Decomposing => 3,
+            Stage::DecomposePlanning => 4,
+            Stage::Planning => 5,
+            Stage::Preparing => 6,
+            Stage::Analysing => 7,
+            Stage::Pending => 8,
+            Stage::Done => 9,
         }
     }
 }
@@ -231,6 +239,8 @@ pub enum Role {
     Analyser,
     #[serde(rename = "planner")]
     Planner,
+    #[serde(rename = "decomposer")]
+    Decomposer,
     #[serde(rename = "worker")]
     Worker,
     #[serde(rename = "reviewer")]
@@ -246,6 +256,7 @@ impl Role {
             Role::Preparator => "preparator",
             Role::Analyser => "analyser",
             Role::Planner => "planner",
+            Role::Decomposer => "decomposer",
             Role::Worker => "worker",
             Role::Reviewer => "reviewer",
             Role::Merger => "merger",
@@ -263,6 +274,7 @@ impl From<Role> for Stage {
             Role::Preparator => Stage::Preparing,
             Role::Analyser => Stage::Analysing,
             Role::Planner => Stage::Planning,
+            Role::Decomposer => Stage::DecomposePlanning,
             Role::Worker => Stage::Working,
             Role::Reviewer => Stage::Reviewing,
             Role::Merger => Stage::Merging,
@@ -278,6 +290,7 @@ impl std::convert::TryFrom<Stage> for Role {
             Stage::Preparing => Ok(Role::Preparator),
             Stage::Analysing => Ok(Role::Analyser),
             Stage::Planning => Ok(Role::Planner),
+            Stage::DecomposePlanning => Ok(Role::Decomposer),
             Stage::Working => Ok(Role::Worker),
             Stage::Reviewing => Ok(Role::Reviewer),
             Stage::Merging => Ok(Role::Merger),
@@ -302,6 +315,7 @@ impl std::str::FromStr for Role {
             "preparator" => Ok(Role::Preparator),
             "analyser" => Ok(Role::Analyser),
             "planner" => Ok(Role::Planner),
+            "decomposer" => Ok(Role::Decomposer),
             "worker" => Ok(Role::Worker),
             "reviewer" => Ok(Role::Reviewer),
             "merger" => Ok(Role::Merger),
@@ -693,6 +707,8 @@ pub struct Task {
     /// the task's stage is changed.  This gives human operators an opportunity to
     /// review a transition before the next processing step occurs.
     pub confirm: bool,
+    /// If true, this task is an umbrella task that will be decomposed into subtasks.
+    pub umbrella: bool,
     /// ETag for optimistic locking to prevent concurrent update conflicts.
     /// Used to detect if the task has been modified between read and write operations.
     #[serde(skip)]
