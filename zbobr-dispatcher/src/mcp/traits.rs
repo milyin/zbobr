@@ -93,10 +93,10 @@ pub trait CommonMcpImpl: Send + Sync {
             .unwrap_or(comments.len());
 
         // Return the plan comment + all following comments until next plan,
-        // skipping Analysis and Error comments (not fed to LLM agents).
+        // excluding only Error comments (system messages, not for LLM agents).
         let result_comments: Vec<zbobr_api::Comment> = comments[plan_comment_idx..end_idx]
             .iter()
-            .filter(|c| c.comment_type != CommentType::Analysis && c.comment_type != CommentType::Error)
+            .filter(|c| c.comment_type != CommentType::Error)
             .cloned()
             .collect();
         
