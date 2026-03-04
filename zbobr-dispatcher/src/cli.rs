@@ -2023,6 +2023,7 @@ where
     zbobr.validate_connectivity().await?;
 
     let prompts = crate::prompts::resolve_prompts(&cli.settings.dispatcher, zbobr.config());
+    crate::prompts::validate_prompts(&prompts)?;
 
     run_command(zbobr, cli.command, &prompts, &executor_config).await
 }

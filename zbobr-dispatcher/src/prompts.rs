@@ -128,6 +128,77 @@ pub fn build_full_prompt(user_context: &str, role: Role) -> String {
     }
 }
 
+/// Validate that all specified prompt files exist.
+/// Returns an error listing all missing files if any are not found.
+pub fn validate_prompts(prompts: &Prompts) -> anyhow::Result<()> {
+    let mut missing_files = Vec::new();
+
+    for path in &prompts.preparator {
+        if !file_exists(path, prompts.base_path.as_ref()) {
+            missing_files.push(path.clone());
+        }
+    }
+    for path in &prompts.analyser {
+        if !file_exists(path, prompts.base_path.as_ref()) {
+            missing_files.push(path.clone());
+        }
+    }
+    for path in &prompts.planner {
+        if !file_exists(path, prompts.base_path.as_ref()) {
+            missing_files.push(path.clone());
+        }
+    }
+    for path in &prompts.worker {
+        if !file_exists(path, prompts.base_path.as_ref()) {
+            missing_files.push(path.clone());
+        }
+    }
+    for path in &prompts.reviewer {
+        if !file_exists(path, prompts.base_path.as_ref()) {
+            missing_files.push(path.clone());
+        }
+    }
+    for path in &prompts.merger {
+        if !file_exists(path, prompts.base_path.as_ref()) {
+            missing_files.push(path.clone());
+        }
+    }
+
+    if !missing_files.is_empty() {
+        let missing_list = missing_files
+            .iter()
+            .map(|p| format!("  - {}", p.display()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(anyhow::anyhow!(
+            "The following prompt files do not exist:\n{}",
+            missing_list
+        ));
+    }
+
+    Ok(())
+}
+
+/// Check if a file exists, resolving relative paths with base_path if provided.
+fn file_exists(path: &PathBuf, base_path: Option<&PathBuf>) -> bool {
+    let resolved_path = if let Some(base) = base_path {
+        if path.is_relative() {
+            base.join(path)
+        } else {
+            path.clone()
+        }
+    } else if path.is_relative() {
+        match std::env::current_dir() {
+            Ok(cwd) => cwd.join(path),
+            Err(_) => return false,
+        }
+    } else {
+        path.clone()
+    };
+
+    resolved_path.exists()
+}
+
 impl Prompts {
     /// Build the full prompt for the given role.
     pub fn build_prompt(&self, role: Role) -> anyhow::Result<String> {
@@ -160,12 +231,12 @@ mod tests {
 
     fn default_config() -> ZbobrDispatcherConfig {
         ZbobrDispatcherConfig {
-            preparator_prompts: vec![PathBuf::from("prompts/preparator.md")],
-            analyser_prompts: vec![PathBuf::from("prompts/analyser.md")],
-            planner_prompts: vec![PathBuf::from("prompts/planner.md")],
-            worker_prompts: vec![PathBuf::from("prompts/worker.md")],
-            reviewer_prompts: vec![PathBuf::from("prompts/reviewer.md")],
-            merger_prompts: vec![PathBuf::from("prompts/merger.md")],
+            preparator_prompts: vec![],
+            analyser_prompts: vec![],
+            planner_prompts: vec![],
+            worker_prompts: vec![],
+            reviewer_prompts: vec![],
+            merger_prompts: vec![],
             prompts_path: None,
             ..ZbobrDispatcherConfig::default()
         }
@@ -356,5 +427,105 @@ mod tests {
         };
         let result = prompts.build_prompt(Role::Reviewer).unwrap();
         assert!(result.contains("review carefully"));
+    }
+
+    // --- validate_prompts ---
+
+    #[test]
+    fn validate_prompts_succeeds_with_existing_files() {
+        let dir = TempDir::new().unwrap();
+        let worker_file = write_file(&dir, "worker.md", "content");
+        let prompts = Prompts {
+            base_path: None,
+            preparator: vec![],
+            analyser: vec![],
+            planner: vec![],
+            worker: vec![worker_file],
+            reviewer: vec![],
+            merger: vec![],
+        };
+        assert!(validate_prompts(&prompts).is_ok());
+    }
+
+    #[test]
+    fn validate_prompts_succeeds_with_empty_prompts() {
+        let prompts = Prompts {
+            base_path: None,
+            preparator: vec![],
+            analyser: vec![],
+            planner: vec![],
+            worker: vec![],
+            reviewer: vec![],
+            merger: vec![],
+        };
+        assert!(validate_prompts(&prompts).is_ok());
+    }
+
+    #[test]
+    fn validate_prompts_fails_with_missing_file() {
+        let prompts = Prompts {
+            base_path: None,
+            preparator: vec![],
+            analyser: vec![],
+            planner: vec![],
+            worker: vec![PathBuf::from("/nonexistent/worker.md")],
+            reviewer: vec![],
+            merger: vec![],
+        };
+        let result = validate_prompts(&prompts);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("do not exist"));
+        assert!(err.contains("/nonexistent/worker.md"));
+    }
+
+    #[test]
+    fn validate_prompts_lists_all_missing_files() {
+        let prompts = Prompts {
+            base_path: None,
+            preparator: vec![PathBuf::from("/missing1.md")],
+            analyser: vec![PathBuf::from("/missing2.md")],
+            planner: vec![],
+            worker: vec![],
+            reviewer: vec![],
+            merger: vec![],
+        };
+        let result = validate_prompts(&prompts);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("/missing1.md"));
+        assert!(err.contains("/missing2.md"));
+    }
+
+    #[test]
+    fn validate_prompts_resolves_relative_paths_with_base_path() {
+        let dir = TempDir::new().unwrap();
+        write_file(&dir, "worker.md", "content");
+        let prompts = Prompts {
+            base_path: Some(dir.path().to_path_buf()),
+            preparator: vec![],
+            analyser: vec![],
+            planner: vec![],
+            worker: vec![PathBuf::from("worker.md")],
+            reviewer: vec![],
+            merger: vec![],
+        };
+        assert!(validate_prompts(&prompts).is_ok());
+    }
+
+    #[test]
+    fn validate_prompts_detects_missing_relative_paths_with_base_path() {
+        let dir = TempDir::new().unwrap();
+        let prompts = Prompts {
+            base_path: Some(dir.path().to_path_buf()),
+            preparator: vec![],
+            analyser: vec![],
+            planner: vec![],
+            worker: vec![PathBuf::from("missing.md")],
+            reviewer: vec![],
+            merger: vec![],
+        };
+        let result = validate_prompts(&prompts);
+        assert!(result.is_err());
     }
 }
