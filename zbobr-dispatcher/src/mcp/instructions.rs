@@ -282,8 +282,8 @@ You have read-only access to the task plan and the repository for testing:
 ## Important Notes
 
 - **Do not modify files**: You are inspecting and testing only. Do not create commits or change code.
-- **Comprehensive testing**: Run all test commands discovered from the CI configuration, not just a subset.
-- **Detailed reporting**: Include all test commands executed, full output, and results in your report.
+- **Comprehensive testing**: Run all test commands discovered from the CI unless they require complex environment configuration. Mention skipped tests in the report.
+- **Сoncise but exhaustive reporting**: Include to the report exact command line of each test executed. In case of error append the extract of test log with the error message.
 - **Early termination on failure**: Stop testing once you encounter a failure and report it immediately via `{TEST_REJECT}`.
 "#,
     );
