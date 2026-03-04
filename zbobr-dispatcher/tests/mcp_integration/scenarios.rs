@@ -365,7 +365,7 @@ steps:
     type: tool_call
     tool: {REVIEW_REJECT}
     arguments:
-      message: "Found a problem during review."
+      message: "Reviewer complete. Found a problem during review."
   assertions:
     - type: success
 "#,

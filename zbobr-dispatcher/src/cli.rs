@@ -1689,7 +1689,9 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Planner => {
-            task_session.set_signal(Some(Signal::GoWork)).await?;
+            if current_task.signal.is_none() && !current_task.pause {
+                task_session.set_signal(Some(Signal::GoWork)).await?;
+            }
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Worker => {
