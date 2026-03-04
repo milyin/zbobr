@@ -121,6 +121,26 @@ pub struct GetPlanParam {
     pub offset: Option<i32>,
 }
 
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct CreateTaskParam {
+    #[schemars(description = "Task title")]
+    pub title: String,
+    #[schemars(description = "Task description")]
+    pub description: String,
+    #[schemars(description = "Task stage (e.g., 'Planning', 'Working', 'Testing')")]
+    pub stage: Option<String>,
+    #[schemars(description = "Tool name (optional)")]
+    pub tool: Option<String>,
+    #[schemars(description = "Model name (optional)")]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct TaskIdParam {
+    #[schemars(description = "Task ID (issue number)")]
+    pub task_id: u64,
+}
+
 macro_rules! mcp_tools {
     ($mod_name:ident, $($name:ident = $val:expr),* $(,)?) => {
         pub mod $mod_name {
@@ -161,6 +181,10 @@ mcp_tools! {
 
 mcp_tools! {
     decomposer_tools,
+    CREATE_TASK = "create_task",
+    GET_TASK_URL = "get_task_url",
+    GET_CHECKLIST = "get_checklist",
+    INSERT_CHECKLIST_ITEM = "insert_checklist_item",
     REPORT_DONE = "report_done",
     REPORT_ERROR = "report_error",
     ASK_USER = "ask_user",
