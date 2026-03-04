@@ -8,7 +8,6 @@ use zbobr_utility::{config_struct, resolve_path};
 /// Configuration for the mcp-tester executor.
 pub struct ZbobrExecutorMcpTesterConfig {
     pub preparation: Option<PathBuf>,
-    pub analysing: Option<PathBuf>,
     pub planning: Option<PathBuf>,
     pub working: Option<PathBuf>,
     pub reviewing: Option<PathBuf>,
@@ -28,10 +27,6 @@ impl ZbobrExecutorMcpTesterConfig {
         Self {
             preparation: merged
                 .preparation
-                .as_ref()
-                .map(|p| resolve_path(p.clone(), config_dir)),
-            analysing: merged
-                .analysing
                 .as_ref()
                 .map(|p| resolve_path(p.clone(), config_dir)),
             planning: merged
@@ -61,7 +56,6 @@ impl ZbobrExecutorMcpTesterConfig {
     pub fn scenario_for_role(&self, role: Role) -> Option<&PathBuf> {
         match role {
             Role::Preparator => self.preparation.as_ref(),
-            Role::Analyser => self.analysing.as_ref(),
             Role::Planner => self.planning.as_ref(),
             Role::Worker => self.working.as_ref(),
             Role::Reviewer => self.reviewing.as_ref(),

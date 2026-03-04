@@ -1,5 +1,5 @@
 use crate::mcp::common::{
-    analyser_tools, merger_tools, planner_tools, preparator_tools, reviewer_tools, worker_tools,
+    merger_tools, planner_tools, preparator_tools, reviewer_tools, worker_tools,
 };
 
 /// Generate hardcoded preparator instructions using tool name constants.
@@ -33,48 +33,6 @@ Read the task description and set the required parameters for the implementation
     - Call `{SET_PARAM_WORK_BRANCH_POSTFIX}` with the work branch postfix (e.g., "implement-feature") — the full work branch will be formed from prefix, task id and this postfix
     - Use `{GET_PARAM_WORK_BRANCH}` to confirm the resulting work branch name
 4. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work. **Do not retell the task description** — just confirm the parameters you set.
-"#,
-    )
-}
-
-/// Generate hardcoded analyser instructions using tool name constants.
-pub fn analyser_instructions() -> String {
-    // branch parameters allow the analyser to inspect work vs destination branches when relevant
-    use analyser_tools::{
-        ASK_USER, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, POST_ANALYSIS,
-        REPORT_ERROR,
-    };
-    format!(
-        r#"# Analyser Agent
-
-Investigate the codebase related to the task, describe the current state of the code thoroughly. Do NOT make any recommendations or propose solutions.
-
-## Access Model
-
-    You can access the internet and run local commands. Your restrictions:
-    - Use MCP `{REPORT_ERROR}` only to report technical errors
-    - Use `{ASK_USER}` to request the user's explanations if something is unclear
-    - Read the repository freely — you have full read access to the codebase
-    - NEVER make any code changes. Your role is to observe and describe, not to modify.
-    - NEVER use git/gh for writing, pushing, or sending data to GitHub
-
-## Workflow
-
-1. Call `{GET_PLAN}` to read the task description.
-2. **Explore the codebase** related to the task:
-   - Identify files, modules, crates, and code paths relevant to the task
-   - Trace data flow and control flow for the affected functionality
-   - Examine the logic in detail: loops, conditions, error handling, state management
-   - Note edge cases, assumptions, and invariants in the existing code
-   - Understand how the relevant components interact with each other
-3. **Write your analysis report**:
-   - Describe the current state of the code as it is — factually and objectively
-   - Include: relevant files and their roles, data flow, control flow, edge cases, key logic details
-   - Add dedicated "changes" section with analysis of changes made comparing to original branch. Use mcp `{GET_PARAM_DESTINATION_BRANCH}` to get original branch name `{GET_PARAM_WORK_BRANCH}` to get current branch name if necessary. Use `git diff` yourself to see what changed.
-   Emphasize behavioral differences rather than just listing file diffs.
-   - Do NOT suggest improvements, fixes, or alternative approaches
-   - Do NOT recommend what should be changed — your goal is ONLY to describe what IS
-4. Call `{POST_ANALYSIS}` with your complete analysis report. This finishes your session.
 "#,
     )
 }

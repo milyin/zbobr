@@ -448,7 +448,6 @@ impl ZbobrTaskBackendGithub {
         let desired_stages = [
             Stage::Pending,
             Stage::Preparing,
-            Stage::Analysing,
             Stage::Planning,
             Stage::Working,
             Stage::Reviewing,
@@ -1008,7 +1007,6 @@ fn stage_description(stage: Stage) -> &'static str {
     match stage {
         Stage::Pending => "Task is pending dispatch",
         Stage::Preparing => "Task parameters are being set",
-        Stage::Analysing => "Task codebase is being analysed",
         Stage::Planning => "Task is in planning",
         Stage::Working => "Task is in work",
         Stage::Reviewing => "Task is in review",

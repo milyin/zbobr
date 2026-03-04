@@ -19,7 +19,6 @@ pub trait CommonMcpImpl: Send + Sync {
     fn retry_signal(&self) -> Signal {
         match self.role() {
             Role::Preparator => Signal::GoPrepare,
-            Role::Analyser => Signal::GoAnalyse,
             Role::Planner => Signal::GoPlan,
             Role::Worker => Signal::GoWork,
             Role::Reviewer => Signal::GoReview,
@@ -447,35 +446,6 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(()) => format!("{} updated", param.name()),
             Err(e) => format!("Error: {e}"),
         }
-    }
-}
-
-/// Analyser-specific MCP implementations
-#[allow(async_fn_in_trait)]
-pub trait AnalyserMcpImpl: CommonMcpImpl {
-    async fn post_analysis_impl(&self, analysis: &str) -> String {
-        tracing::info!("[analyser#{}] post_analysis", self.session().task_id());
-        let hostname = crate::mcp::common::get_hostname();
-
-        if let Err(e) = self
-            .session()
-            .post_comment(
-                CommentType::Analysis,
-                analysis,
-                Some(self.role()),
-                &hostname,
-                None,
-            )
-            .await
-        {
-            tracing::error!(
-                "Failed to post analysis comment for task {}: {e}",
-                self.session().task_id()
-            );
-            return format!("Error posting analysis: {e}");
-        }
-
-        "Analysis posted successfully".to_string()
     }
 }
 

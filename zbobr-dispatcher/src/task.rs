@@ -920,7 +920,6 @@ mod tests {
     #[test]
     fn signal_target_role() {
         assert_eq!(Signal::GoPrepare.target_role(), Role::Preparator);
-        assert_eq!(Signal::GoAnalyse.target_role(), Role::Analyser);
         assert_eq!(Signal::GoPlan.target_role(), Role::Planner);
         assert_eq!(Signal::GoWork.target_role(), Role::Worker);
         assert_eq!(Signal::GoReview.target_role(), Role::Reviewer);
