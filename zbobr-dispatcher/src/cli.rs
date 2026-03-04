@@ -14,7 +14,7 @@ use crate::{
     ZbobrExecutorConfig,
     mcp::common::get_hostname,
     prompts::Prompts,
-    task::{Model, Parameter, Role, Tool},
+    task::{Parameter, Role, Tool},
 };
 
 // ---------------------------------------------------------------------------
@@ -64,9 +64,6 @@ pub enum Command {
         /// How often to clean up workspaces for closed tasks, in seconds
         #[arg(long, default_value = "600")]
         cleanup_interval: u64,
-        /// AI model to use (e.g. "gpt-5-mini", "claude-3-5-sonnet")
-        #[arg(long)]
-        model: Option<String>,
     },
     /// Remove workspace directories for tasks that have been closed
     Cleanup {
@@ -97,9 +94,6 @@ pub enum TaskSubcommand {
         /// AI tool to assign (copilot, claude, mcp-tester)
         #[arg(long)]
         tool: Option<String>,
-        /// AI model to assign (e.g. "claude-3-5-sonnet")
-        #[arg(long)]
-        model: Option<String>,
         /// Destination repository in owner/repo format
         #[arg(long)]
         dest_repo: Option<String>,
@@ -140,9 +134,6 @@ pub enum TaskSubcommand {
         /// New AI tool (copilot, claude, mcp-tester)
         #[arg(long)]
         tool: Option<String>,
-        /// New AI model
-        #[arg(long)]
-        model: Option<String>,
         /// New destination repository in owner/repo format.
         /// Pass `--dest-repo` without a value to delete the parameter.
         #[arg(long, num_args = 0..=1)]
@@ -176,9 +167,6 @@ pub enum TaskSubcommand {
     Prepare {
         /// Task ID
         task: u64,
-        /// AI model to use (e.g. "gpt-5-mini", "claude-3-5-sonnet")
-        #[arg(long)]
-        model: Option<String>,
         /// Show the prompt that would be sent to the model instead of running
         #[arg(long)]
         show_prompt: bool,
@@ -187,9 +175,6 @@ pub enum TaskSubcommand {
     Plan {
         /// Task ID
         task: u64,
-        /// AI model to use (e.g. "gpt-5-mini", "claude-3-5-sonnet")
-        #[arg(long)]
-        model: Option<String>,
         /// Show the prompt that would be sent to the model instead of running
         #[arg(long)]
         show_prompt: bool,
@@ -198,9 +183,6 @@ pub enum TaskSubcommand {
     Work {
         /// Task ID
         task: u64,
-        /// AI model to use (e.g. "gpt-5-mini", "claude-3-5-sonnet")
-        #[arg(long)]
-        model: Option<String>,
         /// Show the prompt that would be sent to the model instead of running
         #[arg(long)]
         show_prompt: bool,
@@ -209,9 +191,6 @@ pub enum TaskSubcommand {
     Review {
         /// Task ID
         task: u64,
-        /// AI model to use (e.g. "gpt-5-mini", "claude-3-5-sonnet")
-        #[arg(long)]
-        model: Option<String>,
         /// Show the prompt that would be sent to the model instead of running
         #[arg(long)]
         show_prompt: bool,
@@ -220,9 +199,6 @@ pub enum TaskSubcommand {
     Merge {
         /// Task ID
         task: u64,
-        /// AI model to use (e.g. "gpt-5-mini", "claude-3-5-sonnet")
-        #[arg(long)]
-        model: Option<String>,
         /// Show the prompt that would be sent to the model instead of running
         #[arg(long)]
         show_prompt: bool,
@@ -231,9 +207,6 @@ pub enum TaskSubcommand {
     Process {
         /// Task ID
         task: u64,
-        /// AI model override to use when role execution is needed
-        #[arg(long)]
-        model: Option<String>,
         /// MCP tester scenario file for preparation role
         #[arg(long)]
         executor_mcp_tester_preparation: Option<PathBuf>,
@@ -387,13 +360,6 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
             .unwrap_or_else(|| "(none)".to_string())
     );
     println!(
-        "Model:       {}",
-        task.model
-            .as_ref()
-            .map(|m| m.to_string())
-            .unwrap_or_else(|| "(none)".to_string())
-    );
-    println!(
         "Signal:      {}",
         task.signal
             .map(|s| s.to_string())
@@ -465,22 +431,9 @@ pub async fn run_command(
         Command::Loop {
             interval,
             cleanup_interval,
-            model,
             ..
         } => {
-            let model_enum = model
-                .map(|m| m.parse::<Model>())
-                .transpose()
-                .context("Invalid model name")?;
-            run_manager_loop(
-                &zbobr,
-                interval,
-                cleanup_interval,
-                model_enum,
-                prompts,
-                executor_config,
-            )
-            .await?;
+            run_manager_loop(&zbobr, interval, cleanup_interval, prompts, executor_config).await?;
         }
     }
     Ok(())
@@ -498,7 +451,6 @@ async fn run_task_subcommand(
             description,
             stage,
             tool,
-            model,
             dest_repo,
             dest_branch,
             confirm,
@@ -509,20 +461,8 @@ async fn run_task_subcommand(
                 .map(|t| t.parse::<Tool>())
                 .transpose()
                 .context("Invalid tool")?;
-            let model = model
-                .map(|m| m.parse::<Model>())
-                .transpose()
-                .context("Invalid model")?;
             let id = zbobr
-                .create_task(
-                    &title,
-                    &description,
-                    stage,
-                    tool,
-                    model,
-                    dest_repo,
-                    dest_branch,
-                )
+                .create_task(&title, &description, stage, tool, dest_repo, dest_branch)
                 .await?;
             if confirm {
                 zbobr.task_session(id).set_confirm(true).await?;
@@ -584,7 +524,6 @@ async fn run_task_subcommand(
             description,
             stage,
             tool,
-            model,
             dest_repo,
             dest_branch,
             work_branch,
@@ -599,9 +538,6 @@ async fn run_task_subcommand(
                 .transpose()?;
             let tool = tool
                 .map(|t| t.parse::<Tool>().context("Invalid tool"))
-                .transpose()?;
-            let model = model
-                .map(|m| m.parse::<Model>().context("Invalid model"))
                 .transpose()?;
             let signal = signal
                 .map(|s| s.parse::<Signal>().context("Invalid signal"))
@@ -627,9 +563,6 @@ async fn run_task_subcommand(
                         }
                         if let Some(to) = tool {
                             task.tool = Some(to);
-                        }
-                        if let Some(m) = model {
-                            task.model = Some(m);
                         }
                         if let Some(s) = signal {
                             task.signal = Some(s);
@@ -700,80 +633,55 @@ async fn run_task_subcommand(
                 .await?;
             println!("Cloned to {}", path.display());
         }
-        TaskSubcommand::Prepare {
-            task,
-            model,
-            show_prompt,
-        } => {
+        TaskSubcommand::Prepare { task, show_prompt } => {
             run_role_command(
                 zbobr,
                 task,
                 Role::Preparator,
-                model,
                 show_prompt,
                 prompts,
                 executor_config,
             )
             .await?;
         }
-        TaskSubcommand::Plan {
-            task,
-            model,
-            show_prompt,
-        } => {
+        TaskSubcommand::Plan { task, show_prompt } => {
             run_role_command(
                 zbobr,
                 task,
                 Role::Planner,
-                model,
                 show_prompt,
                 prompts,
                 executor_config,
             )
             .await?;
         }
-        TaskSubcommand::Work {
-            task,
-            model,
-            show_prompt,
-        } => {
+        TaskSubcommand::Work { task, show_prompt } => {
             run_role_command(
                 zbobr,
                 task,
                 Role::Worker,
-                model,
                 show_prompt,
                 prompts,
                 executor_config,
             )
             .await?;
         }
-        TaskSubcommand::Review {
-            task,
-            model,
-            show_prompt,
-        } => {
+        TaskSubcommand::Review { task, show_prompt } => {
             run_role_command(
                 zbobr,
                 task,
                 Role::Reviewer,
-                model,
                 show_prompt,
                 prompts,
                 executor_config,
             )
             .await?;
         }
-        TaskSubcommand::Merge {
-            task,
-            model,
-            show_prompt,
-        } => {
+        TaskSubcommand::Merge { task, show_prompt } => {
             run_role_command(
                 zbobr,
                 task,
                 Role::Merger,
-                model,
                 show_prompt,
                 prompts,
                 executor_config,
@@ -782,7 +690,6 @@ async fn run_task_subcommand(
         }
         TaskSubcommand::Process {
             task,
-            model,
             executor_mcp_tester_preparation,
             executor_mcp_tester_planning,
             executor_mcp_tester_working,
@@ -790,10 +697,6 @@ async fn run_task_subcommand(
             executor_mcp_tester_testing,
             executor_mcp_tester_merging,
         } => {
-            let model_enum = model
-                .map(|m| m.parse::<Model>())
-                .transpose()
-                .context("Invalid model name")?;
             let task_obj = zbobr.get_task(task).await?;
             let mcp_tester_config_override = if executor_mcp_tester_preparation.is_some()
                 || executor_mcp_tester_planning.is_some()
@@ -820,14 +723,7 @@ async fn run_task_subcommand(
                 },
                 None => executor_config.clone(),
             };
-            process_task_by_stage(
-                zbobr,
-                &task_obj,
-                model_enum,
-                prompts,
-                &effective_executor_config,
-            )
-            .await?;
+            process_task_by_stage(zbobr, &task_obj, prompts, &effective_executor_config).await?;
         }
         TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
             let task = zbobr.get_task(id).await?;
@@ -926,16 +822,11 @@ async fn run_role_command(
     zbobr: &ZbobrDispatcherDyn,
     task: u64,
     role: Role,
-    model: Option<String>,
     show_prompt: bool,
     prompts: &Prompts,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
-    let model_enum = model
-        .map(|m| m.parse::<Model>())
-        .transpose()
-        .context("Invalid model name")?;
-    let session = CliRoleRunner::new(zbobr, task, role, model_enum, prompts, executor_config);
+    let session = CliRoleRunner::new(zbobr, task, role, prompts, executor_config);
     if show_prompt {
         println!("{}", session.prompt()?);
     } else {
@@ -952,7 +843,6 @@ struct CliRoleRunner<'a> {
     zbobr: &'a ZbobrDispatcherDyn,
     task_id: u64,
     role: Role,
-    model: Option<Model>,
     prompts: &'a Prompts,
     executor_config: &'a ZbobrExecutorConfig,
 }
@@ -962,7 +852,6 @@ impl<'a> CliRoleRunner<'a> {
         zbobr: &'a ZbobrDispatcherDyn,
         task_id: u64,
         role: Role,
-        model: Option<Model>,
         prompts: &'a Prompts,
         executor_config: &'a ZbobrExecutorConfig,
     ) -> Self {
@@ -970,7 +859,6 @@ impl<'a> CliRoleRunner<'a> {
             zbobr,
             task_id,
             role,
-            model,
             prompts,
             executor_config,
         }
@@ -982,7 +870,6 @@ impl<'a> CliRoleRunner<'a> {
 
     async fn run(&self) -> anyhow::Result<()> {
         let cli_tool = self.zbobr.config().cli_tool;
-        let model = resolve_model(cli_tool, self.model.clone(), self.executor_config);
 
         self.zbobr
             .set_task_stage(self.task_id, self.role.into())
@@ -1048,7 +935,6 @@ impl<'a> CliRoleRunner<'a> {
             self.executor_config,
             self.task_id,
             self.role,
-            &model,
             assigned_port,
             &prompt_text,
             &work_dir,
@@ -1084,7 +970,6 @@ impl<'a> CliRoleRunner<'a> {
 pub async fn process_task_by_stage(
     zbobr: &ZbobrDispatcherDyn,
     task: &Task,
-    model: Option<Model>,
     prompts: &Prompts,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
@@ -1095,15 +980,13 @@ pub async fn process_task_by_stage(
                 return Ok(());
             }
             if task.conflict {
-                let task_model = task.model.clone().or(model);
-                let session = CliRoleRunner::new(
-                    zbobr,
+                tracing::info!(
+                    "Found PENDING task #{} with conflict flag - running merger (tool: {:?})",
                     task.id,
-                    Role::Merger,
-                    task_model,
-                    prompts,
-                    executor_config,
+                    task.tool
                 );
+                let session =
+                    CliRoleRunner::new(zbobr, task.id, Role::Merger, prompts, executor_config);
                 session.run().await?;
             } else if task.signal.is_none() {
                 println!(
@@ -1114,9 +997,7 @@ pub async fn process_task_by_stage(
             } else {
                 let signal = task.signal.unwrap();
                 let role = signal.target_role();
-                let task_model = task.model.clone().or(model);
-                let session =
-                    CliRoleRunner::new(zbobr, task.id, role, task_model, prompts, executor_config);
+                let session = CliRoleRunner::new(zbobr, task.id, role, prompts, executor_config);
                 session.run().await?;
             }
         }
@@ -1127,9 +1008,7 @@ pub async fn process_task_by_stage(
         | Stage::Testing
         | Stage::Merging => {
             let role = Role::try_from(task.stage).unwrap();
-            let task_model = task.model.clone().or(model);
-            let session =
-                CliRoleRunner::new(zbobr, task.id, role, task_model, prompts, executor_config);
+            let session = CliRoleRunner::new(zbobr, task.id, role, prompts, executor_config);
             session.run().await?;
         }
         Stage::Done => {
@@ -1144,20 +1023,11 @@ pub async fn run_manager_loop(
     zbobr: &ZbobrDispatcherDyn,
     interval_secs: u64,
     cleanup_interval_secs: u64,
-    model: Option<Model>,
     prompts: &Prompts,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
-    let cli_tool = zbobr.config().cli_tool;
-    let model = model.unwrap_or_else(|| match cli_tool {
-        Tool::Claude => executor_config.claude.default_model.clone(),
-        Tool::Copilot => executor_config.copilot.default_model.clone(),
-        Tool::McpTester => Model::default(),
-    });
-
     tracing::info!("Manager loop started ({})", zbobr.debug_state());
     tracing::info!("Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s");
-    tracing::info!("Default Model: {model}");
     tracing::info!("CLI Tool: {:?}", zbobr.config().cli_tool);
     if let Some(ref base) = prompts.base_path {
         tracing::info!("Prompts base path: {}", base.display());
@@ -1244,21 +1114,13 @@ pub async fn run_manager_loop(
             }
 
             if task.conflict {
-                let task_model = task.model.clone().unwrap_or_else(|| model.clone());
                 tracing::info!(
-                    "Found PENDING task #{} with conflict flag - running merger (tool: {:?}, model: {})",
+                    "Found PENDING task #{} with conflict flag - running merger (tool: {:?})",
                     task.id,
-                    task.tool,
-                    task_model
+                    task.tool
                 );
-                let session = CliRoleRunner::new(
-                    zbobr,
-                    task.id,
-                    Role::Merger,
-                    Some(task_model),
-                    prompts,
-                    executor_config,
-                );
+                let session =
+                    CliRoleRunner::new(zbobr, task.id, Role::Merger, prompts, executor_config);
                 if let Err(e) = session.run().await {
                     tracing::error!("Merger session failed: {e}");
                 }
@@ -1268,23 +1130,14 @@ pub async fn run_manager_loop(
 
             let Some(signal) = task.signal else { continue };
             let role = signal.target_role();
-            let task_model = task.model.clone().unwrap_or_else(|| model.clone());
             tracing::info!(
-                "Found PENDING task #{} with signal {:?} (tool: {:?}, model: {}) - running {:?}",
+                "Found PENDING task #{} with signal {:?} (tool: {:?}) - running {:?}",
                 task.id,
                 signal,
                 task.tool,
-                task_model,
                 role
             );
-            let session = CliRoleRunner::new(
-                zbobr,
-                task.id,
-                role,
-                Some(task_model),
-                prompts,
-                executor_config,
-            );
+            let session = CliRoleRunner::new(zbobr, task.id, role, prompts, executor_config);
             if let Err(e) = session.run().await {
                 tracing::error!("{:?} session failed: {e}", role);
             }
@@ -1349,18 +1202,6 @@ pub async fn run_manager_loop(
 // ---------------------------------------------------------------------------
 // Low-level helpers
 // ---------------------------------------------------------------------------
-
-fn resolve_model(
-    cli_tool: Tool,
-    override_model: Option<Model>,
-    executor_config: &ZbobrExecutorConfig,
-) -> Model {
-    override_model.unwrap_or_else(|| match cli_tool {
-        Tool::Claude => executor_config.claude.default_model.clone(),
-        Tool::Copilot => executor_config.copilot.default_model.clone(),
-        Tool::McpTester => Model::default(),
-    })
-}
 
 async fn prepare_workspace(
     zbobr: &ZbobrDispatcherDyn,
@@ -1549,7 +1390,6 @@ async fn execute_tool(
     executor_config: &ZbobrExecutorConfig,
     task_id: u64,
     role: Role,
-    model: &Model,
     assigned_port: u16,
     prompt: &str,
     work_dir: &Path,
@@ -1574,7 +1414,7 @@ async fn execute_tool(
     };
 
     tokio::select! {
-        result = executor.execute(task_id, role, model, assigned_port, prompt, work_dir, mcp_url, agent_token, copilot_token) => {
+        result = executor.execute(task_id, role, assigned_port, prompt, work_dir, mcp_url, agent_token, copilot_token) => {
             match result {
                 Ok(()) => (false, None),
                 Err(e) => {

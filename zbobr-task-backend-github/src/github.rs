@@ -482,7 +482,6 @@ impl ZbobrTaskBackendGithub {
 
         const SIGNAL_LABEL_COLOR: &str = "5319e7";
         const TOOL_LABEL_COLOR: &str = "d4c5f9";
-        const MODEL_LABEL_COLOR: &str = "bfd4f2";
         const FLAG_LABEL_COLOR: &str = "f9d0c4";
 
         for signal in Signal::all() {
@@ -514,22 +513,6 @@ impl ZbobrTaskBackendGithub {
                     .await?;
             } else {
                 tracing::info!("Label '{tool_label}' already exists");
-            }
-        }
-
-        for model in Model::all() {
-            let model_label = format!("model:{}", model);
-            let model_desc = format!("Use {} model", model);
-            if !existing_labels.contains(&model_label) {
-                tracing::info!("Creating label '{model_label}'");
-                self.create_label(&model_label, MODEL_LABEL_COLOR, &model_desc)
-                    .await?;
-            } else if force {
-                tracing::info!("Updating label '{model_label}' (force)");
-                self.update_label(&model_label, MODEL_LABEL_COLOR, &model_desc)
-                    .await?;
-            } else {
-                tracing::info!("Label '{model_label}' already exists");
             }
         }
 
@@ -578,14 +561,6 @@ impl ZbobrTaskBackendGithub {
             }
         });
 
-        let model = issue.labels.iter().find_map(|l| {
-            if let Some(name) = l.name.strip_prefix("model:") {
-                name.parse::<Model>().ok()
-            } else {
-                None
-            }
-        });
-
         let mut parameters = HashMap::new();
         if let Some(repo) = params_map.get(Parameter::DestinationRepository.name()) {
             parameters.insert(Parameter::DestinationRepository, repo.clone());
@@ -627,7 +602,6 @@ impl ZbobrTaskBackendGithub {
             description,
             stage,
             tool,
-            model,
             parameters,
             checklist,
             signal,
@@ -708,7 +682,6 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         description: &str,
         stage: Stage,
         tool: Option<Tool>,
-        model: Option<Model>,
         parameters: HashMap<Parameter, String>,
     ) -> anyhow::Result<u64> {
         let (owner, repo) = self.parse_repo()?;
@@ -735,9 +708,6 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         let mut labels = vec![];
         if let Some(t) = tool {
             labels.push(format!("tool:{}", t));
-        }
-        if let Some(m) = model {
-            labels.push(format!("model:{}", m));
         }
 
         let issue = retry_github("create issue", || async {

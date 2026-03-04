@@ -108,7 +108,6 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
         description: &str,
         stage: Stage,
         tool: Option<Tool>,
-        model: Option<Model>,
         destination_repository: Option<String>,
         destination_branch: Option<String>,
     ) -> anyhow::Result<u64> {
@@ -117,7 +116,6 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
             description,
             stage,
             tool,
-            model,
             destination_repository,
             destination_branch,
             false,
@@ -134,7 +132,6 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
         description: &str,
         stage: Stage,
         tool: Option<Tool>,
-        model: Option<Model>,
         destination_repository: Option<String>,
         destination_branch: Option<String>,
         confirm: bool,
@@ -148,7 +145,7 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
                 parameters.insert(Parameter::DestinationBranch, branch);
             }
             self.task_backend
-                .create_task(title, description, stage, tool, model, parameters)
+                .create_task(title, description, stage, tool, parameters)
                 .await?
         };
         if confirm {

@@ -3,7 +3,7 @@ use std::{path::Path, process::Stdio};
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use zbobr_api::{
-    task::{Model, Role, Tool},
+    task::{Role, Tool},
     tool_executor::{ToolExecutor, format_command_for_log},
 };
 
@@ -21,7 +21,6 @@ impl ToolExecutor for ClaudeExecutor {
         &self,
         task_id: u64,
         role: Role,
-        model: &Model,
         _port: u16,
         prompt: &str,
         work_dir: &Path,
@@ -41,9 +40,16 @@ impl ToolExecutor for ClaudeExecutor {
         });
         let mcp_config_str = serde_json::to_string(&mcp_config)?;
 
-        let model_name = model
+        let model_name = self
+            .config
+            .default_model
             .model_name_for_tool(Tool::Claude)
-            .ok_or_else(|| anyhow::anyhow!("Model {} is not supported by claude", model))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Model {} is not supported by claude",
+                    self.config.default_model
+                )
+            })?;
 
         tracing::info!(
             "Starting claude {role} session for task #{task_id} with model {model_name}"

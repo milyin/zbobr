@@ -44,7 +44,6 @@ pub trait ToolExecutor: Send + Sync {
         &self,
         task_id: u64,
         role: crate::task::Role,
-        model: &crate::task::Model,
         port: u16,
         prompt: &str,
         work_dir: &Path,

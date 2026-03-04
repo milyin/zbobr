@@ -19,7 +19,6 @@ struct TaskFile {
     description: String,
     stage: String,
     tool: Option<String>,
-    model: Option<String>,
     parameters: HashMap<String, String>,
     #[serde(default)]
     conflict: bool,
@@ -38,8 +37,6 @@ impl TaskFile {
             .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", self.stage))?;
 
         let tool = self.tool.as_ref().map(|s| s.parse()).transpose()?;
-
-        let model = self.model.as_ref().map(|s| s.parse()).transpose()?;
 
         let signal = self.signal.as_ref().map(|s| s.parse()).transpose()?;
 
@@ -65,7 +62,6 @@ impl TaskFile {
             description: self.description.clone(),
             stage,
             tool,
-            model,
             parameters,
             checklist: self.checklist.clone(),
             signal,
@@ -83,7 +79,6 @@ impl TaskFile {
             description: task.description.clone(),
             stage: task.stage.milestone_name().to_string(),
             tool: task.tool.map(|t| t.to_string()),
-            model: task.model.as_ref().map(|m| m.to_string()),
             parameters: task
                 .parameters
                 .iter()
@@ -277,7 +272,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
         description: &str,
         stage: Stage,
         tool: Option<Tool>,
-        model: Option<Model>,
         parameters: HashMap<Parameter, String>,
     ) -> anyhow::Result<u64> {
         let id = self.get_next_id().await?;
@@ -288,7 +282,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
             description: description.to_string(),
             stage,
             tool,
-            model,
             parameters,
             checklist: vec![],
             signal: None,

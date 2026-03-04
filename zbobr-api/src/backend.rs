@@ -25,7 +25,6 @@ pub trait TaskBackend: Send + Sync {
         description: &str,
         stage: Stage,
         tool: Option<Tool>,
-        model: Option<Model>,
         parameters: HashMap<Parameter, String>,
     ) -> anyhow::Result<u64>;
 
