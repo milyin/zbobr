@@ -59,7 +59,7 @@ impl ToolExecutor for ClaudeExecutor {
             "--permission-mode",
             "dontAsk",
             "--allowedTools",
-            "mcp__zbobr__*",
+            "mcp__zbobr__*,Bash,WebFetch,WebSearch",
             "--tools",
             "default",
             "-p",
