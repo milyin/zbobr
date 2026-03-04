@@ -3,6 +3,8 @@ use crate::{
     mcp::common::get_hostname,
     task::{ChecklistItem, Parameter, Role, RoleSession},
 };
+use zbobr_api::{Stage, Tool, Model};
+
 
 /// Common trait for MCP services (Planner, Worker) - shared implementations
 #[allow(async_fn_in_trait)]
@@ -20,6 +22,8 @@ pub trait CommonMcpImpl: Send + Sync {
         match self.role() {
             Role::Preparator => Signal::GoPrepare,
             Role::Analyser => Signal::GoAnalyse,
+            Role::DecomposePlanner => Signal::GoAnalyse,
+            Role::Decomposer => Signal::GoAnalyse,
             Role::Planner => Signal::GoPlan,
             Role::Worker => Signal::GoWork,
             Role::Reviewer => Signal::GoReview,
@@ -733,5 +737,147 @@ pub trait MergerMcpImpl: CommonMcpImpl {
 
     async fn get_param_work_branch_impl(&self) -> String {
         self.get_param_impl(Parameter::WorkBranch).await
+    }
+}
+
+// -- DecomposePlanner MCP service --
+
+#[allow(async_fn_in_trait)]
+pub trait DecomposePlannerMcpImpl: CommonMcpImpl {
+    async fn post_plan_impl(&self, plan: &str) -> String {
+        tracing::info!("[decompose_planner#{}] post_plan", self.session().task_id());
+        let hostname = get_hostname();
+
+        if let Err(e) = self
+            .session()
+            .post_comment(
+                CommentType::Plan,
+                plan,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
+            .await
+        {
+            tracing::error!(
+                "Failed to post decomposition plan comment for task {}: {e}",
+                self.session().task_id()
+            );
+            return format!("Error posting plan: {e}");
+        }
+
+        "Decomposition plan posted successfully".to_string()
+    }
+}
+
+// -- Decomposer MCP service --
+
+#[allow(async_fn_in_trait)]
+pub trait DecomposerMcpImpl: CommonMcpImpl {
+    async fn report_done_impl(&self, message: &str) -> String {
+        tracing::info!("[decomposer#{}] report_done", self.session().task_id());
+        let hostname = get_hostname();
+
+        if let Err(e) = self
+            .session()
+            .post_comment(
+                CommentType::Done,
+                message,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
+            .await
+        {
+            tracing::error!(
+                "Failed to post done comment for task {}: {e}",
+                self.session().task_id()
+            );
+            return format!("Error posting done: {e}");
+        }
+
+        "Decomposition completed successfully".to_string()
+    }
+
+    async fn create_task_impl(&self, title: &str, description: &str, stage: Option<&str>, tool: Option<&str>, model: Option<&str>) -> String {
+        tracing::info!("[decomposer#{}] create_task: {}", self.session().task_id(), title);
+        
+        // Parse stage string to Stage enum if provided
+        let stage_enum = match stage {
+            Some(stage_str) => {
+                // Try parsing as milestone name (e.g., "PLANNING")
+                match Stage::from_milestone_name(stage_str) {
+                    Some(s) => s,
+                    None => {
+                        // Try parsing by Display format (same as milestone_name)
+                        match Stage::from_milestone_name(&stage_str.to_uppercase()) {
+                            Some(s) => s,
+                            None => return format!("Invalid stage: {}", stage_str),
+                        }
+                    }
+                }
+            },
+            None => Stage::Pending,
+        };
+
+        // Parse tool if provided
+        let tool_enum = match tool {
+            Some(tool_str) => match tool_str.parse::<Tool>() {
+                Ok(t) => Some(t),
+                Err(_) => {
+                    return format!("Invalid tool: {}", tool_str);
+                }
+            },
+            None => None,
+        };
+
+        // Parse model if provided
+        let model_enum = match model {
+            Some(model_str) => match model_str.parse::<Model>() {
+                Ok(m) => Some(m),
+                Err(_) => {
+                    return format!("Invalid model: {}", model_str);
+                }
+            },
+            None => None,
+        };
+
+        // Create task using RoleSession method
+        match self.session().create_task(title, description, stage_enum, tool_enum, model_enum).await {
+            Ok(task_id) => {
+                tracing::info!("[decomposer#{}] created task #{}", self.session().task_id(), task_id);
+                format!("Created task #{}", task_id)
+            }
+            Err(e) => {
+                tracing::error!("[decomposer#{}] failed to create task: {e}", self.session().task_id());
+                format!("Error creating task: {e}")
+            }
+        }
+    }
+
+    async fn get_task_url_impl(&self, task_id: u64) -> String {
+        tracing::info!("[decomposer#{}] get_task_url: {}", self.session().task_id(), task_id);
+        
+        // Get the destination repository from current task parameters
+        match self.session().get_parameter(Parameter::DestinationRepository).await {
+            Ok(Some(repo)) => {
+                // repo format could be owner/repo or a full URL
+                if repo.contains("github.com") {
+                    format!("{}/issues/{}", repo, task_id)
+                } else if repo.contains('/') {
+                    format!("https://github.com/{}/issues/{}", repo, task_id)
+                } else {
+                    format!("https://github.com/{}/issues/{}", repo, task_id)
+                }
+            }
+            Ok(None) => {
+                // No destination repo, return generic format
+                format!("Task #{}", task_id)
+            }
+            Err(e) => {
+                tracing::error!("[decomposer#{}] failed to get repo parameter: {e}", self.session().task_id());
+                format!("Error getting task URL: {e}")
+            }
+        }
     }
 }

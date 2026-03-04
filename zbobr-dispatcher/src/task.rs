@@ -384,6 +384,19 @@ impl RoleSession {
         })
         .await
     }
+
+    /// Create a new subtask with the given parameters.
+    /// This is primarily used by the Decomposer role.
+    pub async fn create_task(
+        &self,
+        title: &str,
+        description: &str,
+        stage: Stage,
+        tool: Option<Tool>,
+        model: Option<Model>,
+    ) -> anyhow::Result<u64> {
+        self.zbobr.create_task(title, description, stage, tool, model, None, None).await
+    }
 }
 
 // ---------------------------------------------------------------------------

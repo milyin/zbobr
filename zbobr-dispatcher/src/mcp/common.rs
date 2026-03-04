@@ -121,6 +121,26 @@ pub struct GetPlanParam {
     pub offset: Option<i32>,
 }
 
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct CreateTaskParam {
+    #[schemars(description = "Task title")]
+    pub title: String,
+    #[schemars(description = "Task description")]
+    pub description: String,
+    #[schemars(description = "Task stage (e.g., 'Planning', 'Working', 'Testing')")]
+    pub stage: Option<String>,
+    #[schemars(description = "Tool name (optional)")]
+    pub tool: Option<String>,
+    #[schemars(description = "Model name (optional)")]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct TaskIdParam {
+    #[schemars(description = "Task ID (issue number)")]
+    pub task_id: u64,
+}
+
 macro_rules! mcp_tools {
     ($mod_name:ident, $($name:ident = $val:expr),* $(,)?) => {
         pub mod $mod_name {
@@ -147,6 +167,25 @@ mcp_tools! {
     analyser_tools,
     GET_PLAN = "get_plan",
     POST_ANALYSIS = "post_analysis",
+    REPORT_ERROR = "report_error",
+    ASK_USER = "ask_user",
+}
+
+mcp_tools! {
+    decompose_planner_tools,
+    GET_PLAN = "get_plan",
+    POST_PLAN = "post_plan",
+    REPORT_ERROR = "report_error",
+    ASK_USER = "ask_user",
+}
+
+mcp_tools! {
+    decomposer_tools,
+    CREATE_TASK = "create_task",
+    GET_TASK_URL = "get_task_url",
+    GET_CHECKLIST = "get_checklist",
+    INSERT_CHECKLIST_ITEM = "insert_checklist_item",
+    REPORT_DONE = "report_done",
     REPORT_ERROR = "report_error",
     ASK_USER = "ask_user",
 }
@@ -363,6 +402,30 @@ pub async fn run_role_mcp_server(
                 move || {
                     tracing::debug!("Creating new AnalyserMcp instance for task {task_id}");
                     Ok(super::analyser::AnalyserMcp::new(zbobr.clone(), task_id))
+                },
+                std::sync::Arc::new(LocalSessionManager::default()),
+                Default::default(),
+            );
+            axum::Router::new().nest_service(&path, svc)
+        }
+        Role::DecomposePlanner => {
+            tracing::info!("Creating DecomposePlannerMcp service for task {task_id} at path {path}");
+            let svc = StreamableHttpService::new(
+                move || {
+                    tracing::debug!("Creating new DecomposePlannerMcp instance for task {task_id}");
+                    Ok(super::decompose_planner::DecomposePlannerMcp::new(zbobr.clone(), task_id))
+                },
+                std::sync::Arc::new(LocalSessionManager::default()),
+                Default::default(),
+            );
+            axum::Router::new().nest_service(&path, svc)
+        }
+        Role::Decomposer => {
+            tracing::info!("Creating DecomposerMcp service for task {task_id} at path {path}");
+            let svc = StreamableHttpService::new(
+                move || {
+                    tracing::debug!("Creating new DecomposerMcp instance for task {task_id}");
+                    Ok(super::decomposer::DecomposerMcp::new(zbobr.clone(), task_id))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
                 Default::default(),

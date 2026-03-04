@@ -9,6 +9,8 @@ use zbobr_utility::{config_struct, resolve_path};
 pub struct ZbobrExecutorMcpTesterConfig {
     pub preparation: Option<PathBuf>,
     pub analysing: Option<PathBuf>,
+    pub decompose_planning: Option<PathBuf>,
+    pub decomposing: Option<PathBuf>,
     pub planning: Option<PathBuf>,
     pub working: Option<PathBuf>,
     pub reviewing: Option<PathBuf>,
@@ -32,6 +34,14 @@ impl ZbobrExecutorMcpTesterConfig {
                 .map(|p| resolve_path(p.clone(), config_dir)),
             analysing: merged
                 .analysing
+                .as_ref()
+                .map(|p| resolve_path(p.clone(), config_dir)),
+            decompose_planning: merged
+                .decompose_planning
+                .as_ref()
+                .map(|p| resolve_path(p.clone(), config_dir)),
+            decomposing: merged
+                .decomposing
                 .as_ref()
                 .map(|p| resolve_path(p.clone(), config_dir)),
             planning: merged
@@ -62,6 +72,8 @@ impl ZbobrExecutorMcpTesterConfig {
         match role {
             Role::Preparator => self.preparation.as_ref(),
             Role::Analyser => self.analysing.as_ref(),
+            Role::DecomposePlanner => self.decompose_planning.as_ref(),
+            Role::Decomposer => self.decomposing.as_ref(),
             Role::Planner => self.planning.as_ref(),
             Role::Worker => self.working.as_ref(),
             Role::Reviewer => self.reviewing.as_ref(),

@@ -263,6 +263,12 @@ pub enum TaskSubcommand {
         /// MCP tester scenario file for testing role
         #[arg(long)]
         executor_mcp_tester_testing: Option<PathBuf>,
+        /// MCP tester scenario file for decompose_planning role
+        #[arg(long)]
+        executor_mcp_tester_decompose_planning: Option<PathBuf>,
+        /// MCP tester scenario file for decomposing role
+        #[arg(long)]
+        executor_mcp_tester_decomposing: Option<PathBuf>,
         /// MCP tester scenario file for merging role
         #[arg(long)]
         executor_mcp_tester_merging: Option<PathBuf>,
@@ -566,9 +572,12 @@ async fn run_task_subcommand(
                     Stage::Pending,
                     Stage::Preparing,
                     Stage::Analysing,
+                    Stage::DecomposePlanning,
+                    Stage::Decomposing,
                     Stage::Planning,
                     Stage::Working,
                     Stage::Reviewing,
+                    Stage::Testing,
                     Stage::Merging,
                     Stage::Done,
                 ];
@@ -813,6 +822,8 @@ async fn run_task_subcommand(
             model,
             executor_mcp_tester_preparation,
             executor_mcp_tester_analysing,
+            executor_mcp_tester_decompose_planning,
+            executor_mcp_tester_decomposing,
             executor_mcp_tester_planning,
             executor_mcp_tester_working,
             executor_mcp_tester_reviewing,
@@ -826,6 +837,8 @@ async fn run_task_subcommand(
             let task_obj = zbobr.get_task(task).await?;
             let mcp_tester_config_override = if executor_mcp_tester_preparation.is_some()
                 || executor_mcp_tester_analysing.is_some()
+                || executor_mcp_tester_decompose_planning.is_some()
+                || executor_mcp_tester_decomposing.is_some()
                 || executor_mcp_tester_planning.is_some()
                 || executor_mcp_tester_working.is_some()
                 || executor_mcp_tester_reviewing.is_some()
@@ -835,6 +848,8 @@ async fn run_task_subcommand(
                 Some(ZbobrExecutorMcpTesterConfig {
                     preparation: executor_mcp_tester_preparation,
                     analysing: executor_mcp_tester_analysing,
+                    decompose_planning: executor_mcp_tester_decompose_planning,
+                    decomposing: executor_mcp_tester_decomposing,
                     planning: executor_mcp_tester_planning,
                     working: executor_mcp_tester_working,
                     reviewing: executor_mcp_tester_reviewing,
@@ -1153,6 +1168,8 @@ pub async fn process_task_by_stage(
         }
         Stage::Preparing
         | Stage::Analysing
+        | Stage::DecomposePlanning
+        | Stage::Decomposing
         | Stage::Planning
         | Stage::Working
         | Stage::Reviewing
@@ -1340,6 +1357,8 @@ pub async fn run_manager_loop(
         let active_stages = [
             Stage::Preparing,
             Stage::Analysing,
+            Stage::DecomposePlanning,
+            Stage::Decomposing,
             Stage::Planning,
             Stage::Working,
             Stage::Reviewing,
@@ -1703,6 +1722,39 @@ async fn finalize_session(
             }
             task_session.set_stage(Stage::Pending).await?;
         }
+        Role::DecomposePlanner => {
+            if current_task.signal.is_none() && !current_task.pause {
+                // After decompose planning, pause for user review
+                task_session.modify_task(|task| {
+                    task.pause = true;
+                }).await?;
+            }
+            task_session.set_stage(Stage::Pending).await?;
+        }
+        Role::Decomposer => {
+            if current_task.signal.is_none() && !current_task.pause {
+                // After decomposition, mark task done
+                let hostname = get_hostname();
+                if let Err(e) = task_session
+                    .post_comment(
+                        CommentType::Done,
+                        "",
+                        None,
+                        &hostname,
+                        None,
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        "Failed to post DONE boundary after decomposition for task {}: {e}",
+                        task_id
+                    );
+                }
+                task_session.mark_done().await?;
+                return Ok(());
+            }
+            task_session.set_stage(Stage::Pending).await?;
+        }
         Role::Planner => {
             if current_task.signal.is_none() && !current_task.pause {
                 task_session.set_signal(Some(Signal::GoWork)).await?;
@@ -1721,11 +1773,29 @@ async fn finalize_session(
         }
         Role::Reviewer => {
             // Routing is driven by the signal set during the session:
-            //   None (review_accept called)  → route to tester
+            //   None (review_accept called)  → mark task done
             //   GoPlan (review_reject called) → route back to planner
             //   GoReview (report_error)        → preserved as-is (task paused)
             if !current_task.pause && current_task.signal.is_none() {
-                task_session.set_signal(Some(Signal::GoTest)).await?;
+                // Post DONE boundary after marking task done
+                let hostname = get_hostname();
+                if let Err(e) = task_session
+                    .post_comment(
+                        CommentType::Done,
+                        "",
+                        None,
+                        &hostname,
+                        None,
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        "Failed to post DONE boundary after review acceptance for task {}: {e}",
+                        task_id
+                    );
+                }
+                task_session.mark_done().await?;
+                return Ok(());
             }
             task_session.set_stage(Stage::Pending).await?;
         }
