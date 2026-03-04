@@ -146,7 +146,6 @@ mcp_tools! {
 mcp_tools! {
     analyser_tools,
     GET_PLAN = "get_plan",
-    GET_ANALYSIS = "get_analysis",
     POST_ANALYSIS = "post_analysis",
     REPORT_ERROR = "report_error",
     ASK_USER = "ask_user",
@@ -155,7 +154,6 @@ mcp_tools! {
 mcp_tools! {
     planner_tools,
     GET_PLAN = "get_plan",
-    GET_ANALYSIS = "get_analysis",
     POST_PLAN = "post_plan",
     GET_CHECKLIST = "get_checklist",
     INSERT_CHECKLIST_ITEM = "insert_checklist_item",
@@ -170,7 +168,6 @@ mcp_tools! {
 mcp_tools! {
     worker_tools,
     GET_PLAN = "get_plan",
-    GET_ANALYSIS = "get_analysis",
     REPORT_ERROR = "report_error",
     ASK_USER = "ask_user",
     ASK_PLANNER = "ask_planner",
@@ -187,7 +184,6 @@ mcp_tools! {
 mcp_tools! {
     reviewer_tools,
     GET_PLAN = "get_plan",
-    GET_ANALYSIS = "get_analysis",
     REPORT_ERROR = "report_error",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
@@ -198,7 +194,6 @@ mcp_tools! {
 mcp_tools! {
     tester_tools,
     GET_PLAN = "get_plan",
-    GET_ANALYSIS = "get_analysis",
     REPORT_ERROR = "report_error",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",

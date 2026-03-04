@@ -93,36 +93,13 @@ pub trait CommonMcpImpl: Send + Sync {
             .unwrap_or(comments.len());
 
         // Return the plan comment + all following comments until next plan,
-        // skipping Analysis comments (they are accessed via GET_ANALYSIS).
+        // skipping Analysis and Error comments (not fed to LLM agents).
         let result_comments: Vec<zbobr_api::Comment> = comments[plan_comment_idx..end_idx]
             .iter()
-            .filter(|c| c.comment_type != CommentType::Analysis)
+            .filter(|c| c.comment_type != CommentType::Analysis && c.comment_type != CommentType::Error)
             .cloned()
             .collect();
         match serde_json::to_string_pretty(&result_comments) {
-            Ok(json) => json,
-            Err(e) => format!("Error serializing: {e}"),
-        }
-    }
-
-    async fn get_analysis_impl(&self) -> String {
-        tracing::info!(
-            "[{}#{}] get_analysis",
-            self.role_name(),
-            self.session().task_id()
-        );
-
-        let comments = match self.session().get_comments().await {
-            Ok(c) => c,
-            Err(e) => return format!("Error: {e}"),
-        };
-
-        let analysis_comments: Vec<zbobr_api::Comment> = comments
-            .into_iter()
-            .filter(|c| c.comment_type == CommentType::Analysis)
-            .collect();
-
-        match serde_json::to_string_pretty(&analysis_comments) {
             Ok(json) => json,
             Err(e) => format!("Error serializing: {e}"),
         }

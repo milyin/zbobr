@@ -88,6 +88,11 @@ pub enum CommentType {
     /// User message or agent request awaiting a human response (ASK_xxx operations).
     #[serde(rename = "request")]
     Request,
+    /// Technical boundary marker posted by the dispatcher before each new processing loop.
+    /// CUT comments mark the start of a new context window and are not sent to LLM agents.
+    /// Used to delimit chunks read by GET_PLAN and manage context size across cycles.
+    #[serde(rename = "cut")]
+    Cut,
 }
 
 impl CommentType {
@@ -99,6 +104,7 @@ impl CommentType {
             CommentType::Plan => "plan",
             CommentType::Analysis => "analysis",
             CommentType::Request => "request",
+            CommentType::Cut => "cut",
         }
     }
 
@@ -111,6 +117,7 @@ impl CommentType {
             "plan" => Some(CommentType::Plan),
             "analysis" => Some(CommentType::Analysis),
             "request" => Some(CommentType::Request),
+            "cut" => Some(CommentType::Cut),
             _ => None,
         }
     }
@@ -625,6 +632,7 @@ impl std::fmt::Display for CommentTag {
             CommentType::Plan => "PLAN",
             CommentType::Analysis => "ANALYSIS",
             CommentType::Request => "REQUEST",
+            CommentType::Cut => "CUT",
         };
 
         // All tag types now follow the same serialization rules.  REQUEST no

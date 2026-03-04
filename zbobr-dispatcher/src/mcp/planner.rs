@@ -51,11 +51,6 @@ impl PlannerMcp {
         self.get_plan_impl(params.offset.unwrap_or(0)).await
     }
 
-    #[tool(description = "Get all analysis comments for this task in chronological order")]
-    async fn get_analysis(&self) -> String {
-        self.get_analysis_impl().await
-    }
-
     #[tool(description = "Post the implementation plan for this task and finish your session")]
     async fn post_plan(&self, Parameters(params): Parameters<DescriptionParam>) -> String {
         self.post_plan_impl(&params.description).await

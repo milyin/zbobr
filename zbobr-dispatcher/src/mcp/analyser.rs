@@ -48,11 +48,6 @@ impl AnalyserMcp {
         self.get_plan_impl(params.offset.unwrap_or(0)).await
     }
 
-    #[tool(description = "Get all analysis comments for this task in chronological order")]
-    async fn get_analysis(&self) -> String {
-        self.get_analysis_impl().await
-    }
-
     #[tool(description = "Post the codebase analysis for this task and finish your session")]
     async fn post_analysis(&self, Parameters(params): Parameters<MessageParam>) -> String {
         self.post_analysis_impl(&params.message).await
