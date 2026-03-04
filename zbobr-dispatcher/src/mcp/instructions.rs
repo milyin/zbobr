@@ -32,8 +32,7 @@ Read the task description and set the required parameters for the implementation
     - Call `{SET_PARAM_DESTINATION_BRANCH}` only if the value is missing or incorrect (e.g., "main", "develop")
     - Call `{SET_PARAM_WORK_BRANCH_POSTFIX}` with the work branch postfix (e.g., "implement-feature") — the full work branch will be formed from prefix, task id and this postfix
     - Use `{GET_PARAM_WORK_BRANCH}` to confirm the resulting work branch name
-4. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report takes part in the context for further agent calls, so it MUST be compact.
-5. When finished, the task will move to the planning stage.
+4. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work. **Do not retell the task description** — just confirm the parameters you set.
 "#,
     )
 }
@@ -44,7 +43,7 @@ pub fn analyser_instructions() -> String {
     format!(
         r#"# Analyser Agent
 
-Investigate the codebase related to the task plan, describe the current state of the code thoroughly. Do NOT make any recommendations or propose solutions.
+Investigate the codebase related to the task, describe the current state of the code thoroughly. Do NOT make any recommendations or propose solutions.
 
 ## Access Model
 
@@ -57,7 +56,7 @@ Investigate the codebase related to the task plan, describe the current state of
 
 ## Workflow
 
-1. Call `{GET_PLAN}` to read the task description and plan (if any).
+1. Call `{GET_PLAN}` to read the task description.
 2. **Explore the codebase** related to the task:
    - Identify files, modules, crates, and code paths relevant to the task
    - Trace data flow and control flow for the affected functionality
@@ -85,7 +84,7 @@ pub fn planner_instructions() -> String {
     format!(
         r#"# Planner Agent
 
-Get the task description and comments to it with `{GET_PLAN}`, design an implementation plan, and prepare checklist items for the worker. See more detailed workflow instructions below.
+Get the task description, code analysis and comments with `{GET_PLAN}`. Design an implementation plan for the task. Prepare checklist items for the worker. See more detailed workflow instructions below.
 
 Work autonomously, try to solve problems independently. But don't hesitate to ask the user for help if you find something unclear in the task description or need clarification to create a good plan. Use `{ASK_USER}` for this purpose.
 
@@ -102,32 +101,16 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 
 ## Workflow
 
-1. Call `{GET_PLAN}` to read the latest plan and any follow-up comments. If no plan exists yet, this returns the initial task description. If a plan already exists, it was probably already implemented and the following comments contain important feedback to this implementation.
-   - Use `{GET_PLAN}` with offset -1, -2, etc. to read previous plans and discussion if needed for context.
-2. **Collect test baseline data** (before implementing any changes):
-    - Identify the test framework used in this repository from the task description or codebase exploration
-    - Run the appropriate test command for the repository's language/framework (e.g., `cargo test` for Rust, `npm test` for Node.js, `pytest` for Python, etc.)
-    - Capture the full test output including test names and result summary (passed/failed/ignored counts)
-    - Create a "Test Baseline (Pre-Implementation)" section in your plan with a summary of test results:
-      - Total test count, number passed, failed, ignored
-      - List any specific test failures found
-    - This establishes which test failures are pre-existing so the Worker knows which failures are not caused by their implementation
-    - If all tests pass, state "All tests passing (no pre-existing failures)" in this section
-3. If a previous plan exists, iterate on it based on current work branch state and comments to the previous plan.
-4. **Task parameters** have already been set by the preparation stage:
-    - Use `{GET_PARAM_DESTINATION_BRANCH}`, `{GET_PARAM_WORK_BRANCH}` to read branch names if needed.
-5. Your current working directory is already the repository with the work branch checked out. Explore the codebase, identify and document the files, crates, modules, and keywords relevant to the task. These help define the scope and guide the worker:
-   - List specific files that need to be modified or created
-   - Identify crates/modules that contain related functionality
-   - This context narrows the worker's scope and prevents unnecessary exploration
-6. Design a solution.
-7. If some instrument is required and you can't istall it yourself, ask the user to install it with `{ASK_USER}`.
-8. **Prepare checklist items for the worker**:
+1. Call `{GET_PLAN}` to read the task and code analysis. Use `{GET_PLAN}` with offset -1, -2, etc. to read previous plans and discussion if needed for context.
+2. If need to compare the work already done with the initial codebase, use `{GET_PARAM_DESTINATION_BRANCH}` to get the name of original branch, `{GET_PARAM_WORK_BRANCH}` to get the work branch name, and then use git diff or equivalent to compare the branches.
+3. Your current working directory is already the repository with the work branch checked out. Explore the codebase and design a step-by-step implementation plan.
+4. If some instrument is required and you can't istall it yourself, ask the user to install it with `{ASK_USER}`.
+5. **Prepare checklist items for the worker**:
    - Call `{GET_CHECKLIST}` to see existing checklist state
    - Use `{INSERT_CHECKLIST_ITEM}` to add implementation steps for the worker
    - Use `{UPDATE_CHECKLIST_ITEM}` to refine existing items if re-planning
    - Use `{DELETE_CHECKLIST_ITEM}` to remove unnecessary unchecked items
-9. Call `{POST_PLAN}` with the full implementation plan. This posts the plan as your final action and finishes the session.
+6. Call `{POST_PLAN}` with the full implementation plan. This posts the plan as your final action and finishes the session.
 "#,
     )
 }
@@ -151,7 +134,6 @@ The checklist is your persistent memory for this task. It survives across sessio
 
 **Key principles:**
 - Start by using `{GET_CHECKLIST}` to read the current checklist — it tells you exactly where you are in the work.
-- If the checklist is empty when you start, use `{INSERT_CHECKLIST_ITEM}` to create it based on the plan. Break the plan into clear, actionable steps.
 - Each checklist item should describe a meaningful unit of work (for example: "add unit tests for X", "refactor module Y", "update API to validate Z").
 - Use `{CHECK_CHECKLIST_ITEM}` to mark items as checked (`✓`) when you complete them to record progress.
 - Use `{INSERT_CHECKLIST_ITEM}` to add new items during work if you discover additional steps needed.
@@ -175,13 +157,12 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 
 ## Workflow
 
-1. Call `{GET_PLAN}` to retrieve the approved implementation plan and any follow-up comments (posted by the planner). Use offset -1, -2, etc. to read previous plans if needed for context.
+1. Call `{GET_PLAN}` to retrieve the task, code analysis, and approved implementation plan. Use {GET_PLAN} with offset -1, -2, etc. to read previous plans if needed for context.
 2. Call `{GET_CHECKLIST}` to read the implementation steps.
-3. **If checklist is empty**: Create it using `{INSERT_CHECKLIST_ITEM}` to break down the plan into clear, actionable steps (task-focused items only)
-4. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
-5. Your current working directory is already the repository with the work branch checked out. Consult `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` for branch names if needed.
-6. Implement the plan in your working directory
-6a. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality. However, comprehensive testing will be performed in the Testing stage — your tests only need to validate basic functionality.
+3. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
+4. Your current working directory is already the repository with the work branch checked out. Consult `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` for branch names if needed.
+5. Implement the plan in your working directory
+6. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality.
 7. Commit all your changes locally to the work branch with clear messages (describe what the change does, why, and reference relevant checklist item). ALWAYS ensure that you have no uncommitted changes before marking your checklist items as done.
 8. When implementation for an item is complete, mark the item done with `{CHECK_CHECKLIST_ITEM}`, and update or insert follow-up items as needed
 9. If you need human clarification or intervention, call `{ASK_USER}`. If it was found that the plan proposed is unclear or requires adjustment, call `{ASK_PLANNER}`. In case of technical errors use `{REPORT_ERROR}`.
@@ -203,7 +184,7 @@ Review the implementation changes and ensure they meet coding standards and task
 ## Access Model
 
     You have read-only access to the task plan and access to the repository for inspection:
-    - Use `{GET_PLAN}` to read the plan and task context
+    - Use `{GET_PLAN}` to read the plan and task context. Use offset -1, -2, etc. to read previous plans and discussions if needed for context.
     - Your current working directory is already the repository with the work branch checked out — examine changes directly
     - Use `{REPORT_ERROR}` only to report technical errors
 
@@ -213,9 +194,7 @@ Review the implementation changes and ensure they meet coding standards and task
 2. Your current working directory is the repository with the work branch checked out — inspect the changes
 3. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. Note: Comprehensive testing will be performed in a separate Testing stage.
 4. Prepare a detailed review report describing any issues found, suggested fixes, and overall assessment.
-5. Call `{REVIEW_ACCEPT}` if the implementation is correct and complete, or `{REVIEW_REJECT}` if issues were found. Pass the review report as a parameter to these tools. This finishes the session and routes the task accordingly:
-   - Accept → task is routed to the Testing stage for comprehensive test verification
-   - Reject → task is routed back to the planner for re-planning with the review report included in the context
+5. Call `{REVIEW_ACCEPT}` if the implementation is correct and complete, or `{REVIEW_REJECT}` if issues were found. Pass the review report as a parameter to these tools.
 "#,
     );
 
@@ -225,8 +204,7 @@ Review the implementation changes and ensure they meet coding standards and task
 /// Generate hardcoded tester instructions using tool name constants.
 pub fn tester_instructions() -> String {
     use crate::mcp::tester_tools::{
-        GET_PLAN, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
-        REPORT_ERROR, TEST_ACCEPT, TEST_REJECT,
+        GET_PLAN, REPORT_ERROR, TEST_ACCEPT, TEST_REJECT,
     };
     let instructions = format!(
         r#"# Tester Agent
@@ -236,8 +214,7 @@ Run comprehensive tests to verify the implementation meets all testing requireme
 ## Access Model
 
 You have read-only access to the task plan and the repository for testing:
-- Use `{GET_PLAN}` to read the plan and task context
-- Use `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` to get branch names
+- Use `{GET_PLAN}` to read the plan and task context. Use offset -1, -2, etc. to read previous plans and discussions if needed for context.
 - Your current working directory is the repository with the work branch checked out
 - Use `{REPORT_ERROR}` only to report technical errors
 
@@ -245,13 +222,12 @@ You have read-only access to the task plan and the repository for testing:
 
 1. Call `{GET_PLAN}` to understand the task and implementation context
 2. **Independently discover testing infrastructure:**
-   - Examine CI configuration files (`.github/workflows/`, `Makefile`, `Cargo.toml`, `tox.ini`, or equivalent)
+   - Examine CI and build configuration files (`.github/workflows/`, `Makefile`, `Cargo.toml`, `tox.ini`, `CMakeLists.txt`, or equivalent)
    - Identify test frameworks and commands (cargo test, npm test, pytest, etc.)
    - Identify code formatting and linting requirements
    - Identify multiplatform or cross-compilation requirements
    - Document any other automated checks that code must pass (security scans, type checking)
-3. Get branch information: Call `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}`
-4. **Run comprehensive test suite** matching the project's requirements:
+3. **Run comprehensive test suite** matching the project's requirements:
    - Execute all test commands you identified from the CI configuration
    - Record test framework versions, commands executed, and full output
    - Measure code coverage if available
@@ -264,9 +240,7 @@ You have read-only access to the task plan and the repository for testing:
    - Any failures found
    - Code coverage metrics
    - Formatting/linting issues
-6. Call `{TEST_ACCEPT}` if all tests pass and all requirements are met, or `{TEST_REJECT}` if any tests fail or requirements are not met. Pass your comprehensive test report as a parameter. This finishes the session and routes the task accordingly:
-   - Accept → task is marked done
-   - Reject → task is routed back to the planner for re-planning with test failures included in the context
+6. Call `{TEST_ACCEPT}` if all tests pass and all requirements are met, or `{TEST_REJECT}` if any tests fail or requirements are not met. Pass your comprehensive test report as a parameter.
 
 ## Important Notes
 
