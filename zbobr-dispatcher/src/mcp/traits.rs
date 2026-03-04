@@ -21,6 +21,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Role::Preparator => Signal::GoPrepare,
             Role::Analyser => Signal::GoAnalyse,
             Role::Planner => Signal::GoPlan,
+            Role::Decomposer => Signal::GoDecomposePlan,
             Role::Worker => Signal::GoWork,
             Role::Reviewer => Signal::GoReview,
             Role::Merger => Signal::GoWork,

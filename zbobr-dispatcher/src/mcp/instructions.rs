@@ -150,6 +150,46 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
     )
 }
 
+/// Generate hardcoded decomposer instructions using tool name constants.
+pub fn decomposer_instructions() -> String {
+    use planner_tools::{GET_ANALYSIS, GET_PLAN, POST_PLAN, ASK_USER, GET_CHECKLIST, INSERT_CHECKLIST_ITEM, UPDATE_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, REPORT_ERROR};
+    let branch_isolation = crate::mcp::common::branch_isolation_instruction();
+    format!(
+        r#"# Decomposer Agent
+
+Analyze the task and break it down into subtasks. Create concrete subtasks with specific repositories, branches, and instructions that can be executed independently.
+
+## Access Model
+
+    You can access the internet and run local commands. Your restrictions:
+    - Use MCP `{POST_PLAN}` to post the decomposition plan — this is your final action and finishes the session
+    - Use MCP `{REPORT_ERROR}` only to report technical errors; use `{ASK_USER}` to request clarifications
+    - NEVER use git/gh for writing, pushing, or sending data to GitHub
+
+## Workspace isolation
+
+    {branch_isolation}
+
+## Workflow
+
+1. Call `{GET_PLAN}` to read the task description and understand the overall goal
+2. Call `{GET_ANALYSIS}` to read the codebase analysis to understand existing code structure
+3. **Analyze the task for multi-repository/multi-component decomposition:**
+   - Identify logical subtasks that can be executed independently
+   - Determine which repository each subtask belongs to
+   - Determine what branch each subtask should work on
+   - Create specific, actionable instructions for each subtask
+4. **Prepare decomposition plan:**
+   - Call `{GET_CHECKLIST}` to see the current checklist
+   - Use `{INSERT_CHECKLIST_ITEM}` to add each subtask as a checklist item with:
+     - Clear title describing what needs to be done
+     - Description with: repository, target branch, and concise instructions
+   - Use `{UPDATE_CHECKLIST_ITEM}` to refine items if needed
+5. Call `{POST_PLAN}` with the full decomposition plan. This posts the plan as your final action and finishes the session.
+"#,
+    )
+}
+
 /// Generate hardcoded worker instructions using tool name constants.
 pub fn worker_instructions() -> String {
     use worker_tools::{

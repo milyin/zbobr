@@ -121,6 +121,20 @@ pub struct GetPlanParam {
     pub offset: Option<i32>,
 }
 
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct CreateTaskParam {
+    #[schemars(description = "Title of the new task")]
+    pub title: String,
+    #[schemars(description = "Description of the new task")]
+    pub description: String,
+    #[schemars(description = "Destination repository (full git URL, local path, or owner/repo format) (or null for same repo)")]
+    pub destination_repository: Option<String>,
+    #[schemars(description = "Destination branch name")]
+    pub destination_branch: Option<String>,
+    #[schemars(description = "Work branch name (or null to auto-generate)")]
+    pub work_branch: Option<String>,
+}
+
 macro_rules! mcp_tools {
     ($mod_name:ident, $($name:ident = $val:expr),* $(,)?) => {
         pub mod $mod_name {
@@ -165,6 +179,21 @@ mcp_tools! {
     ASK_USER = "ask_user",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
+}
+
+mcp_tools! {
+    decomposer_tools,
+    GET_PLAN = "get_plan",
+    GET_ANALYSIS = "get_analysis",
+    POST_PLAN = "post_plan",
+    GET_CHECKLIST = "get_checklist",
+    INSERT_CHECKLIST_ITEM = "insert_checklist_item",
+    UPDATE_CHECKLIST_ITEM = "update_checklist_item",
+    DELETE_CHECKLIST_ITEM = "delete_checklist_item",
+    CREATE_TASK = "create_task",
+    REPORT_ERROR = "report_error",
+    ASK_USER = "ask_user",
+    REPORT_RESULTS = "report_results",
 }
 
 mcp_tools! {
@@ -369,6 +398,18 @@ pub async fn run_role_mcp_server(
                 move || {
                     tracing::debug!("Creating new PlannerMcp instance for task {task_id}");
                     Ok(super::planner::PlannerMcp::new(zbobr.clone(), task_id))
+                },
+                std::sync::Arc::new(LocalSessionManager::default()),
+                Default::default(),
+            );
+            axum::Router::new().nest_service(&path, svc)
+        }
+        Role::Decomposer => {
+            tracing::info!("Creating DecomposerMcp service for task {task_id} at path {path}");
+            let svc = StreamableHttpService::new(
+                move || {
+                    tracing::debug!("Creating new DecomposerMcp instance for task {task_id}");
+                    Ok(super::decomposer::DecomposerMcp::new(zbobr.clone(), task_id))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
                 Default::default(),
