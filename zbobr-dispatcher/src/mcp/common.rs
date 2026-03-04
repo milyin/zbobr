@@ -168,6 +168,19 @@ mcp_tools! {
 }
 
 mcp_tools! {
+    decomposer_tools,
+    GET_PLAN = "get_plan",
+    GET_ANALYSIS = "get_analysis",
+    POST_PLAN = "post_plan",
+    GET_CHECKLIST = "get_checklist",
+    INSERT_CHECKLIST_ITEM = "insert_checklist_item",
+    UPDATE_CHECKLIST_ITEM = "update_checklist_item",
+    DELETE_CHECKLIST_ITEM = "delete_checklist_item",
+    REPORT_ERROR = "report_error",
+    ASK_USER = "ask_user",
+}
+
+mcp_tools! {
     worker_tools,
     GET_PLAN = "get_plan",
     GET_ANALYSIS = "get_analysis",
@@ -369,6 +382,18 @@ pub async fn run_role_mcp_server(
                 move || {
                     tracing::debug!("Creating new PlannerMcp instance for task {task_id}");
                     Ok(super::planner::PlannerMcp::new(zbobr.clone(), task_id))
+                },
+                std::sync::Arc::new(LocalSessionManager::default()),
+                Default::default(),
+            );
+            axum::Router::new().nest_service(&path, svc)
+        }
+        Role::Decomposer => {
+            tracing::info!("Creating DecomposerMcp service for task {task_id} at path {path}");
+            let svc = StreamableHttpService::new(
+                move || {
+                    tracing::debug!("Creating new DecomposerMcp instance for task {task_id}");
+                    Ok(super::decomposer::DecomposerMcp::new(zbobr.clone(), task_id))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
                 Default::default(),

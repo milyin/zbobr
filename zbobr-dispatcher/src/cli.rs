@@ -1148,6 +1148,8 @@ pub async fn process_task_by_stage(
         Stage::Preparing
         | Stage::Analysing
         | Stage::Planning
+        | Stage::DecomposePlanning
+        | Stage::Decomposing
         | Stage::Working
         | Stage::Reviewing
         | Stage::Merging => {
@@ -1698,6 +1700,11 @@ async fn finalize_session(
             if current_task.signal.is_none() && !current_task.pause {
                 task_session.set_signal(Some(Signal::GoWork)).await?;
             }
+            task_session.set_stage(Stage::Pending).await?;
+        }
+        Role::Decomposer => {
+            // After decomposing, return to Pending. The decomposer will handle
+            // further transitions based on the decomposition result.
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Worker => {

@@ -72,6 +72,7 @@ impl TaskFile {
             conflict: self.conflict,
             pause: self.pause,
             confirm: self.confirm,
+            umbrella: false,
             etag: None,
         })
     }
@@ -295,6 +296,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             conflict: false,
             pause: false,
             confirm: false,
+            umbrella: false,
             etag: None,
         };
 

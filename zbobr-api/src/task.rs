@@ -325,7 +325,7 @@ impl std::str::FromStr for Role {
 }
 
 /// Signal for task flow control (mapped to labels in GitHub backend).
-/// Ordered by priority (highest to lowest): GoPrepare > GoAnalyse > GoPlan > GoWork > GoReview.
+/// Ordered by priority (highest to lowest): GoPrepare > GoAnalyse > GoPlan > GoDecomposePlan > GoWork > GoReview.
 #[derive(
     Debug,
     Clone,
@@ -345,6 +345,8 @@ pub enum Signal {
     GoAnalyse = 2,
     #[serde(rename = "go_plan")]
     GoPlan = 3,
+    #[serde(rename = "go_decompose_plan")]
+    GoDecomposePlan = 3_5,
     #[serde(rename = "go_work")]
     GoWork = 4,
     #[serde(rename = "go_review")]
@@ -357,6 +359,7 @@ impl Signal {
         match self {
             Signal::GoReview => "go_review",
             Signal::GoWork => "go_work",
+            Signal::GoDecomposePlan => "go_decompose_plan",
             Signal::GoPlan => "go_plan",
             Signal::GoAnalyse => "go_analyse",
             Signal::GoPrepare => "go_prepare",
@@ -369,6 +372,7 @@ impl Signal {
             Signal::GoPrepare,
             Signal::GoAnalyse,
             Signal::GoPlan,
+            Signal::GoDecomposePlan,
             Signal::GoWork,
             Signal::GoReview,
         ]
@@ -379,6 +383,7 @@ impl Signal {
         match self {
             Signal::GoReview => Role::Reviewer,
             Signal::GoWork => Role::Worker,
+            Signal::GoDecomposePlan => Role::Decomposer,
             Signal::GoPlan => Role::Planner,
             Signal::GoAnalyse => Role::Analyser,
             Signal::GoPrepare => Role::Preparator,
@@ -398,6 +403,7 @@ impl std::str::FromStr for Signal {
         match s.to_lowercase().replace('_', "").as_str() {
             "goreview" | "go-review" => Ok(Signal::GoReview),
             "gowork" | "go-work" => Ok(Signal::GoWork),
+            "godecomposeplan" | "go-decompose-plan" => Ok(Signal::GoDecomposePlan),
             "goplan" | "go-plan" => Ok(Signal::GoPlan),
             "goanalyse" | "go-analyse" => Ok(Signal::GoAnalyse),
             "goprepare" | "go-prepare" => Ok(Signal::GoPrepare),

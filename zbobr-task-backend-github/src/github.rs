@@ -634,6 +634,10 @@ impl ZbobrTaskBackendGithub {
             conflict,
             pause,
             confirm,
+            umbrella: issue
+                .labels
+                .iter()
+                .any(|l| Self::label_to_flag(&l.name) == Some("umbrella")),
             etag: Some(body),
         }
     }
@@ -1009,6 +1013,8 @@ fn stage_description(stage: Stage) -> &'static str {
         Stage::Preparing => "Task parameters are being set",
         Stage::Analysing => "Task codebase is being analysed",
         Stage::Planning => "Task is in planning",
+        Stage::DecomposePlanning => "Task is in decomposition planning",
+        Stage::Decomposing => "Task is being decomposed into subtasks",
         Stage::Working => "Task is in work",
         Stage::Reviewing => "Task is in review",
         Stage::Merging => "Task is in merge conflict resolution",
