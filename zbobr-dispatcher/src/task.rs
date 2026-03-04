@@ -107,7 +107,7 @@ impl RoleSession {
     }
 
     /// Get all comments as structured `Comment` objects (includes all
-    /// types: error, report, request, analysis, etc.).
+    /// types: error, report, request, plan, etc.).
     pub async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
         self.zbobr.get_task_comments(self.task_id).await
     }
