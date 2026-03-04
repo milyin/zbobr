@@ -1,5 +1,5 @@
 use crate::{
-    Signal, CommentType,
+    CommentType, Signal,
     mcp::common::get_hostname,
     task::{ChecklistItem, Parameter, Role, RoleSession},
 };
@@ -512,13 +512,7 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
         // Post the plan as a PLAN comment to preserve history
         if let Err(e) = self
             .session()
-            .post_comment(
-                CommentType::Plan,
-                plan,
-                Some(self.role()),
-                &hostname,
-                None,
-            )
+            .post_comment(CommentType::Plan, plan, Some(self.role()), &hostname, None)
             .await
         {
             tracing::error!(
@@ -527,7 +521,6 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
             );
             return format!("Error posting plan: {e}");
         }
-
 
         "Plan posted and task ready for worker implementation".to_string()
     }
@@ -558,7 +551,13 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
 
         if let Err(e) = self
             .session()
-            .post_comment(CommentType::Request, message, Some(self.role()), &hostname, None)
+            .post_comment(
+                CommentType::Request,
+                message,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
             .await
         {
             tracing::error!(

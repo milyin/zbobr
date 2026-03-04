@@ -168,9 +168,5 @@ pub(crate) fn merge_concurrent_description_updates(
     };
 
     // Serialize back with the merged content
-    serialize_description_full(
-        &merged_desc,
-        &merged_params,
-        &merged_checklist,
-    )
+    serialize_description_full(&merged_desc, &merged_params, &merged_checklist)
 }

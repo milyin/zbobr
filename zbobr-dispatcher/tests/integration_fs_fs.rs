@@ -6,12 +6,10 @@
 /// or filter by prefix: `cargo test test_fs_fs_`
 mod mcp_integration;
 
-
 use std::sync::Arc;
-use tokio::sync::OnceCell;
 
-use mcp_integration::IntegrationTestEnv;
-use mcp_integration::test_helpers;
+use mcp_integration::{IntegrationTestEnv, test_helpers};
+use tokio::sync::OnceCell;
 
 static ENV: OnceCell<Option<Arc<IntegrationTestEnv>>> = OnceCell::const_new();
 // tokio::sync::Mutex serializes tests — no poison semantics, works across runtimes.

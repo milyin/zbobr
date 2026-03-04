@@ -3,9 +3,9 @@
 
 pub fn preparation_scenario(repo_path: &str) -> String {
     use zbobr_dispatcher::mcp::preparator_tools::{
-        GET_PARAM_DESTINATION_BRANCH,
-        GET_PARAM_DESTINATION_REPOSITORY, GET_PARAM_WORK_BRANCH, GET_PLAN, SET_PARAM_DESTINATION_BRANCH,
-        SET_PARAM_DESTINATION_REPOSITORY, SET_PARAM_WORK_BRANCH_POSTFIX,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_DESTINATION_REPOSITORY, GET_PARAM_WORK_BRANCH,
+        GET_PLAN, SET_PARAM_DESTINATION_BRANCH, SET_PARAM_DESTINATION_REPOSITORY,
+        SET_PARAM_WORK_BRANCH_POSTFIX,
     };
 
     format!(
@@ -88,8 +88,8 @@ steps:
 
 pub fn planning_scenario() -> String {
     use zbobr_dispatcher::mcp::planner_tools::{
-        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
-        GET_PLAN, INSERT_CHECKLIST_ITEM, POST_PLAN,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, INSERT_CHECKLIST_ITEM,
+        POST_PLAN,
     };
 
     format!(
@@ -203,9 +203,9 @@ steps:
 
 pub fn working_scenario() -> String {
     use zbobr_dispatcher::mcp::worker_tools::{
-        CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST,
-        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN,
-        INSERT_CHECKLIST_ITEM, REPORT_RESULTS, UPDATE_CHECKLIST_ITEM,
+        CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST, GET_PARAM_DESTINATION_BRANCH,
+        GET_PARAM_WORK_BRANCH, GET_PLAN, INSERT_CHECKLIST_ITEM, REPORT_RESULTS,
+        UPDATE_CHECKLIST_ITEM,
     };
 
     const PRIMARY_ID: &str = "w1";
@@ -322,9 +322,11 @@ steps:
 pub fn reviewing_scenario() -> String {
     // checklist operations aren't exported by reviewer_tools, so pull them
     // from worker_tools (they're otherwise the same constants).
-    use zbobr_dispatcher::mcp::worker_tools::INSERT_CHECKLIST_ITEM;
-    use zbobr_dispatcher::mcp::reviewer_tools::{
-        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, REVIEW_REJECT,
+    use zbobr_dispatcher::mcp::{
+        reviewer_tools::{
+            GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, REVIEW_REJECT,
+        },
+        worker_tools::INSERT_CHECKLIST_ITEM,
     };
 
     format!(
@@ -431,8 +433,7 @@ steps:
 
 pub fn merging_scenario(ending: &str) -> String {
     use zbobr_dispatcher::mcp::merger_tools::{
-        ASK_USER, GET_PARAM_DESTINATION_BRANCH,
-        GET_PARAM_WORK_BRANCH, GET_PLAN, REPORT_RESULTS,
+        ASK_USER, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, REPORT_RESULTS,
     };
 
     let ending_step = match ending {

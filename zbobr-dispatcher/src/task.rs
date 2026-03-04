@@ -106,7 +106,6 @@ impl RoleSession {
             .await
     }
 
-
     /// Get all comments as structured `Comment` objects (includes all
     /// types: error, report, request, analysis, etc.).
     pub async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {

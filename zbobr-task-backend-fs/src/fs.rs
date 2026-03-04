@@ -4,7 +4,10 @@ use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use zbobr_api::{ChecklistItem, Comment, CommentType, Model, Parameter, Role, Stage, Task, Tool, backend::TaskBackend};
+use zbobr_api::{
+    ChecklistItem, Comment, CommentType, Model, Parameter, Role, Stage, Task, Tool,
+    backend::TaskBackend,
+};
 
 use crate::config::ZbobrTaskBackendFsConfig;
 
@@ -210,7 +213,11 @@ impl ZbobrTaskBackendFs {
     }
 
     /// Write structured comments to disk.
-    async fn write_comments_structured(&self, id: u64, comments: Vec<Comment>) -> anyhow::Result<()> {
+    async fn write_comments_structured(
+        &self,
+        id: u64,
+        comments: Vec<Comment>,
+    ) -> anyhow::Result<()> {
         let path = self.comments_path(id);
 
         let comments_file = CommentsFile { comments };
@@ -393,7 +400,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
         body: &str,
     ) -> anyhow::Result<()> {
         let mut comments = self.read_comments_structured(id).await?;
-        
+
         let new_comment = Comment {
             comment_type,
             timestamp: format!("{:?}", std::time::SystemTime::now()),
@@ -402,10 +409,10 @@ impl TaskBackend for ZbobrTaskBackendFs {
             model,
             text: body.to_string(),
         };
-        
+
         comments.push(new_comment);
         self.write_comments_structured(id, comments).await?;
-        
+
         tracing::debug!("Posted structured comment to task {}", id);
         Ok(())
     }
@@ -460,9 +467,11 @@ impl TaskBackend for ZbobrTaskBackendFs {
 
 #[cfg(test)]
 mod parse_tests {
-    use super::*;
     use std::str::FromStr;
+
     use zbobr_api::task::CommentTag;
+
+    use super::*;
 
     fn split_tag_body(input: &str) -> (CommentTag, String) {
         let mut parts = input.splitn(2, '\n');
@@ -474,17 +483,14 @@ mod parse_tests {
         let result = match tag_line.parse::<CommentTag>() {
             Ok(tag) => {
                 eprintln!("split_tag_body: parsed tag={:?}", tag);
-                let body = rest
-                    .unwrap_or("")
-                    .trim_start()
-                    .to_string();
+                let body = rest.unwrap_or("").trim_start().to_string();
                 (tag, body)
             }
             Err(err) => {
                 eprintln!("split_tag_body: parse error={:?}", err);
                 // parsing failed, keep entire input as body
                 (
-                    CommentTag::new(CommentType::Request,None, String::new(), None),
+                    CommentTag::new(CommentType::Request, None, String::new(), None),
                     input.to_string(),
                 )
             }
@@ -501,7 +507,7 @@ mod parse_tests {
         let role = tag.role;
         let host = tag.hostname;
         let model = tag.model;
-        
+
         assert_eq!(comment_type, CommentType::Report);
         assert_eq!(role, Some(Role::Worker));
         assert_eq!(host, "localhost");
@@ -517,7 +523,7 @@ mod parse_tests {
         let role = tag.role;
         let host = tag.hostname;
         let model = tag.model;
-        
+
         assert_eq!(comment_type, CommentType::Error);
         assert_eq!(role, Some(Role::Planner));
         assert_eq!(host, "skynet");
@@ -549,7 +555,7 @@ mod parse_tests {
         let role = tag.role;
         let host = tag.hostname;
         let model = tag.model;
-        
+
         assert_eq!(comment_type, CommentType::Report);
         assert_eq!(role, Some(Role::Reviewer));
         assert_eq!(host, "host");
@@ -596,7 +602,8 @@ mod parse_tests {
 
     #[test]
     fn test_parse_comment_tag_plan_with_body() {
-        let input = "// PLAN planner:localhost:claude-opus-4.6\n\nStep 1: analyse\nStep 2: implement";
+        let input =
+            "// PLAN planner:localhost:claude-opus-4.6\n\nStep 1: analyse\nStep 2: implement";
         let (tag, body) = split_tag_body(input);
         assert_eq!(tag.comment_type, CommentType::Plan);
         assert_eq!(tag.role, Some(Role::Planner));

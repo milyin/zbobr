@@ -8,13 +8,10 @@
 /// `[repo.github]` section.
 mod mcp_integration;
 
-
 use std::sync::Arc;
-use tokio::sync::OnceCell;
 
-use mcp_integration::IntegrationTestEnv;
-use mcp_integration::github_config::GitHubTestConfig;
-use mcp_integration::test_helpers;
+use mcp_integration::{IntegrationTestEnv, github_config::GitHubTestConfig, test_helpers};
+use tokio::sync::OnceCell;
 
 static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -33,7 +30,11 @@ async fn load_credentials() -> (String, String, Option<String>) {
                 .repo
                 .expect("[repo.github] section missing in zbobr_github_test.toml");
             let target_repo = cfg.tasks.as_ref().map(|t| t.github.github_repo.clone());
-            (repo.github.fork_owner, repo.github.github_token, target_repo)
+            (
+                repo.github.fork_owner,
+                repo.github.github_token,
+                target_repo,
+            )
         })
         .await
         .clone()
@@ -41,14 +42,9 @@ async fn load_credentials() -> (String, String, Option<String>) {
 
 async fn get_env() -> Arc<IntegrationTestEnv> {
     let (fork_owner, repo_token, target_repo) = load_credentials().await;
-    IntegrationTestEnv::init_fs_github(
-        "fs_github",
-        fork_owner,
-        repo_token,
-        target_repo,
-    )
-    .await
-    .expect("failed to initialise FS/GitHub environment; check credentials")
+    IntegrationTestEnv::init_fs_github("fs_github", fork_owner, repo_token, target_repo)
+        .await
+        .expect("failed to initialise FS/GitHub environment; check credentials")
 }
 
 // ---------------------------------------------------------------------------

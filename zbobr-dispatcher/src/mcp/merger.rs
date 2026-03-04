@@ -41,7 +41,9 @@ impl MergerMcp {
         }
     }
 
-    #[tool(description = "Get the plan and following comments. Optional offset: 0 = latest plan (default), -1 = previous plan, etc.")]
+    #[tool(
+        description = "Get the plan and following comments. Optional offset: 0 = latest plan (default), -1 = previous plan, etc."
+    )]
     async fn get_plan(&self, Parameters(params): Parameters<GetPlanParam>) -> String {
         self.get_plan_impl(params.offset.unwrap_or(0)).await
     }

@@ -9,8 +9,8 @@ use crate::{
     ZbobrDispatcherDyn,
     mcp::{
         common::{
-            DeleteChecklistItemParam, DescriptionParam, GetPlanParam,
-            InsertChecklistItemParam, MessageParam, UpdateChecklistItemParam,
+            DeleteChecklistItemParam, DescriptionParam, GetPlanParam, InsertChecklistItemParam,
+            MessageParam, UpdateChecklistItemParam,
         },
         traits::{CommonMcpImpl, PlannerMcpImpl},
     },
@@ -44,7 +44,9 @@ impl PlannerMcp {
         }
     }
 
-    #[tool(description = "Get the plan and following comments (analysis comments excluded). Optional offset: 0 = latest plan (default), -1 = previous plan, etc.")]
+    #[tool(
+        description = "Get the plan and following comments (analysis comments excluded). Optional offset: 0 = latest plan (default), -1 = previous plan, etc."
+    )]
     async fn get_plan(&self, Parameters(params): Parameters<GetPlanParam>) -> String {
         self.get_plan_impl(params.offset.unwrap_or(0)).await
     }

@@ -8,13 +8,10 @@
 /// `[tasks.github]` and `[repo.github]` sections.
 mod mcp_integration;
 
-
 use std::sync::Arc;
-use tokio::sync::OnceCell;
 
-use mcp_integration::IntegrationTestEnv;
-use mcp_integration::github_config::GitHubTestConfig;
-use mcp_integration::test_helpers;
+use mcp_integration::{IntegrationTestEnv, github_config::GitHubTestConfig, test_helpers};
+use tokio::sync::OnceCell;
 
 static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

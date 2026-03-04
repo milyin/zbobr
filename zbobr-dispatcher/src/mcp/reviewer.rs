@@ -41,7 +41,9 @@ impl ReviewerMcp {
         }
     }
 
-    #[tool(description = "Get the plan and following comments (analysis comments excluded). Optional offset: 0 = latest plan (default), -1 = previous plan, etc.")]
+    #[tool(
+        description = "Get the plan and following comments (analysis comments excluded). Optional offset: 0 = latest plan (default), -1 = previous plan, etc."
+    )]
     async fn get_plan(&self, Parameters(params): Parameters<GetPlanParam>) -> String {
         self.get_plan_impl(params.offset.unwrap_or(0)).await
     }
@@ -69,7 +71,9 @@ impl ReviewerMcp {
         self.get_param_work_branch_impl().await
     }
 
-    #[tool(description = "Accept the review: the implementation is correct and the task is done. Provide a concise summary of what was reviewed and confirmed.")]
+    #[tool(
+        description = "Accept the review: the implementation is correct and the task is done. Provide a concise summary of what was reviewed and confirmed."
+    )]
     async fn review_accept(
         &self,
         Parameters(params): Parameters<crate::mcp::common::MessageParam>,
@@ -77,7 +81,9 @@ impl ReviewerMcp {
         self.review_accept_impl(&params.message).await
     }
 
-    #[tool(description = "Reject the review: the implementation has issues that need to be addressed. Provide a concise description of the problems found.")]
+    #[tool(
+        description = "Reject the review: the implementation has issues that need to be addressed. Provide a concise description of the problems found."
+    )]
     async fn review_reject(
         &self,
         Parameters(params): Parameters<crate::mcp::common::MessageParam>,

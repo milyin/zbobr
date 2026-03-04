@@ -602,7 +602,11 @@ impl std::fmt::Display for CommentTag {
         // and we want to be able to see `// REQUEST planner:foo:bar` or
         // `// REQUEST user:host` in the log.
         // role is always present now
-        let role = self.role.as_ref().map(|r| r.to_string()).unwrap_or_else(|| "user".to_string());
+        let role = self
+            .role
+            .as_ref()
+            .map(|r| r.to_string())
+            .unwrap_or_else(|| "user".to_string());
         if let Some(model) = &self.model {
             write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, model)
         } else {

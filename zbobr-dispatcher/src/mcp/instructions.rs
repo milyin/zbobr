@@ -5,10 +5,9 @@ use crate::mcp::common::{
 /// Generate hardcoded preparator instructions using tool name constants.
 pub fn preparator_instructions() -> String {
     use preparator_tools::{
-        GET_PARAM_DESTINATION_BRANCH,
-        GET_PARAM_DESTINATION_REPOSITORY, GET_PARAM_WORK_BRANCH, GET_PLAN, REPORT_ERROR, REPORT_RESULTS,
-        SET_PARAM_DESTINATION_BRANCH, SET_PARAM_DESTINATION_REPOSITORY,
-        SET_PARAM_WORK_BRANCH_POSTFIX,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_DESTINATION_REPOSITORY, GET_PARAM_WORK_BRANCH,
+        GET_PLAN, REPORT_ERROR, REPORT_RESULTS, SET_PARAM_DESTINATION_BRANCH,
+        SET_PARAM_DESTINATION_REPOSITORY, SET_PARAM_WORK_BRANCH_POSTFIX,
     };
     use worker_tools::ASK_USER;
     format!(
@@ -83,10 +82,9 @@ Investigate the codebase related to the task plan, describe the current state of
 /// Generate hardcoded planner instructions using tool name constants.
 pub fn planner_instructions() -> String {
     use planner_tools::{
-        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
-        GET_PLAN, GET_ANALYSIS, POST_PLAN, REPORT_ERROR,
-        GET_CHECKLIST, INSERT_CHECKLIST_ITEM, UPDATE_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM,
-        ASK_USER,
+        ASK_USER, DELETE_CHECKLIST_ITEM, GET_ANALYSIS, GET_CHECKLIST, GET_PARAM_DESTINATION_BRANCH,
+        GET_PARAM_WORK_BRANCH, GET_PLAN, INSERT_CHECKLIST_ITEM, POST_PLAN, REPORT_ERROR,
+        UPDATE_CHECKLIST_ITEM,
     };
     let branch_isolation = crate::mcp::common::branch_isolation_instruction();
     format!(
@@ -196,9 +194,7 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 
 /// Generate hardcoded reviewer instructions using tool name constants.
 pub fn reviewer_instructions() -> String {
-    use reviewer_tools::{
-        GET_ANALYSIS, GET_PLAN, REPORT_ERROR, REVIEW_ACCEPT, REVIEW_REJECT,
-    };
+    use reviewer_tools::{GET_ANALYSIS, GET_PLAN, REPORT_ERROR, REVIEW_ACCEPT, REVIEW_REJECT};
     let instructions = format!(
         r#"# Reviewer Agent
 

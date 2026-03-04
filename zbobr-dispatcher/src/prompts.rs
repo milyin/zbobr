@@ -78,8 +78,13 @@ pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::R
             path.clone()
         };
 
-        let content = std::fs::read_to_string(&resolved_path)
-            .map_err(|e| anyhow::anyhow!("Failed to read prompt file '{}': {}", resolved_path.display(), e))?;
+        let content = std::fs::read_to_string(&resolved_path).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to read prompt file '{}': {}",
+                resolved_path.display(),
+                e
+            )
+        })?;
 
         let trimmed = content.trim();
         if trimmed.is_empty() {
@@ -140,10 +145,11 @@ impl Prompts {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::fs;
-    use std::io::Write;
+    use std::{fs, io::Write};
+
     use tempfile::TempDir;
+
+    use super::*;
 
     fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
         let path = dir.path().join(name);

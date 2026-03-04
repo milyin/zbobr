@@ -10,7 +10,8 @@ use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
 
 use crate::{
-    Comment, CommentType, Signal, Stage, Task, ToolExecutor, ZbobrDispatcherDyn, ZbobrExecutorConfig,
+    Comment, CommentType, Signal, Stage, Task, ToolExecutor, ZbobrDispatcherDyn,
+    ZbobrExecutorConfig,
     mcp::common::get_hostname,
     prompts::Prompts,
     task::{Model, Parameter, Role, Tool},
@@ -423,9 +424,13 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     // show latest plan comment if present (old tasks used to store this in
     // `task.plan` so we try to mimic that behaviour for convenience)
     if !discussion.is_empty()
-        && let Some(plan_comment) = discussion.iter().rev().find(|c| c.comment_type == CommentType::Plan) {
-            println!("Plan (from comment):\n{}", plan_comment.text);
-        }
+        && let Some(plan_comment) = discussion
+            .iter()
+            .rev()
+            .find(|c| c.comment_type == CommentType::Plan)
+    {
+        println!("Plan (from comment):\n{}", plan_comment.text);
+    }
     if !task.checklist.is_empty() {
         println!("Checklist:");
         for item in &task.checklist {
@@ -443,7 +448,6 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
                 model: c.model.clone(),
             };
             println!("  [{}] {}\n{}", i + 1, tag, c.text);
-
         }
     }
 }
@@ -858,9 +862,7 @@ async fn run_task_subcommand(
             let dest_repo = task
                 .parameters
                 .get(&Parameter::DestinationRepository)
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Task #{} has no destination repository", id)
-                })?
+                .ok_or_else(|| anyhow::anyhow!("Task #{} has no destination repository", id))?
                 .clone();
 
             if dry_run {
@@ -1029,9 +1031,10 @@ impl<'a> CliRoleRunner<'a> {
         // If a conflict is detected the session exits here — the signal is left
         // intact so the Merger can return to the same stage after resolving it.
         if should_try_early_merge(self.role)
-            && try_early_merge(self.zbobr, self.task_id, &work_dir).await? {
-                return Ok(());
-            }
+            && try_early_merge(self.zbobr, self.task_id, &work_dir).await?
+        {
+            return Ok(());
+        }
 
         // Rule 1: clear the triggering condition right before the agent session
         // starts (no conflict was detected above).
@@ -1471,27 +1474,28 @@ async fn ensure_pr_url(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> anyhow::Resu
 /// Pre-populate task parameters from dispatcher config defaults before the
 /// preparator agent runs. Only sets a parameter if it is not already present,
 /// so a previously prepared task (e.g. re-run) keeps its values unchanged.
-async fn seed_preparator_defaults(
-    zbobr: &ZbobrDispatcherDyn,
-    task_id: u64,
-) -> anyhow::Result<()> {
+async fn seed_preparator_defaults(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> anyhow::Result<()> {
     let config = zbobr.config();
     let task = zbobr.get_task(task_id).await?;
     let role_session = zbobr.role_session(task_id);
 
     if let Some(default_repo) = &config.default_destination_repository
-        && !task.parameters.contains_key(&Parameter::DestinationRepository) {
-            role_session
-                .set_parameter(Parameter::DestinationRepository, Some(default_repo.clone()))
-                .await?;
-        }
+        && !task
+            .parameters
+            .contains_key(&Parameter::DestinationRepository)
+    {
+        role_session
+            .set_parameter(Parameter::DestinationRepository, Some(default_repo.clone()))
+            .await?;
+    }
 
     if let Some(default_branch) = &config.default_destination_branch
-        && !task.parameters.contains_key(&Parameter::DestinationBranch) {
-            role_session
-                .set_parameter(Parameter::DestinationBranch, Some(default_branch.clone()))
-                .await?;
-        }
+        && !task.parameters.contains_key(&Parameter::DestinationBranch)
+    {
+        role_session
+            .set_parameter(Parameter::DestinationBranch, Some(default_branch.clone()))
+            .await?;
+    }
 
     Ok(())
 }
@@ -1795,13 +1799,11 @@ async fn rewrite_commit_authors(
         .current_dir(work_dir)
         .output()
         .await;
-    
+
     let git_root = match git_root_cmd {
         Ok(output) => {
             if output.status.success() {
-                String::from_utf8_lossy(&output.stdout)
-                    .trim()
-                    .to_string()
+                String::from_utf8_lossy(&output.stdout).trim().to_string()
             } else {
                 return Err(anyhow::anyhow!(
                     "Failed to determine git repository root: {}",
@@ -1810,22 +1812,23 @@ async fn rewrite_commit_authors(
             }
         }
         Err(e) => {
-            return Err(anyhow::anyhow!(
-                "Error executing git rev-parse: {}",
-                e
-            ));
+            return Err(anyhow::anyhow!("Error executing git rev-parse: {}", e));
         }
     };
 
     let git_root_path = std::path::PathBuf::from(&git_root);
-    
+
     // Get list of commits that will be rewritten
     let log_cmd = TokioCommand::new("git")
-        .args(["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"])
+        .args([
+            "log",
+            &format!("{}..HEAD", dest_branch),
+            "--format=%H %an <%ae>",
+        ])
         .current_dir(&git_root_path)
         .output()
         .await;
-    
+
     let commits_to_rewrite = match log_cmd {
         Ok(output) => {
             if output.status.success() {
@@ -1841,10 +1844,7 @@ async fn rewrite_commit_authors(
             }
         }
         Err(e) => {
-            return Err(anyhow::anyhow!(
-                "Error executing git log: {}",
-                e
-            ));
+            return Err(anyhow::anyhow!("Error executing git log: {}", e));
         }
     };
 
@@ -1854,8 +1854,10 @@ async fn rewrite_commit_authors(
     }
 
     if dry_run {
-        println!("\n[DRY-RUN] Skipping actual rebase. These commits would be rewritten with author: {} <{}>",
-                 git_user_name, git_user_email);
+        println!(
+            "\n[DRY-RUN] Skipping actual rebase. These commits would be rewritten with author: {} <{}>",
+            git_user_name, git_user_email
+        );
         return Ok(());
     }
 
@@ -1895,22 +1897,27 @@ async fn rewrite_commit_authors(
         match rebase_output {
             Ok(output) if output.status.success() => {
                 println!("Successfully rewrote commit authors");
-                
+
                 // Show post-rebase log to verify changes
                 let post_log_cmd = TokioCommand::new("git")
-                    .args(["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"])
+                    .args([
+                        "log",
+                        &format!("{}..HEAD", dest_branch),
+                        "--format=%H %an <%ae>",
+                    ])
                     .current_dir(&git_root_path)
                     .output()
                     .await;
-                
+
                 if let Ok(log_output) = post_log_cmd
-                    && log_output.status.success() {
-                        let updated_commits = String::from_utf8_lossy(&log_output.stdout);
-                        println!("Updated commits:");
-                        for commit in updated_commits.lines() {
-                            println!("  {}", commit);
-                        }
+                    && log_output.status.success()
+                {
+                    let updated_commits = String::from_utf8_lossy(&log_output.stdout);
+                    println!("Updated commits:");
+                    for commit in updated_commits.lines() {
+                        println!("  {}", commit);
                     }
+                }
 
                 if let Err(e) = zbobr
                     .task_session(task_id)

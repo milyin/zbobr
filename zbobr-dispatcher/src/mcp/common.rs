@@ -115,7 +115,9 @@ pub struct SetWorkBranchParam {
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct GetPlanParam {
-    #[schemars(description = "Plan history offset: 0 or omitted = latest plan, -1 = previous plan, -2 = plan before that, etc.")]
+    #[schemars(
+        description = "Plan history offset: 0 or omitted = latest plan, -1 = previous plan, -2 = plan before that, etc."
+    )]
     pub offset: Option<i32>,
 }
 

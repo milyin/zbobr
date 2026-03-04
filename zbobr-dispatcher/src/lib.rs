@@ -27,7 +27,8 @@ pub use mcp::{
 };
 pub use prompts::{Prompts, build_full_prompt, load_prompts, resolve_prompts};
 pub use task::{
-    ChecklistItem, Comment, CommentType, Model, Parameter, RoleSession, Signal, Stage, Task, TaskSession, Tool,
+    ChecklistItem, Comment, CommentType, Model, Parameter, RoleSession, Signal, Stage, Task,
+    TaskSession, Tool,
 };
 pub use tool_executor::ToolExecutor;
 pub use zbobr_api::config::{BackendConfig, Config};

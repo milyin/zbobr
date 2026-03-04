@@ -8,7 +8,9 @@ use rmcp::{
 use crate::{
     ZbobrDispatcherDyn,
     mcp::{
-        common::{GetPlanParam, MessageParam, SetDestinationBranchParam, SetDestinationRepositoryParam},
+        common::{
+            GetPlanParam, MessageParam, SetDestinationBranchParam, SetDestinationRepositoryParam,
+        },
         traits::{CommonMcpImpl, PreparatorMcpImpl},
     },
     task::RoleSession,
@@ -41,7 +43,9 @@ impl PreparatorMcp {
         }
     }
 
-    #[tool(description = "Get the plan and following comments. Optional offset: 0 = latest plan (default), -1 = previous plan, etc. Returns task description if no plan exists yet.")]
+    #[tool(
+        description = "Get the plan and following comments. Optional offset: 0 = latest plan (default), -1 = previous plan, etc. Returns task description if no plan exists yet."
+    )]
     async fn get_plan(&self, Parameters(params): Parameters<GetPlanParam>) -> String {
         self.get_plan_impl(params.offset.unwrap_or(0)).await
     }
