@@ -152,6 +152,21 @@ mcp_tools! {
 }
 
 mcp_tools! {
+    decompose_planner_tools,
+    GET_PLAN = "get_plan",
+    POST_PLAN = "post_plan",
+    REPORT_ERROR = "report_error",
+    ASK_USER = "ask_user",
+}
+
+mcp_tools! {
+    decomposer_tools,
+    REPORT_DONE = "report_done",
+    REPORT_ERROR = "report_error",
+    ASK_USER = "ask_user",
+}
+
+mcp_tools! {
     planner_tools,
     GET_PLAN = "get_plan",
     POST_PLAN = "post_plan",
@@ -363,6 +378,30 @@ pub async fn run_role_mcp_server(
                 move || {
                     tracing::debug!("Creating new AnalyserMcp instance for task {task_id}");
                     Ok(super::analyser::AnalyserMcp::new(zbobr.clone(), task_id))
+                },
+                std::sync::Arc::new(LocalSessionManager::default()),
+                Default::default(),
+            );
+            axum::Router::new().nest_service(&path, svc)
+        }
+        Role::DecomposePlanner => {
+            tracing::info!("Creating DecomposePlannerMcp service for task {task_id} at path {path}");
+            let svc = StreamableHttpService::new(
+                move || {
+                    tracing::debug!("Creating new DecomposePlannerMcp instance for task {task_id}");
+                    Ok(super::decompose_planner::DecomposePlannerMcp::new(zbobr.clone(), task_id))
+                },
+                std::sync::Arc::new(LocalSessionManager::default()),
+                Default::default(),
+            );
+            axum::Router::new().nest_service(&path, svc)
+        }
+        Role::Decomposer => {
+            tracing::info!("Creating DecomposerMcp service for task {task_id} at path {path}");
+            let svc = StreamableHttpService::new(
+                move || {
+                    tracing::debug!("Creating new DecomposerMcp instance for task {task_id}");
+                    Ok(super::decomposer::DecomposerMcp::new(zbobr.clone(), task_id))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
                 Default::default(),

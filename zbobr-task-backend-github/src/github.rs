@@ -449,6 +449,8 @@ impl ZbobrTaskBackendGithub {
             Stage::Pending,
             Stage::Preparing,
             Stage::Analysing,
+            Stage::DecomposePlanning,
+            Stage::Decomposing,
             Stage::Planning,
             Stage::Working,
             Stage::Reviewing,
@@ -534,7 +536,7 @@ impl ZbobrTaskBackendGithub {
             }
         }
 
-        for flag_name in ["conflict", "pause", "confirm"] {
+        for flag_name in ["conflict", "pause", "confirm", "umbrella"] {
             let flag_label = Self::flag_to_label(flag_name);
             let flag_desc = format!("Flag: {}", flag_name);
             if !existing_labels.contains(&flag_label) {
@@ -1009,6 +1011,8 @@ fn stage_description(stage: Stage) -> &'static str {
         Stage::Pending => "Task is pending dispatch",
         Stage::Preparing => "Task parameters are being set",
         Stage::Analysing => "Task codebase is being analysed",
+        Stage::DecomposePlanning => "Task decomposition plan is being created",
+        Stage::Decomposing => "Task is being decomposed into subtasks",
         Stage::Planning => "Task is in planning",
         Stage::Working => "Task is in work",
         Stage::Reviewing => "Task is in review",

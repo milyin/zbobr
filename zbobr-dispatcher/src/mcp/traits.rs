@@ -20,6 +20,8 @@ pub trait CommonMcpImpl: Send + Sync {
         match self.role() {
             Role::Preparator => Signal::GoPrepare,
             Role::Analyser => Signal::GoAnalyse,
+            Role::DecomposePlanner => Signal::GoAnalyse,
+            Role::Decomposer => Signal::GoAnalyse,
             Role::Planner => Signal::GoPlan,
             Role::Worker => Signal::GoWork,
             Role::Reviewer => Signal::GoReview,
@@ -737,5 +739,65 @@ pub trait MergerMcpImpl: CommonMcpImpl {
 
     async fn get_param_work_branch_impl(&self) -> String {
         self.get_param_impl(Parameter::WorkBranch).await
+    }
+}
+
+// -- DecomposePlanner MCP service --
+
+#[allow(async_fn_in_trait)]
+pub trait DecomposePlannerMcpImpl: CommonMcpImpl {
+    async fn post_plan_impl(&self, plan: &str) -> String {
+        tracing::info!("[decompose_planner#{}] post_plan", self.session().task_id());
+        let hostname = get_hostname();
+
+        if let Err(e) = self
+            .session()
+            .post_comment(
+                CommentType::Plan,
+                plan,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
+            .await
+        {
+            tracing::error!(
+                "Failed to post decomposition plan comment for task {}: {e}",
+                self.session().task_id()
+            );
+            return format!("Error posting plan: {e}");
+        }
+
+        "Decomposition plan posted successfully".to_string()
+    }
+}
+
+// -- Decomposer MCP service --
+
+#[allow(async_fn_in_trait)]
+pub trait DecomposerMcpImpl: CommonMcpImpl {
+    async fn report_done_impl(&self, message: &str) -> String {
+        tracing::info!("[decomposer#{}] report_done", self.session().task_id());
+        let hostname = get_hostname();
+
+        if let Err(e) = self
+            .session()
+            .post_comment(
+                CommentType::Done,
+                message,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
+            .await
+        {
+            tracing::error!(
+                "Failed to post done comment for task {}: {e}",
+                self.session().task_id()
+            );
+            return format!("Error posting done: {e}");
+        }
+
+        "Decomposition completed successfully".to_string()
     }
 }

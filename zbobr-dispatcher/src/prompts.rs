@@ -11,6 +11,8 @@ pub struct Prompts {
     pub base_path: Option<PathBuf>,
     pub preparator: Vec<PathBuf>,
     pub analyser: Vec<PathBuf>,
+    pub decompose_planner: Vec<PathBuf>,
+    pub decomposer: Vec<PathBuf>,
     pub planner: Vec<PathBuf>,
     pub worker: Vec<PathBuf>,
     pub reviewer: Vec<PathBuf>,
@@ -29,6 +31,8 @@ pub fn resolve_prompts(args: &ZbobrDispatcherArgs, config: &ZbobrDispatcherConfi
         .analyser_prompts
         .clone()
         .unwrap_or_else(|| config.analyser_prompts.clone());
+    let decompose_planner = Vec::new(); // TODO: Add config support
+    let decomposer = Vec::new(); // TODO: Add config support
     let planner = args
         .planner_prompts
         .clone()
@@ -58,6 +62,8 @@ pub fn resolve_prompts(args: &ZbobrDispatcherArgs, config: &ZbobrDispatcherConfi
         base_path,
         preparator,
         analyser,
+        decompose_planner,
+        decomposer,
         planner,
         worker,
         reviewer,
@@ -109,6 +115,8 @@ pub fn build_full_prompt(user_context: &str, role: Role) -> String {
     let hardcoded = match role {
         Role::Preparator => crate::preparator_instructions(),
         Role::Analyser => crate::analyser_instructions(),
+        Role::DecomposePlanner => crate::decompose_planner_instructions(),
+        Role::Decomposer => crate::decomposer_instructions(),
         Role::Planner => crate::planner_instructions(),
         Role::Worker => crate::worker_instructions(),
         Role::Reviewer => crate::reviewer_instructions(),
@@ -119,6 +127,8 @@ pub fn build_full_prompt(user_context: &str, role: Role) -> String {
     let api_docs = match role {
         Role::Preparator => crate::PreparatorMcp::generate_api_docs(),
         Role::Analyser => crate::AnalyserMcp::generate_api_docs(),
+        Role::DecomposePlanner => crate::DecomposePlannerMcp::generate_api_docs(),
+        Role::Decomposer => crate::DecomposerMcp::generate_api_docs(),
         Role::Planner => crate::PlannerMcp::generate_api_docs(),
         Role::Worker => crate::WorkerMcp::generate_api_docs(),
         Role::Reviewer => crate::ReviewerMcp::generate_api_docs(),
@@ -151,6 +161,16 @@ pub fn validate_prompts(prompts: &Prompts) -> anyhow::Result<()> {
             missing_files.push(path.clone());
         }
     }
+    for path in &prompts.decompose_planner {
+        if !file_exists(path, prompts.base_path.as_ref()) {
+            missing_files.push(path.clone());
+        }
+    }
+    for path in &prompts.decomposer {
+        if !file_exists(path, prompts.base_path.as_ref()) {
+            missing_files.push(path.clone());
+        }
+    }
     for path in &prompts.planner {
         if !file_exists(path, prompts.base_path.as_ref()) {
             missing_files.push(path.clone());
@@ -162,6 +182,11 @@ pub fn validate_prompts(prompts: &Prompts) -> anyhow::Result<()> {
         }
     }
     for path in &prompts.reviewer {
+        if !file_exists(path, prompts.base_path.as_ref()) {
+            missing_files.push(path.clone());
+        }
+    }
+    for path in &prompts.tester {
         if !file_exists(path, prompts.base_path.as_ref()) {
             missing_files.push(path.clone());
         }
@@ -213,6 +238,8 @@ impl Prompts {
         let base_prompt = match role {
             Role::Preparator => load_prompts(&self.preparator, self.base_path.as_ref())?,
             Role::Analyser => load_prompts(&self.analyser, self.base_path.as_ref())?,
+            Role::DecomposePlanner => load_prompts(&self.decompose_planner, self.base_path.as_ref())?,
+            Role::Decomposer => load_prompts(&self.decomposer, self.base_path.as_ref())?,
             Role::Planner => load_prompts(&self.planner, self.base_path.as_ref())?,
             Role::Worker => load_prompts(&self.worker, self.base_path.as_ref())?,
             Role::Reviewer => load_prompts(&self.reviewer, self.base_path.as_ref())?,
@@ -395,6 +422,8 @@ mod tests {
             base_path: None,
             preparator: vec![],
             analyser: vec![],
+            decompose_planner: vec![],
+            decomposer: vec![],
             planner: vec![],
             worker: vec![path],
             reviewer: vec![],
@@ -411,6 +440,8 @@ mod tests {
             base_path: None,
             preparator: vec![],
             analyser: vec![],
+            decompose_planner: vec![],
+            decomposer: vec![],
             planner: vec![],
             worker: vec![],
             reviewer: vec![],
@@ -431,6 +462,8 @@ mod tests {
             base_path: Some(dir.path().to_path_buf()),
             preparator: vec![],
             analyser: vec![],
+            decompose_planner: vec![],
+            decomposer: vec![],
             planner: vec![],
             worker: vec![],
             reviewer: vec![PathBuf::from("reviewer.md")],
@@ -451,6 +484,8 @@ mod tests {
             base_path: None,
             preparator: vec![],
             analyser: vec![],
+            decompose_planner: vec![],
+            decomposer: vec![],
             planner: vec![],
             worker: vec![worker_file],
             reviewer: vec![],
@@ -466,6 +501,8 @@ mod tests {
             base_path: None,
             preparator: vec![],
             analyser: vec![],
+            decompose_planner: vec![],
+            decomposer: vec![],
             planner: vec![],
             worker: vec![],
             reviewer: vec![],
@@ -481,6 +518,8 @@ mod tests {
             base_path: None,
             preparator: vec![],
             analyser: vec![],
+            decompose_planner: vec![],
+            decomposer: vec![],
             planner: vec![],
             worker: vec![PathBuf::from("/nonexistent/worker.md")],
             reviewer: vec![],
@@ -500,6 +539,8 @@ mod tests {
             base_path: None,
             preparator: vec![PathBuf::from("/missing1.md")],
             analyser: vec![PathBuf::from("/missing2.md")],
+            decompose_planner: vec![],
+            decomposer: vec![],
             planner: vec![],
             worker: vec![],
             reviewer: vec![],
@@ -521,6 +562,8 @@ mod tests {
             base_path: Some(dir.path().to_path_buf()),
             preparator: vec![],
             analyser: vec![],
+            decompose_planner: vec![],
+            decomposer: vec![],
             planner: vec![],
             worker: vec![PathBuf::from("worker.md")],
             reviewer: vec![],
@@ -537,6 +580,8 @@ mod tests {
             base_path: Some(dir.path().to_path_buf()),
             preparator: vec![],
             analyser: vec![],
+            decompose_planner: vec![],
+            decomposer: vec![],
             planner: vec![],
             worker: vec![PathBuf::from("missing.md")],
             reviewer: vec![],

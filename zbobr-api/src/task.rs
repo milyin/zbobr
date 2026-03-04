@@ -185,6 +185,8 @@ pub enum Stage {
     Pending,
     Preparing,
     Analysing,
+    DecomposePlanning,
+    Decomposing,
     Planning,
     Working,
     Reviewing,
@@ -199,6 +201,8 @@ impl Stage {
             Stage::Pending => "PENDING",
             Stage::Preparing => "PREPARING",
             Stage::Analysing => "ANALYSING",
+            Stage::DecomposePlanning => "DECOMPOSE_PLANNING",
+            Stage::Decomposing => "DECOMPOSING",
             Stage::Planning => "PLANNING",
             Stage::Working => "WORKING",
             Stage::Reviewing => "REVIEWING",
@@ -213,6 +217,8 @@ impl Stage {
             "PENDING" => Some(Stage::Pending),
             "PREPARING" | "PREPARATION" => Some(Stage::Preparing),
             "ANALYSING" => Some(Stage::Analysing),
+            "DECOMPOSE_PLANNING" => Some(Stage::DecomposePlanning),
+            "DECOMPOSING" => Some(Stage::Decomposing),
             "PLANNING" => Some(Stage::Planning),
             "WORKING" => Some(Stage::Working),
             "REVIEWING" => Some(Stage::Reviewing),
@@ -232,10 +238,12 @@ impl Stage {
             Stage::Merging => 2,
             Stage::Working => 3,
             Stage::Planning => 4,
-            Stage::Preparing => 5,
-            Stage::Analysing => 6,
-            Stage::Pending => 7,
-            Stage::Done => 8,
+            Stage::Decomposing => 5,
+            Stage::DecomposePlanning => 5,
+            Stage::Preparing => 6,
+            Stage::Analysing => 7,
+            Stage::Pending => 8,
+            Stage::Done => 9,
         }
     }
 }
@@ -255,6 +263,10 @@ pub enum Role {
     Preparator,
     #[serde(rename = "analyser")]
     Analyser,
+    #[serde(rename = "decompose_planner")]
+    DecomposePlanner,
+    #[serde(rename = "decomposer")]
+    Decomposer,
     #[serde(rename = "planner")]
     Planner,
     #[serde(rename = "worker")]
@@ -273,6 +285,8 @@ impl Role {
         match self {
             Role::Preparator => "preparator",
             Role::Analyser => "analyser",
+            Role::DecomposePlanner => "decompose_planner",
+            Role::Decomposer => "decomposer",
             Role::Planner => "planner",
             Role::Worker => "worker",
             Role::Reviewer => "reviewer",
@@ -291,6 +305,8 @@ impl From<Role> for Stage {
         match role {
             Role::Preparator => Stage::Preparing,
             Role::Analyser => Stage::Analysing,
+            Role::DecomposePlanner => Stage::DecomposePlanning,
+            Role::Decomposer => Stage::Decomposing,
             Role::Planner => Stage::Planning,
             Role::Worker => Stage::Working,
             Role::Reviewer => Stage::Reviewing,
@@ -307,6 +323,8 @@ impl std::convert::TryFrom<Stage> for Role {
         match stage {
             Stage::Preparing => Ok(Role::Preparator),
             Stage::Analysing => Ok(Role::Analyser),
+            Stage::DecomposePlanning => Ok(Role::DecomposePlanner),
+            Stage::Decomposing => Ok(Role::Decomposer),
             Stage::Planning => Ok(Role::Planner),
             Stage::Working => Ok(Role::Worker),
             Stage::Reviewing => Ok(Role::Reviewer),
@@ -332,9 +350,12 @@ impl std::str::FromStr for Role {
         match s.to_lowercase().as_str() {
             "preparator" => Ok(Role::Preparator),
             "analyser" => Ok(Role::Analyser),
+            "decompose_planner" => Ok(Role::DecomposePlanner),
+            "decomposer" => Ok(Role::Decomposer),
             "planner" => Ok(Role::Planner),
             "worker" => Ok(Role::Worker),
             "reviewer" => Ok(Role::Reviewer),
+            "tester" => Ok(Role::Tester),
             "merger" => Ok(Role::Merger),
             _ => Err(anyhow::anyhow!("Unknown role: {}", s)),
         }

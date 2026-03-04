@@ -21,8 +21,8 @@ pub use config::{
 };
 pub use generic_config::{GenericConfig, GenericConfigArgs, GenericConfigToml};
 pub use mcp::{
-    AnalyserMcp, MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, TesterMcp, WorkerMcp,
-    analyser_instructions, merger_instructions, planner_instructions, preparator_instructions,
+    AnalyserMcp, DecomposePlannerMcp, DecomposerMcp, MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, TesterMcp, WorkerMcp,
+    analyser_instructions, decompose_planner_instructions, decomposer_instructions, merger_instructions, planner_instructions, preparator_instructions,
     reviewer_instructions, tester_instructions, worker_instructions,
 };
 pub use prompts::{Prompts, build_full_prompt, load_prompts, resolve_prompts};
