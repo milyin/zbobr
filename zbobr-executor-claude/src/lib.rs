@@ -58,8 +58,10 @@ impl ToolExecutor for ClaudeExecutor {
             &mcp_config_str,
             "--permission-mode",
             "dontAsk",
+            "--allowedTools",
+            "mcp__zbobr__*",
             "--tools",
-            "default,mcp__zbobr__*",
+            "default",
             "-p",
             prompt,
         ];
