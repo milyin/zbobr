@@ -532,9 +532,9 @@ impl Model {
     pub fn model_name_for_tool(&self, tool: Tool) -> Option<&'static str> {
         match tool {
             Tool::Copilot => match self {
-                Model::Gpt4o => None, // retired
+                Model::Gpt4o => None,          // retired
                 Model::Claude35Sonnet => None, // retired
-                Model::Claude3Opus => None, // retired
+                Model::Claude3Opus => None,    // retired
                 Model::Gpt5Mini => Some("gpt-5-mini"),
                 Model::Gpt5 => Some("gpt-5"),
                 Model::Gpt5_1 => Some("gpt-5.1"),
@@ -600,9 +600,7 @@ impl std::str::FromStr for Model {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().replace('.', "-").as_str() {
             "gpt-4o" | "gpt4o" => Ok(Model::Gpt4o),
-            "claude-3-5-sonnet" | "claude35sonnet" => {
-                Ok(Model::Claude35Sonnet)
-            }
+            "claude-3-5-sonnet" | "claude35sonnet" => Ok(Model::Claude35Sonnet),
             "claude-3-opus" | "claude3opus" => Ok(Model::Claude3Opus),
             "gpt-5-mini" | "gpt5mini" => Ok(Model::Gpt5Mini),
             "gpt-5" => Ok(Model::Gpt5),

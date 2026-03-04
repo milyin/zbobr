@@ -1740,7 +1740,9 @@ async fn finalize_session(
                     .post_comment(CommentType::Error, &msg, None, &hostname, None)
                     .await
                 {
-                    tracing::warn!("Failed to post merger-failure comment for task #{task_id}: {e}");
+                    tracing::warn!(
+                        "Failed to post merger-failure comment for task #{task_id}: {e}"
+                    );
                 }
                 if let Err(e) = task_session
                     .modify_task(|task| {

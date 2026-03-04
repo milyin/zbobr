@@ -51,25 +51,27 @@ impl ToolExecutor for ClaudeExecutor {
         tracing::info!("MCP endpoint: {mcp_url}");
         tracing::debug!("MCP config JSON: {}", mcp_config_str);
 
-        let mut args = vec![
+        let permission_mode = if role == Role::Planner {
+            "plan"
+        } else {
+            "dontAsk"
+        };
+
+        let args = [
             "--model",
             model_name,
             "--mcp-config",
             &mcp_config_str,
             "--permission-mode",
-            "dontAsk",
+            permission_mode,
             "--allowedTools",
             "mcp__zbobr__*,Bash,WebFetch,WebSearch",
             "--tools",
             "default",
             "--verbose",
+            "-p",
+            prompt,
         ];
-
-        if role == Role::Planner {
-            args.push("--plan");
-        }
-
-        args.extend_from_slice(&["-p", prompt]);
 
         let mut cmd = tokio::process::Command::new("claude");
         cmd.args(&args)
