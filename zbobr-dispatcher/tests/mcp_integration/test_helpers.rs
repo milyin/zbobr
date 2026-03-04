@@ -31,8 +31,8 @@ pub async fn run_preparation(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some(Signal::GoPlan),
-        "[{}] Preparator should emit go_plan after setting repo/branches",
+        Some(Signal::GoAnalyse),
+        "[{}] Preparator should emit go_analyse after setting repo/branches",
         env.name()
     );
 }

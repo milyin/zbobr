@@ -182,6 +182,17 @@ pub enum TaskSubcommand {
         #[arg(long)]
         show_prompt: bool,
     },
+    /// Run analyser role for a specific task (analyses the codebase)
+    Analyse {
+        /// Task ID
+        task: u64,
+        /// AI model to use (e.g. "gpt-5-mini", "claude-3-5-sonnet")
+        #[arg(long)]
+        model: Option<String>,
+        /// Show the prompt that would be sent to the model instead of running
+        #[arg(long)]
+        show_prompt: bool,
+    },
     /// Run planner role for a specific task (creates implementation plan)
     Plan {
         /// Task ID
@@ -236,6 +247,9 @@ pub enum TaskSubcommand {
         /// MCP tester scenario file for preparation role
         #[arg(long)]
         executor_mcp_tester_preparation: Option<PathBuf>,
+        /// MCP tester scenario file for analysing role
+        #[arg(long)]
+        executor_mcp_tester_analysing: Option<PathBuf>,
         /// MCP tester scenario file for planning role
         #[arg(long)]
         executor_mcp_tester_planning: Option<PathBuf>,
@@ -706,6 +720,22 @@ async fn run_task_subcommand(
             )
             .await?;
         }
+        TaskSubcommand::Analyse {
+            task,
+            model,
+            show_prompt,
+        } => {
+            run_role_command(
+                zbobr,
+                task,
+                Role::Analyser,
+                model,
+                show_prompt,
+                prompts,
+                executor_config,
+            )
+            .await?;
+        }
         TaskSubcommand::Plan {
             task,
             model,
@@ -774,6 +804,7 @@ async fn run_task_subcommand(
             task,
             model,
             executor_mcp_tester_preparation,
+            executor_mcp_tester_analysing,
             executor_mcp_tester_planning,
             executor_mcp_tester_working,
             executor_mcp_tester_reviewing,
@@ -785,6 +816,7 @@ async fn run_task_subcommand(
                 .context("Invalid model name")?;
             let task_obj = zbobr.get_task(task).await?;
             let mcp_tester_config_override = if executor_mcp_tester_preparation.is_some()
+                || executor_mcp_tester_analysing.is_some()
                 || executor_mcp_tester_planning.is_some()
                 || executor_mcp_tester_working.is_some()
                 || executor_mcp_tester_reviewing.is_some()
@@ -792,6 +824,7 @@ async fn run_task_subcommand(
             {
                 Some(ZbobrExecutorMcpTesterConfig {
                     preparation: executor_mcp_tester_preparation,
+                    analysing: executor_mcp_tester_analysing,
                     planning: executor_mcp_tester_planning,
                     working: executor_mcp_tester_working,
                     reviewing: executor_mcp_tester_reviewing,
@@ -988,7 +1021,7 @@ impl<'a> CliRoleRunner<'a> {
 
         if matches!(self.role, Role::Preparator) {
             seed_preparator_defaults(self.zbobr, self.task_id).await?;
-        } else {
+        } else if !matches!(self.role, Role::Analyser) {
             ensure_pr_url(self.zbobr, self.task_id).await?;
         }
 
@@ -1108,7 +1141,12 @@ pub async fn process_task_by_stage(
                 session.run().await?;
             }
         }
-        Stage::Preparing | Stage::Planning | Stage::Working | Stage::Reviewing | Stage::Merging => {
+        Stage::Preparing
+        | Stage::Analysing
+        | Stage::Planning
+        | Stage::Working
+        | Stage::Reviewing
+        | Stage::Merging => {
             let role = Role::try_from(task.stage).unwrap();
             let task_model = task.model.clone().or(model);
             let session =
@@ -1149,6 +1187,15 @@ pub async fn run_manager_loop(
         "Preparator prompt files: {}",
         prompts
             .preparator
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("; ")
+    );
+    tracing::info!(
+        "Analyser prompt files: {}",
+        prompts
+            .analyser
             .iter()
             .map(|p| p.display().to_string())
             .collect::<Vec<_>>()
@@ -1626,6 +1673,12 @@ async fn finalize_session(
     let has_unchecked = current_task.checklist.iter().any(|i| !i.checked);
     match role {
         Role::Preparator => {
+            if current_task.signal.is_none() && !current_task.pause {
+                task_session.set_signal(Some(Signal::GoAnalyse)).await?;
+            }
+            task_session.set_stage(Stage::Pending).await?;
+        }
+        Role::Analyser => {
             if current_task.signal.is_none() && !current_task.pause {
                 task_session.set_signal(Some(Signal::GoPlan)).await?;
             }
