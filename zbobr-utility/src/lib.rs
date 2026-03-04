@@ -154,3 +154,49 @@ pub async fn create_placeholder_commit(work_dir: &Path, branch_name: &str) -> Re
 
     Ok(())
 }
+
+/// Delete the placeholder file created by [`create_placeholder_commit`] and commit the removal.
+///
+/// If the placeholder file does not exist this function is a no-op (returns `Ok(())`).
+pub async fn delete_placeholder_commit(work_dir: &Path, branch_name: &str) -> Result<()> {
+    let sanitized_branch = sanitize_filename(branch_name);
+    let placeholder_path = work_dir.join(".zbobr").join(&sanitized_branch);
+
+    if !tokio::fs::try_exists(&placeholder_path).await.unwrap_or(false) {
+        tracing::debug!(
+            "Placeholder file {} does not exist — skipping deletion",
+            placeholder_path.display()
+        );
+        return Ok(());
+    }
+
+    let rm_status = tokio::process::Command::new("git")
+        .args(["rm", "-f", &format!(".zbobr/{}", sanitized_branch)])
+        .current_dir(work_dir)
+        .status()
+        .await
+        .map_err(|e| anyhow!("Failed to run git rm for placeholder: {}", e))?;
+
+    if !rm_status.success() {
+        anyhow::bail!("git rm for placeholder failed (exit != 0)");
+    }
+
+    let commit_msg = format!("chore: remove branch placeholder {}", branch_name);
+    let commit_status = tokio::process::Command::new("git")
+        .args(["commit", "-m", &commit_msg])
+        .current_dir(work_dir)
+        .status()
+        .await
+        .map_err(|e| anyhow!("Failed to run git commit for placeholder removal: {}", e))?;
+
+    if !commit_status.success() {
+        anyhow::bail!("git commit for placeholder removal failed (exit != 0)");
+    }
+
+    tracing::info!(
+        "Deleted branch placeholder .zbobr/{} and committed",
+        sanitized_branch
+    );
+
+    Ok(())
+}
