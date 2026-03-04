@@ -19,6 +19,8 @@ Issues progress through milestones that represent their current stage:
 | **PENDING** | Task is under user's control, bot ignores it | Human reviewer |
 | **GO_PLANNING** | Ready for planner agent to pick up | Human sets this |
 | **PLANNING** | Agent is investigating and creating an implementation plan | Planner agent |
+| **DECOMPOSE_PLANNING** | *(Optional)* Task is being decomposed into subtasks (for umbrella tasks) | Decomposer agent |
+| **DECOMPOSING** | *(Optional)* Subtasks are being created and linked (for umbrella tasks) | Decomposer agent |
 | **GO_WORKING** | Plan approved, ready for worker agent to pick up | Human sets this |
 | **WORKING** | Agent is actively implementing the issue | Worker agent |
 
@@ -29,10 +31,20 @@ New issue ──► PENDING ──► GO_PLANNING ──► PLANNING ──► P
                                                             │
                                                      Human reviews plan
                                                             │
-                                                     GO_WORKING ──► WORKING ──► PENDING (done)
-                                                                                       │
-                                                                                Human reviews PR
-                                                                                  and closes
+                                      (For umbrella tasks)
+                                            │
+                                      DECOMPOSE_PLANNING ──► PENDING
+                                            │
+                                      Human reviews decomposition plan
+                                            │
+                                      DECOMPOSING ──► PENDING (subtasks created)
+                                                            │
+                                      (For regular/after decomposition)
+                                            │
+                                      GO_WORKING ──► WORKING ──► PENDING (done)
+                                                                         │
+                                                                  Human reviews PR
+                                                                    and closes
 ```
 
 ## Labels
@@ -41,11 +53,22 @@ New issue ──► PENDING ──► GO_PLANNING ──► PLANNING ──► P
 |-------|-------------|
 | `tool:<name>` | Specifies which tool to use (e.g., `tool:copilot`, `tool:claude`, `tool:stub`) |
 | `model:<name>` | Specifies which AI model to use (e.g., `model:gpt-5-mini`, `model:claude-opus-4.6`) |
-| `done` | Implementation is complete, PR has been created |
+| `flag:umbrella` | Marks task as an umbrella task that should be decomposed into subtasks |
+| `go_prepare` | Signal to start preparation stage |
+| `go_analyse` | Signal to start analysis stage |
+| `go_plan` | Signal to start planning stage |
+| `go_decompose_plan` | Signal to start decomposition planning |
+| `go_work` | Signal to start working stage |
+| `go_review` | Signal to start review stage |
+| `flag:conflict` | Indicates merge conflict needs resolution |
+| `flag:pause` | Pauses task processing |
+| `flag:confirm` | Requires confirmation before proceeding to next stage |
 
 If no `tool:` or `model:` labels are set, the defaults from configuration are used.
 
 ## Creating Issues
+
+### Regular Tasks (Single Repository)
 
 1. Create a new issue describing what needs to be done
 2. Set the milestone to **GO_PLANNING** to start automated processing
@@ -54,6 +77,21 @@ If no `tool:` or `model:` labels are set, the defaults from configuration are us
 5. Review the plan when it reaches **PENDING**
 6. Set milestone to **GO_WORKING** to approve implementation
 7. The worker agent will implement, create a PR, and mark as `done`
+
+### Umbrella Tasks (Multiple Repositories/Components)
+
+For tasks that span multiple repositories or components, use the `flag:umbrella` label:
+
+1. Create a new issue describing the overall goal
+2. Add the `flag:umbrella` label to mark it as an umbrella task
+3. Set the milestone to **GO_PLANNING** to start automated processing
+4. The planner agent will investigate and create an initial plan
+5. Review the plan, then set milestone to **GO_DECOMPOSE_PLAN**
+6. The decomposer agent will analyze the task and create a decomposition plan with subtasks
+7. Review the decomposition plan when it reaches **PENDING**
+8. Set milestone to **GO_DECOMPOSING** to approve decomposition
+9. The decomposer agent creates the individual subtasks and links them as checklist items
+10. No further processing occurs - each subtask can now be tracked and managed independently
 
 ## Configuration
 

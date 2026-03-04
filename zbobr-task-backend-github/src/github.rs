@@ -450,6 +450,8 @@ impl ZbobrTaskBackendGithub {
             Stage::Preparing,
             Stage::Analysing,
             Stage::Planning,
+            Stage::DecomposePlanning,
+            Stage::Decomposing,
             Stage::Working,
             Stage::Reviewing,
             Stage::Merging,
@@ -533,7 +535,7 @@ impl ZbobrTaskBackendGithub {
             }
         }
 
-        for flag_name in ["conflict", "pause", "confirm"] {
+        for flag_name in ["conflict", "pause", "confirm", "umbrella"] {
             let flag_label = Self::flag_to_label(flag_name);
             let flag_desc = format!("Flag: {}", flag_name);
             if !existing_labels.contains(&flag_label) {
@@ -634,6 +636,10 @@ impl ZbobrTaskBackendGithub {
             conflict,
             pause,
             confirm,
+            umbrella: issue
+                .labels
+                .iter()
+                .any(|l| Self::label_to_flag(&l.name) == Some("umbrella")),
             etag: Some(body),
         }
     }
@@ -1009,6 +1015,8 @@ fn stage_description(stage: Stage) -> &'static str {
         Stage::Preparing => "Task parameters are being set",
         Stage::Analysing => "Task codebase is being analysed",
         Stage::Planning => "Task is in planning",
+        Stage::DecomposePlanning => "Task is in decomposition planning",
+        Stage::Decomposing => "Task is being decomposed into subtasks",
         Stage::Working => "Task is in work",
         Stage::Reviewing => "Task is in review",
         Stage::Merging => "Task is in merge conflict resolution",

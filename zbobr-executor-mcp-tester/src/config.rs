@@ -58,6 +58,7 @@ impl ZbobrExecutorMcpTesterConfig {
             Role::Preparator => self.preparation.as_ref(),
             Role::Analyser => self.analysing.as_ref(),
             Role::Planner => self.planning.as_ref(),
+            Role::Decomposer => None,
             Role::Worker => self.working.as_ref(),
             Role::Reviewer => self.reviewing.as_ref(),
             Role::Merger => self.merging.as_ref(),
