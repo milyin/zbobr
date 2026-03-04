@@ -384,6 +384,28 @@ impl RoleSession {
         })
         .await
     }
+
+    /// Create a new subtask for decomposition.
+    /// Returns the created task ID.
+    pub async fn create_task(
+        &self,
+        title: &str,
+        description: &str,
+        destination_repository: Option<String>,
+        destination_branch: Option<String>,
+    ) -> anyhow::Result<u64> {
+        self.zbobr
+            .create_task(
+                title,
+                description,
+                Stage::Pending,
+                None,
+                None,
+                destination_repository,
+                destination_branch,
+            )
+            .await
+    }
 }
 
 // ---------------------------------------------------------------------------

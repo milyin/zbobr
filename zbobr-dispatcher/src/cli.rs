@@ -1686,7 +1686,16 @@ async fn finalize_session(
     match role {
         Role::Preparator => {
             if current_task.signal.is_none() && !current_task.pause {
-                task_session.set_signal(Some(Signal::GoAnalyse)).await?;
+                // Check if this is a multi-repo umbrella task (umbrella=true AND no destination_repository)
+                let is_multi_repo_umbrella = current_task.umbrella 
+                    && current_task.parameters.get(&Parameter::DestinationRepository).is_none();
+                
+                let signal = if is_multi_repo_umbrella {
+                    Signal::GoDecomposePlan
+                } else {
+                    Signal::GoAnalyse
+                };
+                task_session.set_signal(Some(signal)).await?;
             }
             task_session.set_stage(Stage::Pending).await?;
         }
@@ -1708,9 +1717,25 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Decomposer => {
-            // After decomposing, return to Pending. The decomposer will handle
-            // further transitions based on the decomposition result.
-            task_session.set_stage(Stage::Pending).await?;
+            // Handle both DecomposePlanning and Decomposing stages
+            match current_task.stage {
+                Stage::DecomposePlanning => {
+                    // After planning phase, transition to actual decomposition
+                    if current_task.signal.is_none() && !current_task.pause {
+                        task_session.set_signal(Some(Signal::GoDecompose)).await?;
+                    }
+                    task_session.set_stage(Stage::Pending).await?;
+                }
+                Stage::Decomposing => {
+                    // After decomposing, mark as done (decomposition task complete)
+                    task_session.mark_done().await?;
+                    return Ok(());
+                }
+                _ => {
+                    // Fallback for unexpected stages
+                    task_session.set_stage(Stage::Pending).await?;
+                }
+            }
         }
         Role::Worker => {
             if current_task.signal.is_none() && !current_task.pause {

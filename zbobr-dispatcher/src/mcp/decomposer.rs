@@ -9,8 +9,8 @@ use crate::{
     ZbobrDispatcherDyn,
     mcp::{
         common::{
-            DeleteChecklistItemParam, DescriptionParam, GetPlanParam, InsertChecklistItemParam,
-            MessageParam, UpdateChecklistItemParam,
+            CreateTaskParam, DeleteChecklistItemParam, DescriptionParam, GetPlanParam, 
+            InsertChecklistItemParam, MessageParam, UpdateChecklistItemParam,
         },
         traits::{CommonMcpImpl, PlannerMcpImpl},
     },
@@ -108,6 +108,37 @@ impl DecomposerMcp {
     async fn report_results(&self, Parameters(params): Parameters<MessageParam>) -> String {
         self.report_results_impl(&params.message).await
     }
+
+    #[tool(description = "Create a new subtask for decomposition (only available in Decomposing stage)")]
+    async fn create_task(&self, Parameters(params): Parameters<CreateTaskParam>) -> String {
+        let task = match self.session.get_task().await {
+            Ok(t) => t,
+            Err(e) => {
+                return format!("Error retrieving task: {}", e);
+            }
+        };
+
+        // Check if we're in Decomposing stage
+        if task.stage != crate::task::Stage::Decomposing {
+            return format!("Error: create_task is only available in Decomposing stage. Current stage: {:?}", task.stage);
+        }
+
+        match self
+            .session
+            .create_task(&params.title, &params.description, params.destination_repository, params.destination_branch)
+            .await
+        {
+            Ok(task_id) => {
+                format!(
+                    "Successfully created subtask #{} '{}'. Add a checklist item with text 'Task #{}: {}' to link it to the parent task.",
+                    task_id, params.title, task_id, params.title
+                )
+            }
+            Err(e) => {
+                format!("Error creating task: {}", e)
+            }
+        }
+    }
 }
 
 #[tool_handler]
@@ -124,7 +155,31 @@ impl ServerHandler for DecomposerMcp {
         ServerInfo {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             instructions: Some(
-                "Decomposer tools: analyze umbrella task and create subtasks for execution.".to_string(),
+                r#"# Decomposer Agent
+
+Two-stage decomposition workflow:
+
+**DecomposePlanning Stage:**
+- Analyze the umbrella task structure and understand the full scope
+- Review existing code structure using get_analysis
+- Propose a comprehensive decomposition plan using post_plan tool
+- Do NOT create subtasks yet — that happens in the next stage
+- Focus on identifying repositories, branches, and logical task boundaries
+
+**Decomposing Stage:**
+- Create actual subtasks using the create_task tool
+- Each subtask should have a clear title and description
+- Set appropriate destination_repository and destination_branch parameters for each subtask
+- Link created subtasks in checklist items with references like "Task #123: Subtask title"
+- Use report_results to finalize when all subtasks are created
+
+Tools available:
+- get_plan: Review the task description and plan
+- get_analysis: Understand codebase structure
+- post_plan: Post the decomposition plan (DecomposePlanning stage only)
+- create_task: Create new subtasks (Decomposing stage only)
+- Checklist tools: Manage task items and dependencies
+- report_results: Complete your work"#.to_string(),
             ),
             ..Default::default()
         }

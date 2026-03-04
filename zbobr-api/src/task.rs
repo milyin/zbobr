@@ -347,6 +347,8 @@ pub enum Signal {
     GoPlan = 3,
     #[serde(rename = "go_decompose_plan")]
     GoDecomposePlan = 3_5,
+    #[serde(rename = "go_decompose")]
+    GoDecompose = 3_7,
     #[serde(rename = "go_work")]
     GoWork = 4,
     #[serde(rename = "go_review")]
@@ -359,6 +361,7 @@ impl Signal {
         match self {
             Signal::GoReview => "go_review",
             Signal::GoWork => "go_work",
+            Signal::GoDecompose => "go_decompose",
             Signal::GoDecomposePlan => "go_decompose_plan",
             Signal::GoPlan => "go_plan",
             Signal::GoAnalyse => "go_analyse",
@@ -373,6 +376,7 @@ impl Signal {
             Signal::GoAnalyse,
             Signal::GoPlan,
             Signal::GoDecomposePlan,
+            Signal::GoDecompose,
             Signal::GoWork,
             Signal::GoReview,
         ]
@@ -383,6 +387,7 @@ impl Signal {
         match self {
             Signal::GoReview => Role::Reviewer,
             Signal::GoWork => Role::Worker,
+            Signal::GoDecompose => Role::Decomposer,
             Signal::GoDecomposePlan => Role::Decomposer,
             Signal::GoPlan => Role::Planner,
             Signal::GoAnalyse => Role::Analyser,
@@ -403,6 +408,7 @@ impl std::str::FromStr for Signal {
         match s.to_lowercase().replace('_', "").as_str() {
             "goreview" | "go-review" => Ok(Signal::GoReview),
             "gowork" | "go-work" => Ok(Signal::GoWork),
+            "godecompose" | "go-decompose" => Ok(Signal::GoDecompose),
             "godecomposeplan" | "go-decompose-plan" => Ok(Signal::GoDecomposePlan),
             "goplan" | "go-plan" => Ok(Signal::GoPlan),
             "goanalyse" | "go-analyse" => Ok(Signal::GoAnalyse),
