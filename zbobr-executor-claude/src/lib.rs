@@ -62,6 +62,7 @@ impl ToolExecutor for ClaudeExecutor {
             "mcp__zbobr__*,Bash,WebFetch,WebSearch",
             "--tools",
             "default",
+            "--verbose",
             "-p",
             prompt,
         ];
