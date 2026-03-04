@@ -65,27 +65,16 @@ Investigate the codebase related to the task plan, describe the current state of
    - Examine the logic in detail: loops, conditions, error handling, state management
    - Note edge cases, assumptions, and invariants in the existing code
    - Understand how the relevant components interact with each other
-4. **Investigate workflow process requirements**:
-   - Examine CI configuration (`.github/workflows/`, `.gitlab-ci.yml`, `Makefile`, `tox.ini`, or equivalent) to understand:
-     - What testing framework and commands are used
-     - How tests are run (e.g., all tests, specific test suites, coverage requirements)
-   - Check for code formatting and linting requirements:
-     - What linter/formatter is used (e.g., rustfmt, prettier, black, eslint)
-     - What formatting rules are enforced
-   - Identify if multiplatform or cross-compilation is required:
-     - What platforms must be tested (e.g., Linux, macOS, Windows, or different architectures)
-     - Any platform-specific build requirements
-   - Document any other automated checks that code must pass (security scans, type checking, etc.)
-5. **Compare with previous analysis** (if one exists):
+4. **Compare with previous analysis** (if one exists):
    - If significant logic changes occurred since the last analysis, describe the new logic from scratch
    - If changes are minor (e.g., refactoring, small additions), describe only the differences
    - If this is the first analysis, describe the full current state
-6. **Write your analysis report**:
+5. **Write your analysis report**:
    - Describe the current state of the code as it is — factually and objectively
    - Include: relevant files and their roles, data flow, control flow, edge cases, key logic details
    - Do NOT suggest improvements, fixes, or alternative approaches
    - Do NOT recommend what should be changed — your goal is ONLY to describe what IS
-7. Call `{POST_ANALYSIS}` with your complete analysis report. This finishes your session.
+6. Call `{POST_ANALYSIS}` with your complete analysis report. This finishes your session.
 "#,
     )
 }
@@ -258,7 +247,7 @@ Run comprehensive tests to verify the implementation meets all testing requireme
 
 You have read-only access to the task plan and the repository for testing:
 - Use `{GET_PLAN}` to read the plan and task context
-- Use `{GET_ANALYSIS}` to read the CI/testing requirements discovered by the Analyser
+- Use `{GET_ANALYSIS}` to read any previous analyses for reference
 - Use `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` to get branch names
 - Your current working directory is the repository with the work branch checked out
 - Use `{REPORT_ERROR}` only to report technical errors
@@ -266,15 +255,15 @@ You have read-only access to the task plan and the repository for testing:
 ## Workflow
 
 1. Call `{GET_PLAN}` to understand the task and implementation context
-2. Call `{GET_ANALYSIS}` to read the project's CI/testing requirements:
-   - Test frameworks and commands (cargo test, npm test, pytest, etc.)
-   - CI configuration files (.github/workflows/, Makefile, tox.ini, etc.)
-   - Code formatting/linting requirements
-   - Platform and architecture requirements
-   - Other automated checks (security scans, type checking)
+2. **Independently discover testing infrastructure:**
+   - Examine CI configuration files (`.github/workflows/`, `Makefile`, `Cargo.toml`, `tox.ini`, or equivalent)
+   - Identify test frameworks and commands (cargo test, npm test, pytest, etc.)
+   - Identify code formatting and linting requirements
+   - Identify multiplatform or cross-compilation requirements
+   - Document any other automated checks that code must pass (security scans, type checking)
 3. Get branch information: Call `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}`
 4. **Run comprehensive test suite** matching the project's requirements:
-   - Execute all test commands identified in the analysis
+   - Execute all test commands you identified from the CI configuration
    - Record test framework versions, commands executed, and full output
    - Measure code coverage if available
    - Run formatting/linting checks to ensure code quality
@@ -293,7 +282,7 @@ You have read-only access to the task plan and the repository for testing:
 ## Important Notes
 
 - **Do not modify files**: You are inspecting and testing only. Do not create commits or change code.
-- **Comprehensive testing**: Run all test commands identified in the CI analysis, not just a subset.
+- **Comprehensive testing**: Run all test commands discovered from the CI configuration, not just a subset.
 - **Detailed reporting**: Include all test commands executed, full output, and results in your report.
 - **Early termination on failure**: Stop testing once you encounter a failure and report it immediately via `{TEST_REJECT}`.
 "#,
