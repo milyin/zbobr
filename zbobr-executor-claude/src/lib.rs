@@ -54,7 +54,7 @@ impl ToolExecutor for ClaudeExecutor {
         let args = [
             "--model",
             model_name,
-            "--additional-mcp-config",
+            "--mcp-config",
             &mcp_config_str,
             "--permission-mode",
             "dontAsk",
