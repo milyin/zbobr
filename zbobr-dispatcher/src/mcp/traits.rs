@@ -41,72 +41,98 @@ pub trait CommonMcpImpl: Send + Sync {
             Err(e) => return format!("Error: {e}"),
         };
 
-        // Find indices of all PLAN comments
-        let plan_indices: Vec<usize> = comments
+        // Find indices of all cut-boundary comments (Reject or Done).
+        // Each cut marker starts a new context chunk.
+        let cut_indices: Vec<usize> = comments
             .iter()
             .enumerate()
-            .filter(|(_, c)| c.comment_type == CommentType::Plan)
+            .filter(|(_, c)| c.comment_type.is_cut())
             .map(|(i, _)| i)
             .collect();
 
-        if plan_indices.is_empty() {
-            // No plan posted yet — return task description as a user Request comment
-            let desc = match self.session().get_description().await {
-                Ok(d) if !d.is_empty() => d,
-                Ok(_) => "No task description provided.".to_string(),
-                Err(e) => return format!("Error fetching description: {e}"),
-            };
-            let synthetic = vec![zbobr_api::Comment {
-                comment_type: CommentType::Request,
-                timestamp: String::new(),
-                role: None,
-                hostname: String::new(),
-                model: None,
-                text: desc,
-            }];
-            return match serde_json::to_string_pretty(&synthetic) {
+        if cut_indices.is_empty() {
+            // No chunks yet — check if there is any plan comment; if not, return task description.
+            let has_plan = comments
+                .iter()
+                .any(|c| c.comment_type == CommentType::Plan);
+            if !has_plan {
+                let desc = match self.session().get_description().await {
+                    Ok(d) if !d.is_empty() => d,
+                    Ok(_) => "No task description provided.".to_string(),
+                    Err(e) => return format!("Error fetching description: {e}"),
+                };
+                let synthetic = vec![zbobr_api::Comment {
+                    comment_type: CommentType::Request,
+                    timestamp: String::new(),
+                    role: None,
+                    hostname: String::new(),
+                    model: None,
+                    text: desc,
+                }];
+                return match serde_json::to_string_pretty(&synthetic) {
+                    Ok(json) => json,
+                    Err(e) => format!("Error serializing: {e}"),
+                };
+            }
+            // There is a plan but no cuts yet — the whole comment list is one chunk.
+            if offset < -1 {
+                return format!(
+                    "offset {} out of range: only 1 chunk available",
+                    offset
+                );
+            }
+            let result_comments: Vec<zbobr_api::Comment> = comments
+                .iter()
+                .filter(|c| c.comment_type != CommentType::Error && c.comment_type != CommentType::Done)
+                .cloned()
+                .collect();
+            if result_comments.is_empty() {
+                return "Error: No messages found in chunk (task may already be complete, or all comments have been filtered)".to_string();
+            }
+            return match serde_json::to_string_pretty(&result_comments) {
                 Ok(json) => json,
                 Err(e) => format!("Error serializing: {e}"),
             };
         }
 
-        // Select plan by offset (0 = last, -1 = second-to-last, etc.)
-        let target_idx = if offset >= 0 {
-            plan_indices.len() - 1
+        // Chunks: chunk[0] = comments[0..cut[0]], chunk[i] = comments[cut[i-1]..cut[i]], ...
+        // Last chunk = comments[cut.last()..end].
+        // Number of chunks = cut_indices.len() + 1 (but chunk 0 may be empty if first comment is cut).
+        // We expose chunks as: index 0 = last chunk, -1 = second-to-last, etc.
+        let num_chunks = cut_indices.len() + 1;
+        let target_chunk = if offset >= 0 {
+            num_chunks - 1
         } else {
             let back = (-offset) as usize;
-            if back >= plan_indices.len() {
+            if back >= num_chunks {
                 return format!(
-                    "offset {} out of range: only {} plan(s) available",
+                    "offset {} out of range: only {} chunk(s) available",
                     offset,
-                    plan_indices.len()
+                    num_chunks
                 );
             }
-            plan_indices.len() - 1 - back
+            num_chunks - 1 - back
         };
 
-        let plan_comment_idx = plan_indices[target_idx];
-        // End boundary: the next plan comment (exclusive) or end of comments
-        let end_idx = plan_indices
-            .get(target_idx + 1)
-            .copied()
-            .unwrap_or(comments.len());
+        let (start_idx, end_idx) = if target_chunk == 0 {
+            (0, cut_indices[0])
+        } else if target_chunk == num_chunks - 1 {
+            (cut_indices[target_chunk - 1], comments.len())
+        } else {
+            (cut_indices[target_chunk - 1], cut_indices[target_chunk])
+        };
 
-        // Return the plan comment + all following comments until next plan,
-        // excluding only Error comments (system messages, not for LLM agents).
-        let result_comments: Vec<zbobr_api::Comment> = comments[plan_comment_idx..end_idx]
+        // Return comments in the chunk, excluding Error and Done (but keeping Reject).
+        let result_comments: Vec<zbobr_api::Comment> = comments[start_idx..end_idx]
             .iter()
-            .filter(|c| c.comment_type != CommentType::Error)
+            .filter(|c| c.comment_type != CommentType::Error && c.comment_type != CommentType::Done)
             .cloned()
             .collect();
-        
-        // If chunk is empty after filtering, return error to indicate task is done or chunk is invalid
+
         if result_comments.is_empty() {
-            return format!(
-                "Error: No messages found in chunk (task may already be complete, or all comments have been filtered)"
-            );
+            return "Error: No messages found in chunk (task may already be complete, or all comments have been filtered)".to_string();
         }
-        
+
         match serde_json::to_string_pretty(&result_comments) {
             Ok(json) => json,
             Err(e) => format!("Error serializing: {e}"),
@@ -612,27 +638,10 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
             self.session().task_id()
         );
         let hostname = get_hostname();
-        // Post CUT boundary before rejection report
         if let Err(e) = self
             .session()
             .post_comment(
-                CommentType::Cut,
-                "",
-                None,
-                &hostname,
-                None,
-            )
-            .await
-        {
-            tracing::warn!(
-                "Failed to post CUT boundary for task {}: {e}",
-                self.session().task_id()
-            );
-        }
-        if let Err(e) = self
-            .session()
-            .post_comment(
-                CommentType::Report,
+                CommentType::Reject,
                 message,
                 Some(self.role()),
                 &hostname,
@@ -695,27 +704,10 @@ pub trait TesterMcpImpl: CommonMcpImpl {
             self.session().task_id()
         );
         let hostname = get_hostname();
-        // Post CUT boundary before rejection report
         if let Err(e) = self
             .session()
             .post_comment(
-                CommentType::Cut,
-                "",
-                None,
-                &hostname,
-                None,
-            )
-            .await
-        {
-            tracing::warn!(
-                "Failed to post CUT boundary for task {}: {e}",
-                self.session().task_id()
-            );
-        }
-        if let Err(e) = self
-            .session()
-            .post_comment(
-                CommentType::Report,
+                CommentType::Reject,
                 message,
                 Some(self.role()),
                 &hostname,
