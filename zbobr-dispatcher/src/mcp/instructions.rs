@@ -1,5 +1,5 @@
 use crate::mcp::common::{
-    analyser_tools, merger_tools, planner_tools, preparator_tools, reviewer_tools, worker_tools,
+    merger_tools, planner_tools, preparator_tools, reviewer_tools, worker_tools,
 };
 
 /// Generate hardcoded preparator instructions using tool name constants.
@@ -37,48 +37,6 @@ Read the task description and set the required parameters for the implementation
     )
 }
 
-/// Generate hardcoded analyser instructions using tool name constants.
-pub fn analyser_instructions() -> String {
-    // branch parameters allow the analyser to inspect work vs destination branches when relevant
-    use analyser_tools::{
-        ASK_USER, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, POST_ANALYSIS,
-        REPORT_ERROR,
-    };
-    format!(
-        r#"# Analyser Agent
-
-Investigate the codebase related to the task, describe the current state of the code thoroughly. Do NOT make any recommendations or propose solutions.
-
-## Access Model
-
-    You can access the internet and run local commands. Your restrictions:
-    - Use MCP `{REPORT_ERROR}` only to report technical errors
-    - Use `{ASK_USER}` to request the user's explanations if something is unclear
-    - Read the repository freely — you have full read access to the codebase
-    - NEVER make any code changes. Your role is to observe and describe, not to modify.
-    - NEVER use git/gh for writing, pushing, or sending data to GitHub
-
-## Workflow
-
-1. Call `{GET_PLAN}` to read the task description.
-2. **Explore the codebase** related to the task:
-   - Identify files, modules, crates, and code paths relevant to the task
-   - Trace data flow and control flow for the affected functionality
-   - Examine the logic in detail: loops, conditions, error handling, state management
-   - Note edge cases, assumptions, and invariants in the existing code
-   - Understand how the relevant components interact with each other
-3. **Write your analysis report**:
-   - Describe the current state of the code as it is — factually and objectively
-   - Include: relevant files and their roles, data flow, control flow, edge cases, key logic details
-   - Add dedicated "changes" section with analysis of changes made comparing to original branch. Use mcp `{GET_PARAM_DESTINATION_BRANCH}` to get original branch name `{GET_PARAM_WORK_BRANCH}` to get current branch name if necessary. Use `git diff` yourself to see what changed.
-   Emphasize behavioral differences rather than just listing file diffs.
-   - Do NOT suggest improvements, fixes, or alternative approaches
-   - Do NOT recommend what should be changed — your goal is ONLY to describe what IS
-4. Call `{POST_ANALYSIS}` with your complete analysis report. This finishes your session.
-"#,
-    )
-}
-
 /// Generate hardcoded planner instructions using tool name constants.
 pub fn planner_instructions() -> String {
     use planner_tools::{
@@ -90,7 +48,7 @@ pub fn planner_instructions() -> String {
     format!(
         r#"# Planner Agent
 
-Get the task description, code analysis and comments with `{GET_PLAN}`. Design an implementation plan for the task. Prepare checklist items for the worker. See more detailed workflow instructions below.
+Get the task description and comments with `{GET_PLAN}`. Design an implementation plan for the task. Prepare checklist items for the worker. See more detailed workflow instructions below.
 
 Work autonomously, try to solve problems independently. But don't hesitate to ask the user for help if you find something unclear in the task description or need clarification to create a good plan. Use `{ASK_USER}` for this purpose.
 
@@ -107,7 +65,7 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 
 ## Workflow
 
-1. Call `{GET_PLAN}` to read the task and code analysis. Use `{GET_PLAN}` with offset -1, -2, etc. to read previous plans and discussion if needed for context.
+1. Call `{GET_PLAN}` to read the task description and context. Use `{GET_PLAN}` with offset -1, -2, etc. to read previous plans and discussion if needed for context.
 2. If need to compare the work already done with the initial codebase, use `{GET_PARAM_DESTINATION_BRANCH}` to get the name of original branch, `{GET_PARAM_WORK_BRANCH}` to get the work branch name, and then use git diff or equivalent to compare the branches.
 3. Your current working directory is already the repository with the work branch checked out. Explore the codebase and design a step-by-step implementation plan.
 4. If some instrument is required and you can't istall it yourself, ask the user to install it with `{ASK_USER}`.
@@ -163,7 +121,7 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 
 ## Workflow
 
-1. Call `{GET_PLAN}` to retrieve the task, code analysis, and approved implementation plan. Use {GET_PLAN} with offset -1, -2, etc. to read previous plans if needed for context.
+1. Call `{GET_PLAN}` to retrieve the task description and approved implementation plan. Use {GET_PLAN} with offset -1, -2, etc. to read previous plans if needed for context.
 2. Call `{GET_CHECKLIST}` to read the implementation steps.
 3. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
 4. Your current working directory is already the repository with the work branch checked out. Consult `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` for branch names if needed.

@@ -34,8 +34,6 @@ pub struct ZbobrDispatcherConfig {
     pub cli_tool: Tool,
     /// Custom prompt files for preparator agent.
     pub preparator_prompts: Vec<std::path::PathBuf>,
-    /// Custom prompt files for analyser agent.
-    pub analyser_prompts: Vec<std::path::PathBuf>,
     /// Custom prompt files for planner agent.
     pub planner_prompts: Vec<std::path::PathBuf>,
     /// Custom prompt files for worker agent.
@@ -75,7 +73,6 @@ impl Default for ZbobrDispatcherConfig {
             agent_github_token: "not-configured".to_string(),
             cli_tool: Tool::default(),
             preparator_prompts: vec![],
-            analyser_prompts: vec![],
             planner_prompts: vec![],
             worker_prompts: vec![],
             reviewer_prompts: vec![],

@@ -66,7 +66,6 @@ pub struct ChecklistItem {
 ///   problem; also posted by the dispatcher/CLI on execution failure.
 /// - `Report`   — posted by `report_results` MCP tool to deliver a role's completion output.
 /// - `Plan`     — posted by `post_plan` MCP tool (planner role) to record the implementation plan.
-/// - `Analysis` — posted by `post_analysis` MCP tool (analyser role) to record codebase analysis.
 /// - `Request`  — posted for user-originated messages and for questions raised by `ask_user` (and
 ///   similar ASK_xxx MCP tools) that pause the task waiting for a human response.
 /// - `Reject`   — posted by reviewer/tester when rejecting work; acts as a context chunk boundary
@@ -86,9 +85,6 @@ pub enum CommentType {
     /// Implementation plan posted by the planner role.
     #[serde(rename = "plan")]
     Plan,
-    /// Codebase analysis posted by the analyser role.
-    #[serde(rename = "analysis")]
-    Analysis,
     /// User message or agent request awaiting a human response (ASK_xxx operations).
     #[serde(rename = "request")]
     Request,
@@ -109,7 +105,6 @@ impl CommentType {
             CommentType::Error => "error",
             CommentType::Report => "report",
             CommentType::Plan => "plan",
-            CommentType::Analysis => "analysis",
             CommentType::Request => "request",
             CommentType::Reject => "reject",
             CommentType::Done => "done",
@@ -123,7 +118,6 @@ impl CommentType {
             "error" => Some(CommentType::Error),
             "report" => Some(CommentType::Report),
             "plan" => Some(CommentType::Plan),
-            "analysis" => Some(CommentType::Analysis),
             "request" => Some(CommentType::Request),
             "reject" => Some(CommentType::Reject),
             "done" => Some(CommentType::Done),
@@ -184,7 +178,6 @@ pub struct Comment {
 pub enum Stage {
     Pending,
     Preparing,
-    Analysing,
     Planning,
     Working,
     Reviewing,
@@ -198,7 +191,6 @@ impl Stage {
         match self {
             Stage::Pending => "PENDING",
             Stage::Preparing => "PREPARING",
-            Stage::Analysing => "ANALYSING",
             Stage::Planning => "PLANNING",
             Stage::Working => "WORKING",
             Stage::Reviewing => "REVIEWING",
@@ -212,7 +204,6 @@ impl Stage {
         match name {
             "PENDING" => Some(Stage::Pending),
             "PREPARING" | "PREPARATION" => Some(Stage::Preparing),
-            "ANALYSING" => Some(Stage::Analysing),
             "PLANNING" => Some(Stage::Planning),
             "WORKING" => Some(Stage::Working),
             "REVIEWING" => Some(Stage::Reviewing),
@@ -233,9 +224,8 @@ impl Stage {
             Stage::Working => 3,
             Stage::Planning => 4,
             Stage::Preparing => 5,
-            Stage::Analysing => 6,
-            Stage::Pending => 7,
-            Stage::Done => 8,
+            Stage::Pending => 6,
+            Stage::Done => 7,
         }
     }
 }
@@ -253,8 +243,6 @@ impl std::fmt::Display for Stage {
 pub enum Role {
     #[serde(rename = "preparator")]
     Preparator,
-    #[serde(rename = "analyser")]
-    Analyser,
     #[serde(rename = "planner")]
     Planner,
     #[serde(rename = "worker")]
@@ -272,7 +260,6 @@ impl Role {
     pub fn as_str(&self) -> &'static str {
         match self {
             Role::Preparator => "preparator",
-            Role::Analyser => "analyser",
             Role::Planner => "planner",
             Role::Worker => "worker",
             Role::Reviewer => "reviewer",
@@ -290,7 +277,6 @@ impl From<Role> for Stage {
     fn from(role: Role) -> Stage {
         match role {
             Role::Preparator => Stage::Preparing,
-            Role::Analyser => Stage::Analysing,
             Role::Planner => Stage::Planning,
             Role::Worker => Stage::Working,
             Role::Reviewer => Stage::Reviewing,
@@ -306,7 +292,6 @@ impl std::convert::TryFrom<Stage> for Role {
     fn try_from(stage: Stage) -> Result<Self, Self::Error> {
         match stage {
             Stage::Preparing => Ok(Role::Preparator),
-            Stage::Analysing => Ok(Role::Analyser),
             Stage::Planning => Ok(Role::Planner),
             Stage::Working => Ok(Role::Worker),
             Stage::Reviewing => Ok(Role::Reviewer),
@@ -331,7 +316,6 @@ impl std::str::FromStr for Role {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "preparator" => Ok(Role::Preparator),
-            "analyser" => Ok(Role::Analyser),
             "planner" => Ok(Role::Planner),
             "worker" => Ok(Role::Worker),
             "reviewer" => Ok(Role::Reviewer),
@@ -342,7 +326,7 @@ impl std::str::FromStr for Role {
 }
 
 /// Signal for task flow control (mapped to labels in GitHub backend).
-/// Ordered by priority (highest to lowest): GoPrepare > GoAnalyse > GoPlan > GoWork > GoReview.
+/// Ordered by priority (highest to lowest): GoPrepare > GoPlan > GoWork > GoReview > GoTest.
 #[derive(
     Debug,
     Clone,
@@ -358,16 +342,14 @@ impl std::str::FromStr for Role {
 pub enum Signal {
     #[serde(rename = "go_prepare")]
     GoPrepare = 1,
-    #[serde(rename = "go_analyse")]
-    GoAnalyse = 2,
     #[serde(rename = "go_plan")]
-    GoPlan = 3,
+    GoPlan = 2,
     #[serde(rename = "go_work")]
-    GoWork = 4,
+    GoWork = 3,
     #[serde(rename = "go_review")]
-    GoReview = 5,
+    GoReview = 4,
     #[serde(rename = "go_test")]
-    GoTest = 6,
+    GoTest = 5,
 }
 
 impl Signal {
@@ -378,7 +360,6 @@ impl Signal {
             Signal::GoTest => "go_test",
             Signal::GoWork => "go_work",
             Signal::GoPlan => "go_plan",
-            Signal::GoAnalyse => "go_analyse",
             Signal::GoPrepare => "go_prepare",
         }
     }
@@ -387,7 +368,6 @@ impl Signal {
     pub fn all() -> &'static [Signal] {
         &[
             Signal::GoPrepare,
-            Signal::GoAnalyse,
             Signal::GoPlan,
             Signal::GoWork,
             Signal::GoReview,
@@ -402,7 +382,6 @@ impl Signal {
             Signal::GoTest => Role::Tester,
             Signal::GoWork => Role::Worker,
             Signal::GoPlan => Role::Planner,
-            Signal::GoAnalyse => Role::Analyser,
             Signal::GoPrepare => Role::Preparator,
         }
     }
@@ -422,7 +401,6 @@ impl std::str::FromStr for Signal {
             "gotest" | "go-test" => Ok(Signal::GoTest),
             "gowork" | "go-work" => Ok(Signal::GoWork),
             "goplan" | "go-plan" => Ok(Signal::GoPlan),
-            "goanalyse" | "go-analyse" => Ok(Signal::GoAnalyse),
             "goprepare" | "go-prepare" => Ok(Signal::GoPrepare),
             _ => Err(anyhow::anyhow!("Unknown signal: {}", s)),
         }
@@ -645,7 +623,6 @@ impl std::fmt::Display for CommentTag {
             CommentType::Error => "ERROR",
             CommentType::Report => "REPORT",
             CommentType::Plan => "PLAN",
-            CommentType::Analysis => "ANALYSIS",
             CommentType::Request => "REQUEST",
             CommentType::Reject => "REJECT",
             CommentType::Done => "DONE",

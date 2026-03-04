@@ -107,7 +107,7 @@ impl RoleSession {
     }
 
     /// Get all comments as structured `Comment` objects (includes all
-    /// types: error, report, request, analysis, etc.).
+    /// types: error, report, request, plan, etc.).
     pub async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
         self.zbobr.get_task_comments(self.task_id).await
     }
@@ -920,7 +920,6 @@ mod tests {
     #[test]
     fn signal_target_role() {
         assert_eq!(Signal::GoPrepare.target_role(), Role::Preparator);
-        assert_eq!(Signal::GoAnalyse.target_role(), Role::Analyser);
         assert_eq!(Signal::GoPlan.target_role(), Role::Planner);
         assert_eq!(Signal::GoWork.target_role(), Role::Worker);
         assert_eq!(Signal::GoReview.target_role(), Role::Reviewer);

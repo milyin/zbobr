@@ -643,10 +643,6 @@ impl IntegrationTestEnv {
                 preparation: Some(scenario_path),
                 ..Default::default()
             },
-            Stage::Analysing => ZbobrExecutorMcpTesterConfig {
-                analysing: Some(scenario_path),
-                ..Default::default()
-            },
             Stage::Planning => ZbobrExecutorMcpTesterConfig {
                 planning: Some(scenario_path),
                 ..Default::default()
@@ -674,7 +670,6 @@ impl IntegrationTestEnv {
         let prompts = Prompts {
             base_path: None,
             preparator: vec![],
-            analyser: vec![],
             planner: vec![],
             worker: vec![],
             reviewer: vec![],

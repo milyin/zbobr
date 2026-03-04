@@ -144,14 +144,6 @@ mcp_tools! {
 }
 
 mcp_tools! {
-    analyser_tools,
-    GET_PLAN = "get_plan",
-    POST_ANALYSIS = "post_analysis",
-    REPORT_ERROR = "report_error",
-    ASK_USER = "ask_user",
-}
-
-mcp_tools! {
     planner_tools,
     GET_PLAN = "get_plan",
     POST_PLAN = "post_plan",
@@ -351,18 +343,6 @@ pub async fn run_role_mcp_server(
                         zbobr.clone(),
                         task_id,
                     ))
-                },
-                std::sync::Arc::new(LocalSessionManager::default()),
-                Default::default(),
-            );
-            axum::Router::new().nest_service(&path, svc)
-        }
-        Role::Analyser => {
-            tracing::info!("Creating AnalyserMcp service for task {task_id} at path {path}");
-            let svc = StreamableHttpService::new(
-                move || {
-                    tracing::debug!("Creating new AnalyserMcp instance for task {task_id}");
-                    Ok(super::analyser::AnalyserMcp::new(zbobr.clone(), task_id))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
                 Default::default(),
