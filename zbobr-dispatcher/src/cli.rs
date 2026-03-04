@@ -665,6 +665,9 @@ async fn run_task_subcommand(
                                 }
                             }
                         }
+                        if let Some(signal) = signal {
+                            task.signal = Some(signal);
+                        }
                         task
                     }),
                 )
@@ -1701,8 +1704,54 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Merger => {
-            // Conflict was already cleared on entry (Rule 1); just return to Pending.
-            // Any signal set before or during the session is preserved per Rule 2.
+            // Conflict was already cleared on entry (Rule 1).
+            // Retry the same merge operation to verify the Merger actually resolved it.
+            // If it still fails, pause the task and report — do NOT set conflict=true
+            // again, to prevent an infinite Merger loop.
+            let dest_branch = zbobr
+                .get_task(task_id)
+                .await?
+                .parameters
+                .get(&Parameter::DestinationBranch)
+                .cloned()
+                .unwrap_or_else(|| "main".to_string());
+            let merge = TokioCommand::new("git")
+                .args(["merge", &dest_branch, "--no-edit"])
+                .current_dir(work_dir)
+                .output()
+                .await
+                .context("Failed to run git merge verification after Merger session")?;
+            if !merge.status.success() {
+                // Merger did not fix the conflict — abort the leftover merge state,
+                // report the failure, and pause to avoid an infinite retry loop.
+                let _ = TokioCommand::new("git")
+                    .args(["merge", "--abort"])
+                    .current_dir(work_dir)
+                    .status()
+                    .await;
+                let stderr = String::from_utf8_lossy(&merge.stderr);
+                let msg = format!(
+                    "Merger failed to resolve merge conflict with branch '{dest_branch}'. \
+                     Manual intervention required.\n{stderr}"
+                );
+                tracing::error!("task #{task_id}: {msg}");
+                let hostname = get_hostname();
+                if let Err(e) = task_session
+                    .post_comment(CommentType::Error, &msg, None, &hostname, None)
+                    .await
+                {
+                    tracing::warn!("Failed to post merger-failure comment for task #{task_id}: {e}");
+                }
+                if let Err(e) = task_session
+                    .modify_task(|task| {
+                        task.pause = true;
+                    })
+                    .await
+                {
+                    tracing::warn!("Failed to pause task #{task_id} after merger failure: {e}");
+                }
+            }
+            // Return to Pending; any signal set before/during the session is preserved.
             task_session.set_stage(Stage::Pending).await?;
         }
     }

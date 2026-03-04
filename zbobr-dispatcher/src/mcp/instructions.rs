@@ -231,13 +231,15 @@ Resolve merge conflicts when the destination branch cannot be automatically merg
 
 ## When Merger Runs
 
-A merge conflict occurred when trying to automatically merge the destination branch into the work branch. The merger agent is started to examine conflicts and resolve them when possible.
+The framework ran `git merge <dest_branch> --no-edit` on the work branch and it failed with conflicts. **The merge is already in progress** — the repository is in a mid-merge state with conflict markers in the affected files. Your job is to resolve those conflicts and complete the merge commit.
+
+After you finish, the framework will automatically retry the same `git merge` command to verify success. If the merge still fails, the task will be paused and the user will be notified. So you must leave the repository in a state where `git merge <dest_branch> --no-edit` would succeed (i.e., the merge is fully committed with no remaining conflict markers).
 
 ## Access Model
 
 You have read access to the task and repository:
 - Use `{GET_PLAN}` to understand the task context and what work was being done
-- Your current working directory is already the repository with the work branch checked out and merge conflicts present
+- Your current working directory is already the repository with the work branch checked out and the merge in progress (conflict markers present)
 - Use `{ASK_USER}` to ask the user for clarification on conflict resolution
 - Use `{REPORT_ERROR}` to report when conflicts cannot be resolved
 
@@ -248,20 +250,21 @@ You have read access to the task and repository:
 ## Workflow
 
 1. Call `{GET_PLAN}` to understand the task being worked on and prior context
-2. Your current working directory is the repository (the work branch currently has merge conflicts). Examine the conflicts:
+2. Your current working directory is the repository. The `git merge <dest_branch> --no-edit` command was already run and left the repository in a mid-merge conflict state. Examine the conflicts:
    - `git status` to see which files have conflicts
    - `git diff` to examine conflict markers and understand what changed in each branch
    - Review the code in both branches to understand the intent
 3. **Attempt automatic resolution:**
    - For simple, non-overlapping changes (e.g., formatting, imports, unrelated edits), apply manual fixes that combine both changes
-   - Use `git add` to resolve simple conflicts, then `git commit -m "chore: merge conflicts resolved"`
-   - If you can create a reasonable merged version, do so and ensure all changes are committed
+   - Edit each conflicted file to remove all conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) and produce a correct merged version
+   - Use `git add <file>` for each resolved file, then `git commit -m "chore: merge conflicts resolved"` to complete the merge commit
+   - Do NOT run `git merge` again — just resolve the markers and commit
 4. **If automatic resolution is not possible:**
    - Use `{ASK_USER}` to describe the conflicts and ask which version should be preferred, or ask for guidance
    - Wait for user input before proceeding
 5. **After successful resolution:**
    - Ensure all your changes are explicitly committed using `git commit` to the local work branch
-   - The framework will automatically push the resolved branch and open a pull request
+   - The framework will verify the merge succeeded and will push the resolved branch automatically
 6. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact.
 
 ## Conflict Resolution Principles
