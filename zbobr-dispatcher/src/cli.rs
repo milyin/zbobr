@@ -1725,6 +1725,23 @@ async fn finalize_session(
             //   GoPlan (review_reject called) → route back to planner
             //   GoReview (report_error)        → preserved as-is (task paused)
             if !current_task.pause && current_task.signal.is_none() {
+                // Post CUT boundary after marking task done
+                let hostname = get_hostname();
+                if let Err(e) = task_session
+                    .post_comment(
+                        CommentType::Cut,
+                        "",
+                        None,
+                        &hostname,
+                        None,
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        "Failed to post CUT boundary after review acceptance for task {}: {e}",
+                        task_id
+                    );
+                }
                 task_session.mark_done().await?;
                 return Ok(());
             }
@@ -1736,6 +1753,23 @@ async fn finalize_session(
             //   GoPlan (test_reject called) → route back to planner
             //   GoTest (report_error)       → preserved as-is (task paused)
             if !current_task.pause && current_task.signal.is_none() {
+                // Post CUT boundary after marking task done
+                let hostname = get_hostname();
+                if let Err(e) = task_session
+                    .post_comment(
+                        CommentType::Cut,
+                        "",
+                        None,
+                        &hostname,
+                        None,
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        "Failed to post CUT boundary after test acceptance for task {}: {e}",
+                        task_id
+                    );
+                }
                 task_session.mark_done().await?;
                 return Ok(());
             }

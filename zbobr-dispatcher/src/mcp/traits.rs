@@ -604,6 +604,23 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
             self.session().task_id()
         );
         let hostname = get_hostname();
+        // Post CUT boundary before rejection report
+        if let Err(e) = self
+            .session()
+            .post_comment(
+                CommentType::Cut,
+                "",
+                None,
+                &hostname,
+                None,
+            )
+            .await
+        {
+            tracing::warn!(
+                "Failed to post CUT boundary for task {}: {e}",
+                self.session().task_id()
+            );
+        }
         if let Err(e) = self
             .session()
             .post_comment(
@@ -670,6 +687,23 @@ pub trait TesterMcpImpl: CommonMcpImpl {
             self.session().task_id()
         );
         let hostname = get_hostname();
+        // Post CUT boundary before rejection report
+        if let Err(e) = self
+            .session()
+            .post_comment(
+                CommentType::Cut,
+                "",
+                None,
+                &hostname,
+                None,
+            )
+            .await
+        {
+            tracing::warn!(
+                "Failed to post CUT boundary for task {}: {e}",
+                self.session().task_id()
+            );
+        }
         if let Err(e) = self
             .session()
             .post_comment(
