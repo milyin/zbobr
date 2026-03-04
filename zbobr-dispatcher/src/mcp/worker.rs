@@ -51,11 +51,6 @@ impl WorkerMcp {
         self.get_plan_impl(params.offset.unwrap_or(0)).await
     }
 
-    #[tool(description = "Get all analysis comments for this task in chronological order")]
-    async fn get_analysis(&self) -> String {
-        self.get_analysis_impl().await
-    }
-
     #[tool(description = "Report an error to the user and pause task processing")]
     async fn report_error(&self, Parameters(params): Parameters<MessageParam>) -> String {
         self.report_error_impl(&params.message).await

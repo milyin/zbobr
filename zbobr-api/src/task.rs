@@ -69,6 +69,10 @@ pub struct ChecklistItem {
 /// - `Analysis` — posted by `post_analysis` MCP tool (analyser role) to record codebase analysis.
 /// - `Request`  — posted for user-originated messages and for questions raised by `ask_user` (and
 ///   similar ASK_xxx MCP tools) that pause the task waiting for a human response.
+/// - `Reject`   — posted by reviewer/tester when rejecting work; acts as a context chunk boundary
+///   and contains the rejection message. Visible in GET_PLAN as the first comment of a new chunk.
+/// - `Done`     — posted by the dispatcher when a task is accepted and marked complete; acts as a
+///   context chunk boundary but is excluded from GET_PLAN results.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
@@ -88,6 +92,14 @@ pub enum CommentType {
     /// User message or agent request awaiting a human response (ASK_xxx operations).
     #[serde(rename = "request")]
     Request,
+    /// Rejection posted by a reviewer or tester; also serves as a context chunk boundary.
+    /// Contains the rejection message and is included in GET_PLAN as the first comment of a chunk.
+    #[serde(rename = "reject")]
+    Reject,
+    /// Completion marker posted by the dispatcher after a task is accepted and marked done.
+    /// Serves as a context chunk boundary; excluded from GET_PLAN results.
+    #[serde(rename = "done")]
+    Done,
 }
 
 impl CommentType {
@@ -99,6 +111,8 @@ impl CommentType {
             CommentType::Plan => "plan",
             CommentType::Analysis => "analysis",
             CommentType::Request => "request",
+            CommentType::Reject => "reject",
+            CommentType::Done => "done",
         }
     }
 
@@ -111,8 +125,16 @@ impl CommentType {
             "plan" => Some(CommentType::Plan),
             "analysis" => Some(CommentType::Analysis),
             "request" => Some(CommentType::Request),
+            "reject" => Some(CommentType::Reject),
+            "done" => Some(CommentType::Done),
             _ => None,
         }
+    }
+
+    /// Returns `true` for comment types that act as context chunk boundaries
+    /// (`Reject` and `Done`). Used by GET_PLAN to split the comment history into chunks.
+    pub fn is_cut(&self) -> bool {
+        matches!(self, CommentType::Reject | CommentType::Done)
     }
 }
 
@@ -625,6 +647,8 @@ impl std::fmt::Display for CommentTag {
             CommentType::Plan => "PLAN",
             CommentType::Analysis => "ANALYSIS",
             CommentType::Request => "REQUEST",
+            CommentType::Reject => "REJECT",
+            CommentType::Done => "DONE",
         };
 
         // All tag types now follow the same serialization rules.  REQUEST no
