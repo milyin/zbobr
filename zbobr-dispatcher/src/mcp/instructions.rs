@@ -39,7 +39,11 @@ Read the task description and set the required parameters for the implementation
 
 /// Generate hardcoded analyser instructions using tool name constants.
 pub fn analyser_instructions() -> String {
-    use analyser_tools::{ASK_USER, GET_PLAN, POST_ANALYSIS, REPORT_ERROR};
+    // branch parameters allow the analyser to inspect work vs destination branches when relevant
+    use analyser_tools::{
+        ASK_USER, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, POST_ANALYSIS,
+        REPORT_ERROR,
+    };
     format!(
         r#"# Analyser Agent
 
@@ -66,6 +70,8 @@ Investigate the codebase related to the task, describe the current state of the 
 3. **Write your analysis report**:
    - Describe the current state of the code as it is — factually and objectively
    - Include: relevant files and their roles, data flow, control flow, edge cases, key logic details
+   - Add dedicated "changes" section with analysis of changes made comparing to original branch. Use mcp `{GET_PARAM_DESTINATION_BRANCH}` to get original branch name `{GET_PARAM_WORK_BRANCH}` to get current branch name if necessary. Use `git diff` yourself to see what changed.
+   Emphasize behavioral differences rather than just listing file diffs.
    - Do NOT suggest improvements, fixes, or alternative approaches
    - Do NOT recommend what should be changed — your goal is ONLY to describe what IS
 4. Call `{POST_ANALYSIS}` with your complete analysis report. This finishes your session.
@@ -118,9 +124,9 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 /// Generate hardcoded worker instructions using tool name constants.
 pub fn worker_instructions() -> String {
     use worker_tools::{
-        ASK_PLANNER, ASK_USER, CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM,
-        GET_CHECKLIST, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN,
-        INSERT_CHECKLIST_ITEM, REPORT_ERROR, REPORT_RESULTS, UPDATE_CHECKLIST_ITEM,
+        ASK_PLANNER, ASK_USER, CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, INSERT_CHECKLIST_ITEM,
+        REPORT_ERROR, REPORT_RESULTS, UPDATE_CHECKLIST_ITEM,
     };
     let branch_isolation = crate::mcp::common::branch_isolation_instruction();
     let instructions = format!(
@@ -204,8 +210,8 @@ Review the implementation changes and ensure they meet coding standards and task
 /// Generate hardcoded tester instructions using tool name constants.
 pub fn tester_instructions() -> String {
     use crate::mcp::tester_tools::{
-        GET_PLAN, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
-        REPORT_ERROR, TEST_ACCEPT, TEST_REJECT,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, REPORT_ERROR, TEST_ACCEPT,
+        TEST_REJECT,
     };
     let instructions = format!(
         r#"# Tester Agent
