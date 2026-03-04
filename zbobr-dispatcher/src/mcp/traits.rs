@@ -1,5 +1,5 @@
 use crate::{
-    Signal, CommentType,
+    CommentType, Signal,
     mcp::common::get_hostname,
     task::{ChecklistItem, Parameter, Role, RoleSession},
 };
@@ -19,6 +19,7 @@ pub trait CommonMcpImpl: Send + Sync {
     fn retry_signal(&self) -> Signal {
         match self.role() {
             Role::Preparator => Signal::GoPrepare,
+            Role::Analyser => Signal::GoAnalyse,
             Role::Planner => Signal::GoPlan,
             Role::Worker => Signal::GoWork,
             Role::Reviewer => Signal::GoReview,
@@ -90,10 +91,37 @@ pub trait CommonMcpImpl: Send + Sync {
             .copied()
             .unwrap_or(comments.len());
 
-        // Return the plan comment + all following comments until next plan as JSON
-        let result_comments: Vec<zbobr_api::Comment> =
-            comments[plan_comment_idx..end_idx].to_vec();
+        // Return the plan comment + all following comments until next plan,
+        // skipping Analysis comments (they are accessed via GET_ANALYSIS).
+        let result_comments: Vec<zbobr_api::Comment> = comments[plan_comment_idx..end_idx]
+            .iter()
+            .filter(|c| c.comment_type != CommentType::Analysis)
+            .cloned()
+            .collect();
         match serde_json::to_string_pretty(&result_comments) {
+            Ok(json) => json,
+            Err(e) => format!("Error serializing: {e}"),
+        }
+    }
+
+    async fn get_analysis_impl(&self) -> String {
+        tracing::info!(
+            "[{}#{}] get_analysis",
+            self.role_name(),
+            self.session().task_id()
+        );
+
+        let comments = match self.session().get_comments().await {
+            Ok(c) => c,
+            Err(e) => return format!("Error: {e}"),
+        };
+
+        let analysis_comments: Vec<zbobr_api::Comment> = comments
+            .into_iter()
+            .filter(|c| c.comment_type == CommentType::Analysis)
+            .collect();
+
+        match serde_json::to_string_pretty(&analysis_comments) {
             Ok(json) => json,
             Err(e) => format!("Error serializing: {e}"),
         }
@@ -414,6 +442,35 @@ pub trait CommonMcpImpl: Send + Sync {
     }
 }
 
+/// Analyser-specific MCP implementations
+#[allow(async_fn_in_trait)]
+pub trait AnalyserMcpImpl: CommonMcpImpl {
+    async fn post_analysis_impl(&self, analysis: &str) -> String {
+        tracing::info!("[analyser#{}] post_analysis", self.session().task_id());
+        let hostname = crate::mcp::common::get_hostname();
+
+        if let Err(e) = self
+            .session()
+            .post_comment(
+                CommentType::Analysis,
+                analysis,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
+            .await
+        {
+            tracing::error!(
+                "Failed to post analysis comment for task {}: {e}",
+                self.session().task_id()
+            );
+            return format!("Error posting analysis: {e}");
+        }
+
+        "Analysis posted successfully".to_string()
+    }
+}
+
 /// Preparator-specific MCP implementations
 #[allow(async_fn_in_trait)]
 pub trait PreparatorMcpImpl: CommonMcpImpl {
@@ -455,13 +512,7 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
         // Post the plan as a PLAN comment to preserve history
         if let Err(e) = self
             .session()
-            .post_comment(
-                CommentType::Plan,
-                plan,
-                Some(self.role()),
-                &hostname,
-                None,
-            )
+            .post_comment(CommentType::Plan, plan, Some(self.role()), &hostname, None)
             .await
         {
             tracing::error!(
@@ -470,7 +521,6 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
             );
             return format!("Error posting plan: {e}");
         }
-
 
         "Plan posted and task ready for worker implementation".to_string()
     }
@@ -501,7 +551,13 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
 
         if let Err(e) = self
             .session()
-            .post_comment(CommentType::Request, message, Some(self.role()), &hostname, None)
+            .post_comment(
+                CommentType::Request,
+                message,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
             .await
         {
             tracing::error!(

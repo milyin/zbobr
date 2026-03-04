@@ -21,12 +21,14 @@ pub use config::{
 };
 pub use generic_config::{GenericConfig, GenericConfigArgs, GenericConfigToml};
 pub use mcp::{
-    MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, WorkerMcp, merger_instructions,
-    planner_instructions, preparator_instructions, reviewer_instructions, worker_instructions,
+    AnalyserMcp, MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, WorkerMcp,
+    analyser_instructions, merger_instructions, planner_instructions, preparator_instructions,
+    reviewer_instructions, worker_instructions,
 };
 pub use prompts::{Prompts, build_full_prompt, load_prompts, resolve_prompts};
 pub use task::{
-    ChecklistItem, Comment, CommentType, Model, Parameter, RoleSession, Signal, Stage, Task, TaskSession, Tool,
+    ChecklistItem, Comment, CommentType, Model, Parameter, RoleSession, Signal, Stage, Task,
+    TaskSession, Tool,
 };
 pub use tool_executor::ToolExecutor;
 pub use zbobr_api::config::{BackendConfig, Config};

@@ -1,5 +1,5 @@
-use std::path::Path;
-use std::process::Command;
+use std::{path::Path, process::Command};
+
 use tempfile::TempDir;
 
 /// Test that author rewriting works with a real git repository.
@@ -238,9 +238,7 @@ fn test_git_repo_discovery_from_nested_directory() {
         "Failed to discover git repo from nested directory"
     );
 
-    let discovered_root = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_string();
+    let discovered_root = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let expected_root = repo_path
         .canonicalize()
         .unwrap()
@@ -434,6 +432,8 @@ fn test_author_rewriting_from_nested_directory() {
         .output()
         .expect("Failed to get author from nested dir");
 
-    let final_author = String::from_utf8_lossy(&author_cmd.stdout).trim().to_string();
+    let final_author = String::from_utf8_lossy(&author_cmd.stdout)
+        .trim()
+        .to_string();
     assert_eq!(final_author, new_author, "Author should be rewritten");
 }

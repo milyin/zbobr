@@ -8,13 +8,10 @@
 /// `[tasks.github]` section.
 mod mcp_integration;
 
-
 use std::sync::Arc;
-use tokio::sync::OnceCell;
 
-use mcp_integration::IntegrationTestEnv;
-use mcp_integration::github_config::GitHubTestConfig;
-use mcp_integration::test_helpers;
+use mcp_integration::{IntegrationTestEnv, github_config::GitHubTestConfig, test_helpers};
+use tokio::sync::OnceCell;
 
 static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -40,13 +37,9 @@ async fn load_credentials() -> (String, String) {
 
 async fn get_env() -> Arc<IntegrationTestEnv> {
     let (github_repo, github_token) = load_credentials().await;
-    IntegrationTestEnv::init_github_fs(
-        "github_fs",
-        github_repo,
-        github_token,
-    )
-    .await
-    .expect("failed to initialise GitHub/FS environment; check credentials")
+    IntegrationTestEnv::init_github_fs("github_fs", github_repo, github_token)
+        .await
+        .expect("failed to initialise GitHub/FS environment; check credentials")
 }
 
 // ---------------------------------------------------------------------------

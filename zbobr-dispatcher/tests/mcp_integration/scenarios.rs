@@ -3,9 +3,9 @@
 
 pub fn preparation_scenario(repo_path: &str) -> String {
     use zbobr_dispatcher::mcp::preparator_tools::{
-        GET_PARAM_DESTINATION_BRANCH,
-        GET_PARAM_DESTINATION_REPOSITORY, GET_PARAM_WORK_BRANCH, GET_PLAN, SET_PARAM_DESTINATION_BRANCH,
-        SET_PARAM_DESTINATION_REPOSITORY, SET_PARAM_WORK_BRANCH_POSTFIX,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_DESTINATION_REPOSITORY, GET_PARAM_WORK_BRANCH,
+        GET_PLAN, SET_PARAM_DESTINATION_BRANCH, SET_PARAM_DESTINATION_REPOSITORY,
+        SET_PARAM_WORK_BRANCH_POSTFIX,
     };
 
     format!(
@@ -88,8 +88,8 @@ steps:
 
 pub fn planning_scenario() -> String {
     use zbobr_dispatcher::mcp::planner_tools::{
-        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
-        GET_PLAN, INSERT_CHECKLIST_ITEM, POST_PLAN,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, INSERT_CHECKLIST_ITEM,
+        POST_PLAN,
     };
 
     format!(
@@ -203,9 +203,9 @@ steps:
 
 pub fn working_scenario() -> String {
     use zbobr_dispatcher::mcp::worker_tools::{
-        CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST,
-        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN,
-        INSERT_CHECKLIST_ITEM, REPORT_RESULTS, UPDATE_CHECKLIST_ITEM,
+        CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST, GET_PARAM_DESTINATION_BRANCH,
+        GET_PARAM_WORK_BRANCH, GET_PLAN, INSERT_CHECKLIST_ITEM, REPORT_RESULTS,
+        UPDATE_CHECKLIST_ITEM,
     };
 
     const PRIMARY_ID: &str = "w1";
@@ -322,7 +322,6 @@ steps:
 pub fn reviewing_scenario() -> String {
     // checklist operations aren't exported by reviewer_tools, so pull them
     // from worker_tools (they're otherwise the same constants).
-    use zbobr_dispatcher::mcp::worker_tools::INSERT_CHECKLIST_ITEM;
     use zbobr_dispatcher::mcp::reviewer_tools::{
         GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, REVIEW_REJECT,
     };
@@ -366,7 +365,7 @@ steps:
     type: tool_call
     tool: {REVIEW_REJECT}
     arguments:
-      message: "Found a problem during review."
+      message: "Reviewer complete. Found a problem during review."
   assertions:
     - type: success
 "#,
@@ -431,8 +430,7 @@ steps:
 
 pub fn merging_scenario(ending: &str) -> String {
     use zbobr_dispatcher::mcp::merger_tools::{
-        ASK_USER, GET_PARAM_DESTINATION_BRANCH,
-        GET_PARAM_WORK_BRANCH, GET_PLAN, REPORT_RESULTS,
+        ASK_USER, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, REPORT_RESULTS,
     };
 
     let ending_step = match ending {
@@ -527,7 +525,7 @@ steps:
 /// Scenario for testing multiple plan postings and GET_PLAN with offset parameter.
 ///
 /// The `description` parameter is the task description, used to verify that
-/// GET_PLAN returns it as a user reply comment when no plan has been posted.
+/// GET_PLAN returns it as a user request comment when no plan has been posted.
 pub fn multiple_plans_scenario(description: &str) -> String {
     use zbobr_dispatcher::mcp::planner_tools::{GET_PLAN, POST_PLAN, REPORT_ERROR};
 
@@ -538,7 +536,7 @@ timeout: 60
 stop_on_failure: true
 
 steps:
-- name: Get plan before any plan exists (returns task description as user reply comment)
+- name: Get plan before any plan exists (returns task description as user request comment)
   operation:
     type: tool_call
     tool: {GET_PLAN}

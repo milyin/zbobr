@@ -1,12 +1,16 @@
 #![allow(dead_code)]
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use zbobr_dispatcher::{
-    ZbobrDispatcher, ZbobrDispatcherConfig, ZbobrDispatcherDyn, ZbobrExecutorConfig,
-    ChecklistItem, Comment, Signal, Stage, Task, process_task_by_stage,
+    ChecklistItem, Comment, Signal, Stage, Task, ZbobrDispatcher, ZbobrDispatcherConfig,
+    ZbobrDispatcherDyn, ZbobrExecutorConfig, process_task_by_stage,
     prompts::Prompts,
     task::{Parameter, Tool},
 };
@@ -323,16 +327,7 @@ impl IntegrationTestEnv {
         confirm: bool,
     ) -> u64 {
         self.zbobr
-            .create_task_with_confirm(
-                title,
-                description,
-                stage,
-                None,
-                None,
-                None,
-                None,
-                confirm,
-            )
+            .create_task_with_confirm(title, description, stage, None, None, None, None, confirm)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to create task: {e}", self.name))
     }
@@ -349,7 +344,10 @@ impl IntegrationTestEnv {
             .get_task_comments(task_id)
             .await
             .unwrap_or_else(|e| {
-                panic!("[{}] failed to get comments for task #{task_id}: {e}", self.name)
+                panic!(
+                    "[{}] failed to get comments for task #{task_id}: {e}",
+                    self.name
+                )
             })
     }
 
@@ -359,11 +357,18 @@ impl IntegrationTestEnv {
         self.zbobr
             .task_session(task_id)
             .modify_task(move |task| {
-                task.checklist.push(ChecklistItem { id, checked: false, text });
+                task.checklist.push(ChecklistItem {
+                    id,
+                    checked: false,
+                    text,
+                });
             })
             .await
             .unwrap_or_else(|e| {
-                panic!("[{}] failed to insert checklist item for task #{task_id}: {e}", self.name)
+                panic!(
+                    "[{}] failed to insert checklist item for task #{task_id}: {e}",
+                    self.name
+                )
             });
     }
 
@@ -624,10 +629,7 @@ impl IntegrationTestEnv {
             .unwrap_or_else(|e| panic!("[{}] failed to set stage: {e}", self.name));
 
         let idx = SCENARIO_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let scenarios_dir = self
-            .base_path
-            .join("scenarios")
-            .join(format!("{idx}"));
+        let scenarios_dir = self.base_path.join("scenarios").join(format!("{idx}"));
         tokio::fs::create_dir_all(&scenarios_dir)
             .await
             .expect("failed to create scenarios directory");
@@ -639,6 +641,10 @@ impl IntegrationTestEnv {
         let mcp_tester_config = match stage {
             Stage::Preparing => ZbobrExecutorMcpTesterConfig {
                 preparation: Some(scenario_path),
+                ..Default::default()
+            },
+            Stage::Analysing => ZbobrExecutorMcpTesterConfig {
+                analysing: Some(scenario_path),
                 ..Default::default()
             },
             Stage::Planning => ZbobrExecutorMcpTesterConfig {
@@ -668,6 +674,7 @@ impl IntegrationTestEnv {
         let prompts = Prompts {
             base_path: None,
             preparator: vec![],
+            analyser: vec![],
             planner: vec![],
             worker: vec![],
             reviewer: vec![],

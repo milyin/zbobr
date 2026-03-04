@@ -5,11 +5,10 @@
 
 use std::path::PathBuf;
 
-use zbobr_dispatcher::{CommentType, Signal, Stage, task::Parameter};
 use zbobr_api::task::ChecklistItem;
+use zbobr_dispatcher::{CommentType, Signal, Stage, task::Parameter};
 
-use super::env::IntegrationTestEnv;
-use super::scenarios;
+use super::{env::IntegrationTestEnv, scenarios};
 
 // ---------------------------------------------------------------------------
 // Preparation
@@ -31,8 +30,8 @@ pub async fn run_preparation(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some(Signal::GoPlan),
-        "[{}] Preparator should emit go_plan after setting repo/branches",
+        Some(Signal::GoAnalyse),
+        "[{}] Preparator should emit go_analyse after setting repo/branches",
         env.name()
     );
 }
@@ -178,12 +177,7 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
             }),
         )
         .await
-        .unwrap_or_else(|e| {
-            panic!(
-                "[{}] failed to add review checklist item: {e}",
-                env.name()
-            )
-        });
+        .unwrap_or_else(|e| panic!("[{}] failed to add review checklist item: {e}", env.name()));
 
     env.run_stage(task_id, Stage::Reviewing, scenarios::reviewing_scenario())
         .await;
@@ -191,7 +185,9 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     let comments = env.get_comments(task_id).await;
     assert!(
-        comments.iter().any(|c| c.text.contains("Reviewer complete.")),
+        comments
+            .iter()
+            .any(|c| c.text.contains("Reviewer complete.")),
         "[{}] Reviewer report not found in discussion",
         env.name()
     );
@@ -510,7 +506,9 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     let comments = env.get_comments(task_id).await;
     assert!(
-        comments.iter().any(|c| c.text.contains("Detected merge conflicts")),
+        comments
+            .iter()
+            .any(|c| c.text.contains("Detected merge conflicts")),
         "[{}] Merger should report detected conflicts",
         env.name()
     );
@@ -829,20 +827,24 @@ pub async fn run_plan_history_with_index(env: &IntegrationTestEnv) {
         env.name()
     );
     assert!(
-        error_comments[0].text.contains("Issue found after first plan"),
+        error_comments[0]
+            .text
+            .contains("Issue found after first plan"),
         "[{}] Error comment should contain expected text, got: {}",
         env.name(),
         error_comments[0].text
     );
 
     // Verify the ordering: plan-1, error, plan-2
-    let plan1_pos = comments.iter().position(|c| {
-        c.comment_type == CommentType::Plan && c.text.contains("First plan")
-    });
-    let error_pos = comments.iter().position(|c| c.comment_type == CommentType::Error);
-    let plan2_pos = comments.iter().position(|c| {
-        c.comment_type == CommentType::Plan && c.text.contains("Second plan")
-    });
+    let plan1_pos = comments
+        .iter()
+        .position(|c| c.comment_type == CommentType::Plan && c.text.contains("First plan"));
+    let error_pos = comments
+        .iter()
+        .position(|c| c.comment_type == CommentType::Error);
+    let plan2_pos = comments
+        .iter()
+        .position(|c| c.comment_type == CommentType::Plan && c.text.contains("Second plan"));
 
     assert!(
         plan1_pos < error_pos && error_pos < plan2_pos,
@@ -1546,9 +1548,7 @@ pub async fn run_entry_clears_signal_for_worker(env: &IntegrationTestEnv) {
 /// Verify that after a Merger session:
 ///   - conflict == false (cleared on entry)
 ///   - signal == Some(GoWork) (preserved; Merger entry must not clear it)
-pub async fn run_entry_clears_conflict_preserves_signal_for_merger(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_entry_clears_conflict_preserves_signal_for_merger(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_entry_clear_merger").await;
     let dest_repo = env
         .target_repo
