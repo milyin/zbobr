@@ -52,9 +52,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if cut_indices.is_empty() {
             // No chunks yet — check if there is any plan comment; if not, return task description.
-            let has_plan = comments
-                .iter()
-                .any(|c| c.comment_type == CommentType::Plan);
+            let has_plan = comments.iter().any(|c| c.comment_type == CommentType::Plan);
             if !has_plan {
                 let desc = match self.session().get_description().await {
                     Ok(d) if !d.is_empty() => d,
@@ -76,14 +74,13 @@ pub trait CommonMcpImpl: Send + Sync {
             }
             // There is a plan but no cuts yet — the whole comment list is one chunk.
             if offset < -1 {
-                return format!(
-                    "offset {} out of range: only 1 chunk available",
-                    offset
-                );
+                return format!("offset {} out of range: only 1 chunk available", offset);
             }
             let result_comments: Vec<zbobr_api::Comment> = comments
                 .iter()
-                .filter(|c| c.comment_type != CommentType::Error && c.comment_type != CommentType::Done)
+                .filter(|c| {
+                    c.comment_type != CommentType::Error && c.comment_type != CommentType::Done
+                })
                 .cloned()
                 .collect();
             if result_comments.is_empty() {
@@ -107,8 +104,7 @@ pub trait CommonMcpImpl: Send + Sync {
             if back >= num_chunks {
                 return format!(
                     "offset {} out of range: only {} chunk(s) available",
-                    offset,
-                    num_chunks
+                    offset, num_chunks
                 );
             }
             num_chunks - 1 - back

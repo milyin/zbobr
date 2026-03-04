@@ -1,10 +1,10 @@
 use heck::ToSnakeCase;
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::{ToTokens, format_ident, quote};
+use quote::{format_ident, quote, ToTokens};
 use syn::{
-    Attribute, Fields, GenericArgument, ItemStruct, Lit, LitStr, Meta, Token, Type, TypePath,
-    parse_macro_input, punctuated::Punctuated,
+    parse_macro_input, punctuated::Punctuated, Attribute, Fields, GenericArgument, ItemStruct, Lit,
+    LitStr, Meta, Token, Type, TypePath,
 };
 
 #[proc_macro_attribute]

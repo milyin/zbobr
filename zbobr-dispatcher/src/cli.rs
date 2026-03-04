@@ -1738,13 +1738,7 @@ async fn finalize_session(
                 // Post DONE boundary after marking task done
                 let hostname = get_hostname();
                 if let Err(e) = task_session
-                    .post_comment(
-                        CommentType::Done,
-                        "",
-                        None,
-                        &hostname,
-                        None,
-                    )
+                    .post_comment(CommentType::Done, "", None, &hostname, None)
                     .await
                 {
                     tracing::warn!(
