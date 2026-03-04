@@ -260,16 +260,17 @@ pub async fn run_reviewing_approval(env: &IntegrationTestEnv) {
     .await;
 
     let task = env.get_task(task_id).await;
-    // approval path should mark the task done instead of signalling planner
+    // approval path routes to tester via GoTest signal
     assert_eq!(
         task.stage,
-        Stage::Done,
-        "[{}] Reviewer approval should mark task DONE when no checklist items remain",
+        Stage::Pending,
+        "[{}] Reviewer approval should route to tester (Pending + GoTest signal)",
         env.name()
     );
-    assert!(
-        task.signal.is_none(),
-        "[{}] DONE task should not have any follow-up signal",
+    assert_eq!(
+        task.signal,
+        Some(Signal::GoTest),
+        "[{}] Reviewer approval should emit GoTest signal",
         env.name()
     );
     assert!(
