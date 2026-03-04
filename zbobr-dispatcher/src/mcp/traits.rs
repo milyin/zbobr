@@ -99,6 +99,14 @@ pub trait CommonMcpImpl: Send + Sync {
             .filter(|c| c.comment_type != CommentType::Analysis && c.comment_type != CommentType::Error)
             .cloned()
             .collect();
+        
+        // If chunk is empty after filtering, return error to indicate task is done or chunk is invalid
+        if result_comments.is_empty() {
+            return format!(
+                "Error: No messages found in chunk (task may already be complete, or all comments have been filtered)"
+            );
+        }
+        
         match serde_json::to_string_pretty(&result_comments) {
             Ok(json) => json,
             Err(e) => format!("Error serializing: {e}"),
