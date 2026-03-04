@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use async_trait::async_trait;
 
-use crate::task::{Comment, CommentType, Model, Parameter, Role, Stage, Task, Tool};
+use crate::task::{Comment, CommentType, Model, Parameter, Role, Stage, Task};
 
 /// TaskBackend: stores and manages tasks, their metadata, comments, and lifecycle.
 ///
@@ -24,7 +24,6 @@ pub trait TaskBackend: Send + Sync {
         title: &str,
         description: &str,
         stage: Stage,
-        tool: Option<Tool>,
         parameters: HashMap<Parameter, String>,
     ) -> anyhow::Result<u64>;
 
@@ -48,12 +47,8 @@ pub trait TaskBackend: Send + Sync {
 
     // -- Queries --
 
-    /// List open tasks with a given stage, optionally filtered by tool.
-    async fn list_tasks_by_stage(
-        &self,
-        stage: Stage,
-        tool: Option<Tool>,
-    ) -> anyhow::Result<Vec<Task>>;
+    /// List open tasks with a given stage.
+    async fn list_tasks_by_stage(&self, stage: Stage) -> anyhow::Result<Vec<Task>>;
 
     // -- Discussion --
 

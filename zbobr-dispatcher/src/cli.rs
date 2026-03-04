@@ -91,9 +91,7 @@ pub enum TaskSubcommand {
         /// Initial stage (PENDING, GO_PREPARATION, etc.; default: PENDING)
         #[arg(long, default_value = "PENDING")]
         stage: String,
-        /// AI tool to assign (copilot, claude, mcp-tester)
-        #[arg(long)]
-        tool: Option<String>,
+
         /// Destination repository in owner/repo format
         #[arg(long)]
         dest_repo: Option<String>,
@@ -109,9 +107,6 @@ pub enum TaskSubcommand {
         /// Only show tasks in this stage (PENDING, GO_PREPARATION, etc.)
         #[arg(long)]
         stage: Option<String>,
-        /// Only show tasks assigned to this tool (copilot, claude, mcp-tester)
-        #[arg(long)]
-        tool: Option<String>,
     },
     /// Show a task by ID
     Show {
@@ -131,9 +126,7 @@ pub enum TaskSubcommand {
         /// New stage (PENDING, GO_PREPARATION, etc.)
         #[arg(long)]
         stage: Option<String>,
-        /// New AI tool (copilot, claude, mcp-tester)
-        #[arg(long)]
-        tool: Option<String>,
+
         /// New destination repository in owner/repo format.
         /// Pass `--dest-repo` without a value to delete the parameter.
         #[arg(long, num_args = 0..=1)]
@@ -354,12 +347,6 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     println!("Title:       {}", task.title);
     println!("Stage:       {}", task.stage);
     println!(
-        "Tool:        {}",
-        task.tool
-            .map(|t| t.to_string())
-            .unwrap_or_else(|| "(none)".to_string())
-    );
-    println!(
         "Signal:      {}",
         task.signal
             .map(|s| s.to_string())
@@ -450,26 +437,21 @@ async fn run_task_subcommand(
             title,
             description,
             stage,
-            tool,
             dest_repo,
             dest_branch,
             confirm,
         } => {
             let stage = Stage::from_milestone_name(&stage.to_uppercase())
                 .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", stage))?;
-            let tool = tool
-                .map(|t| t.parse::<Tool>())
-                .transpose()
-                .context("Invalid tool")?;
             let id = zbobr
-                .create_task(&title, &description, stage, tool, dest_repo, dest_branch)
+                .create_task(&title, &description, stage, dest_repo, dest_branch)
                 .await?;
             if confirm {
                 zbobr.task_session(id).set_confirm(true).await?;
             }
             println!("Created task #{}", id);
         }
-        TaskSubcommand::List { stage, tool } => {
+        TaskSubcommand::List { stage } => {
             let stage_filter = if let Some(s) = stage {
                 Some(
                     Stage::from_milestone_name(&s.to_uppercase())
@@ -478,15 +460,9 @@ async fn run_task_subcommand(
             } else {
                 None
             };
-            let tool_filter = if let Some(t) = tool {
-                Some(t.parse::<Tool>()?)
-            } else {
-                None
-            };
-
             let mut tasks = Vec::new();
             if let Some(stage) = stage_filter {
-                tasks = zbobr.list_tasks_by_stage(stage, tool_filter).await?;
+                tasks = zbobr.list_tasks_by_stage(stage).await?;
             } else {
                 let all_stages = [
                     Stage::Pending,
@@ -498,7 +474,7 @@ async fn run_task_subcommand(
                     Stage::Done,
                 ];
                 for st in all_stages {
-                    let mut ts = zbobr.list_tasks_by_stage(st, tool_filter).await?;
+                    let mut ts = zbobr.list_tasks_by_stage(st).await?;
                     tasks.append(&mut ts);
                 }
                 tasks.sort_by_key(|t| t.id);
@@ -523,7 +499,6 @@ async fn run_task_subcommand(
             title,
             description,
             stage,
-            tool,
             dest_repo,
             dest_branch,
             work_branch,
@@ -536,9 +511,7 @@ async fn run_task_subcommand(
                         .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", s))
                 })
                 .transpose()?;
-            let tool = tool
-                .map(|t| t.parse::<Tool>().context("Invalid tool"))
-                .transpose()?;
+
             let signal = signal
                 .map(|s| s.parse::<Signal>().context("Invalid signal"))
                 .transpose()?;
@@ -561,9 +534,7 @@ async fn run_task_subcommand(
                             }
                             task.stage = s;
                         }
-                        if let Some(to) = tool {
-                            task.tool = Some(to);
-                        }
+
                         if let Some(s) = signal {
                             task.signal = Some(s);
                         }
@@ -981,9 +952,8 @@ pub async fn process_task_by_stage(
             }
             if task.conflict {
                 tracing::info!(
-                    "Found PENDING task #{} with conflict flag - running merger (tool: {:?})",
-                    task.id,
-                    task.tool
+                    "Found PENDING task #{} with conflict flag - running merger",
+                    task.id
                 );
                 let session =
                     CliRoleRunner::new(zbobr, task.id, Role::Merger, prompts, executor_config);
@@ -1091,11 +1061,7 @@ pub async fn run_manager_loop(
             last_cleanup = std::time::Instant::now();
         }
 
-        let current_tool = zbobr.config().cli_tool;
-        let mut pending_tasks = match zbobr
-            .list_tasks_by_stage(Stage::Pending, Some(current_tool))
-            .await
-        {
+        let mut pending_tasks = match zbobr.list_tasks_by_stage(Stage::Pending).await {
             Ok(tasks) => tasks,
             Err(e) => {
                 tracing::error!("Failed to check PENDING tasks: {e}");
@@ -1115,9 +1081,8 @@ pub async fn run_manager_loop(
 
             if task.conflict {
                 tracing::info!(
-                    "Found PENDING task #{} with conflict flag - running merger (tool: {:?})",
-                    task.id,
-                    task.tool
+                    "Found PENDING task #{} with conflict flag - running merger",
+                    task.id
                 );
                 let session =
                     CliRoleRunner::new(zbobr, task.id, Role::Merger, prompts, executor_config);
@@ -1131,10 +1096,9 @@ pub async fn run_manager_loop(
             let Some(signal) = task.signal else { continue };
             let role = signal.target_role();
             tracing::info!(
-                "Found PENDING task #{} with signal {:?} (tool: {:?}) - running {:?}",
+                "Found PENDING task #{} with signal {:?} - running {:?}",
                 task.id,
                 signal,
-                task.tool,
                 role
             );
             let session = CliRoleRunner::new(zbobr, task.id, role, prompts, executor_config);
@@ -1160,21 +1124,20 @@ pub async fn run_manager_loop(
         let mut active_counts = std::collections::HashMap::new();
         for stage in &active_stages {
             let count = zbobr
-                .list_tasks_by_stage(*stage, Some(current_tool))
+                .list_tasks_by_stage(*stage)
                 .await
                 .unwrap_or_default()
                 .len();
             active_counts.insert(stage, count);
         }
         tracing::info!(
-            "Task statistics for tool {:?}: PREPARING={}, PLANNING={}, WORKING={}, REVIEWING={}, TESTING={}, MERGING={}",
-            current_tool,
+            "Task statistics: PREPARING={}, PLANNING={}, WORKING={}, REVIEWING={}, TESTING={}, MERGING={}",
             active_counts[&Stage::Preparing],
             active_counts[&Stage::Planning],
             active_counts[&Stage::Working],
             active_counts[&Stage::Reviewing],
             active_counts[&Stage::Testing],
-            active_counts[&Stage::Merging],
+            active_counts[&Stage::Merging]
         );
 
         let elapsed = loop_start.elapsed();

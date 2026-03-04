@@ -731,7 +731,6 @@ pub struct Task {
     pub title: String,
     pub description: String,
     pub stage: Stage,
-    pub tool: Option<Tool>,
     pub parameters: HashMap<Parameter, String>,
     pub checklist: Vec<ChecklistItem>,
     pub signal: Option<Signal>,

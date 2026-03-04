@@ -5,8 +5,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use zbobr_api::{
-    ChecklistItem, Comment, CommentType, Model, Parameter, Role, Stage, Task, Tool,
-    backend::TaskBackend,
+    ChecklistItem, Comment, CommentType, Model, Parameter, Role, Stage, Task, backend::TaskBackend,
 };
 
 use crate::config::ZbobrTaskBackendFsConfig;
@@ -18,7 +17,7 @@ struct TaskFile {
     title: String,
     description: String,
     stage: String,
-    tool: Option<String>,
+
     parameters: HashMap<String, String>,
     #[serde(default)]
     conflict: bool,
@@ -35,8 +34,6 @@ impl TaskFile {
     fn to_task(&self) -> anyhow::Result<Task> {
         let stage = Stage::from_milestone_name(&self.stage)
             .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", self.stage))?;
-
-        let tool = self.tool.as_ref().map(|s| s.parse()).transpose()?;
 
         let signal = self.signal.as_ref().map(|s| s.parse()).transpose()?;
 
@@ -61,7 +58,7 @@ impl TaskFile {
             title: self.title.clone(),
             description: self.description.clone(),
             stage,
-            tool,
+
             parameters,
             checklist: self.checklist.clone(),
             signal,
@@ -78,7 +75,7 @@ impl TaskFile {
             title: task.title.clone(),
             description: task.description.clone(),
             stage: task.stage.milestone_name().to_string(),
-            tool: task.tool.map(|t| t.to_string()),
+
             parameters: task
                 .parameters
                 .iter()
@@ -271,7 +268,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
         title: &str,
         description: &str,
         stage: Stage,
-        tool: Option<Tool>,
         parameters: HashMap<Parameter, String>,
     ) -> anyhow::Result<u64> {
         let id = self.get_next_id().await?;
@@ -281,7 +277,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
             title: title.to_string(),
             description: description.to_string(),
             stage,
-            tool,
             parameters,
             checklist: vec![],
             signal: None,
@@ -332,11 +327,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
         Ok(())
     }
 
-    async fn list_tasks_by_stage(
-        &self,
-        stage: Stage,
-        tool: Option<Tool>,
-    ) -> anyhow::Result<Vec<Task>> {
+    async fn list_tasks_by_stage(&self, stage: Stage) -> anyhow::Result<Vec<Task>> {
         let task_ids = self.list_task_files().await?;
         let mut matching_tasks = Vec::new();
 
@@ -359,17 +350,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
             // Filter by stage
             if task.stage != stage {
                 continue;
-            }
-
-            // Filter by tool if specified
-            if let Some(filter_tool) = tool {
-                if let Some(task_tool) = task.tool {
-                    if task_tool != filter_tool {
-                        continue;
-                    }
-                } else {
-                    // Task has no tool label, include it (can be taken by anyone)
-                }
             }
 
             matching_tasks.push(task);

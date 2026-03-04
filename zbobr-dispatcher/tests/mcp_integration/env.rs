@@ -314,7 +314,7 @@ impl IntegrationTestEnv {
 
     pub async fn create_task(&self, title: &str, description: &str, stage: Stage) -> u64 {
         self.zbobr
-            .create_task(title, description, stage, None, None, None)
+            .create_task(title, description, stage, None, None)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to create task: {e}", self.name))
     }
@@ -327,7 +327,7 @@ impl IntegrationTestEnv {
         confirm: bool,
     ) -> u64 {
         self.zbobr
-            .create_task_with_confirm(title, description, stage, None, None, None, confirm)
+            .create_task_with_confirm(title, description, stage, None, None, confirm)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to create task: {e}", self.name))
     }

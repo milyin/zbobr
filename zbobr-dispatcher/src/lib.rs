@@ -107,7 +107,6 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
         title: &str,
         description: &str,
         stage: Stage,
-        tool: Option<Tool>,
         destination_repository: Option<String>,
         destination_branch: Option<String>,
     ) -> anyhow::Result<u64> {
@@ -115,7 +114,6 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
             title,
             description,
             stage,
-            tool,
             destination_repository,
             destination_branch,
             false,
@@ -131,7 +129,6 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
         title: &str,
         description: &str,
         stage: Stage,
-        tool: Option<Tool>,
         destination_repository: Option<String>,
         destination_branch: Option<String>,
         confirm: bool,
@@ -145,7 +142,7 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
                 parameters.insert(Parameter::DestinationBranch, branch);
             }
             self.task_backend
-                .create_task(title, description, stage, tool, parameters)
+                .create_task(title, description, stage, parameters)
                 .await?
         };
         if confirm {
@@ -207,12 +204,8 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
             .await
     }
 
-    pub async fn list_tasks_by_stage(
-        &self,
-        stage: Stage,
-        tool: Option<Tool>,
-    ) -> anyhow::Result<Vec<Task>> {
-        self.task_backend.list_tasks_by_stage(stage, tool).await
+    pub async fn list_tasks_by_stage(&self, stage: Stage) -> anyhow::Result<Vec<Task>> {
+        self.task_backend.list_tasks_by_stage(stage).await
     }
 
     pub async fn is_task_closed(&self, id: u64) -> anyhow::Result<bool> {
