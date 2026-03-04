@@ -200,7 +200,7 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 5. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
 6. Your current working directory is already the repository with the work branch checked out. Consult `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` for branch names if needed.
 7. Implement the plan in your working directory
-7a. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality.
+7a. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality. However, comprehensive testing will be performed in the Testing stage — your tests only need to validate basic functionality.
 8. Commit all your changes locally to the work branch with clear messages (describe what the change does, why, and reference relevant checklist item). ALWAYS ensure that you have no uncommitted changes before marking your checklist items as done.
 9. When implementation for an item is complete, mark the item done with `{CHECK_CHECKLIST_ITEM}`, and update or insert follow-up items as needed
 10. If you need human clarification or intervention, call `{ASK_USER}`. If it was found that the plan proposed is unclear or requires adjustment, call `{ASK_PLANNER}`. In case of technical errors use `{REPORT_ERROR}`.
@@ -232,11 +232,70 @@ Review the implementation changes and ensure they meet coding standards and task
 1. Call `{GET_PLAN}` to understand the task requirements and agreed implementation plan
 2. Call `{GET_ANALYSIS}` to read the codebase analysis. Use it to better understand the code being reviewed and spot deviations from the existing patterns.
 3. Your current working directory is the repository with the work branch checked out — inspect the changes
-4. **Run tests created by the worker**: Execute the test suite to validate the implementation. Report any test failures found.
-5. Prepare a detailed review report describing issues found (including test failures), suggested fixes, and overall assessment.
+4. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. Note: Comprehensive testing will be performed in a separate Testing stage.
+5. Prepare a detailed review report describing any issues found, suggested fixes, and overall assessment.
 6. Call `{REVIEW_ACCEPT}` if the implementation is correct and complete, or `{REVIEW_REJECT}` if issues were found. Pass the review report as a parameter to these tools. This finishes the session and routes the task accordingly:
-   - Accept → task is marked done
+   - Accept → task is routed to the Testing stage for comprehensive test verification
    - Reject → task is routed back to the planner for re-planning with the review report included in the context
+"#,
+    );
+
+    instructions
+}
+
+/// Generate hardcoded tester instructions using tool name constants.
+pub fn tester_instructions() -> String {
+    use crate::mcp::tester_tools::{
+        GET_ANALYSIS, GET_PLAN, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
+        REPORT_ERROR, TEST_ACCEPT, TEST_REJECT,
+    };
+    let instructions = format!(
+        r#"# Tester Agent
+
+Run comprehensive tests to verify the implementation meets all testing requirements and CI/build standards.
+
+## Access Model
+
+You have read-only access to the task plan and the repository for testing:
+- Use `{GET_PLAN}` to read the plan and task context
+- Use `{GET_ANALYSIS}` to read the CI/testing requirements discovered by the Analyser
+- Use `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` to get branch names
+- Your current working directory is the repository with the work branch checked out
+- Use `{REPORT_ERROR}` only to report technical errors
+
+## Workflow
+
+1. Call `{GET_PLAN}` to understand the task and implementation context
+2. Call `{GET_ANALYSIS}` to read the project's CI/testing requirements:
+   - Test frameworks and commands (cargo test, npm test, pytest, etc.)
+   - CI configuration files (.github/workflows/, Makefile, tox.ini, etc.)
+   - Code formatting/linting requirements
+   - Platform and architecture requirements
+   - Other automated checks (security scans, type checking)
+3. Get branch information: Call `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}`
+4. **Run comprehensive test suite** matching the project's requirements:
+   - Execute all test commands identified in the analysis
+   - Record test framework versions, commands executed, and full output
+   - Measure code coverage if available
+   - Run formatting/linting checks to ensure code quality
+   - Verify all CI requirements are met
+5. **Document all testing performed:**
+   - Test frameworks and versions used
+   - All commands executed with full output
+   - Test results (passed/failed/skipped counts)
+   - Any failures found
+   - Code coverage metrics
+   - Formatting/linting issues
+6. Call `{TEST_ACCEPT}` if all tests pass and all requirements are met, or `{TEST_REJECT}` if any tests fail or requirements are not met. Pass your comprehensive test report as a parameter. This finishes the session and routes the task accordingly:
+   - Accept → task is marked done
+   - Reject → task is routed back to the planner for re-planning with test failures included in the context
+
+## Important Notes
+
+- **Do not modify files**: You are inspecting and testing only. Do not create commits or change code.
+- **Comprehensive testing**: Run all test commands identified in the CI analysis, not just a subset.
+- **Detailed reporting**: Include all test commands executed, full output, and results in your report.
+- **Early termination on failure**: Stop testing once you encounter a failure and report it immediately via `{TEST_REJECT}`.
 "#,
     );
 

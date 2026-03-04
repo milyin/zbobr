@@ -14,6 +14,7 @@ pub struct Prompts {
     pub planner: Vec<PathBuf>,
     pub worker: Vec<PathBuf>,
     pub reviewer: Vec<PathBuf>,
+    pub tester: Vec<PathBuf>,
     pub merger: Vec<PathBuf>,
 }
 
@@ -40,6 +41,10 @@ pub fn resolve_prompts(args: &ZbobrDispatcherArgs, config: &ZbobrDispatcherConfi
         .reviewer_prompts
         .clone()
         .unwrap_or_else(|| config.reviewer_prompts.clone());
+    let tester = args
+        .tester_prompts
+        .clone()
+        .unwrap_or_else(|| config.tester_prompts.clone());
     let merger = args
         .merger_prompts
         .clone()
@@ -56,6 +61,7 @@ pub fn resolve_prompts(args: &ZbobrDispatcherArgs, config: &ZbobrDispatcherConfi
         planner,
         worker,
         reviewer,
+        tester,
         merger,
     }
 }
@@ -106,6 +112,7 @@ pub fn build_full_prompt(user_context: &str, role: Role) -> String {
         Role::Planner => crate::planner_instructions(),
         Role::Worker => crate::worker_instructions(),
         Role::Reviewer => crate::reviewer_instructions(),
+        Role::Tester => crate::tester_instructions(),
         Role::Merger => crate::merger_instructions(),
     };
 
@@ -115,6 +122,7 @@ pub fn build_full_prompt(user_context: &str, role: Role) -> String {
         Role::Planner => crate::PlannerMcp::generate_api_docs(),
         Role::Worker => crate::WorkerMcp::generate_api_docs(),
         Role::Reviewer => crate::ReviewerMcp::generate_api_docs(),
+        Role::Tester => crate::TesterMcp::generate_api_docs(),
         Role::Merger => crate::MergerMcp::generate_api_docs(),
     };
 
@@ -208,6 +216,7 @@ impl Prompts {
             Role::Planner => load_prompts(&self.planner, self.base_path.as_ref())?,
             Role::Worker => load_prompts(&self.worker, self.base_path.as_ref())?,
             Role::Reviewer => load_prompts(&self.reviewer, self.base_path.as_ref())?,
+            Role::Tester => load_prompts(&self.tester, self.base_path.as_ref())?,
             Role::Merger => load_prompts(&self.merger, self.base_path.as_ref())?,
         };
         Ok(build_full_prompt(&base_prompt, role))
@@ -389,6 +398,7 @@ mod tests {
             planner: vec![],
             worker: vec![path],
             reviewer: vec![],
+            tester: vec![],
             merger: vec![],
         };
         let result = prompts.build_prompt(Role::Worker).unwrap();
@@ -404,6 +414,7 @@ mod tests {
             planner: vec![],
             worker: vec![],
             reviewer: vec![],
+            tester: vec![],
             merger: vec![],
         };
         let result = prompts.build_prompt(Role::Worker).unwrap();
@@ -423,6 +434,7 @@ mod tests {
             planner: vec![],
             worker: vec![],
             reviewer: vec![PathBuf::from("reviewer.md")],
+            tester: vec![],
             merger: vec![],
         };
         let result = prompts.build_prompt(Role::Reviewer).unwrap();
@@ -442,6 +454,7 @@ mod tests {
             planner: vec![],
             worker: vec![worker_file],
             reviewer: vec![],
+            tester: vec![],
             merger: vec![],
         };
         assert!(validate_prompts(&prompts).is_ok());
@@ -456,6 +469,7 @@ mod tests {
             planner: vec![],
             worker: vec![],
             reviewer: vec![],
+            tester: vec![],
             merger: vec![],
         };
         assert!(validate_prompts(&prompts).is_ok());
@@ -470,6 +484,7 @@ mod tests {
             planner: vec![],
             worker: vec![PathBuf::from("/nonexistent/worker.md")],
             reviewer: vec![],
+            tester: vec![],
             merger: vec![],
         };
         let result = validate_prompts(&prompts);
@@ -488,6 +503,7 @@ mod tests {
             planner: vec![],
             worker: vec![],
             reviewer: vec![],
+            tester: vec![],
             merger: vec![],
         };
         let result = validate_prompts(&prompts);
@@ -508,6 +524,7 @@ mod tests {
             planner: vec![],
             worker: vec![PathBuf::from("worker.md")],
             reviewer: vec![],
+            tester: vec![],
             merger: vec![],
         };
         assert!(validate_prompts(&prompts).is_ok());
@@ -523,6 +540,7 @@ mod tests {
             planner: vec![],
             worker: vec![PathBuf::from("missing.md")],
             reviewer: vec![],
+            tester: vec![],
             merger: vec![],
         };
         let result = validate_prompts(&prompts);

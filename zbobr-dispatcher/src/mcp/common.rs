@@ -196,6 +196,17 @@ mcp_tools! {
 }
 
 mcp_tools! {
+    tester_tools,
+    GET_PLAN = "get_plan",
+    GET_ANALYSIS = "get_analysis",
+    REPORT_ERROR = "report_error",
+    GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
+    GET_PARAM_WORK_BRANCH = "get_param_work_branch",
+    TEST_ACCEPT = "test_accept",
+    TEST_REJECT = "test_reject",
+}
+
+mcp_tools! {
     merger_tools,
     GET_PLAN = "get_plan",
     REPORT_ERROR = "report_error",
@@ -393,6 +404,18 @@ pub async fn run_role_mcp_server(
                 move || {
                     tracing::debug!("Creating new ReviewerMcp instance for task {task_id}");
                     Ok(super::reviewer::ReviewerMcp::new(zbobr.clone(), task_id))
+                },
+                std::sync::Arc::new(LocalSessionManager::default()),
+                Default::default(),
+            );
+            axum::Router::new().nest_service(&path, svc)
+        }
+        Role::Tester => {
+            tracing::info!("Creating TesterMcp service for task {task_id} at path {path}");
+            let svc = StreamableHttpService::new(
+                move || {
+                    tracing::debug!("Creating new TesterMcp instance for task {task_id}");
+                    Ok(super::tester::TesterMcp::new(zbobr.clone(), task_id))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
                 Default::default(),

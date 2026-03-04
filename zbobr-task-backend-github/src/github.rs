@@ -452,6 +452,7 @@ impl ZbobrTaskBackendGithub {
             Stage::Planning,
             Stage::Working,
             Stage::Reviewing,
+            Stage::Testing,
             Stage::Merging,
             Stage::Done,
         ];
@@ -1011,6 +1012,7 @@ fn stage_description(stage: Stage) -> &'static str {
         Stage::Planning => "Task is in planning",
         Stage::Working => "Task is in work",
         Stage::Reviewing => "Task is in review",
+        Stage::Testing => "Task is undergoing comprehensive testing",
         Stage::Merging => "Task is in merge conflict resolution",
         Stage::Done => "Task is complete",
     }

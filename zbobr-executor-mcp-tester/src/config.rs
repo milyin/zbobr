@@ -12,6 +12,7 @@ pub struct ZbobrExecutorMcpTesterConfig {
     pub planning: Option<PathBuf>,
     pub working: Option<PathBuf>,
     pub reviewing: Option<PathBuf>,
+    pub testing: Option<PathBuf>,
     pub merging: Option<PathBuf>,
 }
 
@@ -45,6 +46,10 @@ impl ZbobrExecutorMcpTesterConfig {
                 .reviewing
                 .as_ref()
                 .map(|p| resolve_path(p.clone(), config_dir)),
+            testing: merged
+                .testing
+                .as_ref()
+                .map(|p| resolve_path(p.clone(), config_dir)),
             merging: merged
                 .merging
                 .as_ref()
@@ -60,6 +65,7 @@ impl ZbobrExecutorMcpTesterConfig {
             Role::Planner => self.planning.as_ref(),
             Role::Worker => self.working.as_ref(),
             Role::Reviewer => self.reviewing.as_ref(),
+            Role::Tester => self.testing.as_ref(),
             Role::Merger => self.merging.as_ref(),
         }
     }

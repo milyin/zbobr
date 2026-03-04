@@ -42,6 +42,8 @@ pub struct ZbobrDispatcherConfig {
     pub worker_prompts: Vec<std::path::PathBuf>,
     /// Custom prompt files for reviewer agent.
     pub reviewer_prompts: Vec<std::path::PathBuf>,
+    /// Custom prompt files for tester agent.
+    pub tester_prompts: Vec<std::path::PathBuf>,
     /// Custom prompt files for merger agent.
     pub merger_prompts: Vec<std::path::PathBuf>,
     /// Prefix for work branches (default: "zbobr_fix").
@@ -77,6 +79,7 @@ impl Default for ZbobrDispatcherConfig {
             planner_prompts: vec![],
             worker_prompts: vec![],
             reviewer_prompts: vec![],
+            tester_prompts: vec![],
             merger_prompts: vec![],
             work_branch_prefix: "zbobr_fix".to_string(),
             prompts_path: None,
