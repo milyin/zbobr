@@ -1692,7 +1692,12 @@ async fn finalize_session(
         }
         Role::Analyser => {
             if current_task.signal.is_none() && !current_task.pause {
-                task_session.set_signal(Some(Signal::GoPlan)).await?;
+                let signal = if current_task.umbrella {
+                    Signal::GoDecomposePlan
+                } else {
+                    Signal::GoPlan
+                };
+                task_session.set_signal(Some(signal)).await?;
             }
             task_session.set_stage(Stage::Pending).await?;
         }
