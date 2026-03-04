@@ -204,7 +204,8 @@ Review the implementation changes and ensure they meet coding standards and task
 /// Generate hardcoded tester instructions using tool name constants.
 pub fn tester_instructions() -> String {
     use crate::mcp::tester_tools::{
-        GET_PLAN, REPORT_ERROR, TEST_ACCEPT, TEST_REJECT,
+        GET_PLAN, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH,
+        REPORT_ERROR, TEST_ACCEPT, TEST_REJECT,
     };
     let instructions = format!(
         r#"# Tester Agent
@@ -233,6 +234,7 @@ You have read-only access to the task plan and the repository for testing:
    - Measure code coverage if available
    - Run formatting/linting checks to ensure code quality
    - Verify all CI requirements are met
+4. In case of test failures try the same test on the original `{GET_PARAM_DESTINATION_BRANCH}` branch to determine if the failure is due to new changes or existing issues in the codebase.
 5. **Document all testing performed:**
    - Test frameworks and versions used
    - All commands executed with full output
