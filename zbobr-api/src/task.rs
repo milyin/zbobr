@@ -166,6 +166,7 @@ pub enum Stage {
     Planning,
     Working,
     Reviewing,
+    Testing,
     Merging,
     Done,
 }
@@ -179,6 +180,7 @@ impl Stage {
             Stage::Planning => "PLANNING",
             Stage::Working => "WORKING",
             Stage::Reviewing => "REVIEWING",
+            Stage::Testing => "TESTING",
             Stage::Merging => "MERGING",
             Stage::Done => "DONE",
         }
@@ -192,6 +194,7 @@ impl Stage {
             "PLANNING" => Some(Stage::Planning),
             "WORKING" => Some(Stage::Working),
             "REVIEWING" => Some(Stage::Reviewing),
+            "TESTING" => Some(Stage::Testing),
             "MERGING" => Some(Stage::Merging),
             "DONE" => Some(Stage::Done),
             _ => None,
@@ -202,14 +205,15 @@ impl Stage {
     /// Lower values = higher priority (closer to completion).
     pub fn priority(&self) -> u8 {
         match self {
-            Stage::Reviewing => 0,
-            Stage::Merging => 1,
-            Stage::Working => 2,
-            Stage::Planning => 3,
-            Stage::Preparing => 4,
-            Stage::Analysing => 5,
-            Stage::Pending => 6,
-            Stage::Done => 7,
+            Stage::Testing => 0,
+            Stage::Reviewing => 1,
+            Stage::Merging => 2,
+            Stage::Working => 3,
+            Stage::Planning => 4,
+            Stage::Preparing => 5,
+            Stage::Analysing => 6,
+            Stage::Pending => 7,
+            Stage::Done => 8,
         }
     }
 }
@@ -235,6 +239,8 @@ pub enum Role {
     Worker,
     #[serde(rename = "reviewer")]
     Reviewer,
+    #[serde(rename = "tester")]
+    Tester,
     #[serde(rename = "merger")]
     Merger,
 }
@@ -248,6 +254,7 @@ impl Role {
             Role::Planner => "planner",
             Role::Worker => "worker",
             Role::Reviewer => "reviewer",
+            Role::Tester => "tester",
             Role::Merger => "merger",
         }
     }
@@ -265,6 +272,7 @@ impl From<Role> for Stage {
             Role::Planner => Stage::Planning,
             Role::Worker => Stage::Working,
             Role::Reviewer => Stage::Reviewing,
+            Role::Tester => Stage::Testing,
             Role::Merger => Stage::Merging,
         }
     }
@@ -280,6 +288,7 @@ impl std::convert::TryFrom<Stage> for Role {
             Stage::Planning => Ok(Role::Planner),
             Stage::Working => Ok(Role::Worker),
             Stage::Reviewing => Ok(Role::Reviewer),
+            Stage::Testing => Ok(Role::Tester),
             Stage::Merging => Ok(Role::Merger),
             other => Err(anyhow::anyhow!(
                 "cannot convert stage {:?} into a role",
@@ -335,6 +344,8 @@ pub enum Signal {
     GoWork = 4,
     #[serde(rename = "go_review")]
     GoReview = 5,
+    #[serde(rename = "go_test")]
+    GoTest = 6,
 }
 
 impl Signal {
@@ -342,6 +353,7 @@ impl Signal {
     pub fn name(&self) -> &'static str {
         match self {
             Signal::GoReview => "go_review",
+            Signal::GoTest => "go_test",
             Signal::GoWork => "go_work",
             Signal::GoPlan => "go_plan",
             Signal::GoAnalyse => "go_analyse",
@@ -357,6 +369,7 @@ impl Signal {
             Signal::GoPlan,
             Signal::GoWork,
             Signal::GoReview,
+            Signal::GoTest,
         ]
     }
 
@@ -364,6 +377,7 @@ impl Signal {
     pub fn target_role(&self) -> Role {
         match self {
             Signal::GoReview => Role::Reviewer,
+            Signal::GoTest => Role::Tester,
             Signal::GoWork => Role::Worker,
             Signal::GoPlan => Role::Planner,
             Signal::GoAnalyse => Role::Analyser,
@@ -383,6 +397,7 @@ impl std::str::FromStr for Signal {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().replace('_', "").as_str() {
             "goreview" | "go-review" => Ok(Signal::GoReview),
+            "gotest" | "go-test" => Ok(Signal::GoTest),
             "gowork" | "go-work" => Ok(Signal::GoWork),
             "goplan" | "go-plan" => Ok(Signal::GoPlan),
             "goanalyse" | "go-analyse" => Ok(Signal::GoAnalyse),

@@ -23,6 +23,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Role::Planner => Signal::GoPlan,
             Role::Worker => Signal::GoWork,
             Role::Reviewer => Signal::GoReview,
+            Role::Tester => Signal::GoTest,
             Role::Merger => Signal::GoWork,
         }
     }
@@ -646,6 +647,72 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
             );
         }
         "Review rejected — task routed back to planner".to_string()
+    }
+}
+
+// -- Tester MCP service --
+
+#[allow(async_fn_in_trait)]
+pub trait TesterMcpImpl: CommonMcpImpl {
+    async fn get_param_destination_branch_impl(&self) -> String {
+        self.get_param_impl(Parameter::DestinationBranch).await
+    }
+
+    async fn get_param_work_branch_impl(&self) -> String {
+        self.get_param_impl(Parameter::WorkBranch).await
+    }
+
+    async fn test_accept_impl(&self, message: &str) -> String {
+        tracing::info!(
+            "[{}#{}] test_accept",
+            self.role_name(),
+            self.session().task_id()
+        );
+        let hostname = get_hostname();
+        if let Err(e) = self
+            .session()
+            .post_comment(
+                CommentType::Report,
+                message,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
+            .await
+        {
+            return format!("Error posting test acceptance: {e}");
+        }
+        // No signal set — finalize_session will call mark_done when signal is None.
+        "Testing accepted — task will be marked done".to_string()
+    }
+
+    async fn test_reject_impl(&self, message: &str) -> String {
+        tracing::info!(
+            "[{}#{}] test_reject",
+            self.role_name(),
+            self.session().task_id()
+        );
+        let hostname = get_hostname();
+        if let Err(e) = self
+            .session()
+            .post_comment(
+                CommentType::Report,
+                message,
+                Some(self.role()),
+                &hostname,
+                None,
+            )
+            .await
+        {
+            return format!("Error posting test rejection: {e}");
+        }
+        if let Err(e) = self.session().set_signal(crate::Signal::GoPlan).await {
+            tracing::warn!(
+                "Failed to set GoPlan signal for task {}: {e}",
+                self.session().task_id()
+            );
+        }
+        "Testing rejected — task routed back to planner".to_string()
     }
 }
 

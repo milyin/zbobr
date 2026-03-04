@@ -260,6 +260,9 @@ pub enum TaskSubcommand {
         /// MCP tester scenario file for reviewing role
         #[arg(long)]
         executor_mcp_tester_reviewing: Option<PathBuf>,
+        /// MCP tester scenario file for testing role
+        #[arg(long)]
+        executor_mcp_tester_testing: Option<PathBuf>,
         /// MCP tester scenario file for merging role
         #[arg(long)]
         executor_mcp_tester_merging: Option<PathBuf>,
@@ -813,6 +816,7 @@ async fn run_task_subcommand(
             executor_mcp_tester_planning,
             executor_mcp_tester_working,
             executor_mcp_tester_reviewing,
+            executor_mcp_tester_testing,
             executor_mcp_tester_merging,
         } => {
             let model_enum = model
@@ -825,6 +829,7 @@ async fn run_task_subcommand(
                 || executor_mcp_tester_planning.is_some()
                 || executor_mcp_tester_working.is_some()
                 || executor_mcp_tester_reviewing.is_some()
+                || executor_mcp_tester_testing.is_some()
                 || executor_mcp_tester_merging.is_some()
             {
                 Some(ZbobrExecutorMcpTesterConfig {
@@ -833,6 +838,7 @@ async fn run_task_subcommand(
                     planning: executor_mcp_tester_planning,
                     working: executor_mcp_tester_working,
                     reviewing: executor_mcp_tester_reviewing,
+                    testing: executor_mcp_tester_testing,
                     merging: executor_mcp_tester_merging,
                 })
             } else {
@@ -1150,6 +1156,7 @@ pub async fn process_task_by_stage(
         | Stage::Planning
         | Stage::Working
         | Stage::Reviewing
+        | Stage::Testing
         | Stage::Merging => {
             let role = Role::try_from(task.stage).unwrap();
             let task_model = task.model.clone().or(model);
@@ -1336,6 +1343,7 @@ pub async fn run_manager_loop(
             Stage::Planning,
             Stage::Working,
             Stage::Reviewing,
+            Stage::Testing,
             Stage::Merging,
         ];
         let mut active_counts = std::collections::HashMap::new();
@@ -1348,12 +1356,13 @@ pub async fn run_manager_loop(
             active_counts.insert(stage, count);
         }
         tracing::info!(
-            "Task statistics for tool {:?}: PREPARING={}, PLANNING={}, WORKING={}, REVIEWING={}, MERGING={}",
+            "Task statistics for tool {:?}: PREPARING={}, PLANNING={}, WORKING={}, REVIEWING={}, TESTING={}, MERGING={}",
             current_tool,
             active_counts[&Stage::Preparing],
             active_counts[&Stage::Planning],
             active_counts[&Stage::Working],
             active_counts[&Stage::Reviewing],
+            active_counts[&Stage::Testing],
             active_counts[&Stage::Merging],
         );
 
@@ -1715,6 +1724,17 @@ async fn finalize_session(
             //   None (review_accept called)  → mark task done
             //   GoPlan (review_reject called) → route back to planner
             //   GoReview (report_error)        → preserved as-is (task paused)
+            if !current_task.pause && current_task.signal.is_none() {
+                task_session.mark_done().await?;
+                return Ok(());
+            }
+            task_session.set_stage(Stage::Pending).await?;
+        }
+        Role::Tester => {
+            // Routing is driven by the signal set during the session:
+            //   None (test_accept called)  → mark task done
+            //   GoPlan (test_reject called) → route back to planner
+            //   GoTest (report_error)       → preserved as-is (task paused)
             if !current_task.pause && current_task.signal.is_none() {
                 task_session.mark_done().await?;
                 return Ok(());

@@ -678,6 +678,7 @@ impl IntegrationTestEnv {
             planner: vec![],
             worker: vec![],
             reviewer: vec![],
+            tester: vec![],
             merger: vec![],
         };
 
