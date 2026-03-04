@@ -497,6 +497,11 @@ pub trait PreparatorMcpImpl: CommonMcpImpl {
     }
 
     async fn set_param_work_branch_postfix_impl(&self, value: Option<String>) -> String {
+        match self.session().get_parameter(Parameter::WorkBranch).await {
+            Ok(Some(_)) => return "Error: work_branch is already set".to_string(),
+            Err(e) => return format!("Error: {e}"),
+            Ok(None) => {}
+        }
         let branch = value.map(|v| self.session().create_branch_name(&v));
         self.set_param_impl(Parameter::WorkBranch, branch).await
     }
