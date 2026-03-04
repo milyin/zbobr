@@ -197,6 +197,21 @@ impl Stage {
             _ => None,
         }
     }
+
+    /// Returns a priority value for task selection by stage proximity.
+    /// Lower values = higher priority (closer to completion).
+    pub fn priority(&self) -> u8 {
+        match self {
+            Stage::Reviewing => 0,
+            Stage::Merging => 1,
+            Stage::Working => 2,
+            Stage::Planning => 3,
+            Stage::Preparing => 4,
+            Stage::Analysing => 5,
+            Stage::Pending => 6,
+            Stage::Done => 7,
+        }
+    }
 }
 
 impl std::fmt::Display for Stage {

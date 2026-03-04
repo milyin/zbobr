@@ -562,6 +562,7 @@ async fn run_task_subcommand(
                 let all_stages = [
                     Stage::Pending,
                     Stage::Preparing,
+                    Stage::Analysing,
                     Stage::Planning,
                     Stage::Working,
                     Stage::Reviewing,
@@ -1255,7 +1256,7 @@ pub async fn run_manager_loop(
         }
 
         let current_tool = zbobr.config().cli_tool;
-        let pending_tasks = match zbobr
+        let mut pending_tasks = match zbobr
             .list_tasks_by_stage(Stage::Pending, Some(current_tool))
             .await
         {
@@ -1265,6 +1266,10 @@ pub async fn run_manager_loop(
                 vec![]
             }
         };
+
+        // Sort pending tasks by stage priority (closer to completion first).
+        // Conflict tasks will still take priority in the loop below since they're checked first.
+        pending_tasks.sort_by_key(|task| task.stage.priority());
 
         let mut session_run = false;
         for task in pending_tasks {
@@ -1327,6 +1332,7 @@ pub async fn run_manager_loop(
 
         let active_stages = [
             Stage::Preparing,
+            Stage::Analysing,
             Stage::Planning,
             Stage::Working,
             Stage::Reviewing,
