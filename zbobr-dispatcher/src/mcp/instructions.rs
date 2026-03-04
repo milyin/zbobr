@@ -110,6 +110,15 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 1. Call `{GET_PLAN}` to read the latest plan and any follow-up comments. If no plan exists yet, this returns the initial task description. If a plan already exists, it was probably already implemented and the following comments contain important feedback to this implementation.
    - Use `{GET_PLAN}` with offset -1, -2, etc. to read previous plans and discussion if needed for context.
 2. Call `{GET_ANALYSIS}` to read the codebase analysis produced by the analyser. Use it to understand the existing code structure, data flow, and edge cases before designing your solution.
+2a. **Collect test baseline data** (before implementing any changes):
+    - Run `cargo test --lib --no-fail-fast -- --test-threads=1 2>&1` to collect unit test results
+    - Run `cargo test --test "*" --no-fail-fast -- --test-threads=1 2>&1` to collect integration test results
+    - Capture the full output including test names and result summary (passed/failed/ignored counts)
+    - Create a "Test Baseline (Pre-Implementation)" section in your plan with:
+      - Unit tests: total count, passed, failed, ignored, and list of any failures
+      - Integration tests: total count, passed, failed, ignored, and list of any failures
+    - This establishes which test failures are pre-existing so the Worker knows which failures are not caused by their implementation
+    - If all tests pass, state "All tests passing (no pre-existing failures)" in this section
 3. **Prepend your plan with the user request it addresses** (literally copied from the task description or comment).
 4. If a previous plan exists, iterate on it based on current work branch state and comments to the previous plan.
 5. **Task parameters** have already been set by the preparation stage:
@@ -117,7 +126,7 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 6. Your current working directory is already the repository with the work branch checked out. Explore the codebase, identify and document the files, crates, modules, and keywords relevant to the task. These help define the scope and guide the worker:
    - List specific files that need to be modified or created
    - Identify crates/modules that contain related functionality
-   - Include keywords/concepts the worker should focus on (e.g., "async/await", "error handling", "API compatibility")
+   - Include keywords/concepts the worker should focus on (e.g., async/await, error handling, API compatibility)
    - This context narrows the worker's scope and prevents unnecessary exploration
 7. Design a solution.
 8. If some instrument is required and you can't istall it yourself, ask the user to install it with `{ASK_USER}`.
