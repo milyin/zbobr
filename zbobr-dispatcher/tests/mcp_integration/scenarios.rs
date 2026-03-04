@@ -322,11 +322,8 @@ steps:
 pub fn reviewing_scenario() -> String {
     // checklist operations aren't exported by reviewer_tools, so pull them
     // from worker_tools (they're otherwise the same constants).
-    use zbobr_dispatcher::mcp::{
-        reviewer_tools::{
-            GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, REVIEW_REJECT,
-        },
-        worker_tools::INSERT_CHECKLIST_ITEM,
+    use zbobr_dispatcher::mcp::reviewer_tools::{
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, REVIEW_REJECT,
     };
 
     format!(
