@@ -51,7 +51,7 @@ impl ToolExecutor for ClaudeExecutor {
         tracing::info!("MCP endpoint: {mcp_url}");
         tracing::debug!("MCP config JSON: {}", mcp_config_str);
 
-        let args = [
+        let mut args = vec![
             "--model",
             model_name,
             "--mcp-config",
@@ -63,12 +63,16 @@ impl ToolExecutor for ClaudeExecutor {
             "--tools",
             "default",
             "--verbose",
-            "-p",
-            prompt,
         ];
 
+        if role == Role::Planner {
+            args.push("--plan");
+        }
+
+        args.extend_from_slice(&["-p", prompt]);
+
         let mut cmd = tokio::process::Command::new("claude");
-        cmd.args(args)
+        cmd.args(&args)
             .current_dir(work_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
