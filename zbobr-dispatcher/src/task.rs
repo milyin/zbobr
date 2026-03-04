@@ -937,7 +937,7 @@ mod tests {
         );
         assert_eq!(
             Model::Claude35Sonnet.model_name_for_tool(Tool::Claude),
-            Some("sonnet")
+            Some("claude-3-5-sonnet")
         );
         assert_eq!(Model::Gpt5_2.model_name_for_tool(Tool::Claude), None);
     }
