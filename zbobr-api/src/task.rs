@@ -110,7 +110,7 @@ impl CommentType {
             "report" => Some(CommentType::Report),
             "plan" => Some(CommentType::Plan),
             "analysis" => Some(CommentType::Analysis),
-            "request" | "reply" => Some(CommentType::Request),
+            "request" => Some(CommentType::Request),
             _ => None,
         }
     }

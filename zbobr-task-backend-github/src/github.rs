@@ -1147,23 +1147,6 @@ mod parse_tests {
     }
 
     #[test]
-    fn test_parse_comment_tag_reply_backward_compat() {
-        // Old "// REPLY" tag should still parse as Request for backward compatibility
-        let input = "// REPLY\n\nThis is a legacy reply";
-        let (tag, body) = split_tag_body(input);
-        let comment_type = tag.comment_type;
-        let role = tag.role;
-        let host = tag.hostname;
-        let model = tag.model;
-
-        assert_eq!(comment_type, CommentType::Request);
-        assert_eq!(role, None);
-        assert_eq!(host, "");
-        assert_eq!(model, None);
-        assert_eq!(body, "This is a legacy reply");
-    }
-
-    #[test]
     fn test_parse_comment_tag_report_no_model() {
         let input = "// REPORT reviewer:host\n\nBody text";
         let (tag, body) = split_tag_body(input);
