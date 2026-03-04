@@ -450,6 +450,8 @@ impl ZbobrTaskBackendGithub {
             Stage::Preparing,
             Stage::Analysing,
             Stage::Planning,
+            Stage::DecomposePlanning,
+            Stage::Decomposing,
             Stage::Working,
             Stage::Reviewing,
             Stage::Merging,
@@ -533,7 +535,7 @@ impl ZbobrTaskBackendGithub {
             }
         }
 
-        for flag_name in ["conflict", "pause", "confirm"] {
+        for flag_name in ["conflict", "pause", "confirm", "umbrella"] {
             let flag_label = Self::flag_to_label(flag_name);
             let flag_desc = format!("Flag: {}", flag_name);
             if !existing_labels.contains(&flag_label) {
