@@ -65,16 +65,27 @@ Investigate the codebase related to the task plan, describe the current state of
    - Examine the logic in detail: loops, conditions, error handling, state management
    - Note edge cases, assumptions, and invariants in the existing code
    - Understand how the relevant components interact with each other
-4. **Compare with previous analysis** (if one exists):
+4. **Investigate workflow process requirements**:
+   - Examine CI configuration (`.github/workflows/`, `.gitlab-ci.yml`, `Makefile`, `tox.ini`, or equivalent) to understand:
+     - What testing framework and commands are used
+     - How tests are run (e.g., all tests, specific test suites, coverage requirements)
+   - Check for code formatting and linting requirements:
+     - What linter/formatter is used (e.g., rustfmt, prettier, black, eslint)
+     - What formatting rules are enforced
+   - Identify if multiplatform or cross-compilation is required:
+     - What platforms must be tested (e.g., Linux, macOS, Windows, or different architectures)
+     - Any platform-specific build requirements
+   - Document any other automated checks that code must pass (security scans, type checking, etc.)
+5. **Compare with previous analysis** (if one exists):
    - If significant logic changes occurred since the last analysis, describe the new logic from scratch
    - If changes are minor (e.g., refactoring, small additions), describe only the differences
    - If this is the first analysis, describe the full current state
-5. **Write your analysis report**:
+6. **Write your analysis report**:
    - Describe the current state of the code as it is — factually and objectively
    - Include: relevant files and their roles, data flow, control flow, edge cases, key logic details
    - Do NOT suggest improvements, fixes, or alternative approaches
    - Do NOT recommend what should be changed — your goal is ONLY to describe what IS
-6. Call `{POST_ANALYSIS}` with your complete analysis report. This finishes your session.
+7. Call `{POST_ANALYSIS}` with your complete analysis report. This finishes your session.
 "#,
     )
 }
@@ -111,12 +122,12 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
    - Use `{GET_PLAN}` with offset -1, -2, etc. to read previous plans and discussion if needed for context.
 2. Call `{GET_ANALYSIS}` to read the codebase analysis produced by the analyser. Use it to understand the existing code structure, data flow, and edge cases before designing your solution.
 2a. **Collect test baseline data** (before implementing any changes):
-    - Run `cargo test --lib --no-fail-fast -- --test-threads=1 2>&1` to collect unit test results
-    - Run `cargo test --test "*" --no-fail-fast -- --test-threads=1 2>&1` to collect integration test results
-    - Capture the full output including test names and result summary (passed/failed/ignored counts)
-    - Create a "Test Baseline (Pre-Implementation)" section in your plan with:
-      - Unit tests: total count, passed, failed, ignored, and list of any failures
-      - Integration tests: total count, passed, failed, ignored, and list of any failures
+    - Identify the test framework used in this repository from the Analyzer's workflow investigation
+    - Run the appropriate test command for the repository's language/framework (e.g., `cargo test` for Rust, `npm test` for Node.js, `pytest` for Python, etc.)
+    - Capture the full test output including test names and result summary (passed/failed/ignored counts)
+    - Create a "Test Baseline (Pre-Implementation)" section in your plan with a summary of test results:
+      - Total test count, number passed, failed, ignored
+      - List any specific test failures found
     - This establishes which test failures are pre-existing so the Worker knows which failures are not caused by their implementation
     - If all tests pass, state "All tests passing (no pre-existing failures)" in this section
 3. **Prepend your plan with the user request it addresses** (literally copied from the task description or comment).
@@ -126,7 +137,6 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 6. Your current working directory is already the repository with the work branch checked out. Explore the codebase, identify and document the files, crates, modules, and keywords relevant to the task. These help define the scope and guide the worker:
    - List specific files that need to be modified or created
    - Identify crates/modules that contain related functionality
-   - Include keywords/concepts the worker should focus on (e.g., async/await, error handling, API compatibility)
    - This context narrows the worker's scope and prevents unnecessary exploration
 7. Design a solution.
 8. If some instrument is required and you can't istall it yourself, ask the user to install it with `{ASK_USER}`.
