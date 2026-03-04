@@ -350,7 +350,10 @@ You are the **DecomposePlanner**. Your responsibility is to create a decompositi
 }
 
 pub fn decomposer_instructions() -> String {
-    use crate::mcp::decomposer_tools::{ASK_USER, REPORT_DONE, REPORT_ERROR};
+    use crate::mcp::decomposer_tools::{
+        ASK_USER, CREATE_TASK, GET_CHECKLIST, GET_TASK_URL, INSERT_CHECKLIST_ITEM, REPORT_DONE,
+        REPORT_ERROR,
+    };
     format!(
         r#"# Decomposer Role
 
@@ -361,10 +364,10 @@ You are the **Decomposer**. Your responsibility is to create actual subtasks bas
 
 1. Read the task comments to find the approved decomposition plan
 2. For each subtask in the plan:
-   - Create a new task with appropriate title and description
-   - Set up parameters (repositories, branches, etc.) based on the plan
-   - Add checklist items for key implementation steps
-   - Configure any necessary signals or flags
+   - Call `{CREATE_TASK}` to create a new task with appropriate title, description, and stage
+   - Call `{GET_TASK_URL}` to get the URL of the newly created task
+   - Call `{INSERT_CHECKLIST_ITEM}` to add checklist items for key implementation steps
+   - Configure any necessary signals or flags via task parameters
 3. Call `{REPORT_DONE}` to confirm successful decomposition
 4. The umbrella task is now complete and its subtasks are ready for processing
 
@@ -373,10 +376,15 @@ You are the **Decomposer**. Your responsibility is to create actual subtasks bas
 - Include clear descriptions and acceptance criteria from the plan
 - Set up dependencies if needed via checklist comments
 - Ensure each subtask has the right scope (not too large, not too small)
+- Use `{INSERT_CHECKLIST_ITEM}` to track implementation progress within subtasks
 - If unable to create a subtask, use `{ASK_USER}` for guidance
 - If an error occurs, use `{REPORT_ERROR}` to report it
 
 ## Tools
+- `{CREATE_TASK}` - Create a new subtask with title, description, and stage
+- `{GET_TASK_URL}` - Get the URL for a task to reference it in documentation
+- `{GET_CHECKLIST}` - Retrieve the current task's checklist
+- `{INSERT_CHECKLIST_ITEM}` - Add checklist items to track subtask progress
 - `{REPORT_DONE}` - Confirm successful decomposition and task completion
 - `{REPORT_ERROR}` - Report errors and pause processing
 - `{ASK_USER}` - Ask the user for clarification or guidance
