@@ -593,7 +593,7 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
         {
             return format!("Error posting review acceptance: {e}");
         }
-        // No signal set — finalize_session will call mark_done when signal is None.
+        // No signal set — finalize_session will call finish when signal is None.
         "Review accepted — task will be marked done".to_string()
     }
 
@@ -659,7 +659,7 @@ pub trait TesterMcpImpl: CommonMcpImpl {
         {
             return format!("Error posting test acceptance: {e}");
         }
-        // No signal set — finalize_session will call mark_done when signal is None.
+        // No signal set — finalize_session will call finish when signal is None.
         "Testing accepted — task will be marked done".to_string()
     }
 

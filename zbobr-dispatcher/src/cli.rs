@@ -1687,18 +1687,7 @@ async fn finalize_session(
             //   GoPlan (test_reject called) → route back to planner
             //   GoTest (report_error)       → preserved as-is (task paused)
             if !current_task.pause && current_task.signal.is_none() {
-                // Post DONE boundary after marking task done
-                let hostname = get_hostname();
-                if let Err(e) = task_session
-                    .post_comment(CommentType::Done, "", None, &hostname, None)
-                    .await
-                {
-                    tracing::warn!(
-                        "Failed to post DONE boundary after test acceptance for task {}: {e}",
-                        task_id
-                    );
-                }
-                task_session.mark_done().await?;
+                task_session.finish().await?;
                 return Ok(());
             }
             task_session.set_stage(Stage::Pending).await?;

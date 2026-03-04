@@ -482,8 +482,49 @@ impl TaskSession {
         .await
     }
 
-    /// Mark task as done: set stage to Done and clear signal.
-    pub async fn mark_done(&self) -> anyhow::Result<()> {
+    /// Finish the task: delete placeholder commit, push branch, post Done comment,
+    /// then set stage to Done and clear signal.
+    pub async fn finish(&self) -> anyhow::Result<()> {
+        let task_id = self.task_id;
+        let task = self.get_task().await?;
+
+        // Delete placeholder commit and push before marking done.
+        if let Some(work_branch) = task.parameters.get(&Parameter::WorkBranch).cloned() {
+            let task_dir = self
+                .zbobr
+                .config()
+                .workspaces
+                .join(format!("task#{task_id}"));
+            let work_dir =
+                if let Some(dest_repo) = task.parameters.get(&Parameter::DestinationRepository) {
+                    let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo.as_str());
+                    task_dir.join(repo_name)
+                } else {
+                    task_dir
+                };
+            if let Err(e) =
+                zbobr_utility::delete_placeholder_commit(&work_dir, &work_branch).await
+            {
+                tracing::warn!("Failed to delete placeholder commit for task #{task_id}: {e}");
+            } else {
+                let role_session = self.role_session();
+                if let Err(e) = role_session.push_branch_commits().await {
+                    tracing::warn!(
+                        "Failed to push branch after placeholder deletion for task #{task_id}: {e}"
+                    );
+                }
+            }
+        }
+
+        // Post DONE boundary comment.
+        let hostname = crate::mcp::common::get_hostname();
+        if let Err(e) = self
+            .post_comment(CommentType::Done, "", None, &hostname, None)
+            .await
+        {
+            tracing::warn!("Failed to post DONE boundary for task #{task_id}: {e}");
+        }
+
         self.modify_task(move |task| {
             task.stage = Stage::Done;
             task.signal = None;
