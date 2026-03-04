@@ -59,7 +59,7 @@ impl ToolExecutor for ClaudeExecutor {
             "--permission-mode",
             "dontAsk",
             "--tools",
-            "default",
+            "default,mcp__zbobr__*",
             "-p",
             prompt,
         ];
