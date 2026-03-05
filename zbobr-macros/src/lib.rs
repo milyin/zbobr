@@ -229,10 +229,31 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 });
             }
 
-            // For nested fields in Config::build, use defaults.
-            config_build_fields.push(quote! {
-                #field_ident: defaults.#field_ident
-            });
+            // For nested fields in Config::build, delegate to the nested Config::build.
+            let base_is_option_nested = option_inner_type(&field_ty);
+            let suffix_target_ty_build = base_is_option_nested.as_ref().unwrap_or(&field_ty);
+            let build_expr = if base_is_option_nested.is_some() {
+                // Option<NestedConfig>: only build if TOML section was present
+                quote! {
+                    #field_ident: __merged.#field_ident.map(|t| {
+                        <#suffix_target_ty_build as ::zbobr_api::config::Config>::build(
+                            ::std::option::Option::Some(t),
+                            ::std::default::Default::default(),
+                            config_dir,
+                        )
+                    })
+                }
+            } else {
+                // Required NestedConfig: always build, passing through merged TOML (may be None)
+                quote! {
+                    #field_ident: <#suffix_target_ty_build as ::zbobr_api::config::Config>::build(
+                        __merged.#field_ident,
+                        ::std::default::Default::default(),
+                        config_dir,
+                    )
+                }
+            };
+            config_build_fields.push(build_expr);
         } else {
             let arg_name_value = config_meta
                 .heading_prefix
