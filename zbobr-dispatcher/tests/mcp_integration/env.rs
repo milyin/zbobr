@@ -12,6 +12,7 @@ use zbobr_dispatcher::{
     ChecklistItem, Comment, Signal, Stage, Task, ZbobrDispatcher, ZbobrDispatcherConfig,
     ZbobrDispatcherDyn, ZbobrExecutorConfig, process_task_by_stage,
     prompts::Prompts,
+    config::StageConfig,
     task::{Parameter, Tool},
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
@@ -58,11 +59,12 @@ impl IntegrationTestEnv {
             cli_tool: Tool::McpTester,
             git_user_name: "test-bot".to_string(),
             git_user_email: "test@example.com".to_string(),
-            preparator_prompts: vec![],
-            planner_prompts: vec![],
-            worker_prompts: vec![],
-            reviewer_prompts: vec![],
-            merger_prompts: vec![],
+            preparator: StageConfig::default(),
+            planner: StageConfig::default(),
+            worker: StageConfig::default(),
+            reviewer: StageConfig::default(),
+            tester: StageConfig::default(),
+            merger: StageConfig::default(),
             ..ZbobrDispatcherConfig::default()
         };
 
@@ -119,11 +121,12 @@ impl IntegrationTestEnv {
             cli_tool: Tool::McpTester,
             git_user_name: "test-bot".to_string(),
             git_user_email: "test@example.com".to_string(),
-            preparator_prompts: vec![],
-            planner_prompts: vec![],
-            worker_prompts: vec![],
-            reviewer_prompts: vec![],
-            merger_prompts: vec![],
+            preparator: StageConfig::default(),
+            planner: StageConfig::default(),
+            worker: StageConfig::default(),
+            reviewer: StageConfig::default(),
+            tester: StageConfig::default(),
+            merger: StageConfig::default(),
             ..ZbobrDispatcherConfig::default()
         };
 
@@ -182,11 +185,12 @@ impl IntegrationTestEnv {
             cli_tool: Tool::McpTester,
             git_user_name: "test-bot".to_string(),
             git_user_email: "test@example.com".to_string(),
-            preparator_prompts: vec![],
-            planner_prompts: vec![],
-            worker_prompts: vec![],
-            reviewer_prompts: vec![],
-            merger_prompts: vec![],
+            preparator: StageConfig::default(),
+            planner: StageConfig::default(),
+            worker: StageConfig::default(),
+            reviewer: StageConfig::default(),
+            tester: StageConfig::default(),
+            merger: StageConfig::default(),
             ..ZbobrDispatcherConfig::default()
         };
 
@@ -252,11 +256,12 @@ impl IntegrationTestEnv {
             cli_tool: Tool::McpTester,
             git_user_name: "test-bot".to_string(),
             git_user_email: "test@example.com".to_string(),
-            preparator_prompts: vec![],
-            planner_prompts: vec![],
-            worker_prompts: vec![],
-            reviewer_prompts: vec![],
-            merger_prompts: vec![],
+            preparator: StageConfig::default(),
+            planner: StageConfig::default(),
+            worker: StageConfig::default(),
+            reviewer: StageConfig::default(),
+            tester: StageConfig::default(),
+            merger: StageConfig::default(),
             ..ZbobrDispatcherConfig::default()
         };
 

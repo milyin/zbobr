@@ -59,7 +59,9 @@ If no `tool:` or `model:` labels are set, the defaults from configuration are us
 
 ### zbobr.toml
 
-The `zbobr.toml` file is the primary configuration for this task project:
+The `zbobr.toml` file is the primary configuration for this task project. Dispatcher
+settings live under the `[dispatcher]` table; task and repo backends are configured in
+separate tables.
 
 ```toml
 # Task project repository ("owner/repo")
@@ -68,26 +70,38 @@ task_repo = "your-org/task-project"
 # GitHub user or org where target repos are forked
 fork_owner = "your-username"
 
-# Default AI model (e.g. "gpt-5-mini", "claude-sonnet-4.5")
-# default_model = "gpt-5-mini"
-
-# Workspaces directory; each task gets a separate subdirectory
-# workspaces = "./workspaces"
-
+[dispatcher]
+# Global defaults applied to every stage; individual stages can override.
 # CLI tool: "copilot", "claude", or "stub"
 # cli_tool = "copilot"
-
+# Workspaces directory; each task gets a separate subdirectory
+# workspaces = "./workspaces"
 # Work branch prefix
 # work_branch_prefix = "zbobr_fix"
+# Git user/email for commits (required)
+# git_user_name = "Your Name"
+# git_user_email = "you@example.com"
 
-[prompts]
-# Base directory for additional prompt files (appended after built-in instructions)
-# path = "./prompts"
-# Additional context files for planner
-# planner = ["planner.md", "common.md"]
-# Additional context files for worker
-# worker = ["worker.md", "common.md"]
+# Example: per-stage overrides
+# [dispatcher.preparator]
+# tool = "claude"
+# model = "gpt-5-mini"
+# prompts = ["preparator.md", "common.md"]
+#
+# [dispatcher.planner]
+# prompts = ["planner.md", "common.md"]
+#
+# [dispatcher.worker]
+# prompts = ["worker.md", "common.md"]
 ```
+
+Configuration priority: CLI args > environment variables > `zbobr.toml` > defaults.
+
+**GitHub Token**: Set `GH_TOKEN` in your environment:
+```bash
+export GH_TOKEN=$(gh auth token)
+```
+Or create a token at https://github.com/settings/tokens (needs `repo` scope).
 
 Configuration priority: CLI args > environment variables > `zbobr.toml` > defaults.
 

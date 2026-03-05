@@ -840,7 +840,9 @@ impl<'a> CliRoleRunner<'a> {
     }
 
     async fn run(&self) -> anyhow::Result<()> {
-        let cli_tool = self.zbobr.config().cli_tool;
+        // determine which tool and model we should use for this role/stage
+        let cli_tool = self.zbobr.config().tool_for_role(self.role);
+        let stage_model_override = self.zbobr.config().model_for_role(self.role);
 
         self.zbobr
             .set_task_stage(self.task_id, self.role.into())
@@ -901,9 +903,21 @@ impl<'a> CliRoleRunner<'a> {
         );
 
         let prompt_text = self.prompt()?;
+        // possibly adjust executor configuration with a model override
+        let mut exec_cfg = self.executor_config.clone();
+        if let Some(model) = stage_model_override {
+            match cli_tool {
+                Tool::Copilot => exec_cfg.copilot.default_model = model,
+                Tool::Claude => exec_cfg.claude.default_model = model,
+                Tool::McpTester => {
+                    // mcp-tester doesn't use models; ignore
+                }
+            }
+        }
+
         let (execution_interrupted, execution_error) = execute_tool(
             cli_tool,
-            self.executor_config,
+            &exec_cfg,
             self.task_id,
             self.role,
             assigned_port,
@@ -998,10 +1012,32 @@ pub async fn run_manager_loop(
 ) -> anyhow::Result<()> {
     tracing::info!("Manager loop started ({})", zbobr.debug_state());
     tracing::info!("Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s");
-    tracing::info!("CLI Tool: {:?}", zbobr.config().cli_tool);
+    tracing::info!("Global CLI Tool default: {:?}", zbobr.config().cli_tool);
     if let Some(ref base) = prompts.base_path {
         tracing::info!("Prompts base path: {}", base.display());
     }
+
+    // Dump stage-specific settings for visibility
+    for role in &[
+        Role::Preparator,
+        Role::Planner,
+        Role::Worker,
+        Role::Reviewer,
+        Role::Tester,
+        Role::Merger,
+    ] {
+        let tool = zbobr.config().tool_for_role(*role);
+        let model = zbobr.config().model_for_role(*role);
+        let stage_prompts = zbobr.config().stage_for_role(*role).prompts.clone();
+        tracing::info!(
+            "Stage {:?}: tool={:?}, model={:?}, prompt_files={:?}",
+            role,
+            tool,
+            model,
+            stage_prompts
+        );
+    }
+
     tracing::info!(
         "Preparator prompt files: {}",
         prompts

@@ -106,6 +106,17 @@ Notes on TOML layout:
 
    [dispatcher]
    task_repo = "owner/repo"
+
+  Stage-specific settings (tool, model, prompts) can be placed in nested tables:
+
+   [dispatcher.preparator]
+   tool = "claude"
+   model = "gpt-5-mini"
+   prompts = ["preparator.md"]
+
+  If a stage table is omitted the global defaults are used.  The previous
+  per-role `*_prompts` fields are removed.
+
 Note: legacy top-level dispatcher-only TOML files are no longer supported; use the root `zbobr.toml` with a `[dispatcher]` table.
 
 This is the recommended approach for task-project workflows, as it eliminates the need to manually specify `--tasks-github-task-repo` and `--repo-github-fork-owner` flags.
