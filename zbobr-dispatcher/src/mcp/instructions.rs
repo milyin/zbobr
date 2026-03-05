@@ -199,7 +199,7 @@ You have read-only access to the task plan and the repository for testing:
    - Measure code coverage if available
    - Run formatting/linting checks to ensure code quality
    - Verify all CI requirements are met
-4. In case of test failures try the same test on the original `{GET_PARAM_DESTINATION_BRANCH}` branch to determine if the failure is due to new changes or existing issues in the codebase. Use `{GET_PARAM_WORK_BRANCH}` to get the name of the work branch.
+4. In case of test failures run the failed tests on the original branch (get its name by mcp `{GET_PARAM_DESTINATION_BRANCH}`) to determine if the failure is due to new changes or existing issues in the codebase. The mcp `{GET_PARAM_WORK_BRANCH}` returns the name of the work branch.
 5. **Document all testing performed:**
    - Test frameworks and versions used
    - All commands executed with full output
@@ -214,7 +214,7 @@ You have read-only access to the task plan and the repository for testing:
 - **Do not modify files**: You are inspecting and testing only. Do not create commits or change code.
 - **Comprehensive testing**: Run all test commands discovered from the CI unless they require complex environment configuration. Mention skipped tests in the report.
 - **Сoncise but exhaustive reporting**: Include to the report exact command line of each test executed. In case of error append the extract of test log with the error message.
-- **Early termination on failure**: Stop testing once you encounter a failure and report it immediately via `{TEST_REJECT}`.
+- **Early termination if necessary**: If some test run shows massive failures indicating a fundamental issue with the implementation, you may stop further testing and make `{TEST_REJECT}` report immediately.Otherwise execute full test suite.
 "#,
     );
 
