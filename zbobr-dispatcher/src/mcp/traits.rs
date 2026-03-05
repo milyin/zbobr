@@ -157,8 +157,7 @@ pub trait CommonMcpImpl: Send + Sync {
             },
         };
 
-        // If there are no comments at all, return task description as the first user's comment.
-        // Otherwise, the comment feed is the only source of truth (description is unused).
+        // If no comments, return task description as synthetic comment.
         if comments.is_empty() {
             let desc = match self.session().get_description().await {
                 Ok(d) if !d.is_empty() => d,
@@ -187,8 +186,7 @@ pub trait CommonMcpImpl: Send + Sync {
         }
 
         // Find indices of all cut-boundary comments (Reject or Done).
-        // These mark chunk boundaries: each chunk starts FROM a cut marker
-        // and extends to (but not including) the next cut marker, or to end-of-feed.
+        // Chunks are separated by these markers.
         let cut_indices: Vec<usize> = comments
             .iter()
             .enumerate()
@@ -196,41 +194,19 @@ pub trait CommonMcpImpl: Send + Sync {
             .map(|(i, _)| i)
             .collect();
 
-        if cut_indices.is_empty() {
-            // No cut markers yet — all comments form a single chunk.
-            // offset=0 and negative offsets request this single chunk; offset >= 0 all map to it.
-            if offset < -1 {
-                let response = format!("offset {} out of range: only 1 chunk available", offset);
-                log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
-                return response;
-            }
-            let result_comments: Vec<zbobr_api::Comment> = comments
-                .iter()
-                .filter(|c| {
-                    c.comment_type != CommentType::Error && c.comment_type != CommentType::Done
-                })
-                .cloned()
-                .collect();
-            if result_comments.is_empty() {
-                let response = "Error: No messages found in chunk (task may already be complete, or all comments have been filtered)".to_string();
-                log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
-                return response;
-            }
-            let response = match serde_json::to_string_pretty(&result_comments) {
-                Ok(json) => json,
-                Err(e) => format!("Error serializing: {e}"),
-            };
-            log_mcp_comments_response(self.role_name(), self.session().task_id(), &response);
+        // Universal chunk calculation:
+        // - If no cuts: 1 chunk (all comments)
+        // - Otherwise: (number of cuts) + 1 chunks
+        let num_chunks = cut_indices.len() + 1;
+
+        // Special handling for offset validation when there are no cuts.
+        if cut_indices.is_empty() && offset < -1 {
+            let response = format!("offset {} out of range: only 1 chunk available", offset);
+            log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
             return response;
         }
 
-        // Multiple chunks separated by cut markers:
-        // - chunk[0] = comments[0..cut[0]] (comments before first cut)
-        // - chunk[i] = comments[cut[i-1]..cut[i]] (comments from cut[i-1] to before cut[i])
-        // - chunk[last] = comments[cut[-1]..end] (comments from last cut to end)
-        // 
-        // Offset mapping: offset >= 0 → last chunk, offset -1 → second-to-last, offset -2 → third-to-last, etc.
-        let num_chunks = cut_indices.len() + 1;
+        // Determine target chunk index (offset >= 0 → last chunk, offset < 0 → earlier chunks).
         let target_chunk = if offset >= 0 {
             num_chunks - 1
         } else {
@@ -246,16 +222,22 @@ pub trait CommonMcpImpl: Send + Sync {
             num_chunks - 1 - back
         };
 
-        let (start_idx, end_idx) = if target_chunk == 0 {
+        // Universal boundary extraction: all chunks follow the same pattern.
+        let (start_idx, end_idx) = if cut_indices.is_empty() {
+            // Single chunk: all comments.
+            (0, comments.len())
+        } else if target_chunk == 0 {
+            // First chunk: from start to first cut.
             (0, cut_indices[0])
         } else if target_chunk == num_chunks - 1 {
+            // Last chunk: from last cut to end.
             (cut_indices[target_chunk - 1], comments.len())
         } else {
+            // Middle chunks: from cut[i-1] to cut[i].
             (cut_indices[target_chunk - 1], cut_indices[target_chunk])
         };
 
-        // Extract comments from the target chunk and filter out Error and Done comments.
-        // Reject comments (which mark cut boundaries) are kept.
+        // Extract and filter comments from target chunk (exclude Error and Done).
         let result_comments: Vec<zbobr_api::Comment> = comments[start_idx..end_idx]
             .iter()
             .filter(|c| c.comment_type != CommentType::Error && c.comment_type != CommentType::Done)
