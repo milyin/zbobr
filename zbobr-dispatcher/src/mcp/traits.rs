@@ -157,8 +157,38 @@ pub trait CommonMcpImpl: Send + Sync {
             },
         };
 
+        // If there are no comments at all, return task description as the first user's comment.
+        // Otherwise, the comment feed is the only source of truth (description is unused).
+        if comments.is_empty() {
+            let desc = match self.session().get_description().await {
+                Ok(d) if !d.is_empty() => d,
+                Ok(_) => "No task description provided.".to_string(),
+                Err(e) => {
+                    let response = format!("Error fetching description: {e}");
+                    log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
+                    return response;
+                },
+            };
+            let synthetic = vec![zbobr_api::Comment {
+                comment_type: CommentType::Request,
+                timestamp: String::new(),
+                role: None,
+                hostname: String::new(),
+                tool: None,
+                model: None,
+                text: desc,
+            }];
+            let response = match serde_json::to_string_pretty(&synthetic) {
+                Ok(json) => json,
+                Err(e) => format!("Error serializing: {e}"),
+            };
+            log_mcp_comments_response(self.role_name(), self.session().task_id(), &response);
+            return response;
+        }
+
         // Find indices of all cut-boundary comments (Reject or Done).
-        // Each cut marker starts a new context chunk.
+        // These mark chunk boundaries: each chunk starts FROM a cut marker
+        // and extends to (but not including) the next cut marker, or to end-of-feed.
         let cut_indices: Vec<usize> = comments
             .iter()
             .enumerate()
@@ -167,35 +197,8 @@ pub trait CommonMcpImpl: Send + Sync {
             .collect();
 
         if cut_indices.is_empty() {
-            // No chunks yet — check if there is any plan comment; if not, return task description.
-            let has_plan = comments.iter().any(|c| c.comment_type == CommentType::Plan);
-            if !has_plan {
-                let desc = match self.session().get_description().await {
-                    Ok(d) if !d.is_empty() => d,
-                    Ok(_) => "No task description provided.".to_string(),
-                    Err(e) => {
-                        let response = format!("Error fetching description: {e}");
-                        log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
-                        return response;
-                    },
-                };
-                let synthetic = vec![zbobr_api::Comment {
-                    comment_type: CommentType::Request,
-                    timestamp: String::new(),
-                    role: None,
-                    hostname: String::new(),
-                    tool: None,
-                    model: None,
-                    text: desc,
-                }];
-                let response = match serde_json::to_string_pretty(&synthetic) {
-                    Ok(json) => json,
-                    Err(e) => format!("Error serializing: {e}"),
-                };
-                log_mcp_comments_response(self.role_name(), self.session().task_id(), &response);
-                return response;
-            }
-            // There is a plan but no cuts yet — the whole comment list is one chunk.
+            // No cut markers yet — all comments form a single chunk.
+            // offset=0 and negative offsets request this single chunk; offset >= 0 all map to it.
             if offset < -1 {
                 let response = format!("offset {} out of range: only 1 chunk available", offset);
                 log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
@@ -221,10 +224,12 @@ pub trait CommonMcpImpl: Send + Sync {
             return response;
         }
 
-        // Chunks: chunk[0] = comments[0..cut[0]], chunk[i] = comments[cut[i-1]..cut[i]], ...
-        // Last chunk = comments[cut.last()..end].
-        // Number of chunks = cut_indices.len() + 1 (but chunk 0 may be empty if first comment is cut).
-        // We expose chunks as: index 0 = last chunk, -1 = second-to-last, etc.
+        // Multiple chunks separated by cut markers:
+        // - chunk[0] = comments[0..cut[0]] (comments before first cut)
+        // - chunk[i] = comments[cut[i-1]..cut[i]] (comments from cut[i-1] to before cut[i])
+        // - chunk[last] = comments[cut[-1]..end] (comments from last cut to end)
+        // 
+        // Offset mapping: offset >= 0 → last chunk, offset -1 → second-to-last, offset -2 → third-to-last, etc.
         let num_chunks = cut_indices.len() + 1;
         let target_chunk = if offset >= 0 {
             num_chunks - 1
@@ -249,7 +254,8 @@ pub trait CommonMcpImpl: Send + Sync {
             (cut_indices[target_chunk - 1], cut_indices[target_chunk])
         };
 
-        // Return comments in the chunk, excluding Error and Done (but keeping Reject).
+        // Extract comments from the target chunk and filter out Error and Done comments.
+        // Reject comments (which mark cut boundaries) are kept.
         let result_comments: Vec<zbobr_api::Comment> = comments[start_idx..end_idx]
             .iter()
             .filter(|c| c.comment_type != CommentType::Error && c.comment_type != CommentType::Done)
