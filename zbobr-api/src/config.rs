@@ -41,12 +41,8 @@ pub struct ZbobrDispatcherConfig {
     /// repositories. Use a fine-grained token with read-only scopes (or no scopes at all
     /// for fully offline/mcp-tester runs). Defaults to "not-configured" when omitted.
     pub agent_github_token: String,
-    // NOTE: `copilot_github_token` has been moved to the Copilot executor
-    // configuration; the dispatcher no longer tracks this value.
-    // NOTE: `task_backend` and `repo_backend` have been moved to binary-specific
-    // entry points (zbobr, zbobr-fs). The dispatcher is now backend-agnostic.
     /// CLI tool to use as a global default. Individual stages may override this.
-    pub cli_tool: Tool,
+    pub tool: Tool,
 
     /// Default configuration for the preparator stage.
     #[config(nested)]
@@ -93,7 +89,7 @@ impl Default for ZbobrDispatcherConfig {
             workspaces: std::path::PathBuf::from("./workspaces"),
             base_port: 3000,
             agent_github_token: "not-configured".to_string(),
-            cli_tool: Tool::default(),
+            tool: Tool::default(),
             preparator: StageConfig::default(),
             planner: StageConfig::default(),
             worker: StageConfig::default(),
@@ -171,7 +167,7 @@ impl ZbobrDispatcherConfig {
     pub fn tool_for_role(&self, role: crate::task::Role) -> crate::task::Tool {
         self.stage_for_role(role)
             .tool
-            .unwrap_or(self.cli_tool)
+            .unwrap_or(self.tool)
     }
 
     /// Determine whether a specific model override exists for the given role.

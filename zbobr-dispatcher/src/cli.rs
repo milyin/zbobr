@@ -1012,7 +1012,7 @@ pub async fn run_manager_loop(
 ) -> anyhow::Result<()> {
     tracing::info!("Manager loop started ({})", zbobr.debug_state());
     tracing::info!("Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s");
-    tracing::info!("Global CLI Tool default: {:?}", zbobr.config().cli_tool);
+    tracing::info!("Global CLI Tool default: {:?}", zbobr.config().tool);
     if let Some(ref base) = prompts.base_path {
         tracing::info!("Prompts base path: {}", base.display());
     }

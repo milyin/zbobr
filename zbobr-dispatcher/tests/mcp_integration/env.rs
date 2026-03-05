@@ -56,7 +56,7 @@ impl IntegrationTestEnv {
 
         let dispatcher_config = ZbobrDispatcherConfig {
             workspaces: workspaces_dir.clone(),
-            cli_tool: Tool::McpTester,
+            tool: Tool::McpTester,
             git_user_name: "test-bot".to_string(),
             git_user_email: "test@example.com".to_string(),
             preparator: StageConfig::default(),
@@ -118,7 +118,7 @@ impl IntegrationTestEnv {
 
         let dispatcher_config = ZbobrDispatcherConfig {
             workspaces: workspaces_dir.clone(),
-            cli_tool: Tool::McpTester,
+            tool: Tool::McpTester,
             git_user_name: "test-bot".to_string(),
             git_user_email: "test@example.com".to_string(),
             preparator: StageConfig::default(),
@@ -182,7 +182,7 @@ impl IntegrationTestEnv {
 
         let dispatcher_config = ZbobrDispatcherConfig {
             workspaces: workspaces_dir.clone(),
-            cli_tool: Tool::McpTester,
+            tool: Tool::McpTester,
             git_user_name: "test-bot".to_string(),
             git_user_email: "test@example.com".to_string(),
             preparator: StageConfig::default(),
@@ -253,7 +253,7 @@ impl IntegrationTestEnv {
 
         let dispatcher_config = ZbobrDispatcherConfig {
             workspaces: workspaces_dir.clone(),
-            cli_tool: Tool::McpTester,
+            tool: Tool::McpTester,
             git_user_name: "test-bot".to_string(),
             git_user_email: "test@example.com".to_string(),
             preparator: StageConfig::default(),
