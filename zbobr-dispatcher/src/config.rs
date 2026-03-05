@@ -32,7 +32,7 @@ mod tests {
 
     use super::*;
     use std::path::PathBuf;
-    use crate::task::Tool;
+    use crate::task::{Tool, Model};
 
     fn test_config_dir() -> PathBuf {
         PathBuf::from("/test/config")
@@ -62,15 +62,19 @@ mod tests {
     cli_tool = "claude"
     work_branch_prefix = "my_fix"
     prompts_path = "/opt/prompts"
-    planner_prompts = ["plan.md", "shared.md"]
-    worker_prompts = ["work.md"]
+
+    [preparator]
+    prompts = ["prep.md"]
+
+    [planner]
+    prompts = ["plan.md", "shared.md"]
     "#;
         let config: ZbobrDispatcherToml = toml::from_str(toml_str).unwrap();
         assert_eq!(config.cli_tool, Some(Tool::Claude));
         assert_eq!(config.prompts_path, Some(PathBuf::from("/opt/prompts")));
         assert_eq!(
-            config.planner_prompts,
-            Some(vec![PathBuf::from("plan.md"), PathBuf::from("shared.md")])
+            config.planner.as_ref().unwrap().prompts,
+            vec![PathBuf::from("plan.md"), PathBuf::from("shared.md")]
         );
     }
 
@@ -105,11 +109,11 @@ mod tests {
             git_user_email: Some("test@example.com".into()),
             overwrite_author: Some(true),
             prompts_path: Some(PathBuf::from("/opt/prompts")),
-            preparator_prompts: Some(vec![PathBuf::from("pre.md")]),
-            planner_prompts: Some(vec![PathBuf::from("p.md")]),
-            worker_prompts: Some(vec![PathBuf::from("w.md")]),
-            reviewer_prompts: Some(vec![PathBuf::from("r.md")]),
-            merger_prompts: Some(vec![PathBuf::from("m.md")]),
+            preparator: Some(StageConfigToml { tool: None, model: None, prompts: Some(vec![PathBuf::from("pre.md")]) }),
+            planner: Some(StageConfigToml { tool: None, model: None, prompts: Some(vec![PathBuf::from("p.md")]) }),
+            worker: Some(StageConfigToml { tool: None, model: None, prompts: Some(vec![PathBuf::from("w.md")]) }),
+            reviewer: Some(StageConfigToml { tool: None, model: None, prompts: Some(vec![PathBuf::from("r.md")]) }),
+            merger: Some(StageConfigToml { tool: None, model: None, prompts: Some(vec![PathBuf::from("m.md")]) }),
         };
 
         let config = ZbobrDispatcherConfig::build(
@@ -124,19 +128,19 @@ mod tests {
         assert_eq!(config.work_branch_prefix, "toml_fix");
         // Relative prompt paths resolved against config_dir
         assert_eq!(
-            config.preparator_prompts,
+            config.preparator.prompts,
             vec![PathBuf::from("/test/config/pre.md")]
         );
         assert_eq!(
-            config.planner_prompts,
+            config.planner.prompts,
             vec![PathBuf::from("/test/config/p.md")]
         );
         assert_eq!(
-            config.worker_prompts,
+            config.worker.prompts,
             vec![PathBuf::from("/test/config/w.md")]
         );
         assert_eq!(
-            config.reviewer_prompts,
+            config.reviewer.prompts,
             vec![PathBuf::from("/test/config/r.md")]
         );
         // Absolute prompts_path stays absolute
@@ -156,6 +160,7 @@ mod tests {
         assert_eq!(config.work_branch_prefix, "zbobr_fix");
         assert_eq!(config.workspaces, PathBuf::from("./workspaces"));
         assert_eq!(config.agent_github_token, "not-configured");
+        assert_eq!(config.model, Model::default());
         assert_eq!(config.overwrite_author, false);
     }
 
@@ -201,11 +206,11 @@ mod tests {
             git_user_email: None,
             overwrite_author: Some(true),
             prompts_path: None,
-            preparator_prompts: None,
-            planner_prompts: None,
-            worker_prompts: None,
-            reviewer_prompts: None,
-            merger_prompts: None,
+            preparator: None,
+            planner: None,
+            worker: None,
+            reviewer: None,
+            merger: None,
         };
 
         let config = ZbobrDispatcherConfig::build(
@@ -231,11 +236,11 @@ mod tests {
             git_user_email: None,
             overwrite_author: Some(false),
             prompts_path: None,
-            preparator_prompts: None,
-            planner_prompts: None,
-            worker_prompts: None,
-            reviewer_prompts: None,
-            merger_prompts: None,
+            preparator: None,
+            planner: None,
+            worker: None,
+            reviewer: None,
+            merger: None,
         };
 
         let config = ZbobrDispatcherConfig::build(
@@ -261,11 +266,11 @@ mod tests {
             git_user_email: None,
             overwrite_author: Some(false),
             prompts_path: None,
-            preparator_prompts: None,
-            planner_prompts: None,
-            worker_prompts: None,
-            reviewer_prompts: None,
-            merger_prompts: None,
+            preparator: None,
+            planner: None,
+            worker: None,
+            reviewer: None,
+            merger: None,
         };
 
         // Create args with CLI flag set to true, overriding TOML false
@@ -288,15 +293,57 @@ mod tests {
         assert_eq!(config.overwrite_author, true);
     }
 
+
     #[test]
-    fn cli_flag_can_be_false() {
-        // When CLI flag is explicitly set to false, it should be false
-        let mut args = ZbobrDispatcherArgs::default();
-        args.overwrite_author = Some(false);
+    fn stage_settings_override_helpers() {
+        let mut cfg = ZbobrDispatcherConfig::default();
+        cfg.tool = Tool::Copilot;
+        cfg.model = Model::Gpt5;
+        cfg.preparator.tool = Some(Tool::Claude);
+        cfg.preparator.model = Some(Model::ClaudeOpus4_5);
 
-        let config = ZbobrDispatcherConfig::build(None, args, &test_config_dir()).unwrap();
+        assert_eq!(cfg.tool_for_role(Role::Preparator), Tool::Claude);
+        assert_eq!(cfg.tool_for_role(Role::Planner), Tool::Copilot);
+        assert_eq!(cfg.model_for_role(Role::Preparator), Model::ClaudeOpus4_5);
+        assert_eq!(cfg.model_for_role(Role::Planner), Model::Gpt5);
+    }
 
-        assert_eq!(config.overwrite_author, false);
+    #[test]
+    fn validate_tool_model_global_mismatch() {
+        let mut cfg = ZbobrDispatcherConfig::default();
+        // set git fields so validation gets past name/email check
+        cfg.git_user_name = "u".into();
+        cfg.git_user_email = "e".into();
+
+        cfg.tool = Tool::Claude;
+        cfg.model = Model::Gpt5; // not usable by Claude
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_tool_model_role_mismatch() {
+        let mut cfg = ZbobrDispatcherConfig::default();
+        cfg.git_user_name = "u".into();
+        cfg.git_user_email = "e".into();
+
+        cfg.tool = Tool::Copilot;
+        cfg.model = Model::Gpt5;
+        cfg.preparator.tool = Some(Tool::Claude);
+        // preparator will inherit global model which is incompatible
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_tool_model_combinations_ok() {
+        let mut cfg = ZbobrDispatcherConfig::default();
+        cfg.git_user_name = "u".into();
+        cfg.git_user_email = "e".into();
+
+        cfg.tool = Tool::Copilot;
+        cfg.model = Model::Gpt5;
+        cfg.preparator.tool = Some(Tool::Copilot);
+        cfg.preparator.model = Some(Model::Gpt5_2);
+        assert!(cfg.validate().is_ok());
     }
 }
 */

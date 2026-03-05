@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Mutex, time::Duration};
 
 use async_trait::async_trait;
 use zbobr_api::{
-    Comment, CommentTag, CommentType, Model, Parameter, Role, Signal, Stage, Task, Tool,
+    Comment, CommentTag, CommentType, Model, Parameter, Role, Signal, Stage, Task,
     backend::TaskBackend,
 };
 
@@ -481,8 +481,6 @@ impl ZbobrTaskBackendGithub {
         let existing_labels = self.list_labels().await?;
 
         const SIGNAL_LABEL_COLOR: &str = "5319e7";
-        const TOOL_LABEL_COLOR: &str = "d4c5f9";
-        const MODEL_LABEL_COLOR: &str = "bfd4f2";
         const FLAG_LABEL_COLOR: &str = "f9d0c4";
 
         for signal in Signal::all() {
@@ -498,38 +496,6 @@ impl ZbobrTaskBackendGithub {
                     .await?;
             } else {
                 tracing::info!("Label '{signal_label}' already exists");
-            }
-        }
-
-        for tool in Tool::all() {
-            let tool_label = format!("tool:{}", tool);
-            let tool_desc = format!("Use {} tool", tool);
-            if !existing_labels.contains(&tool_label) {
-                tracing::info!("Creating label '{tool_label}'");
-                self.create_label(&tool_label, TOOL_LABEL_COLOR, &tool_desc)
-                    .await?;
-            } else if force {
-                tracing::info!("Updating label '{tool_label}' (force)");
-                self.update_label(&tool_label, TOOL_LABEL_COLOR, &tool_desc)
-                    .await?;
-            } else {
-                tracing::info!("Label '{tool_label}' already exists");
-            }
-        }
-
-        for model in Model::all() {
-            let model_label = format!("model:{}", model);
-            let model_desc = format!("Use {} model", model);
-            if !existing_labels.contains(&model_label) {
-                tracing::info!("Creating label '{model_label}'");
-                self.create_label(&model_label, MODEL_LABEL_COLOR, &model_desc)
-                    .await?;
-            } else if force {
-                tracing::info!("Updating label '{model_label}' (force)");
-                self.update_label(&model_label, MODEL_LABEL_COLOR, &model_desc)
-                    .await?;
-            } else {
-                tracing::info!("Label '{model_label}' already exists");
             }
         }
 
@@ -565,26 +531,6 @@ impl ZbobrTaskBackendGithub {
 
         let body = issue.body.unwrap_or_default();
         let (description, params_map, checklist) = parse_description_full(&body);
-
-        let tool = issue.labels.iter().find_map(|l| {
-            if let Some(name) = l.name.strip_prefix("tool:") {
-                match name {
-                    "copilot" => Some(Tool::Copilot),
-                    "claude" => Some(Tool::Claude),
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        });
-
-        let model = issue.labels.iter().find_map(|l| {
-            if let Some(name) = l.name.strip_prefix("model:") {
-                name.parse::<Model>().ok()
-            } else {
-                None
-            }
-        });
 
         let mut parameters = HashMap::new();
         if let Some(repo) = params_map.get(Parameter::DestinationRepository.name()) {
@@ -626,8 +572,6 @@ impl ZbobrTaskBackendGithub {
             title: issue.title,
             description,
             stage,
-            tool,
-            model,
             parameters,
             checklist,
             signal,
@@ -707,8 +651,6 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         title: &str,
         description: &str,
         stage: Stage,
-        tool: Option<Tool>,
-        model: Option<Model>,
         parameters: HashMap<Parameter, String>,
     ) -> anyhow::Result<u64> {
         let (owner, repo) = self.parse_repo()?;
@@ -732,24 +674,12 @@ impl TaskBackend for ZbobrTaskBackendGithub {
 
         let stage_number = self.find_stage_number(stage).await?;
 
-        let mut labels = vec![];
-        if let Some(t) = tool {
-            labels.push(format!("tool:{}", t));
-        }
-        if let Some(m) = model {
-            labels.push(format!("model:{}", m));
-        }
-
         let issue = retry_github("create issue", || async {
             let issues = self.octocrab.issues(owner, repo);
             let mut builder = issues.create(title).body(body.clone());
 
             if let Some(n) = stage_number {
                 builder = builder.milestone(n);
-            }
-
-            if !labels.is_empty() {
-                builder = builder.labels(labels.clone());
             }
 
             builder.send().await
@@ -860,11 +790,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         Ok(())
     }
 
-    async fn list_tasks_by_stage(
-        &self,
-        stage: Stage,
-        tool: Option<Tool>,
-    ) -> anyhow::Result<Vec<Task>> {
+    async fn list_tasks_by_stage(&self, stage: Stage) -> anyhow::Result<Vec<Task>> {
         self.await_all_cooling().await;
         let stage_number = match self.find_stage_number(stage).await? {
             Some(n) => n,
@@ -886,16 +812,6 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         let mut tasks = Vec::new();
         for issue in issues {
             let task = Self::issue_to_task(issue);
-
-            // Filter client-side: if tool filter is provided, only include tasks that:
-            // - have no tool label (can be taken by anyone), OR
-            // - have a matching tool label
-            if let Some(filter_tool) = tool
-                && let Some(t) = task.tool
-                && t != filter_tool
-            {
-                continue;
-            }
 
             tasks.push(task);
         }
@@ -1073,7 +989,7 @@ mod parse_tests {
         let tag_line = parts.next().unwrap_or("");
         let rest = parts.next();
 
-        let result = match tag_line.parse::<CommentTag>() {
+        match tag_line.parse::<CommentTag>() {
             Ok(tag) => {
                 let body = rest.unwrap_or("").trim_start().to_string();
                 (tag, body)
@@ -1082,8 +998,7 @@ mod parse_tests {
                 CommentTag::new(CommentType::Request, None, String::new(), None),
                 input.to_string(),
             ),
-        };
-        result
+        }
     }
 
     #[test]

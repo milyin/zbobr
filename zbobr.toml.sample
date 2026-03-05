@@ -11,6 +11,11 @@
 
 # CLI tool: "copilot", "claude", or "stub"
 # cli_tool = "copilot"
+#
+# Global AI model used when no stage override is provided.  This value is
+# validated against the chosen tool at startup (see `dispatcher.validate()`).
+# Defaults to the language-model default (usually `gpt-5-mini`).
+# model = "gpt-5-mini"
 
 # Prefix for work branches
 # work_branch_prefix = "zbobr_fix"
@@ -36,12 +41,22 @@ git_user_email = "your.email@example.com"
 # Base directory for resolving relative prompt file paths
 # prompts_path = "./prompts"
 
-# Additional context files per agent role (relative to prompts_path, or absolute)
-# preparator_prompts = ["preparator.md", "common.md"]
-# planner_prompts = ["planner.md", "common.md"]
-# worker_prompts = ["worker.md", "common.md"]
-# reviewer_prompts = ["reviewer.md", "common.md"]
-# merger_prompts = ["merger.md", "common.md"]
+# Stage-specific overrides. Each table lives under the [dispatcher] section,
+# e.g. `[dispatcher.preparator]`.  All fields are optional; unspecified values
+# fall back to the global defaults (`cli_tool` and the executor-configured
+# model) or to an empty prompt list.
+#
+# [dispatcher.preparator]
+# tool = "claude"
+# model = "gpt-5"
+# prompts = ["preparator.md", "common.md"]
+#
+# [dispatcher.planner]
+# tool = "copilot"
+# model = "gpt-5-mini"
+# prompts = ["planner.md"]
+#
+# (other stages work similarly)
 
 [tasks.github]
 # Task project repository ("owner/repo") - where tasks are tracked

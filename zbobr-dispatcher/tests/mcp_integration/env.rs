@@ -12,6 +12,7 @@ use zbobr_dispatcher::{
     ChecklistItem, Comment, Signal, Stage, Task, ZbobrDispatcher, ZbobrDispatcherConfig,
     ZbobrDispatcherDyn, ZbobrExecutorConfig, process_task_by_stage,
     prompts::Prompts,
+    config::StageConfig,
     task::{Parameter, Tool},
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
@@ -55,14 +56,15 @@ impl IntegrationTestEnv {
 
         let dispatcher_config = ZbobrDispatcherConfig {
             workspaces: workspaces_dir.clone(),
-            cli_tool: Tool::McpTester,
+            tool: Tool::McpTester,
             git_user_name: "test-bot".to_string(),
             git_user_email: "test@example.com".to_string(),
-            preparator_prompts: vec![],
-            planner_prompts: vec![],
-            worker_prompts: vec![],
-            reviewer_prompts: vec![],
-            merger_prompts: vec![],
+            preparator: StageConfig::default(),
+            planner: StageConfig::default(),
+            worker: StageConfig::default(),
+            reviewer: StageConfig::default(),
+            tester: StageConfig::default(),
+            merger: StageConfig::default(),
             ..ZbobrDispatcherConfig::default()
         };
 
@@ -116,14 +118,15 @@ impl IntegrationTestEnv {
 
         let dispatcher_config = ZbobrDispatcherConfig {
             workspaces: workspaces_dir.clone(),
-            cli_tool: Tool::McpTester,
+            tool: Tool::McpTester,
             git_user_name: "test-bot".to_string(),
             git_user_email: "test@example.com".to_string(),
-            preparator_prompts: vec![],
-            planner_prompts: vec![],
-            worker_prompts: vec![],
-            reviewer_prompts: vec![],
-            merger_prompts: vec![],
+            preparator: StageConfig::default(),
+            planner: StageConfig::default(),
+            worker: StageConfig::default(),
+            reviewer: StageConfig::default(),
+            tester: StageConfig::default(),
+            merger: StageConfig::default(),
             ..ZbobrDispatcherConfig::default()
         };
 
@@ -179,14 +182,15 @@ impl IntegrationTestEnv {
 
         let dispatcher_config = ZbobrDispatcherConfig {
             workspaces: workspaces_dir.clone(),
-            cli_tool: Tool::McpTester,
+            tool: Tool::McpTester,
             git_user_name: "test-bot".to_string(),
             git_user_email: "test@example.com".to_string(),
-            preparator_prompts: vec![],
-            planner_prompts: vec![],
-            worker_prompts: vec![],
-            reviewer_prompts: vec![],
-            merger_prompts: vec![],
+            preparator: StageConfig::default(),
+            planner: StageConfig::default(),
+            worker: StageConfig::default(),
+            reviewer: StageConfig::default(),
+            tester: StageConfig::default(),
+            merger: StageConfig::default(),
             ..ZbobrDispatcherConfig::default()
         };
 
@@ -249,14 +253,15 @@ impl IntegrationTestEnv {
 
         let dispatcher_config = ZbobrDispatcherConfig {
             workspaces: workspaces_dir.clone(),
-            cli_tool: Tool::McpTester,
+            tool: Tool::McpTester,
             git_user_name: "test-bot".to_string(),
             git_user_email: "test@example.com".to_string(),
-            preparator_prompts: vec![],
-            planner_prompts: vec![],
-            worker_prompts: vec![],
-            reviewer_prompts: vec![],
-            merger_prompts: vec![],
+            preparator: StageConfig::default(),
+            planner: StageConfig::default(),
+            worker: StageConfig::default(),
+            reviewer: StageConfig::default(),
+            tester: StageConfig::default(),
+            merger: StageConfig::default(),
             ..ZbobrDispatcherConfig::default()
         };
 
@@ -314,7 +319,7 @@ impl IntegrationTestEnv {
 
     pub async fn create_task(&self, title: &str, description: &str, stage: Stage) -> u64 {
         self.zbobr
-            .create_task(title, description, stage, None, None, None, None)
+            .create_task(title, description, stage, None, None)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to create task: {e}", self.name))
     }
@@ -327,7 +332,7 @@ impl IntegrationTestEnv {
         confirm: bool,
     ) -> u64 {
         self.zbobr
-            .create_task_with_confirm(title, description, stage, None, None, None, None, confirm)
+            .create_task_with_confirm(title, description, stage, None, None, confirm)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to create task: {e}", self.name))
     }
@@ -679,7 +684,7 @@ impl IntegrationTestEnv {
 
         let task = self.get_task(task_id).await;
 
-        process_task_by_stage(&self.zbobr, &task, None, &prompts, &executor_config)
+        process_task_by_stage(&self.zbobr, &task, &prompts, &executor_config)
             .await
             .unwrap_or_else(|e| {
                 panic!(

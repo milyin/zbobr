@@ -3,7 +3,7 @@ use std::{path::Path, process::Stdio};
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use zbobr_api::{
-    task::{Model, Role},
+    task::Role,
     tool_executor::{ToolExecutor, format_command_for_log},
 };
 
@@ -23,7 +23,6 @@ impl ToolExecutor for McpTesterExecutor {
         &self,
         task_id: u64,
         role: Role,
-        _model: &Model,
         _port: u16,
         _prompt: &str,
         work_dir: &Path,
@@ -126,7 +125,7 @@ impl ToolExecutor for McpTesterExecutor {
 mod tests {
     use std::path::Path;
 
-    use zbobr_api::task::{Model, Role};
+    use zbobr_api::Role;
 
     use super::*;
 
@@ -140,7 +139,6 @@ mod tests {
             .execute(
                 42,
                 Role::Preparator,
-                &Model::default(),
                 0,
                 "",
                 Path::new("."),
