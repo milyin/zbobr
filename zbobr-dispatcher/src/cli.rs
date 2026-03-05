@@ -842,7 +842,8 @@ impl<'a> CliRoleRunner<'a> {
     async fn run(&self) -> anyhow::Result<()> {
         // determine which tool and model we should use for this role/stage
         let cli_tool = self.zbobr.config().tool_for_role(self.role);
-        let stage_model_override = self.zbobr.config().model_for_role(self.role);
+        // model_for_role now returns a concrete model (global or override)
+        let model = self.zbobr.config().model_for_role(self.role);
 
         self.zbobr
             .set_task_stage(self.task_id, self.role.into())
@@ -903,15 +904,15 @@ impl<'a> CliRoleRunner<'a> {
         );
 
         let prompt_text = self.prompt()?;
-        // possibly adjust executor configuration with a model override
+        // apply the resolved model to the executor configuration; dispatcher
+        // configuration takes precedence over whatever the executor may have
+        // been initialized with.
         let mut exec_cfg = self.executor_config.clone();
-        if let Some(model) = stage_model_override {
-            match cli_tool {
-                Tool::Copilot => exec_cfg.copilot.default_model = model,
-                Tool::Claude => exec_cfg.claude.default_model = model,
-                Tool::McpTester => {
-                    // mcp-tester doesn't use models; ignore
-                }
+        match cli_tool {
+            Tool::Copilot => exec_cfg.copilot.default_model = model.clone(),
+            Tool::Claude => exec_cfg.claude.default_model = model.clone(),
+            Tool::McpTester => {
+                // mcp-tester doesn't use models; ignore
             }
         }
 
@@ -1013,6 +1014,7 @@ pub async fn run_manager_loop(
     tracing::info!("Manager loop started ({})", zbobr.debug_state());
     tracing::info!("Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s");
     tracing::info!("Global CLI Tool default: {:?}", zbobr.config().tool);
+    tracing::info!("Global model default: {:?}", zbobr.config().model);
     if let Some(ref base) = prompts.base_path {
         tracing::info!("Prompts base path: {}", base.display());
     }

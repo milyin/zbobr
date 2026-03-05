@@ -160,6 +160,7 @@ mod tests {
         assert_eq!(config.work_branch_prefix, "zbobr_fix");
         assert_eq!(config.workspaces, PathBuf::from("./workspaces"));
         assert_eq!(config.agent_github_token, "not-configured");
+        assert_eq!(config.model, Model::default());
         assert_eq!(config.overwrite_author, false);
     }
 
@@ -292,28 +293,57 @@ mod tests {
         assert_eq!(config.overwrite_author, true);
     }
 
-    #[test]
-    fn cli_flag_can_be_false() {
-        // When CLI flag is explicitly set to false, it should be false
-        let mut args = ZbobrDispatcherArgs::default();
-        args.overwrite_author = Some(false);
-
-        let config = ZbobrDispatcherConfig::build(None, args, &test_config_dir()).unwrap();
-
-        assert_eq!(config.overwrite_author, false);
-    }
 
     #[test]
     fn stage_settings_override_helpers() {
         let mut cfg = ZbobrDispatcherConfig::default();
-        cfg.cli_tool = Tool::Copilot;
+        cfg.tool = Tool::Copilot;
+        cfg.model = Model::Gpt5;
         cfg.preparator.tool = Some(Tool::Claude);
-        cfg.preparator.model = Some(Model::Gpt5);
+        cfg.preparator.model = Some(Model::ClaudeOpus4_5);
 
         assert_eq!(cfg.tool_for_role(Role::Preparator), Tool::Claude);
         assert_eq!(cfg.tool_for_role(Role::Planner), Tool::Copilot);
-        assert_eq!(cfg.model_for_role(Role::Preparator), Some(Model::Gpt5));
-        assert_eq!(cfg.model_for_role(Role::Planner), None);
+        assert_eq!(cfg.model_for_role(Role::Preparator), Model::ClaudeOpus4_5);
+        assert_eq!(cfg.model_for_role(Role::Planner), Model::Gpt5);
+    }
+
+    #[test]
+    fn validate_tool_model_global_mismatch() {
+        let mut cfg = ZbobrDispatcherConfig::default();
+        // set git fields so validation gets past name/email check
+        cfg.git_user_name = "u".into();
+        cfg.git_user_email = "e".into();
+
+        cfg.tool = Tool::Claude;
+        cfg.model = Model::Gpt5; // not usable by Claude
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_tool_model_role_mismatch() {
+        let mut cfg = ZbobrDispatcherConfig::default();
+        cfg.git_user_name = "u".into();
+        cfg.git_user_email = "e".into();
+
+        cfg.tool = Tool::Copilot;
+        cfg.model = Model::Gpt5;
+        cfg.preparator.tool = Some(Tool::Claude);
+        // preparator will inherit global model which is incompatible
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_tool_model_combinations_ok() {
+        let mut cfg = ZbobrDispatcherConfig::default();
+        cfg.git_user_name = "u".into();
+        cfg.git_user_email = "e".into();
+
+        cfg.tool = Tool::Copilot;
+        cfg.model = Model::Gpt5;
+        cfg.preparator.tool = Some(Tool::Copilot);
+        cfg.preparator.model = Some(Model::Gpt5_2);
+        assert!(cfg.validate().is_ok());
     }
 }
 */

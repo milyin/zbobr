@@ -43,6 +43,10 @@ pub struct ZbobrDispatcherConfig {
     pub agent_github_token: String,
     /// CLI tool to use as a global default. Individual stages may override this.
     pub tool: Tool,
+    /// Global AI model to use when a stage does not specify an override.  Returns
+    /// to `Model::default()` when omitted so existing configurations keep working.
+    /// Individual stages may still specify their own model, which takes precedence.
+    pub model: Model,
 
     /// Default configuration for the preparator stage.
     #[config(nested)]
@@ -90,6 +94,7 @@ impl Default for ZbobrDispatcherConfig {
             base_port: 3000,
             agent_github_token: "not-configured".to_string(),
             tool: Tool::default(),
+            model: Model::default(),
             preparator: StageConfig::default(),
             planner: StageConfig::default(),
             worker: StageConfig::default(),
@@ -145,6 +150,37 @@ impl ZbobrDispatcherConfig {
                  This is used for git commits made by the tool."
             );
         }
+
+        // global tool/model compatibility
+        if self.model.model_name_for_tool(self.tool).is_none() {
+            anyhow::bail!(
+                "Global model {:?} is not supported by global tool {:?}",
+                self.model,
+                self.tool
+            );
+        }
+
+        // check every role-specific combination (including overrides)
+        for role in &[
+            crate::task::Role::Preparator,
+            crate::task::Role::Planner,
+            crate::task::Role::Worker,
+            crate::task::Role::Reviewer,
+            crate::task::Role::Tester,
+            crate::task::Role::Merger,
+        ] {
+            let tool = self.tool_for_role(*role);
+            let model = self.model_for_role(*role);
+            if model.model_name_for_tool(tool).is_none() {
+                anyhow::bail!(
+                    "Configured model {:?} is not supported by tool {:?} for role {:?}",
+                    model,
+                    tool,
+                    role
+                );
+            }
+        }
+
         Ok(())
     }
 
@@ -170,10 +206,14 @@ impl ZbobrDispatcherConfig {
             .unwrap_or(self.tool)
     }
 
-    /// Determine whether a specific model override exists for the given role.
-    /// The caller is responsible for applying this value to the executor
-    /// configuration if appropriate for the selected tool.
-    pub fn model_for_role(&self, role: crate::task::Role) -> Option<crate::task::Model> {
-        self.stage_for_role(role).model.clone()
+    /// Determine which model should be used for the given role.  The precedence
+    /// order is: stage-specific override, then the global dispatcher `model`.
+    /// The result is _never_ optional; a default value is provided by
+    /// `Model::default()` so callers can apply it unconditionally.
+    pub fn model_for_role(&self, role: crate::task::Role) -> crate::task::Model {
+        self.stage_for_role(role)
+            .model
+            .clone()
+            .unwrap_or(self.model.clone())
     }
 }

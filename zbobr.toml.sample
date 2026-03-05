@@ -11,6 +11,11 @@
 
 # CLI tool: "copilot", "claude", or "stub"
 # cli_tool = "copilot"
+#
+# Global AI model used when no stage override is provided.  This value is
+# validated against the chosen tool at startup (see `dispatcher.validate()`).
+# Defaults to the language-model default (usually `gpt-5-mini`).
+# model = "gpt-5-mini"
 
 # Prefix for work branches
 # work_branch_prefix = "zbobr_fix"
