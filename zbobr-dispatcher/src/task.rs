@@ -995,6 +995,7 @@ mod tests {
 
     #[test]
     fn model_mapping() {
+        // specific mappings
         assert_eq!(
             Model::Gpt4o.model_name_for_tool(Tool::Copilot),
             Some("gpt-4o")
@@ -1008,6 +1009,17 @@ mod tests {
             Some("claude-3-5-sonnet")
         );
         assert_eq!(Model::Gpt5_2.model_name_for_tool(Tool::Claude), None);
+
+        // the "default" sentinel should produce the cheapest supported
+        // option for each tool.
+        assert_eq!(
+            Model::Default.model_name_for_tool(Tool::Copilot),
+            Some("gpt-5-mini")
+        );
+        assert_eq!(
+            Model::Default.model_name_for_tool(Tool::Claude),
+            Some("claude-3-5-sonnet")
+        );
     }
 
     #[test]
@@ -1240,8 +1252,8 @@ mod comment_model_tests {
         let planner = crate::mcp::planner::PlannerMcp::new(
             zbobr.clone(),
             id,
-            Some(Tool::Copilot),
-            Some(Model::Gpt5Mini),
+            Tool::Copilot,
+            Model::Gpt5Mini,
         );
 
         // call helper directly
@@ -1299,6 +1311,18 @@ mod comment_model_tests {
             None,
         );
         assert_eq!(tag_user.to_string(), "// REQUEST user:web");
+
+        // verify default-model serialization
+        let tag_default = CommentTag::new(
+            CommentType::Report,
+            Some(Role::Planner),
+            "host".to_string(),
+            Some(Tool::Copilot),
+            Some(Model::Default),
+        );
+        assert_eq!(tag_default.to_string(), "// REPORT planner:host:copilot:default");
+        let parsed_default: CommentTag = tag_default.to_string().parse().unwrap();
+        assert_eq!(parsed_default, tag_default);
 
         // verify tool field serialization when both tool and model present
         let tag_tool = CommentTag::new(

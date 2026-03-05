@@ -325,8 +325,8 @@ pub async fn run_role_mcp_server(
     zbobr: ZbobrDispatcherDyn,
     role: Role,
     task_id: u64,
-    tool: Option<Tool>,
-    model: Option<Model>,
+    tool: Tool,
+    model: Model,
 ) -> anyhow::Result<u16> {
     let base_port = zbobr.config().base_port;
     use rmcp::transport::streamable_http_server::{

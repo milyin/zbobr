@@ -465,6 +465,12 @@ impl std::str::FromStr for Tool {
     Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, schemars::JsonSchema, Default,
 )]
 pub enum Model {
+    /// Special sentinel indicating the default model for the current tool.
+    /// The concrete mapping is handled outside of the enum (e.g. via
+    /// executor configuration).  It serializes to the string "default".
+    #[serde(rename = "default")]
+    Default,
+
     // Retired models (kept for backward compatibility, no longer available)
     #[serde(rename = "gpt-4o")]
     Gpt4o,
@@ -512,6 +518,7 @@ impl Model {
     /// Returns all available models.
     pub fn all() -> &'static [Model] {
         &[
+            Model::Default,
             Model::Gpt5Mini,
             Model::Gpt5,
             Model::Gpt5_1,
@@ -534,6 +541,8 @@ impl Model {
     pub fn model_name_for_tool(&self, tool: Tool) -> Option<&'static str> {
         match tool {
             Tool::Copilot => match self {
+                // cheapest Copilot offering is gpt-5-mini
+                Model::Default => Some("gpt-5-mini"),
                 Model::Gpt4o => None,          // retired
                 Model::Claude35Sonnet => None, // retired
                 Model::Claude3Opus => None,    // retired
@@ -555,6 +564,8 @@ impl Model {
                 Model::Gemini3ProPreview => Some("gemini-3-pro-preview"),
             },
             Tool::Claude => match self {
+                // cheapest Claude offering is the 3.5 sonnet
+                Model::Default => Some("claude-3-5-sonnet"),
                 Model::Claude35Sonnet => Some("claude-3-5-sonnet"),
                 Model::Claude3Opus => Some("claude-3-opus"),
                 Model::ClaudeSonnet4_5 => Some("claude-sonnet-4-5"),
@@ -573,6 +584,7 @@ impl Model {
 impl std::fmt::Display for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
+            Model::Default => "default",
             Model::Gpt4o => "gpt-4o",
             Model::Claude35Sonnet => "claude-3-5-sonnet",
             Model::Claude3Opus => "claude-3-opus",
@@ -601,6 +613,7 @@ impl std::str::FromStr for Model {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().replace('.', "-").as_str() {
+            "default" => Ok(Model::Default),
             "gpt-4o" | "gpt4o" => Ok(Model::Gpt4o),
             "claude-3-5-sonnet" | "claude35sonnet" => Ok(Model::Claude35Sonnet),
             "claude-3-opus" | "claude3opus" => Ok(Model::Claude3Opus),

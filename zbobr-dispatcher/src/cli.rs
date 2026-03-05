@@ -903,8 +903,8 @@ impl<'a> CliRoleRunner<'a> {
                 self.zbobr.clone(),
                 self.role,
                 self.task_id,
-                Some(cli_tool),
-                Some(model.clone()),
+                cli_tool,
+                model.clone(),
             )
             .await?;
 
@@ -1375,8 +1375,8 @@ async fn start_mcp_server(
     zbobr: ZbobrDispatcherDyn,
     role: Role,
     task_id: u64,
-    tool: Option<Tool>,
-    model: Option<Model>,
+    tool: Tool,
+    model: Model,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
     let server_handle = tokio::spawn(async move {

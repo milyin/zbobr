@@ -10,19 +10,11 @@ pub trait CommonMcpImpl: Send + Sync {
     fn session(&self) -> &RoleSession;
     fn role(&self) -> Role;
 
-    /// Optionally returns the tool that is executing this MCP session.  This
-    /// is filled in by `run_role_mcp_server` when the server is constructed.
-    fn mcp_tool(&self) -> Option<Tool> {
-        None
-    }
+    /// Returns the tool that is executing this MCP session
+    fn mcp_tool(&self) -> Tool;
 
-    /// Optionally returns the concrete model currently in use by the agent
-    /// tool.  When present the model will be included in comment tags; when
-    /// `None` the tag omits the model field.  Dispatcher-originated messages
-    /// keep this `None`.
-    fn mcp_model(&self) -> Option<Model> {
-        None
-    }
+    /// Returns the concrete model currently in use by the agent tool
+    fn mcp_model(&self) -> Model;
 
     fn role_name(&self) -> &'static str {
         self.role().as_str()
@@ -164,8 +156,8 @@ pub trait CommonMcpImpl: Send + Sync {
                 message,
                 Some(self.role()),
                 &hostname,
-                self.mcp_tool(),
-                self.mcp_model(),
+                Some(self.mcp_tool()),
+                Some(self.mcp_model()),
             )
             .await
         {
@@ -210,9 +202,7 @@ pub trait CommonMcpImpl: Send + Sync {
                 CommentType::Report,
                 message,
                 Some(self.role()),
-                &hostname,
-                self.mcp_tool(),
-                self.mcp_model(),
+                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
             )
             .await
         {
@@ -240,9 +230,7 @@ pub trait CommonMcpImpl: Send + Sync {
                 CommentType::Request,
                 message,
                 Some(self.role()),
-                &hostname,
-                self.mcp_tool(),
-                self.mcp_model(),
+                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
             )
             .await
         {
@@ -513,7 +501,7 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
         // Post the plan as a PLAN comment to preserve history
         if let Err(e) = self
             .session()
-            .post_comment(CommentType::Plan, plan, Some(self.role()), &hostname, self.mcp_tool(), None)
+            .post_comment(CommentType::Plan, plan, Some(self.role()), &hostname, Some(self.mcp_tool()), None)
             .await
         {
             tracing::error!(
@@ -556,9 +544,7 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
                 CommentType::Request,
                 message,
                 Some(self.role()),
-                &hostname,
-                self.mcp_tool(),
-                self.mcp_model(),
+                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
             )
             .await
         {
@@ -605,9 +591,7 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
                 CommentType::Report,
                 message,
                 Some(self.role()),
-                &hostname,
-                self.mcp_tool(),
-                self.mcp_model(),
+                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
             )
             .await
         {
@@ -630,9 +614,7 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
                 CommentType::Reject,
                 message,
                 Some(self.role()),
-                &hostname,
-                self.mcp_tool(),
-                self.mcp_model(),
+                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
             )
             .await
         {
@@ -673,9 +655,7 @@ pub trait TesterMcpImpl: CommonMcpImpl {
                 CommentType::Report,
                 message,
                 Some(self.role()),
-                &hostname,
-                self.mcp_tool(),
-                self.mcp_model(),
+                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
             )
             .await
         {
@@ -698,9 +678,7 @@ pub trait TesterMcpImpl: CommonMcpImpl {
                 CommentType::Reject,
                 message,
                 Some(self.role()),
-                &hostname,
-                self.mcp_tool(),
-                self.mcp_model(),
+                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
             )
             .await
         {

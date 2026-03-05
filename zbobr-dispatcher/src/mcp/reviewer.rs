@@ -18,8 +18,8 @@ use crate::{
 pub struct ReviewerMcp {
     session: RoleSession,
     tool_router: ToolRouter<Self>,
-    tool: Option<Tool>,
-    model: Option<Model>,
+    tool: Tool,
+    model: Model,
 }
 
 impl CommonMcpImpl for ReviewerMcp {
@@ -31,11 +31,11 @@ impl CommonMcpImpl for ReviewerMcp {
         crate::task::Role::Reviewer
     }
 
-    fn mcp_tool(&self) -> Option<Tool> {
+    fn mcp_tool(&self) -> Tool {
         self.tool.clone()
     }
 
-    fn mcp_model(&self) -> Option<Model> {
+    fn mcp_model(&self) -> Model {
         self.model.clone()
     }
 }
@@ -44,7 +44,7 @@ impl ReviewerMcpImpl for ReviewerMcp {}
 
 #[tool_router]
 impl ReviewerMcp {
-    pub fn new(zbobr: ZbobrDispatcherDyn, task_id: u64, tool: Option<Tool>, model: Option<Model>) -> Self {
+    pub fn new(zbobr: ZbobrDispatcherDyn, task_id: u64, tool: Tool, model: Model) -> Self {
         Self {
             session: zbobr.role_session(task_id),
             tool_router: Self::tool_router(),
