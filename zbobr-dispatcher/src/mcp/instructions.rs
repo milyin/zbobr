@@ -26,12 +26,13 @@ Read the task description and set the required parameters for the implementation
 ## Workflow
 
 1. Call `{GET_PLAN}` to read the task context
-2. **Set task parameters** that will guide the implementation:
-    - Call `{GET_PARAM_DESTINATION_REPOSITORY}` and `{GET_PARAM_DESTINATION_BRANCH}` first — they may already be pre-populated with defaults from the configuration. Keep the defaults unless the task description clearly specifies a different repository or branch.
-    - Call `{SET_PARAM_DESTINATION_REPOSITORY}` only if the value is missing or incorrect (full git URL, local path, or owner/repo format)
-    - Call `{SET_PARAM_DESTINATION_BRANCH}` only if the value is missing or incorrect (e.g., "main", "develop")
-    - Call `{SET_PARAM_WORK_BRANCH_POSTFIX}` with the work branch postfix (e.g., "implement-feature") — the full work branch will be formed from prefix, task id and this postfix
-    - Use `{GET_PARAM_WORK_BRANCH}` to confirm the resulting work branch name
+2. Set task parameters accordingly to the task description:
+    - Call `{GET_PARAM_DESTINATION_REPOSITORY}`. If it's empty call `{SET_PARAM_DESTINATION_REPOSITORY}` with either
+       - local path (e.g., "/home/user/repo") if the task is for a local repository
+       - owner/repo format (e.g., "octocat/Hello-World") if the task is for a GitHub repository
+    - Call `{GET_PARAM_DESTINATION_BRANCH}`. If it's empty call `{SET_PARAM_DESTINATION_BRANCH}` with the value from the task description (if task explicitly specifies it) or a default like "main"
+    - Call `{SET_PARAM_WORK_BRANCH_POSTFIX}` with the work branch postfix. Choose short but meaningful related to the task
+    - Call `{GET_PARAM_WORK_BRANCH}` to get the resulting work branch name for report
 3. Call `{REPORT_RESULTS}` to provide a brief and concise report of the parameters you set.
 "#,
     )
