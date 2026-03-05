@@ -98,7 +98,7 @@ impl TaskFile {
 /// The behaviour is intentionally lenient because user-written requests may
 /// omit the tag entirely; in that case we default the role to `Role::User` so
 /// that downstream code can annotate the request origin.
-
+///
 /// Comments storage structure - stores structured comments as YAML.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct CommentsFile {
@@ -377,7 +377,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
         let new_comment = Comment {
             comment_type,
             timestamp: format!("{:?}", std::time::SystemTime::now()),
-            role: role,
+            role,
             hostname: hostname.to_string(),
             model,
             text: body.to_string(),
@@ -453,7 +453,7 @@ mod parse_tests {
 
         // debug for failing tests
         eprintln!("split_tag_body: tag_line={:?}", tag_line);
-        let result = match tag_line.parse::<CommentTag>() {
+        match tag_line.parse::<CommentTag>() {
             Ok(tag) => {
                 eprintln!("split_tag_body: parsed tag={:?}", tag);
                 let body = rest.unwrap_or("").trim_start().to_string();
@@ -467,8 +467,7 @@ mod parse_tests {
                     input.to_string(),
                 )
             }
-        };
-        result
+        }
     }
 
     #[test]

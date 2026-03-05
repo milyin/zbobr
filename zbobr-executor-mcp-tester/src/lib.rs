@@ -125,7 +125,7 @@ impl ToolExecutor for McpTesterExecutor {
 mod tests {
     use std::path::Path;
 
-    use zbobr_api::{Role, Stage, Task};
+    use zbobr_api::Role;
 
     use super::*;
 

@@ -989,7 +989,7 @@ mod parse_tests {
         let tag_line = parts.next().unwrap_or("");
         let rest = parts.next();
 
-        let result = match tag_line.parse::<CommentTag>() {
+        match tag_line.parse::<CommentTag>() {
             Ok(tag) => {
                 let body = rest.unwrap_or("").trim_start().to_string();
                 (tag, body)
@@ -998,8 +998,7 @@ mod parse_tests {
                 CommentTag::new(CommentType::Request, None, String::new(), None),
                 input.to_string(),
             ),
-        };
-        result
+        }
     }
 
     #[test]

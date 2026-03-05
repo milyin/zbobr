@@ -80,7 +80,7 @@ impl ToolExecutor for ClaudeExecutor {
         ];
 
         let mut cmd = tokio::process::Command::new("claude");
-        cmd.args(&args)
+        cmd.args(args)
             .current_dir(work_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
