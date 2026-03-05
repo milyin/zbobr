@@ -118,10 +118,22 @@ impl RoleSession {
         body: &str,
         role: Option<Role>,
         hostname: &str,
+        tool: Option<Tool>,
         model: Option<Model>,
     ) -> anyhow::Result<()> {
+        // dispatcher/session API simply forwards whatever tool/model the caller
+        // provides.  MCP helpers will pass the concrete values; dispatcher-only
+        // code uses `None` for both.
         self.zbobr
-            .post_task_comment(self.task_id, comment_type, role, hostname, model, body)
+            .post_task_comment(
+                self.task_id,
+                comment_type,
+                role,
+                hostname,
+                tool,
+                model,
+                body,
+            )
             .await
     }
 
@@ -519,7 +531,7 @@ impl TaskSession {
         // Post DONE boundary comment.
         let hostname = crate::mcp::common::get_hostname();
         if let Err(e) = self
-            .post_comment(CommentType::Done, "", None, &hostname, None)
+            .post_comment(CommentType::Done, "", None, &hostname, None, None)
             .await
         {
             tracing::warn!("Failed to post DONE boundary for task #{task_id}: {e}");
@@ -539,10 +551,22 @@ impl TaskSession {
         body: &str,
         role: Option<Role>,
         hostname: &str,
+        tool: Option<Tool>,
         model: Option<Model>,
     ) -> anyhow::Result<()> {
+        // simply forward provided metadata; dispatcher-level callers send
+        // `None` for both tool and model so tags remain minimal.
+
         self.zbobr
-            .post_task_comment(self.task_id, comment_type, role, hostname, model, body)
+            .post_task_comment(
+                self.task_id,
+                comment_type,
+                role,
+                hostname,
+                tool,
+                model,
+                body,
+            )
             .await
     }
 }
@@ -606,6 +630,7 @@ mod tests {
             CommentType::Request,
             Role::Planner,
             "host".to_string(),
+            None,
             Some(Model::Claude3Opus),
         );
         assert_eq!(tag.to_string(), "// REQUEST planner:host:claude-opus");
@@ -616,6 +641,7 @@ mod tests {
             CommentType::Request,
             Role::User,
             "web".to_string(),
+            None,
             None,
         );
         assert_eq!(tag_user.to_string(), "// REQUEST user:web");
@@ -823,6 +849,7 @@ mod tests {
             _body: &str,
             _role: Role,
             _hostname: &str,
+            _tool: Option<Tool>,
             _model: Option<Model>,
         ) -> anyhow::Result<()> {
             Ok(())
@@ -996,3 +1023,294 @@ mod tests {
     }
 }
 */
+
+// new tests for model-defaulting behaviour
+#[cfg(test)]
+mod comment_model_tests {
+    use super::*;
+    use crate::config::ZbobrDispatcherConfig;
+    use crate::mcp::traits::CommonMcpImpl;
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use std::sync::{Arc, atomic::AtomicU64};
+    use tokio::sync::Mutex;
+
+    /// Simple in-memory backend that records posted comments so tests can
+    /// observe them.
+    struct TrackingBackend {
+        tasks: Mutex<HashMap<u64, Task>>,
+        comments: Mutex<HashMap<u64, Vec<Comment>>>,
+        next_id: AtomicU64,
+    }
+
+    #[async_trait]
+    impl crate::backend::TaskBackend for TrackingBackend {
+        async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
+            let tasks = self.tasks.lock().await;
+            tasks
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("not found"))
+        }
+
+        async fn create_task(
+            &self,
+            title: &str,
+            description: &str,
+            stage: Stage,
+            parameters: HashMap<Parameter, String>,
+        ) -> anyhow::Result<u64> {
+            let id = self.next_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            let task = Task {
+                id,
+                title: title.to_string(),
+                description: description.to_string(),
+                stage,
+                parameters,
+                checklist: vec![],
+                signal: None,
+                conflict: false,
+                pause: false,
+                confirm: false,
+                etag: None,
+            };
+            self.tasks.lock().await.insert(id, task);
+            Ok(id)
+        }
+
+        async fn close_task(&self, _id: u64) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn is_task_closed(&self, _id: u64) -> anyhow::Result<bool> {
+            Ok(false)
+        }
+
+        async fn modify_task(
+            &self,
+            id: u64,
+            mutate: Box<dyn FnOnce(Task) -> Task + Send>,
+        ) -> anyhow::Result<()> {
+            let mut tasks = self.tasks.lock().await;
+            if let Some(t) = tasks.remove(&id) {
+                let t = mutate(t);
+                tasks.insert(id, t);
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!("not found"))
+            }
+        }
+
+        async fn list_tasks_by_stage(&self, _stage: Stage) -> anyhow::Result<Vec<Task>> {
+            Ok(vec![])
+        }
+
+        async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
+            let comments = self.comments.lock().await;
+            Ok(comments.get(&id).cloned().unwrap_or_default())
+        }
+
+        async fn post_task_comment(
+            &self,
+            id: u64,
+            comment_type: CommentType,
+            role: Option<Role>,
+            hostname: &str,
+            tool: Option<Tool>,
+            model: Option<Model>,
+            body: &str,
+        ) -> anyhow::Result<()> {
+            let mut comments = self.comments.lock().await;
+            comments
+                .entry(id)
+                .or_default()
+                .push(Comment {
+                    comment_type,
+                    timestamp: String::new(),
+                    role,
+                    hostname: hostname.to_string(),
+                    tool,
+                    model,
+                    text: body.to_string(),
+                });
+            Ok(())
+        }
+
+        async fn setup(&self, _force: bool) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn validate_connectivity(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn debug_state(&self) -> String {
+            "tracking".to_string()
+        }
+    }
+
+    struct DummyRepo;
+    #[async_trait]
+    impl crate::backend::RepoBackend for DummyRepo {
+        async fn clone_and_setup(
+            &self,
+            _target_repo: &str,
+            _work_branch: &str,
+            _destination_branch: &str,
+            _workspace_path: &std::path::Path,
+        ) -> anyhow::Result<std::path::PathBuf> {
+            Err(anyhow::anyhow!("not used"))
+        }
+        async fn clone_readonly(
+            &self,
+            _target_repo: &str,
+            _branch: &str,
+            _workspace_path: &std::path::Path,
+        ) -> anyhow::Result<std::path::PathBuf> {
+            Err(anyhow::anyhow!("not used"))
+        }
+        async fn setup_fork_remote_and_push(
+            &self,
+            _work_dir: &std::path::Path,
+            _target_repo: &str,
+            _work_branch: &str,
+        ) -> anyhow::Result<()> {
+            Err(anyhow::anyhow!("not used"))
+        }
+        async fn ensure_branch_and_pr(
+            &self,
+            _target_repo: &str,
+            _workspace_path: &std::path::Path,
+            _work_branch: &str,
+            _destination_branch: &str,
+            _pr_title: &str,
+        ) -> anyhow::Result<String> {
+            Err(anyhow::anyhow!("not used"))
+        }
+        async fn push_branch(
+            &self,
+            _target_repo: &str,
+            _workspace_path: &std::path::Path,
+            _work_branch: &str,
+        ) -> anyhow::Result<()> {
+            Err(anyhow::anyhow!("not used"))
+        }
+        async fn create_pr_in_fork(
+            &self,
+            _repo_name: &str,
+            _work_branch: &str,
+            _destination_branch: &str,
+            _pr_title: &str,
+            _pr_body: &str,
+        ) -> anyhow::Result<String> {
+            Err(anyhow::anyhow!("not used"))
+        }
+        async fn parse_pr_to_repo_branch(&self, _pr_ref: &str) -> anyhow::Result<(String, String)> {
+            Err(anyhow::anyhow!("not used"))
+        }
+        async fn validate_connectivity(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn debug_state(&self) -> String {
+            "dummy".to_string()
+        }
+    }
+
+    fn make_dispatcher() -> crate::ZbobrDispatcherDyn {
+        let backend: Arc<dyn crate::backend::TaskBackend> = Arc::new(TrackingBackend {
+            tasks: Mutex::new(HashMap::new()),
+            comments: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(0),
+        });
+        let repo: Arc<dyn crate::backend::RepoBackend> = Arc::new(DummyRepo);
+        crate::ZbobrDispatcher::new_with_backends(ZbobrDispatcherConfig::default(), backend, repo)
+    }
+
+    #[tokio::test]
+    async fn mcp_helper_includes_explicit_model() {
+        let zbobr = make_dispatcher();
+        let id = zbobr
+            .create_task("t", "", Stage::Pending, None, None)
+            .await
+            .unwrap();
+
+        // construct a planner MCP instance with a concrete model and use it to
+        // report an error; the TrackingBackend should record the model field
+        // from the MCP session rather than leaving it None.
+        let planner = crate::mcp::planner::PlannerMcp::new(
+            zbobr.clone(),
+            id,
+            Some(Tool::Copilot),
+            Some(Model::Gpt5Mini),
+        );
+
+        // call helper directly
+        let _ = planner.report_error_impl("oops").await;
+
+        let comments = zbobr.get_task_comments(id).await.unwrap();
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].model, Some(Model::Gpt5Mini));
+    }
+
+    #[tokio::test]
+    async fn dispatcher_posts_have_no_model() {
+        let zbobr = make_dispatcher();
+        let id = zbobr
+            .create_task("t", "", Stage::Pending, None, None)
+            .await
+            .unwrap();
+
+        zbobr
+            .task_session(id)
+            .post_comment(
+                CommentType::Error,
+                "dispatcher error",
+                None,
+                "host",
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let comments = zbobr.get_task_comments(id).await.unwrap();
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].model, None);
+    }
+
+    #[test]
+    fn comment_tag_roundtrip_models() {
+        let tag = CommentTag::new(
+            CommentType::Request,
+            Some(Role::Planner),
+            "host".to_string(),
+            None,
+            Some(Model::Gpt5Mini),
+        );
+        assert_eq!(tag.to_string(), "// REQUEST planner:host:gpt-5-mini");
+        let parsed: CommentTag = tag.to_string().parse().unwrap();
+        assert_eq!(parsed, tag);
+
+        let tag_user = CommentTag::new(
+            CommentType::Request,
+            None,
+            "web".to_string(),
+            None,
+            None,
+        );
+        assert_eq!(tag_user.to_string(), "// REQUEST user:web");
+
+        // verify tool field serialization when both tool and model present
+        let tag_tool = CommentTag::new(
+            CommentType::Report,
+            Some(Role::Worker),
+            "host".to_string(),
+            Some(Tool::Copilot),
+            Some(Model::Gpt5Mini),
+        );
+        assert_eq!(tag_tool.to_string(), "// REPORT worker:host:copilot:gpt-5-mini");
+        let parsed_tool: CommentTag = tag_tool.to_string().parse().unwrap();
+        assert_eq!(parsed_tool, tag_tool);
+    }
+}
+

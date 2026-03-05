@@ -1,7 +1,7 @@
 use crate::{
     CommentType, Signal,
     mcp::common::get_hostname,
-    task::{ChecklistItem, Parameter, Role, RoleSession},
+    task::{ChecklistItem, Parameter, Role, RoleSession, Tool, Model},
 };
 
 /// Common trait for MCP services (Planner, Worker) - shared implementations
@@ -9,6 +9,20 @@ use crate::{
 pub trait CommonMcpImpl: Send + Sync {
     fn session(&self) -> &RoleSession;
     fn role(&self) -> Role;
+
+    /// Optionally returns the tool that is executing this MCP session.  This
+    /// is filled in by `run_role_mcp_server` when the server is constructed.
+    fn mcp_tool(&self) -> Option<Tool> {
+        None
+    }
+
+    /// Optionally returns the concrete model currently in use by the agent
+    /// tool.  When present the model will be included in comment tags; when
+    /// `None` the tag omits the model field.  Dispatcher-originated messages
+    /// keep this `None`.
+    fn mcp_model(&self) -> Option<Model> {
+        None
+    }
 
     fn role_name(&self) -> &'static str {
         self.role().as_str()
@@ -63,6 +77,7 @@ pub trait CommonMcpImpl: Send + Sync {
                     timestamp: String::new(),
                     role: None,
                     hostname: String::new(),
+                    tool: None,
                     model: None,
                     text: desc,
                 }];
@@ -149,7 +164,8 @@ pub trait CommonMcpImpl: Send + Sync {
                 message,
                 Some(self.role()),
                 &hostname,
-                None,
+                self.mcp_tool(),
+                self.mcp_model(),
             )
             .await
         {
@@ -195,7 +211,8 @@ pub trait CommonMcpImpl: Send + Sync {
                 message,
                 Some(self.role()),
                 &hostname,
-                None,
+                self.mcp_tool(),
+                self.mcp_model(),
             )
             .await
         {
@@ -224,7 +241,8 @@ pub trait CommonMcpImpl: Send + Sync {
                 message,
                 Some(self.role()),
                 &hostname,
-                None,
+                self.mcp_tool(),
+                self.mcp_model(),
             )
             .await
         {
@@ -495,7 +513,7 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
         // Post the plan as a PLAN comment to preserve history
         if let Err(e) = self
             .session()
-            .post_comment(CommentType::Plan, plan, Some(self.role()), &hostname, None)
+            .post_comment(CommentType::Plan, plan, Some(self.role()), &hostname, self.mcp_tool(), None)
             .await
         {
             tracing::error!(
@@ -539,7 +557,8 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
                 message,
                 Some(self.role()),
                 &hostname,
-                None,
+                self.mcp_tool(),
+                self.mcp_model(),
             )
             .await
         {
@@ -587,7 +606,8 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
                 message,
                 Some(self.role()),
                 &hostname,
-                None,
+                self.mcp_tool(),
+                self.mcp_model(),
             )
             .await
         {
@@ -611,7 +631,8 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
                 message,
                 Some(self.role()),
                 &hostname,
-                None,
+                self.mcp_tool(),
+                self.mcp_model(),
             )
             .await
         {
@@ -653,7 +674,8 @@ pub trait TesterMcpImpl: CommonMcpImpl {
                 message,
                 Some(self.role()),
                 &hostname,
-                None,
+                self.mcp_tool(),
+                self.mcp_model(),
             )
             .await
         {
@@ -677,7 +699,8 @@ pub trait TesterMcpImpl: CommonMcpImpl {
                 message,
                 Some(self.role()),
                 &hostname,
-                None,
+                self.mcp_tool(),
+                self.mcp_model(),
             )
             .await
         {

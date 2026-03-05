@@ -1,4 +1,5 @@
 use std::{collections::HashMap, path::PathBuf};
+use crate::Tool;
 
 use async_trait::async_trait;
 
@@ -62,6 +63,7 @@ pub trait TaskBackend: Send + Sync {
         comment_type: CommentType,
         role: Option<Role>,
         hostname: &str,
+        tool: Option<Tool>,
         model: Option<Model>,
         body: &str,
     ) -> anyhow::Result<()>;

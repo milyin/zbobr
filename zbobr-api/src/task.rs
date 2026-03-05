@@ -157,6 +157,8 @@ pub struct Comment {
     pub role: Option<Role>,
     #[schemars(description = "Hostname of the system posting the comment")]
     pub hostname: String,
+    #[schemars(description = "Execution tool that produced the comment (if known)")]
+    pub tool: Option<Tool>,
     #[schemars(description = "AI model used (if applicable)")]
     pub model: Option<Model>,
     #[schemars(description = "Comment text without signature/tag")]
@@ -624,12 +626,24 @@ impl std::str::FromStr for Model {
 }
 
 /// Tag for GitHub-specific comment formatting (e.g., `// REPORT role:host:model`).
-/// This type encapsulates the tag serialization/deserialization logic for GitHub comments.
+///
+/// The `model` field is optional and is mainly used by MCP handlers to record the
+/// concrete LLM model that generated the message (for example, a Copilot or
+/// Claude session).  Dispatcher-originated messages normally leave this field
+/// unset, so that comments created by internal code do not imply any model.
+/// Agents should supply the model explicitly when they know it; the tag merely
+/// serializes whatever value is provided.
+///
+/// This type handles only serialization/deserialization.  Logic for deciding when
+/// to include a model (and what value to use) lives in the dispatcher and MCP
+/// helpers rather than here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommentTag {
     pub comment_type: CommentType,
     pub role: Option<Role>,
     pub hostname: String,
+    /// Which tool executed the action that produced this comment (if any).
+    pub tool: Option<Tool>,
     pub model: Option<Model>,
 }
 
@@ -639,12 +653,14 @@ impl CommentTag {
         comment_type: CommentType,
         role: Option<Role>,
         hostname: String,
+        tool: Option<Tool>,
         model: Option<Model>,
     ) -> Self {
         Self {
             comment_type,
             role,
             hostname,
+            tool,
             model,
         }
     }
@@ -671,10 +687,17 @@ impl std::fmt::Display for CommentTag {
             .as_ref()
             .map(|r| r.to_string())
             .unwrap_or_else(|| "user".to_string());
-        if let Some(model) = &self.model {
-            write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, model)
-        } else {
-            write!(f, "// {} {}:{}", tag_type, role, self.hostname)
+
+        // Serialization includes optional tool and model.  Maintain backward
+        // compatibility by emitting only hostname:model when tool is absent.
+        match (&self.tool, &self.model) {
+            (Some(tool), Some(model)) =>
+                write!(f, "// {} {}:{}:{}:{}", tag_type, role, self.hostname, tool, model),
+            (Some(tool), None) =>
+                write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, tool),
+            (None, Some(model)) =>
+                write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, model),
+            (None, None) => write!(f, "// {} {}:{}", tag_type, role, self.hostname),
         }
     }
 }
@@ -693,9 +716,9 @@ impl std::str::FromStr for CommentTag {
         let comment_type = CommentType::parse(tag_type_str)
             .ok_or_else(|| anyhow::anyhow!("Unknown comment type: {}", tag_type_str))?;
 
-        let (role, hostname, model) = if rest.is_empty() {
+let (role, hostname, tool, model) = if rest.is_empty() {
             // no metadata supplied; default to user/request with empty host
-            (None, String::new(), None)
+            (None, String::new(), None, None)
         } else {
             let parts: Vec<&str> = rest.split(':').collect();
             if parts.len() < 2 {
@@ -703,22 +726,38 @@ impl std::str::FromStr for CommentTag {
             }
 
             let role = Role::from_str(parts[0]).ok();
-
             let hostname = parts[1].to_string();
 
-            let model = if parts.len() > 2 && !parts[2].is_empty() && parts[2] != "unknown" {
-                Some(Model::from_str(parts[2])?)
+            // backwards compatibility: three parts used to mean role:host:model
+            let (tool, model) = if parts.len() == 3 {
+                (None,
+                 if !parts[2].is_empty() && parts[2] != "unknown" {
+                     Some(Model::from_str(parts[2])?)
+                 } else {
+                     None
+                 })
             } else {
-                None
+                let tool = if parts.len() > 2 && !parts[2].is_empty() {
+                    Some(Tool::from_str(parts[2])?)
+                } else {
+                    None
+                };
+                let model = if parts.len() > 3 && !parts[3].is_empty() && parts[3] != "unknown" {
+                    Some(Model::from_str(parts[3])?)
+                } else {
+                    None
+                };
+                (tool, model)
             };
 
-            (role, hostname, model)
+            (role, hostname, tool, model)
         };
 
         Ok(CommentTag {
             comment_type,
             role,
             hostname,
+            tool,
             model,
         })
     }
