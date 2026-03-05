@@ -148,7 +148,7 @@ pub trait CommonMcpImpl: Send + Sync {
             offset
         );
 
-        let comments = match self.session().get_comments().await {
+        let mut comments = match self.session().get_comments().await {
             Ok(c) => c,
             Err(e) => {
                 let response = format!("Error: {e}");
@@ -157,18 +157,20 @@ pub trait CommonMcpImpl: Send + Sync {
             },
         };
 
-        // If no comments, return task description as synthetic comment.
-        if comments.is_empty() {
-            let desc = match self.session().get_description().await {
-                Ok(d) if !d.is_empty() => d,
-                Ok(_) => "No task description provided.".to_string(),
-                Err(e) => {
-                    let response = format!("Error fetching description: {e}");
-                    log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
-                    return response;
-                },
-            };
-            let synthetic = vec![zbobr_api::Comment {
+        // Prepend task description as first synthetic comment, if available.
+        // Description is always considered as the first comment.
+        let desc = match self.session().get_description().await {
+            Ok(d) if !d.is_empty() => d,
+            Ok(_) => String::new(),
+            Err(e) => {
+                let response = format!("Error fetching description: {e}");
+                log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
+                return response;
+            },
+        };
+
+        if !desc.is_empty() {
+            comments.insert(0, zbobr_api::Comment {
                 comment_type: CommentType::Request,
                 timestamp: String::new(),
                 role: None,
@@ -176,12 +178,13 @@ pub trait CommonMcpImpl: Send + Sync {
                 tool: None,
                 model: None,
                 text: desc,
-            }];
-            let response = match serde_json::to_string_pretty(&synthetic) {
-                Ok(json) => json,
-                Err(e) => format!("Error serializing: {e}"),
-            };
-            log_mcp_comments_response(self.role_name(), self.session().task_id(), &response);
+            });
+        }
+
+        // If no comments and no description, return error.
+        if comments.is_empty() {
+            let response = "Error: No task description or comments available.".to_string();
+            log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
             return response;
         }
 
