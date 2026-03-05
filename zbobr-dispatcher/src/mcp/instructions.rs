@@ -10,6 +10,10 @@ pub fn preparator_instructions() -> String {
         SET_PARAM_DESTINATION_REPOSITORY, SET_PARAM_WORK_BRANCH_POSTFIX,
     };
     use worker_tools::ASK_USER;
+    // TODO: allow formats other than owner/repo for destination repository to allow use this prompt in the fs background
+    // Make deterministic rules to extract from the value passed by the model.
+    // e.g. for github repo model may return file path or full git URL, but we still can extract owner/repo from such string
+    // The problem is that on this simple stage the cheap model is usually called, so we can't trust the value it returned.
     format!(
         r#"# Preparator Agent
 
@@ -27,9 +31,7 @@ Read the task description and set the required parameters for the implementation
 
 1. Call `{GET_PLAN}` to read the task context
 2. Set task parameters accordingly to the task description:
-    - Call `{GET_PARAM_DESTINATION_REPOSITORY}`. If it's empty call `{SET_PARAM_DESTINATION_REPOSITORY}` with either
-       - local path (e.g., "/home/user/repo") if the task is for a local repository
-       - owner/repo format (e.g., "octocat/Hello-World") if the task is for a GitHub repository
+    - Call `{GET_PARAM_DESTINATION_REPOSITORY}`. If it's empty call `{SET_PARAM_DESTINATION_REPOSITORY}` in owner/repo format accordingly to the external repository URL in the task description
     - Call `{GET_PARAM_DESTINATION_BRANCH}`. If it's empty call `{SET_PARAM_DESTINATION_BRANCH}` with the value from the task description (if task explicitly specifies it) or a default like "main"
     - Call `{SET_PARAM_WORK_BRANCH_POSTFIX}` with the work branch postfix. Choose short but meaningful related to the task
     - Call `{GET_PARAM_WORK_BRANCH}` to get the resulting work branch name for report

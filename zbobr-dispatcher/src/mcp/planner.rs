@@ -14,13 +14,15 @@ use crate::{
         },
         traits::{CommonMcpImpl, PlannerMcpImpl},
     },
-    task::RoleSession,
+    task::{RoleSession, Model, Tool},
 };
 
 #[derive(Clone)]
 pub struct PlannerMcp {
     session: RoleSession,
     tool_router: ToolRouter<Self>,
+    tool: Tool,
+    model: Model,
 }
 
 impl CommonMcpImpl for PlannerMcp {
@@ -31,16 +33,26 @@ impl CommonMcpImpl for PlannerMcp {
     fn role(&self) -> crate::task::Role {
         crate::task::Role::Planner
     }
+
+    fn mcp_tool(&self) -> Tool {
+        self.tool.clone()
+    }
+
+    fn mcp_model(&self) -> Model {
+        self.model.clone()
+    }
 }
 
 impl PlannerMcpImpl for PlannerMcp {}
 
 #[tool_router]
 impl PlannerMcp {
-    pub fn new(zbobr: ZbobrDispatcherDyn, task_id: u64) -> Self {
+    pub fn new(zbobr: ZbobrDispatcherDyn, task_id: u64, tool: Tool, model: Model) -> Self {
         Self {
             session: zbobr.role_session(task_id),
             tool_router: Self::tool_router(),
+            tool,
+            model,
         }
     }
 

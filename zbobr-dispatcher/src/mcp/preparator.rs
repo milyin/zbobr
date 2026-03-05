@@ -13,13 +13,15 @@ use crate::{
         },
         traits::{CommonMcpImpl, PreparatorMcpImpl},
     },
-    task::RoleSession,
+    task::{RoleSession, Model, Tool},
 };
 
 #[derive(Clone)]
 pub struct PreparatorMcp {
     session: RoleSession,
     tool_router: ToolRouter<Self>,
+    tool: Tool,
+    model: Model,
 }
 
 impl CommonMcpImpl for PreparatorMcp {
@@ -30,16 +32,26 @@ impl CommonMcpImpl for PreparatorMcp {
     fn role(&self) -> crate::task::Role {
         crate::task::Role::Preparator
     }
+
+    fn mcp_tool(&self) -> Tool {
+        self.tool.clone()
+    }
+
+    fn mcp_model(&self) -> Model {
+        self.model.clone()
+    }
 }
 
 impl PreparatorMcpImpl for PreparatorMcp {}
 
 #[tool_router]
 impl PreparatorMcp {
-    pub fn new(zbobr: ZbobrDispatcherDyn, task_id: u64) -> Self {
+    pub fn new(zbobr: ZbobrDispatcherDyn, task_id: u64, tool: Tool, model: Model) -> Self {
         Self {
             session: zbobr.role_session(task_id),
             tool_router: Self::tool_router(),
+            tool,
+            model,
         }
     }
 

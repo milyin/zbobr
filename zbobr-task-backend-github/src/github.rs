@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Mutex, time::Duration};
 use async_trait::async_trait;
 use zbobr_api::{
     Comment, CommentTag, CommentType, Model, Parameter, Role, Signal, Stage, Task,
+    Tool,
     backend::TaskBackend,
 };
 
@@ -849,7 +850,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                         (t, body_text)
                     }
                     Err(_) => (
-                        CommentTag::new(CommentType::Request, None, String::new(), None),
+                        CommentTag::new(CommentType::Request, None, String::new(), None, None),
                         body.clone(),
                     ),
                 };
@@ -859,6 +860,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                     timestamp,
                     role: tag.role,
                     hostname: tag.hostname,
+                    tool: tag.tool,
                     model: tag.model,
                     text,
                 }
@@ -872,12 +874,13 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         comment_type: CommentType,
         role: Option<Role>,
         hostname: &str,
+        tool: Option<Tool>,
         model: Option<Model>,
         body: &str,
     ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        let tag = CommentTag::new(comment_type, role, hostname.to_string(), model);
+        let tag = CommentTag::new(comment_type, role, hostname.to_string(), tool, model);
         let formatted_body = format!("{}\n\n{}", tag, body);
 
         retry_github("create issue comment", || async {
@@ -995,7 +998,7 @@ mod parse_tests {
                 (tag, body)
             }
             Err(_) => (
-                CommentTag::new(CommentType::Request, None, String::new(), None),
+                CommentTag::new(CommentType::Request, None, String::new(), None, None),
                 input.to_string(),
             ),
         }
@@ -1008,11 +1011,13 @@ mod parse_tests {
         let comment_type = tag.comment_type;
         let role = tag.role;
         let host = tag.hostname;
+          let tool = tag.tool;
         let model = tag.model;
 
         assert_eq!(comment_type, CommentType::Report);
         assert_eq!(role, Some(Role::Worker));
         assert_eq!(host, "localhost");
+        assert_eq!(tool, None);
         assert_eq!(model, Some(Model::from_str("claude-opus-4.6").unwrap()));
         assert_eq!(body, "This is the report body\nWith multiple lines");
     }
@@ -1022,6 +1027,7 @@ mod parse_tests {
         let input = "// ERROR planner:skynet:gpt-4o\n\nAn error occurred";
         let (tag, body) = split_tag_body(input);
         let comment_type = tag.comment_type;
+        let tool = tag.tool;
         let role = tag.role;
         let host = tag.hostname;
         let model = tag.model;
@@ -1029,6 +1035,7 @@ mod parse_tests {
         assert_eq!(comment_type, CommentType::Error);
         assert_eq!(role, Some(Role::Planner));
         assert_eq!(host, "skynet");
+        assert_eq!(tool, None);
         assert_eq!(model, Some(Model::from_str("gpt-4o").unwrap()));
         assert_eq!(body, "An error occurred");
     }
@@ -1038,6 +1045,7 @@ mod parse_tests {
         let input = "// REQUEST\n\nThis is a user request";
         let (tag, body) = split_tag_body(input);
         let comment_type = tag.comment_type;
+        let tool = tag.tool;
         let role = tag.role;
         let host = tag.hostname;
         let model = tag.model;
@@ -1045,6 +1053,7 @@ mod parse_tests {
         assert_eq!(comment_type, CommentType::Request);
         assert_eq!(role, None);
         assert_eq!(host, "");
+        assert_eq!(tool, None);
         assert_eq!(model, None);
         assert_eq!(body, "This is a user request");
     }
@@ -1054,6 +1063,7 @@ mod parse_tests {
         let input = "// REPORT reviewer:host\n\nBody text";
         let (tag, body) = split_tag_body(input);
         let comment_type = tag.comment_type;
+        let tool = tag.tool;
         let role = tag.role;
         let host = tag.hostname;
         let model = tag.model;
@@ -1061,6 +1071,7 @@ mod parse_tests {
         assert_eq!(comment_type, CommentType::Report);
         assert_eq!(role, Some(Role::Reviewer));
         assert_eq!(host, "host");
+        assert_eq!(tool, None);
         assert_eq!(model, None);
         assert_eq!(body, "Body text");
     }
@@ -1072,6 +1083,7 @@ mod parse_tests {
         assert_eq!(tag.comment_type, CommentType::Request);
         assert_eq!(tag.role, None);
         assert_eq!(tag.hostname, "");
+        assert_eq!(tag.tool, None);
         assert_eq!(tag.model, None);
         assert_eq!(body, "This is just text without a tag");
     }
@@ -1083,6 +1095,7 @@ mod parse_tests {
         assert_eq!(tag.comment_type, CommentType::Request);
         assert_eq!(tag.role, None);
         assert_eq!(tag.hostname, "");
+        assert_eq!(tag.tool, None);
         assert_eq!(tag.model, None);
         assert_eq!(body, "// NOTATAG\nbody text");
     }
@@ -1092,6 +1105,7 @@ mod parse_tests {
         let input = "// REQUEST planner:skynet:gpt-4o\n\nPlease respond";
         let (tag, body) = split_tag_body(input);
         let comment_type = tag.comment_type;
+        let tool = tag.tool;
         let role = tag.role;
         let host = tag.hostname;
         let model = tag.model;
@@ -1099,6 +1113,7 @@ mod parse_tests {
         assert_eq!(comment_type, CommentType::Request);
         assert_eq!(role, Some(Role::Planner));
         assert_eq!(host, "skynet");
+        assert_eq!(tool, None);
         assert_eq!(model, Some(Model::from_str("gpt-4o").unwrap()));
         assert_eq!(body, "Please respond");
     }
@@ -1110,12 +1125,14 @@ mod parse_tests {
         let (tag, body) = split_tag_body(input);
         let comment_type = tag.comment_type;
         let role = tag.role;
+        let tool = tag.tool;
         let host = tag.hostname;
         let model = tag.model;
 
         assert_eq!(comment_type, CommentType::Plan);
         assert_eq!(role, Some(Role::Planner));
         assert_eq!(host, "localhost");
+        assert_eq!(tool, None);
         assert_eq!(model, Some(Model::from_str("claude-opus-4.6").unwrap()));
         assert_eq!(body, "Step 1: analyse\nStep 2: implement");
     }

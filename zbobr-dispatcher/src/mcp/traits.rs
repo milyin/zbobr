@@ -1,7 +1,7 @@
 use crate::{
     CommentType, Signal,
     mcp::common::get_hostname,
-    task::{ChecklistItem, Parameter, Role, RoleSession},
+    task::{ChecklistItem, Parameter, Role, RoleSession, Tool, Model},
 };
 
 /// Common trait for MCP services (Planner, Worker) - shared implementations
@@ -9,6 +9,12 @@ use crate::{
 pub trait CommonMcpImpl: Send + Sync {
     fn session(&self) -> &RoleSession;
     fn role(&self) -> Role;
+
+    /// Returns the tool that is executing this MCP session
+    fn mcp_tool(&self) -> Tool;
+
+    /// Returns the concrete model currently in use by the agent tool
+    fn mcp_model(&self) -> Model;
 
     fn role_name(&self) -> &'static str {
         self.role().as_str()
@@ -63,6 +69,7 @@ pub trait CommonMcpImpl: Send + Sync {
                     timestamp: String::new(),
                     role: None,
                     hostname: String::new(),
+                    tool: None,
                     model: None,
                     text: desc,
                 }];
@@ -149,7 +156,8 @@ pub trait CommonMcpImpl: Send + Sync {
                 message,
                 Some(self.role()),
                 &hostname,
-                None,
+                Some(self.mcp_tool()),
+                Some(self.mcp_model()),
             )
             .await
         {
@@ -194,8 +202,7 @@ pub trait CommonMcpImpl: Send + Sync {
                 CommentType::Report,
                 message,
                 Some(self.role()),
-                &hostname,
-                None,
+                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
             )
             .await
         {
@@ -223,8 +230,7 @@ pub trait CommonMcpImpl: Send + Sync {
                 CommentType::Request,
                 message,
                 Some(self.role()),
-                &hostname,
-                None,
+                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
             )
             .await
         {
@@ -495,7 +501,7 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
         // Post the plan as a PLAN comment to preserve history
         if let Err(e) = self
             .session()
-            .post_comment(CommentType::Plan, plan, Some(self.role()), &hostname, None)
+            .post_comment(CommentType::Plan, plan, Some(self.role()), &hostname, Some(self.mcp_tool()), None)
             .await
         {
             tracing::error!(
@@ -538,8 +544,7 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
                 CommentType::Request,
                 message,
                 Some(self.role()),
-                &hostname,
-                None,
+                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
             )
             .await
         {
@@ -586,8 +591,7 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
                 CommentType::Report,
                 message,
                 Some(self.role()),
-                &hostname,
-                None,
+                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
             )
             .await
         {
@@ -610,8 +614,7 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
                 CommentType::Reject,
                 message,
                 Some(self.role()),
-                &hostname,
-                None,
+                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
             )
             .await
         {
@@ -652,8 +655,7 @@ pub trait TesterMcpImpl: CommonMcpImpl {
                 CommentType::Report,
                 message,
                 Some(self.role()),
-                &hostname,
-                None,
+                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
             )
             .await
         {
@@ -676,8 +678,7 @@ pub trait TesterMcpImpl: CommonMcpImpl {
                 CommentType::Reject,
                 message,
                 Some(self.role()),
-                &hostname,
-                None,
+                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
             )
             .await
         {

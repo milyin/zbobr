@@ -14,7 +14,7 @@ use crate::{
     ZbobrExecutorConfig,
     mcp::common::get_hostname,
     prompts::Prompts,
-    task::{Parameter, Role, Tool},
+    task::{Parameter, Role, Tool, Model},
 };
 
 // ---------------------------------------------------------------------------
@@ -387,6 +387,7 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
                 comment_type: c.comment_type,
                 role: c.role,
                 hostname: c.hostname.clone(),
+                tool: c.tool.clone(),
                 model: c.model.clone(),
             };
             println!("  [{}] {}\n{}", i + 1, tag, c.text);
@@ -893,8 +894,19 @@ impl<'a> CliRoleRunner<'a> {
             }
         }
 
+        // compute tool/model early so the MCP server can record them in
+        // its session structs.  we already determined `cli_tool` and `model`
+        // above from dispatcher configuration.
+        // clone `model` because we'll still need it after the call
         let (assigned_port, server_handle) =
-            start_mcp_server(self.zbobr.clone(), self.role, self.task_id).await?;
+            start_mcp_server(
+                self.zbobr.clone(),
+                self.role,
+                self.task_id,
+                cli_tool,
+                model.clone(),
+            )
+            .await?;
 
         let mcp_url = format!(
             "http://127.0.0.1:{assigned_port}/{role}/{task_id}",
@@ -1254,7 +1266,7 @@ async fn prepare_workspace(
                     let hostname = get_hostname();
                     if let Err(post_err) = zbobr
                         .task_session(task_id)
-                        .post_comment(CommentType::Error, &msg, None, &hostname, None)
+                        .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
                         .await
                     {
                         tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -1276,7 +1288,7 @@ async fn ensure_pr_url(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> anyhow::Resu
             let hostname = get_hostname();
             let task_session = zbobr.task_session(task_id);
             if let Err(post_err) = task_session
-                .post_comment(CommentType::Error, &msg, None, &hostname, None)
+                .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
                 .await
             {
                 tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -1363,10 +1375,12 @@ async fn start_mcp_server(
     zbobr: ZbobrDispatcherDyn,
     role: Role,
     task_id: u64,
+    tool: Tool,
+    model: Model,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
     let server_handle = tokio::spawn(async move {
-        match crate::mcp::run_role_mcp_server(zbobr, role, task_id).await {
+        match crate::mcp::run_role_mcp_server(zbobr, role, task_id, tool, model).await {
             Ok(assigned_port) => {
                 let _ = port_tx.send(assigned_port);
                 tracing::info!("MCP server assigned port {assigned_port}");
@@ -1463,7 +1477,7 @@ async fn finalize_session(
         let error_msg = format!("Execution failed: {e}");
         let hostname = get_hostname();
         if let Err(post_err) = task_session
-            .post_comment(CommentType::Error, &error_msg, None, &hostname, None)
+            .post_comment(CommentType::Error, &error_msg, None, &hostname, None, None)
             .await
         {
             tracing::error!("Failed to post error to task #{task_id}: {post_err}");
@@ -1567,7 +1581,7 @@ async fn finalize_session(
                 tracing::error!("task #{task_id}: {msg}");
                 let hostname = get_hostname();
                 if let Err(e) = task_session
-                    .post_comment(CommentType::Error, &msg, None, &hostname, None)
+                    .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
                     .await
                 {
                     tracing::warn!(
