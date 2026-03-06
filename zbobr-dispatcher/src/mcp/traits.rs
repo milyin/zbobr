@@ -19,12 +19,6 @@ fn log_mcp_comments_response(role_name: &str, task_id: u64, response: &str) {
     // Log info level with parsed comments
     if response.starts_with('[') {
         if let Ok(comments) = serde_json::from_str::<Vec<zbobr_api::Comment>>(response) {
-            tracing::info!(
-                "[{}#{}] get_plan returned {} comment(s)",
-                role_name,
-                task_id,
-                comments.len()
-            );
             for comment in comments {
                 let stripped_text = comment.text.lines().next().unwrap_or("").trim();
                 let display_text = if stripped_text.len() > 80 {
@@ -152,9 +146,17 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(comments) => {
                 if comments.is_empty() {
                     tracing::warn!(
-                        "[{}#{}] get_plan returned empty chunk for offset={}",
+                        "[{}#{}] get_plan returned 0 comment(s) for offset={}",
                         self.role_name(),
                         self.session().task_id(),
+                        offset
+                    );
+                } else {
+                    tracing::info!(
+                        "[{}#{}] get_plan returned {} comment(s) for offset={}",
+                        self.role_name(),
+                        self.session().task_id(),
+                        comments.len(),
                         offset
                     );
                 }
