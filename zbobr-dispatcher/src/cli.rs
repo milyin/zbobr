@@ -801,7 +801,7 @@ async fn run_role_command(
     let session = CliRoleRunner::new(zbobr, task, role, prompts, executor_config);
     if show_prompt {
         let task_obj = zbobr.get_task(task).await?;
-        println!("{}", session.prompt(&task_obj.title)?);
+        println!("{}", session.prompt(&task_obj)?);
     } else {
         session.run().await?;
     }
@@ -837,8 +837,8 @@ impl<'a> CliRoleRunner<'a> {
         }
     }
 
-    fn prompt(&self, task_title: &str) -> anyhow::Result<String> {
-        self.prompts.build_prompt(self.role, task_title)
+    fn prompt(&self, task: &Task) -> anyhow::Result<String> {
+        self.prompts.build_prompt(self.role, task)
     }
 
     async fn run(&self) -> anyhow::Result<()> {
@@ -936,7 +936,7 @@ impl<'a> CliRoleRunner<'a> {
         );
 
         let task = self.zbobr.get_task(self.task_id).await?;
-        let prompt_text = self.prompt(&task.title)?;
+        let prompt_text = self.prompt(&task)?;
         // apply the resolved model to the executor configuration; dispatcher
         // configuration takes precedence over whatever the executor may have
         // been initialized with.
