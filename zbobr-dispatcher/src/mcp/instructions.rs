@@ -30,6 +30,7 @@ Read the task description and set the required parameters for the implementation
 ## Workflow
 
 1. Call `{GET_PLAN}` to read the task context
+2. If the task contains a link to an external GitHub issue, read also the issue title and description to know the task.
 2. Set task parameters accordingly to the task description:
     - Call `{GET_PARAM_DESTINATION_REPOSITORY}`. If it's empty call `{SET_PARAM_DESTINATION_REPOSITORY}` in owner/repo format accordingly to the external repository URL in the task description
     - Call `{GET_PARAM_DESTINATION_BRANCH}`. If it's empty call `{SET_PARAM_DESTINATION_BRANCH}` with the value from the task description (if task explicitly specifies it) or a default like "main"
@@ -58,8 +59,9 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 ## Access Model
 
     You can access the internet and run local commands. Your restrictions:
-    - Use MCP `{POST_PLAN}` to post the implementation plan — this is your final action and finishes the session
-    - Use MCP `{REPORT_ERROR}` only to report technical errors; use `{ASK_USER}` to request the user's explanations related to the task
+    - Use MCP `{POST_PLAN}` to post the implementation plan when the plan is complete and clear
+    - Use MCP `{ASK_USER}` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
+    - Use MCP `{REPORT_ERROR}` only to report technical errors
     - NEVER use git/gh for writing, pushing, or sending data to GitHub
 
 ## Workspace isolation
@@ -72,12 +74,17 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 2. If need to compare the work already done with the initial codebase, use `{GET_PARAM_DESTINATION_BRANCH}` to get the name of original branch, `{GET_PARAM_WORK_BRANCH}` to get the work branch name, and then use git diff or equivalent to compare the branches.
 3. Your current working directory is already the repository with the work branch checked out. Explore the codebase and design a step-by-step implementation plan.
 4. If some instrument is required and you can't istall it yourself, ask the user to install it with `{ASK_USER}`.
-5. **Prepare checklist items for the worker**:
+5. **Determine if the plan is clear and ready**:
+   - If something is unclear or you have doubts, use `{ASK_USER}` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet.
+   - Only if the plan is clear and no questions were posted, proceed to step 6. Otherwise finish the session.
+6. **Prepare checklist items for the worker** (only when plan is clear):
    - Call `{GET_CHECKLIST}` to see existing checklist state
    - Use `{INSERT_CHECKLIST_ITEM}` to add implementation steps for the worker
    - Use `{UPDATE_CHECKLIST_ITEM}` to refine existing items if re-planning
    - Use `{DELETE_CHECKLIST_ITEM}` to remove unnecessary unchecked items
-6. Call `{POST_PLAN}` with the full implementation plan. This posts the plan as your final action and finishes the session.
+7. **Finish with one of these final actions**:
+   - Call `{POST_PLAN}` with the full implementation plan if all is clear and the plan is ready to implement — this finishes the session
+   - Call `{ASK_USER}` only if you still have doubts or clarifications needed — send only the focused questions, not the full plan
 "#,
     )
 }
