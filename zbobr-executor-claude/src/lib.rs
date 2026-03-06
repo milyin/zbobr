@@ -60,7 +60,7 @@ impl ToolExecutor for ClaudeExecutor {
         let permission_mode = if role == Role::Planner {
             "plan"
         } else {
-            "dontAsk"
+            "acceptEdits"
         };
 
         let args = [
