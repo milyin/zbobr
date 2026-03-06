@@ -373,46 +373,15 @@ impl RepoBackend for ZbobrRepoBackendGithub {
             );
         }
 
-        // Checkout the work branch
-        tracing::info!("Checking out branch {work_branch}");
-        let checkout_status = tokio::process::Command::new("git")
-            .args(["checkout", work_branch])
-            .current_dir(&work_dir)
-            .status()
-            .await?;
-        if !checkout_status.success() {
-            let checkout_remote_status = tokio::process::Command::new("git")
-                .args([
-                    "checkout",
-                    "-b",
-                    work_branch,
-                    &format!("origin/{work_branch}"),
-                ])
-                .current_dir(&work_dir)
-                .status()
-                .await?;
-            if !checkout_remote_status.success() {
-                // Branch doesn't exist on remote — create it fresh from the destination branch.
-                tracing::info!("Creating new local branch {work_branch} from {destination_branch}");
-                let create_status = tokio::process::Command::new("git")
-                    .args(["checkout", "-b", work_branch])
-                    .current_dir(&work_dir)
-                    .status()
-                    .await?;
-                if !create_status.success() {
-                    anyhow::bail!("Failed to checkout branch {work_branch}");
-                }
-            }
-        }
-
-        // In same-org mode (fork_owner == target repo owner), work directly on
-        // the repo without forking.  In cross-org mode, ensure the fork exists,
-        // sync the destination branch in the fork, and add a "fork" remote.
+        // Determine same-org vs cross-org mode and set up fork remote BEFORE
+        // checking out the work branch — in cross-org mode the work branch
+        // lives on the fork remote and must be fetched from there.
         let same_org = repo
             .owner()
             .eq_ignore_ascii_case(&self.backend_config.fork_owner);
-        if same_org {
+        let push_remote = if same_org {
             tracing::info!("Same-org mode: skipping fork setup for {target_repo}");
+            "origin"
         } else {
             let fork_repo = self.ensure_fork(target_repo, destination_branch).await?;
 
@@ -437,6 +406,122 @@ impl RepoBackend for ZbobrRepoBackendGithub {
                     .await?;
                 if !status.success() {
                     anyhow::bail!("Failed to add fork remote");
+                }
+            }
+
+            "fork"
+        };
+
+        // Fetch the work branch from the push remote so we can recover
+        // previous commits even when the local workspace is fresh.
+        // Without this, a fresh clone only has the destination branch and
+        // the work branch would be created from scratch, losing all history.
+        if work_branch != destination_branch {
+            tracing::info!("Fetching work branch '{work_branch}' from {push_remote}");
+            let fetch_work = tokio::process::Command::new("git")
+                .args(["fetch", push_remote, work_branch])
+                .current_dir(&work_dir)
+                .output()
+                .await?;
+            if fetch_work.status.success() {
+                tracing::info!(
+                    "Fetched work branch '{work_branch}' from {push_remote}"
+                );
+            } else {
+                tracing::info!(
+                    "Work branch '{work_branch}' not found on {push_remote} (may be new)"
+                );
+            }
+        }
+
+        // Checkout the work branch
+        tracing::info!("Checking out branch {work_branch}");
+        let checkout_status = tokio::process::Command::new("git")
+            .args(["checkout", work_branch])
+            .current_dir(&work_dir)
+            .status()
+            .await?;
+        if !checkout_status.success() {
+            // Try from the push remote (fork in cross-org, origin in same-org)
+            let checkout_remote_status = tokio::process::Command::new("git")
+                .args([
+                    "checkout",
+                    "-b",
+                    work_branch,
+                    &format!("{push_remote}/{work_branch}"),
+                ])
+                .current_dir(&work_dir)
+                .status()
+                .await?;
+            if !checkout_remote_status.success() {
+                // In cross-org mode, also try origin as a fallback
+                let fallback_ok = if push_remote != "origin" {
+                    tokio::process::Command::new("git")
+                        .args([
+                            "checkout",
+                            "-b",
+                            work_branch,
+                            &format!("origin/{work_branch}"),
+                        ])
+                        .current_dir(&work_dir)
+                        .status()
+                        .await?
+                        .success()
+                } else {
+                    false
+                };
+                if !fallback_ok {
+                    // Branch doesn't exist on any remote — create it fresh from the destination branch.
+                    tracing::info!(
+                        "Creating new local branch {work_branch} from {destination_branch}"
+                    );
+                    let create_status = tokio::process::Command::new("git")
+                        .args(["checkout", "-b", work_branch])
+                        .current_dir(&work_dir)
+                        .status()
+                        .await?;
+                    if !create_status.success() {
+                        anyhow::bail!("Failed to checkout branch {work_branch}");
+                    }
+                }
+            }
+        } else {
+            // Local branch existed — check if the remote has newer commits
+            // (e.g. from a previous session on a different machine) and
+            // fast-forward to include them so we don't overwrite history.
+            let remote_ref = format!("{push_remote}/{work_branch}");
+            let has_remote = tokio::process::Command::new("git")
+                .args(["rev-parse", "--verify", &remote_ref])
+                .current_dir(&work_dir)
+                .output()
+                .await
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+
+            if has_remote {
+                // Check if local HEAD is an ancestor of the remote ref.
+                // If so, fast-forward to include the remote commits.
+                let is_ancestor = tokio::process::Command::new("git")
+                    .args(["merge-base", "--is-ancestor", "HEAD", &remote_ref])
+                    .current_dir(&work_dir)
+                    .output()
+                    .await
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+
+                if is_ancestor {
+                    tracing::info!(
+                        "Fast-forwarding local '{work_branch}' to {remote_ref}"
+                    );
+                    let _ = tokio::process::Command::new("git")
+                        .args(["merge", "--ff-only", &remote_ref])
+                        .current_dir(&work_dir)
+                        .status()
+                        .await;
+                } else {
+                    tracing::info!(
+                        "Local '{work_branch}' has commits not on {remote_ref}, keeping local state"
+                    );
                 }
             }
         }

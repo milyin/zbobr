@@ -573,34 +573,25 @@ steps:
   assertions:
     - type: success
 
-- name: Get latest plan (default offset 0) - should return second plan
+- name: Get latest plan (default offset 0) - should return both plans (single chunk, no cuts)
   operation:
     type: tool_call
     tool: {GET_PLAN}
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "Second plan"
-
-- name: Get previous plan (offset -1) - should return first plan
-  operation:
-    type: tool_call
-    tool: {GET_PLAN}
-    arguments:
-      offset: -1
   assertions:
     - type: success
     - type: contains
       path: result
       value: "First plan"
+    - type: contains
+      path: result
+      value: "Second plan"
 
-- name: Get out-of-range offset (-2) - should return out-of-range message
+- name: Get offset -1 - should return out-of-range (no cut boundaries, single chunk)
   operation:
     type: tool_call
     tool: {GET_PLAN}
     arguments:
-      offset: -2
+      offset: -1
   assertions:
     - type: success
     - type: contains
