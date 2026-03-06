@@ -894,6 +894,18 @@ impl<'a> CliRoleRunner<'a> {
             }
         }
 
+        // Pre-flight check: verify that get_plan would return meaningful
+        // content.  If the latest chunk contains no actionable messages the
+        // agent session would do useless work, so bail early.
+        let chunk = self.zbobr.get_plan_chunk(self.task_id, 0).await
+            .context("Pre-flight get_plan check failed")?;
+        if chunk.is_empty() {
+            anyhow::bail!(
+                "Task #{} has no actionable messages in the latest chunk — nothing for the agent to do",
+                self.task_id
+            );
+        }
+
         // compute tool/model early so the MCP server can record them in
         // its session structs.  we already determined `cli_tool` and `model`
         // above from dispatcher configuration.

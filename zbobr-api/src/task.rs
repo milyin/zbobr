@@ -165,6 +165,84 @@ pub struct Comment {
     pub text: String,
 }
 
+/// Prepend a task description as a synthetic `Request` comment, then extract
+/// the chunk at `offset` from the comment history.
+///
+/// Chunks are delimited by "cut" comments (`Reject` / `Done`).
+/// `offset >= 0` selects the latest chunk; negative offsets walk backwards
+/// (`-1` = second-to-last, etc.).
+///
+/// Non-actionable comments (`Error` and `Done`) are filtered out.
+/// Returns an empty `Vec` when the chunk has no actionable messages.
+/// Returns `Err` only for hard failures (offset out of range).
+pub fn extract_plan_chunk(
+    mut comments: Vec<Comment>,
+    description: &str,
+    offset: i32,
+) -> anyhow::Result<Vec<Comment>> {
+    // Prepend description as synthetic first comment.
+    if !description.is_empty() {
+        comments.insert(
+            0,
+            Comment {
+                comment_type: CommentType::Request,
+                timestamp: String::new(),
+                role: None,
+                hostname: String::new(),
+                tool: None,
+                model: None,
+                text: description.to_owned(),
+            },
+        );
+    }
+
+    if comments.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Find cut-boundary indices.
+    let cut_indices: Vec<usize> = comments
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.comment_type.is_cut())
+        .map(|(i, _)| i)
+        .collect();
+
+    let num_chunks = cut_indices.len() + 1;
+
+    // Resolve target chunk.
+    let target_chunk = if offset >= 0 {
+        num_chunks - 1
+    } else {
+        let back = (-offset) as usize;
+        anyhow::ensure!(
+            back < num_chunks,
+            "offset {} out of range: only {} chunk(s) available",
+            offset,
+            num_chunks
+        );
+        num_chunks - 1 - back
+    };
+
+    // Extract chunk boundaries.
+    let (start_idx, end_idx) = if cut_indices.is_empty() {
+        (0, comments.len())
+    } else if target_chunk == 0 {
+        (0, cut_indices[0])
+    } else if target_chunk == num_chunks - 1 {
+        (cut_indices[target_chunk - 1], comments.len())
+    } else {
+        (cut_indices[target_chunk - 1], cut_indices[target_chunk])
+    };
+
+    // Filter out Error and Done comments.
+    Ok(comments[start_idx..end_idx]
+        .iter()
+        .filter(|c| c.comment_type != CommentType::Error && c.comment_type != CommentType::Done)
+        .cloned()
+        .collect())
+}
+
 /// Workflow stage (maps to GitHub milestones internally).
 #[derive(
     Debug,

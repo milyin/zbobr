@@ -148,117 +148,29 @@ pub trait CommonMcpImpl: Send + Sync {
             offset
         );
 
-        let mut comments = match self.session().get_comments().await {
-            Ok(c) => c,
+        match self.session().get_plan_chunk(offset).await {
+            Ok(comments) => {
+                if comments.is_empty() {
+                    tracing::warn!(
+                        "[{}#{}] get_plan returned empty chunk for offset={}",
+                        self.role_name(),
+                        self.session().task_id(),
+                        offset
+                    );
+                }
+                let response = match serde_json::to_string_pretty(&comments) {
+                    Ok(json) => json,
+                    Err(e) => format!("Error serializing: {e}"),
+                };
+                log_mcp_comments_response(self.role_name(), self.session().task_id(), &response);
+                response
+            }
             Err(e) => {
                 let response = format!("Error: {e}");
                 log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
-                return response;
-            },
-        };
-
-        // Prepend task description as first synthetic comment, if available.
-        // Description is always considered as the first comment.
-        let desc = match self.session().get_description().await {
-            Ok(d) if !d.is_empty() => d,
-            Ok(_) => String::new(),
-            Err(e) => {
-                let response = format!("Error fetching description: {e}");
-                log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
-                return response;
-            },
-        };
-
-        if !desc.is_empty() {
-            comments.insert(0, zbobr_api::Comment {
-                comment_type: CommentType::Request,
-                timestamp: String::new(),
-                role: None,
-                hostname: String::new(),
-                tool: None,
-                model: None,
-                text: desc,
-            });
-        }
-
-        // If no comments and no description, return error.
-        if comments.is_empty() {
-            let response = "Error: No task description or comments available.".to_string();
-            log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
-            return response;
-        }
-
-        // Find indices of all cut-boundary comments (Reject or Done).
-        // Chunks are separated by these markers.
-        let cut_indices: Vec<usize> = comments
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.comment_type.is_cut())
-            .map(|(i, _)| i)
-            .collect();
-
-        // Universal chunk calculation:
-        // - If no cuts: 1 chunk (all comments)
-        // - Otherwise: (number of cuts) + 1 chunks
-        let num_chunks = cut_indices.len() + 1;
-
-        // Special handling for offset validation when there are no cuts.
-        if cut_indices.is_empty() && offset < -1 {
-            let response = format!("offset {} out of range: only 1 chunk available", offset);
-            log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
-            return response;
-        }
-
-        // Determine target chunk index (offset >= 0 → last chunk, offset < 0 → earlier chunks).
-        let target_chunk = if offset >= 0 {
-            num_chunks - 1
-        } else {
-            let back = (-offset) as usize;
-            if back >= num_chunks {
-                let response = format!(
-                    "offset {} out of range: only {} chunk(s) available",
-                    offset, num_chunks
-                );
-                log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
-                return response;
+                response
             }
-            num_chunks - 1 - back
-        };
-
-        // Universal boundary extraction: all chunks follow the same pattern.
-        let (start_idx, end_idx) = if cut_indices.is_empty() {
-            // Single chunk: all comments.
-            (0, comments.len())
-        } else if target_chunk == 0 {
-            // First chunk: from start to first cut.
-            (0, cut_indices[0])
-        } else if target_chunk == num_chunks - 1 {
-            // Last chunk: from last cut to end.
-            (cut_indices[target_chunk - 1], comments.len())
-        } else {
-            // Middle chunks: from cut[i-1] to cut[i].
-            (cut_indices[target_chunk - 1], cut_indices[target_chunk])
-        };
-
-        // Extract and filter comments from target chunk (exclude Error and Done).
-        let result_comments: Vec<zbobr_api::Comment> = comments[start_idx..end_idx]
-            .iter()
-            .filter(|c| c.comment_type != CommentType::Error && c.comment_type != CommentType::Done)
-            .cloned()
-            .collect();
-
-        if result_comments.is_empty() {
-            let response = "Error: No messages found in chunk (task may already be complete, or all comments have been filtered)".to_string();
-            log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
-            return response;
         }
-
-        let response = match serde_json::to_string_pretty(&result_comments) {
-            Ok(json) => json,
-            Err(e) => format!("Error serializing: {e}"),
-        };
-        log_mcp_comments_response(self.role_name(), self.session().task_id(), &response);
-        response
     }
 
     async fn report_error_impl(&self, message: &str) -> String {
