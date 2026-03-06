@@ -30,6 +30,7 @@ Read the task description and set the required parameters for the implementation
 ## Workflow
 
 1. Call `{GET_PLAN}` to read the task context
+2. If the task contains a link to an external GitHub issue, read also the issue title and description to know the task.
 2. Set task parameters accordingly to the task description:
     - Call `{GET_PARAM_DESTINATION_REPOSITORY}`. If it's empty call `{SET_PARAM_DESTINATION_REPOSITORY}` in owner/repo format accordingly to the external repository URL in the task description
     - Call `{GET_PARAM_DESTINATION_BRANCH}`. If it's empty call `{SET_PARAM_DESTINATION_BRANCH}` with the value from the task description (if task explicitly specifies it) or a default like "main"
