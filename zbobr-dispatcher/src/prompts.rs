@@ -110,8 +110,8 @@ pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::R
     Ok(combined)
 }
 
-/// Build full prompt: role instructions + user context + auto-generated API docs.
-pub fn build_full_prompt(user_context: &str, role: Role) -> String {
+/// Build full prompt: role instructions + task title + user context + auto-generated API docs.
+pub fn build_full_prompt(user_context: &str, role: Role, task_title: &str) -> String {
     let hardcoded = match role {
         Role::Preparator => crate::preparator_instructions(),
         Role::Planner => crate::planner_instructions(),
@@ -130,14 +130,19 @@ pub fn build_full_prompt(user_context: &str, role: Role) -> String {
         Role::Merger => crate::MergerMcp::generate_api_docs(),
     };
 
-    if user_context.is_empty() {
-        format!("{}\n\n---\n\n{}", hardcoded, api_docs)
-    } else {
-        format!(
-            "{}\n\n---\n\n{}\n\n---\n\n{}",
-            hardcoded, user_context, api_docs
-        )
+    let mut sections = vec![hardcoded];
+
+    if !task_title.is_empty() {
+        sections.push(format!("Current task: {task_title}"));
     }
+
+    if !user_context.is_empty() {
+        sections.push(user_context.to_owned());
+    }
+
+    sections.push(api_docs);
+
+    sections.join("\n\n---\n\n")
 }
 
 /// Validate that all specified prompt files exist.
@@ -213,7 +218,7 @@ fn file_exists(path: &PathBuf, base_path: Option<&PathBuf>) -> bool {
 
 impl Prompts {
     /// Build the full prompt for the given role.
-    pub fn build_prompt(&self, role: Role) -> anyhow::Result<String> {
+    pub fn build_prompt(&self, role: Role, task_title: &str) -> anyhow::Result<String> {
         let base_prompt = match role {
             Role::Preparator => load_prompts(&self.preparator, self.base_path.as_ref())?,
             Role::Planner => load_prompts(&self.planner, self.base_path.as_ref())?,
@@ -222,7 +227,7 @@ impl Prompts {
             Role::Tester => load_prompts(&self.tester, self.base_path.as_ref())?,
             Role::Merger => load_prompts(&self.merger, self.base_path.as_ref())?,
         };
-        Ok(build_full_prompt(&base_prompt, role))
+        Ok(build_full_prompt(&base_prompt, role, task_title))
     }
 }
 
@@ -378,14 +383,14 @@ mod tests {
 
     #[test]
     fn build_full_prompt_includes_user_context() {
-        let prompt = build_full_prompt("my custom instructions", Role::Worker);
+        let prompt = build_full_prompt("my custom instructions", Role::Worker, "");
         assert!(prompt.contains("my custom instructions"));
     }
 
     #[test]
     fn build_full_prompt_empty_context_omits_user_section() {
-        let prompt_empty = build_full_prompt("", Role::Worker);
-        let prompt_with = build_full_prompt("UNIQUE_MARKER", Role::Worker);
+        let prompt_empty = build_full_prompt("", Role::Worker, "");
+        let prompt_with = build_full_prompt("UNIQUE_MARKER", Role::Worker, "");
         assert!(!prompt_empty.contains("UNIQUE_MARKER"));
         // With context is longer (has the extra context section)
         assert!(prompt_with.len() > prompt_empty.len());
@@ -406,7 +411,7 @@ mod tests {
             tester: vec![],
             merger: vec![],
         };
-        let result = prompts.build_prompt(Role::Worker).unwrap();
+        let result = prompts.build_prompt(Role::Worker, "").unwrap();
         assert!(result.contains("do the work carefully"));
     }
 
@@ -421,9 +426,9 @@ mod tests {
             tester: vec![],
             merger: vec![],
         };
-        let result = prompts.build_prompt(Role::Worker).unwrap();
+        let result = prompts.build_prompt(Role::Worker, "").unwrap();
         // Result should equal build_full_prompt with empty context
-        let expected = build_full_prompt("", Role::Worker);
+        let expected = build_full_prompt("", Role::Worker, "");
         assert_eq!(result, expected);
     }
 
@@ -440,7 +445,7 @@ mod tests {
             tester: vec![],
             merger: vec![],
         };
-        let result = prompts.build_prompt(Role::Reviewer).unwrap();
+        let result = prompts.build_prompt(Role::Reviewer, "").unwrap();
         assert!(result.contains("review carefully"));
     }
 

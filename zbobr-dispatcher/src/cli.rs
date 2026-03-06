@@ -800,7 +800,8 @@ async fn run_role_command(
 ) -> anyhow::Result<()> {
     let session = CliRoleRunner::new(zbobr, task, role, prompts, executor_config);
     if show_prompt {
-        println!("{}", session.prompt()?);
+        let task_obj = zbobr.get_task(task).await?;
+        println!("{}", session.prompt(&task_obj.title)?);
     } else {
         session.run().await?;
     }
@@ -808,7 +809,7 @@ async fn run_role_command(
 }
 
 // ---------------------------------------------------------------------------
-// CliRoleRunner — CLI-side role execution (analogous to role_session.rs in zbobr)
+// CliRoleRunner — CLI-side role execution
 // ---------------------------------------------------------------------------
 
 struct CliRoleRunner<'a> {
@@ -836,8 +837,8 @@ impl<'a> CliRoleRunner<'a> {
         }
     }
 
-    fn prompt(&self) -> anyhow::Result<String> {
-        self.prompts.build_prompt(self.role)
+    fn prompt(&self, task_title: &str) -> anyhow::Result<String> {
+        self.prompts.build_prompt(self.role, task_title)
     }
 
     async fn run(&self) -> anyhow::Result<()> {
@@ -934,7 +935,8 @@ impl<'a> CliRoleRunner<'a> {
             task_id = self.task_id,
         );
 
-        let prompt_text = self.prompt()?;
+        let task = self.zbobr.get_task(self.task_id).await?;
+        let prompt_text = self.prompt(&task.title)?;
         // apply the resolved model to the executor configuration; dispatcher
         // configuration takes precedence over whatever the executor may have
         // been initialized with.
