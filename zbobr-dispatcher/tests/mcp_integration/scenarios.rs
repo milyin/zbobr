@@ -614,7 +614,7 @@ steps:
     arguments:
       offset: 1
   assertions:
-    - type: success
+    - type: failure
     - type: contains
       path: result
       value: "out of range"
