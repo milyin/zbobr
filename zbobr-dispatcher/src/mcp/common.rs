@@ -3,6 +3,31 @@ use serde_json::Value;
 
 use crate::{ZbobrDispatcherDyn, task::{Role, Tool, Model}};
 
+// Custom deserializer for boolean that accepts both bool and string values
+// This handles cases where HTTP clients stringify all parameters
+fn deserialize_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{self, Deserialize};
+    
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum BoolOrString {
+        Bool(bool),
+        String(String),
+    }
+
+    match BoolOrString::deserialize(deserializer)? {
+        BoolOrString::Bool(b) => Ok(b),
+        BoolOrString::String(s) => match s.to_lowercase().as_str() {
+            "true" | "1" | "yes" => Ok(true),
+            "false" | "0" | "no" => Ok(false),
+            _ => Err(de::Error::custom(format!("invalid bool value: {}", s))),
+        },
+    }
+}
+
 // Instruction shared across all role prompts explaining branch isolation rules.
 pub fn branch_isolation_instruction() -> String {
     use planner_tools::{GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH};
@@ -82,6 +107,7 @@ pub struct CheckChecklistItemParam {
     #[schemars(description = "ID of the checklist item to check/uncheck")]
     pub id: String,
     #[schemars(description = "New checkbox state (true = checked, false = unchecked)")]
+    #[serde(deserialize_with = "deserialize_bool")]
     pub checked: bool,
 }
 
