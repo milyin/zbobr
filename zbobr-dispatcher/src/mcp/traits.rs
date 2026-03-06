@@ -150,7 +150,7 @@ pub trait CommonMcpImpl: Send + Sync {
             offset
         );
 
-        match self.session().get_history_chunk(offset).await {
+        match self.session().get_history(offset).await {
             Ok(chunk) => {
                 if chunk.comments.is_empty() {
                     tracing::warn!(

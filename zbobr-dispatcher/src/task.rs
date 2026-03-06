@@ -57,9 +57,9 @@ impl RoleSession {
     }
 
     /// Get a history chunk at the given offset.
-    /// Convenience wrapper — delegates to `get_history_chunk`.
+    /// `offset` is 0-based (0 = oldest chunk); `None` returns the last chunk.
     pub async fn get_history(&self, offset: Option<usize>) -> anyhow::Result<zbobr_api::HistoryChunk> {
-        self.get_history_chunk(offset).await
+        self.zbobr.get_history(self.task_id, offset).await
     }
 
     /// Get the current task checklist.
@@ -101,12 +101,6 @@ impl RoleSession {
     /// types: error, report, request, plan, etc.).
     pub async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
         self.zbobr.get_task_comments(self.task_id).await
-    }
-
-    /// Extract a history chunk at the given offset (delegates to the dispatcher).
-    /// `offset` is 0-based (0 = oldest chunk); `None` returns the last chunk.
-    pub async fn get_history_chunk(&self, offset: Option<usize>) -> anyhow::Result<zbobr_api::HistoryChunk> {
-        self.zbobr.get_history_chunk(self.task_id, offset).await
     }
 
     pub async fn post_comment(

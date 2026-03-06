@@ -168,7 +168,7 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
 
     /// Fetch comments and description for a task, then extract the history chunk
     /// at the given `offset` using [`zbobr_api::extract_history_chunk`].
-    pub async fn get_history_chunk(
+    pub async fn get_history(
         &self,
         id: u64,
         offset: Option<usize>,

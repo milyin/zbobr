@@ -899,7 +899,7 @@ impl<'a> CliRoleRunner<'a> {
         // content.  If the latest chunk contains no actionable messages the
         // agent session would do useless work, so bail early.
         {
-            let history = self.zbobr.get_history_chunk(self.task_id, None).await
+            let history = self.zbobr.get_history(self.task_id, None).await
                 .context("Pre-flight get_history check failed")?;
             tracing::info!(
                 "Task #{} pre-flight: get_history returned {} comment(s)",
