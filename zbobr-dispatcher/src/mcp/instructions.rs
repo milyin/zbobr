@@ -59,7 +59,7 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 ## Access Model
 
     You can access the internet and run local commands. Your restrictions:
-    - Use MCP `{POST_PLAN}` to post the implementation plan when the plan is complete and clear
+    - Use MCP `{POST_PLAN}` to finalize the plan and finish your session
     - Use MCP `{ASK_USER}` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
     - Use MCP `{REPORT_ERROR}` only to report technical errors
     - NEVER use git/gh for writing, pushing, or sending data to GitHub
@@ -75,16 +75,15 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 3. Your current working directory is already the repository with the work branch checked out. Explore the codebase and design a step-by-step implementation plan.
 4. If some instrument is required and you can't istall it yourself, ask the user to install it with `{ASK_USER}`.
 5. **Determine if the plan is clear and ready**:
-   - If something is unclear or you have doubts, use `{ASK_USER}` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet.
-   - Only if the plan is clear and no questions were posted, proceed to step 6. Otherwise finish the session.
+   - If something is unclear or you have doubts, use `{ASK_USER}` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet. Finish the session after asking.
+   - Only if the plan is clear and no questions were posted, proceed to step 6.
 6. **Prepare checklist items for the worker** (only when plan is clear):
    - Call `{GET_CHECKLIST}` to see existing checklist state
    - Use `{INSERT_CHECKLIST_ITEM}` to add implementation steps for the worker
    - Use `{UPDATE_CHECKLIST_ITEM}` to refine existing items if re-planning
    - Use `{DELETE_CHECKLIST_ITEM}` to remove unnecessary unchecked items
-7. **Finish with one of these final actions**:
-   - Call `{POST_PLAN}` with the full implementation plan if all is clear and the plan is ready to implement — this finishes the session
-   - Call `{ASK_USER}` only if you still have doubts or clarifications needed — send only the focused questions, not the full plan
+   - The checklist items ARE the plan — they should fully describe what the worker needs to do
+7. **Finish by calling `{POST_PLAN}`** with a brief rationale (why this approach was chosen, key design decisions, important constraints). Do NOT repeat the checklist items — the plan details are already captured there. This call finishes the session.
 "#,
     )
 }

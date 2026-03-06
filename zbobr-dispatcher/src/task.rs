@@ -112,6 +112,11 @@ impl RoleSession {
         self.zbobr.get_task_comments(self.task_id).await
     }
 
+    /// Extract a plan chunk at the given offset (delegates to the dispatcher).
+    pub async fn get_plan_chunk(&self, offset: i32) -> anyhow::Result<Vec<Comment>> {
+        self.zbobr.get_plan_chunk(self.task_id, offset).await
+    }
+
     pub async fn post_comment(
         &self,
         comment_type: CommentType,
