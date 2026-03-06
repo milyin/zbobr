@@ -72,18 +72,19 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 
 1. Call `{GET_PLAN}` to read the task description and context. Use `{GET_PLAN}` with offset -1, -2, etc. to read previous plans and discussion if needed for context.
 2. If need to compare the work already done with the initial codebase, use `{GET_PARAM_DESTINATION_BRANCH}` to get the name of original branch, `{GET_PARAM_WORK_BRANCH}` to get the work branch name, and then use git diff or equivalent to compare the branches.
-3. Your current working directory is already the repository with the work branch checked out. Explore the codebase and design a step-by-step implementation plan.
-4. If some instrument is required and you can't istall it yourself, ask the user to install it with `{ASK_USER}`.
-5. **Determine if the plan is clear and ready**:
+3. **Search for analogous functionality in the codebase BEFORE designing the plan.** Look for existing code that does something similar to what the task requires — similar features, modules, patterns, or workflows. This is critical: the implementation must follow the same approaches, conventions, and style as the existing analogous code. Identify the analog explicitly in your plan so the worker and reviewer can reference it.
+4. Your current working directory is already the repository with the work branch checked out. Explore the codebase and design a step-by-step implementation plan that follows the patterns and style of the identified analog if found.
+5. If some instrument is required and you can't istall it yourself, ask the user to install it with `{ASK_USER}`.
+6. **Determine if the plan is clear and ready**:
    - If something is unclear or you have doubts, use `{ASK_USER}` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet. Finish the session after asking.
-   - Only if the plan is clear and no questions were posted, proceed to step 6.
-6. **Prepare checklist items for the worker** (only when plan is clear):
+   - Only if the plan is clear and no questions were posted, proceed to step 7.
+7. **Prepare checklist items for the worker** (only when plan is clear):
    - Call `{GET_CHECKLIST}` to see existing checklist state
    - Use `{INSERT_CHECKLIST_ITEM}` to add implementation steps for the worker
    - Use `{UPDATE_CHECKLIST_ITEM}` to refine existing items if re-planning
    - Use `{DELETE_CHECKLIST_ITEM}` to remove unnecessary unchecked items
    - The checklist items ARE the plan — they should fully describe what the worker needs to do
-7. **Finish by calling `{POST_PLAN}`** with a brief rationale (why this approach was chosen, key design decisions, important constraints). Do NOT repeat the checklist items — the plan details are already captured there. This call finishes the session.
+8. **Finish by calling `{POST_PLAN}`** with a brief rationale (why this approach was chosen, key design decisions, important constraints). Mention the chosen analog and why it's the right one to follow. Do NOT repeat the checklist items — the plan details are already captured there. This call finishes the session.
 "#,
     )
 }
@@ -132,15 +133,16 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 
 1. Call `{GET_PLAN}` to retrieve the task description and approved implementation plan. Use {GET_PLAN} with offset -1, -2, etc. to read previous plans if needed for context.
 2. Call `{GET_CHECKLIST}` to read the implementation steps.
-3. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
-4. Your current working directory is already the repository with the work branch checked out. Consult `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` for branch names if needed.
-5. Implement the plan in your working directory
-6. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality.
-7. Commit all your changes locally to the work branch with clear messages (describe what the change does, why, and reference relevant checklist item). ALWAYS ensure that you have no uncommitted changes before marking your checklist items as done.
-8. When implementation for an item is complete, mark the item done with `{CHECK_CHECKLIST_ITEM}`, and update or insert follow-up items as needed
-9. If you need human clarification or intervention, call `{ASK_USER}`. If it was found that the plan proposed is unclear or requires adjustment, call `{ASK_PLANNER}`. In case of technical errors use `{REPORT_ERROR}`.
-10. If some instrument is required and you can't istall it yourself, ask the user to install it with `{ASK_USER}`.
-11. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact."#,
+3. **Identify the analog referenced in the plan.** Before writing any code, study the analogous existing code mentioned by the planner. Your implementation MUST follow the same patterns, conventions, coding style, and architectural approaches as the analog. If no analog is mentioned, search for similar functionality in the codebase yourself before proceeding.
+4. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
+5. Your current working directory is already the repository with the work branch checked out. Consult `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` for branch names if needed.
+6. Implement the plan in your working directory. **Follow the same patterns and style as the identified analog.** Do not invent new approaches when existing code already establishes a convention for the same kind of functionality.
+7. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality.
+8. Commit all your changes locally to the work branch with clear messages (describe what the change does, why, and reference relevant checklist item). ALWAYS ensure that you have no uncommitted changes before marking your checklist items as done.
+9. When implementation for an item is complete, mark the item done with `{CHECK_CHECKLIST_ITEM}`, and update or insert follow-up items as needed
+10. If you need human clarification or intervention, call `{ASK_USER}`. If it was found that the plan proposed is unclear or requires adjustment, call `{ASK_PLANNER}`. In case of technical errors use `{REPORT_ERROR}`.
+11. If some instrument is required and you can't istall it yourself, ask the user to install it with `{ASK_USER}`.
+12. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact."#,
     );
 
     instructions
@@ -163,11 +165,12 @@ Review the implementation changes and ensure they meet coding standards and task
 
 ## Workflow
 
-1. Call `{GET_PLAN}` to understand the task requirements and agreed implementation plan
-2. Your current working directory is the repository with the work branch checked out — inspect the changes
-3. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. Note: Comprehensive testing will be performed in a separate Testing stage.
-4. Prepare a detailed review report describing any issues found, suggested fixes, and overall assessment.
-5. Call `{REVIEW_ACCEPT}` if the implementation is correct and complete, or `{REVIEW_REJECT}` if issues were found. Pass the review report as a parameter to these tools.
+1. Call `{GET_PLAN}` to understand the task requirements and agreed implementation plan. Note the analog referenced in the plan.
+2. Your current working directory is the repository with the work branch checked out — inspect the changes.
+3. **Verify the analog choice and pattern consistency**: Check that the planner chose an appropriate analog for the new functionality. Then verify that the implementation consistently follows the same patterns, conventions, coding style, and architectural approaches as the analog. Flag any deviations — new code should look like it was written by the same author as the existing analogous code. If the analog was poorly chosen, note this as a review finding.
+4. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. Note: Comprehensive testing will be performed in a separate Testing stage.
+5. Prepare a detailed review report describing any issues found, suggested fixes, and overall assessment. Include your assessment of analog consistency.
+6. Call `{REVIEW_ACCEPT}` if the implementation is correct and complete, or `{REVIEW_REJECT}` if issues were found. Pass the review report as a parameter to these tools.
 "#,
     );
 
