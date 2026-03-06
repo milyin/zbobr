@@ -11,7 +11,7 @@ Added comprehensive logging for all MCP request responses in the zbobr-dispatche
 
 Three logging helper functions were added after the imports:
 
-**`log_mcp_comments_response()`** - For `get_plan` responses
+**`log_mcp_comments_response()`** - For `get_history` responses
 - **Info Level**: Logs the number of comments returned, then for each comment:
   - Comment type (Request, Plan, Response, Report, Error, Done, Reject)
   - First line of text (stripped, truncated to 80 chars if needed)
@@ -37,7 +37,7 @@ Three logging helper functions were added after the imports:
 All `*_impl()` methods in the following traits now call the appropriate logging helper:
 
 **CommonMcpImpl trait:**
-- `get_plan_impl()` - Returns comments with detailed per-comment logging
+- `get_history_impl()` - Returns comments with detailed per-comment logging
 - `report_error_impl()` - Status message logging
 - `report_results_impl()` - Status message logging
 - `ask_user_impl()` - Status message logging
@@ -84,9 +84,9 @@ response
 
 ### Info Level Logs
 
-For `get_plan` with 3 comments:
+For `get_history` with 3 comments:
 ```
-[planner#456] get_plan returned 3 comment(s)
+[planner#456] get_history returned 3 comment(s)
 [planner#456] comment type=Request text=Fix the authentication bug in the login...
 [planner#456] comment type=Plan text=I will start by checking the login module...
 [planner#456] comment type=Response text=Found the issue - the token validation...

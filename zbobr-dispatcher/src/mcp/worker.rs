@@ -9,7 +9,7 @@ use crate::{
     ZbobrDispatcherDyn,
     mcp::{
         common::{
-            CheckChecklistItemParam, DeleteChecklistItemParam, GetPlanParam,
+            CheckChecklistItemParam, DeleteChecklistItemParam, GetHistoryParam,
             InsertChecklistItemParam, MessageParam, UpdateChecklistItemParam,
         },
         traits::{CommonMcpImpl, WorkerMcpImpl},
@@ -57,10 +57,10 @@ impl WorkerMcp {
     }
 
     #[tool(
-        description = "Get the plan and following comments. Optional offset: 0 = latest plan (default), -1 = previous plan, etc."
+        description = "Get task history chunk. Optional offset: chunk index (0 = oldest, omitted = latest). Response includes current_chunk and last_chunk for navigation."
     )]
-    async fn get_plan(&self, Parameters(params): Parameters<GetPlanParam>) -> String {
-        self.get_plan_impl(params.offset.unwrap_or(0)).await
+    async fn get_history(&self, Parameters(params): Parameters<GetHistoryParam>) -> String {
+        self.get_history_impl(params.offset).await
     }
 
     #[tool(description = "Report an error to the user and pause task processing")]

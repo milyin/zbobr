@@ -11,6 +11,6 @@ pub use config::{
 };
 pub use task::{
     ChecklistItem, Comment, CommentTag, CommentType, Model, Parameter, Role, Signal, Stage, Task,
-    Tool, extract_plan_chunk, extract_repo_name,
+    Tool, HistoryChunk, extract_history_chunk, extract_repo_name,
 };
 pub use tool_executor::{ToolExecutor, format_command_for_log};

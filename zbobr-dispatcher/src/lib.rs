@@ -166,20 +166,20 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
         self.task_backend.get_task_comments(id).await
     }
 
-    /// Fetch comments and description for a task, then extract the plan chunk
-    /// at the given `offset` using [`zbobr_api::extract_plan_chunk`].
-    pub async fn get_plan_chunk(
+    /// Fetch comments and description for a task, then extract the history chunk
+    /// at the given `offset` using [`zbobr_api::extract_history_chunk`].
+    pub async fn get_history_chunk(
         &self,
         id: u64,
-        offset: i32,
-    ) -> anyhow::Result<Vec<Comment>> {
+        offset: Option<usize>,
+    ) -> anyhow::Result<zbobr_api::HistoryChunk> {
         let comments = self.get_task_comments(id).await?;
         let desc = self
             .get_task(id)
             .await
             .map(|t| t.description)
             .unwrap_or_default();
-        zbobr_api::extract_plan_chunk(comments, &desc, offset)
+        zbobr_api::extract_history_chunk(comments, &desc, offset)
     }
 
     pub async fn post_task_comment(

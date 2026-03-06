@@ -749,10 +749,10 @@ pub async fn run_signal_preservation_during_conflict(env: &IntegrationTestEnv) {
 }
 
 // ---------------------------------------------------------------------------
-// Plan history with index (GET_PLAN offset parameter)
+// Plan history with index (GET_HISTORY offset parameter)
 // ---------------------------------------------------------------------------
 
-/// Verify that GET_PLAN:
+/// Verify that GET_HISTORY:
 ///  - returns the task description as a user Reply comment when no plan exists
 ///  - returns only the plan and subsequent comments up to the next plan for each offset
 ///  - returns an error for an out-of-range offset

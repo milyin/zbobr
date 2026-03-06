@@ -214,7 +214,7 @@ async fn test_fs_fs_repo_backend_merging_cross_org() {
 }
 
 // ---------------------------------------------------------------------------
-// Plan history with GET_PLAN index parameter
+// Plan history with GET_HISTORY index parameter
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
