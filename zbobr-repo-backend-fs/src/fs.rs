@@ -206,6 +206,28 @@ impl RepoBackend for ZbobrRepoBackendFs {
             }
         }
 
+        // Clean up any broken rebase/merge state left by a previous session
+        // before attempting to checkout.
+        let rebase_merge_dir = work_dir.join(".git/rebase-merge");
+        let rebase_apply_dir = work_dir.join(".git/rebase-apply");
+        if rebase_merge_dir.exists() || rebase_apply_dir.exists() {
+            tracing::warn!("Detected in-progress rebase in {}, aborting", work_dir.display());
+            let _ = tokio::process::Command::new("git")
+                .args(["rebase", "--abort"])
+                .current_dir(&work_dir)
+                .status()
+                .await;
+        }
+        let merge_head = work_dir.join(".git/MERGE_HEAD");
+        if merge_head.exists() {
+            tracing::warn!("Detected in-progress merge in {}, aborting", work_dir.display());
+            let _ = tokio::process::Command::new("git")
+                .args(["merge", "--abort"])
+                .current_dir(&work_dir)
+                .status()
+                .await;
+        }
+
         // Checkout the work branch; create from HEAD if it doesn't exist yet.
         tracing::info!("Checking out branch {}", work_branch);
         let checkout_status = tokio::process::Command::new("git")

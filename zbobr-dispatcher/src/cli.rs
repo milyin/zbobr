@@ -1517,7 +1517,27 @@ async fn finalize_session(
     tracing::info!("Session complete for task #{task_id}");
 
     if role == Role::Worker || role == Role::Merger {
-        perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await?;
+        if let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await {
+            tracing::error!("Auto-commit/push failed for task #{task_id}: {e}");
+            let hostname = get_hostname();
+            let msg = format!("Auto-commit/push failed: {e}");
+            if let Err(post_err) = task_session
+                .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
+                .await
+            {
+                tracing::error!("Failed to post auto-commit/push error for task #{task_id}: {post_err}");
+            }
+            if let Err(pause_err) = task_session
+                .modify_task(|task| {
+                    task.pause = true;
+                })
+                .await
+            {
+                tracing::error!("Failed to pause task #{task_id} after auto-commit/push failure: {pause_err}");
+            }
+            task_session.set_stage(Stage::Pending).await?;
+            return Ok(());
+        }
     }
 
     let current_task = zbobr.get_task(task_id).await?;
@@ -1830,12 +1850,24 @@ async fn rewrite_commit_authors(
                 }
             }
             Ok(output) => {
+                // Abort the failed rebase so the workspace isn't left in a
+                // broken state that blocks subsequent operations.
+                let _ = TokioCommand::new("git")
+                    .args(["rebase", "--abort"])
+                    .current_dir(&git_root_path)
+                    .status()
+                    .await;
                 return Err(anyhow::anyhow!(
                     "Failed to rewrite commit authors: {}",
                     String::from_utf8_lossy(&output.stderr)
                 ));
             }
             Err(e) => {
+                let _ = TokioCommand::new("git")
+                    .args(["rebase", "--abort"])
+                    .current_dir(&git_root_path)
+                    .status()
+                    .await;
                 return Err(anyhow::anyhow!(
                     "Error running git rebase for author rewriting: {}",
                     e
