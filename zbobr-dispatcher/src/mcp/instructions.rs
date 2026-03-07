@@ -233,7 +233,7 @@ You have read-only access to the task plan and the repository for testing:
 
 /// Generate hardcoded merger instructions using tool name constants.
 pub fn merger_instructions() -> String {
-    use merger_tools::{ASK_USER, GET_HISTORY, REPORT_ERROR, REPORT_RESULTS};
+    use merger_tools::{ASK_USER, REPORT_ERROR, REPORT_RESULTS};
     let branch_isolation = crate::mcp::common::branch_isolation_instruction();
     let instructions = format!(
         r#"# Merger Agent
