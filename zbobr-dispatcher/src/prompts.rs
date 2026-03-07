@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use crate::{
     config::{ZbobrDispatcherArgs, ZbobrDispatcherConfig},
     task::Role,
+    ZbobrDispatcherDyn,
 };
+
+use zbobr_api::Task;
 
 /// Resolved prompt file paths for each role.
 #[derive(Debug, Clone)]
@@ -110,8 +113,33 @@ pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::R
     Ok(combined)
 }
 
-/// Build full prompt: role instructions + user context + auto-generated API docs.
-pub fn build_full_prompt(user_context: &str, role: Role) -> String {
+/// Build full prompt with sections in order:
+/// 1. Role description (hardcoded instructions)
+/// 2. MCP API docs
+/// 3. Custom prompts (user context from prompt files)
+/// 4. Task title
+/// 5. Recent task history (latest chunk from get_history)
+/// 6. Unchecked checklist items with ids
+pub async fn build_full_prompt(
+    user_context: &str,
+    role: Role,
+    task_id: u64,
+    dispatcher: &ZbobrDispatcherDyn,
+) -> anyhow::Result<String> {
+    let task = dispatcher.get_task(task_id).await?;
+    let history = dispatcher.get_history(task_id, None).await?;
+    let history_json = serde_json::to_string_pretty(&history.comments).unwrap_or_default();
+    Ok(assemble_prompt(user_context, role, &task, &history_json))
+}
+
+/// Pure synchronous prompt assembly (used by tests and `build_full_prompt`).
+fn assemble_prompt(
+    user_context: &str,
+    role: Role,
+    task: &Task,
+    history_json: &str,
+) -> String {
+    let task_title = &task.title;
     let hardcoded = match role {
         Role::Preparator => crate::preparator_instructions(),
         Role::Planner => crate::planner_instructions(),
@@ -130,14 +158,41 @@ pub fn build_full_prompt(user_context: &str, role: Role) -> String {
         Role::Merger => crate::MergerMcp::generate_api_docs(),
     };
 
-    if user_context.is_empty() {
-        format!("{}\n\n---\n\n{}", hardcoded, api_docs)
-    } else {
-        format!(
-            "{}\n\n---\n\n{}\n\n---\n\n{}",
-            hardcoded, user_context, api_docs
-        )
+    let mut sections = vec![hardcoded];
+
+    // MCP API docs
+    sections.push(api_docs);
+
+    // Custom prompts from prompt files
+    if !user_context.is_empty() {
+        sections.push(user_context.to_owned());
     }
+
+    // Task title
+    if !task_title.is_empty() {
+        sections.push(format!("# Current task: {task_title}"));
+    }
+
+    // Recent task history
+    if !history_json.is_empty() {
+        sections.push(format!("# Recent task history\n\n{history_json}"));
+    }
+
+    // Unchecked checklist items with ids
+    let unchecked: Vec<_> = task
+        .checklist
+        .iter()
+        .filter(|item| !item.checked)
+        .collect();
+    if !unchecked.is_empty() {
+        let mut checklist_text = String::from("# Unchecked checklist items\n");
+        for item in &unchecked {
+            checklist_text.push_str(&format!("\n- [ ] [id: {}] {}", item.id, item.text));
+        }
+        sections.push(checklist_text);
+    }
+
+    sections.join("\n\n---\n\n")
 }
 
 /// Validate that all specified prompt files exist.
@@ -213,7 +268,12 @@ fn file_exists(path: &PathBuf, base_path: Option<&PathBuf>) -> bool {
 
 impl Prompts {
     /// Build the full prompt for the given role.
-    pub fn build_prompt(&self, role: Role) -> anyhow::Result<String> {
+    pub async fn build_prompt(
+        &self,
+        role: Role,
+        task_id: u64,
+        dispatcher: &ZbobrDispatcherDyn,
+    ) -> anyhow::Result<String> {
         let base_prompt = match role {
             Role::Preparator => load_prompts(&self.preparator, self.base_path.as_ref())?,
             Role::Planner => load_prompts(&self.planner, self.base_path.as_ref())?,
@@ -222,7 +282,7 @@ impl Prompts {
             Role::Tester => load_prompts(&self.tester, self.base_path.as_ref())?,
             Role::Merger => load_prompts(&self.merger, self.base_path.as_ref())?,
         };
-        Ok(build_full_prompt(&base_prompt, role))
+        build_full_prompt(&base_prompt, role, task_id, dispatcher).await
     }
 }
 
@@ -232,7 +292,25 @@ mod tests {
 
     use tempfile::TempDir;
 
+    use zbobr_api::Stage;
+
     use super::*;
+
+    fn dummy_task(title: &str) -> Task {
+        Task {
+            id: 1,
+            title: title.to_owned(),
+            description: String::new(),
+            stage: Stage::Pending,
+            parameters: Default::default(),
+            checklist: vec![],
+            signal: None,
+            conflict: false,
+            pause: false,
+            confirm: false,
+            etag: None,
+        }
+    }
 
     fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
         let path = dir.path().join(name);
@@ -374,73 +452,52 @@ mod tests {
         assert_eq!(prompts.preparator, vec![PathBuf::from("stage.md")]);
     }
 
-    // --- build_full_prompt ---
+    // --- assemble_prompt ---
 
     #[test]
-    fn build_full_prompt_includes_user_context() {
-        let prompt = build_full_prompt("my custom instructions", Role::Worker);
+    fn assemble_prompt_includes_user_context() {
+        let prompt = assemble_prompt("my custom instructions", Role::Worker, &dummy_task(""), "");
         assert!(prompt.contains("my custom instructions"));
     }
 
     #[test]
-    fn build_full_prompt_empty_context_omits_user_section() {
-        let prompt_empty = build_full_prompt("", Role::Worker);
-        let prompt_with = build_full_prompt("UNIQUE_MARKER", Role::Worker);
+    fn assemble_prompt_empty_context_omits_user_section() {
+        let prompt_empty = assemble_prompt("", Role::Worker, &dummy_task(""), "");
+        let prompt_with = assemble_prompt("UNIQUE_MARKER", Role::Worker, &dummy_task(""), "");
         assert!(!prompt_empty.contains("UNIQUE_MARKER"));
         // With context is longer (has the extra context section)
         assert!(prompt_with.len() > prompt_empty.len());
     }
 
-    // --- Prompts::build_prompt ---
+    // --- load_prompts + assemble_prompt integration ---
 
     #[test]
-    fn prompts_build_prompt_loads_content_from_file() {
+    fn load_prompts_content_appears_in_assembled_prompt() {
         let dir = TempDir::new().unwrap();
         let path = write_file(&dir, "worker.md", "do the work carefully");
-        let prompts = Prompts {
-            base_path: None,
-            preparator: vec![],
-            planner: vec![],
-            worker: vec![path],
-            reviewer: vec![],
-            tester: vec![],
-            merger: vec![],
-        };
-        let result = prompts.build_prompt(Role::Worker).unwrap();
+        let loaded = load_prompts(&[path], None).unwrap();
+        let result = assemble_prompt(&loaded, Role::Worker, &dummy_task(""), "");
         assert!(result.contains("do the work carefully"));
     }
 
     #[test]
-    fn prompts_build_prompt_no_custom_content_when_no_files() {
-        let prompts = Prompts {
-            base_path: None,
-            preparator: vec![],
-            planner: vec![],
-            worker: vec![],
-            reviewer: vec![],
-            tester: vec![],
-            merger: vec![],
-        };
-        let result = prompts.build_prompt(Role::Worker).unwrap();
-        // Result should equal build_full_prompt with empty context
-        let expected = build_full_prompt("", Role::Worker);
+    fn no_prompt_files_gives_empty_context() {
+        let loaded = load_prompts(&[] as &[PathBuf], None).unwrap();
+        let result = assemble_prompt(&loaded, Role::Worker, &dummy_task(""), "");
+        let expected = assemble_prompt("", Role::Worker, &dummy_task(""), "");
         assert_eq!(result, expected);
     }
 
     #[test]
-    fn prompts_build_prompt_uses_base_path_for_relative_files() {
+    fn load_prompts_with_base_path_resolves_relative_files() {
         let dir = TempDir::new().unwrap();
         write_file(&dir, "reviewer.md", "review carefully");
-        let prompts = Prompts {
-            base_path: Some(dir.path().to_path_buf()),
-            preparator: vec![],
-            planner: vec![],
-            worker: vec![],
-            reviewer: vec![PathBuf::from("reviewer.md")],
-            tester: vec![],
-            merger: vec![],
-        };
-        let result = prompts.build_prompt(Role::Reviewer).unwrap();
+        let loaded = load_prompts(
+            &[PathBuf::from("reviewer.md")],
+            Some(&dir.path().to_path_buf()),
+        )
+        .unwrap();
+        let result = assemble_prompt(&loaded, Role::Reviewer, &dummy_task(""), "");
         assert!(result.contains("review carefully"));
     }
 

@@ -4,7 +4,7 @@
 pub fn preparation_scenario(repo_path: &str) -> String {
     use zbobr_dispatcher::mcp::preparator_tools::{
         GET_PARAM_DESTINATION_BRANCH, GET_PARAM_DESTINATION_REPOSITORY, GET_PARAM_WORK_BRANCH,
-        GET_PLAN, SET_PARAM_DESTINATION_BRANCH, SET_PARAM_DESTINATION_REPOSITORY,
+        GET_HISTORY, SET_PARAM_DESTINATION_BRANCH, SET_PARAM_DESTINATION_REPOSITORY,
         SET_PARAM_WORK_BRANCH_POSTFIX,
     };
 
@@ -18,7 +18,7 @@ steps:
 - name: Get plan (returns task description when no plan exists)
   operation:
     type: tool_call
-    tool: {GET_PLAN}
+    tool: {GET_HISTORY}
   assertions:
     - type: success
     - type: contains
@@ -88,7 +88,7 @@ steps:
 
 pub fn planning_scenario() -> String {
     use zbobr_dispatcher::mcp::planner_tools::{
-        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, INSERT_CHECKLIST_ITEM,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_HISTORY, INSERT_CHECKLIST_ITEM,
         POST_PLAN,
     };
 
@@ -102,7 +102,7 @@ steps:
 - name: Get plan (initially returns task description)
   operation:
     type: tool_call
-    tool: {GET_PLAN}
+    tool: {GET_HISTORY}
   assertions:
     - type: success
 
@@ -118,7 +118,7 @@ steps:
 - name: Get plan (verify posted content)
   operation:
     type: tool_call
-    tool: {GET_PLAN}
+    tool: {GET_HISTORY}
   assertions:
     - type: success
     - type: contains
@@ -204,7 +204,7 @@ steps:
 pub fn working_scenario() -> String {
     use zbobr_dispatcher::mcp::worker_tools::{
         CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST, GET_PARAM_DESTINATION_BRANCH,
-        GET_PARAM_WORK_BRANCH, GET_PLAN, INSERT_CHECKLIST_ITEM, REPORT_RESULTS,
+        GET_PARAM_WORK_BRANCH, GET_HISTORY, INSERT_CHECKLIST_ITEM, REPORT_RESULTS,
         UPDATE_CHECKLIST_ITEM,
     };
 
@@ -221,7 +221,7 @@ steps:
 - name: Get plan
   operation:
     type: tool_call
-    tool: {GET_PLAN}
+    tool: {GET_HISTORY}
   assertions:
     - type: success
 
@@ -323,7 +323,7 @@ pub fn reviewing_scenario() -> String {
     // checklist operations aren't exported by reviewer_tools, so pull them
     // from worker_tools (they're otherwise the same constants).
     use zbobr_dispatcher::mcp::reviewer_tools::{
-        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, REVIEW_REJECT,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_HISTORY, REVIEW_REJECT,
     };
 
     format!(
@@ -336,7 +336,7 @@ steps:
 - name: Get plan
   operation:
     type: tool_call
-    tool: {GET_PLAN}
+    tool: {GET_HISTORY}
   assertions:
     - type: success
 
@@ -375,7 +375,7 @@ steps:
 /// Scenario where the reviewer finds no issues — task should be marked DONE instead
 /// of routing back to the planner.
 pub fn reviewing_approval_scenario() -> String {
-    use zbobr_dispatcher::mcp::reviewer_tools::{GET_PLAN, REVIEW_ACCEPT};
+    use zbobr_dispatcher::mcp::reviewer_tools::{GET_HISTORY, REVIEW_ACCEPT};
 
     format!(
         r#"name: Reviewer Approval Test
@@ -387,7 +387,7 @@ steps:
 - name: Get plan
   operation:
     type: tool_call
-    tool: {GET_PLAN}
+    tool: {GET_HISTORY}
   assertions:
     - type: success
 
@@ -430,7 +430,7 @@ steps:
 
 pub fn merging_scenario(ending: &str) -> String {
     use zbobr_dispatcher::mcp::merger_tools::{
-        ASK_USER, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, REPORT_RESULTS,
+        ASK_USER, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_HISTORY, REPORT_RESULTS,
     };
 
     let ending_step = match ending {
@@ -471,7 +471,7 @@ steps:
 - name: Get plan
   operation:
     type: tool_call
-    tool: {GET_PLAN}
+    tool: {GET_HISTORY}
   assertions:
     - type: success
 
@@ -522,16 +522,16 @@ steps:
     )
 }
 
-/// Scenario for testing multiple plan postings and GET_PLAN with offset parameter.
+/// Scenario for testing multiple plan postings and GET_HISTORY with offset parameter.
 ///
 /// The `description` parameter is the task description, used to verify that
-/// GET_PLAN returns it as a user request comment when no plan has been posted.
+/// GET_HISTORY returns it as a user request comment when no plan has been posted.
 pub fn multiple_plans_scenario(description: &str) -> String {
-    use zbobr_dispatcher::mcp::planner_tools::{GET_PLAN, POST_PLAN, REPORT_ERROR};
+    use zbobr_dispatcher::mcp::planner_tools::{GET_HISTORY, POST_PLAN, REPORT_ERROR};
 
     format!(
         r#"name: Multiple Plans History Test
-description: Verify GET_PLAN with offset parameter and plan isolation
+description: Verify GET_HISTORY with offset parameter and plan isolation
 timeout: 60
 stop_on_failure: true
 
@@ -539,7 +539,7 @@ steps:
 - name: Get plan before any plan exists (returns task description as user request comment)
   operation:
     type: tool_call
-    tool: {GET_PLAN}
+    tool: {GET_HISTORY}
   assertions:
     - type: success
     - type: contains
@@ -573,10 +573,31 @@ steps:
   assertions:
     - type: success
 
-- name: Get latest plan (default offset 0) - should return both plans (single chunk, no cuts)
+- name: Get latest history (default, no offset) - should return both plans (single chunk, no cuts)
   operation:
     type: tool_call
-    tool: {GET_PLAN}
+    tool: {GET_HISTORY}
+  assertions:
+    - type: success
+    - type: contains
+      path: result
+      value: "First plan"
+    - type: contains
+      path: result
+      value: "Second plan"
+    - type: contains
+      path: result
+      value: "current_chunk"
+    - type: contains
+      path: result
+      value: "last_chunk"
+
+- name: Get offset 0 - should return same chunk (oldest = latest when single chunk)
+  operation:
+    type: tool_call
+    tool: {GET_HISTORY}
+    arguments:
+      offset: 0
   assertions:
     - type: success
     - type: contains
@@ -586,14 +607,14 @@ steps:
       path: result
       value: "Second plan"
 
-- name: Get offset -1 - should return out-of-range (no cut boundaries, single chunk)
+- name: Get offset 1 - should return out-of-range (no cut boundaries, single chunk)
   operation:
     type: tool_call
-    tool: {GET_PLAN}
+    tool: {GET_HISTORY}
     arguments:
-      offset: -1
+      offset: 1
   assertions:
-    - type: success
+    - type: failure
     - type: contains
       path: result
       value: "out of range"
@@ -603,7 +624,7 @@ steps:
 }
 
 pub fn merging_conflict_scenario() -> String {
-    use zbobr_dispatcher::mcp::merger_tools::{GET_PLAN, REPORT_RESULTS};
+    use zbobr_dispatcher::mcp::merger_tools::{GET_HISTORY, REPORT_RESULTS};
 
     format!(
         r#"name: Merger Conflict Resolution Test
@@ -615,7 +636,7 @@ steps:
 - name: Get plan
   operation:
     type: tool_call
-    tool: {GET_PLAN}
+    tool: {GET_HISTORY}
   assertions:
     - type: success
 

@@ -6,7 +6,7 @@ use crate::mcp::common::{
 pub fn preparator_instructions() -> String {
     use preparator_tools::{
         GET_PARAM_DESTINATION_BRANCH, GET_PARAM_DESTINATION_REPOSITORY, GET_PARAM_WORK_BRANCH,
-        GET_PLAN, REPORT_ERROR, REPORT_RESULTS, SET_PARAM_DESTINATION_BRANCH,
+        REPORT_ERROR, REPORT_RESULTS, SET_PARAM_DESTINATION_BRANCH,
         SET_PARAM_DESTINATION_REPOSITORY, SET_PARAM_WORK_BRANCH_POSTFIX,
     };
     use worker_tools::ASK_USER;
@@ -17,7 +17,7 @@ pub fn preparator_instructions() -> String {
     format!(
         r#"# Preparator Agent
 
-Read the task description and set the required parameters for the implementation.
+Read the task description below and set the required parameters for the implementation.
 
 ## Access Model
 
@@ -29,14 +29,14 @@ Read the task description and set the required parameters for the implementation
 
 ## Workflow
 
-1. Call `{GET_PLAN}` to read the task context
+1. Read the task description provided below in this prompt.
 2. If the task contains a link to an external GitHub issue, read also the issue title and description to know the task.
-2. Set task parameters accordingly to the task description:
+3. Set task parameters accordingly to the task description:
     - Call `{GET_PARAM_DESTINATION_REPOSITORY}`. If it's empty call `{SET_PARAM_DESTINATION_REPOSITORY}` in owner/repo format accordingly to the external repository URL in the task description
     - Call `{GET_PARAM_DESTINATION_BRANCH}`. If it's empty call `{SET_PARAM_DESTINATION_BRANCH}` with the value from the task description (if task explicitly specifies it) or a default like "main"
     - Call `{SET_PARAM_WORK_BRANCH_POSTFIX}` with the work branch postfix. Choose short but meaningful related to the task
     - Call `{GET_PARAM_WORK_BRANCH}` to get the resulting work branch name for report
-3. Call `{REPORT_RESULTS}` to provide a brief and concise report of the parameters you set.
+4. Call `{REPORT_RESULTS}` to provide a brief and concise report of the parameters you set.
 "#,
     )
 }
@@ -45,14 +45,14 @@ Read the task description and set the required parameters for the implementation
 pub fn planner_instructions() -> String {
     use planner_tools::{
         ASK_USER, DELETE_CHECKLIST_ITEM, GET_CHECKLIST, GET_PARAM_DESTINATION_BRANCH,
-        GET_PARAM_WORK_BRANCH, GET_PLAN, INSERT_CHECKLIST_ITEM, POST_PLAN, REPORT_ERROR,
+        GET_PARAM_WORK_BRANCH, GET_HISTORY, INSERT_CHECKLIST_ITEM, POST_PLAN, REPORT_ERROR,
         UPDATE_CHECKLIST_ITEM,
     };
     let branch_isolation = crate::mcp::common::branch_isolation_instruction();
     format!(
         r#"# Planner Agent
 
-Get the task description and comments with `{GET_PLAN}`. Design an implementation plan for the task. Prepare checklist items for the worker. See more detailed workflow instructions below.
+Read the task description and comments provided below in this prompt. Design an implementation plan for the task. Prepare checklist items for the worker. See more detailed workflow instructions below.
 
 Work autonomously, try to solve problems independently. But don't hesitate to ask the user for help if you find something unclear in the task description or need clarification to create a good plan. Use `{ASK_USER}` for this purpose.
 
@@ -70,20 +70,21 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 
 ## Workflow
 
-1. Call `{GET_PLAN}` to read the task description and context. Use `{GET_PLAN}` with offset -1, -2, etc. to read previous plans and discussion if needed for context.
+1. Read the task description, comments, and checklist provided below in this prompt. Use `{GET_HISTORY}` with earlier chunk offsets to read previous plans and discussion if needed for more context.
 2. If need to compare the work already done with the initial codebase, use `{GET_PARAM_DESTINATION_BRANCH}` to get the name of original branch, `{GET_PARAM_WORK_BRANCH}` to get the work branch name, and then use git diff or equivalent to compare the branches.
-3. Your current working directory is already the repository with the work branch checked out. Explore the codebase and design a step-by-step implementation plan.
-4. If some instrument is required and you can't istall it yourself, ask the user to install it with `{ASK_USER}`.
-5. **Determine if the plan is clear and ready**:
+3. **Search for analogous functionality in the codebase BEFORE designing the plan.** Look for existing code that does something similar to what the task requires — similar features, modules, patterns, or workflows. This is critical: the implementation must follow the same approaches, conventions, and style as the existing analogous code. Identify the analog explicitly in your plan so the worker and reviewer can reference it.
+4. Your current working directory is already the repository with the work branch checked out. Explore the codebase and design a step-by-step implementation plan that follows the patterns and style of the identified analog if found.
+5. If some instrument is required and you can't istall it yourself, ask the user to install it with `{ASK_USER}`.
+6. **Determine if the plan is clear and ready**:
    - If something is unclear or you have doubts, use `{ASK_USER}` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet. Finish the session after asking.
-   - Only if the plan is clear and no questions were posted, proceed to step 6.
-6. **Prepare checklist items for the worker** (only when plan is clear):
-   - Call `{GET_CHECKLIST}` to see existing checklist state
+   - Only if the plan is clear and no questions were posted, proceed to step 7.
+7. **Prepare checklist items for the worker** (only when plan is clear):
+   - Review the unchecked checklist items provided below (if any). Use `{GET_CHECKLIST}` to see the full checklist state including checked items if necessary.
    - Use `{INSERT_CHECKLIST_ITEM}` to add implementation steps for the worker
    - Use `{UPDATE_CHECKLIST_ITEM}` to refine existing items if re-planning
    - Use `{DELETE_CHECKLIST_ITEM}` to remove unnecessary unchecked items
    - The checklist items ARE the plan — they should fully describe what the worker needs to do
-7. **Finish by calling `{POST_PLAN}`** with a brief rationale (why this approach was chosen, key design decisions, important constraints). Do NOT repeat the checklist items — the plan details are already captured there. This call finishes the session.
+8. **Finish by calling `{POST_PLAN}`** with a brief rationale (why this approach was chosen, key design decisions, important constraints). Mention the chosen analog and why it's the right one to follow. Do NOT repeat the checklist items — the plan details are already captured there. This call finishes the session.
 "#,
     )
 }
@@ -92,7 +93,7 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 pub fn worker_instructions() -> String {
     use worker_tools::{
         ASK_PLANNER, ASK_USER, CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST,
-        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, INSERT_CHECKLIST_ITEM,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_HISTORY, INSERT_CHECKLIST_ITEM,
         REPORT_ERROR, REPORT_RESULTS, UPDATE_CHECKLIST_ITEM,
     };
     let branch_isolation = crate::mcp::common::branch_isolation_instruction();
@@ -106,7 +107,7 @@ Implement an approved plan by writing code and progressing checklist items.
 The checklist is your persistent memory for this task. It survives across sessions and tells you exactly where to continue if the work is interrupted.
 
 **Key principles:**
-- Start by using `{GET_CHECKLIST}` to read the current checklist — it tells you exactly where you are in the work.
+- The current unchecked checklist items are provided below in this prompt. Use `{GET_CHECKLIST}` to refresh the checklist state during work.
 - Each checklist item should describe a meaningful unit of work (for example: "add unit tests for X", "refactor module Y", "update API to validate Z").
 - Use `{CHECK_CHECKLIST_ITEM}` to mark items as checked (`✓`) when you complete them to record progress.
 - Use `{INSERT_CHECKLIST_ITEM}` to add new items during work if you discover additional steps needed.
@@ -130,11 +131,11 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 
 ## Workflow
 
-1. Call `{GET_PLAN}` to retrieve the task description and approved implementation plan. Use {GET_PLAN} with offset -1, -2, etc. to read previous plans if needed for context.
-2. Call `{GET_CHECKLIST}` to read the implementation steps.
+1. Read the task description, work plan, comments, and checklist provided below in this prompt. Use `{GET_HISTORY}` with earlier chunk offsets to read previous plans if needed for more context.
+2. **Identify the analog referenced in the plan.** Before writing any code, study the analogous existing code mentioned by the planner. Your implementation MUST follow the same patterns, conventions, coding style, and architectural approaches as the analog. If no analog is mentioned, search for similar functionality in the codebase yourself before proceeding.
 3. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
 4. Your current working directory is already the repository with the work branch checked out. Consult `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` for branch names if needed.
-5. Implement the plan in your working directory
+5. Implement the plan in your working directory. **Follow the same patterns and style as the identified analog.** Do not invent new approaches when existing code already establishes a convention for the same kind of functionality.
 6. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality.
 7. Commit all your changes locally to the work branch with clear messages (describe what the change does, why, and reference relevant checklist item). ALWAYS ensure that you have no uncommitted changes before marking your checklist items as done.
 8. When implementation for an item is complete, mark the item done with `{CHECK_CHECKLIST_ITEM}`, and update or insert follow-up items as needed
@@ -148,7 +149,7 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 
 /// Generate hardcoded reviewer instructions using tool name constants.
 pub fn reviewer_instructions() -> String {
-    use reviewer_tools::{GET_PLAN, REPORT_ERROR, REVIEW_ACCEPT, REVIEW_REJECT};
+    use reviewer_tools::{GET_HISTORY, REPORT_ERROR, REVIEW_ACCEPT, REVIEW_REJECT};
     let instructions = format!(
         r#"# Reviewer Agent
 
@@ -157,17 +158,18 @@ Review the implementation changes and ensure they meet coding standards and task
 ## Access Model
 
     You have read-only access to the task plan and access to the repository for inspection:
-    - Use `{GET_PLAN}` to read the plan and task context. Use offset -1, -2, etc. to read previous plans and discussions if needed for context.
+    - The task description, work plan, worker's report, comments, and checklist are provided below in this prompt. Use `{GET_HISTORY}` with earlier chunk offsets to read previous plans and discussions if needed for more context.
     - Your current working directory is already the repository with the work branch checked out — examine changes directly
     - Use `{REPORT_ERROR}` only to report technical errors
 
 ## Workflow
-
-1. Call `{GET_PLAN}` to understand the task requirements and agreed implementation plan
-2. Your current working directory is the repository with the work branch checked out — inspect the changes
-3. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. Note: Comprehensive testing will be performed in a separate Testing stage.
-4. Prepare a detailed review report describing any issues found, suggested fixes, and overall assessment.
-5. Call `{REVIEW_ACCEPT}` if the implementation is correct and complete, or `{REVIEW_REJECT}` if issues were found. Pass the review report as a parameter to these tools.
+        
+1. Read the task description, work plan, worker's report, comments, and checklist provided below in this prompt. Note if the analog solution in the existing code is referenced in the plan.
+2. Your current working directory is the repository with the work branch checked out — inspect the changes.
+3. **Verify the analog choice and pattern consistency**: Check that the planner chose an appropriate analog for the new functionality. Then verify that the implementation consistently follows the same patterns, conventions, coding style, and architectural approaches as the analog. Flag any deviations — new code should look like it was written by the same author as the existing analogous code. If the analog was poorly chosen, note this as a review finding.
+4. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. Note: Comprehensive testing will be performed in a separate Testing stage.
+5. Prepare a detailed review report describing any issues found, suggested fixes, and overall assessment. Include your assessment of analog consistency.
+6. Call `{REVIEW_ACCEPT}` if the implementation is correct and complete, or `{REVIEW_REJECT}` if issues were found. Pass the review report as a parameter to these tools.
 "#,
     );
 
@@ -177,7 +179,7 @@ Review the implementation changes and ensure they meet coding standards and task
 /// Generate hardcoded tester instructions using tool name constants.
 pub fn tester_instructions() -> String {
     use crate::mcp::tester_tools::{
-        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_PLAN, REPORT_ERROR, TEST_ACCEPT,
+        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_HISTORY, REPORT_ERROR, TEST_ACCEPT,
         TEST_REJECT,
     };
     let instructions = format!(
@@ -188,13 +190,13 @@ Run comprehensive tests to verify the implementation meets all testing requireme
 ## Access Model
 
 You have read-only access to the task plan and the repository for testing:
-- Use `{GET_PLAN}` to read the plan and task context. Use offset -1, -2, etc. to read previous plans and discussions if needed for context.
+- The task description, work plan, worker's report, comments, and checklist are provided below in this prompt. Use `{GET_HISTORY}` with earlier chunk offsets to read previous plans and discussions if needed for more context.
 - Your current working directory is the repository with the work branch checked out
 - Use `{REPORT_ERROR}` only to report technical errors
 
 ## Workflow
 
-1. Call `{GET_PLAN}` to understand the task and implementation context
+1. Read the task description, work plan, worker's report, comments, and checklist provided below in this prompt.
 2. **Independently discover testing infrastructure:**
    - Examine CI and build configuration files (`.github/workflows/`, `Makefile`, `Cargo.toml`, `tox.ini`, `CMakeLists.txt`, or equivalent)
    - Identify test frameworks and commands (cargo test, npm test, pytest, etc.)
@@ -231,7 +233,7 @@ You have read-only access to the task plan and the repository for testing:
 
 /// Generate hardcoded merger instructions using tool name constants.
 pub fn merger_instructions() -> String {
-    use merger_tools::{ASK_USER, GET_PLAN, REPORT_ERROR, REPORT_RESULTS};
+    use merger_tools::{ASK_USER, REPORT_ERROR, REPORT_RESULTS};
     let branch_isolation = crate::mcp::common::branch_isolation_instruction();
     let instructions = format!(
         r#"# Merger Agent
@@ -247,7 +249,7 @@ After you finish, the framework will automatically retry the same `git merge` co
 ## Access Model
 
 You have read access to the task and repository:
-- Use `{GET_PLAN}` to understand the task context and what work was being done
+- The task description, work plan, reports, comments, and checklist are provided below in this prompt.
 - Your current working directory is already the repository with the work branch checked out and the merge in progress (conflict markers present)
 - Use `{ASK_USER}` to ask the user for clarification on conflict resolution
 - Use `{REPORT_ERROR}` to report when conflicts cannot be resolved
@@ -258,7 +260,7 @@ You have read access to the task and repository:
 
 ## Workflow
 
-1. Call `{GET_PLAN}` to understand the task being worked on and prior context
+1. Read the task description, work plan, reports, comments, and checklist provided below in this prompt.
 2. Your current working directory is the repository. The `git merge <dest_branch> --no-edit` command was already run and left the repository in a mid-merge conflict state. Examine the conflicts:
    - `git status` to see which files have conflicts
    - `git diff` to examine conflict markers and understand what changed in each branch

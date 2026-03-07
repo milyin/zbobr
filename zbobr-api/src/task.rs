@@ -69,9 +69,9 @@ pub struct ChecklistItem {
 /// - `Request`  — posted for user-originated messages and for questions raised by `ask_user` (and
 ///   similar ASK_xxx MCP tools) that pause the task waiting for a human response.
 /// - `Reject`   — posted by reviewer/tester when rejecting work; acts as a context chunk boundary
-///   and contains the rejection message. Visible in GET_PLAN as the first comment of a new chunk.
+///   and contains the rejection message. Visible in GET_HISTORY as the first comment of a new chunk.
 /// - `Done`     — posted by the dispatcher when a task is accepted and marked complete; acts as a
-///   context chunk boundary but is excluded from GET_PLAN results.
+///   context chunk boundary but is excluded from GET_HISTORY results.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
@@ -89,11 +89,11 @@ pub enum CommentType {
     #[serde(rename = "request")]
     Request,
     /// Rejection posted by a reviewer or tester; also serves as a context chunk boundary.
-    /// Contains the rejection message and is included in GET_PLAN as the first comment of a chunk.
+    /// Contains the rejection message and is included in GET_HISTORY as the first comment of a chunk.
     #[serde(rename = "reject")]
     Reject,
     /// Completion marker posted by the dispatcher after a task is accepted and marked done.
-    /// Serves as a context chunk boundary; excluded from GET_PLAN results.
+    /// Serves as a context chunk boundary; excluded from GET_HISTORY results.
     #[serde(rename = "done")]
     Done,
 }
@@ -126,7 +126,7 @@ impl CommentType {
     }
 
     /// Returns `true` for comment types that act as context chunk boundaries
-    /// (`Reject` and `Done`). Used by GET_PLAN to split the comment history into chunks.
+    /// (`Reject` and `Done`). Used by GET_HISTORY to split the comment history into chunks.
     pub fn is_cut(&self) -> bool {
         matches!(self, CommentType::Reject | CommentType::Done)
     }
@@ -165,21 +165,32 @@ pub struct Comment {
     pub text: String,
 }
 
+/// Result of extracting a history chunk, including navigation metadata.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct HistoryChunk {
+    /// Index of the returned chunk (0-based, 0 = oldest).
+    pub current_chunk: usize,
+    /// Index of the last available chunk.
+    pub last_chunk: usize,
+    /// Comments in this chunk
+    pub comments: Vec<Comment>,
+}
+
 /// Prepend a task description as a synthetic `Request` comment, then extract
 /// the chunk at `offset` from the comment history.
 ///
 /// Chunks are delimited by "cut" comments (`Reject` / `Done`).
-/// `offset >= 0` selects the latest chunk; negative offsets walk backwards
-/// (`-1` = second-to-last, etc.).
+/// Chunks are numbered 0 to N where 0 is the oldest and N is the newest.
+/// When `offset` is `None`, the last (newest) chunk is returned.
 ///
 /// Non-actionable comments (`Error` and `Done`) are filtered out.
-/// Returns an empty `Vec` when the chunk has no actionable messages.
+/// Returns an empty `comments` vec when the chunk has no actionable messages.
 /// Returns `Err` only for hard failures (offset out of range).
-pub fn extract_plan_chunk(
+pub fn extract_history_chunk(
     mut comments: Vec<Comment>,
     description: &str,
-    offset: i32,
-) -> anyhow::Result<Vec<Comment>> {
+    offset: Option<usize>,
+) -> anyhow::Result<HistoryChunk> {
     // Prepend description as synthetic first comment.
     if !description.is_empty() {
         comments.insert(
@@ -197,7 +208,11 @@ pub fn extract_plan_chunk(
     }
 
     if comments.is_empty() {
-        return Ok(Vec::new());
+        return Ok(HistoryChunk {
+            current_chunk: 0,
+            last_chunk: 0,
+            comments: Vec::new(),
+        });
     }
 
     // Find cut-boundary indices.
@@ -209,19 +224,21 @@ pub fn extract_plan_chunk(
         .collect();
 
     let num_chunks = cut_indices.len() + 1;
+    let last_chunk = num_chunks - 1;
 
-    // Resolve target chunk.
-    let target_chunk = if offset >= 0 {
-        num_chunks - 1
-    } else {
-        let back = (-offset) as usize;
-        anyhow::ensure!(
-            back < num_chunks,
-            "offset {} out of range: only {} chunk(s) available",
-            offset,
-            num_chunks
-        );
-        num_chunks - 1 - back
+    // Resolve target chunk: None or out-of-range defaults to last.
+    let target_chunk = match offset {
+        None => last_chunk,
+        Some(idx) => {
+            anyhow::ensure!(
+                idx < num_chunks,
+                "offset {} out of range: only {} chunk(s) available (0..{})",
+                idx,
+                num_chunks,
+                last_chunk
+            );
+            idx
+        }
     };
 
     // Extract chunk boundaries.
@@ -229,18 +246,24 @@ pub fn extract_plan_chunk(
         (0, comments.len())
     } else if target_chunk == 0 {
         (0, cut_indices[0])
-    } else if target_chunk == num_chunks - 1 {
+    } else if target_chunk == last_chunk {
         (cut_indices[target_chunk - 1], comments.len())
     } else {
         (cut_indices[target_chunk - 1], cut_indices[target_chunk])
     };
 
     // Filter out Error and Done comments.
-    Ok(comments[start_idx..end_idx]
+    let chunk_comments = comments[start_idx..end_idx]
         .iter()
         .filter(|c| c.comment_type != CommentType::Error && c.comment_type != CommentType::Done)
         .cloned()
-        .collect())
+        .collect();
+
+    Ok(HistoryChunk {
+        current_chunk: target_chunk,
+        last_chunk,
+        comments: chunk_comments,
+    })
 }
 
 /// Workflow stage (maps to GitHub milestones internally).

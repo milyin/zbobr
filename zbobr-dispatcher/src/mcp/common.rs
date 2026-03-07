@@ -140,11 +140,11 @@ pub struct SetWorkBranchParam {
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct GetPlanParam {
+pub struct GetHistoryParam {
     #[schemars(
-        description = "Plan history offset: 0 or omitted = latest plan, -1 = previous plan, -2 = plan before that, etc."
+        description = "History chunk index (0 = oldest, omitted = latest). Response includes current_chunk and last_chunk for navigation."
     )]
-    pub offset: Option<i32>,
+    pub offset: Option<usize>,
 }
 
 macro_rules! mcp_tools {
@@ -158,7 +158,7 @@ macro_rules! mcp_tools {
 
 mcp_tools! {
     preparator_tools,
-    GET_PLAN = "get_plan",
+    GET_HISTORY = "get_history",
     REPORT_ERROR = "report_error",
     SET_PARAM_DESTINATION_REPOSITORY = "set_param_destination_repository",
     SET_PARAM_DESTINATION_BRANCH = "set_param_destination_branch",
@@ -171,7 +171,7 @@ mcp_tools! {
 
 mcp_tools! {
     planner_tools,
-    GET_PLAN = "get_plan",
+    GET_HISTORY = "get_history",
     POST_PLAN = "post_plan",
     GET_CHECKLIST = "get_checklist",
     INSERT_CHECKLIST_ITEM = "insert_checklist_item",
@@ -185,7 +185,7 @@ mcp_tools! {
 
 mcp_tools! {
     worker_tools,
-    GET_PLAN = "get_plan",
+    GET_HISTORY = "get_history",
     REPORT_ERROR = "report_error",
     ASK_USER = "ask_user",
     ASK_PLANNER = "ask_planner",
@@ -201,7 +201,7 @@ mcp_tools! {
 
 mcp_tools! {
     reviewer_tools,
-    GET_PLAN = "get_plan",
+    GET_HISTORY = "get_history",
     REPORT_ERROR = "report_error",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
@@ -211,7 +211,7 @@ mcp_tools! {
 
 mcp_tools! {
     tester_tools,
-    GET_PLAN = "get_plan",
+    GET_HISTORY = "get_history",
     REPORT_ERROR = "report_error",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
     GET_PARAM_WORK_BRANCH = "get_param_work_branch",
@@ -221,7 +221,7 @@ mcp_tools! {
 
 mcp_tools! {
     merger_tools,
-    GET_PLAN = "get_plan",
+    GET_HISTORY = "get_history",
     REPORT_ERROR = "report_error",
     ASK_USER = "ask_user",
     GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",

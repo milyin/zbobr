@@ -800,7 +800,7 @@ async fn run_role_command(
 ) -> anyhow::Result<()> {
     let session = CliRoleRunner::new(zbobr, task, role, prompts, executor_config);
     if show_prompt {
-        println!("{}", session.prompt()?);
+        println!("{}", session.prompt().await?);
     } else {
         session.run().await?;
     }
@@ -808,7 +808,7 @@ async fn run_role_command(
 }
 
 // ---------------------------------------------------------------------------
-// CliRoleRunner — CLI-side role execution (analogous to role_session.rs in zbobr)
+// CliRoleRunner — CLI-side role execution
 // ---------------------------------------------------------------------------
 
 struct CliRoleRunner<'a> {
@@ -836,8 +836,8 @@ impl<'a> CliRoleRunner<'a> {
         }
     }
 
-    fn prompt(&self) -> anyhow::Result<String> {
-        self.prompts.build_prompt(self.role)
+    async fn prompt(&self) -> anyhow::Result<String> {
+        self.prompts.build_prompt(self.role, self.task_id, self.zbobr).await
     }
 
     async fn run(&self) -> anyhow::Result<()> {
@@ -894,18 +894,18 @@ impl<'a> CliRoleRunner<'a> {
             }
         }
 
-        // Pre-flight check: verify that get_plan would return meaningful
+        // Pre-flight check: verify that get_history would return meaningful
         // content.  If the latest chunk contains no actionable messages the
         // agent session would do useless work, so bail early.
         {
-            let chunk = self.zbobr.get_plan_chunk(self.task_id, 0).await
-                .context("Pre-flight get_plan check failed")?;
+            let history = self.zbobr.get_history(self.task_id, None).await
+                .context("Pre-flight get_history check failed")?;
             tracing::info!(
-                "Task #{} pre-flight: get_plan returned {} comment(s)",
+                "Task #{} pre-flight: get_history returned {} comment(s)",
                 self.task_id,
-                chunk.len()
+                history.comments.len()
             );
-            if chunk.is_empty() {
+            if history.comments.is_empty() {
                 anyhow::bail!(
                     "Task #{} has no actionable messages in the latest chunk — nothing for the agent to do",
                     self.task_id
@@ -934,7 +934,7 @@ impl<'a> CliRoleRunner<'a> {
             task_id = self.task_id,
         );
 
-        let prompt_text = self.prompt()?;
+        let prompt_text = self.prompt().await?;
         // apply the resolved model to the executor configuration; dispatcher
         // configuration takes precedence over whatever the executor may have
         // been initialized with.

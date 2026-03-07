@@ -56,19 +56,10 @@ impl RoleSession {
         Ok(self.get_task().await?.description)
     }
 
-    /// Get the current task plan (latest `PLAN` comment).
-    ///
-    /// Since plans are now stored as comments, this walks the task's comment
-    /// history from newest to oldest and returns the first `Plan`-typed entry.
-    /// Returns an empty string if no plan comment exists.
-    pub async fn get_plan(&self) -> anyhow::Result<String> {
-        let comments = self.get_comments().await?;
-        for c in comments.iter().rev() {
-            if c.comment_type == CommentType::Plan {
-                return Ok(c.text.clone());
-            }
-        }
-        Ok(String::new())
+    /// Get a history chunk at the given offset.
+    /// `offset` is 0-based (0 = oldest chunk); `None` returns the last chunk.
+    pub async fn get_history(&self, offset: Option<usize>) -> anyhow::Result<zbobr_api::HistoryChunk> {
+        self.zbobr.get_history(self.task_id, offset).await
     }
 
     /// Get the current task checklist.
@@ -110,11 +101,6 @@ impl RoleSession {
     /// types: error, report, request, plan, etc.).
     pub async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
         self.zbobr.get_task_comments(self.task_id).await
-    }
-
-    /// Extract a plan chunk at the given offset (delegates to the dispatcher).
-    pub async fn get_plan_chunk(&self, offset: i32) -> anyhow::Result<Vec<Comment>> {
-        self.zbobr.get_plan_chunk(self.task_id, offset).await
     }
 
     pub async fn post_comment(

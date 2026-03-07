@@ -6,7 +6,7 @@ use crate::{
 
 // Helper functions for logging MCP responses
 
-/// Log a comments response (typically from get_plan). Parses JSON and logs each comment.
+/// Log a comments response (typically from get_history). Parses JSON and logs each comment.
 fn log_mcp_comments_response(role_name: &str, task_id: u64, response: &str) {
     // Log exact JSON in debug level
     tracing::debug!(
@@ -17,9 +17,17 @@ fn log_mcp_comments_response(role_name: &str, task_id: u64, response: &str) {
     );
 
     // Log info level with parsed comments
-    if response.starts_with('[') {
-        if let Ok(comments) = serde_json::from_str::<Vec<zbobr_api::Comment>>(response) {
-            for comment in comments {
+    if response.starts_with('{') {
+        if let Ok(chunk) = serde_json::from_str::<zbobr_api::HistoryChunk>(response) {
+            tracing::info!(
+                "[{}#{}] history chunk {}/{} ({} comment(s))",
+                role_name,
+                task_id,
+                chunk.current_chunk,
+                chunk.last_chunk,
+                chunk.comments.len()
+            );
+            for comment in chunk.comments {
                 let stripped_text = comment.text.lines().next().unwrap_or("").trim();
                 let display_text = if stripped_text.len() > 80 {
                     format!("{}...", &stripped_text[..80])
@@ -35,12 +43,12 @@ fn log_mcp_comments_response(role_name: &str, task_id: u64, response: &str) {
                 );
             }
         } else {
-            tracing::info!("[{}#{}] get_plan response (failed to parse): {}", role_name, task_id, response);
+            tracing::info!("[{}#{}] get_history response (failed to parse): {}", role_name, task_id, response);
         }
     } else if response.starts_with("Error") {
-        tracing::info!("[{}#{}] get_plan error: {}", role_name, task_id, response);
+        tracing::info!("[{}#{}] get_history error: {}", role_name, task_id, response);
     } else {
-        tracing::info!("[{}#{}] get_plan response: {}", role_name, task_id, response);
+        tracing::info!("[{}#{}] get_history response: {}", role_name, task_id, response);
     }
 }
 
@@ -134,33 +142,35 @@ pub trait CommonMcpImpl: Send + Sync {
         }
     }
 
-    async fn get_plan_impl(&self, offset: i32) -> String {
+    async fn get_history_impl(&self, offset: Option<usize>) -> String {
         tracing::info!(
-            "[{}#{}] get_plan offset={}",
+            "[{}#{}] get_history offset={:?}",
             self.role_name(),
             self.session().task_id(),
             offset
         );
 
-        match self.session().get_plan_chunk(offset).await {
-            Ok(comments) => {
-                if comments.is_empty() {
+        match self.session().get_history(offset).await {
+            Ok(chunk) => {
+                if chunk.comments.is_empty() {
                     tracing::warn!(
-                        "[{}#{}] get_plan returned 0 comment(s) for offset={}",
+                        "[{}#{}] get_history returned 0 comment(s) for offset={:?}",
                         self.role_name(),
                         self.session().task_id(),
                         offset
                     );
                 } else {
                     tracing::info!(
-                        "[{}#{}] get_plan returned {} comment(s) for offset={}",
+                        "[{}#{}] get_history returned {} comment(s) for offset={:?} (chunk {}/{})",
                         self.role_name(),
                         self.session().task_id(),
-                        comments.len(),
-                        offset
+                        chunk.comments.len(),
+                        offset,
+                        chunk.current_chunk,
+                        chunk.last_chunk
                     );
                 }
-                let response = match serde_json::to_string_pretty(&comments) {
+                let response = match serde_json::to_string_pretty(&chunk) {
                     Ok(json) => json,
                     Err(e) => format!("Error serializing: {e}"),
                 };
@@ -169,7 +179,7 @@ pub trait CommonMcpImpl: Send + Sync {
             }
             Err(e) => {
                 let response = format!("Error: {e}");
-                log_mcp_string_response(self.role_name(), self.session().task_id(), "get_plan", &response);
+                log_mcp_string_response(self.role_name(), self.session().task_id(), "get_history", &response);
                 response
             }
         }
