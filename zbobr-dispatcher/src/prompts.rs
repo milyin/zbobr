@@ -112,8 +112,19 @@ pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::R
     Ok(combined)
 }
 
-/// Build full prompt: role instructions + task title + user context + auto-generated API docs.
-pub fn build_full_prompt(user_context: &str, role: Role, task: &Task) -> String {
+/// Build full prompt with sections in order:
+/// 1. Role description (hardcoded instructions)
+/// 2. MCP API docs
+/// 3. Custom prompts (user context from prompt files)
+/// 4. Task title
+/// 5. Recent task history (latest chunk from get_history)
+/// 6. Unchecked checklist items with ids
+pub fn build_full_prompt(
+    user_context: &str,
+    role: Role,
+    task: &Task,
+    history_json: &str,
+) -> String {
     let task_title = &task.title;
     let hardcoded = match role {
         Role::Preparator => crate::preparator_instructions(),
@@ -135,15 +146,37 @@ pub fn build_full_prompt(user_context: &str, role: Role, task: &Task) -> String 
 
     let mut sections = vec![hardcoded];
 
-    if !task_title.is_empty() {
-        sections.push(format!("Current task: {task_title}"));
-    }
+    // MCP API docs
+    sections.push(api_docs);
 
+    // Custom prompts from prompt files
     if !user_context.is_empty() {
         sections.push(user_context.to_owned());
     }
 
-    sections.push(api_docs);
+    // Task title
+    if !task_title.is_empty() {
+        sections.push(format!("# Current task: {task_title}"));
+    }
+
+    // Recent task history
+    if !history_json.is_empty() {
+        sections.push(format!("# Recent task history\n\n{history_json}"));
+    }
+
+    // Unchecked checklist items with ids
+    let unchecked: Vec<_> = task
+        .checklist
+        .iter()
+        .filter(|item| !item.checked)
+        .collect();
+    if !unchecked.is_empty() {
+        let mut checklist_text = String::from("# Unchecked checklist items\n");
+        for item in &unchecked {
+            checklist_text.push_str(&format!("\n- [ ] [id: {}] {}", item.id, item.text));
+        }
+        sections.push(checklist_text);
+    }
 
     sections.join("\n\n---\n\n")
 }
@@ -221,7 +254,12 @@ fn file_exists(path: &PathBuf, base_path: Option<&PathBuf>) -> bool {
 
 impl Prompts {
     /// Build the full prompt for the given role.
-    pub fn build_prompt(&self, role: Role, task: &Task) -> anyhow::Result<String> {
+    pub fn build_prompt(
+        &self,
+        role: Role,
+        task: &Task,
+        history_json: &str,
+    ) -> anyhow::Result<String> {
         let base_prompt = match role {
             Role::Preparator => load_prompts(&self.preparator, self.base_path.as_ref())?,
             Role::Planner => load_prompts(&self.planner, self.base_path.as_ref())?,
@@ -230,7 +268,7 @@ impl Prompts {
             Role::Tester => load_prompts(&self.tester, self.base_path.as_ref())?,
             Role::Merger => load_prompts(&self.merger, self.base_path.as_ref())?,
         };
-        Ok(build_full_prompt(&base_prompt, role, task))
+        Ok(build_full_prompt(&base_prompt, role, task, history_json))
     }
 }
 
@@ -404,14 +442,14 @@ mod tests {
 
     #[test]
     fn build_full_prompt_includes_user_context() {
-        let prompt = build_full_prompt("my custom instructions", Role::Worker, &dummy_task(""));
+        let prompt = build_full_prompt("my custom instructions", Role::Worker, &dummy_task(""), "");
         assert!(prompt.contains("my custom instructions"));
     }
 
     #[test]
     fn build_full_prompt_empty_context_omits_user_section() {
-        let prompt_empty = build_full_prompt("", Role::Worker, &dummy_task(""));
-        let prompt_with = build_full_prompt("UNIQUE_MARKER", Role::Worker, &dummy_task(""));
+        let prompt_empty = build_full_prompt("", Role::Worker, &dummy_task(""), "");
+        let prompt_with = build_full_prompt("UNIQUE_MARKER", Role::Worker, &dummy_task(""), "");
         assert!(!prompt_empty.contains("UNIQUE_MARKER"));
         // With context is longer (has the extra context section)
         assert!(prompt_with.len() > prompt_empty.len());
@@ -432,7 +470,7 @@ mod tests {
             tester: vec![],
             merger: vec![],
         };
-        let result = prompts.build_prompt(Role::Worker, &dummy_task("")).unwrap();
+        let result = prompts.build_prompt(Role::Worker, &dummy_task(""), "").unwrap();
         assert!(result.contains("do the work carefully"));
     }
 
@@ -447,9 +485,9 @@ mod tests {
             tester: vec![],
             merger: vec![],
         };
-        let result = prompts.build_prompt(Role::Worker, &dummy_task("")).unwrap();
+        let result = prompts.build_prompt(Role::Worker, &dummy_task(""), "").unwrap();
         // Result should equal build_full_prompt with empty context
-        let expected = build_full_prompt("", Role::Worker, &dummy_task(""));
+        let expected = build_full_prompt("", Role::Worker, &dummy_task(""), "");
         assert_eq!(result, expected);
     }
 
@@ -466,7 +504,7 @@ mod tests {
             tester: vec![],
             merger: vec![],
         };
-        let result = prompts.build_prompt(Role::Reviewer, &dummy_task("")).unwrap();
+        let result = prompts.build_prompt(Role::Reviewer, &dummy_task(""), "").unwrap();
         assert!(result.contains("review carefully"));
     }
 
