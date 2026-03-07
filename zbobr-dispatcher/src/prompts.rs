@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crate::{
     config::{ZbobrDispatcherArgs, ZbobrDispatcherConfig},
     task::Role,
+    ZbobrDispatcherDyn,
 };
 
 use zbobr_api::Task;
@@ -119,7 +120,20 @@ pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::R
 /// 4. Task title
 /// 5. Recent task history (latest chunk from get_history)
 /// 6. Unchecked checklist items with ids
-pub fn build_full_prompt(
+pub async fn build_full_prompt(
+    user_context: &str,
+    role: Role,
+    task_id: u64,
+    dispatcher: &ZbobrDispatcherDyn,
+) -> anyhow::Result<String> {
+    let task = dispatcher.get_task(task_id).await?;
+    let history = dispatcher.get_history(task_id, None).await?;
+    let history_json = serde_json::to_string_pretty(&history.comments).unwrap_or_default();
+    Ok(assemble_prompt(user_context, role, &task, &history_json))
+}
+
+/// Pure synchronous prompt assembly (used by tests and `build_full_prompt`).
+fn assemble_prompt(
     user_context: &str,
     role: Role,
     task: &Task,
@@ -254,11 +268,11 @@ fn file_exists(path: &PathBuf, base_path: Option<&PathBuf>) -> bool {
 
 impl Prompts {
     /// Build the full prompt for the given role.
-    pub fn build_prompt(
+    pub async fn build_prompt(
         &self,
         role: Role,
-        task: &Task,
-        history_json: &str,
+        task_id: u64,
+        dispatcher: &ZbobrDispatcherDyn,
     ) -> anyhow::Result<String> {
         let base_prompt = match role {
             Role::Preparator => load_prompts(&self.preparator, self.base_path.as_ref())?,
@@ -268,7 +282,7 @@ impl Prompts {
             Role::Tester => load_prompts(&self.tester, self.base_path.as_ref())?,
             Role::Merger => load_prompts(&self.merger, self.base_path.as_ref())?,
         };
-        Ok(build_full_prompt(&base_prompt, role, task, history_json))
+        build_full_prompt(&base_prompt, role, task_id, dispatcher).await
     }
 }
 
@@ -438,73 +452,52 @@ mod tests {
         assert_eq!(prompts.preparator, vec![PathBuf::from("stage.md")]);
     }
 
-    // --- build_full_prompt ---
+    // --- assemble_prompt ---
 
     #[test]
-    fn build_full_prompt_includes_user_context() {
-        let prompt = build_full_prompt("my custom instructions", Role::Worker, &dummy_task(""), "");
+    fn assemble_prompt_includes_user_context() {
+        let prompt = assemble_prompt("my custom instructions", Role::Worker, &dummy_task(""), "");
         assert!(prompt.contains("my custom instructions"));
     }
 
     #[test]
-    fn build_full_prompt_empty_context_omits_user_section() {
-        let prompt_empty = build_full_prompt("", Role::Worker, &dummy_task(""), "");
-        let prompt_with = build_full_prompt("UNIQUE_MARKER", Role::Worker, &dummy_task(""), "");
+    fn assemble_prompt_empty_context_omits_user_section() {
+        let prompt_empty = assemble_prompt("", Role::Worker, &dummy_task(""), "");
+        let prompt_with = assemble_prompt("UNIQUE_MARKER", Role::Worker, &dummy_task(""), "");
         assert!(!prompt_empty.contains("UNIQUE_MARKER"));
         // With context is longer (has the extra context section)
         assert!(prompt_with.len() > prompt_empty.len());
     }
 
-    // --- Prompts::build_prompt ---
+    // --- load_prompts + assemble_prompt integration ---
 
     #[test]
-    fn prompts_build_prompt_loads_content_from_file() {
+    fn load_prompts_content_appears_in_assembled_prompt() {
         let dir = TempDir::new().unwrap();
         let path = write_file(&dir, "worker.md", "do the work carefully");
-        let prompts = Prompts {
-            base_path: None,
-            preparator: vec![],
-            planner: vec![],
-            worker: vec![path],
-            reviewer: vec![],
-            tester: vec![],
-            merger: vec![],
-        };
-        let result = prompts.build_prompt(Role::Worker, &dummy_task(""), "").unwrap();
+        let loaded = load_prompts(&[path], None).unwrap();
+        let result = assemble_prompt(&loaded, Role::Worker, &dummy_task(""), "");
         assert!(result.contains("do the work carefully"));
     }
 
     #[test]
-    fn prompts_build_prompt_no_custom_content_when_no_files() {
-        let prompts = Prompts {
-            base_path: None,
-            preparator: vec![],
-            planner: vec![],
-            worker: vec![],
-            reviewer: vec![],
-            tester: vec![],
-            merger: vec![],
-        };
-        let result = prompts.build_prompt(Role::Worker, &dummy_task(""), "").unwrap();
-        // Result should equal build_full_prompt with empty context
-        let expected = build_full_prompt("", Role::Worker, &dummy_task(""), "");
+    fn no_prompt_files_gives_empty_context() {
+        let loaded = load_prompts(&[] as &[PathBuf], None).unwrap();
+        let result = assemble_prompt(&loaded, Role::Worker, &dummy_task(""), "");
+        let expected = assemble_prompt("", Role::Worker, &dummy_task(""), "");
         assert_eq!(result, expected);
     }
 
     #[test]
-    fn prompts_build_prompt_uses_base_path_for_relative_files() {
+    fn load_prompts_with_base_path_resolves_relative_files() {
         let dir = TempDir::new().unwrap();
         write_file(&dir, "reviewer.md", "review carefully");
-        let prompts = Prompts {
-            base_path: Some(dir.path().to_path_buf()),
-            preparator: vec![],
-            planner: vec![],
-            worker: vec![],
-            reviewer: vec![PathBuf::from("reviewer.md")],
-            tester: vec![],
-            merger: vec![],
-        };
-        let result = prompts.build_prompt(Role::Reviewer, &dummy_task(""), "").unwrap();
+        let loaded = load_prompts(
+            &[PathBuf::from("reviewer.md")],
+            Some(&dir.path().to_path_buf()),
+        )
+        .unwrap();
+        let result = assemble_prompt(&loaded, Role::Reviewer, &dummy_task(""), "");
         assert!(result.contains("review carefully"));
     }
 

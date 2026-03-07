@@ -800,12 +800,7 @@ async fn run_role_command(
 ) -> anyhow::Result<()> {
     let session = CliRoleRunner::new(zbobr, task, role, prompts, executor_config);
     if show_prompt {
-        let task_obj = zbobr.get_task(task).await?;
-        let history = zbobr.get_history(task, None).await
-            .context("Failed to fetch history for prompt")?;
-        let history_json = serde_json::to_string_pretty(&history.comments)
-            .unwrap_or_default();
-        println!("{}", session.prompt(&task_obj, &history_json)?);
+        println!("{}", session.prompt().await?);
     } else {
         session.run().await?;
     }
@@ -841,8 +836,8 @@ impl<'a> CliRoleRunner<'a> {
         }
     }
 
-    fn prompt(&self, task: &Task, history_json: &str) -> anyhow::Result<String> {
-        self.prompts.build_prompt(self.role, task, history_json)
+    async fn prompt(&self) -> anyhow::Result<String> {
+        self.prompts.build_prompt(self.role, self.task_id, self.zbobr).await
     }
 
     async fn run(&self) -> anyhow::Result<()> {
@@ -939,12 +934,7 @@ impl<'a> CliRoleRunner<'a> {
             task_id = self.task_id,
         );
 
-        let task = self.zbobr.get_task(self.task_id).await?;
-        let history = self.zbobr.get_history(self.task_id, None).await
-            .context("Failed to fetch history for prompt")?;
-        let history_json = serde_json::to_string_pretty(&history.comments)
-            .unwrap_or_default();
-        let prompt_text = self.prompt(&task, &history_json)?;
+        let prompt_text = self.prompt().await?;
         // apply the resolved model to the executor configuration; dispatcher
         // configuration takes precedence over whatever the executor may have
         // been initialized with.
