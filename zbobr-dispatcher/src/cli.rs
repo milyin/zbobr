@@ -9,6 +9,9 @@ use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
 
+// bring in the generic git helpers from utility crate
+use zbobr_utility::{git, git_check, git_output, configure_git_user};
+
 use crate::{
     Comment, CommentType, Signal, Stage, Task, ToolExecutor, ZbobrDispatcherDyn,
     ZbobrExecutorConfig,
@@ -1376,14 +1379,11 @@ async fn try_early_merge(
         .cloned()
         .unwrap_or_else(|| "main".to_string());
 
-    let merge = TokioCommand::new("git")
-        .args(["merge", &dest_branch, "--no-edit"])
-        .current_dir(work_dir)
-        .output()
+    let merged_ok = git_check(work_dir, &["merge", &dest_branch, "--no-edit"])
         .await
         .context("Failed to run git merge for conflict detection")?;
 
-    if !merge.status.success() {
+    if !merged_ok {
         tracing::warn!(
             "Merge conflict detected for task #{task_id} \
              (merging '{dest_branch}' into work branch). \
@@ -1666,38 +1666,23 @@ async fn perform_auto_commit_and_push(
 ) -> anyhow::Result<()> {
     tracing::info!("Checking for uncommitted changes in {}", work_dir.display());
 
-    match TokioCommand::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(work_dir)
-        .output()
-        .await
-    {
-        Ok(status_output) if status_output.status.success() => {
-            let uncommitted = String::from_utf8_lossy(&status_output.stdout)
-                .trim()
-                .to_string();
-            if !uncommitted.is_empty() {
+    match git_output(work_dir, &["status", "--porcelain"]).await {
+        Ok(status) => {
+            if !status.is_empty() {
                 tracing::info!("Found uncommitted changes, auto-committing...");
-                let _ = TokioCommand::new("git")
-                    .args(["add", "."])
-                    .current_dir(work_dir)
-                    .status()
-                    .await;
+                if let Err(e) = git(work_dir, &["add", "."]).await {
+                    tracing::warn!("Failed to stage changes for auto-commit: {e}");
+                }
                 let commit_msg = format!("Auto-commit by {} agent", role.as_str());
-                match TokioCommand::new("git")
-                    .args(["commit", "-m", &commit_msg])
-                    .current_dir(work_dir)
-                    .status()
-                    .await
-                {
-                    Ok(s) if s.success() => tracing::info!("Auto-commit successful"),
-                    _ => tracing::warn!("Auto-commit failed"),
+                match git(work_dir, &["commit", "-m", &commit_msg]).await {
+                    Ok(_) => tracing::info!("Auto-commit successful"),
+                    Err(e) => tracing::warn!("Auto-commit failed: {e}"),
                 }
             } else {
                 tracing::info!("No uncommitted changes found");
             }
         }
-        _ => tracing::warn!("Failed to check git status for auto-commit"),
+        Err(e) => tracing::warn!("Failed to check git status for auto-commit: {e}"),
     }
 
     let role_session = zbobr.task_session(task_id).role_session();
@@ -1729,60 +1714,20 @@ async fn rewrite_commit_authors(
     let git_user_email = &zbobr.config().git_user_email;
 
     // Get absolute path to the git repository
-    let git_root_cmd = TokioCommand::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(work_dir)
-        .output()
-        .await;
-
-    let git_root = match git_root_cmd {
-        Ok(output) => {
-            if output.status.success() {
-                String::from_utf8_lossy(&output.stdout).trim().to_string()
-            } else {
-                return Err(anyhow::anyhow!(
-                    "Failed to determine git repository root: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                ));
-            }
-        }
-        Err(e) => {
-            return Err(anyhow::anyhow!("Error executing git rev-parse: {}", e));
-        }
-    };
-
+    let git_root = git_output(work_dir, &["rev-parse", "--show-toplevel"]).await?;
     let git_root_path = std::path::PathBuf::from(&git_root);
 
     // Get list of commits that will be rewritten
-    let log_cmd = TokioCommand::new("git")
-        .args([
-            "log",
-            &format!("{}..HEAD", dest_branch),
-            "--format=%H %an <%ae>",
-        ])
-        .current_dir(&git_root_path)
-        .output()
-        .await;
+    let log_output = git_output(
+        &git_root_path,
+        &["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"],
+    )
+    .await?;
 
-    let commits_to_rewrite = match log_cmd {
-        Ok(output) => {
-            if output.status.success() {
-                String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .map(|s| s.to_string())
-                    .collect::<Vec<_>>()
-            } else {
-                return Err(anyhow::anyhow!(
-                    "Failed to list commits: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                ));
-            }
-        }
-        Err(e) => {
-            return Err(anyhow::anyhow!("Error executing git log: {}", e));
-        }
-    };
-
+    let commits_to_rewrite = log_output
+        .lines()
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>();
     println!("Commits to be rewritten ({}):", commits_to_rewrite.len());
     for commit in &commits_to_rewrite {
         println!("  {}", commit);
@@ -1796,58 +1741,34 @@ async fn rewrite_commit_authors(
         return Ok(());
     }
 
-    let config_user = TokioCommand::new("git")
-        .args(["config", "--local", "user.name", git_user_name])
+    // configure git user locally using helper
+    configure_git_user(&git_root_path, git_user_name, git_user_email).await?;
+
+    let rebase_cmd = format!(
+        "git rebase --exec 'git commit --amend --no-edit --reset-author' '{}'",
+        dest_branch
+    );
+    let rebase_output = TokioCommand::new("sh")
+        .arg("-c")
+        .arg(&rebase_cmd)
+        .env("GIT_AUTHOR_NAME", git_user_name)
+        .env("GIT_AUTHOR_EMAIL", git_user_email)
+        .env("GIT_COMMITTER_NAME", git_user_name)
+        .env("GIT_COMMITTER_EMAIL", git_user_email)
         .current_dir(&git_root_path)
         .output()
         .await;
-    let config_email = TokioCommand::new("git")
-        .args(["config", "--local", "user.email", git_user_email])
-        .current_dir(&git_root_path)
-        .output()
-        .await;
-
-    if let (Ok(user_out), Ok(email_out)) = (config_user, config_email) {
-        if !user_out.status.success() || !email_out.status.success() {
-            return Err(anyhow::anyhow!(
-                "Failed to set up git config for author rewriting"
-            ));
-        }
-
-        let rebase_cmd = format!(
-            "git rebase --exec 'git commit --amend --no-edit --reset-author' '{}'",
-            dest_branch
-        );
-        let rebase_output = TokioCommand::new("sh")
-            .arg("-c")
-            .arg(&rebase_cmd)
-            .env("GIT_AUTHOR_NAME", git_user_name)
-            .env("GIT_AUTHOR_EMAIL", git_user_email)
-            .env("GIT_COMMITTER_NAME", git_user_name)
-            .env("GIT_COMMITTER_EMAIL", git_user_email)
-            .current_dir(&git_root_path)
-            .output()
-            .await;
-
         match rebase_output {
             Ok(output) if output.status.success() => {
                 println!("Successfully rewrote commit authors");
 
                 // Show post-rebase log to verify changes
-                let post_log_cmd = TokioCommand::new("git")
-                    .args([
-                        "log",
-                        &format!("{}..HEAD", dest_branch),
-                        "--format=%H %an <%ae>",
-                    ])
-                    .current_dir(&git_root_path)
-                    .output()
-                    .await;
-
-                if let Ok(log_output) = post_log_cmd
-                    && log_output.status.success()
+                if let Ok(updated_commits) = git_output(
+                    &git_root_path,
+                    &["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"],
+                )
+                .await
                 {
-                    let updated_commits = String::from_utf8_lossy(&log_output.stdout);
                     println!("Updated commits:");
                     for commit in updated_commits.lines() {
                         println!("  {}", commit);
@@ -1866,22 +1787,14 @@ async fn rewrite_commit_authors(
             Ok(output) => {
                 // Abort the failed rebase so the workspace isn't left in a
                 // broken state that blocks subsequent operations.
-                let _ = TokioCommand::new("git")
-                    .args(["rebase", "--abort"])
-                    .current_dir(&git_root_path)
-                    .status()
-                    .await;
+                let _ = git(&git_root_path, &["rebase", "--abort"]).await;
                 return Err(anyhow::anyhow!(
                     "Failed to rewrite commit authors: {}",
                     String::from_utf8_lossy(&output.stderr)
                 ));
             }
             Err(e) => {
-                let _ = TokioCommand::new("git")
-                    .args(["rebase", "--abort"])
-                    .current_dir(&git_root_path)
-                    .status()
-                    .await;
+                let _ = git(&git_root_path, &["rebase", "--abort"]).await;
                 return Err(anyhow::anyhow!(
                     "Error running git rebase for author rewriting: {}",
                     e
