@@ -49,18 +49,11 @@ impl ZbobrRepoBackendFs {
 
         if !bare_dir.exists() {
             tracing::info!("Creating bare clone at {}", bare_dir.display());
-            let status = tokio::process::Command::new("git")
-                .args([
-                    "clone",
-                    "--bare",
-                    remote_repo,
-                    bare_dir.to_str().unwrap(),
-                ])
-                .status()
-                .await?;
-            if !status.success() {
-                anyhow::bail!("Failed to create bare clone from {}", remote_repo);
-            }
+            git(
+                &self.config.repos_dir,
+                &["clone", "--bare", remote_repo, bare_dir.to_str().unwrap()],
+            )
+            .await?;
             // Configure fetch refspec so worktrees get proper origin/* refs
             git(
                 bare_dir,
