@@ -411,11 +411,6 @@ pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
         .as_deref()
         .map(|r| format!("https://github.com/{r}"))
         .unwrap_or_else(|| repo_path_str.clone());
-    let repo_name = dest_repo
-        .rsplit('/')
-        .next()
-        .unwrap_or(&dest_repo)
-        .to_string();
 
     let task_id = env
         .create_task(
