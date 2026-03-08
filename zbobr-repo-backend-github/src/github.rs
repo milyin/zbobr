@@ -956,3 +956,34 @@ impl RepoBackend for ZbobrRepoBackendGithub {
         )
     }
 }
+
+// A minimal WorktreeBackend implementation so that the dispatcher can still be
+// constructed with a GitHub repo backend during integration testing.  The
+// methods here are effectively no-ops or errors; GitHub backend does not support
+// the local worktree workflow.
+
+#[async_trait]
+impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
+    async fn update_worktree(
+        &self,
+        _remote_repo: &str,
+        _base_branch: &str,
+        _work_branch: &str,
+        _workspace_path: &std::path::Path,
+    ) -> anyhow::Result<bool> {
+        anyhow::bail!("Worktree operations are not supported by GitHub backend")
+    }
+
+    async fn update_pr(&self, _work_branch: &str) -> anyhow::Result<String> {
+        Ok("".to_string())
+    }
+
+    async fn validate_connectivity(&self) -> anyhow::Result<()> {
+        // we'll assume existing octocrab client configuration means connectivity
+        Ok(())
+    }
+
+    fn debug_state(&self) -> String {
+        "GitHub backend (no worktree)".to_string()
+    }
+}

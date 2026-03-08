@@ -9,7 +9,7 @@ pub mod setup;
 pub mod task;
 pub mod tool_executor;
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 pub use cli::{
     Command, ConfigFileArg, GlobalArgs, TaskSubcommand, parse_cli, print_task,

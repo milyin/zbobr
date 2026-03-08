@@ -10,7 +10,7 @@
 // ///
 // /// Requires `zbobr_github_test.toml` at the workspace root with both
 // /// `[tasks.github]` and `[repo.github]` sections.
-// mod mcp_integration;
+mod mcp_integration;
 
 use std::sync::Arc;
 
@@ -26,7 +26,7 @@ static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 static CONFIG: OnceCell<(String, String, String, String)> = OnceCell::const_new();
 
 async fn load_credentials() -> (String, String, String, String) {
-    CONFIG
+    let creds: &(String, String, String, String) = CONFIG
         .get_or_init(|| async {
             let cfg = GitHubTestConfig::load()
                 .expect("zbobr_github_test.toml not found; required for GitHub/GitHub tests");
@@ -43,8 +43,8 @@ async fn load_credentials() -> (String, String, String, String) {
                 repo.github.github_token,
             )
         })
-        .await
-        .clone()
+        .await;
+    creds.clone()
 }
 
 async fn get_env() -> Arc<IntegrationTestEnv> {
