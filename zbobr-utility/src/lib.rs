@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 
 pub mod macros;
 pub use macros::config_struct;
@@ -28,20 +28,6 @@ pub fn resolve_path(path: PathBuf, base: &Path) -> PathBuf {
     } else {
         path
     }
-}
-
-// Replace characters that are unsafe or invalid in filenames with '_'.
-// Allows ASCII alphanumerics, '-', '_', and '.'.
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }
 
 /// Run a git command in `dir`, returning an error with context on failure.
@@ -103,81 +89,19 @@ pub async fn configure_git_user(
     Ok(())
 }
 
-/// Create a placeholder file in a branch to ensure it has at least one commit.
+/// Create an empty placeholder commit in a branch to ensure it has at least one commit
+/// ahead of the base branch.
 ///
-/// Behavior mirrors the old implementation in `zbobr-dispatcher`:
-/// - Creates `.zbobr/{sanitized_branch}` file
-/// - Stages it with `git add` and commits it with `git commit`
-///
-/// Errors include helpful context for diagnostics.
+/// Uses `git commit --allow-empty` so no files are created or staged.
 pub async fn create_placeholder_commit(work_dir: &Path, branch_name: &str) -> Result<()> {
-    let zbobr_dir = work_dir.join(".zbobr");
-    let sanitized_branch = sanitize_filename(branch_name);
-    let placeholder_path = zbobr_dir.join(&sanitized_branch);
-
-    // Create .zbobr directory
-    tokio::fs::create_dir_all(&zbobr_dir)
-        .await
-        .map_err(|e| anyhow!("Failed to create .zbobr directory: {}", e))?;
-
-    // Create placeholder file with extended diagnostics on failure
-    match tokio::fs::File::create(&placeholder_path).await {
-        Ok(_) => {}
-        Err(e) => {
-            let kind = e.kind();
-            let raw = e.raw_os_error();
-
-            let zbobr_exists = tokio::fs::metadata(&zbobr_dir).await.is_ok();
-            let work_dir_meta = tokio::fs::metadata(work_dir).await;
-            let work_dir_readonly = work_dir_meta
-                .as_ref()
-                .map(|m| m.permissions().readonly())
-                .unwrap_or(false);
-
-            anyhow::bail!(
-                "Failed to create placeholder file: {} — attempted path: {} — work_dir: {} — .zbobr exists: {} — work_dir_readonly: {} — kind: {:?} — raw_os_error: {:?}",
-                e,
-                placeholder_path.display(),
-                work_dir.display(),
-                zbobr_exists,
-                work_dir_readonly,
-                kind,
-                raw
-            );
-        }
-    }
-
-    // Stage and commit
-    git(work_dir, &["add", &format!(".zbobr/{}", sanitized_branch)]).await?;
     let commit_msg = format!("chore: add branch placeholder {}", branch_name);
-    git(work_dir, &["commit", "-m", &commit_msg]).await?;
-
+    git(work_dir, &["commit", "--allow-empty", "-m", &commit_msg]).await?;
     Ok(())
 }
 
-/// Delete the placeholder file created by [`create_placeholder_commit`] and commit the removal.
+/// No-op: placeholder commits are now empty commits that don't need cleanup.
 ///
-/// If the placeholder file does not exist this function is a no-op (returns `Ok(())`).
-pub async fn delete_placeholder_commit(work_dir: &Path, branch_name: &str) -> Result<()> {
-    let sanitized_branch = sanitize_filename(branch_name);
-    let placeholder_path = work_dir.join(".zbobr").join(&sanitized_branch);
-
-    if !tokio::fs::try_exists(&placeholder_path).await.unwrap_or(false) {
-        tracing::debug!(
-            "Placeholder file {} does not exist — skipping deletion",
-            placeholder_path.display()
-        );
-        return Ok(());
-    }
-
-    git(work_dir, &["rm", "-f", &format!(".zbobr/{}", sanitized_branch)]).await?;
-    let commit_msg = format!("chore: remove branch placeholder {}", branch_name);
-    git(work_dir, &["commit", "-m", &commit_msg]).await?;
-
-    tracing::info!(
-        "Deleted branch placeholder .zbobr/{} and committed",
-        sanitized_branch
-    );
-
+/// Kept for backward compatibility with callers.
+pub async fn delete_placeholder_commit(_work_dir: &Path, _branch_name: &str) -> Result<()> {
     Ok(())
 }
