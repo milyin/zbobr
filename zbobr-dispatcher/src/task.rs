@@ -165,23 +165,18 @@ impl RoleSession {
         .await
     }
 
-    /// Prepare a worktree for read-only access (same branch for base and work).
+    /// Prepare a worktree for read-only access.
+    ///
+    /// Delegates to `request_branch` so the worktree is created with a proper
+    /// work branch distinct from base. The caller should ensure the branch is
+    /// not modified during read-only stages (testing, reviewing).
+    // TODO: verify that the branch isn't changed during read-only stages
     pub async fn request_branch_readonly(
         &self,
         repo: &str,
         branch: &str,
     ) -> anyhow::Result<String> {
-        self.zbobr
-            .update_worktree(repo, branch, branch, self.task_id)
-            .await?;
-        let repo_name = repo.rsplit('/').next().unwrap_or(repo);
-        let path = self
-            .zbobr
-            .config()
-            .workspaces
-            .join(format!("task#{}", self.task_id))
-            .join(repo_name);
-        Ok(path.to_string_lossy().to_string())
+        self.request_branch(repo, branch).await
     }
 
     /// Prepare a worktree for the given repo and work branch.

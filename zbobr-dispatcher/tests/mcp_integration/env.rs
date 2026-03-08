@@ -200,6 +200,7 @@ impl IntegrationTestEnv {
         let repo_backend_config = ZbobrRepoBackendGithubConfig {
             fork_owner: fork_owner.clone(),
             github_token: repo_token,
+            repos_dir: base_path.join("repos"),
         };
 
         let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
@@ -272,6 +273,7 @@ impl IntegrationTestEnv {
         let repo_backend_config = ZbobrRepoBackendGithubConfig {
             fork_owner: fork_owner.clone(),
             github_token: repo_token,
+            repos_dir: base_path.join("repos"),
         };
 
         let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =

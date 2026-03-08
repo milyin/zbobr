@@ -179,9 +179,12 @@ pub trait RepoBackend: Send + Sync {
 
 #[async_trait]
 pub trait WorktreeBackend: Send + Sync {
-    /// 1. Clones remote repository as `--bare` to an own location if not already cloned. 
+    /// **Precondition**: `work_branch` must differ from `base_branch`. Passing the same
+    /// value for both is a caller error and implementations should return `Err`.
+    ///
+    /// 1. Clones remote repository as `--bare` to an own location if not already cloned.
     ///    It's important to notice that this clone is not necessarity the direct clone
-    ///    of the `remote_repo` in the parameter. It's up to backend how to proxy the 
+    ///    of the `remote_repo` in the parameter. It's up to backend how to proxy the
     ///    remote repository, e.g. by creating a fork in own account and locally cloning it.
     /// 
     /// 2. Creates in the `workspace_path` a new worktree linked to the main clone for 

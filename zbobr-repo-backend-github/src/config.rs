@@ -1,6 +1,8 @@
+use std::path::PathBuf;
+
 use zbobr_utility::config_struct;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 #[config_struct]
 /// Configuration for the GitHub repo backend.
 pub struct ZbobrRepoBackendGithubConfig {
@@ -10,6 +12,20 @@ pub struct ZbobrRepoBackendGithubConfig {
     /// GitHub token with read/write access to fork org.
     #[arg(long, env = "ZBOBR_REPO_GITHUB_TOKEN")]
     pub github_token: String,
+    /// Directory for bare clones of repositories.
+    #[arg(long)]
+    #[config(path)]
+    pub repos_dir: PathBuf,
+}
+
+impl Default for ZbobrRepoBackendGithubConfig {
+    fn default() -> Self {
+        Self {
+            fork_owner: String::new(),
+            github_token: String::new(),
+            repos_dir: PathBuf::from("./repos"),
+        }
+    }
 }
 
 impl zbobr_api::config::BackendConfig for ZbobrRepoBackendGithubConfig {

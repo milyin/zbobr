@@ -96,9 +96,7 @@ impl ZbobrRepoBackendFs {
         );
 
         let ws = workspace_path.to_str().unwrap();
-        if work_branch == base_branch {
-            git(bare_dir, &["worktree", "add", ws, base_branch]).await?;
-        } else if git_check(bare_dir, &["rev-parse", &format!("{}^{{commit}}", work_branch)])
+        if git_check(bare_dir, &["rev-parse", &format!("{}^{{commit}}", work_branch)])
             .await?
         {
             git(bare_dir, &["worktree", "add", ws, work_branch]).await?;
@@ -123,6 +121,13 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
         work_branch: &str,
         workspace_path: &Path,
     ) -> anyhow::Result<bool> {
+        if work_branch == base_branch {
+            anyhow::bail!(
+                "work_branch and base_branch must differ, got '{}'",
+                work_branch
+            );
+        }
+
         let repo_name = Self::repo_name_from_path(remote_repo)?;
         let bare_dir = self.config.repos_dir.join(format!("{}.git", repo_name));
 
