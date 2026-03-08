@@ -143,12 +143,66 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
                 }
             }
 
-            let status = create_cmd.status().await?;
+            let status = create_cmd.current_dir(&bare_dir).status().await?;
             if !status.success() {
                 anyhow::bail!(
                     "Failed to create worktree at {}",
                     workspace_path.display()
                 );
+            }
+        }
+
+        // Step 4.5: Set up remote tracking branches in the worktree by fetching from origin
+        // This ensures that origin/main, origin/<base_branch>, etc. exist for comparisons
+        tracing::info!("Fetching remote tracking branches in worktree");
+        let fetch_status = tokio::process::Command::new("git")
+            .args(["fetch", "origin"]  )
+            .current_dir(workspace_path)
+            .status()
+            .await?;
+        if !fetch_status.success() {
+            anyhow::bail!("Failed to fetch remote tracking branches in worktree at {}", workspace_path.display());
+        }
+        
+        // Double-check that remote tracking branches exist, if not update refs manually
+        // This handles the case where the bare clone has remotes but worktree doesn't get them automatically
+        let check_origin = tokio::process::Command::new("git")
+            .args(["rev-parse", "origin/main"])
+            .current_dir(workspace_path)
+            .status()
+            .await
+            .ok();
+        
+        if check_origin.map_or(true, |s| !s.success()) {
+            tracing::info!("origin/main not found in worktree, updating refs from parent");
+            // Try to get the branches from the bare clone and set them up
+            let branches_output = tokio::process::Command::new("git")
+                .args(["branch", "-r"])
+                .current_dir(&bare_dir)
+                .output()
+                .await?;
+            
+            let branches_str = String::from_utf8_lossy(&branches_output.stdout);
+            for branch_line in branches_str.lines() {
+                let branch = branch_line.trim();
+                if branch.starts_with("origin/") {
+                    let branch_name = &branch[7..]; // Remove "origin/" prefix
+                    if let Ok(output) = tokio::process::Command::new("git")
+                        .args(["rev-parse", &format!("refs/heads/{}", branch_name)])
+                        .current_dir(&bare_dir)
+                        .output()
+                        .await
+                    {
+                        if output.status.success() {
+                            let commit_hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                            let _ = tokio::process::Command::new("git")
+                                .args(["update-ref", &format!("refs/remotes/origin/{}", branch_name), &commit_hash])
+                                .current_dir(workspace_path)
+                                .status()
+                                .await;
+                        }
+                    }
+                }
             }
         }
 
@@ -183,61 +237,62 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
     async fn update_pr(&self, work_branch: &str) -> anyhow::Result<String> {
         // Try to find a worktree for this work_branch by searching all existing worktrees
         // We'll look in all bare clones under repos_dir
-        let entries = fs::read_dir(&self.config.repos_dir)
-            .await
-            .context("Failed to read repos_dir")?;
-
         let mut found_worktree = None;
 
-        let mut dir_entries = vec![];
-        let mut entries = entries;
-        loop {
-            match entries.next_entry().await {
-                Ok(Some(entry)) => dir_entries.push(entry),
-                Ok(None) => break,
-                Err(_) => break,
-            }
-        }
+        // Search in bare clones (if repos_dir exists)
+        if self.config.repos_dir.exists() {
+            let mut entries = fs::read_dir(&self.config.repos_dir)
+                .await
+                .context("Failed to read repos_dir")?;
 
-        for entry in dir_entries {
-            let path = entry.path();
-            if path.is_dir() && path.file_name().map_or(false, |n| n.to_string_lossy().ends_with(".git")) {
-                // List worktrees in this bare clone
-                let output = tokio::process::Command::new("git")
-                    .args(["worktree", "list", "--porcelain"])
-                    .current_dir(&path)
-                    .output()
-                    .await
-                    .ok();
-
-                if let Some(output) = output {
-                    let worktree_list = String::from_utf8_lossy(&output.stdout);
-                    for line in worktree_list.lines() {
-                        // Format: "worktree /path/to/worktree"
-                        if let Some(worktree_path) = line.strip_prefix("worktree ") {
-                            // Check if this worktree is for our work_branch
-                            let branch_output = tokio::process::Command::new("git")
-                                .args(["rev-parse", "--abbrev-ref", "HEAD"])
-                                .current_dir(worktree_path)
+            loop {
+                match entries.next_entry().await {
+                    Ok(Some(entry)) => {
+                        let path = entry.path();
+                        if path.is_dir() && path.file_name().map_or(false, |n| n.to_string_lossy().ends_with(".git")) {
+                            // List worktrees in this bare clone
+                            let output = tokio::process::Command::new("git")
+                                .args(["worktree", "list", "--porcelain"])
+                                .current_dir(&path)
                                 .output()
                                 .await
                                 .ok();
 
-                            if let Some(branch_output) = branch_output {
-                                let current_branch = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
-                                if current_branch == work_branch {
-                                    found_worktree = Some(worktree_path.to_string());
-                                    break;
+                            if let Some(output) = output {
+                                let worktree_list = String::from_utf8_lossy(&output.stdout);
+                                for line in worktree_list.lines() {
+                                    // Format: "worktree /path/to/worktree"
+                                    if let Some(worktree_path) = line.strip_prefix("worktree ") {
+                                        // Check if this worktree is for our work_branch
+                                        let branch_output = tokio::process::Command::new("git")
+                                            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                                            .current_dir(worktree_path)
+                                            .output()
+                                            .await
+                                            .ok();
+
+                                        if let Some(branch_output) = branch_output {
+                                            let current_branch = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
+                                            if current_branch == work_branch {
+                                                found_worktree = Some(worktree_path.to_string());
+                                                break;
+                                            }
+                                        }
+                                    }
                                 }
+                            }
+                            if found_worktree.is_some() {
+                                break;
                             }
                         }
                     }
-                }
-                if found_worktree.is_some() {
-                    break;
+                    Ok(None) => break,
+                    Err(_) => break,
                 }
             }
         }
+
+
 
         found_worktree.ok_or_else(|| {
             anyhow::anyhow!("No worktree found for work_branch '{}'", work_branch)
