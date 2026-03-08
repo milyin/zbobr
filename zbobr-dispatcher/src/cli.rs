@@ -1801,11 +1801,6 @@ async fn rewrite_commit_authors(
                 ));
             }
         }
-    } else {
-        return Err(anyhow::anyhow!(
-            "Error executing git config commands for author rewriting"
-        ));
-    }
 
     Ok(())
 }
