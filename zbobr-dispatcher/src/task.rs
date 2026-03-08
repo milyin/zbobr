@@ -206,161 +206,53 @@ impl RoleSession {
     }
 
     /// MARKER_DELETE_START
-    pub async fn _push_branch_DELETED(&self, path: &str) -> anyhow::Result<()> {
-        let work_dir = std::path::PathBuf::from(path);
-
-        if !work_dir.exists() {
-            anyhow::bail!("Work directory does not exist: {}", work_dir.display());
-        }
-
-        // Get current branch name
-        let output = tokio::process::Command::new("git")
-            .args(["rev-parse", "--abbrev-ref", "HEAD"])
-            .current_dir(&work_dir)
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            anyhow::bail!("Failed to get current branch");
-        }
-
-        let current_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-        if !self.validate_branch_prefix(&current_branch) {
-            anyhow::bail!(
-                "Branch '{}' does not match expected prefix '{}/{}/'. Use create_branch_name to generate a valid branch name.",
-                current_branch,
-                self.zbobr.config().work_branch_prefix,
-                self.task_id
-            );
-        }
-
-        // Push to fork
-        tracing::info!("Pushing branch '{}' to fork", current_branch);
-        let status = tokio::process::Command::new("git")
-            .args(["push", "-u", "fork", "HEAD", "--force"])
-            .current_dir(&work_dir)
-            .status()
-            .await?;
-
-        if !status.success() {
-            anyhow::bail!("Failed to push to fork");
-        }
-
-        Ok(())
-    }
-
-    /// Push the branch and create PR within the fork.
-    /// The PR is created in the fork repo with `destination_branch` as base.
+    /// Push the work branch and return its PR URL from the backend.
+    /// 
+    /// For GitHub: creates/finds a PR and returns its URL.
+    /// For FS backend: returns the worktree path.
     pub async fn push_branch_and_create_pr(
         &self,
-        path: &str,
-        destination_branch: &str,
+        work_branch: &str,
     ) -> anyhow::Result<String> {
-        // First push the branch
-        self.push_branch(path).await?;
-
-        let work_dir = std::path::PathBuf::from(path);
-
-        // Get current branch name (already validated by push_branch)
-        let output = tokio::process::Command::new("git")
-            .args(["rev-parse", "--abbrev-ref", "HEAD"])
-            .current_dir(&work_dir)
-            .output()
-            .await?;
-        let current_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-        // Derive repository name from work directory name (workspace/task#/repo)
-        let repo_name = work_dir
-            .file_name()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| anyhow::anyhow!("Could not determine repo name from path: {}", path))?
-            .to_string();
-
-        // Build PR metadata from task (decoupled from repo backend)
-        let task = self.get_task().await?;
-        let pr_title = format!("Fix #{}: {}", self.task_id, task.title);
-        let pr_body = format!(
-            "Resolves #{}\n\nImplementation for: {}",
-            self.task_id, task.title
-        );
-
-        // Create PR using the backend (which knows the fork owner)
-        let pr_url = self
-            .zbobr
-            .create_pr_in_fork(
-                &repo_name,
-                &current_branch,
-                destination_branch,
-                &pr_title,
-                &pr_body,
-            )
-            .await?;
-        Ok(pr_url)
+        self.zbobr.update_pr(work_branch).await
     }
 
     /// Ensure `pr_url` is stored in task parameters.
     ///
     /// If already set, returns the existing value immediately.
-    /// If not set: calls `ensure_branch_and_pr` on the repo backend, stores the
-    /// resulting URL in `Parameter::PrUrl`, and returns it.
+    /// If not set: calls `update_pr` on the backend, stores the result in 
+    /// `Parameter::PrUrl`, and returns it.
     pub async fn ensure_pr_url(&self) -> anyhow::Result<String> {
         let task = self.get_task().await?;
         if let Some(url) = task.parameters.get(&Parameter::PrUrl).cloned() {
             return Ok(url);
         }
-        let dest_repo = task
-            .parameters
-            .get(&Parameter::DestinationRepository)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("destination_repository parameter is not set"))?;
-        let dest_branch = task
-            .parameters
-            .get(&Parameter::DestinationBranch)
-            .cloned()
-            .unwrap_or_else(|| "main".to_string());
         let work_branch = task
             .parameters
             .get(&Parameter::WorkBranch)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("work_branch parameter is not set"))?;
-        let pr_title = format!("Fix #{}: {}", self.task_id, task.title);
 
-        let pr_url = self
-            .zbobr
-            .ensure_branch_and_pr(
-                &dest_repo,
-                self.task_id,
-                &work_branch,
-                &dest_branch,
-                &pr_title,
-            )
-            .await?;
+        let pr_url = self.zbobr.update_pr(&work_branch).await?;
 
         self.set_parameter(Parameter::PrUrl, Some(pr_url.clone()))
             .await?;
         Ok(pr_url)
     }
 
-    /// Push current work branch commits to the remote.
+    /// Push current work branch commits to the remote by updating PR state.
     ///
-    /// Reads `DestinationRepository` and `WorkBranch` from task parameters and delegates
-    /// to the repo backend. FS backend is a no-op; GitHub backend performs a git push.
+    /// Reads `WorkBranch` from task parameters and calls `update_pr` on the backend
+    /// to sync the remote state. Result URL (if any) is discarded.
     pub async fn push_branch_commits(&self) -> anyhow::Result<()> {
         let task = self.get_task().await?;
-        let dest_repo = task
-            .parameters
-            .get(&Parameter::DestinationRepository)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("destination_repository parameter is not set"))?;
         let work_branch = task
             .parameters
             .get(&Parameter::WorkBranch)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("work_branch parameter is not set"))?;
-        self.zbobr
-            .push_branch(&dest_repo, self.task_id, &work_branch)
-            .await
+        let _ = self.zbobr.update_pr(&work_branch).await?;
+        Ok(())
     }
 
     /// Get a task parameter value. Parameters are stored in the task's parameters HashMap.
@@ -856,66 +748,25 @@ mod tests {
 
     struct DummyRepo;
     #[async_trait]
-    impl crate::backend::RepoBackend for DummyRepo {
-        async fn clone_and_setup(
+    impl crate::backend::WorktreeBackend for DummyRepo {
+        async fn update_worktree(
             &self,
-            _target_repo: &str,
+            _remote_repo: &str,
+            _base_branch: &str,
             _work_branch: &str,
-            _destination_branch: &str,
             _workspace_path: &std::path::Path,
-        ) -> anyhow::Result<std::path::PathBuf> {
-            unreachable!()
+        ) -> anyhow::Result<bool> {
+            Ok(true)
         }
-        async fn clone_readonly(
-            &self,
-            _target_repo: &str,
-            _branch: &str,
-            _workspace_path: &std::path::Path,
-        ) -> anyhow::Result<std::path::PathBuf> {
-            unreachable!()
+
+        async fn update_pr(&self, _work_branch: &str) -> anyhow::Result<String> {
+            Ok("mock-pr-url".to_string())
         }
-        async fn setup_fork_remote_and_push(
-            &self,
-            _work_dir: &std::path::Path,
-            _target_repo: &str,
-            _work_branch: &str,
-        ) -> anyhow::Result<()> {
-            unreachable!()
-        }
-        async fn ensure_branch_and_pr(
-            &self,
-            _target_repo: &str,
-            _workspace_path: &std::path::Path,
-            _work_branch: &str,
-            _destination_branch: &str,
-            _pr_title: &str,
-        ) -> anyhow::Result<String> {
-            unreachable!()
-        }
-        async fn push_branch(
-            &self,
-            _target_repo: &str,
-            _workspace_path: &std::path::Path,
-            _work_branch: &str,
-        ) -> anyhow::Result<()> {
-            unreachable!()
-        }
-        async fn create_pr_in_fork(
-            &self,
-            _repo_name: &str,
-            _work_branch: &str,
-            _destination_branch: &str,
-            _pr_title: &str,
-            _pr_body: &str,
-        ) -> anyhow::Result<String> {
-            unreachable!()
-        }
-        async fn parse_pr_to_repo_branch(&self, _pr_ref: &str) -> anyhow::Result<(String, String)> {
-            unreachable!()
-        }
+
         async fn validate_connectivity(&self) -> anyhow::Result<()> {
             Ok(())
         }
+
         fn debug_state(&self) -> String {
             "dummy".to_string()
         }
@@ -926,7 +777,7 @@ mod tests {
             tasks: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(0),
         });
-        let repo: Arc<dyn crate::backend::RepoBackend> = Arc::new(DummyRepo);
+        let repo: Arc<dyn crate::backend::WorktreeBackend> = Arc::new(DummyRepo);
         crate::ZbobrDispatcher::new_with_backends(ZbobrDispatcherConfig::default(), backend, repo)
     }
 
@@ -1152,66 +1003,25 @@ mod comment_model_tests {
 
     struct DummyRepo;
     #[async_trait]
-    impl crate::backend::RepoBackend for DummyRepo {
-        async fn clone_and_setup(
+    impl crate::backend::WorktreeBackend for DummyRepo {
+        async fn update_worktree(
             &self,
-            _target_repo: &str,
+            _remote_repo: &str,
+            _base_branch: &str,
             _work_branch: &str,
-            _destination_branch: &str,
             _workspace_path: &std::path::Path,
-        ) -> anyhow::Result<std::path::PathBuf> {
-            Err(anyhow::anyhow!("not used"))
+        ) -> anyhow::Result<bool> {
+            Ok(true)
         }
-        async fn clone_readonly(
-            &self,
-            _target_repo: &str,
-            _branch: &str,
-            _workspace_path: &std::path::Path,
-        ) -> anyhow::Result<std::path::PathBuf> {
-            Err(anyhow::anyhow!("not used"))
+
+        async fn update_pr(&self, _work_branch: &str) -> anyhow::Result<String> {
+            Ok("mock-pr-url".to_string())
         }
-        async fn setup_fork_remote_and_push(
-            &self,
-            _work_dir: &std::path::Path,
-            _target_repo: &str,
-            _work_branch: &str,
-        ) -> anyhow::Result<()> {
-            Err(anyhow::anyhow!("not used"))
-        }
-        async fn ensure_branch_and_pr(
-            &self,
-            _target_repo: &str,
-            _workspace_path: &std::path::Path,
-            _work_branch: &str,
-            _destination_branch: &str,
-            _pr_title: &str,
-        ) -> anyhow::Result<String> {
-            Err(anyhow::anyhow!("not used"))
-        }
-        async fn push_branch(
-            &self,
-            _target_repo: &str,
-            _workspace_path: &std::path::Path,
-            _work_branch: &str,
-        ) -> anyhow::Result<()> {
-            Err(anyhow::anyhow!("not used"))
-        }
-        async fn create_pr_in_fork(
-            &self,
-            _repo_name: &str,
-            _work_branch: &str,
-            _destination_branch: &str,
-            _pr_title: &str,
-            _pr_body: &str,
-        ) -> anyhow::Result<String> {
-            Err(anyhow::anyhow!("not used"))
-        }
-        async fn parse_pr_to_repo_branch(&self, _pr_ref: &str) -> anyhow::Result<(String, String)> {
-            Err(anyhow::anyhow!("not used"))
-        }
+
         async fn validate_connectivity(&self) -> anyhow::Result<()> {
             Ok(())
         }
+
         fn debug_state(&self) -> String {
             "dummy".to_string()
         }
@@ -1223,7 +1033,7 @@ mod comment_model_tests {
             comments: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(0),
         });
-        let repo: Arc<dyn crate::backend::RepoBackend> = Arc::new(DummyRepo);
+        let repo: Arc<dyn crate::backend::WorktreeBackend> = Arc::new(DummyRepo);
         crate::ZbobrDispatcher::new_with_backends(ZbobrDispatcherConfig::default(), backend, repo)
     }
 

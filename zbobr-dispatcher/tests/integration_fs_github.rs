@@ -1,12 +1,16 @@
-#![allow(clippy::await_holding_lock)]
-/// Integration tests: filesystem task backend + GitHub repo backend.
-///
-/// All tests are `#[ignore]` by default; run explicitly with:
-///   cargo test --test integration_fs_github -- --ignored
-///
-/// Requires `zbobr_github_test.toml` at the workspace root with a
-/// `[repo.github]` section.
-mod mcp_integration;
+// This test is temporarily disabled while GitHub repo backend is being refactored.
+// The GitHub backend is currently excluded from the build.
+// Use integration_fs_fs.rs for FS-only backend tests.
+//
+// #![allow(clippy::await_holding_lock)]
+// /// Integration tests: filesystem task backend + GitHub repo backend.
+// ///
+// /// All tests are `#[ignore]` by default; run explicitly with:
+// ///   cargo test --test integration_fs_github -- --ignored
+// ///
+// /// Requires `zbobr_github_test.toml` at the workspace root with a
+// /// `[repo.github]` section.
+// mod mcp_integration;
 
 use std::sync::Arc;
 

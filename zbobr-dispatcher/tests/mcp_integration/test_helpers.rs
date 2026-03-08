@@ -910,7 +910,7 @@ pub async fn run_repo_backend_clone(env: &IntegrationTestEnv) {
         .cloned()
         .unwrap_or_else(|| "main".to_string());
     env.zbobr
-        .clone_and_setup(&dest_repo, &work_branch, &dest_branch, task_id)
+        .update_worktree(&dest_repo, &dest_branch, &work_branch, task_id)
         .await
         .unwrap();
 
@@ -1001,7 +1001,7 @@ pub async fn run_repo_backend_clone_cross_org(env: &IntegrationTestEnv) {
         .cloned()
         .unwrap_or_else(|| "main".to_string());
     env.zbobr
-        .clone_and_setup(&dest_repo, &work_branch, &dest_branch, task_id)
+        .update_worktree(&dest_repo, &dest_branch, &work_branch, task_id)
         .await
         .unwrap();
 

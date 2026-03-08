@@ -25,4 +25,6 @@ async fn main() -> anyhow::Result<()> {
     //     "zbobr.toml",
     // )
     // .await
+
+    Ok(())
 }

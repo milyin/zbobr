@@ -600,9 +600,15 @@ async fn run_task_subcommand(
                 .get(&Parameter::WorkBranch)
                 .cloned()
                 .unwrap_or_else(|| dest_branch.clone());
-            let path = zbobr
-                .clone_and_setup(&dest_repo, &work_branch_for_clone, &dest_branch, task)
+            zbobr
+                .update_worktree(&dest_repo, &dest_branch, &work_branch_for_clone, task)
                 .await?;
+            let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo);
+            let path = zbobr
+                .config()
+                .workspaces
+                .join(format!("task#{task}"))
+                .join(repo_name);
             println!("Cloned to {}", path.display());
         }
         TaskSubcommand::Prepare { task, show_prompt } => {
@@ -1275,10 +1281,18 @@ async fn prepare_workspace(
                 .cloned()
                 .unwrap_or_else(|| "main".to_string());
             match zbobr
-                .clone_and_setup(&dest_repo, &work_branch, &dest_branch, task_id)
+                .update_worktree(&dest_repo, &dest_branch, &work_branch, task_id)
                 .await
             {
-                Ok(path) => Ok(path),
+                Ok(_) => {
+                    let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo);
+                    let path = zbobr
+                        .config()
+                        .workspaces
+                        .join(format!("task#{task_id}"))
+                        .join(repo_name);
+                    Ok(path)
+                },
                 Err(e) => {
                     let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
                     tracing::error!("{msg}");
@@ -1899,7 +1913,7 @@ pub async fn run_zbobr<TC: BackendConfig + 'static, RC: BackendConfig + 'static>
 ) -> anyhow::Result<()>
 where
     TC::Backend: crate::backend::TaskBackend + 'static,
-    RC::Backend: crate::backend::RepoBackend + 'static,
+    RC::Backend: crate::backend::WorktreeBackend + 'static,
     TC::Args: zbobr_utility::PrefixedArgs + std::fmt::Debug + Clone,
     RC::Args: zbobr_utility::PrefixedArgs + std::fmt::Debug + Clone,
 {
@@ -1937,7 +1951,7 @@ where
 
     let task_backend: std::sync::Arc<dyn crate::backend::TaskBackend> =
         std::sync::Arc::new(config.tasks.build_backend(&config.dispatcher)?);
-    let repo_backend: std::sync::Arc<dyn crate::backend::RepoBackend> =
+    let repo_backend: std::sync::Arc<dyn crate::backend::WorktreeBackend> =
         std::sync::Arc::new(config.repo.build_backend(&config.dispatcher)?);
 
     let zbobr = crate::ZbobrDispatcher::new_with_backends(

@@ -195,10 +195,9 @@ pub trait WorktreeBackend: Send + Sync {
     ///  - should not be used by any other worktree (i.e. no concurrent worktrees on the same branch).
     ///    This is the git restriction, no need to check it manually (TODO: is it?), but result 
     ///    of attempted failed creation should be reported).
+    ///  - the `workspace_path` should either not exist or contain the worktree with the 
+    ///    `work_branch` selected
     ///
-    /// If the worktree already exists and meets the above conditions, it should be reused (no-op).
-    /// But notice, that the appropriate conditions still should be validated.
-    /// 
     /// Corresponding delete operation is not required: the worktree can be removed with
     /// `git worktree remove` command 
     /// 

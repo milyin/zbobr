@@ -1,0 +1,3 @@
+// This test is temporarily disabled while GitHub repo backend is being refactored.
+// The GitHub backend is currently excluded from the build.
+// Use integration_fs_fs.rs for FS-only backend tests.
