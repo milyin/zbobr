@@ -4,47 +4,9 @@ use anyhow::Context;
 use async_trait::async_trait;
 use tokio::fs;
 use zbobr_api::backend::WorktreeBackend;
+use zbobr_utility::{git, git_check, git_output};
 
 use crate::config::ZbobrRepoBackendFsConfig;
-
-/// Run a git command, returning an error with context on failure.
-async fn git(dir: &Path, args: &[&str]) -> anyhow::Result<()> {
-    let status = tokio::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .await
-        .with_context(|| format!("Failed to spawn: git {}", args.join(" ")))?;
-    if !status.success() {
-        anyhow::bail!("git {} failed in {}", args.join(" "), dir.display());
-    }
-    Ok(())
-}
-
-/// Run a git command and capture stdout.
-async fn git_output(dir: &Path, args: &[&str]) -> anyhow::Result<String> {
-    let output = tokio::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .await
-        .with_context(|| format!("Failed to spawn: git {}", args.join(" ")))?;
-    if !output.status.success() {
-        anyhow::bail!("git {} failed in {}", args.join(" "), dir.display());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-/// Run a git command, returning Ok(true) if exit code 0, Ok(false) if non-zero.
-async fn git_check(dir: &Path, args: &[&str]) -> anyhow::Result<bool> {
-    let status = tokio::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .await
-        .with_context(|| format!("Failed to spawn: git {}", args.join(" ")))?;
-    Ok(status.success())
-}
 
 /// Filesystem-based repo backend using bare clones and git worktrees.
 ///

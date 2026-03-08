@@ -44,6 +44,45 @@ fn sanitize_filename(name: &str) -> String {
         .collect()
 }
 
+/// Run a git command in `dir`, returning an error with context on failure.
+pub async fn git(dir: &Path, args: &[&str]) -> Result<()> {
+    let status = tokio::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .await
+        .with_context(|| format!("Failed to spawn: git {}", args.join(" ")))?;
+    if !status.success() {
+        anyhow::bail!("git {} failed in {}", args.join(" "), dir.display());
+    }
+    Ok(())
+}
+
+/// Run a git command in `dir` and capture stdout (trimmed).
+pub async fn git_output(dir: &Path, args: &[&str]) -> Result<String> {
+    let output = tokio::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .await
+        .with_context(|| format!("Failed to spawn: git {}", args.join(" ")))?;
+    if !output.status.success() {
+        anyhow::bail!("git {} failed in {}", args.join(" "), dir.display());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Run a git command in `dir`, returning `Ok(true)` if exit code 0, `Ok(false)` otherwise.
+pub async fn git_check(dir: &Path, args: &[&str]) -> Result<bool> {
+    let status = tokio::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .await
+        .with_context(|| format!("Failed to spawn: git {}", args.join(" ")))?;
+    Ok(status.success())
+}
+
 /// Configure git user settings for a repository.
 /// Sets user.name and user.email at the repository level.
 pub async fn configure_git_user(
@@ -51,27 +90,8 @@ pub async fn configure_git_user(
     git_user_name: &str,
     git_user_email: &str,
 ) -> Result<()> {
-    let config_user_status = tokio::process::Command::new("git")
-        .args(["config", "--local", "user.name", git_user_name])
-        .current_dir(work_dir)
-        .status()
-        .await
-        .context("Failed to set git user.name")?;
-
-    if !config_user_status.success() {
-        anyhow::bail!("git config user.name failed");
-    }
-
-    let config_email_status = tokio::process::Command::new("git")
-        .args(["config", "--local", "user.email", git_user_email])
-        .current_dir(work_dir)
-        .status()
-        .await
-        .context("Failed to set git user.email")?;
-
-    if !config_email_status.success() {
-        anyhow::bail!("git config user.email failed");
-    }
+    git(work_dir, &["config", "--local", "user.name", git_user_name]).await?;
+    git(work_dir, &["config", "--local", "user.email", git_user_email]).await?;
 
     tracing::info!(
         "Configured git user '{}' <{}> in {}",
@@ -127,30 +147,10 @@ pub async fn create_placeholder_commit(work_dir: &Path, branch_name: &str) -> Re
         }
     }
 
-    // Stage the file
-    let add_status = tokio::process::Command::new("git")
-        .args(["add", &format!(".zbobr/{}", sanitized_branch)])
-        .current_dir(work_dir)
-        .status()
-        .await
-        .map_err(|e| anyhow!("Failed to run git add: {}", e))?;
-
-    if !add_status.success() {
-        anyhow::bail!("git add for placeholder failed (exit != 0)");
-    }
-
-    // Commit the file
+    // Stage and commit
+    git(work_dir, &["add", &format!(".zbobr/{}", sanitized_branch)]).await?;
     let commit_msg = format!("chore: add branch placeholder {}", branch_name);
-    let commit_status = tokio::process::Command::new("git")
-        .args(["commit", "-m", &commit_msg])
-        .current_dir(work_dir)
-        .status()
-        .await
-        .map_err(|e| anyhow!("Failed to run git commit: {}", e))?;
-
-    if !commit_status.success() {
-        anyhow::bail!("git commit for placeholder failed (exit != 0)");
-    }
+    git(work_dir, &["commit", "-m", &commit_msg]).await?;
 
     Ok(())
 }
@@ -170,28 +170,9 @@ pub async fn delete_placeholder_commit(work_dir: &Path, branch_name: &str) -> Re
         return Ok(());
     }
 
-    let rm_status = tokio::process::Command::new("git")
-        .args(["rm", "-f", &format!(".zbobr/{}", sanitized_branch)])
-        .current_dir(work_dir)
-        .status()
-        .await
-        .map_err(|e| anyhow!("Failed to run git rm for placeholder: {}", e))?;
-
-    if !rm_status.success() {
-        anyhow::bail!("git rm for placeholder failed (exit != 0)");
-    }
-
+    git(work_dir, &["rm", "-f", &format!(".zbobr/{}", sanitized_branch)]).await?;
     let commit_msg = format!("chore: remove branch placeholder {}", branch_name);
-    let commit_status = tokio::process::Command::new("git")
-        .args(["commit", "-m", &commit_msg])
-        .current_dir(work_dir)
-        .status()
-        .await
-        .map_err(|e| anyhow!("Failed to run git commit for placeholder removal: {}", e))?;
-
-    if !commit_status.success() {
-        anyhow::bail!("git commit for placeholder removal failed (exit != 0)");
-    }
+    git(work_dir, &["commit", "-m", &commit_msg]).await?;
 
     tracing::info!(
         "Deleted branch placeholder .zbobr/{} and committed",
