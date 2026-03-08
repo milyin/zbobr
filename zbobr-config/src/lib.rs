@@ -17,9 +17,9 @@ use zbobr_executor_mcp_tester::{
 use zbobr_repo_backend_fs::{
     ZbobrRepoBackendFsArgs, ZbobrRepoBackendFsConfig, ZbobrRepoBackendFsToml,
 };
-use zbobr_repo_backend_github::{
-    ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubConfig, ZbobrRepoBackendGithubToml,
-};
+// use zbobr_repo_backend_github::{
+//     ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubConfig, ZbobrRepoBackendGithubToml,
+// };
 use zbobr_task_backend_fs::{
     ZbobrTaskBackendFsArgs, ZbobrTaskBackendFsConfig, ZbobrTaskBackendFsToml,
 };
@@ -44,9 +44,9 @@ pub struct ZbobrTaskBackendConfig {
 #[config_struct]
 /// Repo backend configuration section.
 pub struct ZbobrRepoBackendConfig {
-    /// GitHub repo backend (fork + push via API)
-    #[config(nested)]
-    pub github: ZbobrRepoBackendGithubConfig,
+    // /// GitHub repo backend (fork + push via API)
+    // #[config(nested)]
+    // pub github: ZbobrRepoBackendGithubConfig,
     /// Filesystem repo backend (operate on local clones)
     #[config(nested)]
     pub fs: ZbobrRepoBackendFsConfig,

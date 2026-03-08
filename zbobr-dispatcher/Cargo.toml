@@ -8,7 +8,7 @@ zbobr-api = { version = "0.1.0", path = "../zbobr-api" }
 zbobr-utility = { version = "0.1.0", path = "../zbobr-utility" }
 zbobr-task-backend-github = { version = "0.1.0", path = "../zbobr-task-backend-github" }
 zbobr-task-backend-fs = { version = "0.1.0", path = "../zbobr-task-backend-fs" }
-zbobr-repo-backend-github = { version = "0.1.0", path = "../zbobr-repo-backend-github" }
+# zbobr-repo-backend-github = { version = "0.1.0", path = "../zbobr-repo-backend-github" }
 zbobr-repo-backend-fs = { version = "0.1.0", path = "../zbobr-repo-backend-fs" }
 zbobr-executor-claude = { version = "0.1.0", path = "../zbobr-executor-claude" }
 zbobr-executor-copilot = { version = "0.1.0", path = "../zbobr-executor-copilot" }

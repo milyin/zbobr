@@ -165,21 +165,26 @@ impl RoleSession {
         .await
     }
 
-    /// Clone target repo and checkout specific branch (read-only, for planner).
+    /// Prepare a worktree for read-only access (same branch for base and work).
     pub async fn request_branch_readonly(
         &self,
         repo: &str,
         branch: &str,
     ) -> anyhow::Result<String> {
+        self.zbobr
+            .update_worktree(repo, branch, branch, self.task_id)
+            .await?;
+        let repo_name = repo.rsplit('/').next().unwrap_or(repo);
         let path = self
             .zbobr
-            .clone_readonly(repo, branch, self.task_id)
-            .await?;
-        let path_str = path.to_string_lossy().to_string();
-        Ok(path_str)
+            .config()
+            .workspaces
+            .join(format!("task#{}", self.task_id))
+            .join(repo_name);
+        Ok(path.to_string_lossy().to_string())
     }
 
-    /// Fork target repo, clone locally, checkout specific branch (for worker).
+    /// Prepare a worktree for the given repo and work branch.
     pub async fn request_branch(&self, repo: &str, branch: &str) -> anyhow::Result<String> {
         let task = self.zbobr.get_task(self.task_id).await?;
         let destination_branch = task
@@ -187,28 +192,21 @@ impl RoleSession {
             .get(&crate::Parameter::DestinationBranch)
             .cloned()
             .unwrap_or_else(|| "main".to_string());
+        self.zbobr
+            .update_worktree(repo, &destination_branch, branch, self.task_id)
+            .await?;
+        let repo_name = repo.rsplit('/').next().unwrap_or(repo);
         let path = self
             .zbobr
-            .clone_and_setup(repo, branch, &destination_branch, self.task_id)
-            .await?;
-        let path_str = path.to_string_lossy().to_string();
-        Ok(path_str)
+            .config()
+            .workspaces
+            .join(format!("task#{}", self.task_id))
+            .join(repo_name);
+        Ok(path.to_string_lossy().to_string())
     }
 
-    /// Helper: Clone repo and checkout branch from PR.
-    /// PR format: "https://github.com/owner/repo/pull/123" or "owner/repo#123"
-    pub async fn request_branch_by_pr(&self, pr: &str, readonly: bool) -> anyhow::Result<String> {
-        let (repo, branch) = self.zbobr.parse_pr_to_repo_branch(pr).await?;
-        if readonly {
-            self.request_branch_readonly(&repo, &branch).await
-        } else {
-            self.request_branch(&repo, &branch).await
-        }
-    }
-
-    /// Push the current branch to the fork remote.
-    /// Validates that the current branch has the correct task prefix.
-    pub async fn push_branch(&self, path: &str) -> anyhow::Result<()> {
+    /// MARKER_DELETE_START
+    pub async fn _push_branch_DELETED(&self, path: &str) -> anyhow::Result<()> {
         let work_dir = std::path::PathBuf::from(path);
 
         if !work_dir.exists() {

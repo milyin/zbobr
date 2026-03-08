@@ -227,6 +227,9 @@ pub trait WorktreeBackend: Send + Sync {
     /// For the filesystem backend, this can be just the path to the worktree directory.
     async fn update_pr(&self, work_branch: &str) -> anyhow::Result<String>;
 
+    /// Validate connectivity to the repo hosting service.
+    async fn validate_connectivity(&self) -> anyhow::Result<()>;
+
     /// Return a debug string of the backend state.
     fn debug_state(&self) -> String;
 }
