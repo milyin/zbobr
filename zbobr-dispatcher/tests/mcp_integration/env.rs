@@ -519,7 +519,7 @@ impl IntegrationTestEnv {
             .expect("repo_path must have a file name")
             .to_str()
             .unwrap();
-        let work_dir = workspace_dir.join(repo_name);
+        let work_dir = task_dir.path().join(repo_name);
 
         let clone_ok = tokio::process::Command::new("git")
             .args([
