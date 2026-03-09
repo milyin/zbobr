@@ -1,5 +1,7 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
+use std::sync::Arc;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -11,8 +13,9 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     zbobr_dispatcher::cli::run_zbobr::<
-        zbobr_task_backend_github::ZbobrTaskBackendGithubConfig,
-        zbobr_repo_backend_github::ZbobrRepoBackendGithubConfig,
+        zbobr_config::ZbobrTaskBackendConfig,
+        zbobr_config::ZbobrRepoBackendConfig,
+        _,
     >(
         "zbobr",
         "GitHub-backed AI-powered task dispatcher",
@@ -23,6 +26,14 @@ async fn main() -> anyhow::Result<()> {
         Requires a GitHub token: set GH_TOKEN or GITHUB_TOKEN env var.\n\
         Easiest way: export GH_TOKEN=$(gh auth token)",
         "zbobr.toml",
+        |tc, rc, dispatcher| {
+            use zbobr_dispatcher::BackendConfig;
+            let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
+                Arc::new(tc.github.build_backend(dispatcher)?);
+            let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
+                Arc::new(rc.github.build_backend(dispatcher)?);
+            Ok((task_backend, repo_backend))
+        },
     )
     .await?;
 

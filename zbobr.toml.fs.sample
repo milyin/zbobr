@@ -11,11 +11,11 @@ work_branch_prefix = "zbobr"
 # overwrite_author = true
 
 # Filesystem task backend: tasks stored as YAML files
-[tasks]
+[tasks.fs]
 tasks_dir = "./tasks"
 
 # Filesystem repo backend: clones from local git repos
-[repo]
+[repo.fs]
 repos_dir = "./repos"
 
 # Executor configuration: per-executor default models

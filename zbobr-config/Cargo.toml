@@ -4,10 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+zbobr-api = { workspace = true }
 zbobr-dispatcher = { workspace = true }
 zbobr-task-backend-github = { workspace = true }
 zbobr-task-backend-fs = { workspace = true }
-# zbobr-repo-backend-github = { workspace = true }
+zbobr-repo-backend-github = { workspace = true }
 zbobr-repo-backend-fs = { workspace = true }
 zbobr-executor-claude = { workspace = true }
 zbobr-executor-copilot = { workspace = true }

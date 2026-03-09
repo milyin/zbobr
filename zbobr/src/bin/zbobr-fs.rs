@@ -1,6 +1,6 @@
+use std::sync::Arc;
+
 use zbobr_dispatcher::run_zbobr;
-use zbobr_repo_backend_fs::ZbobrRepoBackendFsConfig;
-use zbobr_task_backend_fs::ZbobrTaskBackendFsConfig;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -13,8 +13,9 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     run_zbobr::<
-        ZbobrTaskBackendFsConfig,
-        ZbobrRepoBackendFsConfig,
+        zbobr_config::ZbobrTaskBackendConfig,
+        zbobr_config::ZbobrRepoBackendConfig,
+        _,
     >(
         "zbobr-fs",
         "Filesystem-backed AI-powered task dispatcher",
@@ -25,6 +26,14 @@ async fn main() -> anyhow::Result<()> {
         Ideal for testing, local development, and offline scenarios.\n\n\
         Default config file: zbobr-fs.toml in current directory.",
         "zbobr-fs.toml",
+        |tc, rc, dispatcher| {
+            use zbobr_dispatcher::BackendConfig;
+            let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
+                Arc::new(tc.fs.build_backend(dispatcher)?);
+            let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
+                Arc::new(rc.fs.build_backend(dispatcher)?);
+            Ok((task_backend, repo_backend))
+        },
     )
     .await
 }

@@ -17,9 +17,9 @@ use zbobr_executor_mcp_tester::{
 use zbobr_repo_backend_fs::{
     ZbobrRepoBackendFsArgs, ZbobrRepoBackendFsConfig, ZbobrRepoBackendFsToml,
 };
-// use zbobr_repo_backend_github::{
-//     ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubConfig, ZbobrRepoBackendGithubToml,
-// };
+use zbobr_repo_backend_github::{
+    ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubConfig, ZbobrRepoBackendGithubToml,
+};
 use zbobr_task_backend_fs::{
     ZbobrTaskBackendFsArgs, ZbobrTaskBackendFsConfig, ZbobrTaskBackendFsToml,
 };
@@ -28,7 +28,7 @@ use zbobr_task_backend_github::{
 };
 use zbobr_utility::config_struct;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 #[config_struct]
 /// Task backend configuration section.
 pub struct ZbobrTaskBackendConfig {
@@ -40,19 +40,19 @@ pub struct ZbobrTaskBackendConfig {
     pub fs: ZbobrTaskBackendFsConfig,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 #[config_struct]
 /// Repo backend configuration section.
 pub struct ZbobrRepoBackendConfig {
-    // /// GitHub repo backend (fork + push via API)
-    // #[config(nested)]
-    // pub github: ZbobrRepoBackendGithubConfig,
+    /// GitHub repo backend (fork + push via API)
+    #[config(nested)]
+    pub github: ZbobrRepoBackendGithubConfig,
     /// Filesystem repo backend (operate on local clones)
     #[config(nested)]
     pub fs: ZbobrRepoBackendFsConfig,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 #[config_struct]
 /// Executor configuration section.
 pub struct ZbobrExecutorConfig {
@@ -67,7 +67,7 @@ pub struct ZbobrExecutorConfig {
     pub mcp_tester: ZbobrExecutorMcpTesterConfig,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 #[config_struct]
 /// Root configuration for zbobr.
 pub struct ZbobrConfig {

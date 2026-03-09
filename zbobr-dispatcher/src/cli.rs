@@ -1719,21 +1719,34 @@ async fn rewrite_commit_authors(
 // run_zbobr
 // ---------------------------------------------------------------------------
 
-/// Standard entry point for a Zbobr CLI application, heavily parameterized
-/// to allow for different backends.
-use zbobr_api::{CommentTag, config::BackendConfig};
+/// Standard entry point for a Zbobr CLI application.
+///
+/// `TC` and `RC` define the TOML config structure (and thus which
+/// `[tasks.*]`/`[repo.*]` sub-sections are accepted).  The `build_backends`
+/// closure maps the resolved config into concrete backend instances — this
+/// is where the binary selects which sub-backend to use.
+use zbobr_api::CommentTag;
 
-pub async fn run_zbobr<TC: BackendConfig + 'static, RC: BackendConfig + 'static>(
+pub async fn run_zbobr<TC, RC, F>(
     app_name: &'static str,
     app_about: &'static str,
     app_long_about: &'static str,
     default_config_name: &'static str,
+    build_backends: F,
 ) -> anyhow::Result<()>
 where
-    TC::Backend: crate::backend::TaskBackend + 'static,
-    RC::Backend: crate::backend::WorktreeBackend + 'static,
+    TC: zbobr_api::config::Config + 'static,
+    RC: zbobr_api::config::Config + 'static,
     TC::Args: zbobr_utility::PrefixedArgs + std::fmt::Debug + Clone,
     RC::Args: zbobr_utility::PrefixedArgs + std::fmt::Debug + Clone,
+    F: FnOnce(
+        TC,
+        RC,
+        &crate::config::ZbobrDispatcherConfig,
+    ) -> anyhow::Result<(
+        std::sync::Arc<dyn crate::backend::TaskBackend>,
+        std::sync::Arc<dyn crate::backend::WorktreeBackend>,
+    )>,
 {
     let cli: GenericCli<TC::Args, RC::Args> = parse_cli(app_name, app_about, app_long_about);
 
@@ -1759,18 +1772,15 @@ where
     let root_toml = crate::GenericConfigToml::<TC, RC>::load(&config_path)
         .with_context(|| format!("Config file: {}", config_path.display()))?;
     let config =
-        crate::GenericConfig::<TC, RC>::build(root_toml, cli.settings.clone(), &config_dir)
-            .with_context(|| format!("Config file: {}", config_path.display()))?;
+        crate::GenericConfig::<TC, RC>::build(root_toml, cli.settings.clone(), &config_dir);
     config
         .dispatcher
         .validate()
         .with_context(|| format!("Config file: {}", config_path.display()))?;
     let executor_config = config.executor.clone();
 
-    let task_backend: std::sync::Arc<dyn crate::backend::TaskBackend> =
-        std::sync::Arc::new(config.tasks.build_backend(&config.dispatcher)?);
-    let repo_backend: std::sync::Arc<dyn crate::backend::WorktreeBackend> =
-        std::sync::Arc::new(config.repo.build_backend(&config.dispatcher)?);
+    let (task_backend, repo_backend) =
+        build_backends(config.tasks, config.repo, &config.dispatcher)?;
 
     let zbobr = crate::ZbobrDispatcher::new_with_backends(
         config.dispatcher.clone(),
