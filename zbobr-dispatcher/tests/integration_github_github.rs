@@ -47,8 +47,6 @@ async fn load_credentials() -> (String, String, String, String) {
     creds.clone()
 }
 
-#![allow(clippy::await_holding_lock)]
-
 async fn get_env() -> Arc<IntegrationTestEnv> {
     let (task_repo, task_token, fork_owner, repo_token) = load_credentials().await;
     IntegrationTestEnv::init_github_github(
