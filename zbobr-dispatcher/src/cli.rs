@@ -729,30 +729,7 @@ async fn run_task_subcommand(
             }
 
             // Fetch the latest from remote
-            let fetch_cmd = TokioCommand::new("git")
-                .args(["fetch", "origin", &dest_branch])
-                .current_dir(&repo_dir)
-                .output()
-                .await;
-
-            match fetch_cmd {
-                Ok(output) if !output.status.success() => {
-                    return Err(anyhow::anyhow!(
-                        "Failed to fetch '{}' from remote in '{}': {}",
-                        dest_branch,
-                        repo_dir.display(),
-                        String::from_utf8_lossy(&output.stderr).trim()
-                    ));
-                }
-                Err(e) => {
-                    return Err(anyhow::anyhow!(
-                        "Failed to run git fetch in '{}': {}",
-                        repo_dir.display(),
-                        e
-                    ));
-                }
-                Ok(_) => {}
-            }
+            git(&repo_dir, &["fetch", "origin", &dest_branch]).await?;
 
             // Call the rewrite_commit_authors function
             rewrite_commit_authors(zbobr, id, &repo_dir, dry_run).await?;
@@ -829,7 +806,7 @@ impl<'a> CliRoleRunner<'a> {
         let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), self.task_id);
         tokio::fs::create_dir_all(task_dir.path()).await?;
 
-        let work_dir = prepare_workspace(self.zbobr, self.task_id, self.role, task_dir.path()).await?;
+        let (work_dir, is_uptodate) = prepare_workspace(self.zbobr, self.task_id, self.role, task_dir.path()).await?;
 
         if matches!(self.role, Role::Preparator) {
             seed_preparator_defaults(self.zbobr, self.task_id).await?;
@@ -837,33 +814,58 @@ impl<'a> CliRoleRunner<'a> {
             ensure_pr_url(self.zbobr, self.task_id).await?;
         }
 
-        // Early-merge check must run BEFORE clearing the triggering condition.
-        // If a conflict is detected the session exits here — the signal is left
-        // intact so the Merger can return to the same stage after resolving it.
-        if should_try_early_merge(self.role)
-            && try_early_merge(self.zbobr, self.task_id, &work_dir).await?
-        {
+        // If the work branch has diverged from the base branch, defer to the
+        // Merger instead of continuing with the current role's session.
+        if !is_uptodate && self.role != Role::Merger {
+            tracing::info!(
+                "Task #{} work branch diverged from base — setting GoMerge signal",
+                self.task_id
+            );
+            let task_session = self.zbobr.task_session(self.task_id);
+            task_session.set_signal(Some(Signal::GoMerge)).await?;
+            task_session.set_stage(Stage::Pending).await?;
             return Ok(());
         }
 
         // Rule 1: clear the triggering condition right before the agent session
-        // starts (no conflict was detected above).
-        // For Merger: clear the conflict flag but NOT the signal — the signal
-        //   carries the original stage to return to after merging.
+        // starts.
+        // For Merger: clear the signal (GoMerge) so re-entry doesn't loop.
         // For all other roles: clear the signal that caused entry.
         {
             let task_session = self.zbobr.task_session(self.task_id);
-            if self.role == Role::Merger {
-                task_session
-                    .set_conflict(false)
-                    .await
-                    .context("Failed to clear conflict flag on entry to Merger")?;
-            } else {
-                task_session
-                    .set_signal(None)
-                    .await
-                    .context("Failed to clear signal on stage entry")?;
+            task_session
+                .set_signal(None)
+                .await
+                .context("Failed to clear signal on stage entry")?;
+        }
+
+        // For Merger: try a normal git merge first. If it succeeds, no need
+        // to invoke the agent — just commit the merge and return.
+        if self.role == Role::Merger {
+            let task = self.zbobr.get_task(self.task_id).await?;
+            let dest_branch = task
+                .parameters
+                .get(&Parameter::DestinationBranch)
+                .cloned()
+                .unwrap_or_else(|| "main".to_string());
+            let merged_ok = git_check(&work_dir, &["merge", &dest_branch, "--no-edit"])
+                .await
+                .context("Failed to run git merge for Merger")?;
+            if merged_ok {
+                tracing::info!(
+                    "Task #{}: normal merge with '{}' succeeded — skipping agent session",
+                    self.task_id, dest_branch
+                );
+                perform_auto_commit_and_push(self.zbobr, self.task_id, &work_dir, self.role).await?;
+                self.zbobr.task_session(self.task_id).set_stage(Stage::Pending).await?;
+                return Ok(());
             }
+            tracing::info!(
+                "Task #{}: normal merge with '{}' failed — invoking agent to resolve conflicts",
+                self.task_id, dest_branch
+            );
+            // Abort the failed merge so the agent starts with a clean state
+            let _ = git(&work_dir, &["merge", "--abort"]).await;
         }
 
         // Pre-flight check: verify that get_history would return meaningful
@@ -968,17 +970,9 @@ pub async fn process_task_by_stage(
                 println!("Task #{} is PENDING (paused) — skipped", task.id);
                 return Ok(());
             }
-            if task.conflict {
-                tracing::info!(
-                    "Found PENDING task #{} with conflict flag - running merger",
-                    task.id
-                );
-                let session =
-                    CliRoleRunner::new(zbobr, task.id, Role::Merger, prompts, executor_config);
-                session.run().await?;
-            } else if task.signal.is_none() {
+            if task.signal.is_none() {
                 println!(
-                    "Task #{} is PENDING (no signal, no conflict) — skipped",
+                    "Task #{} is PENDING (no signal) — skipped",
                     task.id
                 );
                 return Ok(());
@@ -1120,20 +1114,6 @@ pub async fn run_manager_loop(
                 continue;
             }
 
-            if task.conflict {
-                tracing::info!(
-                    "Found PENDING task #{} with conflict flag - running merger",
-                    task.id
-                );
-                let session =
-                    CliRoleRunner::new(zbobr, task.id, Role::Merger, prompts, executor_config);
-                if let Err(e) = session.run().await {
-                    tracing::error!("Merger session failed: {e}");
-                }
-                session_run = true;
-                break;
-            }
-
             let Some(signal) = task.signal else { continue };
             let role = signal.target_role();
             tracing::info!(
@@ -1212,9 +1192,9 @@ async fn prepare_workspace(
     task_id: u64,
     role: Role,
     task_dir: &Path,
-) -> anyhow::Result<PathBuf> {
+) -> anyhow::Result<(PathBuf, bool)> {
     match role {
-        Role::Preparator => Ok(task_dir.to_path_buf()),
+        Role::Preparator => Ok((task_dir.to_path_buf(), true)),
         Role::Merger => {
             let task = zbobr.get_task(task_id).await?;
             let dest_repo = task
@@ -1225,7 +1205,7 @@ async fn prepare_workspace(
                 })?
                 .as_str();
             let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo);
-            Ok(task_dir.join(repo_name))
+            Ok((task_dir.join(repo_name), true))
         }
         _ => {
             let task = zbobr.get_task(task_id).await?;
@@ -1250,11 +1230,11 @@ async fn prepare_workspace(
                 .update_worktree(&dest_repo, &dest_branch, &work_branch, task_id)
                 .await
             {
-                Ok(_) => {
+                Ok(is_uptodate) => {
                     let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo);
                     let task_dir = TaskDir::new(zbobr.config().workspaces.as_path(), task_id);
                     let path = task_dir.path().join(repo_name);
-                    Ok(path)
+                    Ok((path, is_uptodate))
                 },
                 Err(e) => {
                     let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
@@ -1321,47 +1301,6 @@ async fn seed_preparator_defaults(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> a
     }
 
     Ok(())
-}
-
-fn should_try_early_merge(role: Role) -> bool {
-    matches!(role, Role::Planner | Role::Worker | Role::Reviewer)
-}
-
-async fn try_early_merge(
-    zbobr: &ZbobrDispatcherDyn,
-    task_id: u64,
-    work_dir: &Path,
-) -> anyhow::Result<bool> {
-    let task = zbobr.get_task(task_id).await?;
-    let dest_branch = task
-        .parameters
-        .get(&Parameter::DestinationBranch)
-        .cloned()
-        .unwrap_or_else(|| "main".to_string());
-
-    let merged_ok = git_check(work_dir, &["merge", &dest_branch, "--no-edit"])
-        .await
-        .context("Failed to run git merge for conflict detection")?;
-
-    if !merged_ok {
-        tracing::warn!(
-            "Merge conflict detected for task #{task_id} \
-             (merging '{dest_branch}' into work branch). \
-             Setting conflict flag and deferring to Merger."
-        );
-        zbobr
-            .task_session(task_id)
-            .set_conflict(true)
-            .await
-            .context("Failed to set conflict flag")?;
-        zbobr
-            .set_task_stage(task_id, Stage::Pending)
-            .await
-            .context("Failed to reset stage to Pending after conflict")?;
-        return Ok(true);
-    }
-
-    Ok(false)
 }
 
 async fn start_mcp_server(
@@ -1561,10 +1500,9 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Merger => {
-            // Conflict was already cleared on entry (Rule 1).
-            // Retry the same merge operation to verify the Merger actually resolved it.
-            // If it still fails, pause the task and report — do NOT set conflict=true
-            // again, to prevent an infinite Merger loop.
+            // The agent was invoked because a normal merge failed.
+            // Retry the merge to verify the agent actually resolved the conflict.
+            // If it still fails, pause the task and report to avoid an infinite loop.
             let dest_branch = zbobr
                 .get_task(task_id)
                 .await?
@@ -1572,24 +1510,16 @@ async fn finalize_session(
                 .get(&Parameter::DestinationBranch)
                 .cloned()
                 .unwrap_or_else(|| "main".to_string());
-            let merge = TokioCommand::new("git")
-                .args(["merge", &dest_branch, "--no-edit"])
-                .current_dir(work_dir)
-                .output()
+            let merged_ok = git_check(work_dir, &["merge", &dest_branch, "--no-edit"])
                 .await
                 .context("Failed to run git merge verification after Merger session")?;
-            if !merge.status.success() {
+            if !merged_ok {
                 // Merger did not fix the conflict — abort the leftover merge state,
                 // report the failure, and pause to avoid an infinite retry loop.
-                let _ = TokioCommand::new("git")
-                    .args(["merge", "--abort"])
-                    .current_dir(work_dir)
-                    .status()
-                    .await;
-                let stderr = String::from_utf8_lossy(&merge.stderr);
+                let _ = git(work_dir, &["merge", "--abort"]).await;
                 let msg = format!(
                     "Merger failed to resolve merge conflict with branch '{dest_branch}'. \
-                     Manual intervention required.\n{stderr}"
+                     Manual intervention required."
                 );
                 tracing::error!("task #{task_id}: {msg}");
                 let hostname = get_hostname();
