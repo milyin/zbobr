@@ -277,10 +277,11 @@ impl ZbobrRepoBackendGithub {
                 "https://x-access-token:{token}@github.com/{}.git",
                 repo.full_name
             );
+            let bare_name = format!("{}.git", repo.name());
             tracing::info!("Creating bare clone of {} at {}", repo.full_name, bare_dir.display());
             git(
                 &self.backend_config.repos_dir,
-                &["clone", "--bare", &clone_url, bare_dir.to_str().unwrap()],
+                &["clone", "--bare", &clone_url, &bare_name],
             )
             .await?;
 
