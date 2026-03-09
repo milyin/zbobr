@@ -816,22 +816,32 @@ impl<'a> CliRoleRunner<'a> {
 
         // If the work branch has diverged from the base branch, defer to the
         // Merger instead of continuing with the current role's session.
+        // The signal is NOT changed — it will be preserved through the merge
+        // and used to resume the interrupted role after the conflict is resolved.
         if !is_uptodate && self.role != Role::Merger {
             tracing::info!(
-                "Task #{} work branch diverged from base — setting GoMerge signal",
+                "Task #{} work branch diverged from base — setting conflict flag",
                 self.task_id
             );
             let task_session = self.zbobr.task_session(self.task_id);
-            task_session.set_signal(Some(Signal::GoMerge)).await?;
+            task_session.set_conflict(true).await?;
             task_session.set_stage(Stage::Pending).await?;
             return Ok(());
         }
 
         // Rule 1: clear the triggering condition right before the agent session
         // starts.
-        // For Merger: clear the signal (GoMerge) so re-entry doesn't loop.
+        // For Merger: clear the conflict flag so re-entry doesn't loop.
+        //   The signal is NOT cleared — it represents the role that was
+        //   interrupted and should resume after the merge.
         // For all other roles: clear the signal that caused entry.
-        {
+        if self.role == Role::Merger {
+            let task_session = self.zbobr.task_session(self.task_id);
+            task_session
+                .set_conflict(false)
+                .await
+                .context("Failed to clear conflict flag on Merger entry")?;
+        } else {
             let task_session = self.zbobr.task_session(self.task_id);
             task_session
                 .set_signal(None)
@@ -970,17 +980,22 @@ pub async fn process_task_by_stage(
                 println!("Task #{} is PENDING (paused) — skipped", task.id);
                 return Ok(());
             }
-            if task.signal.is_none() {
+            // Conflict flag takes priority: route to Merger to resolve the
+            // diverged work branch before any other role runs.
+            if task.conflict {
+                let session =
+                    CliRoleRunner::new(zbobr, task.id, Role::Merger, prompts, executor_config);
+                session.run().await?;
+            } else if let Some(signal) = task.signal {
+                let role = signal.target_role();
+                let session = CliRoleRunner::new(zbobr, task.id, role, prompts, executor_config);
+                session.run().await?;
+            } else {
                 println!(
                     "Task #{} is PENDING (no signal) — skipped",
                     task.id
                 );
                 return Ok(());
-            } else {
-                let signal = task.signal.unwrap();
-                let role = signal.target_role();
-                let session = CliRoleRunner::new(zbobr, task.id, role, prompts, executor_config);
-                session.run().await?;
             }
         }
         Stage::Preparing
@@ -1114,12 +1129,20 @@ pub async fn run_manager_loop(
                 continue;
             }
 
-            let Some(signal) = task.signal else { continue };
-            let role = signal.target_role();
+            // Conflict flag takes priority over signals.
+            let role = if task.conflict {
+                Role::Merger
+            } else if let Some(signal) = task.signal {
+                signal.target_role()
+            } else {
+                continue;
+            };
+
             tracing::info!(
-                "Found PENDING task #{} with signal {:?} - running {:?}",
+                "Found PENDING task #{} (conflict={}, signal={:?}) - running {:?}",
                 task.id,
-                signal,
+                task.conflict,
+                task.signal,
                 role
             );
             let session = CliRoleRunner::new(zbobr, task.id, role, prompts, executor_config);

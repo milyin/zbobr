@@ -296,6 +296,55 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
         .next()
         .unwrap_or(&dest_repo)
         .to_string();
+    let local_repo_str = repo_path.to_string_lossy().to_string();
+
+    // Helper: set up conflicting history so the auto-merge fails and the
+    // agent is invoked.  Creates divergent changes on work_branch vs main.
+    async fn setup_conflict(
+        env: &IntegrationTestEnv,
+        repo_path: &std::path::PathBuf,
+        task_id: u64,
+        work_branch: &str,
+        repo_name: &str,
+        file_tag: &str,
+    ) -> std::path::PathBuf {
+        let local_repo_str = repo_path.to_string_lossy().to_string();
+        let remote_repo = env
+            .target_repo
+            .as_deref()
+            .unwrap_or_else(|| local_repo_str.as_str());
+
+        // Create an initial file on main so both branches can diverge from it.
+        let merge_file = format!("merge_{file_tag}.txt");
+        write_and_commit(repo_path, &merge_file, "base content\n", "Base commit")
+            .await;
+
+        let work_dir = env
+            .prepare_workspace_via_repo_backend(task_id, remote_repo, work_branch)
+            .await;
+
+        // Diverge: work branch changes the file one way…
+        write_and_commit(
+            &work_dir,
+            &merge_file,
+            "work content\n",
+            "Work divergence",
+        )
+        .await;
+
+        // …and main changes it another way.
+        git_in(&work_dir, &["checkout", "main"]).await;
+        write_and_commit(
+            &work_dir,
+            &merge_file,
+            "main content\n",
+            "Main divergence",
+        )
+        .await;
+        git_in(&work_dir, &["checkout", work_branch]).await;
+
+        work_dir
+    }
 
     // ---- report ending ----
     let task_report = env
@@ -304,24 +353,7 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
     let branch_report = format!("zbobr_fix-{task_report}-test");
     env.update_task_branches(task_report, &dest_repo, "main", &branch_report)
         .await;
-    let local_repo_str = repo_path.to_string_lossy().to_string();
-    let remote_repo = env
-        .target_repo
-        .as_deref()
-        .unwrap_or_else(|| local_repo_str.as_str());
-    env.prepare_workspace_via_repo_backend(task_report, remote_repo, &branch_report)
-        .await;
-
-    // Add a dummy commit so the work branch has changes above main (required for PR creation).
-    let task_dir_report = TaskDir::new(&env.workspaces_dir, task_report);
-    let work_dir_report = task_dir_report.path().join(&repo_name);
-    write_and_commit(
-        &work_dir_report,
-        "ZBOBR_PLACEHOLDER.md",
-        &format!("placeholder for task #{task_report}\n"),
-        "chore: add placeholder for PR",
-    )
-    .await;
+    setup_conflict(env, &repo_path, task_report, &branch_report, &repo_name, "report").await;
 
     env.run_stage(
         task_report,
@@ -359,24 +391,7 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
     let branch_ask = format!("zbobr_fix-{task_ask}-test");
     env.update_task_branches(task_ask, &dest_repo, "main", &branch_ask)
         .await;
-    let local_repo_str = repo_path.to_string_lossy().to_string();
-    let remote_repo = env
-        .target_repo
-        .as_deref()
-        .unwrap_or_else(|| local_repo_str.as_str());
-    env.prepare_workspace_via_repo_backend(task_ask, remote_repo, &branch_ask)
-        .await;
-
-    // Add a dummy commit so the work branch has changes above main (required for PR creation).
-    let task_dir_ask = TaskDir::new(&env.workspaces_dir, task_ask);
-    let work_dir_ask = task_dir_ask.path().join(&repo_name);
-    write_and_commit(
-        &work_dir_ask,
-        "ZBOBR_PLACEHOLDER.md",
-        &format!("placeholder for task #{task_ask}\n"),
-        "chore: add placeholder for PR",
-    )
-    .await;
+    setup_conflict(env, &repo_path, task_ask, &branch_ask, &repo_name, "ask").await;
 
     env.run_stage(task_ask, Stage::Merging, scenarios::merging_scenario("ask"))
         .await;
@@ -565,9 +580,10 @@ pub async fn run_conflict_detection(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &repo_path_str, "main", work_branch)
         .await;
 
-    // Run the Worker stage.  The dispatcher clones the repo, attempts
-    // `git merge main`, detects the conflict, sets conflict=true, and exits
-    // successfully without invoking the mcp-tester agent.
+    // Run the Worker stage.  The dispatcher detects that the work branch
+    // has diverged from main, sets conflict=true, and exits without invoking
+    // the mcp-tester agent.  The workspace is left clean (no unmerged paths)
+    // — the actual merge attempt happens when the Merger runs.
     env.run_stage(task_id, Stage::Working, scenarios::working_scenario())
         .await;
 
@@ -577,18 +593,15 @@ pub async fn run_conflict_detection(env: &IntegrationTestEnv) {
         "[{}] Conflict flag should be set after automatic conflict detection",
         env.name()
     );
-
-    // Workspace must exist and be in an unresolved merge state.
-    let task_dir = TaskDir::new(&env.workspaces_dir, task_id);
-    let work_dir = task_dir.path().join(&repo_name);
-    let git_status = git_output(&work_dir, &["status"]).await;
-    assert!(
-        git_status.contains("You have unmerged paths") || git_status.contains("Unmerged paths"),
-        "[{}] Workspace should be in a conflicted git state:\n{git_status}",
+    assert_eq!(
+        task.stage,
+        Stage::Pending,
+        "[{}] Task should return to Pending after conflict detection",
         env.name()
     );
 
-    // Run the Merger on the already-conflicted workspace.
+    // Run the Merger — it will attempt the merge, encounter the conflict,
+    // and invoke the agent to resolve it.
     env.run_stage(
         task_id,
         Stage::Merging,

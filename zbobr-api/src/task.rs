@@ -430,6 +430,10 @@ impl std::str::FromStr for Role {
 
 /// Signal for task flow control (mapped to labels in GitHub backend).
 /// Ordered by priority (highest to lowest): GoPrepare > GoPlan > GoWork > GoReview > GoTest.
+///
+/// Note: there is no GoMerge signal. Merging is triggered by the `conflict`
+/// flag on the Task struct, which is set automatically when a work branch
+/// diverges from its base branch.
 #[derive(
     Debug,
     Clone,
@@ -453,8 +457,6 @@ pub enum Signal {
     GoReview = 4,
     #[serde(rename = "go_test")]
     GoTest = 5,
-    #[serde(rename = "go_merge")]
-    GoMerge = 6,
 }
 
 impl Signal {
@@ -466,7 +468,6 @@ impl Signal {
             Signal::GoWork => "go_work",
             Signal::GoPlan => "go_plan",
             Signal::GoPrepare => "go_prepare",
-            Signal::GoMerge => "go_merge",
         }
     }
 
@@ -478,7 +479,6 @@ impl Signal {
             Signal::GoWork,
             Signal::GoReview,
             Signal::GoTest,
-            Signal::GoMerge,
         ]
     }
 
@@ -490,7 +490,6 @@ impl Signal {
             Signal::GoWork => Role::Worker,
             Signal::GoPlan => Role::Planner,
             Signal::GoPrepare => Role::Preparator,
-            Signal::GoMerge => Role::Merger,
         }
     }
 }
