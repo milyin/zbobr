@@ -1412,9 +1412,8 @@ async fn finalize_session(
 
     if execution_interrupted {
         if role == Role::Worker || role == Role::Merger {
-            let role_session = zbobr.task_session(task_id).role_session();
-            if let Err(e) = role_session.update_pr().await {
-                tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
+            if let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await {
+                tracing::warn!("Auto-commit/push failed during interruption for task #{task_id}: {e}");
             }
         }
         task_session.set_stage(Stage::Pending).await?;
@@ -1424,9 +1423,8 @@ async fn finalize_session(
 
     if let Some(e) = execution_error {
         if role == Role::Worker || role == Role::Merger {
-            let role_session = zbobr.task_session(task_id).role_session();
-            if let Err(e) = role_session.update_pr().await {
-                tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
+            if let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await {
+                tracing::warn!("Auto-commit/push failed during error handling for task #{task_id}: {e}");
             }
         }
         let error_msg = format!("Execution failed: {e}");
