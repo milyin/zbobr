@@ -1657,7 +1657,7 @@ async fn rewrite_commit_authors(
     configure_git_user(&git_root_path, git_user_name, git_user_email).await?;
 
     let rebase_cmd = format!(
-        "git rebase --exec 'git commit --amend --no-edit --reset-author' '{}'",
+        "git rebase --exec 'git commit --amend --no-edit --reset-author --allow-empty' '{}'",
         dest_branch
     );
     let rebase_output = TokioCommand::new("sh")
