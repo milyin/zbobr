@@ -105,12 +105,12 @@ pub async fn create_placeholder_commit(work_dir: &Path, branch_name: &str) -> Re
 ///
 /// 1. Prunes worktree references whose directories no longer exist.
 /// 2. Scans remaining worktrees for `work_branch`:
-///    - **Functional at `workspace_path`** (`.git` entry exists) — already set
-///      up correctly, nothing to do.
+///    - **Functional at `workspace_path`** (`.git` entry exists and `git
+///      status` succeeds) — already set up correctly, nothing to do.
 ///    - **Functional at a different path** — someone else is using it, returns
 ///      an error.
-///    - **Non-functional** (directory empty/missing, no `.git`) — stale
-///      reference, force-removed regardless of path.
+///    - **Non-functional** (directory empty/missing, no `.git`, or `git status`
+///      fails) — stale reference, force-removed regardless of path.
 pub async fn cleanup_worktree_for_branch(
     bare_dir: &Path,
     work_branch: &str,
@@ -127,10 +127,16 @@ pub async fn cleanup_worktree_for_branch(
             if b == work_branch {
                 if let Some(ref wt) = current_wt_path {
                     let wt_path = Path::new(wt);
-                    let has_git_marker = wt_path.join(".git").exists();
+                    // A worktree is functional if its directory has a .git
+                    // entry AND `git status` succeeds in it.
+                    let functional = wt_path.join(".git").exists()
+                        && git_check(wt_path, &["status"]).await.unwrap_or(false);
 
-                    if has_git_marker {
-                        if wt_path == workspace_path {
+                    if functional {
+                        // Compare canonicalized paths to avoid ./foo vs foo mismatches
+                        let wt_canon = wt_path.canonicalize().ok();
+                        let ws_canon = workspace_path.canonicalize().ok();
+                        if wt_canon.is_some() && wt_canon == ws_canon {
                             // Already set up at the right place, nothing to do
                             return Ok(());
                         }
