@@ -9,7 +9,7 @@ use std::{
 };
 
 use zbobr_dispatcher::{
-    ChecklistItem, Comment, Signal, Stage, Task, ZbobrDispatcher, ZbobrDispatcherConfig,
+    ChecklistItem, Comment, Signal, Stage, Task, TaskDir, ZbobrDispatcher, ZbobrDispatcherConfig,
     ZbobrDispatcherDyn, ZbobrExecutorConfig, process_task_by_stage,
     prompts::Prompts,
     config::StageConfig,
@@ -509,8 +509,8 @@ impl IntegrationTestEnv {
         repo_path: &Path,
         work_branch: &str,
     ) -> PathBuf {
-        let workspace_dir = self.workspaces_dir.join(format!("task#{task_id}"));
-        tokio::fs::create_dir_all(&workspace_dir)
+        let task_dir = TaskDir::new(&self.workspaces_dir, task_id);
+        tokio::fs::create_dir_all(task_dir.path())
             .await
             .expect("failed to create workspace dir");
 
@@ -585,12 +585,8 @@ impl IntegrationTestEnv {
             .unwrap_or_else(|e| panic!("[{}] update_worktree failed: {e}", self.name));
 
         let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo);
-        let work_dir = self
-            .zbobr
-            .config()
-            .workspaces
-            .join(format!("task#{task_id}"))
-            .join(repo_name);
+        let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), task_id);
+        let work_dir = task_dir.path().join(repo_name);
 
         assert!(
             work_dir.exists(),

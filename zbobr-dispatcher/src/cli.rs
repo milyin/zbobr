@@ -13,7 +13,7 @@ use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig}
 use zbobr_utility::{git, git_check, git_output, configure_git_user};
 
 use crate::{
-    Comment, CommentType, Signal, Stage, Task, ToolExecutor, ZbobrDispatcherDyn,
+    Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcherDyn,
     ZbobrExecutorConfig,
     mcp::common::get_hostname,
     prompts::Prompts,
@@ -703,14 +703,14 @@ async fn run_task_subcommand(
                 }
             }
 
-            let work_dir = zbobr.config().workspaces.join(format!("task#{}", id));
+            let task_dir = TaskDir::new(zbobr.config().workspaces.as_path(), id);
 
             // Derive the actual git repo directory (work_dir/<repo_name>)
             let repo_name = std::path::Path::new(&dest_repo)
                 .file_name()
                 .and_then(|n| n.to_str())
                 .ok_or_else(|| anyhow::anyhow!("Cannot extract repo name from: {}", dest_repo))?;
-            let repo_dir = work_dir.join(repo_name);
+            let repo_dir = task_dir.path().join(repo_name);
 
             // Fetch latest to ensure we have the destination branch
             let dest_branch = task
@@ -826,14 +826,10 @@ impl<'a> CliRoleRunner<'a> {
             .set_task_stage(self.task_id, self.role.into())
             .await?;
 
-        let task_dir = self
-            .zbobr
-            .config()
-            .workspaces
-            .join(format!("task#{}", self.task_id));
-        tokio::fs::create_dir_all(&task_dir).await?;
+        let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), self.task_id);
+        tokio::fs::create_dir_all(task_dir.path()).await?;
 
-        let work_dir = prepare_workspace(self.zbobr, self.task_id, self.role, &task_dir).await?;
+        let work_dir = prepare_workspace(self.zbobr, self.task_id, self.role, task_dir.path()).await?;
 
         if matches!(self.role, Role::Preparator) {
             seed_preparator_defaults(self.zbobr, self.task_id).await?;
@@ -1256,11 +1252,8 @@ async fn prepare_workspace(
             {
                 Ok(_) => {
                     let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo);
-                    let path = zbobr
-                        .config()
-                        .workspaces
-                        .join(format!("task#{task_id}"))
-                        .join(repo_name);
+                    let task_dir = TaskDir::new(zbobr.config().workspaces.as_path(), task_id);
+                    let path = task_dir.path().join(repo_name);
                     Ok(path)
                 },
                 Err(e) => {

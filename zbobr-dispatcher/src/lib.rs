@@ -7,6 +7,7 @@ pub mod mcp;
 pub mod prompts;
 pub mod setup;
 pub mod task;
+pub mod task_dir;
 pub mod tool_executor;
 
 use std::{collections::HashMap, sync::Arc};
@@ -30,6 +31,7 @@ pub use task::{
     ChecklistItem, Comment, CommentType, Model, Parameter, RoleSession, Signal, Stage, Task,
     TaskSession, Tool,
 };
+pub use task_dir::TaskDir;
 pub use tool_executor::ToolExecutor;
 pub use zbobr_api::config::{BackendConfig, Config};
 
@@ -262,7 +264,7 @@ impl<T: TaskBackend + ?Sized, R: WorktreeBackend + ?Sized> ZbobrDispatcher<T, R>
     }
 
     /// Prepare a worktree for the given task. Constructs workspace_path as
-    /// `workspaces/task#{task_id}/repo_name` and delegates to the backend.
+    /// `TaskDir::new(workspaces, task_id)/repo_name` and delegates to the backend.
     pub async fn update_worktree(
         &self,
         remote_repo: &str,
@@ -271,11 +273,8 @@ impl<T: TaskBackend + ?Sized, R: WorktreeBackend + ?Sized> ZbobrDispatcher<T, R>
         task_id: u64,
     ) -> anyhow::Result<bool> {
         let repo_name = Self::extract_repo_name(remote_repo);
-        let workspace_path = self
-            .config
-            .workspaces
-            .join(format!("task#{task_id}"))
-            .join(repo_name);
+        let task_dir = TaskDir::new(&self.config.workspaces, task_id);
+        let workspace_path = task_dir.path().join(repo_name);
         self.repo_backend
             .update_worktree(remote_repo, base_branch, work_branch, &workspace_path)
             .await

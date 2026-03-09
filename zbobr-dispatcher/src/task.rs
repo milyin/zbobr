@@ -1,6 +1,6 @@
 pub use zbobr_api::task::*;
 
-use crate::ZbobrDispatcherDyn;
+use crate::{TaskDir, ZbobrDispatcherDyn};
 
 // ---------------------------------------------------------------------------
 // RoleSession — restricted access for MCP tools during agent sessions.
@@ -326,17 +326,13 @@ impl TaskSession {
 
         // Delete placeholder commit and push before marking done.
         if let Some(work_branch) = task.parameters.get(&Parameter::WorkBranch).cloned() {
-            let task_dir = self
-                .zbobr
-                .config()
-                .workspaces
-                .join(format!("task#{task_id}"));
+            let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), task_id);
             let work_dir =
                 if let Some(dest_repo) = task.parameters.get(&Parameter::DestinationRepository) {
                     let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo.as_str());
-                    task_dir.join(repo_name)
+                    task_dir.path().join(repo_name)
                 } else {
-                    task_dir
+                    task_dir.path().to_path_buf()
                 };
             if let Err(e) = zbobr_utility::delete_placeholder_commit(&work_dir, &work_branch).await
             {

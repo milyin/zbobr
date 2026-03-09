@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use zbobr_api::task::ChecklistItem;
-use zbobr_dispatcher::{CommentType, Signal, Stage, task::Parameter};
+use zbobr_dispatcher::{CommentType, Signal, Stage, TaskDir, task::Parameter};
 
 use super::{env::IntegrationTestEnv, scenarios};
 
@@ -240,10 +240,8 @@ pub async fn run_reviewing_approval(env: &IntegrationTestEnv) {
         .await;
 
     // Add a placeholder commit so the work branch differs from main (PR requires changes).
-    let work_dir = env
-        .workspaces_dir
-        .join(format!("task#{task_id}"))
-        .join(&repo_name);
+    let task_dir = TaskDir::new(&env.workspaces_dir, task_id);
+    let work_dir = task_dir.path().join(&repo_name);
     write_and_commit(
         &work_dir,
         "ZBOBR_PLACEHOLDER.md",
@@ -315,10 +313,8 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
         .await;
 
     // Add a dummy commit so the work branch has changes above main (required for PR creation).
-    let work_dir_report = env
-        .workspaces_dir
-        .join(format!("task#{task_report}"))
-        .join(&repo_name);
+    let task_dir_report = TaskDir::new(&env.workspaces_dir, task_report);
+    let work_dir_report = task_dir_report.path().join(&repo_name);
     write_and_commit(
         &work_dir_report,
         "ZBOBR_PLACEHOLDER.md",
@@ -372,10 +368,8 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
         .await;
 
     // Add a dummy commit so the work branch has changes above main (required for PR creation).
-    let work_dir_ask = env
-        .workspaces_dir
-        .join(format!("task#{task_ask}"))
-        .join(&repo_name);
+    let task_dir_ask = TaskDir::new(&env.workspaces_dir, task_ask);
+    let work_dir_ask = task_dir_ask.path().join(&repo_name);
     write_and_commit(
         &work_dir_ask,
         "ZBOBR_PLACEHOLDER.md",
@@ -585,10 +579,8 @@ pub async fn run_conflict_detection(env: &IntegrationTestEnv) {
     );
 
     // Workspace must exist and be in an unresolved merge state.
-    let work_dir = env
-        .workspaces_dir
-        .join(format!("task#{task_id}"))
-        .join(&repo_name);
+    let task_dir = TaskDir::new(&env.workspaces_dir, task_id);
+    let work_dir = task_dir.path().join(&repo_name);
     let git_status = git_output(&work_dir, &["status"]).await;
     assert!(
         git_status.contains("You have unmerged paths") || git_status.contains("Unmerged paths"),
@@ -918,10 +910,8 @@ pub async fn run_repo_backend_clone(env: &IntegrationTestEnv) {
         .await
         .unwrap();
 
-    let workspace_dir = env
-        .workspaces_dir
-        .join(format!("task#{task_id}"))
-        .join(repo_name);
+    let task_dir = TaskDir::new(&env.workspaces_dir, task_id);
+    let workspace_dir = task_dir.path().join(repo_name);
     assert!(
         workspace_dir.exists(),
         "[{}] Workspace directory missing after clone: {}",
@@ -1009,10 +999,8 @@ pub async fn run_repo_backend_clone_cross_org(env: &IntegrationTestEnv) {
         .await
         .unwrap();
 
-    let workspace_dir = env
-        .workspaces_dir
-        .join(format!("task#{task_id}"))
-        .join(repo_name);
+    let task_dir = TaskDir::new(&env.workspaces_dir, task_id);
+    let workspace_dir = task_dir.path().join(repo_name);
     assert!(
         workspace_dir.exists(),
         "[{}] Workspace directory missing after cross-org clone: {}",
@@ -1351,10 +1339,8 @@ async fn assert_workspace_ok(
     repo_name: &str,
     work_branch: &str,
 ) {
-    let work_dir = env
-        .workspaces_dir
-        .join(format!("task#{task_id}"))
-        .join(repo_name);
+    let task_dir = TaskDir::new(&env.workspaces_dir, task_id);
+    let work_dir = task_dir.path().join(repo_name);
 
     assert!(
         work_dir.exists(),
@@ -1602,10 +1588,8 @@ pub async fn run_entry_clears_conflict_preserves_signal_for_merger(env: &Integra
         .await;
 
     // Add a placeholder commit so the PR can be created.
-    let work_dir = env
-        .workspaces_dir
-        .join(format!("task#{task_id}"))
-        .join(&repo_name);
+    let task_dir = TaskDir::new(&env.workspaces_dir, task_id);
+    let work_dir = task_dir.path().join(&repo_name);
     write_and_commit(
         &work_dir,
         "ZBOBR_PLACEHOLDER.md",
