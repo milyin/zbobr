@@ -58,7 +58,9 @@ async fn get_env() -> Arc<IntegrationTestEnv> {
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
 async fn test_fs_github_preparation() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    }
     let env = get_env().await;
     test_helpers::run_preparation(&env).await;
 }
@@ -66,7 +68,9 @@ async fn test_fs_github_preparation() {
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
 async fn test_fs_github_planning() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    }
     let env = get_env().await;
     test_helpers::run_planning(&env).await;
 }
@@ -74,7 +78,9 @@ async fn test_fs_github_planning() {
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
 async fn test_fs_github_working() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    }
     let env = get_env().await;
     test_helpers::run_working(&env).await;
 }
@@ -82,7 +88,9 @@ async fn test_fs_github_working() {
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
 async fn test_fs_github_reviewing() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    }
     let env = get_env().await;
     test_helpers::run_reviewing(&env).await;
 }
@@ -90,7 +98,9 @@ async fn test_fs_github_reviewing() {
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
 async fn test_fs_github_merging() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    }
     let env = get_env().await;
     test_helpers::run_merging(&env).await;
 }
@@ -98,7 +108,9 @@ async fn test_fs_github_merging() {
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
 async fn test_fs_github_merging_with_real_conflict() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    }
     let env = get_env().await;
     test_helpers::run_merging_with_real_conflict(&env).await;
 }
@@ -106,7 +118,9 @@ async fn test_fs_github_merging_with_real_conflict() {
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
 async fn test_fs_github_conflict_detection() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    }
     let env = get_env().await;
     test_helpers::run_conflict_detection(&env).await;
 }

@@ -485,7 +485,7 @@ impl ZbobrRepoBackendGithub {
             if !path.is_dir()
                 || !path
                     .file_name()
-                    .map_or(false, |n| n.to_string_lossy().ends_with(".git"))
+                    .is_some_and(|n| n.to_string_lossy().ends_with(".git"))
             {
                 continue;
             }
@@ -506,11 +506,10 @@ impl ZbobrRepoBackendGithub {
                         branch = Some(b.to_string());
                     }
                 }
-                if branch.as_deref() == Some(work_branch) {
-                    if let Some(wt) = wt_path {
+                if branch.as_deref() == Some(work_branch)
+                    && let Some(wt) = wt_path {
                         return Ok((path.clone(), wt));
                     }
-                }
             }
         }
 

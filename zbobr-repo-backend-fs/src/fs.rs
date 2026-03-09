@@ -176,7 +176,7 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
             if !path.is_dir()
                 || !path
                     .file_name()
-                    .map_or(false, |n| n.to_string_lossy().ends_with(".git"))
+                    .is_some_and(|n| n.to_string_lossy().ends_with(".git"))
             {
                 continue;
             }
@@ -199,10 +199,9 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
                         branch = Some(b.to_string());
                     }
                 }
-                if branch.as_deref() == Some(work_branch) {
-                    if let Some(p) = wt_path {
-                        return Ok(p);
-                    }
+                if branch.as_deref() == Some(work_branch)
+                    && let Some(p) = wt_path {
+                    return Ok(p);
                 }
             }
         }

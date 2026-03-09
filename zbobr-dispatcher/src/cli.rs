@@ -385,7 +385,7 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
                 comment_type: c.comment_type,
                 role: c.role,
                 hostname: c.hostname.clone(),
-                tool: c.tool.clone(),
+                tool: c.tool,
                 model: c.model.clone(),
             };
             println!("  [{}] {}\n{}", i + 1, tag, c.text);
@@ -1404,7 +1404,7 @@ async fn finalize_session(
     zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
     role: Role,
-    work_dir: &PathBuf,
+    work_dir: &Path,
     execution_interrupted: bool,
     execution_error: Option<&anyhow::Error>,
 ) -> anyhow::Result<()> {
@@ -1452,8 +1452,8 @@ async fn finalize_session(
 
     tracing::info!("Session complete for task #{task_id}");
 
-    if role == Role::Worker || role == Role::Merger {
-        if let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await {
+    if (role == Role::Worker || role == Role::Merger)
+        && let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await {
             tracing::error!("Auto-commit/push failed for task #{task_id}: {e}");
             let hostname = get_hostname();
             let msg = format!("Auto-commit/push failed: {e}");
@@ -1474,7 +1474,6 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
             return Ok(());
         }
-    }
 
     let current_task = zbobr.get_task(task_id).await?;
     let has_unchecked = current_task.checklist.iter().any(|i| !i.checked);

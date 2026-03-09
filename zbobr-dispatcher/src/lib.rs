@@ -184,6 +184,7 @@ impl<T: TaskBackend + ?Sized, R: WorktreeBackend + ?Sized> ZbobrDispatcher<T, R>
         zbobr_api::extract_history_chunk(comments, &desc, offset)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn post_task_comment(
         &self,
         id: u64,

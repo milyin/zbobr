@@ -32,7 +32,7 @@ impl CommonMcpImpl for ReviewerMcp {
     }
 
     fn mcp_tool(&self) -> Tool {
-        self.tool.clone()
+        self.tool
     }
 
     fn mcp_model(&self) -> Model {

@@ -120,6 +120,7 @@ pub async fn cleanup_worktree_for_branch(
 
     let worktree_list = git_output(bare_dir, &["worktree", "list", "--porcelain"]).await?;
     let mut current_wt_path: Option<String> = None;
+    #[allow(clippy::collapsible_if)]
     for line in worktree_list.lines() {
         if let Some(p) = line.strip_prefix("worktree ") {
             current_wt_path = Some(p.to_string());

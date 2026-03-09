@@ -77,7 +77,7 @@ fn log_mcp_json_response(role_name: &str, task_id: u64, tool_name: &str, respons
             tracing::info!("[{}#{}] {} response (failed to parse): {}", role_name, task_id, tool_name, response);
         }
     } else if response.starts_with('{') {
-        if let Ok(_) = serde_json::from_str::<serde_json::Value>(response) {
+        if serde_json::from_str::<serde_json::Value>(response).is_ok() {
             tracing::info!("[{}#{}] {} succeeded", role_name, task_id, tool_name);
         } else {
             tracing::info!("[{}#{}] {} response (failed to parse): {}", role_name, task_id, tool_name, response);

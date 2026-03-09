@@ -235,7 +235,7 @@ pub async fn run_reviewing_approval(env: &IntegrationTestEnv) {
     let remote_repo = env
         .target_repo
         .as_deref()
-        .unwrap_or_else(|| local_repo_str.as_str());
+        .unwrap_or(local_repo_str.as_str());
     env.prepare_workspace_via_repo_backend(task_id, remote_repo, &work_branch)
         .await;
 
@@ -296,7 +296,7 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
         .next()
         .unwrap_or(&dest_repo)
         .to_string();
-    let local_repo_str = repo_path.to_string_lossy().to_string();
+    let _local_repo_str = repo_path.to_string_lossy().to_string();
 
     // Helper: set up conflicting history so the auto-merge fails and the
     // agent is invoked.  Creates divergent changes on work_branch vs main.
@@ -305,14 +305,14 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
         repo_path: &std::path::PathBuf,
         task_id: u64,
         work_branch: &str,
-        repo_name: &str,
+        _repo_name: &str,
         file_tag: &str,
     ) -> std::path::PathBuf {
         let local_repo_str = repo_path.to_string_lossy().to_string();
         let remote_repo = env
             .target_repo
             .as_deref()
-            .unwrap_or_else(|| local_repo_str.as_str());
+            .unwrap_or(local_repo_str.as_str());
 
         // Create an initial file on main so both branches can diverge from it.
         let merge_file = format!("merge_{file_tag}.txt");
@@ -550,7 +550,7 @@ pub async fn run_conflict_detection(env: &IntegrationTestEnv) {
 
     let repo_path = env.create_git_repo("repo_conflict_detection").await;
     let repo_path_str = repo_path.to_string_lossy().to_string();
-    let repo_name = repo_path.file_name().unwrap().to_str().unwrap().to_string();
+    let _repo_name = repo_path.file_name().unwrap().to_str().unwrap().to_string();
     let work_branch = "zbobr_conflict-detect-work";
 
     git_in(&repo_path, &["checkout", "-b", work_branch]).await;
@@ -1596,7 +1596,7 @@ pub async fn run_entry_clears_conflict_preserves_signal_for_merger(env: &Integra
     let remote_repo = env
         .target_repo
         .as_deref()
-        .unwrap_or_else(|| local_repo_str.as_str());
+        .unwrap_or(local_repo_str.as_str());
     env.prepare_workspace_via_repo_backend(task_id, remote_repo, &work_branch)
         .await;
 
