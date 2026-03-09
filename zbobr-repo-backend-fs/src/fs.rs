@@ -95,7 +95,7 @@ impl ZbobrRepoBackendFs {
             workspace_path.display()
         );
 
-        zbobr_utility::cleanup_worktree_for_branch(bare_dir, work_branch).await?;
+        zbobr_utility::cleanup_worktree_for_branch(bare_dir, work_branch, workspace_path).await?;
 
         let ws = workspace_path.to_str().unwrap();
         if git_check(bare_dir, &["rev-parse", &format!("{}^{{commit}}", work_branch)])

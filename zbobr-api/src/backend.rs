@@ -195,11 +195,14 @@ pub trait WorktreeBackend: Send + Sync {
     /// The `base_branch` must exist in the main worktree.
     /// The `work_branch`
     ///  - should either not exist or be an ancestor of `base_branch` in the main worktree.
-    ///  - should not be used by any other **functional** worktree (directory exists and contains
-    ///    a `.git` entry). If the branch is registered in a stale worktree (empty or missing
-    ///    directory), the implementation must remove the stale reference and proceed.
-    ///    If the branch is checked out in a functional worktree, the implementation must
-    ///    return `Err`.
+    ///  - if the branch is already checked out in a **functional** worktree (directory exists
+    ///    and contains a `.git` entry) at `workspace_path`, the worktree is considered ready
+    ///    and no action is needed.
+    ///  - if the branch is checked out in a functional worktree at a **different** path,
+    ///    the implementation must return `Err` (concurrent use by another workspace).
+    ///  - if the branch is registered in a **non-functional** worktree (empty or missing
+    ///    directory, no `.git` entry), the stale reference must be removed before creating
+    ///    a new worktree at `workspace_path`.
     ///  - the `workspace_path` should either not exist or contain the worktree with the 
     ///    `work_branch` selected
     ///

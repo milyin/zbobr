@@ -101,14 +101,21 @@ pub async fn create_placeholder_commit(work_dir: &Path, branch_name: &str) -> Re
 
 /// Clean up stale git worktree state for a branch before creating a new worktree.
 ///
+/// `workspace_path` is the intended destination for the new worktree.
+///
 /// 1. Prunes worktree references whose directories no longer exist.
 /// 2. Scans remaining worktrees for `work_branch`:
-///    - If the branch is checked out in a worktree whose directory is empty or
-///      missing (stale reference that `prune` didn't catch), force-removes it.
-///    - If the branch is checked out in a functional worktree (directory exists
-///      and contains a `.git` entry), returns an error — the caller must not
-///      silently discard a working worktree.
-pub async fn cleanup_worktree_for_branch(bare_dir: &Path, work_branch: &str) -> Result<()> {
+///    - **Functional at `workspace_path`** (`.git` entry exists) — already set
+///      up correctly, nothing to do.
+///    - **Functional at a different path** — someone else is using it, returns
+///      an error.
+///    - **Non-functional** (directory empty/missing, no `.git`) — stale
+///      reference, force-removed regardless of path.
+pub async fn cleanup_worktree_for_branch(
+    bare_dir: &Path,
+    work_branch: &str,
+    workspace_path: &Path,
+) -> Result<()> {
     git(bare_dir, &["worktree", "prune"]).await?;
 
     let worktree_list = git_output(bare_dir, &["worktree", "list", "--porcelain"]).await?;
@@ -120,14 +127,22 @@ pub async fn cleanup_worktree_for_branch(bare_dir: &Path, work_branch: &str) -> 
             if b == work_branch {
                 if let Some(ref wt) = current_wt_path {
                     let wt_path = Path::new(wt);
-                    let git_marker = wt_path.join(".git");
-                    if git_marker.exists() {
+                    let has_git_marker = wt_path.join(".git").exists();
+
+                    if has_git_marker {
+                        if wt_path == workspace_path {
+                            // Already set up at the right place, nothing to do
+                            return Ok(());
+                        }
                         anyhow::bail!(
-                            "Branch '{}' is already checked out in functional worktree '{}'",
+                            "Branch '{}' is already checked out in worktree '{}', \
+                             cannot create another at '{}'",
                             work_branch,
-                            wt
+                            wt,
+                            workspace_path.display()
                         );
                     }
+
                     tracing::warn!(
                         "Branch '{}' has stale worktree reference '{}', removing it",
                         work_branch,
