@@ -361,8 +361,7 @@ impl ZbobrRepoBackendGithub {
             workspace_path.display()
         );
 
-        // Prune stale worktree references (e.g. from previously removed directories)
-        git(bare_dir, &["worktree", "prune"]).await?;
+        zbobr_utility::cleanup_worktree_for_branch(bare_dir, work_branch).await?;
 
         let ws = workspace_path.to_str().unwrap();
         if git_check(
