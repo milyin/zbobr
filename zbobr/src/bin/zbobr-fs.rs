@@ -12,11 +12,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    run_zbobr::<
-        zbobr_config::ZbobrTaskBackendConfig,
-        zbobr_config::ZbobrRepoBackendConfig,
-        _,
-    >(
+    run_zbobr(
         "zbobr-fs",
         "Filesystem-backed AI-powered task dispatcher",
         "Filesystem-backed AI-powered task dispatcher that manages tasks through automated stages.\n\n\

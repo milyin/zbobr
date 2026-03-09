@@ -1721,13 +1721,12 @@ async fn rewrite_commit_authors(
 
 /// Standard entry point for a Zbobr CLI application.
 ///
-/// `TC` and `RC` define the TOML config structure (and thus which
-/// `[tasks.*]`/`[repo.*]` sub-sections are accepted).  The `build_backends`
-/// closure maps the resolved config into concrete backend instances — this
-/// is where the binary selects which sub-backend to use.
+/// The `build_backends` closure receives the resolved task and repo config
+/// and maps them into concrete backend instances — this is where the binary
+/// selects which sub-backend to use (e.g. `.github` vs `.fs`).
 use zbobr_api::CommentTag;
 
-pub async fn run_zbobr<TC, RC, F>(
+pub async fn run_zbobr<F>(
     app_name: &'static str,
     app_about: &'static str,
     app_long_about: &'static str,
@@ -1735,20 +1734,22 @@ pub async fn run_zbobr<TC, RC, F>(
     build_backends: F,
 ) -> anyhow::Result<()>
 where
-    TC: zbobr_api::config::Config + 'static,
-    RC: zbobr_api::config::Config + 'static,
-    TC::Args: zbobr_utility::PrefixedArgs + std::fmt::Debug + Clone,
-    RC::Args: zbobr_utility::PrefixedArgs + std::fmt::Debug + Clone,
     F: FnOnce(
-        TC,
-        RC,
+        crate::config::ZbobrTaskBackendConfig,
+        crate::config::ZbobrRepoBackendConfig,
         &crate::config::ZbobrDispatcherConfig,
     ) -> anyhow::Result<(
         std::sync::Arc<dyn crate::backend::TaskBackend>,
         std::sync::Arc<dyn crate::backend::WorktreeBackend>,
     )>,
 {
-    let cli: GenericCli<TC::Args, RC::Args> = parse_cli(app_name, app_about, app_long_about);
+    type TC = crate::config::ZbobrTaskBackendConfig;
+    type RC = crate::config::ZbobrRepoBackendConfig;
+
+    let cli: GenericCli<
+        <TC as zbobr_api::config::Config>::Args,
+        <RC as zbobr_api::config::Config>::Args,
+    > = parse_cli(app_name, app_about, app_long_about);
 
     let config_path = cli
         .config_file

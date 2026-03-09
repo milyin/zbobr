@@ -12,11 +12,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    zbobr_dispatcher::cli::run_zbobr::<
-        zbobr_config::ZbobrTaskBackendConfig,
-        zbobr_config::ZbobrRepoBackendConfig,
-        _,
-    >(
+    zbobr_dispatcher::cli::run_zbobr(
         "zbobr",
         "GitHub-backed AI-powered task dispatcher",
         "GitHub-backed AI-powered task dispatcher that manages tasks through automated stages.\n\n\

@@ -9,7 +9,51 @@ use zbobr_executor_copilot::{
 use zbobr_executor_mcp_tester::{
     ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterConfig, ZbobrExecutorMcpTesterToml,
 };
+use zbobr_repo_backend_fs::{
+    ZbobrRepoBackendFsArgs, ZbobrRepoBackendFsConfig, ZbobrRepoBackendFsToml,
+};
+use zbobr_repo_backend_github::{
+    ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubConfig, ZbobrRepoBackendGithubToml,
+};
+use zbobr_task_backend_fs::{
+    ZbobrTaskBackendFsArgs, ZbobrTaskBackendFsConfig, ZbobrTaskBackendFsToml,
+};
+use zbobr_task_backend_github::{
+    ZbobrTaskBackendGithubArgs, ZbobrTaskBackendGithubConfig, ZbobrTaskBackendGithubToml,
+};
 use zbobr_utility::config_struct;
+
+#[derive(Clone, Default)]
+#[config_struct]
+/// Task backend configuration section.
+///
+/// Each backend lives under a named sub-section (e.g. `[tasks.github]`,
+/// `[tasks.fs]`).  `deny_unknown_fields` ensures bare keys at `[tasks]`
+/// level are rejected.
+pub struct ZbobrTaskBackendConfig {
+    /// GitHub issues as the task source
+    #[config(nested)]
+    pub github: ZbobrTaskBackendGithubConfig,
+    /// Filesystem task backend (YAML files in tasks/)
+    #[config(nested)]
+    pub fs: ZbobrTaskBackendFsConfig,
+}
+
+#[derive(Clone, Default)]
+#[config_struct]
+/// Repo backend configuration section.
+///
+/// Each backend lives under a named sub-section (e.g. `[repo.github]`,
+/// `[repo.fs]`).  `deny_unknown_fields` ensures bare keys at `[repo]`
+/// level are rejected.
+pub struct ZbobrRepoBackendConfig {
+    /// GitHub repo backend (fork + push via API)
+    #[config(nested)]
+    pub github: ZbobrRepoBackendGithubConfig,
+    /// Filesystem repo backend (operate on local clones)
+    #[config(nested)]
+    pub fs: ZbobrRepoBackendFsConfig,
+}
 
 #[derive(Clone, Default)]
 #[config_struct]
