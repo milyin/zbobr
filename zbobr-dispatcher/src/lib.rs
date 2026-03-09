@@ -7,9 +7,10 @@ pub mod mcp;
 pub mod prompts;
 pub mod setup;
 pub mod task;
+pub mod task_dir;
 pub mod tool_executor;
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 pub use cli::{
     Command, ConfigFileArg, GlobalArgs, TaskSubcommand, parse_cli, print_task,
@@ -17,7 +18,7 @@ pub use cli::{
 };
 pub use config::{
     ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs,
-    ZbobrExecutorConfig, ZbobrExecutorToml,
+    ZbobrExecutorConfig, ZbobrExecutorToml, ZbobrRepoBackendConfig, ZbobrTaskBackendConfig,
 };
 pub use generic_config::{GenericConfig, GenericConfigArgs, GenericConfigToml};
 pub use mcp::{
@@ -30,13 +31,14 @@ pub use task::{
     ChecklistItem, Comment, CommentType, Model, Parameter, RoleSession, Signal, Stage, Task,
     TaskSession, Tool,
 };
+pub use task_dir::TaskDir;
 pub use tool_executor::ToolExecutor;
 pub use zbobr_api::config::{BackendConfig, Config};
 
-use crate::backend::{RepoBackend, TaskBackend};
+use crate::backend::{TaskBackend, WorktreeBackend};
 
 /// Central struct holding configuration and backend.
-pub struct ZbobrDispatcher<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> {
+pub struct ZbobrDispatcher<T: TaskBackend + ?Sized, R: WorktreeBackend + ?Sized> {
     config: Arc<ZbobrDispatcherConfig>,
     pub(crate) task_backend: Arc<T>,
     pub(crate) repo_backend: Arc<R>,
@@ -45,7 +47,7 @@ pub struct ZbobrDispatcher<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> {
     task_locks: Arc<std::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
-impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> Clone for ZbobrDispatcher<T, R> {
+impl<T: TaskBackend + ?Sized, R: WorktreeBackend + ?Sized> Clone for ZbobrDispatcher<T, R> {
     fn clone(&self) -> Self {
         Self {
             config: Arc::clone(&self.config),
@@ -57,9 +59,9 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> Clone for ZbobrDispatcher
 }
 
 /// Convenience type alias for using the dispatcher with dynamic dispatch.
-pub type ZbobrDispatcherDyn = ZbobrDispatcher<dyn TaskBackend, dyn RepoBackend>;
+pub type ZbobrDispatcherDyn = ZbobrDispatcher<dyn TaskBackend, dyn WorktreeBackend>;
 
-impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
+impl<T: TaskBackend + ?Sized, R: WorktreeBackend + ?Sized> ZbobrDispatcher<T, R> {
     /// Create a new Zbobr instance from config and pre-built backends.
     /// Used primarily in tests.
     pub fn new_with_backends(
@@ -182,6 +184,7 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
         zbobr_api::extract_history_chunk(comments, &desc, offset)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn post_task_comment(
         &self,
         id: u64,
@@ -254,107 +257,33 @@ impl<T: TaskBackend + ?Sized, R: RepoBackend + ?Sized> ZbobrDispatcher<T, R> {
         self.task_backend.setup(force).await
     }
 
-    // -- Delegate to RepoBackend --
+    // -- Delegate to WorktreeBackend --
 
-    pub async fn clone_and_setup(
+    /// Extract repo name from a remote repo path (last path component).
+    fn extract_repo_name(remote_repo: &str) -> &str {
+        remote_repo.rsplit('/').next().unwrap_or(remote_repo)
+    }
+
+    /// Prepare a worktree for the given task. Constructs workspace_path as
+    /// `TaskDir::new(workspaces, task_id)/repo_name` and delegates to the backend.
+    pub async fn update_worktree(
         &self,
-        target_repo: &str,
+        remote_repo: &str,
+        base_branch: &str,
         work_branch: &str,
-        destination_branch: &str,
         task_id: u64,
-    ) -> anyhow::Result<PathBuf> {
-        let workspace_path = self.config.workspaces.join(format!("task#{task_id}"));
+    ) -> anyhow::Result<bool> {
+        let repo_name = Self::extract_repo_name(remote_repo);
+        let task_dir = TaskDir::new(&self.config.workspaces, task_id);
+        let workspace_path = task_dir.path().join(repo_name);
         self.repo_backend
-            .clone_and_setup(
-                target_repo,
-                work_branch,
-                destination_branch,
-                &workspace_path,
-            )
+            .update_worktree(remote_repo, base_branch, work_branch, &workspace_path)
             .await
     }
 
-    pub async fn clone_readonly(
-        &self,
-        target_repo: &str,
-        branch: &str,
-        task_id: u64,
-    ) -> anyhow::Result<PathBuf> {
-        let workspace_path = self.config.workspaces.join(format!("task#{task_id}"));
-        self.repo_backend
-            .clone_readonly(target_repo, branch, &workspace_path)
-            .await
-    }
-
-    /// Parse PR reference to (repo, branch).
-    /// Accepts formats:
-    /// - "https://github.com/owner/repo/pull/123"
-    /// - "owner/repo#123"
-    ///   Returns (repo, branch_name)
-    pub async fn parse_pr_to_repo_branch(&self, pr_ref: &str) -> anyhow::Result<(String, String)> {
-        self.repo_backend.parse_pr_to_repo_branch(pr_ref).await
-    }
-
-    pub async fn ensure_branch_and_pr(
-        &self,
-        target_repo: &str,
-        task_id: u64,
-        work_branch: &str,
-        destination_branch: &str,
-        pr_title: &str,
-    ) -> anyhow::Result<String> {
-        let workspace_path = self.config.workspaces.join(format!("task#{task_id}"));
-        self.repo_backend
-            .ensure_branch_and_pr(
-                target_repo,
-                &workspace_path,
-                work_branch,
-                destination_branch,
-                pr_title,
-            )
-            .await
-    }
-
-    pub async fn push_branch(
-        &self,
-        target_repo: &str,
-        task_id: u64,
-        work_branch: &str,
-    ) -> anyhow::Result<()> {
-        let workspace_path = self.config.workspaces.join(format!("task#{task_id}"));
-        self.repo_backend
-            .push_branch(target_repo, &workspace_path, work_branch)
-            .await
-    }
-
-    pub async fn create_pr_in_fork(
-        &self,
-        repo_name: &str,
-        work_branch: &str,
-        destination_branch: &str,
-        pr_title: &str,
-        pr_body: &str,
-    ) -> anyhow::Result<String> {
-        self.repo_backend
-            .create_pr_in_fork(
-                repo_name,
-                work_branch,
-                destination_branch,
-                pr_title,
-                pr_body,
-            )
-            .await
-    }
-
-    pub async fn setup_fork_remote_and_push(
-        &self,
-        work_dir: &std::path::Path,
-        target_repo: &str,
-        work_branch: &str,
-    ) -> anyhow::Result<()> {
-        self.repo_backend
-            .setup_fork_remote_and_push(work_dir, target_repo, work_branch)
-            .await
+    /// Sync remote state and return PR URL for the given work branch.
+    pub async fn update_pr(&self, work_branch: &str) -> anyhow::Result<String> {
+        self.repo_backend.update_pr(work_branch).await
     }
 
     // -- Combined state --

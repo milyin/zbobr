@@ -174,3 +174,69 @@ pub trait RepoBackend: Send + Sync {
     /// Return a debug string of the backend state.
     fn debug_state(&self) -> String;
 }
+
+
+
+#[async_trait]
+pub trait WorktreeBackend: Send + Sync {
+    /// **Precondition**: `work_branch` must differ from `base_branch`. Passing the same
+    /// value for both is a caller error and implementations should return `Err`.
+    ///
+    /// 1. Clones remote repository as `--bare` to an own location if not already cloned.
+    ///    It's important to notice that this clone is not necessarity the direct clone
+    ///    of the `remote_repo` in the parameter. It's up to backend how to proxy the
+    ///    remote repository, e.g. by creating a fork in own account and locally cloning it.
+    /// 
+    /// 2. Creates in the `workspace_path` a new worktree linked to the main clone for 
+    /// the branch `work_branch` with `base_branch` as the upstream.
+    /// 
+    /// Conditions to be met for successful worktree creation:
+    /// 
+    /// The `base_branch` must exist in the main worktree.
+    /// The `work_branch`
+    ///  - should either not exist or be an ancestor of `base_branch` in the main worktree.
+    ///  - if the branch is already checked out in a **functional** worktree (directory exists
+    ///    and contains a `.git` entry) at `workspace_path`, the worktree is considered ready
+    ///    and no action is needed.
+    ///  - if the branch is checked out in a functional worktree at a **different** path,
+    ///    the implementation must return `Err` (concurrent use by another workspace).
+    ///  - if the branch is registered in a **non-functional** worktree (empty or missing
+    ///    directory, no `.git` entry), the stale reference must be removed before creating
+    ///    a new worktree at `workspace_path`.
+    ///  - the `workspace_path` should either not exist or contain the worktree with the 
+    ///    `work_branch` selected
+    ///
+    /// Corresponding delete operation is not required: the worktree can be removed with
+    /// `git worktree remove` command 
+    /// 
+    /// Returns boolean value indicating whether the worktree branch is up-to-date with the 
+    /// `base_branch` (i.e. no new commits in `base_branch` comparing to the current state
+    /// of the `work_branch`).
+    /// 
+    /// I.e return values:
+    /// - `Ok(true)` means the worktree is ready to use and up to date with the `base_branch`.
+    /// - `Ok(false)` means the worktree is ready to use but `base_branch` diverged
+    /// - `Err` means the worktree is not ready to use, e.g. due to validation 
+    ///    failure or creation failure.
+    /// 
+    /// The merging `base_branch` into `work_branch` is the responsibility of the caller.
+    async fn update_worktree(&self, 
+        remote_repo: &str,
+        base_branch: &str,
+        work_branch: &str,
+        workspace_path: &std::path::Path,
+    ) -> anyhow::Result<bool>;
+
+    /// Returns the up-to-date URL of the PR for the given work branch. 
+    /// It's up to backend what is considered as the PR URL, this information is only
+    /// for representation tre current status of the work for user.
+    /// For the githug backend, this is the URL of the PR in the GitHub UI. 
+    /// For the filesystem backend, this can be just the path to the worktree directory.
+    async fn update_pr(&self, work_branch: &str) -> anyhow::Result<String>;
+
+    /// Validate connectivity to the repo hosting service.
+    async fn validate_connectivity(&self) -> anyhow::Result<()>;
+
+    /// Return a debug string of the backend state.
+    fn debug_state(&self) -> String;
+}

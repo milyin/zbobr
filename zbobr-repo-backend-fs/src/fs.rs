@@ -1,30 +1,18 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::Context;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use tokio::fs;
-use zbobr_api::backend::RepoBackend;
+use zbobr_api::backend::WorktreeBackend;
+use zbobr_utility::{git, git_check, git_output};
 
 use crate::config::ZbobrRepoBackendFsConfig;
 
-/// Serializable PR structure for YAML storage.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PrFile {
-    id: u64,
-    repo: String,
-    head_branch: String,
-    base_branch: String,
-    title: String,
-    body: String,
-    created_at: String,
-}
-
-/// Filesystem-based repo backend.
+/// Filesystem-based repo backend using bare clones and git worktrees.
 ///
-/// - `target_repo` is a local path to a git repository.
-/// - "Forking" is done by `git clone` from the local path.
-/// - PRs are stored as YAML files under `{repos_dir}/prs/{repo_name}/`.
+/// - Bare clones are stored at `repos_dir/repo_name.git`
+/// - Worktrees are created via `git worktree add` pointing to the bare clone
+/// - Multiple tasks can share the same bare clone
 pub struct ZbobrRepoBackendFs {
     config: ZbobrRepoBackendFsConfig,
 }
@@ -45,7 +33,7 @@ impl ZbobrRepoBackendFs {
         Ok(Self { config })
     }
 
-    /// Extract a short repo name from a local path (last path component).
+    /// Extract a short repo name from a remote path (last path component).
     fn repo_name_from_path(target_repo: &str) -> anyhow::Result<String> {
         let path = Path::new(target_repo);
         let name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
@@ -54,300 +42,174 @@ impl ZbobrRepoBackendFs {
         Ok(name.to_string())
     }
 
-    /// Get the prs directory for a given repo name.
-    fn prs_dir(&self, repo_name: &str) -> PathBuf {
-        self.config.repos_dir.join("prs").join(repo_name)
-    }
+    /// Ensure bare clone exists at `bare_dir`, fetching latest refs from origin.
+    /// Configures fetch refspec so `refs/remotes/origin/*` are available in worktrees.
+    async fn ensure_bare_clone(&self, remote_repo: &str, bare_dir: &Path) -> anyhow::Result<()> {
+        fs::create_dir_all(&self.config.repos_dir).await?;
 
-    /// Read and increment the next PR ID counter for a repo.
-    async fn get_next_pr_id(&self, repo_name: &str) -> anyhow::Result<u64> {
-        let prs_dir = self.prs_dir(repo_name);
-        fs::create_dir_all(&prs_dir)
-            .await
-            .context("Failed to create prs directory")?;
-
-        let path = prs_dir.join("next_pr_id.txt");
-
-        let current_id = match fs::read_to_string(&path).await {
-            Ok(content) => content.trim().parse::<u64>().unwrap_or(1),
-            Err(_) => 1,
-        };
-
-        let next_id = current_id + 1;
-        fs::write(&path, next_id.to_string())
-            .await
-            .context("Failed to write next PR ID")?;
-
-        Ok(current_id)
-    }
-
-    /// Write a PR YAML file and return the file path.
-    async fn write_pr(
-        &self,
-        repo_name: &str,
-        repo_path: &str,
-        head_branch: &str,
-        base_branch: &str,
-        title: &str,
-        body: &str,
-    ) -> anyhow::Result<String> {
-        let pr_id = self.get_next_pr_id(repo_name).await?;
-        let prs_dir = self.prs_dir(repo_name);
-        let pr_path = prs_dir.join(format!("{}.yaml", pr_id));
-
-        let pr_file = PrFile {
-            id: pr_id,
-            repo: repo_path.to_string(),
-            head_branch: head_branch.to_string(),
-            base_branch: base_branch.to_string(),
-            title: title.to_string(),
-            body: body.to_string(),
-            created_at: chrono_now(),
-        };
-
-        let yaml = serde_yaml::to_string(&pr_file).context("Failed to serialize PR")?;
-
-        fs::write(&pr_path, yaml)
-            .await
-            .context("Failed to write PR file")?;
-
-        tracing::info!("Created PR #{} at {}", pr_id, pr_path.display());
-
-        Ok(pr_path.to_string_lossy().to_string())
-    }
-
-    /// Get the current branch name in a git working directory.
-    #[allow(dead_code)]
-    async fn current_branch(work_dir: &Path) -> anyhow::Result<String> {
-        let out = tokio::process::Command::new("git")
-            .args(["rev-parse", "--abbrev-ref", "HEAD"])
-            .current_dir(work_dir)
-            .output()
-            .await
-            .context("Failed to determine current branch")?;
-
-        if !out.status.success() {
-            anyhow::bail!("Failed to determine current branch");
+        if !bare_dir.exists() {
+            tracing::info!("Creating bare clone at {}", bare_dir.display());
+            git(
+                &self.config.repos_dir,
+                &["clone", "--bare", remote_repo, bare_dir.to_str().unwrap()],
+            )
+            .await?;
+            // Configure fetch refspec so worktrees get proper origin/* refs
+            git(
+                bare_dir,
+                &[
+                    "config",
+                    "remote.origin.fetch",
+                    "+refs/heads/*:refs/remotes/origin/*",
+                ],
+            )
+            .await?;
         }
 
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        tracing::info!("Fetching origin in {}", bare_dir.display());
+        git(bare_dir, &["fetch", "origin"]).await?;
+        Ok(())
     }
-}
 
-/// Simple timestamp without pulling in chrono crate.
-fn chrono_now() -> String {
-    // Use a basic approach — the exact format is not critical for local PRs
-    let duration = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}", duration.as_secs())
+    /// Create a worktree at `workspace_path` for `work_branch` from `base_branch`.
+    async fn ensure_worktree(
+        &self,
+        bare_dir: &Path,
+        base_branch: &str,
+        work_branch: &str,
+        workspace_path: &Path,
+    ) -> anyhow::Result<()> {
+        if workspace_path.exists() {
+            tracing::info!("Worktree already exists at {}", workspace_path.display());
+            return Ok(());
+        }
+
+        let workspace_parent = workspace_path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("Cannot get parent of workspace_path"))?;
+        fs::create_dir_all(workspace_parent).await?;
+
+        tracing::info!(
+            "Creating worktree for {} at {}",
+            work_branch,
+            workspace_path.display()
+        );
+
+        zbobr_utility::cleanup_worktree_for_branch(bare_dir, work_branch, workspace_path).await?;
+
+        let ws = workspace_path.to_str().unwrap();
+        if git_check(bare_dir, &["rev-parse", &format!("{}^{{commit}}", work_branch)])
+            .await?
+        {
+            git(bare_dir, &["worktree", "add", ws, work_branch]).await?;
+        } else {
+            git(
+                bare_dir,
+                &["worktree", "add", "-b", work_branch, ws, base_branch],
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
-impl RepoBackend for ZbobrRepoBackendFs {
-    async fn clone_and_setup(
+impl WorktreeBackend for ZbobrRepoBackendFs {
+    async fn update_worktree(
         &self,
-        target_repo: &str,
+        remote_repo: &str,
+        base_branch: &str,
         work_branch: &str,
-        destination_branch: &str,
         workspace_path: &Path,
-    ) -> anyhow::Result<PathBuf> {
-        let repo_name = Self::repo_name_from_path(target_repo)?;
-        let work_dir = workspace_path.join(&repo_name);
+    ) -> anyhow::Result<bool> {
+        if work_branch == base_branch {
+            anyhow::bail!(
+                "work_branch and base_branch must differ, got '{}'",
+                work_branch
+            );
+        }
 
-        fs::create_dir_all(workspace_path).await?;
+        let repo_name = Self::repo_name_from_path(remote_repo)?;
+        let bare_dir = self.config.repos_dir.join(format!("{}.git", repo_name));
 
-        if !work_dir.exists() {
-            tracing::info!("Cloning {} into {}", target_repo, work_dir.display());
-            let status = tokio::process::Command::new("git")
-                .args(["clone", target_repo, work_dir.to_str().unwrap()])
-                .status()
-                .await?;
-            if !status.success() {
-                anyhow::bail!("Failed to clone {}", target_repo);
+        self.ensure_bare_clone(remote_repo, &bare_dir).await?;
+        self.ensure_worktree(&bare_dir, base_branch, work_branch, workspace_path)
+            .await?;
+
+        // Check if work_branch includes all commits from base_branch
+        let is_uptodate = git_check(
+            &bare_dir,
+            &[
+                "merge-base",
+                "--is-ancestor",
+                &format!("origin/{}", base_branch),
+                work_branch,
+            ],
+        )
+        .await?;
+
+        tracing::info!(
+            "Worktree {}: {}",
+            work_branch,
+            if is_uptodate {
+                "up-to-date"
+            } else {
+                "diverged from base_branch"
             }
-        } else {
-            tracing::info!("Updating {} in {}", target_repo, work_dir.display());
-            let fetch_status = tokio::process::Command::new("git")
-                .args(["fetch", "origin"])
-                .current_dir(&work_dir)
-                .status()
-                .await?;
-            if !fetch_status.success() {
-                tracing::warn!(
-                    "Failed to fetch latest changes for {}, using existing state",
-                    target_repo
-                );
+        );
+
+        Ok(is_uptodate)
+    }
+
+    async fn update_pr(&self, work_branch: &str) -> anyhow::Result<String> {
+        if !self.config.repos_dir.exists() {
+            anyhow::bail!("No worktree found for work_branch '{}'", work_branch);
+        }
+
+        let mut entries = fs::read_dir(&self.config.repos_dir)
+            .await
+            .context("Failed to read repos_dir")?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if !path.is_dir()
+                || !path
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().ends_with(".git"))
+            {
+                continue;
             }
 
-            // Force-reset the local destination branch to match origin exactly.
-            // Only needed when work_branch differs from destination_branch.
-            if work_branch != destination_branch {
-                let reset_output = tokio::process::Command::new("git")
-                    .args([
-                        "branch",
-                        "-f",
-                        destination_branch,
-                        &format!("origin/{destination_branch}"),
-                    ])
-                    .current_dir(&work_dir)
-                    .output()
-                    .await?;
-                if !reset_output.status.success() {
-                    let stderr = String::from_utf8_lossy(&reset_output.stderr);
-                    tracing::warn!(
-                        "Failed to reset '{destination_branch}' to origin/{destination_branch}: {stderr}"
-                    );
-                } else {
-                    tracing::info!(
-                        "Reset local '{destination_branch}' to match origin/{destination_branch}"
-                    );
+            let output = match git_output(&path, &["worktree", "list", "--porcelain"]).await {
+                Ok(o) => o,
+                Err(_) => continue,
+            };
+
+            // Porcelain format: blocks separated by blank lines, each starting with "worktree <path>"
+            // followed by "branch refs/heads/<name>"
+            for block in output.split("\n\n") {
+                let mut wt_path = None;
+                let mut branch = None;
+                for line in block.lines() {
+                    if let Some(p) = line.strip_prefix("worktree ") {
+                        wt_path = Some(p.to_string());
+                    }
+                    if let Some(b) = line.strip_prefix("branch refs/heads/") {
+                        branch = Some(b.to_string());
+                    }
+                }
+                if branch.as_deref() == Some(work_branch)
+                    && let Some(p) = wt_path {
+                    return Ok(p);
                 }
             }
         }
 
-        // Clean up any broken rebase/merge state left by a previous session
-        // before attempting to checkout.
-        let rebase_merge_dir = work_dir.join(".git/rebase-merge");
-        let rebase_apply_dir = work_dir.join(".git/rebase-apply");
-        if rebase_merge_dir.exists() || rebase_apply_dir.exists() {
-            tracing::warn!("Detected in-progress rebase in {}, aborting", work_dir.display());
-            let _ = tokio::process::Command::new("git")
-                .args(["rebase", "--abort"])
-                .current_dir(&work_dir)
-                .status()
-                .await;
-        }
-        let merge_head = work_dir.join(".git/MERGE_HEAD");
-        if merge_head.exists() {
-            tracing::warn!("Detected in-progress merge in {}, aborting", work_dir.display());
-            let _ = tokio::process::Command::new("git")
-                .args(["merge", "--abort"])
-                .current_dir(&work_dir)
-                .status()
-                .await;
-        }
-
-        // Checkout the work branch; create from HEAD if it doesn't exist yet.
-        tracing::info!("Checking out branch {}", work_branch);
-        let checkout_status = tokio::process::Command::new("git")
-            .args(["checkout", work_branch])
-            .current_dir(&work_dir)
-            .status()
-            .await?;
-        if !checkout_status.success() {
-            let create_status = tokio::process::Command::new("git")
-                .args(["checkout", "-b", work_branch])
-                .current_dir(&work_dir)
-                .status()
-                .await?;
-            if !create_status.success() {
-                anyhow::bail!("Failed to checkout or create branch {}", work_branch);
-            }
-        }
-
-        Ok(work_dir)
-    }
-
-    async fn clone_readonly(
-        &self,
-        target_repo: &str,
-        branch: &str,
-        workspace_path: &Path,
-    ) -> anyhow::Result<PathBuf> {
-        // In FS mode, clone_readonly checks out the requested branch directly.
-        // Use the same branch for both work and destination (no separate dest branch to sync).
-        self.clone_and_setup(target_repo, branch, branch, workspace_path)
-            .await
-    }
-
-    async fn setup_fork_remote_and_push(
-        &self,
-        work_dir: &Path,
-        _target_repo: &str,
-        work_branch: &str,
-    ) -> anyhow::Result<()> {
-        // In FS mode, origin already points to the local source repo.
-        // Just push the work branch.
-        tracing::info!("Pushing work branch '{}' to origin", work_branch);
-        let push_status = tokio::process::Command::new("git")
-            .args(["push", "-u", "origin", work_branch])
-            .current_dir(work_dir)
-            .status()
-            .await?;
-
-        if !push_status.success() {
-            anyhow::bail!("Failed to push work branch '{}' to origin", work_branch);
-        }
-
-        Ok(())
-    }
-
-    async fn ensure_branch_and_pr(
-        &self,
-        target_repo: &str,
-        workspace_path: &Path,
-        _work_branch: &str,
-        _destination_branch: &str,
-        _pr_title: &str,
-    ) -> anyhow::Result<String> {
-        let repo_name = Self::repo_name_from_path(target_repo)?;
-        let work_dir = workspace_path.join(&repo_name);
-
-        if !work_dir.exists() {
-            anyhow::bail!("Work directory does not exist: {}", work_dir.display());
-        }
-
-        // FS backend: return the work directory path as the "PR URL"
-        Ok(work_dir.to_string_lossy().to_string())
-    }
-
-    async fn push_branch(
-        &self,
-        _target_repo: &str,
-        _workspace_path: &Path,
-        _work_branch: &str,
-    ) -> anyhow::Result<()> {
-        // FS backend: no-op
-        Ok(())
-    }
-
-    async fn create_pr_in_fork(
-        &self,
-        repo_name: &str,
-        work_branch: &str,
-        destination_branch: &str,
-        pr_title: &str,
-        pr_body: &str,
-    ) -> anyhow::Result<String> {
-        // In FS mode, "fork" is just the local clone. Create the PR YAML.
-        // repo_name here is just the short name (not a full path), so we store
-        // the repo field as the repo_name — callers can correlate.
-        self.write_pr(
-            repo_name,
-            repo_name,
-            work_branch,
-            destination_branch,
-            pr_title,
-            pr_body,
-        )
-        .await
-    }
-
-    async fn parse_pr_to_repo_branch(&self, pr_ref: &str) -> anyhow::Result<(String, String)> {
-        // pr_ref is a path to a PR YAML file
-        let content = fs::read_to_string(pr_ref)
-            .await
-            .with_context(|| format!("Failed to read PR file '{}'", pr_ref))?;
-
-        let pr_file: PrFile = serde_yaml::from_str(&content)
-            .with_context(|| format!("Failed to parse PR file '{}'", pr_ref))?;
-
-        Ok((pr_file.repo, pr_file.head_branch))
+        anyhow::bail!("No worktree found for work_branch '{}'", work_branch)
     }
 
     async fn validate_connectivity(&self) -> anyhow::Result<()> {
-        // Check that we can write to repos_dir
         fs::create_dir_all(&self.config.repos_dir)
             .await
             .with_context(|| {
@@ -357,7 +219,6 @@ impl RepoBackend for ZbobrRepoBackendFs {
                 )
             })?;
 
-        // Try to write a test file
         let test_path = self.config.repos_dir.join(".test");
         fs::write(&test_path, "test").await.with_context(|| {
             format!(
@@ -365,8 +226,6 @@ impl RepoBackend for ZbobrRepoBackendFs {
                 self.config.repos_dir.display()
             )
         })?;
-
-        // Clean up
         let _ = fs::remove_file(&test_path).await;
 
         tracing::info!("Filesystem repo backend connectivity validated");
@@ -378,27 +237,5 @@ impl RepoBackend for ZbobrRepoBackendFs {
             "FilesystemRepoBackend(repos_dir: {})",
             self.config.repos_dir.display()
         )
-    }
-}
-
-impl ZbobrRepoBackendFs {
-    /// Get the default branch of origin remote.
-    #[allow(dead_code)]
-    async fn default_branch(work_dir: &Path) -> anyhow::Result<String> {
-        let out = tokio::process::Command::new("git")
-            .args(["symbolic-ref", "refs/remotes/origin/HEAD", "--short"])
-            .current_dir(work_dir)
-            .output()
-            .await
-            .context("Failed to determine default branch")?;
-
-        if !out.status.success() {
-            anyhow::bail!("Failed to determine default branch");
-        }
-
-        let full_ref = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        // Strip "origin/" prefix
-        let branch = full_ref.strip_prefix("origin/").unwrap_or(&full_ref);
-        Ok(branch.to_string())
     }
 }

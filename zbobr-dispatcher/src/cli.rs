@@ -9,8 +9,11 @@ use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
 
+// bring in the generic git helpers from utility crate
+use zbobr_utility::{git, git_check, git_output, configure_git_user};
+
 use crate::{
-    Comment, CommentType, Signal, Stage, Task, ToolExecutor, ZbobrDispatcherDyn,
+    Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcherDyn,
     ZbobrExecutorConfig,
     mcp::common::get_hostname,
     prompts::Prompts,
@@ -150,11 +153,6 @@ pub enum TaskSubcommand {
     Delete {
         /// Task ID
         id: u64,
-    },
-    /// Clone the task's destination repository into its workspace
-    Clone {
-        /// Task ID
-        task: u64,
     },
     /// Run preparator role for a specific task (sets destination repository and branches)
     Prepare {
@@ -387,7 +385,7 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
                 comment_type: c.comment_type,
                 role: c.role,
                 hostname: c.hostname.clone(),
-                tool: c.tool.clone(),
+                tool: c.tool,
                 model: c.model.clone(),
             };
             println!("  [{}] {}\n{}", i + 1, tag, c.text);
@@ -583,28 +581,6 @@ async fn run_task_subcommand(
             zbobr.close_task(id).await?;
             println!("Deleted task #{}", id);
         }
-        TaskSubcommand::Clone { task } => {
-            let t = zbobr.get_task(task).await?;
-            let dest_repo = t
-                .parameters
-                .get(&Parameter::DestinationRepository)
-                .ok_or_else(|| anyhow::anyhow!("Task #{task} has no destination repository"))?
-                .clone();
-            let dest_branch = t
-                .parameters
-                .get(&Parameter::DestinationBranch)
-                .cloned()
-                .unwrap_or_else(|| "main".to_string());
-            let work_branch_for_clone = t
-                .parameters
-                .get(&Parameter::WorkBranch)
-                .cloned()
-                .unwrap_or_else(|| dest_branch.clone());
-            let path = zbobr
-                .clone_and_setup(&dest_repo, &work_branch_for_clone, &dest_branch, task)
-                .await?;
-            println!("Cloned to {}", path.display());
-        }
         TaskSubcommand::Prepare { task, show_prompt } => {
             run_role_command(
                 zbobr,
@@ -727,14 +703,14 @@ async fn run_task_subcommand(
                 }
             }
 
-            let work_dir = zbobr.config().workspaces.join(format!("task#{}", id));
+            let task_dir = TaskDir::new(zbobr.config().workspaces.as_path(), id);
 
             // Derive the actual git repo directory (work_dir/<repo_name>)
             let repo_name = std::path::Path::new(&dest_repo)
                 .file_name()
                 .and_then(|n| n.to_str())
                 .ok_or_else(|| anyhow::anyhow!("Cannot extract repo name from: {}", dest_repo))?;
-            let repo_dir = work_dir.join(repo_name);
+            let repo_dir = task_dir.path().join(repo_name);
 
             // Fetch latest to ensure we have the destination branch
             let dest_branch = task
@@ -753,30 +729,7 @@ async fn run_task_subcommand(
             }
 
             // Fetch the latest from remote
-            let fetch_cmd = TokioCommand::new("git")
-                .args(["fetch", "origin", &dest_branch])
-                .current_dir(&repo_dir)
-                .output()
-                .await;
-
-            match fetch_cmd {
-                Ok(output) if !output.status.success() => {
-                    return Err(anyhow::anyhow!(
-                        "Failed to fetch '{}' from remote in '{}': {}",
-                        dest_branch,
-                        repo_dir.display(),
-                        String::from_utf8_lossy(&output.stderr).trim()
-                    ));
-                }
-                Err(e) => {
-                    return Err(anyhow::anyhow!(
-                        "Failed to run git fetch in '{}': {}",
-                        repo_dir.display(),
-                        e
-                    ));
-                }
-                Ok(_) => {}
-            }
+            git(&repo_dir, &["fetch", "origin", &dest_branch]).await?;
 
             // Call the rewrite_commit_authors function
             rewrite_commit_authors(zbobr, id, &repo_dir, dry_run).await?;
@@ -850,14 +803,10 @@ impl<'a> CliRoleRunner<'a> {
             .set_task_stage(self.task_id, self.role.into())
             .await?;
 
-        let task_dir = self
-            .zbobr
-            .config()
-            .workspaces
-            .join(format!("task#{}", self.task_id));
-        tokio::fs::create_dir_all(&task_dir).await?;
+        let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), self.task_id);
+        tokio::fs::create_dir_all(task_dir.path()).await?;
 
-        let work_dir = prepare_workspace(self.zbobr, self.task_id, self.role, &task_dir).await?;
+        let (work_dir, is_uptodate) = prepare_workspace(self.zbobr, self.task_id, self.role, task_dir.path()).await?;
 
         if matches!(self.role, Role::Preparator) {
             seed_preparator_defaults(self.zbobr, self.task_id).await?;
@@ -865,33 +814,68 @@ impl<'a> CliRoleRunner<'a> {
             ensure_pr_url(self.zbobr, self.task_id).await?;
         }
 
-        // Early-merge check must run BEFORE clearing the triggering condition.
-        // If a conflict is detected the session exits here — the signal is left
-        // intact so the Merger can return to the same stage after resolving it.
-        if should_try_early_merge(self.role)
-            && try_early_merge(self.zbobr, self.task_id, &work_dir).await?
-        {
+        // If the work branch has diverged from the base branch, defer to the
+        // Merger instead of continuing with the current role's session.
+        // The signal is NOT changed — it will be preserved through the merge
+        // and used to resume the interrupted role after the conflict is resolved.
+        if !is_uptodate && self.role != Role::Merger {
+            tracing::info!(
+                "Task #{} work branch diverged from base — setting conflict flag",
+                self.task_id
+            );
+            let task_session = self.zbobr.task_session(self.task_id);
+            task_session.set_conflict(true).await?;
+            task_session.set_stage(Stage::Pending).await?;
             return Ok(());
         }
 
         // Rule 1: clear the triggering condition right before the agent session
-        // starts (no conflict was detected above).
-        // For Merger: clear the conflict flag but NOT the signal — the signal
-        //   carries the original stage to return to after merging.
+        // starts.
+        // For Merger: clear the conflict flag so re-entry doesn't loop.
+        //   The signal is NOT cleared — it represents the role that was
+        //   interrupted and should resume after the merge.
         // For all other roles: clear the signal that caused entry.
-        {
+        if self.role == Role::Merger {
             let task_session = self.zbobr.task_session(self.task_id);
-            if self.role == Role::Merger {
-                task_session
-                    .set_conflict(false)
-                    .await
-                    .context("Failed to clear conflict flag on entry to Merger")?;
-            } else {
-                task_session
-                    .set_signal(None)
-                    .await
-                    .context("Failed to clear signal on stage entry")?;
+            task_session
+                .set_conflict(false)
+                .await
+                .context("Failed to clear conflict flag on Merger entry")?;
+        } else {
+            let task_session = self.zbobr.task_session(self.task_id);
+            task_session
+                .set_signal(None)
+                .await
+                .context("Failed to clear signal on stage entry")?;
+        }
+
+        // For Merger: try a normal git merge first. If it succeeds, no need
+        // to invoke the agent — just commit the merge and return.
+        if self.role == Role::Merger {
+            let task = self.zbobr.get_task(self.task_id).await?;
+            let dest_branch = task
+                .parameters
+                .get(&Parameter::DestinationBranch)
+                .cloned()
+                .unwrap_or_else(|| "main".to_string());
+            let merged_ok = git_check(&work_dir, &["merge", &dest_branch, "--no-edit"])
+                .await
+                .context("Failed to run git merge for Merger")?;
+            if merged_ok {
+                tracing::info!(
+                    "Task #{}: normal merge with '{}' succeeded — skipping agent session",
+                    self.task_id, dest_branch
+                );
+                perform_auto_commit_and_push(self.zbobr, self.task_id, &work_dir, self.role).await?;
+                self.zbobr.task_session(self.task_id).set_stage(Stage::Pending).await?;
+                return Ok(());
             }
+            tracing::info!(
+                "Task #{}: normal merge with '{}' failed — invoking agent to resolve conflicts",
+                self.task_id, dest_branch
+            );
+            // Abort the failed merge so the agent starts with a clean state
+            let _ = git(&work_dir, &["merge", "--abort"]).await;
         }
 
         // Pre-flight check: verify that get_history would return meaningful
@@ -996,25 +980,22 @@ pub async fn process_task_by_stage(
                 println!("Task #{} is PENDING (paused) — skipped", task.id);
                 return Ok(());
             }
+            // Conflict flag takes priority: route to Merger to resolve the
+            // diverged work branch before any other role runs.
             if task.conflict {
-                tracing::info!(
-                    "Found PENDING task #{} with conflict flag - running merger",
-                    task.id
-                );
                 let session =
                     CliRoleRunner::new(zbobr, task.id, Role::Merger, prompts, executor_config);
                 session.run().await?;
-            } else if task.signal.is_none() {
-                println!(
-                    "Task #{} is PENDING (no signal, no conflict) — skipped",
-                    task.id
-                );
-                return Ok(());
-            } else {
-                let signal = task.signal.unwrap();
+            } else if let Some(signal) = task.signal {
                 let role = signal.target_role();
                 let session = CliRoleRunner::new(zbobr, task.id, role, prompts, executor_config);
                 session.run().await?;
+            } else {
+                println!(
+                    "Task #{} is PENDING (no signal) — skipped",
+                    task.id
+                );
+                return Ok(());
             }
         }
         Stage::Preparing
@@ -1148,26 +1129,20 @@ pub async fn run_manager_loop(
                 continue;
             }
 
-            if task.conflict {
-                tracing::info!(
-                    "Found PENDING task #{} with conflict flag - running merger",
-                    task.id
-                );
-                let session =
-                    CliRoleRunner::new(zbobr, task.id, Role::Merger, prompts, executor_config);
-                if let Err(e) = session.run().await {
-                    tracing::error!("Merger session failed: {e}");
-                }
-                session_run = true;
-                break;
-            }
+            // Conflict flag takes priority over signals.
+            let role = if task.conflict {
+                Role::Merger
+            } else if let Some(signal) = task.signal {
+                signal.target_role()
+            } else {
+                continue;
+            };
 
-            let Some(signal) = task.signal else { continue };
-            let role = signal.target_role();
             tracing::info!(
-                "Found PENDING task #{} with signal {:?} - running {:?}",
+                "Found PENDING task #{} (conflict={}, signal={:?}) - running {:?}",
                 task.id,
-                signal,
+                task.conflict,
+                task.signal,
                 role
             );
             let session = CliRoleRunner::new(zbobr, task.id, role, prompts, executor_config);
@@ -1240,9 +1215,9 @@ async fn prepare_workspace(
     task_id: u64,
     role: Role,
     task_dir: &Path,
-) -> anyhow::Result<PathBuf> {
+) -> anyhow::Result<(PathBuf, bool)> {
     match role {
-        Role::Preparator => Ok(task_dir.to_path_buf()),
+        Role::Preparator => Ok((task_dir.to_path_buf(), true)),
         Role::Merger => {
             let task = zbobr.get_task(task_id).await?;
             let dest_repo = task
@@ -1253,7 +1228,7 @@ async fn prepare_workspace(
                 })?
                 .as_str();
             let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo);
-            Ok(task_dir.join(repo_name))
+            Ok((task_dir.join(repo_name), true))
         }
         _ => {
             let task = zbobr.get_task(task_id).await?;
@@ -1275,10 +1250,15 @@ async fn prepare_workspace(
                 .cloned()
                 .unwrap_or_else(|| "main".to_string());
             match zbobr
-                .clone_and_setup(&dest_repo, &work_branch, &dest_branch, task_id)
+                .update_worktree(&dest_repo, &dest_branch, &work_branch, task_id)
                 .await
             {
-                Ok(path) => Ok(path),
+                Ok(is_uptodate) => {
+                    let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo);
+                    let task_dir = TaskDir::new(zbobr.config().workspaces.as_path(), task_id);
+                    let path = task_dir.path().join(repo_name);
+                    Ok((path, is_uptodate))
+                },
                 Err(e) => {
                     let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
                     tracing::error!("{msg}");
@@ -1344,50 +1324,6 @@ async fn seed_preparator_defaults(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> a
     }
 
     Ok(())
-}
-
-fn should_try_early_merge(role: Role) -> bool {
-    matches!(role, Role::Planner | Role::Worker | Role::Reviewer)
-}
-
-async fn try_early_merge(
-    zbobr: &ZbobrDispatcherDyn,
-    task_id: u64,
-    work_dir: &Path,
-) -> anyhow::Result<bool> {
-    let task = zbobr.get_task(task_id).await?;
-    let dest_branch = task
-        .parameters
-        .get(&Parameter::DestinationBranch)
-        .cloned()
-        .unwrap_or_else(|| "main".to_string());
-
-    let merge = TokioCommand::new("git")
-        .args(["merge", &dest_branch, "--no-edit"])
-        .current_dir(work_dir)
-        .output()
-        .await
-        .context("Failed to run git merge for conflict detection")?;
-
-    if !merge.status.success() {
-        tracing::warn!(
-            "Merge conflict detected for task #{task_id} \
-             (merging '{dest_branch}' into work branch). \
-             Setting conflict flag and deferring to Merger."
-        );
-        zbobr
-            .task_session(task_id)
-            .set_conflict(true)
-            .await
-            .context("Failed to set conflict flag")?;
-        zbobr
-            .set_task_stage(task_id, Stage::Pending)
-            .await
-            .context("Failed to reset stage to Pending after conflict")?;
-        return Ok(true);
-    }
-
-    Ok(false)
 }
 
 async fn start_mcp_server(
@@ -1468,7 +1404,7 @@ async fn finalize_session(
     zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
     role: Role,
-    work_dir: &PathBuf,
+    work_dir: &Path,
     execution_interrupted: bool,
     execution_error: Option<&anyhow::Error>,
 ) -> anyhow::Result<()> {
@@ -1476,9 +1412,8 @@ async fn finalize_session(
 
     if execution_interrupted {
         if role == Role::Worker || role == Role::Merger {
-            let role_session = zbobr.task_session(task_id).role_session();
-            if let Err(e) = role_session.push_branch_commits().await {
-                tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
+            if let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await {
+                tracing::warn!("Auto-commit/push failed during interruption for task #{task_id}: {e}");
             }
         }
         task_session.set_stage(Stage::Pending).await?;
@@ -1488,9 +1423,8 @@ async fn finalize_session(
 
     if let Some(e) = execution_error {
         if role == Role::Worker || role == Role::Merger {
-            let role_session = zbobr.task_session(task_id).role_session();
-            if let Err(e) = role_session.push_branch_commits().await {
-                tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
+            if let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await {
+                tracing::warn!("Auto-commit/push failed during error handling for task #{task_id}: {e}");
             }
         }
         let error_msg = format!("Execution failed: {e}");
@@ -1516,8 +1450,8 @@ async fn finalize_session(
 
     tracing::info!("Session complete for task #{task_id}");
 
-    if role == Role::Worker || role == Role::Merger {
-        if let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await {
+    if (role == Role::Worker || role == Role::Merger)
+        && let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await {
             tracing::error!("Auto-commit/push failed for task #{task_id}: {e}");
             let hostname = get_hostname();
             let msg = format!("Auto-commit/push failed: {e}");
@@ -1538,7 +1472,6 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
             return Ok(());
         }
-    }
 
     let current_task = zbobr.get_task(task_id).await?;
     let has_unchecked = current_task.checklist.iter().any(|i| !i.checked);
@@ -1587,10 +1520,9 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
         }
         Role::Merger => {
-            // Conflict was already cleared on entry (Rule 1).
-            // Retry the same merge operation to verify the Merger actually resolved it.
-            // If it still fails, pause the task and report — do NOT set conflict=true
-            // again, to prevent an infinite Merger loop.
+            // The agent was invoked because a normal merge failed.
+            // Retry the merge to verify the agent actually resolved the conflict.
+            // If it still fails, pause the task and report to avoid an infinite loop.
             let dest_branch = zbobr
                 .get_task(task_id)
                 .await?
@@ -1598,24 +1530,16 @@ async fn finalize_session(
                 .get(&Parameter::DestinationBranch)
                 .cloned()
                 .unwrap_or_else(|| "main".to_string());
-            let merge = TokioCommand::new("git")
-                .args(["merge", &dest_branch, "--no-edit"])
-                .current_dir(work_dir)
-                .output()
+            let merged_ok = git_check(work_dir, &["merge", &dest_branch, "--no-edit"])
                 .await
                 .context("Failed to run git merge verification after Merger session")?;
-            if !merge.status.success() {
+            if !merged_ok {
                 // Merger did not fix the conflict — abort the leftover merge state,
                 // report the failure, and pause to avoid an infinite retry loop.
-                let _ = TokioCommand::new("git")
-                    .args(["merge", "--abort"])
-                    .current_dir(work_dir)
-                    .status()
-                    .await;
-                let stderr = String::from_utf8_lossy(&merge.stderr);
+                let _ = git(work_dir, &["merge", "--abort"]).await;
                 let msg = format!(
                     "Merger failed to resolve merge conflict with branch '{dest_branch}'. \
-                     Manual intervention required.\n{stderr}"
+                     Manual intervention required."
                 );
                 tracing::error!("task #{task_id}: {msg}");
                 let hostname = get_hostname();
@@ -1647,47 +1571,32 @@ async fn finalize_session(
 async fn perform_auto_commit_and_push(
     zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
-    work_dir: &PathBuf,
+    work_dir: &Path,
     role: Role,
 ) -> anyhow::Result<()> {
     tracing::info!("Checking for uncommitted changes in {}", work_dir.display());
 
-    match TokioCommand::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(work_dir)
-        .output()
-        .await
-    {
-        Ok(status_output) if status_output.status.success() => {
-            let uncommitted = String::from_utf8_lossy(&status_output.stdout)
-                .trim()
-                .to_string();
-            if !uncommitted.is_empty() {
+    match git_output(work_dir, &["status", "--porcelain"]).await {
+        Ok(status) => {
+            if !status.is_empty() {
                 tracing::info!("Found uncommitted changes, auto-committing...");
-                let _ = TokioCommand::new("git")
-                    .args(["add", "."])
-                    .current_dir(work_dir)
-                    .status()
-                    .await;
+                if let Err(e) = git(work_dir, &["add", "."]).await {
+                    tracing::warn!("Failed to stage changes for auto-commit: {e}");
+                }
                 let commit_msg = format!("Auto-commit by {} agent", role.as_str());
-                match TokioCommand::new("git")
-                    .args(["commit", "-m", &commit_msg])
-                    .current_dir(work_dir)
-                    .status()
-                    .await
-                {
-                    Ok(s) if s.success() => tracing::info!("Auto-commit successful"),
-                    _ => tracing::warn!("Auto-commit failed"),
+                match git(work_dir, &["commit", "-m", &commit_msg]).await {
+                    Ok(_) => tracing::info!("Auto-commit successful"),
+                    Err(e) => tracing::warn!("Auto-commit failed: {e}"),
                 }
             } else {
                 tracing::info!("No uncommitted changes found");
             }
         }
-        _ => tracing::warn!("Failed to check git status for auto-commit"),
+        Err(e) => tracing::warn!("Failed to check git status for auto-commit: {e}"),
     }
 
     let role_session = zbobr.task_session(task_id).role_session();
-    if let Err(e) = role_session.push_branch_commits().await {
+    if let Err(e) = role_session.update_pr().await {
         tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
     }
 
@@ -1701,7 +1610,7 @@ async fn perform_auto_commit_and_push(
 async fn rewrite_commit_authors(
     zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
-    work_dir: &PathBuf,
+    work_dir: &Path,
     dry_run: bool,
 ) -> anyhow::Result<()> {
     let task = zbobr.get_task(task_id).await?;
@@ -1715,60 +1624,20 @@ async fn rewrite_commit_authors(
     let git_user_email = &zbobr.config().git_user_email;
 
     // Get absolute path to the git repository
-    let git_root_cmd = TokioCommand::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(work_dir)
-        .output()
-        .await;
-
-    let git_root = match git_root_cmd {
-        Ok(output) => {
-            if output.status.success() {
-                String::from_utf8_lossy(&output.stdout).trim().to_string()
-            } else {
-                return Err(anyhow::anyhow!(
-                    "Failed to determine git repository root: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                ));
-            }
-        }
-        Err(e) => {
-            return Err(anyhow::anyhow!("Error executing git rev-parse: {}", e));
-        }
-    };
-
+    let git_root = git_output(work_dir, &["rev-parse", "--show-toplevel"]).await?;
     let git_root_path = std::path::PathBuf::from(&git_root);
 
     // Get list of commits that will be rewritten
-    let log_cmd = TokioCommand::new("git")
-        .args([
-            "log",
-            &format!("{}..HEAD", dest_branch),
-            "--format=%H %an <%ae>",
-        ])
-        .current_dir(&git_root_path)
-        .output()
-        .await;
+    let log_output = git_output(
+        &git_root_path,
+        &["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"],
+    )
+    .await?;
 
-    let commits_to_rewrite = match log_cmd {
-        Ok(output) => {
-            if output.status.success() {
-                String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .map(|s| s.to_string())
-                    .collect::<Vec<_>>()
-            } else {
-                return Err(anyhow::anyhow!(
-                    "Failed to list commits: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                ));
-            }
-        }
-        Err(e) => {
-            return Err(anyhow::anyhow!("Error executing git log: {}", e));
-        }
-    };
-
+    let commits_to_rewrite = log_output
+        .lines()
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>();
     println!("Commits to be rewritten ({}):", commits_to_rewrite.len());
     for commit in &commits_to_rewrite {
         println!("  {}", commit);
@@ -1782,58 +1651,34 @@ async fn rewrite_commit_authors(
         return Ok(());
     }
 
-    let config_user = TokioCommand::new("git")
-        .args(["config", "--local", "user.name", git_user_name])
+    // configure git user locally using helper
+    configure_git_user(&git_root_path, git_user_name, git_user_email).await?;
+
+    let rebase_cmd = format!(
+        "git rebase --exec 'git commit --amend --no-edit --reset-author --allow-empty' '{}'",
+        dest_branch
+    );
+    let rebase_output = TokioCommand::new("sh")
+        .arg("-c")
+        .arg(&rebase_cmd)
+        .env("GIT_AUTHOR_NAME", git_user_name)
+        .env("GIT_AUTHOR_EMAIL", git_user_email)
+        .env("GIT_COMMITTER_NAME", git_user_name)
+        .env("GIT_COMMITTER_EMAIL", git_user_email)
         .current_dir(&git_root_path)
         .output()
         .await;
-    let config_email = TokioCommand::new("git")
-        .args(["config", "--local", "user.email", git_user_email])
-        .current_dir(&git_root_path)
-        .output()
-        .await;
-
-    if let (Ok(user_out), Ok(email_out)) = (config_user, config_email) {
-        if !user_out.status.success() || !email_out.status.success() {
-            return Err(anyhow::anyhow!(
-                "Failed to set up git config for author rewriting"
-            ));
-        }
-
-        let rebase_cmd = format!(
-            "git rebase --exec 'git commit --amend --no-edit --reset-author' '{}'",
-            dest_branch
-        );
-        let rebase_output = TokioCommand::new("sh")
-            .arg("-c")
-            .arg(&rebase_cmd)
-            .env("GIT_AUTHOR_NAME", git_user_name)
-            .env("GIT_AUTHOR_EMAIL", git_user_email)
-            .env("GIT_COMMITTER_NAME", git_user_name)
-            .env("GIT_COMMITTER_EMAIL", git_user_email)
-            .current_dir(&git_root_path)
-            .output()
-            .await;
-
         match rebase_output {
             Ok(output) if output.status.success() => {
                 println!("Successfully rewrote commit authors");
 
                 // Show post-rebase log to verify changes
-                let post_log_cmd = TokioCommand::new("git")
-                    .args([
-                        "log",
-                        &format!("{}..HEAD", dest_branch),
-                        "--format=%H %an <%ae>",
-                    ])
-                    .current_dir(&git_root_path)
-                    .output()
-                    .await;
-
-                if let Ok(log_output) = post_log_cmd
-                    && log_output.status.success()
+                if let Ok(updated_commits) = git_output(
+                    &git_root_path,
+                    &["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"],
+                )
+                .await
                 {
-                    let updated_commits = String::from_utf8_lossy(&log_output.stdout);
                     println!("Updated commits:");
                     for commit in updated_commits.lines() {
                         println!("  {}", commit);
@@ -1843,7 +1688,7 @@ async fn rewrite_commit_authors(
                 if let Err(e) = zbobr
                     .task_session(task_id)
                     .role_session()
-                    .push_branch_commits()
+                    .update_pr()
                     .await
                 {
                     tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
@@ -1852,33 +1697,20 @@ async fn rewrite_commit_authors(
             Ok(output) => {
                 // Abort the failed rebase so the workspace isn't left in a
                 // broken state that blocks subsequent operations.
-                let _ = TokioCommand::new("git")
-                    .args(["rebase", "--abort"])
-                    .current_dir(&git_root_path)
-                    .status()
-                    .await;
+                let _ = git(&git_root_path, &["rebase", "--abort"]).await;
                 return Err(anyhow::anyhow!(
                     "Failed to rewrite commit authors: {}",
                     String::from_utf8_lossy(&output.stderr)
                 ));
             }
             Err(e) => {
-                let _ = TokioCommand::new("git")
-                    .args(["rebase", "--abort"])
-                    .current_dir(&git_root_path)
-                    .status()
-                    .await;
+                let _ = git(&git_root_path, &["rebase", "--abort"]).await;
                 return Err(anyhow::anyhow!(
                     "Error running git rebase for author rewriting: {}",
                     e
                 ));
             }
         }
-    } else {
-        return Err(anyhow::anyhow!(
-            "Error executing git config commands for author rewriting"
-        ));
-    }
 
     Ok(())
 }
@@ -1887,23 +1719,37 @@ async fn rewrite_commit_authors(
 // run_zbobr
 // ---------------------------------------------------------------------------
 
-/// Standard entry point for a Zbobr CLI application, heavily parameterized
-/// to allow for different backends.
-use zbobr_api::{CommentTag, config::BackendConfig};
+/// Standard entry point for a Zbobr CLI application.
+///
+/// The `build_backends` closure receives the resolved task and repo config
+/// and maps them into concrete backend instances — this is where the binary
+/// selects which sub-backend to use (e.g. `.github` vs `.fs`).
+use zbobr_api::CommentTag;
 
-pub async fn run_zbobr<TC: BackendConfig + 'static, RC: BackendConfig + 'static>(
+pub async fn run_zbobr<F>(
     app_name: &'static str,
     app_about: &'static str,
     app_long_about: &'static str,
     default_config_name: &'static str,
+    build_backends: F,
 ) -> anyhow::Result<()>
 where
-    TC::Backend: crate::backend::TaskBackend + 'static,
-    RC::Backend: crate::backend::RepoBackend + 'static,
-    TC::Args: zbobr_utility::PrefixedArgs + std::fmt::Debug + Clone,
-    RC::Args: zbobr_utility::PrefixedArgs + std::fmt::Debug + Clone,
+    F: FnOnce(
+        crate::config::ZbobrTaskBackendConfig,
+        crate::config::ZbobrRepoBackendConfig,
+        &crate::config::ZbobrDispatcherConfig,
+    ) -> anyhow::Result<(
+        std::sync::Arc<dyn crate::backend::TaskBackend>,
+        std::sync::Arc<dyn crate::backend::WorktreeBackend>,
+    )>,
 {
-    let cli: GenericCli<TC::Args, RC::Args> = parse_cli(app_name, app_about, app_long_about);
+    type TC = crate::config::ZbobrTaskBackendConfig;
+    type RC = crate::config::ZbobrRepoBackendConfig;
+
+    let cli: GenericCli<
+        <TC as zbobr_api::config::Config>::Args,
+        <RC as zbobr_api::config::Config>::Args,
+    > = parse_cli(app_name, app_about, app_long_about);
 
     let config_path = cli
         .config_file
@@ -1927,18 +1773,15 @@ where
     let root_toml = crate::GenericConfigToml::<TC, RC>::load(&config_path)
         .with_context(|| format!("Config file: {}", config_path.display()))?;
     let config =
-        crate::GenericConfig::<TC, RC>::build(root_toml, cli.settings.clone(), &config_dir)
-            .with_context(|| format!("Config file: {}", config_path.display()))?;
+        crate::GenericConfig::<TC, RC>::build(root_toml, cli.settings.clone(), &config_dir);
     config
         .dispatcher
         .validate()
         .with_context(|| format!("Config file: {}", config_path.display()))?;
     let executor_config = config.executor.clone();
 
-    let task_backend: std::sync::Arc<dyn crate::backend::TaskBackend> =
-        std::sync::Arc::new(config.tasks.build_backend(&config.dispatcher)?);
-    let repo_backend: std::sync::Arc<dyn crate::backend::RepoBackend> =
-        std::sync::Arc::new(config.repo.build_backend(&config.dispatcher)?);
+    let (task_backend, repo_backend) =
+        build_backends(config.tasks, config.repo, &config.dispatcher)?;
 
     let zbobr = crate::ZbobrDispatcher::new_with_backends(
         config.dispatcher.clone(),

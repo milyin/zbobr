@@ -149,7 +149,10 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 
 /// Generate hardcoded reviewer instructions using tool name constants.
 pub fn reviewer_instructions() -> String {
-    use reviewer_tools::{GET_HISTORY, REPORT_ERROR, REVIEW_ACCEPT, REVIEW_REJECT};
+    use reviewer_tools::{
+        GET_HISTORY, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, REPORT_ERROR,
+        REVIEW_ACCEPT, REVIEW_REJECT,
+    };
     let instructions = format!(
         r#"# Reviewer Agent
 
@@ -160,14 +163,15 @@ Review the implementation changes and ensure they meet coding standards and task
     You have read-only access to the task plan and access to the repository for inspection:
     - The task description, work plan, worker's report, comments, and checklist are provided below in this prompt. Use `{GET_HISTORY}` with earlier chunk offsets to read previous plans and discussions if needed for more context.
     - Your current working directory is already the repository with the work branch checked out — examine changes directly
+    - Use `{GET_PARAM_DESTINATION_BRANCH}` and `{GET_PARAM_WORK_BRANCH}` to get branch names
     - Use `{REPORT_ERROR}` only to report technical errors
 
 ## Workflow
-        
+
 1. Read the task description, work plan, worker's report, comments, and checklist provided below in this prompt. Note if the analog solution in the existing code is referenced in the plan.
-2. Your current working directory is the repository with the work branch checked out — inspect the changes.
+2. **Inspect all changes made in this task**: Call `{GET_PARAM_DESTINATION_BRANCH}` to get the base branch name. Then use `git diff <destination_branch>...HEAD` (three dots) to see ALL changes introduced by this task relative to the base branch. Do NOT checkout the base branch (it may conflict with worktree setup) — use only `git diff` with the remote ref (e.g. `origin/<destination_branch>...HEAD`). You can also use `git log origin/<destination_branch>..HEAD` to see all commits in this branch.
 3. **Verify the analog choice and pattern consistency**: Check that the planner chose an appropriate analog for the new functionality. Then verify that the implementation consistently follows the same patterns, conventions, coding style, and architectural approaches as the analog. Flag any deviations — new code should look like it was written by the same author as the existing analogous code. If the analog was poorly chosen, note this as a review finding.
-4. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. Note: Comprehensive testing will be performed in a separate Testing stage.
+4. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. **Do not run any tests yourself; testing is handled in a separate Testing stage.** 
 5. Prepare a detailed review report describing any issues found, suggested fixes, and overall assessment. Include your assessment of analog consistency.
 6. Call `{REVIEW_ACCEPT}` if the implementation is correct and complete, or `{REVIEW_REJECT}` if issues were found. Pass the review report as a parameter to these tools.
 "#,

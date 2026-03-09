@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::Context;
-use zbobr_api::config::{BackendConfig, Config};
+use zbobr_api::config::Config;
 use zbobr_executor_claude::ZbobrExecutorClaudeConfig;
 use zbobr_executor_copilot::ZbobrExecutorCopilotConfig;
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
@@ -18,10 +18,16 @@ use crate::config::{
 /// Root TOML config parametrized by task and repo backend config types.
 ///
 /// Sections:
-/// - `[dispatcher]` — dispatcher runtime settings
-/// - `[tasks]`      — task backend settings (type `TC::Toml`)
-/// - `[repo]`       — repo backend settings (type `RC::Toml`)
-/// - `[executor]`   — executor (AI tool) settings
+/// - `[dispatcher]`       — dispatcher runtime settings
+/// - `[tasks.<backend>]`  — task backend settings (e.g. `[tasks.github]`, `[tasks.fs]`)
+/// - `[repo.<backend>]`   — repo backend settings (e.g. `[repo.github]`, `[repo.fs]`)
+/// - `[executor]`         — executor (AI tool) settings
+///
+/// The TOML structure is enforced by the `TC::Toml` and `RC::Toml` types
+/// via `#[serde(deny_unknown_fields)]`.  Use wrapper config types (e.g.
+/// `ZbobrTaskBackendConfig` from `zbobr-config`) that nest each backend
+/// under a named sub-section to prevent bare keys at the `[tasks]`/`[repo]`
+/// level.
 #[derive(serde::Deserialize)]
 #[serde(
     default,
@@ -132,15 +138,15 @@ where
 // GenericConfig
 // ---------------------------------------------------------------------------
 
-/// Resolved configuration parametrized by task and repo backend config types.
-pub struct GenericConfig<TC: BackendConfig, RC: BackendConfig> {
+/// Resolved configuration parametrized by task and repo config types.
+pub struct GenericConfig<TC: Config, RC: Config> {
     pub dispatcher: ZbobrDispatcherConfig,
     pub tasks: TC,
     pub repo: RC,
     pub executor: ZbobrExecutorConfig,
 }
 
-impl<TC: BackendConfig, RC: BackendConfig> GenericConfig<TC, RC>
+impl<TC: Config, RC: Config> GenericConfig<TC, RC>
 where
     TC::Args: std::fmt::Debug,
     RC::Args: std::fmt::Debug,
@@ -149,7 +155,7 @@ where
         toml: Option<GenericConfigToml<TC, RC>>,
         args: GenericConfigArgs<TC::Args, RC::Args>,
         config_dir: &Path,
-    ) -> anyhow::Result<Self> {
+    ) -> Self {
         let toml = toml.unwrap_or_default();
 
         let dispatcher = ZbobrDispatcherConfig::build(toml.dispatcher, args.dispatcher, config_dir);
@@ -170,11 +176,11 @@ where
             }
         };
 
-        Ok(Self {
+        Self {
             dispatcher,
             tasks,
             repo,
             executor,
-        })
+        }
     }
 }

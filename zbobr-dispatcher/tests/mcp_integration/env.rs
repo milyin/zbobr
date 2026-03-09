@@ -9,7 +9,7 @@ use std::{
 };
 
 use zbobr_dispatcher::{
-    ChecklistItem, Comment, Signal, Stage, Task, ZbobrDispatcher, ZbobrDispatcherConfig,
+    ChecklistItem, Comment, Signal, Stage, Task, TaskDir, ZbobrDispatcher, ZbobrDispatcherConfig,
     ZbobrDispatcherDyn, ZbobrExecutorConfig, process_task_by_stage,
     prompts::Prompts,
     config::StageConfig,
@@ -77,7 +77,7 @@ impl IntegrationTestEnv {
 
         let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
             Arc::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?);
-        let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> =
+        let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
             Arc::new(ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?);
 
         let zbobr =
@@ -140,7 +140,7 @@ impl IntegrationTestEnv {
 
         let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
             Arc::new(ZbobrTaskBackendGithub::from_config(task_backend_config).ok()?);
-        let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> =
+        let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
             Arc::new(ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?);
 
         let zbobr =
@@ -200,11 +200,12 @@ impl IntegrationTestEnv {
         let repo_backend_config = ZbobrRepoBackendGithubConfig {
             fork_owner: fork_owner.clone(),
             github_token: repo_token,
+            repos_dir: base_path.join("repos"),
         };
 
         let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
             Arc::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?);
-        let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = Arc::new(
+        let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> = Arc::new(
             ZbobrRepoBackendGithub::from_config(
                 repo_backend_config,
                 "test-bot".to_string(),
@@ -272,11 +273,12 @@ impl IntegrationTestEnv {
         let repo_backend_config = ZbobrRepoBackendGithubConfig {
             fork_owner: fork_owner.clone(),
             github_token: repo_token,
+            repos_dir: base_path.join("repos"),
         };
 
         let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
             Arc::new(ZbobrTaskBackendGithub::from_config(task_backend_config).ok()?);
-        let repo_backend: Arc<dyn zbobr_dispatcher::backend::RepoBackend> = Arc::new(
+        let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> = Arc::new(
             ZbobrRepoBackendGithub::from_config(
                 repo_backend_config,
                 "test-bot".to_string(),
@@ -507,8 +509,8 @@ impl IntegrationTestEnv {
         repo_path: &Path,
         work_branch: &str,
     ) -> PathBuf {
-        let workspace_dir = self.workspaces_dir.join(format!("task#{task_id}"));
-        tokio::fs::create_dir_all(&workspace_dir)
+        let task_dir = TaskDir::new(&self.workspaces_dir, task_id);
+        tokio::fs::create_dir_all(task_dir.path())
             .await
             .expect("failed to create workspace dir");
 
@@ -517,7 +519,7 @@ impl IntegrationTestEnv {
             .expect("repo_path must have a file name")
             .to_str()
             .unwrap();
-        let work_dir = workspace_dir.join(repo_name);
+        let work_dir = task_dir.path().join(repo_name);
 
         let clone_ok = tokio::process::Command::new("git")
             .args([
@@ -577,40 +579,21 @@ impl IntegrationTestEnv {
             .cloned()
             .unwrap_or_else(|| "main".to_string());
 
-        let work_dir = self
-            .zbobr
-            .clone_and_setup(&dest_repo, work_branch, &dest_branch, task_id)
+        self.zbobr
+            .update_worktree(&dest_repo, &dest_branch, work_branch, task_id)
             .await
-            .unwrap_or_else(|e| panic!("[{}] clone_and_setup failed: {e}", self.name));
+            .unwrap_or_else(|e| panic!("[{}] update_worktree failed: {e}", self.name));
+
+        let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo);
+        let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), task_id);
+        let work_dir = task_dir.path().join(repo_name);
 
         assert!(
             work_dir.exists(),
-            "[{}] Workspace directory missing after clone: {}",
+            "[{}] Workspace directory missing after update: {}",
             self.name,
             work_dir.display()
         );
-
-        let checkout = tokio::process::Command::new("git")
-            .args(["checkout", work_branch])
-            .current_dir(&work_dir)
-            .output()
-            .await
-            .expect("failed to run git checkout");
-
-        if !checkout.status.success() {
-            let ok = tokio::process::Command::new("git")
-                .args(["checkout", "-b", work_branch])
-                .current_dir(&work_dir)
-                .status()
-                .await
-                .expect("failed to run git checkout -b")
-                .success();
-            assert!(
-                ok,
-                "[{}] failed to create branch '{}' in workspace",
-                self.name, work_branch
-            );
-        }
 
         work_dir
     }

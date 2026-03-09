@@ -34,7 +34,7 @@ impl ZbobrTaskBackendGithubConfig {
         }
         if self.github_token.is_empty() {
             anyhow::bail!(
-                "GitHub token not set. Set github_token in [tasks] config or use --tasks-github-token.\n  \
+                "GitHub token not set. Set github_token in [tasks.github] config or use --tasks-github-token.\n  \
                  This token needs read/write access to the tasks repo."
             );
         }

@@ -31,3 +31,4 @@ toml = { workspace = true }
 tempfile = { workspace = true }
 anyhow = { workspace = true }
 rustls = { workspace = true }
+serial_test = "3"

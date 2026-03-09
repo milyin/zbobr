@@ -1,4 +1,4 @@
-use crate::ZbobrDispatcherDyn;
+use crate::{TaskDir, ZbobrDispatcherDyn};
 
 impl ZbobrDispatcherDyn {
     /// Clean up workspaces directories for closed tasks.
@@ -21,19 +21,21 @@ impl ZbobrDispatcherDyn {
 
         let mut entries = tokio::fs::read_dir(workspaces).await?;
         while let Some(entry) = entries.next_entry().await? {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if !name.starts_with("task#") {
-                continue;
-            }
+            let path = entry.path();
 
-            let task_id: u64 = match name.strip_prefix("task#").and_then(|s| s.parse().ok()) {
-                Some(n) => n,
-                None => continue,
+            // Try to parse as a TaskDir
+            let task_dir = match TaskDir::from_path(workspaces, &path) {
+                Ok(td) => td,
+                Err(_) => {
+                    // Not a task directory, skip
+                    continue;
+                }
             };
+
+            let task_id = task_dir.task_id();
 
             match self.is_task_closed(task_id).await {
                 Ok(true) => {
-                    let path = entry.path();
                     if dry_run {
                         tracing::info!(
                             "DRY RUN: Would remove {} (task #{task_id} is closed)",

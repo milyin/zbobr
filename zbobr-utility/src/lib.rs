@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 
 pub mod macros;
 pub use macros::config_struct;
@@ -30,18 +30,43 @@ pub fn resolve_path(path: PathBuf, base: &Path) -> PathBuf {
     }
 }
 
-// Replace characters that are unsafe or invalid in filenames with '_'.
-// Allows ASCII alphanumerics, '-', '_', and '.'.
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
+/// Run a git command in `dir`, returning an error with context on failure.
+pub async fn git(dir: &Path, args: &[&str]) -> Result<()> {
+    let status = tokio::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .await
+        .with_context(|| format!("Failed to spawn: git {}", args.join(" ")))?;
+    if !status.success() {
+        anyhow::bail!("git {} failed in {}", args.join(" "), dir.display());
+    }
+    Ok(())
+}
+
+/// Run a git command in `dir` and capture stdout (trimmed).
+pub async fn git_output(dir: &Path, args: &[&str]) -> Result<String> {
+    let output = tokio::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .await
+        .with_context(|| format!("Failed to spawn: git {}", args.join(" ")))?;
+    if !output.status.success() {
+        anyhow::bail!("git {} failed in {}", args.join(" "), dir.display());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Run a git command in `dir`, returning `Ok(true)` if exit code 0, `Ok(false)` otherwise.
+pub async fn git_check(dir: &Path, args: &[&str]) -> Result<bool> {
+    let status = tokio::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .await
+        .with_context(|| format!("Failed to spawn: git {}", args.join(" ")))?;
+    Ok(status.success())
 }
 
 /// Configure git user settings for a repository.
@@ -51,27 +76,8 @@ pub async fn configure_git_user(
     git_user_name: &str,
     git_user_email: &str,
 ) -> Result<()> {
-    let config_user_status = tokio::process::Command::new("git")
-        .args(["config", "--local", "user.name", git_user_name])
-        .current_dir(work_dir)
-        .status()
-        .await
-        .context("Failed to set git user.name")?;
-
-    if !config_user_status.success() {
-        anyhow::bail!("git config user.name failed");
-    }
-
-    let config_email_status = tokio::process::Command::new("git")
-        .args(["config", "--local", "user.email", git_user_email])
-        .current_dir(work_dir)
-        .status()
-        .await
-        .context("Failed to set git user.email")?;
-
-    if !config_email_status.success() {
-        anyhow::bail!("git config user.email failed");
-    }
+    git(work_dir, &["config", "--local", "user.name", git_user_name]).await?;
+    git(work_dir, &["config", "--local", "user.email", git_user_email]).await?;
 
     tracing::info!(
         "Configured git user '{}' <{}> in {}",
@@ -83,120 +89,84 @@ pub async fn configure_git_user(
     Ok(())
 }
 
-/// Create a placeholder file in a branch to ensure it has at least one commit.
+/// Create an empty placeholder commit in a branch to ensure it has at least one commit
+/// ahead of the base branch.
 ///
-/// Behavior mirrors the old implementation in `zbobr-dispatcher`:
-/// - Creates `.zbobr/{sanitized_branch}` file
-/// - Stages it with `git add` and commits it with `git commit`
-///
-/// Errors include helpful context for diagnostics.
+/// Uses `git commit --allow-empty` so no files are created or staged.
 pub async fn create_placeholder_commit(work_dir: &Path, branch_name: &str) -> Result<()> {
-    let zbobr_dir = work_dir.join(".zbobr");
-    let sanitized_branch = sanitize_filename(branch_name);
-    let placeholder_path = zbobr_dir.join(&sanitized_branch);
-
-    // Create .zbobr directory
-    tokio::fs::create_dir_all(&zbobr_dir)
-        .await
-        .map_err(|e| anyhow!("Failed to create .zbobr directory: {}", e))?;
-
-    // Create placeholder file with extended diagnostics on failure
-    match tokio::fs::File::create(&placeholder_path).await {
-        Ok(_) => {}
-        Err(e) => {
-            let kind = e.kind();
-            let raw = e.raw_os_error();
-
-            let zbobr_exists = tokio::fs::metadata(&zbobr_dir).await.is_ok();
-            let work_dir_meta = tokio::fs::metadata(work_dir).await;
-            let work_dir_readonly = work_dir_meta
-                .as_ref()
-                .map(|m| m.permissions().readonly())
-                .unwrap_or(false);
-
-            anyhow::bail!(
-                "Failed to create placeholder file: {} — attempted path: {} — work_dir: {} — .zbobr exists: {} — work_dir_readonly: {} — kind: {:?} — raw_os_error: {:?}",
-                e,
-                placeholder_path.display(),
-                work_dir.display(),
-                zbobr_exists,
-                work_dir_readonly,
-                kind,
-                raw
-            );
-        }
-    }
-
-    // Stage the file
-    let add_status = tokio::process::Command::new("git")
-        .args(["add", &format!(".zbobr/{}", sanitized_branch)])
-        .current_dir(work_dir)
-        .status()
-        .await
-        .map_err(|e| anyhow!("Failed to run git add: {}", e))?;
-
-    if !add_status.success() {
-        anyhow::bail!("git add for placeholder failed (exit != 0)");
-    }
-
-    // Commit the file
     let commit_msg = format!("chore: add branch placeholder {}", branch_name);
-    let commit_status = tokio::process::Command::new("git")
-        .args(["commit", "-m", &commit_msg])
-        .current_dir(work_dir)
-        .status()
-        .await
-        .map_err(|e| anyhow!("Failed to run git commit: {}", e))?;
+    git(work_dir, &["commit", "--allow-empty", "-m", &commit_msg]).await?;
+    Ok(())
+}
 
-    if !commit_status.success() {
-        anyhow::bail!("git commit for placeholder failed (exit != 0)");
+/// Clean up stale git worktree state for a branch before creating a new worktree.
+///
+/// `workspace_path` is the intended destination for the new worktree.
+///
+/// 1. Prunes worktree references whose directories no longer exist.
+/// 2. Scans remaining worktrees for `work_branch`:
+///    - **Functional at `workspace_path`** (`.git` entry exists and `git
+///      status` succeeds) — already set up correctly, nothing to do.
+///    - **Functional at a different path** — someone else is using it, returns
+///      an error.
+///    - **Non-functional** (directory empty/missing, no `.git`, or `git status`
+///      fails) — stale reference, force-removed regardless of path.
+pub async fn cleanup_worktree_for_branch(
+    bare_dir: &Path,
+    work_branch: &str,
+    workspace_path: &Path,
+) -> Result<()> {
+    git(bare_dir, &["worktree", "prune"]).await?;
+
+    let worktree_list = git_output(bare_dir, &["worktree", "list", "--porcelain"]).await?;
+    let mut current_wt_path: Option<String> = None;
+    #[allow(clippy::collapsible_if)]
+    for line in worktree_list.lines() {
+        if let Some(p) = line.strip_prefix("worktree ") {
+            current_wt_path = Some(p.to_string());
+        } else if let Some(b) = line.strip_prefix("branch refs/heads/") {
+            if b == work_branch {
+                if let Some(ref wt) = current_wt_path {
+                    let wt_path = Path::new(wt);
+                    // A worktree is functional if its directory has a .git
+                    // entry AND `git status` succeeds in it.
+                    let functional = wt_path.join(".git").exists()
+                        && git_check(wt_path, &["status"]).await.unwrap_or(false);
+
+                    if functional {
+                        // Compare canonicalized paths to avoid ./foo vs foo mismatches
+                        let wt_canon = wt_path.canonicalize().ok();
+                        let ws_canon = workspace_path.canonicalize().ok();
+                        if wt_canon.is_some() && wt_canon == ws_canon {
+                            // Already set up at the right place, nothing to do
+                            return Ok(());
+                        }
+                        anyhow::bail!(
+                            "Branch '{}' is already checked out in worktree '{}', \
+                             cannot create another at '{}'",
+                            work_branch,
+                            wt,
+                            workspace_path.display()
+                        );
+                    }
+
+                    tracing::warn!(
+                        "Branch '{}' has stale worktree reference '{}', removing it",
+                        work_branch,
+                        wt
+                    );
+                    let _ = git(bare_dir, &["worktree", "remove", "--force", wt]).await;
+                }
+            }
+        }
     }
 
     Ok(())
 }
 
-/// Delete the placeholder file created by [`create_placeholder_commit`] and commit the removal.
+/// No-op: placeholder commits are now empty commits that don't need cleanup.
 ///
-/// If the placeholder file does not exist this function is a no-op (returns `Ok(())`).
-pub async fn delete_placeholder_commit(work_dir: &Path, branch_name: &str) -> Result<()> {
-    let sanitized_branch = sanitize_filename(branch_name);
-    let placeholder_path = work_dir.join(".zbobr").join(&sanitized_branch);
-
-    if !tokio::fs::try_exists(&placeholder_path).await.unwrap_or(false) {
-        tracing::debug!(
-            "Placeholder file {} does not exist — skipping deletion",
-            placeholder_path.display()
-        );
-        return Ok(());
-    }
-
-    let rm_status = tokio::process::Command::new("git")
-        .args(["rm", "-f", &format!(".zbobr/{}", sanitized_branch)])
-        .current_dir(work_dir)
-        .status()
-        .await
-        .map_err(|e| anyhow!("Failed to run git rm for placeholder: {}", e))?;
-
-    if !rm_status.success() {
-        anyhow::bail!("git rm for placeholder failed (exit != 0)");
-    }
-
-    let commit_msg = format!("chore: remove branch placeholder {}", branch_name);
-    let commit_status = tokio::process::Command::new("git")
-        .args(["commit", "-m", &commit_msg])
-        .current_dir(work_dir)
-        .status()
-        .await
-        .map_err(|e| anyhow!("Failed to run git commit for placeholder removal: {}", e))?;
-
-    if !commit_status.success() {
-        anyhow::bail!("git commit for placeholder removal failed (exit != 0)");
-    }
-
-    tracing::info!(
-        "Deleted branch placeholder .zbobr/{} and committed",
-        sanitized_branch
-    );
-
+/// Kept for backward compatibility with callers.
+pub async fn delete_placeholder_commit(_work_dir: &Path, _branch_name: &str) -> Result<()> {
     Ok(())
 }
