@@ -378,18 +378,21 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                         #field_ident: __merged.#field_ident.map(|p| ::zbobr_utility::resolve_path(p, config_dir))
                     }
                 } else if vec_inner_type(&value_ty).is_some() {
-                    // Vec<PathBuf>: merged.field.map(|v| ...).unwrap_or(defaults.field)
+                    // Vec<PathBuf>: always resolve every element, whether from config or default
                     quote! {
                         #field_ident: __merged.#field_ident
-                            .map(|v| v.into_iter().map(|p| ::zbobr_utility::resolve_path(p, config_dir)).collect())
                             .unwrap_or(defaults.#field_ident)
+                            .into_iter()
+                            .map(|p| ::zbobr_utility::resolve_path(p, config_dir))
+                            .collect()
                     }
                 } else {
-                    // PathBuf: merged.field.map(|p| resolve_path(p, config_dir)).unwrap_or(defaults.field)
+                    // PathBuf: always resolve, whether from config or default
                     quote! {
-                        #field_ident: __merged.#field_ident
-                            .map(|p| ::zbobr_utility::resolve_path(p, config_dir))
-                            .unwrap_or(defaults.#field_ident)
+                        #field_ident: ::zbobr_utility::resolve_path(
+                            __merged.#field_ident.unwrap_or(defaults.#field_ident),
+                            config_dir,
+                        )
                     }
                 }
             } else if base_is_option.is_some() {
