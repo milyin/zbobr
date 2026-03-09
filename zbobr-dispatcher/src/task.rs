@@ -58,7 +58,10 @@ impl RoleSession {
 
     /// Get a history chunk at the given offset.
     /// `offset` is 0-based (0 = oldest chunk); `None` returns the last chunk.
-    pub async fn get_history(&self, offset: Option<usize>) -> anyhow::Result<zbobr_api::HistoryChunk> {
+    pub async fn get_history(
+        &self,
+        offset: Option<usize>,
+    ) -> anyhow::Result<zbobr_api::HistoryChunk> {
         self.zbobr.get_history(self.task_id, offset).await
     }
 
@@ -165,71 +168,17 @@ impl RoleSession {
         .await
     }
 
-    /// Prepare a worktree for read-only access.
-    ///
-    /// Delegates to `request_branch` so the worktree is created with a proper
-    /// work branch distinct from base. The caller should ensure the branch is
-    /// not modified during read-only stages (testing, reviewing).
-    // TODO: verify that the branch isn't changed during read-only stages
-    pub async fn request_branch_readonly(
-        &self,
-        repo: &str,
-        branch: &str,
-    ) -> anyhow::Result<String> {
-        self.request_branch(repo, branch).await
-    }
-
-    /// Prepare a worktree for the given repo and work branch.
-    pub async fn request_branch(&self, repo: &str, branch: &str) -> anyhow::Result<String> {
-        let task = self.zbobr.get_task(self.task_id).await?;
-        let destination_branch = task
-            .parameters
-            .get(&crate::Parameter::DestinationBranch)
-            .cloned()
-            .unwrap_or_else(|| "main".to_string());
-        self.zbobr
-            .update_worktree(repo, &destination_branch, branch, self.task_id)
-            .await?;
-        let repo_name = repo.rsplit('/').next().unwrap_or(repo);
-        let path = self
-            .zbobr
-            .config()
-            .workspaces
-            .join(format!("task#{}", self.task_id))
-            .join(repo_name);
-        Ok(path.to_string_lossy().to_string())
-    }
-
-    /// MARKER_DELETE_START
-    /// Push the work branch and return its PR URL from the backend.
-    /// 
-    /// For GitHub: creates/finds a PR and returns its URL.
-    /// For FS backend: returns the worktree path.
-    pub async fn push_branch_and_create_pr(
-        &self,
-        work_branch: &str,
-    ) -> anyhow::Result<String> {
-        self.zbobr.update_pr(work_branch).await
-    }
-
     /// Ensure `pr_url` is stored in task parameters.
     ///
     /// If already set, returns the existing value immediately.
-    /// If not set: calls `update_pr` on the backend, stores the result in 
+    /// If not set: calls `update_pr` on the backend, stores the result in
     /// `Parameter::PrUrl`, and returns it.
     pub async fn ensure_pr_url(&self) -> anyhow::Result<String> {
         let task = self.get_task().await?;
         if let Some(url) = task.parameters.get(&Parameter::PrUrl).cloned() {
             return Ok(url);
         }
-        let work_branch = task
-            .parameters
-            .get(&Parameter::WorkBranch)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("work_branch parameter is not set"))?;
-
-        let pr_url = self.zbobr.update_pr(&work_branch).await?;
-
+        let pr_url = self.update_pr().await?;
         self.set_parameter(Parameter::PrUrl, Some(pr_url.clone()))
             .await?;
         Ok(pr_url)
@@ -239,15 +188,14 @@ impl RoleSession {
     ///
     /// Reads `WorkBranch` from task parameters and calls `update_pr` on the backend
     /// to sync the remote state. Result URL (if any) is discarded.
-    pub async fn push_branch_commits(&self) -> anyhow::Result<()> {
+    pub async fn update_pr(&self) -> anyhow::Result<String> {
         let task = self.get_task().await?;
         let work_branch = task
             .parameters
             .get(&Parameter::WorkBranch)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("work_branch parameter is not set"))?;
-        let _ = self.zbobr.update_pr(&work_branch).await?;
-        Ok(())
+        self.zbobr.update_pr(&work_branch).await
     }
 
     /// Get a task parameter value. Parameters are stored in the task's parameters HashMap.
@@ -390,13 +338,12 @@ impl TaskSession {
                 } else {
                     task_dir
                 };
-            if let Err(e) =
-                zbobr_utility::delete_placeholder_commit(&work_dir, &work_branch).await
+            if let Err(e) = zbobr_utility::delete_placeholder_commit(&work_dir, &work_branch).await
             {
                 tracing::warn!("Failed to delete placeholder commit for task #{task_id}: {e}");
             } else {
                 let role_session = self.role_session();
-                if let Err(e) = role_session.push_branch_commits().await {
+                if let Err(e) = role_session.update_pr().await {
                     tracing::warn!(
                         "Failed to push branch after placeholder deletion for task #{task_id}: {e}"
                     );
@@ -907,7 +854,10 @@ mod comment_model_tests {
             stage: Stage,
             parameters: HashMap<Parameter, String>,
         ) -> anyhow::Result<u64> {
-            let id = self.next_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            let id = self
+                .next_id
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                + 1;
             let task = Task {
                 id,
                 title: title.to_string(),
@@ -968,18 +918,15 @@ mod comment_model_tests {
             body: &str,
         ) -> anyhow::Result<()> {
             let mut comments = self.comments.lock().await;
-            comments
-                .entry(id)
-                .or_default()
-                .push(Comment {
-                    comment_type,
-                    timestamp: String::new(),
-                    role,
-                    hostname: hostname.to_string(),
-                    tool,
-                    model,
-                    text: body.to_string(),
-                });
+            comments.entry(id).or_default().push(Comment {
+                comment_type,
+                timestamp: String::new(),
+                role,
+                hostname: hostname.to_string(),
+                tool,
+                model,
+                text: body.to_string(),
+            });
             Ok(())
         }
 
@@ -1043,12 +990,8 @@ mod comment_model_tests {
         // construct a planner MCP instance with a concrete model and use it to
         // report an error; the TrackingBackend should record the model field
         // from the MCP session rather than leaving it None.
-        let planner = crate::mcp::planner::PlannerMcp::new(
-            zbobr.clone(),
-            id,
-            Tool::Copilot,
-            Model::Gpt5Mini,
-        );
+        let planner =
+            crate::mcp::planner::PlannerMcp::new(zbobr.clone(), id, Tool::Copilot, Model::Gpt5Mini);
 
         // call helper directly
         let _ = planner.report_error_impl("oops").await;
@@ -1097,13 +1040,7 @@ mod comment_model_tests {
         let parsed: CommentTag = tag.to_string().parse().unwrap();
         assert_eq!(parsed, tag);
 
-        let tag_user = CommentTag::new(
-            CommentType::Request,
-            None,
-            "web".to_string(),
-            None,
-            None,
-        );
+        let tag_user = CommentTag::new(CommentType::Request, None, "web".to_string(), None, None);
         assert_eq!(tag_user.to_string(), "// REQUEST user:web");
 
         // verify default-model serialization
@@ -1114,7 +1051,10 @@ mod comment_model_tests {
             Some(Tool::Copilot),
             Some(Model::Default),
         );
-        assert_eq!(tag_default.to_string(), "// REPORT planner:host:copilot:default");
+        assert_eq!(
+            tag_default.to_string(),
+            "// REPORT planner:host:copilot:default"
+        );
         let parsed_default: CommentTag = tag_default.to_string().parse().unwrap();
         assert_eq!(parsed_default, tag_default);
 
@@ -1126,9 +1066,11 @@ mod comment_model_tests {
             Some(Tool::Copilot),
             Some(Model::Gpt5Mini),
         );
-        assert_eq!(tag_tool.to_string(), "// REPORT worker:host:copilot:gpt-5-mini");
+        assert_eq!(
+            tag_tool.to_string(),
+            "// REPORT worker:host:copilot:gpt-5-mini"
+        );
         let parsed_tool: CommentTag = tag_tool.to_string().parse().unwrap();
         assert_eq!(parsed_tool, tag_tool);
     }
 }
-

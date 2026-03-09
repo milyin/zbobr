@@ -154,11 +154,6 @@ pub enum TaskSubcommand {
         /// Task ID
         id: u64,
     },
-    /// Clone the task's destination repository into its workspace
-    Clone {
-        /// Task ID
-        task: u64,
-    },
     /// Run preparator role for a specific task (sets destination repository and branches)
     Prepare {
         /// Task ID
@@ -585,34 +580,6 @@ async fn run_task_subcommand(
         TaskSubcommand::Delete { id } => {
             zbobr.close_task(id).await?;
             println!("Deleted task #{}", id);
-        }
-        TaskSubcommand::Clone { task } => {
-            let t = zbobr.get_task(task).await?;
-            let dest_repo = t
-                .parameters
-                .get(&Parameter::DestinationRepository)
-                .ok_or_else(|| anyhow::anyhow!("Task #{task} has no destination repository"))?
-                .clone();
-            let dest_branch = t
-                .parameters
-                .get(&Parameter::DestinationBranch)
-                .cloned()
-                .unwrap_or_else(|| "main".to_string());
-            let work_branch_for_clone = t
-                .parameters
-                .get(&Parameter::WorkBranch)
-                .cloned()
-                .unwrap_or_else(|| dest_branch.clone());
-            zbobr
-                .update_worktree(&dest_repo, &dest_branch, &work_branch_for_clone, task)
-                .await?;
-            let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo);
-            let path = zbobr
-                .config()
-                .workspaces
-                .join(format!("task#{task}"))
-                .join(repo_name);
-            println!("Cloned to {}", path.display());
         }
         TaskSubcommand::Prepare { task, show_prompt } => {
             run_role_command(
@@ -1491,7 +1458,7 @@ async fn finalize_session(
     if execution_interrupted {
         if role == Role::Worker || role == Role::Merger {
             let role_session = zbobr.task_session(task_id).role_session();
-            if let Err(e) = role_session.push_branch_commits().await {
+            if let Err(e) = role_session.update_pr().await {
                 tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
             }
         }
@@ -1503,7 +1470,7 @@ async fn finalize_session(
     if let Some(e) = execution_error {
         if role == Role::Worker || role == Role::Merger {
             let role_session = zbobr.task_session(task_id).role_session();
-            if let Err(e) = role_session.push_branch_commits().await {
+            if let Err(e) = role_session.update_pr().await {
                 tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
             }
         }
@@ -1661,7 +1628,7 @@ async fn finalize_session(
 async fn perform_auto_commit_and_push(
     zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
-    work_dir: &PathBuf,
+    work_dir: &Path,
     role: Role,
 ) -> anyhow::Result<()> {
     tracing::info!("Checking for uncommitted changes in {}", work_dir.display());
@@ -1686,7 +1653,7 @@ async fn perform_auto_commit_and_push(
     }
 
     let role_session = zbobr.task_session(task_id).role_session();
-    if let Err(e) = role_session.push_branch_commits().await {
+    if let Err(e) = role_session.update_pr().await {
         tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
     }
 
@@ -1700,7 +1667,7 @@ async fn perform_auto_commit_and_push(
 async fn rewrite_commit_authors(
     zbobr: &ZbobrDispatcherDyn,
     task_id: u64,
-    work_dir: &PathBuf,
+    work_dir: &Path,
     dry_run: bool,
 ) -> anyhow::Result<()> {
     let task = zbobr.get_task(task_id).await?;
@@ -1778,7 +1745,7 @@ async fn rewrite_commit_authors(
                 if let Err(e) = zbobr
                     .task_session(task_id)
                     .role_session()
-                    .push_branch_commits()
+                    .update_pr()
                     .await
                 {
                     tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
