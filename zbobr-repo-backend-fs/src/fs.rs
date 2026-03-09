@@ -95,6 +95,9 @@ impl ZbobrRepoBackendFs {
             workspace_path.display()
         );
 
+        // Prune stale worktree references (e.g. from previously removed directories)
+        git(bare_dir, &["worktree", "prune"]).await?;
+
         let ws = workspace_path.to_str().unwrap();
         if git_check(bare_dir, &["rev-parse", &format!("{}^{{commit}}", work_branch)])
             .await?
