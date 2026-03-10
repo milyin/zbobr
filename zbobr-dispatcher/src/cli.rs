@@ -1657,63 +1657,65 @@ async fn rewrite_commit_authors(
     // configure git user locally using helper
     configure_git_user(&git_root_path, git_user_name, git_user_email).await?;
 
-    let rebase_cmd = format!(
-        "git rebase --exec 'git commit --amend --no-edit --reset-author --allow-empty' '{}'",
-        dest_branch
+    // Use git filter-branch to rewrite author/committer in-place.
+    // Unlike rebase --exec, this does not replay changes so it cannot
+    // produce merge conflicts.
+    let filter_cmd = format!(
+        "git filter-branch -f --env-filter '\
+            export GIT_AUTHOR_NAME=\"{name}\";\
+            export GIT_AUTHOR_EMAIL=\"{email}\";\
+            export GIT_COMMITTER_NAME=\"{name}\";\
+            export GIT_COMMITTER_EMAIL=\"{email}\";\
+        ' '{dest}'..HEAD",
+        name = git_user_name,
+        email = git_user_email,
+        dest = dest_branch,
     );
-    let rebase_output = TokioCommand::new("sh")
+    let filter_output = TokioCommand::new("sh")
         .arg("-c")
-        .arg(&rebase_cmd)
-        .env("GIT_AUTHOR_NAME", git_user_name)
-        .env("GIT_AUTHOR_EMAIL", git_user_email)
-        .env("GIT_COMMITTER_NAME", git_user_name)
-        .env("GIT_COMMITTER_EMAIL", git_user_email)
+        .arg(&filter_cmd)
         .current_dir(&git_root_path)
         .output()
         .await;
-        match rebase_output {
-            Ok(output) if output.status.success() => {
-                println!("Successfully rewrote commit authors");
+    match filter_output {
+        Ok(output) if output.status.success() => {
+            println!("Successfully rewrote commit authors");
 
-                // Show post-rebase log to verify changes
-                if let Ok(updated_commits) = git_output(
-                    &git_root_path,
-                    &["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"],
-                )
+            // Show post-rebase log to verify changes
+            if let Ok(updated_commits) = git_output(
+                &git_root_path,
+                &["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"],
+            )
+            .await
+            {
+                println!("Updated commits:");
+                for commit in updated_commits.lines() {
+                    println!("  {}", commit);
+                }
+            }
+
+            if let Err(e) = zbobr
+                .task_session(task_id)
+                .role_session()
+                .update_pr()
                 .await
-                {
-                    println!("Updated commits:");
-                    for commit in updated_commits.lines() {
-                        println!("  {}", commit);
-                    }
-                }
-
-                if let Err(e) = zbobr
-                    .task_session(task_id)
-                    .role_session()
-                    .update_pr()
-                    .await
-                {
-                    tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
-                }
-            }
-            Ok(output) => {
-                // Abort the failed rebase so the workspace isn't left in a
-                // broken state that blocks subsequent operations.
-                let _ = git(&git_root_path, &["rebase", "--abort"]).await;
-                return Err(anyhow::anyhow!(
-                    "Failed to rewrite commit authors: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                ));
-            }
-            Err(e) => {
-                let _ = git(&git_root_path, &["rebase", "--abort"]).await;
-                return Err(anyhow::anyhow!(
-                    "Error running git rebase for author rewriting: {}",
-                    e
-                ));
+            {
+                tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
             }
         }
+        Ok(output) => {
+            return Err(anyhow::anyhow!(
+                "Failed to rewrite commit authors: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "Error running git filter-branch for author rewriting: {}",
+                e
+            ));
+        }
+    }
 
     Ok(())
 }
