@@ -1017,7 +1017,8 @@ impl RepoBackend for ZbobrRepoBackendGithub {
 
         tracing::info!("Pushing {work_branch} to {push_remote}");
         let status = tokio::process::Command::new("git")
-            .args(["push", "--force", push_remote, "HEAD"])
+            // .args(["push", "--force", push_remote, "HEAD"])
+            .args(["push", push_remote, "HEAD"])
             .current_dir(&work_dir)
             .status()
             .await?;
@@ -1084,7 +1085,8 @@ impl RepoBackend for ZbobrRepoBackendGithub {
 
         tracing::info!("Pushing {work_branch} to {push_remote}");
         let status = tokio::process::Command::new("git")
-            .args(["push", "--force", push_remote, "HEAD"])
+            // .args(["push", "--force", push_remote, "HEAD"])
+            .args(["push", push_remote, "HEAD"])
             .current_dir(&work_dir)
             .status()
             .await?;
