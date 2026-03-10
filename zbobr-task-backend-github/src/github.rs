@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Mutex, time::Duration};
+use std::{collections::HashMap, sync::{Arc, Mutex}, time::Duration};
 
 use async_trait::async_trait;
 use zbobr_api::{
@@ -136,6 +136,9 @@ pub struct ZbobrTaskBackendGithub {
     backend_config: ZbobrTaskBackendGithubConfig,
     octocrab: octocrab::Octocrab,
     cooling_deadlines: Mutex<HashMap<u64, tokio::time::Instant>>,
+    /// Per-task mutexes to serialize concurrent read-modify-write cycles
+    /// for the same task within this process.
+    task_locks: std::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl ZbobrTaskBackendGithub {
@@ -161,6 +164,7 @@ impl ZbobrTaskBackendGithub {
             backend_config,
             octocrab,
             cooling_deadlines: Mutex::new(HashMap::new()),
+            task_locks: std::sync::Mutex::new(HashMap::new()),
         })
     }
 
@@ -716,6 +720,15 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         id: u64,
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
     ) -> anyhow::Result<()> {
+        let lock = {
+            let mut locks = self.task_locks.lock().unwrap();
+            locks
+                .entry(id)
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+                .clone()
+        };
+        let _guard = lock.lock().await;
+
         let task = self.fetch_task(id).await?;
         let original_stage = task.stage;
         let original_signal = task.signal;

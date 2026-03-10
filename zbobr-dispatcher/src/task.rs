@@ -81,9 +81,6 @@ impl RoleSession {
     where
         F: FnOnce(&mut Task) + Send + 'static,
     {
-        let lock = self.zbobr.task_lock(self.task_id);
-        let _guard = lock.lock().await;
-
         self.zbobr
             .task_backend
             .modify_task(
@@ -266,9 +263,6 @@ impl TaskSession {
     where
         F: FnOnce(&mut Task) + Send + 'static,
     {
-        let lock = self.zbobr.task_lock(self.task_id);
-        let _guard = lock.lock().await;
-
         self.zbobr
             .task_backend
             .modify_task(

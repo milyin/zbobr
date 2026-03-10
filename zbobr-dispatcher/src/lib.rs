@@ -10,7 +10,7 @@ pub mod task;
 pub mod task_dir;
 pub mod tool_executor;
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 pub use cli::{
     Command, ConfigFileArg, GlobalArgs, TaskSubcommand, parse_cli, print_task,
@@ -43,9 +43,6 @@ pub struct ZbobrDispatcher {
     config: Arc<ZbobrDispatcherConfig>,
     pub(crate) task_backend: Arc<dyn TaskBackend>,
     pub(crate) repo_backend: Arc<dyn WorktreeBackend>,
-    /// Per-task mutexes to serialize concurrent read-modify-write cycles
-    /// for the same task within this process.
-    task_locks: Arc<std::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 impl ZbobrDispatcher {
@@ -60,21 +57,11 @@ impl ZbobrDispatcher {
             config: Arc::new(config),
             task_backend,
             repo_backend,
-            task_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
     pub fn config(&self) -> &ZbobrDispatcherConfig {
         &self.config
-    }
-
-    /// Get or create a per-task async mutex for serializing read-modify-write cycles.
-    pub(crate) fn task_lock(&self, task_id: u64) -> Arc<tokio::sync::Mutex<()>> {
-        let mut locks = self.task_locks.lock().unwrap();
-        locks
-            .entry(task_id)
-            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
-            .clone()
     }
 
     /// Validate that both backends can reach required resources.
