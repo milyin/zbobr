@@ -1594,8 +1594,82 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         Ok(true)
     }
 
-    async fn update_pr(&self, _work_branch: &str) -> anyhow::Result<String> {
-        todo!("update_pr: to be reimplemented with merge-based flow")
+    async fn update_pr(
+        &self,
+        work_branch: &str,
+        destination_repo: &str,
+        base_branch: &str,
+    ) -> anyhow::Result<String> {
+        // 1. Find the worktree and bare_dir for this branch
+        let (bare_dir, worktree_path) = self.find_worktree_for_branch(work_branch).await?;
+
+        // 2. Auto-commit any uncommitted changes
+        Self::auto_commit_worktree(&worktree_path).await?;
+
+        // 3. Determine push remote and PR repo
+        let has_fork = git_check(&bare_dir, &["remote", "get-url", "fork"]).await?;
+        let repo = parse_github_repo(destination_repo)?;
+        let (push_remote, pr_repo) = if has_fork {
+            (
+                "fork",
+                format!("{}/{}", self.backend_config.fork_owner, repo.name()),
+            )
+        } else {
+            ("origin", repo.full_name.clone())
+        };
+
+        // 4. Push to remote (no --force)
+        Self::push_worktree_to_remote(&worktree_path, push_remote, work_branch).await?;
+
+        // 5. Find existing PR or create a new one
+        #[derive(serde::Deserialize)]
+        struct PrResponse {
+            html_url: String,
+        }
+
+        // First try to find an existing PR
+        let owner = pr_repo.split('/').next().unwrap_or(&pr_repo);
+        let head_filter = format!("{owner}:{work_branch}");
+        let endpoint = format!("/repos/{pr_repo}/pulls");
+        let params = serde_json::json!({
+            "head": head_filter,
+            "state": "open",
+        });
+
+        let prs: Vec<PrResponse> = self
+            .octocrab
+            .get(&endpoint, Some(&params))
+            .await
+            .map_err(octocrab_to_anyhow)?;
+
+        if let Some(pr) = prs.into_iter().next() {
+            return Ok(pr.html_url);
+        }
+
+        // No existing PR — create one
+        tracing::info!("No existing PR found for {work_branch}, creating one in {pr_repo}");
+        let pr_payload = serde_json::json!({
+            "title": work_branch,
+            "head": work_branch,
+            "base": base_branch,
+            "body": "",
+        });
+
+        let create_result: Result<PrResponse, octocrab::Error> =
+            self.octocrab.post(&endpoint, Some(&pr_payload)).await;
+
+        match create_result {
+            Ok(pr) => Ok(pr.html_url),
+            Err(octocrab::Error::GitHub { ref source, .. })
+                if source.status_code.as_u16() == 422 =>
+            {
+                // Race condition: PR was created between our check and create
+                tracing::info!("PR already exists (422), looking up existing PR");
+                self.find_existing_pr(&pr_repo, work_branch, base_branch)
+                    .await
+            }
+            Err(e) => Err(octocrab_to_anyhow(e)),
+        }
     }
 
     async fn validate_connectivity(&self) -> anyhow::Result<()> {

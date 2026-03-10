@@ -226,12 +226,22 @@ pub trait WorktreeBackend: Send + Sync {
         workspace_path: &std::path::Path,
     ) -> anyhow::Result<bool>;
 
-    /// Returns the up-to-date URL of the PR for the given work branch. 
+    /// Push the work branch to its remote and ensure a PR exists.
+    ///
+    /// Returns the up-to-date URL of the PR for the given work branch.
     /// It's up to backend what is considered as the PR URL, this information is only
-    /// for representation tre current status of the work for user.
-    /// For the githug backend, this is the URL of the PR in the GitHub UI. 
+    /// for representing the current status of the work for the user.
+    /// For the GitHub backend, this is the URL of the PR in the GitHub UI.
     /// For the filesystem backend, this can be just the path to the worktree directory.
-    async fn update_pr(&self, work_branch: &str) -> anyhow::Result<String>;
+    ///
+    /// If no PR exists yet, the backend should create one targeting `base_branch`
+    /// in `destination_repo`.
+    async fn update_pr(
+        &self,
+        work_branch: &str,
+        destination_repo: &str,
+        base_branch: &str,
+    ) -> anyhow::Result<String>;
 
     /// Validate connectivity to the repo hosting service.
     async fn validate_connectivity(&self) -> anyhow::Result<()>;

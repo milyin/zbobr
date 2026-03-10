@@ -181,8 +181,9 @@ impl RoleSession {
 
     /// Push current work branch commits to the remote by updating PR state.
     ///
-    /// Reads `WorkBranch` from task parameters and calls `update_pr` on the backend
-    /// to sync the remote state. Result URL (if any) is discarded.
+    /// Reads `WorkBranch`, `DestinationRepository`, and `DestinationBranch` from
+    /// task parameters and calls `update_pr` on the backend to sync the remote
+    /// state and ensure a PR exists.
     pub async fn update_pr(&self) -> anyhow::Result<String> {
         let task = self.get_task().await?;
         let work_branch = task
@@ -190,7 +191,20 @@ impl RoleSession {
             .get(&Parameter::WorkBranch)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("work_branch parameter is not set"))?;
-        self.zbobr.worktree().update_pr(&work_branch).await
+        let destination_repo = task
+            .parameters
+            .get(&Parameter::DestinationRepository)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("destination_repository parameter is not set"))?;
+        let base_branch = task
+            .parameters
+            .get(&Parameter::DestinationBranch)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("destination_branch parameter is not set"))?;
+        self.zbobr
+            .worktree()
+            .update_pr(&work_branch, &destination_repo, &base_branch)
+            .await
     }
 
     /// Get a task parameter value. Parameters are stored in the task's parameters HashMap.
@@ -687,7 +701,7 @@ mod tests {
             Ok(true)
         }
 
-        async fn update_pr(&self, _work_branch: &str) -> anyhow::Result<String> {
+        async fn update_pr(&self, _work_branch: &str, _destination_repo: &str, _base_branch: &str) -> anyhow::Result<String> {
             Ok("mock-pr-url".to_string())
         }
 
@@ -942,7 +956,7 @@ mod comment_model_tests {
             Ok(true)
         }
 
-        async fn update_pr(&self, _work_branch: &str) -> anyhow::Result<String> {
+        async fn update_pr(&self, _work_branch: &str, _destination_repo: &str, _base_branch: &str) -> anyhow::Result<String> {
             Ok("mock-pr-url".to_string())
         }
 
