@@ -209,13 +209,12 @@ pub trait WorktreeBackend: Send + Sync {
     /// Corresponding delete operation is not required: the worktree can be removed with
     /// `git worktree remove` command 
     /// 
-    /// Returns boolean value indicating whether the worktree branch is up-to-date with the 
-    /// `base_branch` (i.e. no new commits in `base_branch` comparing to the current state
-    /// of the `work_branch`).
+    /// Returns boolean value indicating whether the worktree branch is
+    /// successfully created and merged to recent remote updates 
     /// 
     /// I.e return values:
     /// - `Ok(true)` means the worktree is ready to use and up to date with the `base_branch`.
-    /// - `Ok(false)` means the worktree is ready to use but `base_branch` diverged
+    /// - `Ok(false)` means the worktree is in a merging conflict state
     /// - `Err` means the worktree is not ready to use, e.g. due to validation 
     ///    failure or creation failure.
     /// 
