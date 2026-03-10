@@ -11,6 +11,7 @@ use std::{
 use zbobr_dispatcher::{
     ChecklistItem, Comment, Signal, Stage, Task, TaskDir, ZbobrDispatcher, ZbobrDispatcherConfig,
     ZbobrExecutorConfig, process_task_by_stage,
+    backend::TaskBackendExt,
     prompts::Prompts,
     config::StageConfig,
     task::{Parameter, Tool},
@@ -341,14 +342,14 @@ impl IntegrationTestEnv {
 
     pub async fn get_task(&self, task_id: u64) -> Task {
         self.zbobr
-            .get_task(task_id)
+            .tasks().get_task(task_id)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name))
     }
 
     pub async fn get_comments(&self, task_id: u64) -> Vec<Comment> {
         self.zbobr
-            .get_task_comments(task_id)
+            .tasks().get_task_comments(task_id)
             .await
             .unwrap_or_else(|e| {
                 panic!(
@@ -390,7 +391,7 @@ impl IntegrationTestEnv {
         let dest_branch = dest_branch.to_string();
         let work_branch = work_branch.to_string();
         self.zbobr
-            .modify_task(
+            .tasks().modify_task(
                 task_id,
                 Box::new(move |mut task| {
                     task.parameters
@@ -412,7 +413,7 @@ impl IntegrationTestEnv {
 
     pub async fn set_task_conflict(&self, task_id: u64, conflict: bool) {
         self.zbobr
-            .modify_task(
+            .tasks().modify_task(
                 task_id,
                 Box::new(move |mut task| {
                     task.conflict = conflict;
@@ -433,7 +434,7 @@ impl IntegrationTestEnv {
             .parse()
             .unwrap_or_else(|_| panic!("[{}] invalid signal '{signal}'", self.name));
         self.zbobr
-            .set_task_signal(task_id, Some(signal))
+            .tasks().set_task_signal(task_id, Some(signal))
             .await
             .unwrap_or_else(|e| {
                 panic!(
@@ -447,7 +448,7 @@ impl IntegrationTestEnv {
     /// respect to the `confirm` flag (sets `pause` when confirm is true).
     pub async fn update_task_stage(&self, task_id: u64, new_stage: Stage) {
         self.zbobr
-            .modify_task(
+            .tasks().modify_task(
                 task_id,
                 Box::new(move |mut task| {
                     if task.confirm && task.stage != new_stage {
@@ -612,7 +613,7 @@ impl IntegrationTestEnv {
     ///  4. Calls `process_task_by_stage` directly (no subprocess).
     pub async fn run_stage(&self, task_id: u64, stage: Stage, scenario: String) {
         self.zbobr
-            .set_task_stage(task_id, stage)
+            .tasks().set_task_stage(task_id, stage)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to set stage: {e}", self.name));
 

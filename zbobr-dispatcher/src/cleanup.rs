@@ -34,7 +34,7 @@ impl ZbobrDispatcher {
 
             let task_id = task_dir.task_id();
 
-            match self.is_task_closed(task_id).await {
+            match self.tasks().is_task_closed(task_id).await {
                 Ok(true) => {
                     if dry_run {
                         tracing::info!(

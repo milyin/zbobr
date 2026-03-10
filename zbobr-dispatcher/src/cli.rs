@@ -15,6 +15,7 @@ use zbobr_utility::{git, git_check, git_output, configure_git_user};
 use crate::{
     Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
     ZbobrExecutorConfig,
+    backend::TaskBackendExt,
     mcp::common::get_hostname,
     prompts::Prompts,
     task::{Parameter, Role, Tool, Model},
@@ -461,7 +462,7 @@ async fn run_task_subcommand(
             };
             let mut tasks = Vec::new();
             if let Some(stage) = stage_filter {
-                tasks = zbobr.list_tasks_by_stage(stage).await?;
+                tasks = zbobr.tasks().list_tasks_by_stage(stage).await?;
             } else {
                 let all_stages = [
                     Stage::Pending,
@@ -473,7 +474,7 @@ async fn run_task_subcommand(
                     Stage::Done,
                 ];
                 for st in all_stages {
-                    let mut ts = zbobr.list_tasks_by_stage(st).await?;
+                    let mut ts = zbobr.tasks().list_tasks_by_stage(st).await?;
                     tasks.append(&mut ts);
                 }
                 tasks.sort_by_key(|t| t.id);
@@ -489,8 +490,8 @@ async fn run_task_subcommand(
             }
         }
         TaskSubcommand::Show { id } => {
-            let task = zbobr.get_task(id).await?;
-            let discussion = zbobr.get_task_comments(id).await?;
+            let task = zbobr.tasks().get_task(id).await?;
+            let discussion = zbobr.tasks().get_task_comments(id).await?;
             print_task(&task, &discussion);
         }
         TaskSubcommand::Update {
@@ -515,6 +516,7 @@ async fn run_task_subcommand(
                 .map(|s| s.parse::<Signal>().context("Invalid signal"))
                 .transpose()?;
             zbobr
+                .tasks()
                 .modify_task(
                     id,
                     Box::new(move |mut task| {
@@ -578,7 +580,7 @@ async fn run_task_subcommand(
             println!("Updated task #{}", id);
         }
         TaskSubcommand::Delete { id } => {
-            zbobr.close_task(id).await?;
+            zbobr.tasks().close_task(id).await?;
             println!("Deleted task #{}", id);
         }
         TaskSubcommand::Prepare { task, show_prompt } => {
@@ -645,7 +647,7 @@ async fn run_task_subcommand(
             executor_mcp_tester_testing,
             executor_mcp_tester_merging,
         } => {
-            let task_obj = zbobr.get_task(task).await?;
+            let task_obj = zbobr.tasks().get_task(task).await?;
             let mcp_tester_config_override = if executor_mcp_tester_preparation.is_some()
                 || executor_mcp_tester_planning.is_some()
                 || executor_mcp_tester_working.is_some()
@@ -674,7 +676,7 @@ async fn run_task_subcommand(
             process_task_by_stage(zbobr, &task_obj, prompts, &effective_executor_config).await?;
         }
         TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
-            let task = zbobr.get_task(id).await?;
+            let task = zbobr.tasks().get_task(id).await?;
             let git_user_name = &zbobr.config().git_user_name;
             let git_user_email = &zbobr.config().git_user_email;
 
@@ -800,6 +802,7 @@ impl<'a> CliRoleRunner<'a> {
         let model = self.zbobr.config().model_for_role(self.role);
 
         self.zbobr
+            .tasks()
             .set_task_stage(self.task_id, self.role.into())
             .await?;
 
@@ -852,7 +855,7 @@ impl<'a> CliRoleRunner<'a> {
         // For Merger: try a normal git merge first. If it succeeds, no need
         // to invoke the agent — just commit the merge and return.
         if self.role == Role::Merger {
-            let task = self.zbobr.get_task(self.task_id).await?;
+            let task = self.zbobr.tasks().get_task(self.task_id).await?;
             let dest_branch = task
                 .parameters
                 .get(&Parameter::DestinationBranch)
@@ -1111,7 +1114,7 @@ pub async fn run_manager_loop(
             last_cleanup = std::time::Instant::now();
         }
 
-        let mut pending_tasks = match zbobr.list_tasks_by_stage(Stage::Pending).await {
+        let mut pending_tasks = match zbobr.tasks().list_tasks_by_stage(Stage::Pending).await {
             Ok(tasks) => tasks,
             Err(e) => {
                 tracing::error!("Failed to check PENDING tasks: {e}");
@@ -1168,7 +1171,7 @@ pub async fn run_manager_loop(
         let mut active_counts = std::collections::HashMap::new();
         for stage in &active_stages {
             let count = zbobr
-                .list_tasks_by_stage(*stage)
+                .tasks().list_tasks_by_stage(*stage)
                 .await
                 .unwrap_or_default()
                 .len();
@@ -1219,7 +1222,7 @@ async fn prepare_workspace(
     match role {
         Role::Preparator => Ok((task_dir.to_path_buf(), true)),
         Role::Merger => {
-            let task = zbobr.get_task(task_id).await?;
+            let task = zbobr.tasks().get_task(task_id).await?;
             let dest_repo = task
                 .parameters
                 .get(&Parameter::DestinationRepository)
@@ -1231,7 +1234,7 @@ async fn prepare_workspace(
             Ok((task_dir.join(repo_name), true))
         }
         _ => {
-            let task = zbobr.get_task(task_id).await?;
+            let task = zbobr.tasks().get_task(task_id).await?;
             let dest_repo = task
                 .parameters
                 .get(&Parameter::DestinationRepository)
@@ -1302,7 +1305,7 @@ async fn ensure_pr_url(zbobr: &ZbobrDispatcher, task_id: u64) -> anyhow::Result<
 /// so a previously prepared task (e.g. re-run) keeps its values unchanged.
 async fn seed_preparator_defaults(zbobr: &ZbobrDispatcher, task_id: u64) -> anyhow::Result<()> {
     let config = zbobr.config();
-    let task = zbobr.get_task(task_id).await?;
+    let task = zbobr.tasks().get_task(task_id).await?;
     let role_session = zbobr.role_session(task_id);
 
     if let Some(default_repo) = &config.default_destination_repository
@@ -1473,7 +1476,7 @@ async fn finalize_session(
             return Ok(());
         }
 
-    let current_task = zbobr.get_task(task_id).await?;
+    let current_task = zbobr.tasks().get_task(task_id).await?;
     let has_unchecked = current_task.checklist.iter().any(|i| !i.checked);
     match role {
         Role::Preparator => {
@@ -1524,7 +1527,7 @@ async fn finalize_session(
             // Retry the merge to verify the agent actually resolved the conflict.
             // If it still fails, pause the task and report to avoid an infinite loop.
             let dest_branch = zbobr
-                .get_task(task_id)
+                .tasks().get_task(task_id)
                 .await?
                 .parameters
                 .get(&Parameter::DestinationBranch)
@@ -1613,7 +1616,7 @@ async fn rewrite_commit_authors(
     work_dir: &Path,
     dry_run: bool,
 ) -> anyhow::Result<()> {
-    let task = zbobr.get_task(task_id).await?;
+    let task = zbobr.tasks().get_task(task_id).await?;
     let dest_branch = task
         .parameters
         .get(&Parameter::DestinationBranch)

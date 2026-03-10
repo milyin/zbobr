@@ -165,6 +165,7 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
     // report and therefore will route back to the planner.  This mirrors the
     // behaviour of actual workflows where a review usually discovers issues.
     env.zbobr
+        .tasks()
         .modify_task(
             task_id,
             Box::new(|mut task| {
@@ -791,6 +792,7 @@ pub async fn run_plan_history_with_index(env: &IntegrationTestEnv) {
     // Directly verify the structured comment history in the backend.
     let comments = env
         .zbobr
+        .tasks()
         .get_task_comments(task_id)
         .await
         .unwrap_or_else(|e| panic!("[{}] failed to get structured comments: {e}", env.name()));

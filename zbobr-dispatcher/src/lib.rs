@@ -64,17 +64,21 @@ impl ZbobrDispatcher {
         &self.config
     }
 
-    /// Validate that both backends can reach required resources.
-    pub async fn validate_connectivity(&self) -> anyhow::Result<()> {
-        self.task_backend.validate_connectivity().await?;
-        self.repo_backend.validate_connectivity().await?;
-        Ok(())
+    /// Direct access to the task backend.
+    pub fn tasks(&self) -> &dyn TaskBackend {
+        self.task_backend.as_ref()
     }
 
-    // -- Delegate to TaskBackend --
+    /// Direct access to the worktree backend.
+    pub fn worktree(&self) -> &dyn WorktreeBackend {
+        self.repo_backend.as_ref()
+    }
 
-    pub async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
-        self.task_backend.get_task(id).await
+    /// Validate that both backends can reach required resources.
+    pub async fn validate_connectivity(&self) -> anyhow::Result<()> {
+        self.tasks().validate_connectivity().await?;
+        self.worktree().validate_connectivity().await?;
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -117,29 +121,22 @@ impl ZbobrDispatcher {
             if let Some(branch) = destination_branch {
                 parameters.insert(Parameter::DestinationBranch, branch);
             }
-            self.task_backend
+            self.tasks()
                 .create_task(title, description, stage, parameters)
                 .await?
         };
         if confirm {
-            self.modify_task(
-                id,
-                Box::new(|mut task| {
-                    task.confirm = true;
-                    task
-                }),
-            )
-            .await?;
+            self.tasks()
+                .modify_task(
+                    id,
+                    Box::new(|mut task| {
+                        task.confirm = true;
+                        task
+                    }),
+                )
+                .await?;
         }
         Ok(id)
-    }
-
-    pub async fn close_task(&self, id: u64) -> anyhow::Result<()> {
-        self.task_backend.close_task(id).await
-    }
-
-    pub async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
-        self.task_backend.get_task_comments(id).await
     }
 
     /// Fetch comments and description for a task, then extract the history chunk
@@ -149,69 +146,14 @@ impl ZbobrDispatcher {
         id: u64,
         offset: Option<usize>,
     ) -> anyhow::Result<zbobr_api::HistoryChunk> {
-        let comments = self.get_task_comments(id).await?;
+        let comments = self.tasks().get_task_comments(id).await?;
         let desc = self
+            .tasks()
             .get_task(id)
             .await
             .map(|t| t.description)
             .unwrap_or_default();
         zbobr_api::extract_history_chunk(comments, &desc, offset)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn post_task_comment(
-        &self,
-        id: u64,
-        comment_type: CommentType,
-        role: Option<zbobr_api::Role>,
-        hostname: &str,
-        tool: Option<Tool>,
-        model: Option<Model>,
-        body: &str,
-    ) -> anyhow::Result<()> {
-        self.task_backend
-            .post_task_comment(id, comment_type, role, hostname, tool, model, body)
-            .await
-    }
-
-    pub async fn set_task_stage(&self, id: u64, stage: Stage) -> anyhow::Result<()> {
-        self.task_backend
-            .modify_task(
-                id,
-                Box::new(move |mut task| {
-                    task.stage = stage;
-                    task
-                }),
-            )
-            .await
-    }
-
-    pub async fn set_task_signal(&self, id: u64, signal: Option<Signal>) -> anyhow::Result<()> {
-        self.task_backend
-            .modify_task(
-                id,
-                Box::new(move |mut task| {
-                    task.signal = signal;
-                    task
-                }),
-            )
-            .await
-    }
-
-    pub async fn list_tasks_by_stage(&self, stage: Stage) -> anyhow::Result<Vec<Task>> {
-        self.task_backend.list_tasks_by_stage(stage).await
-    }
-
-    pub async fn is_task_closed(&self, id: u64) -> anyhow::Result<bool> {
-        self.task_backend.is_task_closed(id).await
-    }
-
-    pub async fn modify_task(
-        &self,
-        id: u64,
-        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-    ) -> anyhow::Result<()> {
-        self.task_backend.modify_task(id, mutate).await
     }
 
     pub async fn setup_repository(&self, force: bool) -> anyhow::Result<()> {
@@ -228,10 +170,8 @@ impl ZbobrDispatcher {
             "Workspaces directory ready: {}",
             self.config.workspaces.display()
         );
-        self.task_backend.setup(force).await
+        self.tasks().setup(force).await
     }
-
-    // -- Delegate to WorktreeBackend --
 
     /// Extract repo name from a remote repo path (last path component).
     fn extract_repo_name(remote_repo: &str) -> &str {
@@ -250,26 +190,18 @@ impl ZbobrDispatcher {
         let repo_name = Self::extract_repo_name(remote_repo);
         let task_dir = TaskDir::new(&self.config.workspaces, task_id);
         let workspace_path = task_dir.path().join(repo_name);
-        self.repo_backend
+        self.worktree()
             .update_worktree(remote_repo, base_branch, work_branch, &workspace_path)
             .await
     }
 
-    /// Sync remote state and return PR URL for the given work branch.
-    pub async fn update_pr(&self, work_branch: &str) -> anyhow::Result<String> {
-        self.repo_backend.update_pr(work_branch).await
-    }
-
-    // -- Combined state --
-
     pub fn debug_state(&self) -> String {
         format!(
             "task_backend: {}, repo_backend: {}",
-            self.task_backend.debug_state(),
-            self.repo_backend.debug_state()
+            self.tasks().debug_state(),
+            self.worktree().debug_state()
         )
     }
-
 
     /// Create a TaskSession bound to a specific task (full dispatcher access).
     pub fn task_session(&self, task_id: u64) -> TaskSession {

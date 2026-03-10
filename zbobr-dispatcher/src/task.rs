@@ -48,7 +48,7 @@ impl RoleSession {
 
     /// Read the full task state.
     pub async fn get_task(&self) -> anyhow::Result<Task> {
-        self.zbobr.get_task(self.task_id).await
+        self.zbobr.tasks().get_task(self.task_id).await
     }
 
     /// Get the current task description.
@@ -82,7 +82,7 @@ impl RoleSession {
         F: FnOnce(&mut Task) + Send + 'static,
     {
         self.zbobr
-            .task_backend
+            .tasks()
             .modify_task(
                 self.task_id,
                 Box::new(move |mut task| {
@@ -100,7 +100,7 @@ impl RoleSession {
     /// Get all comments as structured `Comment` objects (includes all
     /// types: error, report, request, plan, etc.).
     pub async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
-        self.zbobr.get_task_comments(self.task_id).await
+        self.zbobr.tasks().get_task_comments(self.task_id).await
     }
 
     pub async fn post_comment(
@@ -112,10 +112,8 @@ impl RoleSession {
         tool: Option<Tool>,
         model: Option<Model>,
     ) -> anyhow::Result<()> {
-        // dispatcher/session API simply forwards whatever tool/model the caller
-        // provides.  MCP helpers will pass the concrete values; dispatcher-only
-        // code uses `None` for both.
         self.zbobr
+            .tasks()
             .post_task_comment(
                 self.task_id,
                 comment_type,
@@ -130,7 +128,7 @@ impl RoleSession {
 
     /// Get the current signal on the task.
     pub async fn get_signal(&self) -> anyhow::Result<Option<Signal>> {
-        let task = self.zbobr.get_task(self.task_id).await?;
+        let task = self.zbobr.tasks().get_task(self.task_id).await?;
         Ok(task.signal)
     }
 
@@ -192,12 +190,12 @@ impl RoleSession {
             .get(&Parameter::WorkBranch)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("work_branch parameter is not set"))?;
-        self.zbobr.update_pr(&work_branch).await
+        self.zbobr.worktree().update_pr(&work_branch).await
     }
 
     /// Get a task parameter value. Parameters are stored in the task's parameters HashMap.
     pub async fn get_parameter(&self, param: Parameter) -> anyhow::Result<Option<String>> {
-        let task = self.zbobr.get_task(self.task_id).await?;
+        let task = self.zbobr.tasks().get_task(self.task_id).await?;
         Ok(task.parameters.get(&param).cloned())
     }
 
@@ -249,7 +247,7 @@ impl TaskSession {
 
     /// Read the full task state.
     pub async fn get_task(&self) -> anyhow::Result<Task> {
-        self.zbobr.get_task(self.task_id).await
+        self.zbobr.tasks().get_task(self.task_id).await
     }
 
     /// Get the current task checklist.
@@ -264,7 +262,7 @@ impl TaskSession {
         F: FnOnce(&mut Task) + Send + 'static,
     {
         self.zbobr
-            .task_backend
+            .tasks()
             .modify_task(
                 self.task_id,
                 Box::new(move |mut task| {
@@ -367,10 +365,8 @@ impl TaskSession {
         tool: Option<Tool>,
         model: Option<Model>,
     ) -> anyhow::Result<()> {
-        // simply forward provided metadata; dispatcher-level callers send
-        // `None` for both tool and model so tags remain minimal.
-
         self.zbobr
+            .tasks()
             .post_task_comment(
                 self.task_id,
                 comment_type,
@@ -986,7 +982,7 @@ mod comment_model_tests {
         // call helper directly
         let _ = planner.report_error_impl("oops").await;
 
-        let comments = zbobr.get_task_comments(id).await.unwrap();
+        let comments = zbobr.tasks().get_task_comments(id).await.unwrap();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].model, Some(Model::Gpt5Mini));
     }
@@ -1012,7 +1008,7 @@ mod comment_model_tests {
             .await
             .unwrap();
 
-        let comments = zbobr.get_task_comments(id).await.unwrap();
+        let comments = zbobr.tasks().get_task_comments(id).await.unwrap();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].model, None);
     }

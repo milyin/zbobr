@@ -3,7 +3,7 @@ use crate::Tool;
 
 use async_trait::async_trait;
 
-use crate::task::{Comment, CommentType, Model, Parameter, Role, Stage, Task};
+use crate::task::{Comment, CommentType, Model, Parameter, Role, Signal, Stage, Task};
 
 /// TaskBackend: stores and manages tasks, their metadata, comments, and lifecycle.
 ///
@@ -239,3 +239,33 @@ pub trait WorktreeBackend: Send + Sync {
     /// Return a debug string of the backend state.
     fn debug_state(&self) -> String;
 }
+
+/// Extension trait for higher-level operations built on [`TaskBackend::modify_task`].
+#[async_trait]
+pub trait TaskBackendExt: TaskBackend {
+    /// Set the stage of a task.
+    async fn set_task_stage(&self, id: u64, stage: Stage) -> anyhow::Result<()> {
+        self.modify_task(
+            id,
+            Box::new(move |mut task| {
+                task.stage = stage;
+                task
+            }),
+        )
+        .await
+    }
+
+    /// Set the signal on a task.
+    async fn set_task_signal(&self, id: u64, signal: Option<Signal>) -> anyhow::Result<()> {
+        self.modify_task(
+            id,
+            Box::new(move |mut task| {
+                task.signal = signal;
+                task
+            }),
+        )
+        .await
+    }
+}
+
+impl<T: TaskBackend + ?Sized> TaskBackendExt for T {}
