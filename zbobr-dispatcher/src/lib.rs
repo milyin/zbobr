@@ -38,36 +38,23 @@ pub use zbobr_api::config::{BackendConfig, Config};
 use crate::backend::{TaskBackend, WorktreeBackend};
 
 /// Central struct holding configuration and backend.
-pub struct ZbobrDispatcher<T: TaskBackend + ?Sized, R: WorktreeBackend + ?Sized> {
+#[derive(Clone)]
+pub struct ZbobrDispatcher {
     config: Arc<ZbobrDispatcherConfig>,
-    pub(crate) task_backend: Arc<T>,
-    pub(crate) repo_backend: Arc<R>,
+    pub(crate) task_backend: Arc<dyn TaskBackend>,
+    pub(crate) repo_backend: Arc<dyn WorktreeBackend>,
     /// Per-task mutexes to serialize concurrent read-modify-write cycles
     /// for the same task within this process.
     task_locks: Arc<std::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
-impl<T: TaskBackend + ?Sized, R: WorktreeBackend + ?Sized> Clone for ZbobrDispatcher<T, R> {
-    fn clone(&self) -> Self {
-        Self {
-            config: Arc::clone(&self.config),
-            task_backend: Arc::clone(&self.task_backend),
-            repo_backend: Arc::clone(&self.repo_backend),
-            task_locks: Arc::clone(&self.task_locks),
-        }
-    }
-}
-
-/// Convenience type alias for using the dispatcher with dynamic dispatch.
-pub type ZbobrDispatcherDyn = ZbobrDispatcher<dyn TaskBackend, dyn WorktreeBackend>;
-
-impl<T: TaskBackend + ?Sized, R: WorktreeBackend + ?Sized> ZbobrDispatcher<T, R> {
+impl ZbobrDispatcher {
     /// Create a new Zbobr instance from config and pre-built backends.
     /// Used primarily in tests.
     pub fn new_with_backends(
         config: ZbobrDispatcherConfig,
-        task_backend: Arc<T>,
-        repo_backend: Arc<R>,
+        task_backend: Arc<dyn TaskBackend>,
+        repo_backend: Arc<dyn WorktreeBackend>,
     ) -> Self {
         Self {
             config: Arc::new(config),
@@ -295,10 +282,8 @@ impl<T: TaskBackend + ?Sized, R: WorktreeBackend + ?Sized> ZbobrDispatcher<T, R>
             self.repo_backend.debug_state()
         )
     }
-}
 
-// Implementation specific to the dynamic dispatcher type.
-impl ZbobrDispatcherDyn {
+
     /// Create a TaskSession bound to a specific task (full dispatcher access).
     pub fn task_session(&self, task_id: u64) -> TaskSession {
         TaskSession::new(self.clone(), task_id)

@@ -6,7 +6,7 @@ use rmcp::{
 };
 
 use crate::{
-    ZbobrDispatcherDyn,
+    ZbobrDispatcher,
     mcp::{
         common::GetHistoryParam,
         traits::{CommonMcpImpl, TesterMcpImpl},
@@ -44,7 +44,7 @@ impl TesterMcpImpl for TesterMcp {}
 
 #[tool_router]
 impl TesterMcp {
-    pub fn new(zbobr: ZbobrDispatcherDyn, task_id: u64, tool: Tool, model: Model) -> Self {
+    pub fn new(zbobr: ZbobrDispatcher, task_id: u64, tool: Tool, model: Model) -> Self {
         Self {
             session: zbobr.role_session(task_id),
             tool_router: Self::tool_router(),

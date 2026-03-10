@@ -13,7 +13,7 @@ use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig}
 use zbobr_utility::{git, git_check, git_output, configure_git_user};
 
 use crate::{
-    Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcherDyn,
+    Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
     ZbobrExecutorConfig,
     mcp::common::get_hostname,
     prompts::Prompts,
@@ -399,7 +399,7 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
 
 /// Run the given command against the dispatcher.
 pub async fn run_command(
-    zbobr: ZbobrDispatcherDyn,
+    zbobr: ZbobrDispatcher,
     command: Command,
     prompts: &Prompts,
     executor_config: &ZbobrExecutorConfig,
@@ -426,7 +426,7 @@ pub async fn run_command(
 }
 
 async fn run_task_subcommand(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     subcommand: TaskSubcommand,
     prompts: &Prompts,
     executor_config: &ZbobrExecutorConfig,
@@ -744,7 +744,7 @@ async fn run_task_subcommand(
 }
 
 async fn run_role_command(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     task: u64,
     role: Role,
     show_prompt: bool,
@@ -765,7 +765,7 @@ async fn run_role_command(
 // ---------------------------------------------------------------------------
 
 struct CliRoleRunner<'a> {
-    zbobr: &'a ZbobrDispatcherDyn,
+    zbobr: &'a ZbobrDispatcher,
     task_id: u64,
     role: Role,
     prompts: &'a Prompts,
@@ -774,7 +774,7 @@ struct CliRoleRunner<'a> {
 
 impl<'a> CliRoleRunner<'a> {
     fn new(
-        zbobr: &'a ZbobrDispatcherDyn,
+        zbobr: &'a ZbobrDispatcher,
         task_id: u64,
         role: Role,
         prompts: &'a Prompts,
@@ -969,7 +969,7 @@ impl<'a> CliRoleRunner<'a> {
 
 /// Process a task according to its current stage (single-step).
 pub async fn process_task_by_stage(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     task: &Task,
     prompts: &Prompts,
     executor_config: &ZbobrExecutorConfig,
@@ -1017,7 +1017,7 @@ pub async fn process_task_by_stage(
 
 /// Main manager loop: polls for tasks and dispatches role sessions.
 pub async fn run_manager_loop(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     interval_secs: u64,
     cleanup_interval_secs: u64,
     prompts: &Prompts,
@@ -1211,7 +1211,7 @@ pub async fn run_manager_loop(
 // ---------------------------------------------------------------------------
 
 async fn prepare_workspace(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     task_id: u64,
     role: Role,
     task_dir: &Path,
@@ -1277,7 +1277,7 @@ async fn prepare_workspace(
     }
 }
 
-async fn ensure_pr_url(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> anyhow::Result<()> {
+async fn ensure_pr_url(zbobr: &ZbobrDispatcher, task_id: u64) -> anyhow::Result<()> {
     let role_session = zbobr.role_session(task_id);
     match role_session.ensure_pr_url().await {
         Ok(_) => Ok(()),
@@ -1300,7 +1300,7 @@ async fn ensure_pr_url(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> anyhow::Resu
 /// Pre-populate task parameters from dispatcher config defaults before the
 /// preparator agent runs. Only sets a parameter if it is not already present,
 /// so a previously prepared task (e.g. re-run) keeps its values unchanged.
-async fn seed_preparator_defaults(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> anyhow::Result<()> {
+async fn seed_preparator_defaults(zbobr: &ZbobrDispatcher, task_id: u64) -> anyhow::Result<()> {
     let config = zbobr.config();
     let task = zbobr.get_task(task_id).await?;
     let role_session = zbobr.role_session(task_id);
@@ -1327,7 +1327,7 @@ async fn seed_preparator_defaults(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> a
 }
 
 async fn start_mcp_server(
-    zbobr: ZbobrDispatcherDyn,
+    zbobr: ZbobrDispatcher,
     role: Role,
     task_id: u64,
     tool: Tool,
@@ -1364,7 +1364,7 @@ async fn execute_tool(
     prompt: &str,
     work_dir: &Path,
     mcp_url: &str,
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
 ) -> (bool, Option<anyhow::Error>) {
     let executor: Box<dyn ToolExecutor> = match cli_tool {
         Tool::Copilot => Box::new(CopilotExecutor {
@@ -1401,7 +1401,7 @@ async fn execute_tool(
 }
 
 async fn finalize_session(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     task_id: u64,
     role: Role,
     work_dir: &Path,
@@ -1569,7 +1569,7 @@ async fn finalize_session(
 }
 
 async fn perform_auto_commit_and_push(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     task_id: u64,
     work_dir: &Path,
     role: Role,
@@ -1608,7 +1608,7 @@ async fn perform_auto_commit_and_push(
 }
 
 async fn rewrite_commit_authors(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     task_id: u64,
     work_dir: &Path,
     dry_run: bool,

@@ -1,6 +1,6 @@
 pub use zbobr_api::task::*;
 
-use crate::{TaskDir, ZbobrDispatcherDyn};
+use crate::{TaskDir, ZbobrDispatcher};
 
 // ---------------------------------------------------------------------------
 // RoleSession — restricted access for MCP tools during agent sessions.
@@ -13,12 +13,12 @@ use crate::{TaskDir, ZbobrDispatcherDyn};
 /// Stage and conflict flag are protected — only the dispatcher may change them.
 #[derive(Clone)]
 pub struct RoleSession {
-    zbobr: ZbobrDispatcherDyn,
+    zbobr: ZbobrDispatcher,
     task_id: u64,
 }
 
 impl RoleSession {
-    pub(crate) fn new(zbobr: ZbobrDispatcherDyn, task_id: u64) -> Self {
+    pub(crate) fn new(zbobr: ZbobrDispatcher, task_id: u64) -> Self {
         Self { zbobr, task_id }
     }
 
@@ -232,12 +232,12 @@ impl RoleSession {
 /// Can change stage, conflict flag, and all other fields.
 #[derive(Clone)]
 pub struct TaskSession {
-    zbobr: ZbobrDispatcherDyn,
+    zbobr: ZbobrDispatcher,
     task_id: u64,
 }
 
 impl TaskSession {
-    pub(crate) fn new(zbobr: ZbobrDispatcherDyn, task_id: u64) -> Self {
+    pub(crate) fn new(zbobr: ZbobrDispatcher, task_id: u64) -> Self {
         Self { zbobr, task_id }
     }
 
@@ -710,7 +710,7 @@ mod tests {
         }
     }
 
-    fn make_test_zbobr() -> crate::ZbobrDispatcherDyn {
+    fn make_test_zbobr() -> crate::ZbobrDispatcher {
         let backend: Arc<dyn crate::backend::TaskBackend> = Arc::new(DummyBackend {
             tasks: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(0),
@@ -965,7 +965,7 @@ mod comment_model_tests {
         }
     }
 
-    fn make_dispatcher() -> crate::ZbobrDispatcherDyn {
+    fn make_dispatcher() -> crate::ZbobrDispatcher {
         let backend: Arc<dyn crate::backend::TaskBackend> = Arc::new(TrackingBackend {
             tasks: Mutex::new(HashMap::new()),
             comments: Mutex::new(HashMap::new()),

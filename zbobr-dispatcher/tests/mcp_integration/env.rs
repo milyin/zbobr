@@ -10,7 +10,7 @@ use std::{
 
 use zbobr_dispatcher::{
     ChecklistItem, Comment, Signal, Stage, Task, TaskDir, ZbobrDispatcher, ZbobrDispatcherConfig,
-    ZbobrDispatcherDyn, ZbobrExecutorConfig, process_task_by_stage,
+    ZbobrExecutorConfig, process_task_by_stage,
     prompts::Prompts,
     config::StageConfig,
     task::{Parameter, Tool},
@@ -29,7 +29,7 @@ pub struct IntegrationTestEnv {
     pub base_path: PathBuf,
     pub workspaces_dir: PathBuf,
     pub name: &'static str,
-    pub zbobr: ZbobrDispatcherDyn,
+    pub zbobr: ZbobrDispatcher,
     /// Optional remote repository slug (`owner/repo`) used by GitHub repo-backend tests.
     /// `None` for the filesystem repo backend.
     pub target_repo: Option<String>,
