@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::{
     config::{ZbobrDispatcherArgs, ZbobrDispatcherConfig},
     task::Role,
-    ZbobrDispatcherDyn,
+    ZbobrDispatcher,
 };
 
 use zbobr_api::Task;
@@ -124,9 +124,9 @@ pub async fn build_full_prompt(
     user_context: &str,
     role: Role,
     task_id: u64,
-    dispatcher: &ZbobrDispatcherDyn,
+    dispatcher: &ZbobrDispatcher,
 ) -> anyhow::Result<String> {
-    let task = dispatcher.get_task(task_id).await?;
+    let task = dispatcher.tasks().get_task(task_id).await?;
     let history = dispatcher.get_history(task_id, None).await?;
     let history_json = serde_json::to_string_pretty(&history.comments).unwrap_or_default();
     Ok(assemble_prompt(user_context, role, &task, &history_json))
@@ -272,7 +272,7 @@ impl Prompts {
         &self,
         role: Role,
         task_id: u64,
-        dispatcher: &ZbobrDispatcherDyn,
+        dispatcher: &ZbobrDispatcher,
     ) -> anyhow::Result<String> {
         let base_prompt = match role {
             Role::Preparator => load_prompts(&self.preparator, self.base_path.as_ref())?,

@@ -1,6 +1,6 @@
 pub use zbobr_api::task::*;
 
-use crate::{TaskDir, ZbobrDispatcherDyn};
+use crate::{TaskDir, ZbobrDispatcher};
 
 // ---------------------------------------------------------------------------
 // RoleSession — restricted access for MCP tools during agent sessions.
@@ -13,12 +13,12 @@ use crate::{TaskDir, ZbobrDispatcherDyn};
 /// Stage and conflict flag are protected — only the dispatcher may change them.
 #[derive(Clone)]
 pub struct RoleSession {
-    zbobr: ZbobrDispatcherDyn,
+    zbobr: ZbobrDispatcher,
     task_id: u64,
 }
 
 impl RoleSession {
-    pub(crate) fn new(zbobr: ZbobrDispatcherDyn, task_id: u64) -> Self {
+    pub(crate) fn new(zbobr: ZbobrDispatcher, task_id: u64) -> Self {
         Self { zbobr, task_id }
     }
 
@@ -48,7 +48,7 @@ impl RoleSession {
 
     /// Read the full task state.
     pub async fn get_task(&self) -> anyhow::Result<Task> {
-        self.zbobr.get_task(self.task_id).await
+        self.zbobr.tasks().get_task(self.task_id).await
     }
 
     /// Get the current task description.
@@ -81,11 +81,8 @@ impl RoleSession {
     where
         F: FnOnce(&mut Task) + Send + 'static,
     {
-        let lock = self.zbobr.task_lock(self.task_id);
-        let _guard = lock.lock().await;
-
         self.zbobr
-            .task_backend
+            .tasks()
             .modify_task(
                 self.task_id,
                 Box::new(move |mut task| {
@@ -103,7 +100,7 @@ impl RoleSession {
     /// Get all comments as structured `Comment` objects (includes all
     /// types: error, report, request, plan, etc.).
     pub async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
-        self.zbobr.get_task_comments(self.task_id).await
+        self.zbobr.tasks().get_task_comments(self.task_id).await
     }
 
     pub async fn post_comment(
@@ -115,10 +112,8 @@ impl RoleSession {
         tool: Option<Tool>,
         model: Option<Model>,
     ) -> anyhow::Result<()> {
-        // dispatcher/session API simply forwards whatever tool/model the caller
-        // provides.  MCP helpers will pass the concrete values; dispatcher-only
-        // code uses `None` for both.
         self.zbobr
+            .tasks()
             .post_task_comment(
                 self.task_id,
                 comment_type,
@@ -133,7 +128,7 @@ impl RoleSession {
 
     /// Get the current signal on the task.
     pub async fn get_signal(&self) -> anyhow::Result<Option<Signal>> {
-        let task = self.zbobr.get_task(self.task_id).await?;
+        let task = self.zbobr.tasks().get_task(self.task_id).await?;
         Ok(task.signal)
     }
 
@@ -186,8 +181,9 @@ impl RoleSession {
 
     /// Push current work branch commits to the remote by updating PR state.
     ///
-    /// Reads `WorkBranch` from task parameters and calls `update_pr` on the backend
-    /// to sync the remote state. Result URL (if any) is discarded.
+    /// Reads `WorkBranch`, `DestinationRepository`, and `DestinationBranch` from
+    /// task parameters and calls `update_pr` on the backend to sync the remote
+    /// state and ensure a PR exists.
     pub async fn update_pr(&self) -> anyhow::Result<String> {
         let task = self.get_task().await?;
         let work_branch = task
@@ -195,12 +191,25 @@ impl RoleSession {
             .get(&Parameter::WorkBranch)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("work_branch parameter is not set"))?;
-        self.zbobr.update_pr(&work_branch).await
+        let destination_repo = task
+            .parameters
+            .get(&Parameter::DestinationRepository)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("destination_repository parameter is not set"))?;
+        let base_branch = task
+            .parameters
+            .get(&Parameter::DestinationBranch)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("destination_branch parameter is not set"))?;
+        self.zbobr
+            .worktree()
+            .update_pr(&work_branch, &destination_repo, &base_branch)
+            .await
     }
 
     /// Get a task parameter value. Parameters are stored in the task's parameters HashMap.
     pub async fn get_parameter(&self, param: Parameter) -> anyhow::Result<Option<String>> {
-        let task = self.zbobr.get_task(self.task_id).await?;
+        let task = self.zbobr.tasks().get_task(self.task_id).await?;
         Ok(task.parameters.get(&param).cloned())
     }
 
@@ -232,12 +241,12 @@ impl RoleSession {
 /// Can change stage, conflict flag, and all other fields.
 #[derive(Clone)]
 pub struct TaskSession {
-    zbobr: ZbobrDispatcherDyn,
+    zbobr: ZbobrDispatcher,
     task_id: u64,
 }
 
 impl TaskSession {
-    pub(crate) fn new(zbobr: ZbobrDispatcherDyn, task_id: u64) -> Self {
+    pub(crate) fn new(zbobr: ZbobrDispatcher, task_id: u64) -> Self {
         Self { zbobr, task_id }
     }
 
@@ -252,7 +261,7 @@ impl TaskSession {
 
     /// Read the full task state.
     pub async fn get_task(&self) -> anyhow::Result<Task> {
-        self.zbobr.get_task(self.task_id).await
+        self.zbobr.tasks().get_task(self.task_id).await
     }
 
     /// Get the current task checklist.
@@ -266,11 +275,8 @@ impl TaskSession {
     where
         F: FnOnce(&mut Task) + Send + 'static,
     {
-        let lock = self.zbobr.task_lock(self.task_id);
-        let _guard = lock.lock().await;
-
         self.zbobr
-            .task_backend
+            .tasks()
             .modify_task(
                 self.task_id,
                 Box::new(move |mut task| {
@@ -373,10 +379,8 @@ impl TaskSession {
         tool: Option<Tool>,
         model: Option<Model>,
     ) -> anyhow::Result<()> {
-        // simply forward provided metadata; dispatcher-level callers send
-        // `None` for both tool and model so tags remain minimal.
-
         self.zbobr
+            .tasks()
             .post_task_comment(
                 self.task_id,
                 comment_type,
@@ -697,7 +701,7 @@ mod tests {
             Ok(true)
         }
 
-        async fn update_pr(&self, _work_branch: &str) -> anyhow::Result<String> {
+        async fn update_pr(&self, _work_branch: &str, _destination_repo: &str, _base_branch: &str) -> anyhow::Result<String> {
             Ok("mock-pr-url".to_string())
         }
 
@@ -710,7 +714,7 @@ mod tests {
         }
     }
 
-    fn make_test_zbobr() -> crate::ZbobrDispatcherDyn {
+    fn make_test_zbobr() -> crate::ZbobrDispatcher {
         let backend: Arc<dyn crate::backend::TaskBackend> = Arc::new(DummyBackend {
             tasks: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(0),
@@ -952,7 +956,7 @@ mod comment_model_tests {
             Ok(true)
         }
 
-        async fn update_pr(&self, _work_branch: &str) -> anyhow::Result<String> {
+        async fn update_pr(&self, _work_branch: &str, _destination_repo: &str, _base_branch: &str) -> anyhow::Result<String> {
             Ok("mock-pr-url".to_string())
         }
 
@@ -965,7 +969,7 @@ mod comment_model_tests {
         }
     }
 
-    fn make_dispatcher() -> crate::ZbobrDispatcherDyn {
+    fn make_dispatcher() -> crate::ZbobrDispatcher {
         let backend: Arc<dyn crate::backend::TaskBackend> = Arc::new(TrackingBackend {
             tasks: Mutex::new(HashMap::new()),
             comments: Mutex::new(HashMap::new()),
@@ -992,7 +996,7 @@ mod comment_model_tests {
         // call helper directly
         let _ = planner.report_error_impl("oops").await;
 
-        let comments = zbobr.get_task_comments(id).await.unwrap();
+        let comments = zbobr.tasks().get_task_comments(id).await.unwrap();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].model, Some(Model::Gpt5Mini));
     }
@@ -1018,7 +1022,7 @@ mod comment_model_tests {
             .await
             .unwrap();
 
-        let comments = zbobr.get_task_comments(id).await.unwrap();
+        let comments = zbobr.tasks().get_task_comments(id).await.unwrap();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].model, None);
     }

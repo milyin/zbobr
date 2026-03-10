@@ -1,7 +1,7 @@
 use rmcp::handler::server::router::tool::ToolRouter;
 use serde_json::Value;
 
-use crate::{ZbobrDispatcherDyn, task::{Role, Tool, Model}};
+use crate::{ZbobrDispatcher, task::{Role, Tool, Model}};
 
 // Custom deserializer for boolean that accepts both bool and string values
 // This handles cases where HTTP clients stringify all parameters
@@ -348,7 +348,7 @@ pub(crate) async fn serve_mcp(
 /// Run the MCP HTTP server scoped to a role (planner or worker) and task.
 /// Returns the actual port that was assigned (spawns server in background).
 pub async fn run_role_mcp_server(
-    zbobr: ZbobrDispatcherDyn,
+    zbobr: ZbobrDispatcher,
     role: Role,
     task_id: u64,
     tool: Tool,

@@ -70,25 +70,25 @@ fn test_author_rewriting_with_git_rebase() {
     run_git_command(repo_path, &["config", "--local", "user.name", new_author]);
     run_git_command(repo_path, &["config", "--local", "user.email", new_email]);
 
-    // Use git rebase to rewrite authors on commits since default branch (as dispatcher does)
-    let rebase_cmd = format!(
-        "git rebase --exec 'git commit --amend --no-edit --reset-author' '{}'",
-        default_branch
+    // Use git filter-branch to rewrite authors on commits since default branch (as dispatcher does)
+    let filter_cmd = format!(
+        "git filter-branch -f --env-filter '\
+            export GIT_AUTHOR_NAME=\"{new_author}\";\
+            export GIT_AUTHOR_EMAIL=\"{new_email}\";\
+            export GIT_COMMITTER_NAME=\"{new_author}\";\
+            export GIT_COMMITTER_EMAIL=\"{new_email}\";\
+        ' '{default_branch}'..HEAD",
     );
     let output = std::process::Command::new("sh")
         .arg("-c")
-        .arg(&rebase_cmd)
-        .env("GIT_AUTHOR_NAME", new_author)
-        .env("GIT_AUTHOR_EMAIL", new_email)
-        .env("GIT_COMMITTER_NAME", new_author)
-        .env("GIT_COMMITTER_EMAIL", new_email)
+        .arg(&filter_cmd)
         .current_dir(repo_path)
         .output()
-        .expect("Failed to run rebase command");
+        .expect("Failed to run filter-branch command");
 
     assert!(
         output.status.success(),
-        "Rebase failed: {}",
+        "filter-branch failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -144,22 +144,22 @@ fn test_author_rewriting_multiple_commits() {
     run_git_command(repo_path, &["config", "--local", "user.name", new_author]);
     run_git_command(repo_path, &["config", "--local", "user.email", new_email]);
 
-    let rebase_cmd = format!(
-        "git rebase --exec 'git commit --amend --no-edit --reset-author' '{}'",
-        default_branch
+    let filter_cmd = format!(
+        "git filter-branch -f --env-filter '\
+            export GIT_AUTHOR_NAME=\"{new_author}\";\
+            export GIT_AUTHOR_EMAIL=\"{new_email}\";\
+            export GIT_COMMITTER_NAME=\"{new_author}\";\
+            export GIT_COMMITTER_EMAIL=\"{new_email}\";\
+        ' '{default_branch}'..HEAD",
     );
     let output = std::process::Command::new("sh")
         .arg("-c")
-        .arg(&rebase_cmd)
-        .env("GIT_AUTHOR_NAME", new_author)
-        .env("GIT_AUTHOR_EMAIL", new_email)
-        .env("GIT_COMMITTER_NAME", new_author)
-        .env("GIT_COMMITTER_EMAIL", new_email)
+        .arg(&filter_cmd)
         .current_dir(repo_path)
         .output()
-        .expect("Failed to run rebase");
+        .expect("Failed to run filter-branch");
 
-    assert!(output.status.success(), "Rebase failed");
+    assert!(output.status.success(), "filter-branch failed");
 
     // Get all commits after rewriting
     let authors_after = get_all_commit_authors(repo_path);
@@ -193,14 +193,16 @@ fn test_author_rewriting_nonexistent_destination() {
     run_git_command(repo_path, &["checkout", "-b", "work-branch"]);
     create_commit(repo_path, "Work commit", "work-user", "work@example.com");
 
-    // Try to rebase onto nonexistent branch
-    let rebase_cmd =
-        "git rebase --exec 'git commit --amend --no-edit --reset-author' 'nonexistent'";
+    // Try to filter-branch onto nonexistent branch
+    let filter_cmd = "git filter-branch -f --env-filter '\
+            export GIT_AUTHOR_NAME=\"dispatcher\";\
+            export GIT_AUTHOR_EMAIL=\"dispatcher@example.com\";\
+            export GIT_COMMITTER_NAME=\"dispatcher\";\
+            export GIT_COMMITTER_EMAIL=\"dispatcher@example.com\";\
+        ' 'nonexistent'..HEAD";
     let output = std::process::Command::new("sh")
         .arg("-c")
-        .arg(rebase_cmd)
-        .env("GIT_AUTHOR_NAME", "dispatcher")
-        .env("GIT_AUTHOR_EMAIL", "dispatcher@example.com")
+        .arg(filter_cmd)
         .current_dir(repo_path)
         .output()
         .expect("Failed to run command");
@@ -208,7 +210,7 @@ fn test_author_rewriting_nonexistent_destination() {
     // Command should fail gracefully
     assert!(
         !output.status.success(),
-        "Rebase should have failed for nonexistent destination"
+        "filter-branch should have failed for nonexistent destination"
     );
 }
 
@@ -405,24 +407,24 @@ fn test_author_rewriting_from_nested_directory() {
     run_git_command(&git_root, &["config", "--local", "user.name", new_author]);
     run_git_command(&git_root, &["config", "--local", "user.email", new_email]);
 
-    let rebase_cmd = format!(
-        "git rebase --exec 'git commit --amend --no-edit --reset-author' '{}'",
-        default_branch
+    let filter_cmd = format!(
+        "git filter-branch -f --env-filter '\
+            export GIT_AUTHOR_NAME=\"{new_author}\";\
+            export GIT_AUTHOR_EMAIL=\"{new_email}\";\
+            export GIT_COMMITTER_NAME=\"{new_author}\";\
+            export GIT_COMMITTER_EMAIL=\"{new_email}\";\
+        ' '{default_branch}'..HEAD",
     );
     let output = std::process::Command::new("sh")
         .arg("-c")
-        .arg(&rebase_cmd)
-        .env("GIT_AUTHOR_NAME", new_author)
-        .env("GIT_AUTHOR_EMAIL", new_email)
-        .env("GIT_COMMITTER_NAME", new_author)
-        .env("GIT_COMMITTER_EMAIL", new_email)
+        .arg(&filter_cmd)
         .current_dir(&git_root)
         .output()
-        .expect("Failed to run rebase");
+        .expect("Failed to run filter-branch");
 
     assert!(
         output.status.success(),
-        "Rebase from nested directory should succeed"
+        "filter-branch from nested directory should succeed"
     );
 
     // Verify author was changed (check from nested directory too)

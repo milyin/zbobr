@@ -1,6 +1,6 @@
-use crate::{TaskDir, ZbobrDispatcherDyn};
+use crate::{TaskDir, ZbobrDispatcher};
 
-impl ZbobrDispatcherDyn {
+impl ZbobrDispatcher {
     /// Clean up workspaces directories for closed tasks.
     /// If dry_run is true, only logs what would happen.
     pub async fn cleanup_closed_tasks(&self, dry_run: bool) -> anyhow::Result<()> {
@@ -34,7 +34,7 @@ impl ZbobrDispatcherDyn {
 
             let task_id = task_dir.task_id();
 
-            match self.is_task_closed(task_id).await {
+            match self.tasks().is_task_closed(task_id).await {
                 Ok(true) => {
                     if dry_run {
                         tracing::info!(

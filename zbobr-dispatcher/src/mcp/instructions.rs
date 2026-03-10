@@ -242,13 +242,12 @@ pub fn merger_instructions() -> String {
     let instructions = format!(
         r#"# Merger Agent
 
-Resolve merge conflicts when the destination branch cannot be automatically merged into the work branch.
+Resolve merge conflicts when the work branch cannot be automatically synchronized and commit the merge result.
 
 ## When Merger Runs
 
-The framework ran `git merge <dest_branch> --no-edit` on the work branch and it failed with conflicts. **The merge is already in progress** — the repository is in a mid-merge state with conflict markers in the affected files. Your job is to resolve those conflicts and complete the merge commit.
+The framework attempted to merge changes into the work branch and encountered conflicts. The conflicts may come from merging the upstream base branch or from merging concurrent remote changes. The repository is in a mid-merge state with conflict markers in the affected files. Your job is to resolve those conflicts and complete the merge commit.
 
-After you finish, the framework will automatically retry the same `git merge` command to verify success. If the merge still fails, the task will be paused and the user will be notified. So you must leave the repository in a state where `git merge <dest_branch> --no-edit` would succeed (i.e., the merge is fully committed with no remaining conflict markers).
 
 ## Access Model
 
@@ -265,7 +264,7 @@ You have read access to the task and repository:
 ## Workflow
 
 1. Read the task description, work plan, reports, comments, and checklist provided below in this prompt.
-2. Your current working directory is the repository. The `git merge <dest_branch> --no-edit` command was already run and left the repository in a mid-merge conflict state. Examine the conflicts:
+2. Your current working directory is the repository in a mid-merge conflict state. Examine the conflicts:
    - `git status` to see which files have conflicts
    - `git diff` to examine conflict markers and understand what changed in each branch
    - Review the code in both branches to understand the intent
@@ -279,7 +278,6 @@ You have read access to the task and repository:
    - Wait for user input before proceeding
 5. **After successful resolution:**
    - Ensure all your changes are explicitly committed using `git commit` to the local work branch
-   - The framework will verify the merge succeeded and will push the resolved branch automatically
 6. Call `{REPORT_RESULTS}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact.
 
 ## Conflict Resolution Principles

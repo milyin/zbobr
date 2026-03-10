@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::{path::{Path, PathBuf}, time::Duration};
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -128,7 +128,7 @@ impl ZbobrRepoBackendGithub {
         let backend_config = <ZbobrRepoBackendGithubConfig as zbobr_api::config::Config>::build(
             toml,
             args,
-            std::path::Path::new("."),
+            Path::new("."),
         );
         Self::from_config(backend_config, git_user_name, git_user_email)
     }
@@ -246,7 +246,7 @@ impl ZbobrRepoBackendGithub {
     }
 
     /// Configure token-based auth on a bare clone via URL rewrite in git config.
-    async fn configure_token_auth(&self, bare_dir: &std::path::Path) -> anyhow::Result<()> {
+    async fn configure_token_auth(&self, bare_dir: &Path) -> anyhow::Result<()> {
         let token = &self.backend_config.github_token;
         git(
             bare_dir,
@@ -318,7 +318,7 @@ impl ZbobrRepoBackendGithub {
     /// Returns `(push_remote_name, pr_repo_full_name)`.
     async fn ensure_fork_remote(
         &self,
-        bare_dir: &std::path::Path,
+        bare_dir: &Path,
         target_repo: &str,
         base_branch: &str,
     ) -> anyhow::Result<(String, String)> {
@@ -340,10 +340,10 @@ impl ZbobrRepoBackendGithub {
     /// Create a worktree at `workspace_path` for `work_branch` from `base_branch`.
     async fn ensure_worktree_github(
         &self,
-        bare_dir: &std::path::Path,
+        bare_dir: &Path,
         base_branch: &str,
         work_branch: &str,
-        workspace_path: &std::path::Path,
+        workspace_path: &Path,
     ) -> anyhow::Result<()> {
         if workspace_path.exists() {
             tracing::info!("Worktree already exists at {}", workspace_path.display());
@@ -385,53 +385,14 @@ impl ZbobrRepoBackendGithub {
         Ok(())
     }
 
-    /// Ensure a PR exists for the work branch. Creates a placeholder commit and
-    /// pushes if needed, then creates the PR (or finds existing).
-    async fn ensure_pr(
+    /// Ensure a PR exists on GitHub for the given work branch (API-only, no push).
+    /// Creates a draft PR or silently succeeds if one already exists (422).
+    async fn ensure_pr_exists(
         &self,
-        workspace_path: &std::path::Path,
-        push_remote: &str,
         pr_repo: &str,
         work_branch: &str,
         base_branch: &str,
     ) -> anyhow::Result<()> {
-        // Check if the branch has any commits ahead of the base branch
-        let log_out = git_output(
-            workspace_path,
-            &[
-                "log",
-                &format!("origin/{}..HEAD", base_branch),
-                "--oneline",
-            ],
-        )
-        .await;
-
-        let has_commits_ahead = log_out
-            .as_ref()
-            .map(|o| !o.trim().is_empty())
-            .unwrap_or(false);
-
-        if !has_commits_ahead {
-            tracing::info!(
-                "No commits ahead of origin/{base_branch} — creating placeholder commit"
-            );
-            zbobr_utility::create_placeholder_commit(workspace_path, work_branch).await?;
-        }
-
-        // Push to remote
-        tracing::info!("Pushing {work_branch} to {push_remote}");
-        git(
-            workspace_path,
-            &[
-                "push",
-                "--force",
-                push_remote,
-                &format!("HEAD:{work_branch}"),
-            ],
-        )
-        .await?;
-
-        // Create PR
         let pr_payload = serde_json::json!({
             "title": work_branch,
             "head": work_branch,
@@ -465,6 +426,185 @@ impl ZbobrRepoBackendGithub {
         }
 
         Ok(())
+    }
+
+    /// Cross-org only: sync the fork's base branch with upstream via merge-upstream API.
+    /// Fetches both remotes afterwards so local refs are current.
+    async fn sync_fork_base_with_upstream(
+        &self,
+        bare_dir: &Path,
+        base_branch: &str,
+        fork_repo: &str,
+    ) -> anyhow::Result<()> {
+        // Check if origin/{base} and fork/{base} point to the same commit
+        let origin_ref = format!("origin/{base_branch}");
+        let fork_ref = format!("fork/{base_branch}");
+
+        let origin_sha = git_output(bare_dir, &["rev-parse", &origin_ref]).await;
+        let fork_sha = git_output(bare_dir, &["rev-parse", &fork_ref]).await;
+
+        let needs_sync = match (&origin_sha, &fork_sha) {
+            (Ok(a), Ok(b)) => a.trim() != b.trim(),
+            _ => true, // If either ref is missing, sync anyway
+        };
+
+        if !needs_sync {
+            tracing::info!("Fork base branch '{base_branch}' is already in sync with upstream");
+            return Ok(());
+        }
+
+        tracing::info!("Syncing fork {fork_repo} base branch '{base_branch}' with upstream");
+
+        let endpoint = format!("/repos/{fork_repo}/merge-upstream");
+        let body = serde_json::json!({ "branch": base_branch });
+
+        match self
+            .octocrab
+            .post::<serde_json::Value, serde_json::Value>(endpoint, Some(&body))
+            .await
+        {
+            Ok(response) => {
+                tracing::debug!("merge-upstream response: {response}");
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Failed to sync fork {fork_repo} base branch '{base_branch}' with upstream: {e:#}"
+                );
+                return Err(octocrab_to_anyhow(e));
+            }
+        }
+
+        // Re-fetch fork so local refs are updated
+        git(bare_dir, &["fetch", "fork"]).await?;
+
+        Ok(())
+    }
+
+    /// Ensure local `refs/heads/{base_branch}` matches `refs/remotes/{remote}/{base_branch}`.
+    /// Uses `git update-ref` to force-set the local ref (safe — bare repo local base is just a copy).
+    async fn sync_local_base_ref(
+        bare_dir: &Path,
+        base_branch: &str,
+        remote: &str,
+    ) -> anyhow::Result<()> {
+        let remote_ref = format!("refs/remotes/{remote}/{base_branch}");
+        let local_ref = format!("refs/heads/{base_branch}");
+
+        let remote_sha = git_output(bare_dir, &["rev-parse", &remote_ref])
+            .await
+            .with_context(|| format!("Remote ref {remote_ref} not found"))?;
+
+        let local_sha = git_output(bare_dir, &["rev-parse", &local_ref]).await;
+
+        let needs_update = match &local_sha {
+            Ok(sha) => sha.trim() != remote_sha.trim(),
+            Err(_) => true,
+        };
+
+        if needs_update {
+            tracing::info!("Updating local {local_ref} to match {remote_ref}");
+            git(
+                bare_dir,
+                &["update-ref", &local_ref, remote_sha.trim()],
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Fetch `{push_remote}/{work_branch}` with explicit refspec.
+    /// Returns `false` if the remote branch doesn't exist yet.
+    async fn fetch_remote_work_branch(
+        bare_dir: &Path,
+        push_remote: &str,
+        work_branch: &str,
+    ) -> anyhow::Result<bool> {
+        let refspec = format!(
+            "refs/heads/{work_branch}:refs/remotes/{push_remote}/{work_branch}"
+        );
+
+        let ok = git_check(
+            bare_dir,
+            &["fetch", push_remote, &refspec],
+        )
+        .await?;
+
+        if ok {
+            tracing::info!("Fetched {push_remote}/{work_branch}");
+        } else {
+            tracing::info!("Remote branch {push_remote}/{work_branch} does not exist yet");
+        }
+
+        Ok(ok)
+    }
+
+    /// Auto-commit any uncommitted changes in the worktree.
+    /// Returns whether a commit was made.
+    async fn auto_commit_worktree(worktree_path: &Path) -> anyhow::Result<bool> {
+        let status = git_output(worktree_path, &["status", "--porcelain"]).await?;
+        if status.trim().is_empty() {
+            return Ok(false);
+        }
+
+        tracing::info!("Auto-committing uncommitted changes in worktree");
+        git(worktree_path, &["add", "-A"]).await?;
+        git(
+            worktree_path,
+            &["commit", "-m", "chore: auto-commit uncommitted changes"],
+        )
+        .await?;
+        Ok(true)
+    }
+
+    /// Merge `source_ref` into the current HEAD in the worktree.
+    /// Skips if `source_ref` is already an ancestor of HEAD.
+    /// Returns `true` on success, `false` on conflict (leaves mid-merge state).
+    async fn merge_ref_into_worktree(
+        worktree_path: &Path,
+        source_ref: &str,
+    ) -> anyhow::Result<bool> {
+        // Check if already merged
+        let already_merged = git_check(
+            worktree_path,
+            &["merge-base", "--is-ancestor", source_ref, "HEAD"],
+        )
+        .await?;
+
+        if already_merged {
+            tracing::info!("{source_ref} is already merged into HEAD");
+            return Ok(true);
+        }
+
+        tracing::info!("Merging {source_ref} into worktree HEAD");
+        let ok = git_check(
+            worktree_path,
+            &["merge", source_ref, "--no-edit"],
+        )
+        .await?;
+
+        if ok {
+            tracing::info!("Successfully merged {source_ref}");
+        } else {
+            tracing::warn!("Merge conflict while merging {source_ref}");
+        }
+
+        Ok(ok)
+    }
+
+    /// Push worktree HEAD to remote without --force.
+    /// Errors if remote has diverged (requires merge first).
+    async fn push_worktree_to_remote(
+        worktree_path: &Path,
+        push_remote: &str,
+        work_branch: &str,
+    ) -> anyhow::Result<()> {
+        tracing::info!("Pushing {work_branch} to {push_remote} (no force)");
+        git(
+            worktree_path,
+            &["push", push_remote, &format!("HEAD:{work_branch}")],
+        )
+        .await
     }
 
     /// Find the worktree path for a given work branch by scanning bare clones.
@@ -519,7 +659,7 @@ impl ZbobrRepoBackendGithub {
     /// Find an existing PR URL for a work branch by querying the GitHub API.
     async fn find_pr_for_branch(
         &self,
-        bare_dir: &std::path::Path,
+        bare_dir: &Path,
         work_branch: &str,
     ) -> anyhow::Result<String> {
         // Determine push remote and derive pr_repo
@@ -611,7 +751,7 @@ impl RepoBackend for ZbobrRepoBackendGithub {
         target_repo: &str,
         work_branch: &str,
         destination_branch: &str,
-        workspace_path: &std::path::Path,
+        workspace_path: &Path,
     ) -> anyhow::Result<PathBuf> {
         let repo = parse_github_repo(target_repo)?;
         let repo_name = repo.name();
@@ -874,7 +1014,7 @@ impl RepoBackend for ZbobrRepoBackendGithub {
         &self,
         target_repo: &str,
         branch: &str,
-        workspace_path: &std::path::Path,
+        workspace_path: &Path,
     ) -> anyhow::Result<PathBuf> {
         let repo = parse_github_repo(target_repo)?;
         let repo_name = repo.name();
@@ -951,7 +1091,7 @@ impl RepoBackend for ZbobrRepoBackendGithub {
     async fn ensure_branch_and_pr(
         &self,
         target_repo: &str,
-        workspace_path: &std::path::Path,
+        workspace_path: &Path,
         work_branch: &str,
         destination_branch: &str,
         pr_title: &str,
@@ -1062,7 +1202,7 @@ impl RepoBackend for ZbobrRepoBackendGithub {
     async fn push_branch(
         &self,
         target_repo: &str,
-        workspace_path: &std::path::Path,
+        workspace_path: &Path,
         work_branch: &str,
     ) -> anyhow::Result<()> {
         let repo = parse_github_repo(target_repo)?;
@@ -1136,7 +1276,7 @@ impl RepoBackend for ZbobrRepoBackendGithub {
 
     async fn setup_fork_remote_and_push(
         &self,
-        work_dir: &std::path::Path,
+        work_dir: &Path,
         target_repo: &str,
         work_branch: &str,
     ) -> anyhow::Result<()> {
@@ -1277,12 +1417,42 @@ impl RepoBackend for ZbobrRepoBackendGithub {
 
 #[async_trait]
 impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
+    /// Merge-based update_worktree flow. Never force-pushes the work branch.
+    ///
+    /// ## Algorithm
+    ///
+    /// Phase 1 – Setup: parse repo, ensure bare clone (fetches origin),
+    ///   determine same-org vs cross-org, ensure fork remote if cross-org.
+    ///
+    /// Phase 2 – Validate base branch sync:
+    ///   cross-org: sync fork base with upstream via merge-upstream API.
+    ///   All: sync local refs/heads/{base_branch} to match remote.
+    ///
+    /// Phase 3 – Fetch remote work branch (may not exist yet).
+    ///
+    /// Phase 4 – Create worktree (reuse ensure_worktree_github).
+    ///
+    /// Phase 5 – Ensure PR exists:
+    ///   If remote work branch doesn't exist: create placeholder commit, regular push, create PR.
+    ///   If remote work branch exists: just ensure_pr_exists (API only).
+    ///
+    /// Phase 6 – Abort any in-progress merge from a previous failed run.
+    ///
+    /// Phase 7 – Auto-commit uncommitted changes in worktree.
+    ///
+    /// Phase 8 – Merge remote work → local work (element 5 → 6):
+    ///   skip if remote doesn't exist. On conflict → return Ok(false).
+    ///
+    /// Phase 9 – Merge base → local work (element 4 → 6):
+    ///   on conflict → return Ok(false).
+    ///
+    /// Phase 10 – Push result back (no --force). Return Ok(true).
     async fn update_worktree(
         &self,
         remote_repo: &str,
         base_branch: &str,
         work_branch: &str,
-        workspace_path: &std::path::Path,
+        workspace_path: &Path,
     ) -> anyhow::Result<bool> {
         if work_branch == base_branch {
             anyhow::bail!(
@@ -1291,10 +1461,10 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             );
         }
 
+        // Phase 1: Setup
         let repo = parse_github_repo(remote_repo)?;
         let bare_dir = self.ensure_bare_clone_github(&repo).await?;
 
-        // Determine same-org vs cross-org
         let same_org = repo
             .owner()
             .eq_ignore_ascii_case(&self.backend_config.fork_owner);
@@ -1307,60 +1477,199 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
                 .await?
         };
 
+        // Phase 2: Validate base branch sync
+        let base_remote = if same_org { "origin" } else { "fork" };
+        if !same_org {
+            self.sync_fork_base_with_upstream(&bare_dir, base_branch, &pr_repo)
+                .await?;
+        }
+        Self::sync_local_base_ref(&bare_dir, base_branch, base_remote).await?;
+
+        // Phase 3: Fetch remote work branch
+        let remote_exists =
+            Self::fetch_remote_work_branch(&bare_dir, &push_remote, work_branch).await?;
+
+        // Phase 4: Create worktree
         self.ensure_worktree_github(&bare_dir, base_branch, work_branch, workspace_path)
             .await?;
 
-        // Create PR early so it exists before update_pr is called
-        self.ensure_pr(workspace_path, &push_remote, &pr_repo, work_branch, base_branch)
-            .await?;
+        // Phase 5: Ensure PR exists
+        if !remote_exists {
+            // Need to push first so the PR can be created
+            tracing::info!(
+                "Remote work branch does not exist — creating placeholder commit and pushing"
+            );
 
-        // Check if work_branch includes all commits from base_branch
-        let is_uptodate = git_check(
-            &bare_dir,
-            &[
-                "merge-base",
-                "--is-ancestor",
-                &format!("origin/{}", base_branch),
-                work_branch,
-            ],
-        )
-        .await?;
+            // Check if worktree has any commits ahead of base
+            let log_out = git_output(
+                workspace_path,
+                &[
+                    "log",
+                    &format!("origin/{}..HEAD", base_branch),
+                    "--oneline",
+                ],
+            )
+            .await;
+            let has_commits_ahead = log_out
+                .as_ref()
+                .map(|o| !o.trim().is_empty())
+                .unwrap_or(false);
 
-        tracing::info!(
-            "Worktree {}: {}",
-            work_branch,
-            if is_uptodate {
-                "up-to-date"
-            } else {
-                "diverged from base_branch"
+            if !has_commits_ahead {
+                zbobr_utility::create_placeholder_commit(workspace_path, work_branch).await?;
             }
-        );
 
-        Ok(is_uptodate)
+            // Regular push (not force) — branch is new, so no conflict possible
+            Self::push_worktree_to_remote(workspace_path, &push_remote, work_branch).await?;
+
+            // Now create the PR
+            self.ensure_pr_exists(&pr_repo, work_branch, base_branch)
+                .await?;
+        } else {
+            self.ensure_pr_exists(&pr_repo, work_branch, base_branch)
+                .await?;
+        }
+
+        // Phase 6: Abort any in-progress merge from a previous failed run
+        let merge_head = workspace_path.join(".git/MERGE_HEAD");
+        // For worktrees, .git is a file pointing to the bare repo, so check the
+        // gitdir path for MERGE_HEAD as well.
+        let gitdir_merge_head = {
+            let git_file = workspace_path.join(".git");
+            if git_file.is_file() {
+                // .git file contains "gitdir: /path/to/bare/.git/worktrees/..."
+                if let Ok(content) = tokio::fs::read_to_string(&git_file).await {
+                    content
+                        .strip_prefix("gitdir: ")
+                        .map(|p| PathBuf::from(p.trim()).join("MERGE_HEAD"))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        let has_merge_in_progress = merge_head.exists()
+            || gitdir_merge_head
+                .as_ref()
+                .is_some_and(|p| p.exists());
+
+        if has_merge_in_progress {
+            tracing::warn!(
+                "Detected in-progress merge in worktree, aborting before proceeding"
+            );
+            let _ = git_check(workspace_path, &["merge", "--abort"]).await;
+        }
+
+        // Phase 7: Auto-commit uncommitted changes
+        Self::auto_commit_worktree(workspace_path).await?;
+
+        // Phase 8: Merge remote work → local work (element 5 → 6)
+        if remote_exists {
+            let remote_ref = format!("{push_remote}/{work_branch}");
+            let merged = Self::merge_ref_into_worktree(workspace_path, &remote_ref).await?;
+            if !merged {
+                tracing::warn!(
+                    "Merge conflict merging remote work branch — needs merger"
+                );
+                return Ok(false);
+            }
+        }
+
+        // Phase 9: Merge base → local work (element 4 → 6)
+        let base_ref = format!("origin/{base_branch}");
+        let merged = Self::merge_ref_into_worktree(workspace_path, &base_ref).await?;
+        if !merged {
+            tracing::warn!(
+                "Merge conflict merging base branch — needs merger"
+            );
+            return Ok(false);
+        }
+
+        // Phase 10: Push result back (no --force)
+        Self::push_worktree_to_remote(workspace_path, &push_remote, work_branch).await?;
+
+        tracing::info!("Worktree {work_branch}: up-to-date, all merges succeeded, pushed");
+        Ok(true)
     }
 
-    async fn update_pr(&self, work_branch: &str) -> anyhow::Result<String> {
+    async fn update_pr(
+        &self,
+        work_branch: &str,
+        destination_repo: &str,
+        base_branch: &str,
+    ) -> anyhow::Result<String> {
+        // 1. Find the worktree and bare_dir for this branch
         let (bare_dir, worktree_path) = self.find_worktree_for_branch(work_branch).await?;
 
-        // Determine push remote
+        // 2. Auto-commit any uncommitted changes
+        Self::auto_commit_worktree(&worktree_path).await?;
+
+        // 3. Determine push remote and PR repo
         let has_fork = git_check(&bare_dir, &["remote", "get-url", "fork"]).await?;
-        let push_remote = if has_fork { "fork" } else { "origin" };
+        let repo = parse_github_repo(destination_repo)?;
+        let (push_remote, pr_repo) = if has_fork {
+            (
+                "fork",
+                format!("{}/{}", self.backend_config.fork_owner, repo.name()),
+            )
+        } else {
+            ("origin", repo.full_name.clone())
+        };
 
-        // Push from worktree
-        tracing::info!("Pushing {work_branch} to {push_remote}");
-        git(
-            &worktree_path,
-            &[
-                "push",
-                "--force",
-                push_remote,
-                &format!("HEAD:{work_branch}"),
-            ],
-        )
-        .await?;
+        // 4. Push to remote (no --force)
+        Self::push_worktree_to_remote(&worktree_path, push_remote, work_branch).await?;
 
-        // Find and return PR URL
-        self.find_pr_for_branch(&bare_dir, work_branch).await
+        // 5. Find existing PR or create a new one
+        #[derive(serde::Deserialize)]
+        struct PrResponse {
+            html_url: String,
+        }
+
+        // First try to find an existing PR
+        let owner = pr_repo.split('/').next().unwrap_or(&pr_repo);
+        let head_filter = format!("{owner}:{work_branch}");
+        let endpoint = format!("/repos/{pr_repo}/pulls");
+        let params = serde_json::json!({
+            "head": head_filter,
+            "state": "open",
+        });
+
+        let prs: Vec<PrResponse> = self
+            .octocrab
+            .get(&endpoint, Some(&params))
+            .await
+            .map_err(octocrab_to_anyhow)?;
+
+        if let Some(pr) = prs.into_iter().next() {
+            return Ok(pr.html_url);
+        }
+
+        // No existing PR — create one
+        tracing::info!("No existing PR found for {work_branch}, creating one in {pr_repo}");
+        let pr_payload = serde_json::json!({
+            "title": work_branch,
+            "head": work_branch,
+            "base": base_branch,
+            "body": "",
+        });
+
+        let create_result: Result<PrResponse, octocrab::Error> =
+            self.octocrab.post(&endpoint, Some(&pr_payload)).await;
+
+        match create_result {
+            Ok(pr) => Ok(pr.html_url),
+            Err(octocrab::Error::GitHub { ref source, .. })
+                if source.status_code.as_u16() == 422 =>
+            {
+                // Race condition: PR was created between our check and create
+                tracing::info!("PR already exists (422), looking up existing PR");
+                self.find_existing_pr(&pr_repo, work_branch, base_branch)
+                    .await
+            }
+            Err(e) => Err(octocrab_to_anyhow(e)),
+        }
     }
 
     async fn validate_connectivity(&self) -> anyhow::Result<()> {

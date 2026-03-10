@@ -5,7 +5,7 @@ pub mod config;
 pub mod task;
 pub mod tool_executor;
 
-pub use backend::{RepoBackend, TaskBackend};
+pub use backend::{RepoBackend, TaskBackend, TaskBackendExt};
 pub use config::{
     BackendConfig, Config, ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
 };

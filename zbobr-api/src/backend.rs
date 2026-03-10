@@ -3,7 +3,7 @@ use crate::Tool;
 
 use async_trait::async_trait;
 
-use crate::task::{Comment, CommentType, Model, Parameter, Role, Stage, Task};
+use crate::task::{Comment, CommentType, Model, Parameter, Role, Signal, Stage, Task};
 
 /// TaskBackend: stores and manages tasks, their metadata, comments, and lifecycle.
 ///
@@ -209,13 +209,12 @@ pub trait WorktreeBackend: Send + Sync {
     /// Corresponding delete operation is not required: the worktree can be removed with
     /// `git worktree remove` command 
     /// 
-    /// Returns boolean value indicating whether the worktree branch is up-to-date with the 
-    /// `base_branch` (i.e. no new commits in `base_branch` comparing to the current state
-    /// of the `work_branch`).
+    /// Returns boolean value indicating whether the worktree branch is
+    /// successfully created and merged to recent remote updates 
     /// 
     /// I.e return values:
     /// - `Ok(true)` means the worktree is ready to use and up to date with the `base_branch`.
-    /// - `Ok(false)` means the worktree is ready to use but `base_branch` diverged
+    /// - `Ok(false)` means the worktree is in a merging conflict state
     /// - `Err` means the worktree is not ready to use, e.g. due to validation 
     ///    failure or creation failure.
     /// 
@@ -227,12 +226,22 @@ pub trait WorktreeBackend: Send + Sync {
         workspace_path: &std::path::Path,
     ) -> anyhow::Result<bool>;
 
-    /// Returns the up-to-date URL of the PR for the given work branch. 
+    /// Push the work branch to its remote and ensure a PR exists.
+    ///
+    /// Returns the up-to-date URL of the PR for the given work branch.
     /// It's up to backend what is considered as the PR URL, this information is only
-    /// for representation tre current status of the work for user.
-    /// For the githug backend, this is the URL of the PR in the GitHub UI. 
+    /// for representing the current status of the work for the user.
+    /// For the GitHub backend, this is the URL of the PR in the GitHub UI.
     /// For the filesystem backend, this can be just the path to the worktree directory.
-    async fn update_pr(&self, work_branch: &str) -> anyhow::Result<String>;
+    ///
+    /// If no PR exists yet, the backend should create one targeting `base_branch`
+    /// in `destination_repo`.
+    async fn update_pr(
+        &self,
+        work_branch: &str,
+        destination_repo: &str,
+        base_branch: &str,
+    ) -> anyhow::Result<String>;
 
     /// Validate connectivity to the repo hosting service.
     async fn validate_connectivity(&self) -> anyhow::Result<()>;
@@ -240,3 +249,33 @@ pub trait WorktreeBackend: Send + Sync {
     /// Return a debug string of the backend state.
     fn debug_state(&self) -> String;
 }
+
+/// Extension trait for higher-level operations built on [`TaskBackend::modify_task`].
+#[async_trait]
+pub trait TaskBackendExt: TaskBackend {
+    /// Set the stage of a task.
+    async fn set_task_stage(&self, id: u64, stage: Stage) -> anyhow::Result<()> {
+        self.modify_task(
+            id,
+            Box::new(move |mut task| {
+                task.stage = stage;
+                task
+            }),
+        )
+        .await
+    }
+
+    /// Set the signal on a task.
+    async fn set_task_signal(&self, id: u64, signal: Option<Signal>) -> anyhow::Result<()> {
+        self.modify_task(
+            id,
+            Box::new(move |mut task| {
+                task.signal = signal;
+                task
+            }),
+        )
+        .await
+    }
+}
+
+impl<T: TaskBackend + ?Sized> TaskBackendExt for T {}

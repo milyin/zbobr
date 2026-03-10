@@ -13,8 +13,9 @@ use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig}
 use zbobr_utility::{git, git_check, git_output, configure_git_user};
 
 use crate::{
-    Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcherDyn,
+    Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
     ZbobrExecutorConfig,
+    backend::TaskBackendExt,
     mcp::common::get_hostname,
     prompts::Prompts,
     task::{Parameter, Role, Tool, Model},
@@ -399,7 +400,7 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
 
 /// Run the given command against the dispatcher.
 pub async fn run_command(
-    zbobr: ZbobrDispatcherDyn,
+    zbobr: ZbobrDispatcher,
     command: Command,
     prompts: &Prompts,
     executor_config: &ZbobrExecutorConfig,
@@ -426,7 +427,7 @@ pub async fn run_command(
 }
 
 async fn run_task_subcommand(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     subcommand: TaskSubcommand,
     prompts: &Prompts,
     executor_config: &ZbobrExecutorConfig,
@@ -461,7 +462,7 @@ async fn run_task_subcommand(
             };
             let mut tasks = Vec::new();
             if let Some(stage) = stage_filter {
-                tasks = zbobr.list_tasks_by_stage(stage).await?;
+                tasks = zbobr.tasks().list_tasks_by_stage(stage).await?;
             } else {
                 let all_stages = [
                     Stage::Pending,
@@ -473,7 +474,7 @@ async fn run_task_subcommand(
                     Stage::Done,
                 ];
                 for st in all_stages {
-                    let mut ts = zbobr.list_tasks_by_stage(st).await?;
+                    let mut ts = zbobr.tasks().list_tasks_by_stage(st).await?;
                     tasks.append(&mut ts);
                 }
                 tasks.sort_by_key(|t| t.id);
@@ -489,8 +490,8 @@ async fn run_task_subcommand(
             }
         }
         TaskSubcommand::Show { id } => {
-            let task = zbobr.get_task(id).await?;
-            let discussion = zbobr.get_task_comments(id).await?;
+            let task = zbobr.tasks().get_task(id).await?;
+            let discussion = zbobr.tasks().get_task_comments(id).await?;
             print_task(&task, &discussion);
         }
         TaskSubcommand::Update {
@@ -515,6 +516,7 @@ async fn run_task_subcommand(
                 .map(|s| s.parse::<Signal>().context("Invalid signal"))
                 .transpose()?;
             zbobr
+                .tasks()
                 .modify_task(
                     id,
                     Box::new(move |mut task| {
@@ -578,7 +580,7 @@ async fn run_task_subcommand(
             println!("Updated task #{}", id);
         }
         TaskSubcommand::Delete { id } => {
-            zbobr.close_task(id).await?;
+            zbobr.tasks().close_task(id).await?;
             println!("Deleted task #{}", id);
         }
         TaskSubcommand::Prepare { task, show_prompt } => {
@@ -645,7 +647,7 @@ async fn run_task_subcommand(
             executor_mcp_tester_testing,
             executor_mcp_tester_merging,
         } => {
-            let task_obj = zbobr.get_task(task).await?;
+            let task_obj = zbobr.tasks().get_task(task).await?;
             let mcp_tester_config_override = if executor_mcp_tester_preparation.is_some()
                 || executor_mcp_tester_planning.is_some()
                 || executor_mcp_tester_working.is_some()
@@ -674,7 +676,7 @@ async fn run_task_subcommand(
             process_task_by_stage(zbobr, &task_obj, prompts, &effective_executor_config).await?;
         }
         TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
-            let task = zbobr.get_task(id).await?;
+            let task = zbobr.tasks().get_task(id).await?;
             let git_user_name = &zbobr.config().git_user_name;
             let git_user_email = &zbobr.config().git_user_email;
 
@@ -744,7 +746,7 @@ async fn run_task_subcommand(
 }
 
 async fn run_role_command(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     task: u64,
     role: Role,
     show_prompt: bool,
@@ -765,7 +767,7 @@ async fn run_role_command(
 // ---------------------------------------------------------------------------
 
 struct CliRoleRunner<'a> {
-    zbobr: &'a ZbobrDispatcherDyn,
+    zbobr: &'a ZbobrDispatcher,
     task_id: u64,
     role: Role,
     prompts: &'a Prompts,
@@ -774,7 +776,7 @@ struct CliRoleRunner<'a> {
 
 impl<'a> CliRoleRunner<'a> {
     fn new(
-        zbobr: &'a ZbobrDispatcherDyn,
+        zbobr: &'a ZbobrDispatcher,
         task_id: u64,
         role: Role,
         prompts: &'a Prompts,
@@ -800,6 +802,7 @@ impl<'a> CliRoleRunner<'a> {
         let model = self.zbobr.config().model_for_role(self.role);
 
         self.zbobr
+            .tasks()
             .set_task_stage(self.task_id, self.role.into())
             .await?;
 
@@ -852,7 +855,7 @@ impl<'a> CliRoleRunner<'a> {
         // For Merger: try a normal git merge first. If it succeeds, no need
         // to invoke the agent — just commit the merge and return.
         if self.role == Role::Merger {
-            let task = self.zbobr.get_task(self.task_id).await?;
+            let task = self.zbobr.tasks().get_task(self.task_id).await?;
             let dest_branch = task
                 .parameters
                 .get(&Parameter::DestinationBranch)
@@ -969,7 +972,7 @@ impl<'a> CliRoleRunner<'a> {
 
 /// Process a task according to its current stage (single-step).
 pub async fn process_task_by_stage(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     task: &Task,
     prompts: &Prompts,
     executor_config: &ZbobrExecutorConfig,
@@ -1017,7 +1020,7 @@ pub async fn process_task_by_stage(
 
 /// Main manager loop: polls for tasks and dispatches role sessions.
 pub async fn run_manager_loop(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     interval_secs: u64,
     cleanup_interval_secs: u64,
     prompts: &Prompts,
@@ -1111,7 +1114,7 @@ pub async fn run_manager_loop(
             last_cleanup = std::time::Instant::now();
         }
 
-        let mut pending_tasks = match zbobr.list_tasks_by_stage(Stage::Pending).await {
+        let mut pending_tasks = match zbobr.tasks().list_tasks_by_stage(Stage::Pending).await {
             Ok(tasks) => tasks,
             Err(e) => {
                 tracing::error!("Failed to check PENDING tasks: {e}");
@@ -1168,7 +1171,7 @@ pub async fn run_manager_loop(
         let mut active_counts = std::collections::HashMap::new();
         for stage in &active_stages {
             let count = zbobr
-                .list_tasks_by_stage(*stage)
+                .tasks().list_tasks_by_stage(*stage)
                 .await
                 .unwrap_or_default()
                 .len();
@@ -1211,7 +1214,7 @@ pub async fn run_manager_loop(
 // ---------------------------------------------------------------------------
 
 async fn prepare_workspace(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     task_id: u64,
     role: Role,
     task_dir: &Path,
@@ -1219,7 +1222,7 @@ async fn prepare_workspace(
     match role {
         Role::Preparator => Ok((task_dir.to_path_buf(), true)),
         Role::Merger => {
-            let task = zbobr.get_task(task_id).await?;
+            let task = zbobr.tasks().get_task(task_id).await?;
             let dest_repo = task
                 .parameters
                 .get(&Parameter::DestinationRepository)
@@ -1231,7 +1234,7 @@ async fn prepare_workspace(
             Ok((task_dir.join(repo_name), true))
         }
         _ => {
-            let task = zbobr.get_task(task_id).await?;
+            let task = zbobr.tasks().get_task(task_id).await?;
             let dest_repo = task
                 .parameters
                 .get(&Parameter::DestinationRepository)
@@ -1277,7 +1280,7 @@ async fn prepare_workspace(
     }
 }
 
-async fn ensure_pr_url(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> anyhow::Result<()> {
+async fn ensure_pr_url(zbobr: &ZbobrDispatcher, task_id: u64) -> anyhow::Result<()> {
     let role_session = zbobr.role_session(task_id);
     match role_session.ensure_pr_url().await {
         Ok(_) => Ok(()),
@@ -1300,9 +1303,9 @@ async fn ensure_pr_url(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> anyhow::Resu
 /// Pre-populate task parameters from dispatcher config defaults before the
 /// preparator agent runs. Only sets a parameter if it is not already present,
 /// so a previously prepared task (e.g. re-run) keeps its values unchanged.
-async fn seed_preparator_defaults(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> anyhow::Result<()> {
+async fn seed_preparator_defaults(zbobr: &ZbobrDispatcher, task_id: u64) -> anyhow::Result<()> {
     let config = zbobr.config();
-    let task = zbobr.get_task(task_id).await?;
+    let task = zbobr.tasks().get_task(task_id).await?;
     let role_session = zbobr.role_session(task_id);
 
     if let Some(default_repo) = &config.default_destination_repository
@@ -1327,7 +1330,7 @@ async fn seed_preparator_defaults(zbobr: &ZbobrDispatcherDyn, task_id: u64) -> a
 }
 
 async fn start_mcp_server(
-    zbobr: ZbobrDispatcherDyn,
+    zbobr: ZbobrDispatcher,
     role: Role,
     task_id: u64,
     tool: Tool,
@@ -1364,7 +1367,7 @@ async fn execute_tool(
     prompt: &str,
     work_dir: &Path,
     mcp_url: &str,
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
 ) -> (bool, Option<anyhow::Error>) {
     let executor: Box<dyn ToolExecutor> = match cli_tool {
         Tool::Copilot => Box::new(CopilotExecutor {
@@ -1401,7 +1404,7 @@ async fn execute_tool(
 }
 
 async fn finalize_session(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     task_id: u64,
     role: Role,
     work_dir: &Path,
@@ -1473,7 +1476,7 @@ async fn finalize_session(
             return Ok(());
         }
 
-    let current_task = zbobr.get_task(task_id).await?;
+    let current_task = zbobr.tasks().get_task(task_id).await?;
     let has_unchecked = current_task.checklist.iter().any(|i| !i.checked);
     match role {
         Role::Preparator => {
@@ -1524,7 +1527,7 @@ async fn finalize_session(
             // Retry the merge to verify the agent actually resolved the conflict.
             // If it still fails, pause the task and report to avoid an infinite loop.
             let dest_branch = zbobr
-                .get_task(task_id)
+                .tasks().get_task(task_id)
                 .await?
                 .parameters
                 .get(&Parameter::DestinationBranch)
@@ -1569,7 +1572,7 @@ async fn finalize_session(
 }
 
 async fn perform_auto_commit_and_push(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     task_id: u64,
     work_dir: &Path,
     role: Role,
@@ -1608,12 +1611,12 @@ async fn perform_auto_commit_and_push(
 }
 
 async fn rewrite_commit_authors(
-    zbobr: &ZbobrDispatcherDyn,
+    zbobr: &ZbobrDispatcher,
     task_id: u64,
     work_dir: &Path,
     dry_run: bool,
 ) -> anyhow::Result<()> {
-    let task = zbobr.get_task(task_id).await?;
+    let task = zbobr.tasks().get_task(task_id).await?;
     let dest_branch = task
         .parameters
         .get(&Parameter::DestinationBranch)
@@ -1654,63 +1657,65 @@ async fn rewrite_commit_authors(
     // configure git user locally using helper
     configure_git_user(&git_root_path, git_user_name, git_user_email).await?;
 
-    let rebase_cmd = format!(
-        "git rebase --exec 'git commit --amend --no-edit --reset-author --allow-empty' '{}'",
-        dest_branch
+    // Use git filter-branch to rewrite author/committer in-place.
+    // Unlike rebase --exec, this does not replay changes so it cannot
+    // produce merge conflicts.
+    let filter_cmd = format!(
+        "git filter-branch -f --env-filter '\
+            export GIT_AUTHOR_NAME=\"{name}\";\
+            export GIT_AUTHOR_EMAIL=\"{email}\";\
+            export GIT_COMMITTER_NAME=\"{name}\";\
+            export GIT_COMMITTER_EMAIL=\"{email}\";\
+        ' '{dest}'..HEAD",
+        name = git_user_name,
+        email = git_user_email,
+        dest = dest_branch,
     );
-    let rebase_output = TokioCommand::new("sh")
+    let filter_output = TokioCommand::new("sh")
         .arg("-c")
-        .arg(&rebase_cmd)
-        .env("GIT_AUTHOR_NAME", git_user_name)
-        .env("GIT_AUTHOR_EMAIL", git_user_email)
-        .env("GIT_COMMITTER_NAME", git_user_name)
-        .env("GIT_COMMITTER_EMAIL", git_user_email)
+        .arg(&filter_cmd)
         .current_dir(&git_root_path)
         .output()
         .await;
-        match rebase_output {
-            Ok(output) if output.status.success() => {
-                println!("Successfully rewrote commit authors");
+    match filter_output {
+        Ok(output) if output.status.success() => {
+            println!("Successfully rewrote commit authors");
 
-                // Show post-rebase log to verify changes
-                if let Ok(updated_commits) = git_output(
-                    &git_root_path,
-                    &["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"],
-                )
+            // Show post-rebase log to verify changes
+            if let Ok(updated_commits) = git_output(
+                &git_root_path,
+                &["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"],
+            )
+            .await
+            {
+                println!("Updated commits:");
+                for commit in updated_commits.lines() {
+                    println!("  {}", commit);
+                }
+            }
+
+            if let Err(e) = zbobr
+                .task_session(task_id)
+                .role_session()
+                .update_pr()
                 .await
-                {
-                    println!("Updated commits:");
-                    for commit in updated_commits.lines() {
-                        println!("  {}", commit);
-                    }
-                }
-
-                if let Err(e) = zbobr
-                    .task_session(task_id)
-                    .role_session()
-                    .update_pr()
-                    .await
-                {
-                    tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
-                }
-            }
-            Ok(output) => {
-                // Abort the failed rebase so the workspace isn't left in a
-                // broken state that blocks subsequent operations.
-                let _ = git(&git_root_path, &["rebase", "--abort"]).await;
-                return Err(anyhow::anyhow!(
-                    "Failed to rewrite commit authors: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                ));
-            }
-            Err(e) => {
-                let _ = git(&git_root_path, &["rebase", "--abort"]).await;
-                return Err(anyhow::anyhow!(
-                    "Error running git rebase for author rewriting: {}",
-                    e
-                ));
+            {
+                tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
             }
         }
+        Ok(output) => {
+            return Err(anyhow::anyhow!(
+                "Failed to rewrite commit authors: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "Error running git filter-branch for author rewriting: {}",
+                e
+            ));
+        }
+    }
 
     Ok(())
 }
