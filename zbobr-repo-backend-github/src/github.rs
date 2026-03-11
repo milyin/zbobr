@@ -655,58 +655,13 @@ impl ZbobrRepoBackendGithub {
         anyhow::bail!("No worktree found for work_branch '{}'", work_branch)
     }
 
-    /// Find an existing PR URL for a work branch by querying the GitHub API.
-    async fn find_pr_for_branch(
-        &self,
-        bare_dir: &Path,
-        work_branch: &str,
-    ) -> anyhow::Result<String> {
-        // Determine push remote and derive pr_repo
-        let has_fork = git_check(bare_dir, &["remote", "get-url", "fork"]).await?;
-        let push_remote = if has_fork { "fork" } else { "origin" };
-
-        let remote_url = git_output(bare_dir, &["remote", "get-url", push_remote]).await?;
-        let pr_repo_ref = parse_github_repo(&remote_url)?;
-
-        // Query for open PR with this head branch
-        #[derive(serde::Deserialize)]
-        struct PrListItem {
-            html_url: String,
-        }
-
-        let owner = pr_repo_ref.owner();
-        let head_filter = format!("{owner}:{work_branch}");
-        let endpoint = format!("/repos/{}/pulls", pr_repo_ref.full_name);
-        let params = serde_json::json!({
-            "head": head_filter,
-            "state": "open",
-        });
-
-        let prs: Vec<PrListItem> = self
-            .octocrab
-            .get(&endpoint, Some(&params))
-            .await
-            .map_err(octocrab_to_anyhow)?;
-
-        prs.into_iter()
-            .next()
-            .map(|pr| pr.html_url)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "No existing open PR found for head '{}' in {}",
-                    work_branch,
-                    pr_repo_ref.full_name
-                )
-            })
-    }
-
-    /// Query GitHub for an existing open PR matching `head` → `base`.
+    /// Query GitHub for an existing open PR matching `head` (and optionally `base`).
     /// Returns the `html_url` of the first matching PR.
     async fn find_existing_pr(
         &self,
         full_repo: &str,
         head: &str,
-        base: &str,
+        base: Option<&str>,
     ) -> anyhow::Result<String> {
         #[derive(serde::Deserialize)]
         struct PrListItem {
@@ -720,11 +675,13 @@ impl ZbobrRepoBackendGithub {
         let head_filter = format!("{owner}:{head}");
 
         let endpoint = format!("/repos/{full_repo}/pulls");
-        let params = serde_json::json!({
+        let mut params = serde_json::json!({
             "head": head_filter,
-            "base": base,
             "state": "open",
         });
+        if let Some(base) = base {
+            params["base"] = serde_json::Value::String(base.to_string());
+        }
 
         let prs: Vec<PrListItem> = self
             .octocrab
@@ -733,12 +690,20 @@ impl ZbobrRepoBackendGithub {
             .map_err(octocrab_to_anyhow)?;
 
         prs.into_iter().next().map(|pr| pr.html_url).ok_or_else(|| {
-            anyhow::anyhow!(
-                "No existing open PR found for head '{}' -> base '{}' in {}",
-                head,
-                base,
-                full_repo
-            )
+            if let Some(base) = base {
+                anyhow::anyhow!(
+                    "No existing open PR found for head '{}' -> base '{}' in {}",
+                    head,
+                    base,
+                    full_repo
+                )
+            } else {
+                anyhow::anyhow!(
+                    "No existing open PR found for head '{}' in {}",
+                    head,
+                    full_repo
+                )
+            }
         })
     }
 }
@@ -953,32 +918,19 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         Self::push_worktree_to_remote(&worktree_path, push_remote, work_branch).await?;
 
         // 5. Find existing PR or create a new one
+        if let Ok(url) = self.find_existing_pr(&pr_repo, work_branch, None).await {
+            return Ok(url);
+        }
+
+        // No existing PR — create one
+        tracing::info!("No existing PR found for {work_branch}, creating one in {pr_repo}");
+
         #[derive(serde::Deserialize)]
         struct PrResponse {
             html_url: String,
         }
 
-        // First try to find an existing PR
-        let owner = pr_repo.split('/').next().unwrap_or(&pr_repo);
-        let head_filter = format!("{owner}:{work_branch}");
         let endpoint = format!("/repos/{pr_repo}/pulls");
-        let params = serde_json::json!({
-            "head": head_filter,
-            "state": "open",
-        });
-
-        let prs: Vec<PrResponse> = self
-            .octocrab
-            .get(&endpoint, Some(&params))
-            .await
-            .map_err(octocrab_to_anyhow)?;
-
-        if let Some(pr) = prs.into_iter().next() {
-            return Ok(pr.html_url);
-        }
-
-        // No existing PR — create one
-        tracing::info!("No existing PR found for {work_branch}, creating one in {pr_repo}");
         let pr_payload = serde_json::json!({
             "title": work_branch,
             "head": work_branch,
@@ -996,7 +948,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             {
                 // Race condition: PR was created between our check and create
                 tracing::info!("PR already exists (422), looking up existing PR");
-                self.find_existing_pr(&pr_repo, work_branch, base_branch)
+                self.find_existing_pr(&pr_repo, work_branch, Some(base_branch))
                     .await
             }
             Err(e) => Err(octocrab_to_anyhow(e)),
