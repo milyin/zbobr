@@ -13,13 +13,14 @@ pub struct ZbobrTaskBackendGithubConfig {
 }
 
 impl zbobr_api::config::BackendConfig for ZbobrTaskBackendGithubConfig {
-    type Backend = crate::ZbobrTaskBackendGithub;
+    type Backend = crate::ArcTaskBackendGithub;
 
     fn build_backend(
         self,
         _dispatcher: &zbobr_api::config::ZbobrDispatcherConfig,
     ) -> anyhow::Result<Self::Backend> {
-        crate::ZbobrTaskBackendGithub::from_config(self)
+        let inner = crate::ZbobrTaskBackendGithub::from_config(self)?;
+        Ok(crate::ArcTaskBackendGithub::new(inner))
     }
 }
 

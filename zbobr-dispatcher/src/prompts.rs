@@ -126,7 +126,7 @@ pub async fn build_full_prompt(
     task_id: u64,
     dispatcher: &ZbobrDispatcher,
 ) -> anyhow::Result<String> {
-    let task = dispatcher.tasks().get_task(task_id).await?;
+    let task = dispatcher.tasks().get_task(task_id).await?.snapshot().await?;
     let history = dispatcher.get_history(task_id, None).await?;
     let history_json = serde_json::to_string_pretty(&history.comments).unwrap_or_default();
     Ok(assemble_prompt(user_context, role, &task, &history_json))
@@ -302,6 +302,9 @@ mod tests {
             title: title.to_owned(),
             description: String::new(),
             stage: Stage::Pending,
+            destination_repository: None,
+            destination_branch: None,
+            work_branch: None,
             parameters: Default::default(),
             checklist: vec![],
             signal: None,

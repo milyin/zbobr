@@ -164,21 +164,22 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
     // insert a dummy unchecked checklist item so the reviewer has something to
     // report and therefore will route back to the planner.  This mirrors the
     // behaviour of actual workflows where a review usually discovers issues.
-    env.zbobr
-        .tasks()
-        .modify_task(
-            task_id,
-            Box::new(|mut task| {
-                task.checklist.push(ChecklistItem {
-                    id: "issue".to_string(),
-                    text: "issue found during review".to_string(),
-                    checked: false,
-                });
-                task
-            }),
-        )
+    {
+        let weak = env.zbobr.tasks().get_task(task_id).await
+            .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", env.name()));
+        let mutable = weak.upgrade().await
+            .unwrap_or_else(|e| panic!("[{}] failed to upgrade task #{task_id}: {e}", env.name()));
+        mutable.modify_task(Box::new(|mut task| {
+            task.checklist.push(ChecklistItem {
+                id: "issue".to_string(),
+                text: "issue found during review".to_string(),
+                checked: false,
+            });
+            task
+        }))
         .await
         .unwrap_or_else(|e| panic!("[{}] failed to add review checklist item: {e}", env.name()));
+    }
 
     env.run_stage(task_id, Stage::Reviewing, scenarios::reviewing_scenario())
         .await;
@@ -790,10 +791,14 @@ pub async fn run_plan_history_with_index(env: &IntegrationTestEnv) {
     .await;
 
     // Directly verify the structured comment history in the backend.
-    let comments = env
+    let weak = env
         .zbobr
         .tasks()
-        .get_task_comments(task_id)
+        .get_task(task_id)
+        .await
+        .unwrap_or_else(|e| panic!("[{}] failed to get task: {e}", env.name()));
+    let comments = weak
+        .get_comments()
         .await
         .unwrap_or_else(|e| panic!("[{}] failed to get structured comments: {e}", env.name()));
 
@@ -910,18 +915,11 @@ pub async fn run_repo_backend_clone(env: &IntegrationTestEnv) {
         .await;
 
     let task = env.get_task(task_id).await;
-    let dest_repo = task
-        .parameters
-        .get(&Parameter::DestinationRepository)
-        .cloned()
-        .unwrap();
-    let dest_branch = task
-        .parameters
-        .get(&Parameter::DestinationBranch)
-        .cloned()
-        .unwrap_or_else(|| "main".to_string());
+    let identity = task.identity().unwrap_or_else(|| {
+        panic!("[{}] Task #{task_id} missing routing parameters", env.name())
+    });
     env.zbobr
-        .update_worktree(&dest_repo, &dest_branch, &work_branch, task_id)
+        .update_worktree(&identity)
         .await
         .unwrap();
 
@@ -999,18 +997,11 @@ pub async fn run_repo_backend_clone_cross_org(env: &IntegrationTestEnv) {
         .await;
 
     let task = env.get_task(task_id).await;
-    let dest_repo = task
-        .parameters
-        .get(&Parameter::DestinationRepository)
-        .cloned()
-        .unwrap();
-    let dest_branch = task
-        .parameters
-        .get(&Parameter::DestinationBranch)
-        .cloned()
-        .unwrap_or_else(|| "main".to_string());
+    let identity = task.identity().unwrap_or_else(|| {
+        panic!("[{}] Task #{task_id} missing routing parameters", env.name())
+    });
     env.zbobr
-        .update_worktree(&dest_repo, &dest_branch, &work_branch, task_id)
+        .update_worktree(&identity)
         .await
         .unwrap();
 
@@ -1444,12 +1435,11 @@ async fn assert_pr_has_commits(
 
     let pr_path = PathBuf::from(pr_url);
     
-    // Get the work branch from task parameters
-    let work_branch = task.parameters
-        .get(&Parameter::WorkBranch)
-        .cloned()
+    // Get the work branch from task
+    let work_branch = task.work_branch
+        .clone()
         .unwrap_or_else(|| {
-            panic!("[{}] WorkBranch not in task parameters", env.name());
+            panic!("[{}] work_branch not set on task", env.name());
         });
     
     // Checkout the work branch to ensure we're comparing the right branch

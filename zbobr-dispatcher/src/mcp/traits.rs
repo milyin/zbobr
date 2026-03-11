@@ -1,7 +1,7 @@
 use crate::{
     CommentType, Signal,
     mcp::common::get_hostname,
-    task::{ChecklistItem, Parameter, Role, RoleSession, Tool, Model},
+    task::{ChecklistItem, Role, RoleSession, Tool, Model},
 };
 
 // Helper functions for logging MCP responses
@@ -349,10 +349,11 @@ pub trait CommonMcpImpl: Send + Sync {
         let item_id = id.to_string();
         let response = match self
             .session()
-            .modify_task(move |task| {
+            .modify_task(move |mut task| {
                 if let Some(item) = task.checklist.iter_mut().find(|item| item.id == item_id) {
                     item.checked = checked;
                 }
+                task
             })
             .await
         {
@@ -413,7 +414,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         let response = match self
             .session()
-            .modify_task(move |task| {
+            .modify_task(move |mut task| {
                 let new_item = ChecklistItem {
                     id: item_id,
                     checked: false,
@@ -429,6 +430,7 @@ pub trait CommonMcpImpl: Send + Sync {
                 } else {
                     task.checklist.push(new_item);
                 }
+                task
             })
             .await
         {
@@ -450,10 +452,11 @@ pub trait CommonMcpImpl: Send + Sync {
         let item_text = text.to_string();
         let response = match self
             .session()
-            .modify_task(move |task| {
+            .modify_task(move |mut task| {
                 if let Some(item) = task.checklist.iter_mut().find(|item| item.id == item_id) {
                     item.text = item_text;
                 }
+                task
             })
             .await
         {
@@ -500,8 +503,9 @@ pub trait CommonMcpImpl: Send + Sync {
 
         let response = match self
             .session()
-            .modify_task(move |task| {
+            .modify_task(move |mut task| {
                 task.checklist.retain(|item| item.id != item_id);
+                task
             })
             .await
         {
@@ -512,35 +516,99 @@ pub trait CommonMcpImpl: Send + Sync {
         response
     }
 
-    async fn get_param_impl(&self, param: Parameter) -> String {
+    async fn get_destination_repository_impl(&self) -> String {
         tracing::info!(
-            "[{}#{}] get_param_{}",
+            "[{}#{}] get_param_destination_repository",
             self.role_name(),
             self.session().task_id(),
-            param.name()
         );
-        let response = match self.session().get_parameter(param).await {
+        let response = match self.session().get_destination_repository().await {
             Ok(Some(value)) => value,
-            Ok(None) => format!("{} is not set", param.name()),
+            Ok(None) => "destination_repository is not set".to_string(),
             Err(e) => format!("Error: {e}"),
         };
-        log_mcp_string_response(self.role_name(), self.session().task_id(), &format!("get_param_{}", param.name()), &response);
+        log_mcp_string_response(self.role_name(), self.session().task_id(), "get_param_destination_repository", &response);
         response
     }
 
-    async fn set_param_impl(&self, param: Parameter, value: Option<String>) -> String {
+    async fn set_destination_repository_impl(&self, value: Option<String>) -> String {
         tracing::info!(
-            "[{}#{}] set_param_{} value={:?}",
+            "[{}#{}] set_param_destination_repository value={:?}",
             self.role_name(),
             self.session().task_id(),
-            param.name(),
             value
         );
-        let response = match self.session().set_parameter(param, value).await {
-            Ok(()) => format!("{} updated", param.name()),
+        let response = match self.session().set_destination_repository(value).await {
+            Ok(()) => "destination_repository updated".to_string(),
             Err(e) => format!("Error: {e}"),
         };
-        log_mcp_string_response(self.role_name(), self.session().task_id(), &format!("set_param_{}", param.name()), &response);
+        log_mcp_string_response(self.role_name(), self.session().task_id(), "set_param_destination_repository", &response);
+        response
+    }
+
+    async fn get_destination_branch_impl(&self) -> String {
+        tracing::info!(
+            "[{}#{}] get_param_destination_branch",
+            self.role_name(),
+            self.session().task_id(),
+        );
+        let response = match self.session().get_destination_branch().await {
+            Ok(Some(value)) => value,
+            Ok(None) => "destination_branch is not set".to_string(),
+            Err(e) => format!("Error: {e}"),
+        };
+        log_mcp_string_response(self.role_name(), self.session().task_id(), "get_param_destination_branch", &response);
+        response
+    }
+
+    async fn set_destination_branch_impl(&self, value: Option<String>) -> String {
+        tracing::info!(
+            "[{}#{}] set_param_destination_branch value={:?}",
+            self.role_name(),
+            self.session().task_id(),
+            value
+        );
+        let response = match self.session().set_destination_branch(value).await {
+            Ok(()) => "destination_branch updated".to_string(),
+            Err(e) => format!("Error: {e}"),
+        };
+        log_mcp_string_response(self.role_name(), self.session().task_id(), "set_param_destination_branch", &response);
+        response
+    }
+
+    async fn get_work_branch_impl(&self) -> String {
+        tracing::info!(
+            "[{}#{}] get_param_work_branch",
+            self.role_name(),
+            self.session().task_id(),
+        );
+        let response = match self.session().get_work_branch().await {
+            Ok(Some(value)) => value,
+            Ok(None) => "work_branch is not set".to_string(),
+            Err(e) => format!("Error: {e}"),
+        };
+        log_mcp_string_response(self.role_name(), self.session().task_id(), "get_param_work_branch", &response);
+        response
+    }
+
+    async fn set_work_branch_postfix_impl(&self, value: Option<String>) -> String {
+        match self.session().get_work_branch().await {
+            Ok(Some(_)) => return "Error: work_branch is already set".to_string(),
+            Err(e) => return format!("Error: {e}"),
+            Ok(None) => {}
+        }
+        let branch = value.map(|v| self.session().create_branch_name(&v));
+        tracing::info!(
+            "[{}#{}] set_param_work_branch value={:?}",
+            self.role_name(),
+            self.session().task_id(),
+            branch
+        );
+        let response = match self.session().set_work_branch(branch).await {
+            Ok(()) => "work_branch updated".to_string(),
+            Err(e) => format!("Error: {e}"),
+        };
+        log_mcp_string_response(self.role_name(), self.session().task_id(), "set_param_work_branch", &response);
         response
     }
 }
@@ -549,35 +617,27 @@ pub trait CommonMcpImpl: Send + Sync {
 #[allow(async_fn_in_trait)]
 pub trait PreparatorMcpImpl: CommonMcpImpl {
     async fn get_param_destination_repository_impl(&self) -> String {
-        self.get_param_impl(Parameter::DestinationRepository).await
+        self.get_destination_repository_impl().await
     }
 
     async fn set_param_destination_repository_impl(&self, value: Option<String>) -> String {
-        self.set_param_impl(Parameter::DestinationRepository, value)
-            .await
+        self.set_destination_repository_impl(value).await
     }
 
     async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::DestinationBranch).await
+        self.get_destination_branch_impl().await
     }
 
     async fn set_param_destination_branch_impl(&self, value: Option<String>) -> String {
-        self.set_param_impl(Parameter::DestinationBranch, value)
-            .await
+        self.set_destination_branch_impl(value).await
     }
 
     async fn get_param_work_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::WorkBranch).await
+        self.get_work_branch_impl().await
     }
 
     async fn set_param_work_branch_postfix_impl(&self, value: Option<String>) -> String {
-        match self.session().get_parameter(Parameter::WorkBranch).await {
-            Ok(Some(_)) => return "Error: work_branch is already set".to_string(),
-            Err(e) => return format!("Error: {e}"),
-            Ok(None) => {}
-        }
-        let branch = value.map(|v| self.session().create_branch_name(&v));
-        self.set_param_impl(Parameter::WorkBranch, branch).await
+        self.set_work_branch_postfix_impl(value).await
     }
 }
 
@@ -609,11 +669,11 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
     }
 
     async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::DestinationBranch).await
+        self.get_destination_branch_impl().await
     }
 
     async fn get_param_work_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::WorkBranch).await
+        self.get_work_branch_impl().await
     }
 }
 
@@ -621,11 +681,11 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
 #[allow(async_fn_in_trait)]
 pub trait WorkerMcpImpl: CommonMcpImpl {
     async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::DestinationBranch).await
+        self.get_destination_branch_impl().await
     }
 
     async fn get_param_work_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::WorkBranch).await
+        self.get_work_branch_impl().await
     }
 
     async fn ask_planner_impl(&self, message: &str) -> String {
@@ -671,11 +731,11 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
 #[allow(async_fn_in_trait)]
 pub trait ReviewerMcpImpl: CommonMcpImpl {
     async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::DestinationBranch).await
+        self.get_destination_branch_impl().await
     }
 
     async fn get_param_work_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::WorkBranch).await
+        self.get_work_branch_impl().await
     }
 
     async fn review_accept_impl(&self, message: &str) -> String {
@@ -742,11 +802,11 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
 #[allow(async_fn_in_trait)]
 pub trait TesterMcpImpl: CommonMcpImpl {
     async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::DestinationBranch).await
+        self.get_destination_branch_impl().await
     }
 
     async fn get_param_work_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::WorkBranch).await
+        self.get_work_branch_impl().await
     }
 
     async fn test_accept_impl(&self, message: &str) -> String {
@@ -813,10 +873,10 @@ pub trait TesterMcpImpl: CommonMcpImpl {
 #[allow(async_fn_in_trait)]
 pub trait MergerMcpImpl: CommonMcpImpl {
     async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::DestinationBranch).await
+        self.get_destination_branch_impl().await
     }
 
     async fn get_param_work_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::WorkBranch).await
+        self.get_work_branch_impl().await
     }
 }

@@ -20,13 +20,14 @@ impl Default for ZbobrTaskBackendFsConfig {
 }
 
 impl zbobr_api::config::BackendConfig for ZbobrTaskBackendFsConfig {
-    type Backend = crate::ZbobrTaskBackendFs;
+    type Backend = crate::ArcTaskBackendFs;
 
     fn build_backend(
         self,
         _dispatcher: &zbobr_api::config::ZbobrDispatcherConfig,
     ) -> anyhow::Result<Self::Backend> {
-        crate::ZbobrTaskBackendFs::from_config(self)
+        let inner = crate::ZbobrTaskBackendFs::from_config(self)?;
+        Ok(crate::ArcTaskBackendFs::new(inner))
     }
 }
 

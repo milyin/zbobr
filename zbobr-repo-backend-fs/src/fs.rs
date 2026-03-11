@@ -4,6 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use tokio::fs;
 use zbobr_api::backend::WorktreeBackend;
+use zbobr_api::task::TaskIdentity;
 use zbobr_utility::{git, git_check, git_output};
 
 use crate::config::ZbobrRepoBackendFsConfig;
@@ -118,11 +119,13 @@ impl ZbobrRepoBackendFs {
 impl WorktreeBackend for ZbobrRepoBackendFs {
     async fn update_worktree(
         &self,
-        remote_repo: &str,
-        base_branch: &str,
-        work_branch: &str,
+        identity: &TaskIdentity,
         workspace_path: &Path,
     ) -> anyhow::Result<bool> {
+        let remote_repo = &identity.destination_repository;
+        let base_branch = &identity.destination_branch;
+        let work_branch = &identity.work_branch;
+
         if work_branch == base_branch {
             anyhow::bail!(
                 "work_branch and base_branch must differ, got '{}'",
@@ -137,7 +140,6 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
         self.ensure_worktree(&bare_dir, base_branch, work_branch, workspace_path)
             .await?;
 
-        // Check if work_branch includes all commits from base_branch
         let is_uptodate = git_check(
             &bare_dir,
             &[
@@ -162,7 +164,8 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
         Ok(is_uptodate)
     }
 
-    async fn update_pr(&self, work_branch: &str, _destination_repo: &str, _base_branch: &str) -> anyhow::Result<String> {
+    async fn update_pr(&self, identity: &TaskIdentity) -> anyhow::Result<String> {
+        let work_branch = &identity.work_branch;
         if !self.config.repos_dir.exists() {
             anyhow::bail!("No worktree found for work_branch '{}'", work_branch);
         }

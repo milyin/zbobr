@@ -1,13 +1,24 @@
 use std::collections::HashMap;
 
+// -- TaskIdentity --
+
+/// Bundles task routing info for worktree operations.
+/// Only constructible when all three fields (destination_repository, destination_branch, work_branch) are set.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TaskIdentity {
+    pub task_id: u64,
+    pub destination_repository: String,
+    pub destination_branch: String,
+    pub work_branch: String,
+}
+
 // -- Parameter names enum --
 
 /// Standardized parameter names for task configuration.
+/// Note: DestinationRepository, DestinationBranch, and WorkBranch have been
+/// promoted to first-class fields on Task. Only extensible params remain here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Parameter {
-    DestinationRepository,
-    DestinationBranch,
-    WorkBranch,
     PrUrl,
 }
 
@@ -15,9 +26,6 @@ impl Parameter {
     /// Returns the parameter name as a string.
     pub fn name(&self) -> &'static str {
         match self {
-            Parameter::DestinationRepository => "destination_repository",
-            Parameter::DestinationBranch => "destination_branch",
-            Parameter::WorkBranch => "work_branch",
             Parameter::PrUrl => "pr_url",
         }
     }
@@ -888,6 +896,9 @@ pub struct Task {
     pub title: String,
     pub description: String,
     pub stage: Stage,
+    pub destination_repository: Option<String>,
+    pub destination_branch: Option<String>,
+    pub work_branch: Option<String>,
     pub parameters: HashMap<Parameter, String>,
     pub checklist: Vec<ChecklistItem>,
     pub signal: Option<Signal>,
@@ -901,4 +912,16 @@ pub struct Task {
     /// Used to detect if the task has been modified between read and write operations.
     #[serde(skip)]
     pub etag: Option<String>,
+}
+
+impl Task {
+    /// Returns a TaskIdentity if all three routing fields are set.
+    pub fn identity(&self) -> Option<TaskIdentity> {
+        Some(TaskIdentity {
+            task_id: self.id,
+            destination_repository: self.destination_repository.clone()?,
+            destination_branch: self.destination_branch.clone()?,
+            work_branch: self.work_branch.clone()?,
+        })
+    }
 }

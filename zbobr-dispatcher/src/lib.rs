@@ -47,7 +47,6 @@ pub struct ZbobrDispatcher {
 
 impl ZbobrDispatcher {
     /// Create a new Zbobr instance from config and pre-built backends.
-    /// Used primarily in tests.
     pub fn new_with_backends(
         config: ZbobrDispatcherConfig,
         task_backend: Arc<dyn TaskBackend>,
@@ -114,28 +113,24 @@ impl ZbobrDispatcher {
         confirm: bool,
     ) -> anyhow::Result<u64> {
         let id = {
-            let mut parameters = std::collections::HashMap::new();
-            if let Some(repo) = destination_repository {
-                parameters.insert(Parameter::DestinationRepository, repo);
-            }
-            if let Some(branch) = destination_branch {
-                parameters.insert(Parameter::DestinationBranch, branch);
-            }
+            let parameters = std::collections::HashMap::new();
             self.tasks()
                 .create_task(title, description, stage, parameters)
                 .await?
         };
-        if confirm {
-            self.tasks()
-                .modify_task(
-                    id,
-                    Box::new(|mut task| {
-                        task.confirm = true;
-                        task
-                    }),
-                )
-                .await?;
-        }
+        // Set promoted fields + confirm flag via modify
+        let weak = self.tasks().get_task(id).await?;
+        let mutable = weak.upgrade().await?;
+        mutable
+            .modify_task(Box::new(move |mut task| {
+                task.destination_repository = destination_repository;
+                task.destination_branch = destination_branch;
+                if confirm {
+                    task.confirm = true;
+                }
+                task
+            }))
+            .await?;
         Ok(id)
     }
 
@@ -146,14 +141,10 @@ impl ZbobrDispatcher {
         id: u64,
         offset: Option<usize>,
     ) -> anyhow::Result<zbobr_api::HistoryChunk> {
-        let comments = self.tasks().get_task_comments(id).await?;
-        let desc = self
-            .tasks()
-            .get_task(id)
-            .await
-            .map(|t| t.description)
-            .unwrap_or_default();
-        zbobr_api::extract_history_chunk(comments, &desc, offset)
+        let weak = self.tasks().get_task(id).await?;
+        let comments = weak.get_comments().await?;
+        let task = weak.snapshot().await?;
+        zbobr_api::extract_history_chunk(comments, &task.description, offset)
     }
 
     pub async fn setup_repository(&self, force: bool) -> anyhow::Result<()> {
@@ -182,16 +173,13 @@ impl ZbobrDispatcher {
     /// `TaskDir::new(workspaces, task_id)/repo_name` and delegates to the backend.
     pub async fn update_worktree(
         &self,
-        remote_repo: &str,
-        base_branch: &str,
-        work_branch: &str,
-        task_id: u64,
+        identity: &zbobr_api::TaskIdentity,
     ) -> anyhow::Result<bool> {
-        let repo_name = Self::extract_repo_name(remote_repo);
-        let task_dir = TaskDir::new(&self.config.workspaces, task_id);
+        let repo_name = Self::extract_repo_name(&identity.destination_repository);
+        let task_dir = TaskDir::new(&self.config.workspaces, identity.task_id);
         let workspace_path = task_dir.path().join(repo_name);
         self.worktree()
-            .update_worktree(remote_repo, base_branch, work_branch, &workspace_path)
+            .update_worktree(identity, &workspace_path)
             .await
     }
 

@@ -14,13 +14,13 @@ use zbobr_dispatcher::{
     backend::TaskBackendExt,
     prompts::Prompts,
     config::StageConfig,
-    task::{Parameter, Tool},
+    task::Tool,
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_repo_backend_fs::{ZbobrRepoBackendFs, ZbobrRepoBackendFsConfig};
 use zbobr_repo_backend_github::{ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig};
-use zbobr_task_backend_fs::{ZbobrTaskBackendFs, ZbobrTaskBackendFsConfig};
-use zbobr_task_backend_github::{ZbobrTaskBackendGithub, ZbobrTaskBackendGithubConfig};
+use zbobr_task_backend_fs::{ArcTaskBackendFs, ZbobrTaskBackendFs, ZbobrTaskBackendFsConfig};
+use zbobr_task_backend_github::{ArcTaskBackendGithub, ZbobrTaskBackendGithub, ZbobrTaskBackendGithubConfig};
 
 static SCENARIO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -77,7 +77,7 @@ impl IntegrationTestEnv {
         };
 
         let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
-            Arc::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?);
+            Arc::new(ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?));
         let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
             Arc::new(ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?);
 
@@ -140,7 +140,7 @@ impl IntegrationTestEnv {
         };
 
         let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
-            Arc::new(ZbobrTaskBackendGithub::from_config(task_backend_config).ok()?);
+            Arc::new(ArcTaskBackendGithub::new(ZbobrTaskBackendGithub::from_config(task_backend_config).ok()?));
         let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
             Arc::new(ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?);
 
@@ -205,7 +205,7 @@ impl IntegrationTestEnv {
         };
 
         let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
-            Arc::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?);
+            Arc::new(ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?));
         let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> = Arc::new(
             ZbobrRepoBackendGithub::from_config(
                 repo_backend_config,
@@ -278,7 +278,7 @@ impl IntegrationTestEnv {
         };
 
         let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
-            Arc::new(ZbobrTaskBackendGithub::from_config(task_backend_config).ok()?);
+            Arc::new(ArcTaskBackendGithub::new(ZbobrTaskBackendGithub::from_config(task_backend_config).ok()?));
         let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> = Arc::new(
             ZbobrRepoBackendGithub::from_config(
                 repo_backend_config,
@@ -345,11 +345,17 @@ impl IntegrationTestEnv {
             .tasks().get_task(task_id)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name))
+            .snapshot()
+            .await
+            .unwrap_or_else(|e| panic!("[{}] failed to snapshot task #{task_id}: {e}", self.name))
     }
 
     pub async fn get_comments(&self, task_id: u64) -> Vec<Comment> {
         self.zbobr
-            .tasks().get_task_comments(task_id)
+            .tasks().get_task(task_id)
+            .await
+            .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name))
+            .get_comments()
             .await
             .unwrap_or_else(|e| {
                 panic!(
@@ -364,12 +370,13 @@ impl IntegrationTestEnv {
         let text = text.to_string();
         self.zbobr
             .task_session(task_id)
-            .modify_task(move |task| {
+            .modify_task(move |mut task| {
                 task.checklist.push(ChecklistItem {
                     id,
                     checked: false,
                     text,
                 });
+                task
             })
             .await
             .unwrap_or_else(|e| {
@@ -390,18 +397,17 @@ impl IntegrationTestEnv {
         let dest_repo = dest_repo.to_string();
         let dest_branch = dest_branch.to_string();
         let work_branch = work_branch.to_string();
-        self.zbobr
-            .tasks().modify_task(
-                task_id,
-                Box::new(move |mut task| {
-                    task.parameters
-                        .insert(Parameter::DestinationRepository, dest_repo);
-                    task.parameters
-                        .insert(Parameter::DestinationBranch, dest_branch);
-                    task.parameters.insert(Parameter::WorkBranch, work_branch);
-                    task
-                }),
-            )
+        let weak = self.zbobr.tasks().get_task(task_id).await
+            .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name));
+        let mutable = weak.upgrade().await
+            .unwrap_or_else(|e| panic!("[{}] failed to upgrade task #{task_id}: {e}", self.name));
+        mutable
+            .modify_task(Box::new(move |mut task| {
+                task.destination_repository = Some(dest_repo);
+                task.destination_branch = Some(dest_branch);
+                task.work_branch = Some(work_branch);
+                task
+            }))
             .await
             .unwrap_or_else(|e| {
                 panic!(
@@ -412,15 +418,11 @@ impl IntegrationTestEnv {
     }
 
     pub async fn set_task_conflict(&self, task_id: u64, conflict: bool) {
-        self.zbobr
-            .tasks().modify_task(
-                task_id,
-                Box::new(move |mut task| {
-                    task.conflict = conflict;
-                    task
-                }),
-            )
-            .await
+        let weak = self.zbobr.tasks().get_task(task_id).await
+            .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name));
+        let mutable = weak.upgrade().await
+            .unwrap_or_else(|e| panic!("[{}] failed to upgrade task #{task_id}: {e}", self.name));
+        mutable.set_conflict(conflict).await
             .unwrap_or_else(|e| {
                 panic!(
                     "[{}] failed to set conflict on task #{task_id}: {e}",
@@ -447,17 +449,18 @@ impl IntegrationTestEnv {
     /// Update the task's stage, simulating a manual stage transition with
     /// respect to the `confirm` flag (sets `pause` when confirm is true).
     pub async fn update_task_stage(&self, task_id: u64, new_stage: Stage) {
-        self.zbobr
-            .tasks().modify_task(
-                task_id,
-                Box::new(move |mut task| {
-                    if task.confirm && task.stage != new_stage {
-                        task.pause = true;
-                    }
-                    task.stage = new_stage;
-                    task
-                }),
-            )
+        let weak = self.zbobr.tasks().get_task(task_id).await
+            .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name));
+        let mutable = weak.upgrade().await
+            .unwrap_or_else(|e| panic!("[{}] failed to upgrade task #{task_id}: {e}", self.name));
+        mutable
+            .modify_task(Box::new(move |mut task| {
+                if task.confirm && task.stage != new_stage {
+                    task.pause = true;
+                }
+                task.stage = new_stage;
+                task
+            }))
             .await
             .unwrap_or_else(|e| {
                 panic!(
@@ -565,27 +568,20 @@ impl IntegrationTestEnv {
     pub async fn prepare_workspace_via_repo_backend(
         &self,
         task_id: u64,
-        repo_slug: &str,
-        work_branch: &str,
+        _repo_slug: &str,
+        _work_branch: &str,
     ) -> PathBuf {
         let task = self.get_task(task_id).await;
-        let dest_repo = task
-            .parameters
-            .get(&Parameter::DestinationRepository)
-            .cloned()
-            .unwrap_or_else(|| repo_slug.to_string());
-        let dest_branch = task
-            .parameters
-            .get(&Parameter::DestinationBranch)
-            .cloned()
-            .unwrap_or_else(|| "main".to_string());
+        let identity = task.identity()
+            .unwrap_or_else(|| panic!("[{}] task #{task_id} missing routing params", self.name));
 
         self.zbobr
-            .update_worktree(&dest_repo, &dest_branch, work_branch, task_id)
+            .update_worktree(&identity)
             .await
             .unwrap_or_else(|e| panic!("[{}] update_worktree failed: {e}", self.name));
 
-        let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo);
+        let dest_repo = &identity.destination_repository;
+        let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo);
         let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), task_id);
         let work_dir = task_dir.path().join(repo_name);
 

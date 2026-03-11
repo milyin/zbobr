@@ -537,16 +537,12 @@ impl ZbobrTaskBackendGithub {
         let body = issue.body.unwrap_or_default();
         let (description, params_map, checklist) = parse_description_full(&body);
 
+        // Promoted fields: read from params_map where they were stored in old format
+        let destination_repository = params_map.get("destination_repository").cloned();
+        let destination_branch = params_map.get("destination_branch").cloned();
+        let work_branch = params_map.get("work_branch").cloned();
+
         let mut parameters = HashMap::new();
-        if let Some(repo) = params_map.get(Parameter::DestinationRepository.name()) {
-            parameters.insert(Parameter::DestinationRepository, repo.clone());
-        }
-        if let Some(branch) = params_map.get(Parameter::DestinationBranch.name()) {
-            parameters.insert(Parameter::DestinationBranch, branch.clone());
-        }
-        if let Some(branch) = params_map.get(Parameter::WorkBranch.name()) {
-            parameters.insert(Parameter::WorkBranch, branch.clone());
-        }
         if let Some(url) = params_map.get(Parameter::PrUrl.name()) {
             parameters.insert(Parameter::PrUrl, url.clone());
         }
@@ -577,6 +573,9 @@ impl ZbobrTaskBackendGithub {
             title: issue.title,
             description,
             stage,
+            destination_repository,
+            destination_branch,
+            work_branch,
             parameters,
             checklist,
             signal,
@@ -588,6 +587,25 @@ impl ZbobrTaskBackendGithub {
     }
 
     /// Record that an issue was just written to and needs a cooling period.
+    /// Build the string parameters map for serialization, including promoted fields.
+    fn task_to_string_params(task: &Task) -> HashMap<String, String> {
+        let mut params: HashMap<String, String> = task
+            .parameters
+            .iter()
+            .map(|(k, v)| (k.name().to_string(), v.clone()))
+            .collect();
+        if let Some(ref v) = task.destination_repository {
+            params.insert("destination_repository".to_string(), v.clone());
+        }
+        if let Some(ref v) = task.destination_branch {
+            params.insert("destination_branch".to_string(), v.clone());
+        }
+        if let Some(ref v) = task.work_branch {
+            params.insert("work_branch".to_string(), v.clone());
+        }
+        params
+    }
+
     fn record_cooling(&self, id: u64) {
         let deadline = tokio::time::Instant::now() + COOLING_DURATION;
         let mut map = self.cooling_deadlines.lock().unwrap();
@@ -642,58 +660,24 @@ impl ZbobrTaskBackendGithub {
         .await?;
         Ok(Self::issue_to_task(issue))
     }
-}
 
-#[async_trait]
-impl TaskBackend for ZbobrTaskBackendGithub {
-    async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
+    /// Internal: read task with cooling check.
+    async fn read_task(&self, id: u64) -> anyhow::Result<Task> {
         self.await_cooling_for(id).await;
         self.fetch_task(id).await
     }
 
-    async fn create_task(
-        &self,
-        title: &str,
-        description: &str,
-        stage: Stage,
-        parameters: HashMap<Parameter, String>,
-    ) -> anyhow::Result<u64> {
-        let (owner, repo) = self.parse_repo()?;
-        let mut params_text: HashMap<String, String> = HashMap::new();
-        if let Some(v) = parameters.get(&Parameter::DestinationRepository) {
-            params_text.insert(
-                Parameter::DestinationRepository.name().to_string(),
-                v.clone(),
-            );
-        }
-        if let Some(v) = parameters.get(&Parameter::DestinationBranch) {
-            params_text.insert(Parameter::DestinationBranch.name().to_string(), v.clone());
-        }
-        if let Some(v) = parameters.get(&Parameter::WorkBranch) {
-            params_text.insert(Parameter::WorkBranch.name().to_string(), v.clone());
-        }
-        if let Some(v) = parameters.get(&Parameter::PrUrl) {
-            params_text.insert(Parameter::PrUrl.name().to_string(), v.clone());
-        }
-        let body = serialize_description_full(description, &params_text, &[]);
-
-        let stage_number = self.find_stage_number(stage).await?;
-
-        let issue = retry_github("create issue", || async {
-            let issues = self.octocrab.issues(owner, repo);
-            let mut builder = issues.create(title).body(body.clone());
-
-            if let Some(n) = stage_number {
-                builder = builder.milestone(n);
-            }
-
-            builder.send().await
-        })
-        .await?;
-        Ok(issue.number)
+    /// Get or create a per-task lock.
+    fn task_lock(&self, id: u64) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.task_locks.lock().unwrap();
+        locks
+            .entry(id)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 
-    async fn close_task(&self, id: u64) -> anyhow::Result<()> {
+    /// Internal: close a task (issue).
+    async fn close_task_internal(&self, id: u64) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
         let url = format!("/repos/{owner}/{repo}/issues/{id}");
         let body = serde_json::json!({ "state": "closed" });
@@ -705,30 +689,12 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         Ok(())
     }
 
-    async fn is_task_closed(&self, id: u64) -> anyhow::Result<bool> {
-        let (owner, repo) = self.backend_config.parse_repo()?;
-        let issue: IssueResponse = retry_github("get issue state", || {
-            self.octocrab
-                .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
-        })
-        .await?;
-        Ok(issue.state == "closed")
-    }
-
-    async fn modify_task(
+    /// Internal: read-modify-write a task atomically.
+    async fn modify_task_internal(
         &self,
         id: u64,
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
     ) -> anyhow::Result<()> {
-        let lock = {
-            let mut locks = self.task_locks.lock().unwrap();
-            locks
-                .entry(id)
-                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
-                .clone()
-        };
-        let _guard = lock.lock().await;
-
         let task = self.fetch_task(id).await?;
         let original_stage = task.stage;
         let original_signal = task.signal;
@@ -736,21 +702,13 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         let original_pause = task.pause;
         let original_confirm = task.confirm;
         let expected_description = task.etag.clone().unwrap_or_else(|| {
-            let string_params: HashMap<String, String> = task
-                .parameters
-                .iter()
-                .map(|(k, v)| (k.name().to_string(), v.clone()))
-                .collect();
+            let string_params = Self::task_to_string_params(&task);
             serialize_description_full(&task.description, &string_params, &task.checklist)
         });
 
         let task = mutate(task);
 
-        let string_params: HashMap<String, String> = task
-            .parameters
-            .iter()
-            .map(|(k, v)| (k.name().to_string(), v.clone()))
-            .collect();
+        let string_params = Self::task_to_string_params(&task);
         let new_description =
             serialize_description_full(&task.description, &string_params, &task.checklist);
 
@@ -764,16 +722,14 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                 Err(e) if attempt >= MAX_RETRIES => return Err(e),
                 Err(_) => {}
             }
-            // Re-read to check for concurrent modifications
             let current_task = self.fetch_task(id).await?;
-            let current_body = current_task.etag.unwrap_or_else(|| {
-                let sp: HashMap<String, String> = current_task
-                    .parameters
-                    .iter()
-                    .map(|(k, v)| (k.name().to_string(), v.clone()))
-                    .collect();
-                serialize_description_full(&current_task.description, &sp, &current_task.checklist)
-            });
+            let current_body = match current_task.etag {
+                Some(etag) => etag,
+                None => {
+                    let sp = Self::task_to_string_params(&current_task);
+                    serialize_description_full(&current_task.description, &sp, &current_task.checklist)
+                }
+            };
             if current_body != expected_desc {
                 new_desc =
                     merge_concurrent_description_updates(&expected_desc, &current_body, &new_desc);
@@ -781,17 +737,12 @@ impl TaskBackend for ZbobrTaskBackendGithub {
             }
         }
 
-        // Apply stage change if it differs
         if task.stage != original_stage {
             self.apply_stage_change(id, task.stage).await?;
         }
-
-        // Apply signal change if it differs
         if task.signal != original_signal {
             self.apply_signal_change(id, task.signal).await?;
         }
-
-        // Apply flag changes if they differ
         if task.conflict != original_conflict
             || task.pause != original_pause
             || task.confirm != original_confirm
@@ -804,35 +755,8 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         Ok(())
     }
 
-    async fn list_tasks_by_stage(&self, stage: Stage) -> anyhow::Result<Vec<Task>> {
-        self.await_all_cooling().await;
-        let stage_number = match self.find_stage_number(stage).await? {
-            Some(n) => n,
-            None => return Ok(vec![]),
-        };
-
-        let (owner, repo) = self.parse_repo()?;
-        let params = vec![
-            ("milestone", stage_number.to_string()),
-            ("state", "open".to_string()),
-        ];
-
-        let issues: Vec<IssueResponse> = retry_github("list issues", || {
-            self.octocrab
-                .get(format!("/repos/{owner}/{repo}/issues"), Some(&params))
-        })
-        .await?;
-
-        let mut tasks = Vec::new();
-        for issue in issues {
-            let task = Self::issue_to_task(issue);
-
-            tasks.push(task);
-        }
-        Ok(tasks)
-    }
-
-    async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
+    /// Internal: get task comments.
+    async fn get_task_comments_internal(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
         let (owner, repo) = self.parse_repo()?;
         let comments: Vec<CommentResponse> = retry_github("list issue comments", || {
             self.octocrab.get(
@@ -848,15 +772,10 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                 let body = c.body.unwrap_or_default();
                 let timestamp = c.created_at.unwrap_or_default();
 
-                // Split first line (tag) from body text so we can parse metadata.
-                // split into first line (possible tag) plus the rest of the text
                 let mut parts = body.splitn(2, '\n');
                 let tag_line = parts.next().unwrap_or("");
                 let rest = parts.next();
 
-                // if the first line parses as a tag we drop it and keep the trailing
-                // body.  otherwise we treat the entire comment as a simple request
-                // and retain the original text verbatim.
                 let (tag, text) = match tag_line.parse::<CommentTag>() {
                     Ok(t) => {
                         let body_text = rest.unwrap_or("").trim_start().to_string();
@@ -881,7 +800,8 @@ impl TaskBackend for ZbobrTaskBackendGithub {
             .collect())
     }
 
-    async fn post_task_comment(
+    /// Internal: post a task comment.
+    async fn post_task_comment_internal(
         &self,
         id: u64,
         comment_type: CommentType,
@@ -905,15 +825,193 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         .await?;
         Ok(())
     }
+}
+
+// ---------------------------------------------------------------------------
+// GithubTaskWeak / GithubTaskMut
+// ---------------------------------------------------------------------------
+
+use zbobr_api::backend::{TaskWeak, TaskMut};
+use tokio::sync::OwnedMutexGuard;
+
+struct GithubTaskWeak {
+    id: u64,
+    backend: Arc<ZbobrTaskBackendGithub>,
+}
+
+#[async_trait]
+impl TaskWeak for GithubTaskWeak {
+    fn task_id(&self) -> u64 { self.id }
+
+    async fn snapshot(&self) -> anyhow::Result<Task> {
+        self.backend.read_task(self.id).await
+    }
+
+    async fn upgrade(&self) -> anyhow::Result<Box<dyn TaskMut>> {
+        let lock = self.backend.task_lock(self.id);
+        let guard = lock.try_lock_owned().map_err(|_| {
+            anyhow::anyhow!("Task {} is already exclusively locked", self.id)
+        })?;
+        Ok(Box::new(GithubTaskMut {
+            id: self.id,
+            backend: self.backend.clone(),
+            _guard: guard,
+        }))
+    }
+
+    async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
+        self.backend.get_task_comments_internal(self.id).await
+    }
+}
+
+struct GithubTaskMut {
+    id: u64,
+    backend: Arc<ZbobrTaskBackendGithub>,
+    _guard: OwnedMutexGuard<()>,
+}
+
+#[async_trait]
+impl TaskMut for GithubTaskMut {
+    fn task_id(&self) -> u64 { self.id }
+
+    async fn snapshot(&self) -> anyhow::Result<Task> {
+        self.backend.read_task(self.id).await
+    }
+
+    async fn modify_task(
+        &self,
+        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
+    ) -> anyhow::Result<()> {
+        self.backend.modify_task_internal(self.id, mutate).await
+    }
+
+    async fn close(&self) -> anyhow::Result<()> {
+        self.backend.close_task_internal(self.id).await
+    }
+
+    async fn post_comment(
+        &self,
+        comment_type: CommentType,
+        role: Option<Role>,
+        hostname: &str,
+        tool: Option<Tool>,
+        model: Option<Model>,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        self.backend.post_task_comment_internal(
+            self.id, comment_type, role, hostname, tool, model, body,
+        ).await
+    }
+
+    fn downgrade(self: Box<Self>) -> Box<dyn TaskWeak> {
+        Box::new(GithubTaskWeak {
+            id: self.id,
+            backend: self.backend.clone(),
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ArcTaskBackendGithub — proper TaskBackend wrapper
+// ---------------------------------------------------------------------------
+
+/// Arc-wrapped GitHub backend that properly returns TaskWeak/TaskMut handles.
+pub struct ArcTaskBackendGithub {
+    inner: Arc<ZbobrTaskBackendGithub>,
+}
+
+impl ArcTaskBackendGithub {
+    pub fn new(backend: ZbobrTaskBackendGithub) -> Self {
+        Self {
+            inner: Arc::new(backend),
+        }
+    }
+}
+
+#[async_trait]
+impl TaskBackend for ArcTaskBackendGithub {
+    async fn get_task(&self, id: u64) -> anyhow::Result<Box<dyn TaskWeak>> {
+        // Verify the task exists
+        let _task = self.inner.read_task(id).await?;
+        Ok(Box::new(GithubTaskWeak {
+            id,
+            backend: self.inner.clone(),
+        }))
+    }
+
+    async fn list_tasks_by_stage(
+        &self,
+        stage: Stage,
+    ) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+        self.inner.await_all_cooling().await;
+        let stage_number = match self.inner.find_stage_number(stage).await? {
+            Some(n) => n,
+            None => return Ok(vec![]),
+        };
+
+        let (owner, repo) = self.inner.parse_repo()?;
+        let params = vec![
+            ("milestone", stage_number.to_string()),
+            ("state", "open".to_string()),
+        ];
+
+        let issues: Vec<IssueResponse> = retry_github("list issues", || {
+            self.inner.octocrab
+                .get(format!("/repos/{owner}/{repo}/issues"), Some(&params))
+        })
+        .await?;
+
+        let mut result: Vec<Box<dyn TaskWeak>> = Vec::new();
+        for issue in issues {
+            let id = issue.number;
+            // Verify it parses correctly
+            let _task = ZbobrTaskBackendGithub::issue_to_task(issue);
+            result.push(Box::new(GithubTaskWeak {
+                id,
+                backend: self.inner.clone(),
+            }));
+        }
+        Ok(result)
+    }
+
+    async fn create_task(
+        &self,
+        title: &str,
+        description: &str,
+        stage: Stage,
+        parameters: HashMap<Parameter, String>,
+    ) -> anyhow::Result<u64> {
+        let (owner, repo) = self.inner.parse_repo()?;
+        let mut params_text: HashMap<String, String> = HashMap::new();
+        if let Some(v) = parameters.get(&Parameter::PrUrl) {
+            params_text.insert(Parameter::PrUrl.name().to_string(), v.clone());
+        }
+        let body = serialize_description_full(description, &params_text, &[]);
+
+        let stage_number = self.inner.find_stage_number(stage).await?;
+
+        let issue = retry_github("create issue", || async {
+            let issues = self.inner.octocrab.issues(owner, repo);
+            let mut builder = issues.create(title).body(body.clone());
+
+            if let Some(n) = stage_number {
+                builder = builder.milestone(n);
+            }
+
+            builder.send().await
+        })
+        .await?;
+        Ok(issue.number)
+    }
 
     async fn setup(&self, force: bool) -> anyhow::Result<()> {
-        self.setup(force).await
+        self.inner.setup(force).await
     }
 
     async fn validate_connectivity(&self) -> anyhow::Result<()> {
-        let (owner, repo) = self.parse_repo()?;
+        let (owner, repo) = self.inner.parse_repo()?;
         let task_repo_exists = retry_github("check task repo", || {
-            self.octocrab
+            self.inner.octocrab
                 .get::<RepoResponse, _, _>(format!("/repos/{owner}/{repo}"), None::<&()>)
         })
         .await
@@ -930,7 +1028,7 @@ impl TaskBackend for ZbobrTaskBackendGithub {
     }
 
     fn debug_state(&self) -> String {
-        format!("GitHubTaskBackend({})", self.backend_config.github_repo)
+        format!("GitHubTaskBackend({})", self.inner.backend_config.github_repo)
     }
 }
 

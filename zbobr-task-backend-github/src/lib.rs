@@ -4,4 +4,4 @@ mod separator;
 pub use config::{
     ZbobrTaskBackendGithubArgs, ZbobrTaskBackendGithubConfig, ZbobrTaskBackendGithubToml,
 };
-pub use github::ZbobrTaskBackendGithub;
+pub use github::{ArcTaskBackendGithub, ZbobrTaskBackendGithub};

@@ -15,10 +15,9 @@ use zbobr_utility::{git, git_check, git_output, configure_git_user};
 use crate::{
     Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
     ZbobrExecutorConfig,
-    backend::TaskBackendExt,
     mcp::common::get_hostname,
     prompts::Prompts,
-    task::{Parameter, Role, Tool, Model},
+    task::{Role, Tool, Model},
 };
 
 // ---------------------------------------------------------------------------
@@ -353,6 +352,15 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     );
     println!("Conflict:    {}", task.conflict);
     println!("Pause:       {}", task.pause);
+    if let Some(ref repo) = task.destination_repository {
+        println!("Dest Repo:   {}", repo);
+    }
+    if let Some(ref branch) = task.destination_branch {
+        println!("Dest Branch: {}", branch);
+    }
+    if let Some(ref branch) = task.work_branch {
+        println!("Work Branch: {}", branch);
+    }
     if !task.parameters.is_empty() {
         println!("Parameters:");
         for (k, v) in &task.parameters {
@@ -460,9 +468,9 @@ async fn run_task_subcommand(
             } else {
                 None
             };
-            let mut tasks = Vec::new();
+            let mut weak_tasks: Vec<Box<dyn crate::backend::TaskWeak>> = Vec::new();
             if let Some(stage) = stage_filter {
-                tasks = zbobr.tasks().list_tasks_by_stage(stage).await?;
+                weak_tasks = zbobr.tasks().list_tasks_by_stage(stage).await?;
             } else {
                 let all_stages = [
                     Stage::Pending,
@@ -475,10 +483,14 @@ async fn run_task_subcommand(
                 ];
                 for st in all_stages {
                     let mut ts = zbobr.tasks().list_tasks_by_stage(st).await?;
-                    tasks.append(&mut ts);
+                    weak_tasks.append(&mut ts);
                 }
-                tasks.sort_by_key(|t| t.id);
             }
+            let mut tasks = Vec::new();
+            for w in &weak_tasks {
+                tasks.push(w.snapshot().await?);
+            }
+            tasks.sort_by_key(|t| t.id);
 
             if tasks.is_empty() {
                 println!("No tasks found");
@@ -490,8 +502,9 @@ async fn run_task_subcommand(
             }
         }
         TaskSubcommand::Show { id } => {
-            let task = zbobr.tasks().get_task(id).await?;
-            let discussion = zbobr.tasks().get_task_comments(id).await?;
+            let weak = zbobr.tasks().get_task(id).await?;
+            let task = weak.snapshot().await?;
+            let discussion = weak.get_comments().await?;
             print_task(&task, &discussion);
         }
         TaskSubcommand::Update {
@@ -515,72 +528,47 @@ async fn run_task_subcommand(
             let signal = signal
                 .map(|s| s.parse::<Signal>().context("Invalid signal"))
                 .transpose()?;
-            zbobr
-                .tasks()
-                .modify_task(
-                    id,
-                    Box::new(move |mut task| {
-                        if let Some(t) = title {
-                            task.title = t;
+            let weak = zbobr.tasks().get_task(id).await?;
+            let mutable = weak.upgrade().await?;
+            mutable
+                .modify_task(Box::new(move |mut task| {
+                    if let Some(t) = title {
+                        task.title = t;
+                    }
+                    if let Some(d) = description {
+                        task.description = d;
+                    }
+                    if let Some(c) = confirm {
+                        task.confirm = c;
+                    }
+                    if let Some(s) = stage {
+                        if task.confirm && task.stage != s {
+                            task.pause = true;
                         }
-                        if let Some(d) = description {
-                            task.description = d;
-                        }
-                        if let Some(c) = confirm {
-                            task.confirm = c;
-                        }
-                        if let Some(s) = stage {
-                            if task.confirm && task.stage != s {
-                                task.pause = true;
-                            }
-                            task.stage = s;
-                        }
+                        task.stage = s;
+                    }
 
-                        if let Some(s) = signal {
-                            task.signal = Some(s);
-                        }
-                        if let Some(repo) = dest_repo {
-                            match repo {
-                                Some(repo) => {
-                                    task.parameters
-                                        .insert(Parameter::DestinationRepository, repo);
-                                }
-                                None => {
-                                    task.parameters.remove(&Parameter::DestinationRepository);
-                                }
-                            }
-                        }
-                        if let Some(branch) = dest_branch {
-                            match branch {
-                                Some(branch) => {
-                                    task.parameters.insert(Parameter::DestinationBranch, branch);
-                                }
-                                None => {
-                                    task.parameters.remove(&Parameter::DestinationBranch);
-                                }
-                            }
-                        }
-                        if let Some(branch) = work_branch {
-                            match branch {
-                                Some(branch) => {
-                                    task.parameters.insert(Parameter::WorkBranch, branch);
-                                }
-                                None => {
-                                    task.parameters.remove(&Parameter::WorkBranch);
-                                }
-                            }
-                        }
-                        if let Some(signal) = signal {
-                            task.signal = Some(signal);
-                        }
-                        task
-                    }),
-                )
+                    if let Some(s) = signal {
+                        task.signal = Some(s);
+                    }
+                    if let Some(repo) = dest_repo {
+                        task.destination_repository = repo;
+                    }
+                    if let Some(branch) = dest_branch {
+                        task.destination_branch = branch;
+                    }
+                    if let Some(branch) = work_branch {
+                        task.work_branch = branch;
+                    }
+                    task
+                }))
                 .await?;
             println!("Updated task #{}", id);
         }
         TaskSubcommand::Delete { id } => {
-            zbobr.tasks().close_task(id).await?;
+            let weak = zbobr.tasks().get_task(id).await?;
+            let mutable = weak.upgrade().await?;
+            mutable.close().await?;
             println!("Deleted task #{}", id);
         }
         TaskSubcommand::Prepare { task, show_prompt } => {
@@ -647,7 +635,7 @@ async fn run_task_subcommand(
             executor_mcp_tester_testing,
             executor_mcp_tester_merging,
         } => {
-            let task_obj = zbobr.tasks().get_task(task).await?;
+            let task_obj = zbobr.tasks().get_task(task).await?.snapshot().await?;
             let mcp_tester_config_override = if executor_mcp_tester_preparation.is_some()
                 || executor_mcp_tester_planning.is_some()
                 || executor_mcp_tester_working.is_some()
@@ -676,14 +664,14 @@ async fn run_task_subcommand(
             process_task_by_stage(zbobr, &task_obj, prompts, &effective_executor_config).await?;
         }
         TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
-            let task = zbobr.tasks().get_task(id).await?;
+            let task = zbobr.tasks().get_task(id).await?.snapshot().await?;
             let git_user_name = &zbobr.config().git_user_name;
             let git_user_email = &zbobr.config().git_user_email;
 
             // Ensure task has destination repo and branch
             let dest_repo = task
-                .parameters
-                .get(&Parameter::DestinationRepository)
+                .destination_repository
+                .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("Task #{} has no destination repository", id))?
                 .clone();
 
@@ -716,9 +704,8 @@ async fn run_task_subcommand(
 
             // Fetch latest to ensure we have the destination branch
             let dest_branch = task
-                .parameters
-                .get(&Parameter::DestinationBranch)
-                .cloned()
+                .destination_branch
+                .clone()
                 .unwrap_or_else(|| "main".to_string());
 
             // Ensure workspace exists and is set up
@@ -802,8 +789,8 @@ impl<'a> CliRoleRunner<'a> {
         let model = self.zbobr.config().model_for_role(self.role);
 
         self.zbobr
-            .tasks()
-            .set_task_stage(self.task_id, self.role.into())
+            .task_session(self.task_id)
+            .set_stage(self.role.into())
             .await?;
 
         let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), self.task_id);
@@ -855,11 +842,10 @@ impl<'a> CliRoleRunner<'a> {
         // For Merger: try a normal git merge first. If it succeeds, no need
         // to invoke the agent — just commit the merge and return.
         if self.role == Role::Merger {
-            let task = self.zbobr.tasks().get_task(self.task_id).await?;
+            let task = self.zbobr.tasks().get_task(self.task_id).await?.snapshot().await?;
             let dest_branch = task
-                .parameters
-                .get(&Parameter::DestinationBranch)
-                .cloned()
+                .destination_branch
+                .clone()
                 .unwrap_or_else(|| "main".to_string());
             let merged_ok = git_check(&work_dir, &["merge", &dest_branch, "--no-edit"])
                 .await
@@ -1114,20 +1100,27 @@ pub async fn run_manager_loop(
             last_cleanup = std::time::Instant::now();
         }
 
-        let mut pending_tasks = match zbobr.tasks().list_tasks_by_stage(Stage::Pending).await {
+        let pending_weak = match zbobr.tasks().list_tasks_by_stage(Stage::Pending).await {
             Ok(tasks) => tasks,
             Err(e) => {
                 tracing::error!("Failed to check PENDING tasks: {e}");
                 vec![]
             }
         };
+        let mut pending_tasks = Vec::new();
+        for w in &pending_weak {
+            match w.snapshot().await {
+                Ok(t) => pending_tasks.push(t),
+                Err(e) => tracing::warn!("Failed to snapshot task: {e}"),
+            }
+        }
 
         // Sort pending tasks by stage priority (closer to completion first).
         // Conflict tasks will still take priority in the loop below since they're checked first.
         pending_tasks.sort_by_key(|task| task.stage.priority());
 
         let mut session_run = false;
-        for task in pending_tasks {
+        for task in &pending_tasks {
             if task.pause {
                 continue;
             }
@@ -1222,42 +1215,28 @@ async fn prepare_workspace(
     match role {
         Role::Preparator => Ok((task_dir.to_path_buf(), true)),
         Role::Merger => {
-            let task = zbobr.tasks().get_task(task_id).await?;
+            let task = zbobr.tasks().get_task(task_id).await?.snapshot().await?;
             let dest_repo = task
-                .parameters
-                .get(&Parameter::DestinationRepository)
+                .destination_repository
+                .as_deref()
                 .ok_or_else(|| {
-                    anyhow::anyhow!("Task #{task_id} has no destination_repository parameter")
-                })?
-                .as_str();
+                    anyhow::anyhow!("Task #{task_id} has no destination_repository")
+                })?;
             let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo);
             Ok((task_dir.join(repo_name), true))
         }
         _ => {
-            let task = zbobr.tasks().get_task(task_id).await?;
-            let dest_repo = task
-                .parameters
-                .get(&Parameter::DestinationRepository)
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Task #{task_id} has no destination_repository parameter")
-                })?
-                .clone();
-            let work_branch = task
-                .parameters
-                .get(&Parameter::WorkBranch)
-                .ok_or_else(|| anyhow::anyhow!("Task #{task_id} has no work_branch parameter"))?
-                .clone();
-            let dest_branch = task
-                .parameters
-                .get(&Parameter::DestinationBranch)
-                .cloned()
-                .unwrap_or_else(|| "main".to_string());
+            let task = zbobr.tasks().get_task(task_id).await?.snapshot().await?;
+            let identity = task.identity().ok_or_else(|| {
+                anyhow::anyhow!("Task #{task_id} is missing routing parameters (destination_repository, destination_branch, work_branch)")
+            })?;
             match zbobr
-                .update_worktree(&dest_repo, &dest_branch, &work_branch, task_id)
+                .update_worktree(&identity)
                 .await
             {
                 Ok(is_uptodate) => {
-                    let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo);
+                    let dest_repo = &identity.destination_repository;
+                    let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo);
                     let task_dir = TaskDir::new(zbobr.config().workspaces.as_path(), task_id);
                     let path = task_dir.path().join(repo_name);
                     Ok((path, is_uptodate))
@@ -1305,24 +1284,22 @@ async fn ensure_pr_url(zbobr: &ZbobrDispatcher, task_id: u64) -> anyhow::Result<
 /// so a previously prepared task (e.g. re-run) keeps its values unchanged.
 async fn seed_preparator_defaults(zbobr: &ZbobrDispatcher, task_id: u64) -> anyhow::Result<()> {
     let config = zbobr.config();
-    let task = zbobr.tasks().get_task(task_id).await?;
+    let task = zbobr.tasks().get_task(task_id).await?.snapshot().await?;
     let role_session = zbobr.role_session(task_id);
 
     if let Some(default_repo) = &config.default_destination_repository
-        && !task
-            .parameters
-            .contains_key(&Parameter::DestinationRepository)
+        && task.destination_repository.is_none()
     {
         role_session
-            .set_parameter(Parameter::DestinationRepository, Some(default_repo.clone()))
+            .set_destination_repository(Some(default_repo.clone()))
             .await?;
     }
 
     if let Some(default_branch) = &config.default_destination_branch
-        && !task.parameters.contains_key(&Parameter::DestinationBranch)
+        && task.destination_branch.is_none()
     {
         role_session
-            .set_parameter(Parameter::DestinationBranch, Some(default_branch.clone()))
+            .set_destination_branch(Some(default_branch.clone()))
             .await?;
     }
 
@@ -1439,8 +1416,9 @@ async fn finalize_session(
             tracing::error!("Failed to post error to task #{task_id}: {post_err}");
         }
         if let Err(pause_err) = task_session
-            .modify_task(|task| {
+            .modify_task(|mut task| {
                 task.pause = true;
+                task
             })
             .await
         {
@@ -1465,8 +1443,9 @@ async fn finalize_session(
                 tracing::error!("Failed to post auto-commit/push error for task #{task_id}: {post_err}");
             }
             if let Err(pause_err) = task_session
-                .modify_task(|task| {
+                .modify_task(|mut task| {
                     task.pause = true;
+                    task
                 })
                 .await
             {
@@ -1476,7 +1455,7 @@ async fn finalize_session(
             return Ok(());
         }
 
-    let current_task = zbobr.tasks().get_task(task_id).await?;
+    let current_task = zbobr.tasks().get_task(task_id).await?.snapshot().await?;
     let has_unchecked = current_task.checklist.iter().any(|i| !i.checked);
     match role {
         Role::Preparator => {
@@ -1529,9 +1508,10 @@ async fn finalize_session(
             let dest_branch = zbobr
                 .tasks().get_task(task_id)
                 .await?
-                .parameters
-                .get(&Parameter::DestinationBranch)
-                .cloned()
+                .snapshot()
+                .await?
+                .destination_branch
+                .clone()
                 .unwrap_or_else(|| "main".to_string());
             let merged_ok = git_check(work_dir, &["merge", &dest_branch, "--no-edit"])
                 .await
@@ -1555,8 +1535,9 @@ async fn finalize_session(
                     );
                 }
                 if let Err(e) = task_session
-                    .modify_task(|task| {
+                    .modify_task(|mut task| {
                         task.pause = true;
+                        task
                     })
                     .await
                 {
@@ -1616,11 +1597,10 @@ async fn rewrite_commit_authors(
     work_dir: &Path,
     dry_run: bool,
 ) -> anyhow::Result<()> {
-    let task = zbobr.tasks().get_task(task_id).await?;
+    let task = zbobr.tasks().get_task(task_id).await?.snapshot().await?;
     let dest_branch = task
-        .parameters
-        .get(&Parameter::DestinationBranch)
-        .cloned()
+        .destination_branch
+        .clone()
         .unwrap_or_else(|| "main".to_string());
 
     let git_user_name = &zbobr.config().git_user_name;

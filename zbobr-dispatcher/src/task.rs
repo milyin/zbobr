@@ -48,7 +48,8 @@ impl RoleSession {
 
     /// Read the full task state.
     pub async fn get_task(&self) -> anyhow::Result<Task> {
-        self.zbobr.tasks().get_task(self.task_id).await
+        let weak = self.zbobr.tasks().get_task(self.task_id).await?;
+        weak.snapshot().await
     }
 
     /// Get the current task description.
@@ -70,7 +71,7 @@ impl RoleSession {
         Ok(self.get_task().await?.checklist)
     }
 
-    /// Atomically read-modify-write the task body.
+    /// Atomically read-modify-write the task body via transient upgrade.
     ///
     /// The closure receives a mutable `Task` reference and may modify `description`,
     /// `parameters`, `checklist`, `signal`, and `pause`.
@@ -79,28 +80,26 @@ impl RoleSession {
     /// and restored afterwards, so MCP tools cannot change them.
     pub async fn modify_task<F>(&self, mutate: F) -> anyhow::Result<()>
     where
-        F: FnOnce(&mut Task) + Send + 'static,
+        F: FnOnce(Task) -> Task + Send + 'static,
     {
-        self.zbobr
-            .tasks()
-            .modify_task(
-                self.task_id,
-                Box::new(move |mut task| {
-                    let saved_stage = task.stage;
-                    let saved_conflict = task.conflict;
-                    mutate(&mut task);
-                    task.stage = saved_stage;
-                    task.conflict = saved_conflict;
-                    task
-                }),
-            )
+        let weak = self.zbobr.tasks().get_task(self.task_id).await?;
+        let mutable = weak.upgrade().await?;
+        mutable
+            .modify_task(Box::new(move |mut task| {
+                let saved_stage = task.stage;
+                let saved_conflict = task.conflict;
+                task = mutate(task);
+                task.stage = saved_stage;
+                task.conflict = saved_conflict;
+                task
+            }))
             .await
     }
 
-    /// Get all comments as structured `Comment` objects (includes all
-    /// types: error, report, request, plan, etc.).
+    /// Get all comments as structured `Comment` objects.
     pub async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
-        self.zbobr.tasks().get_task_comments(self.task_id).await
+        let weak = self.zbobr.tasks().get_task(self.task_id).await?;
+        weak.get_comments().await
     }
 
     pub async fn post_comment(
@@ -112,62 +111,54 @@ impl RoleSession {
         tool: Option<Tool>,
         model: Option<Model>,
     ) -> anyhow::Result<()> {
-        self.zbobr
-            .tasks()
-            .post_task_comment(
-                self.task_id,
-                comment_type,
-                role,
-                hostname,
-                tool,
-                model,
-                body,
-            )
+        let weak = self.zbobr.tasks().get_task(self.task_id).await?;
+        let mutable = weak.upgrade().await?;
+        mutable
+            .post_comment(comment_type, role, hostname, tool, model, body)
             .await
     }
 
     /// Get the current signal on the task.
     pub async fn get_signal(&self) -> anyhow::Result<Option<Signal>> {
-        let task = self.zbobr.tasks().get_task(self.task_id).await?;
+        let task = self.get_task().await?;
         Ok(task.signal)
     }
 
     /// Set signal on the task, respecting priority (higher priority signals cannot be overwritten by lower).
     pub async fn set_signal(&self, new_signal: Signal) -> anyhow::Result<()> {
-        self.modify_task(move |task| {
+        self.modify_task(move |mut task| {
             // Only set if new signal has higher or equal priority (lower enum value)
             if let Some(current_signal) = task.signal
                 && new_signal > current_signal
             {
                 // new_signal has lower priority, don't overwrite
-                return;
+                return task;
             }
             task.signal = Some(new_signal);
+            task
         })
         .await
     }
 
     /// Clear the signal on the task.
     pub async fn clear_signal(&self) -> anyhow::Result<()> {
-        self.modify_task(move |task| {
+        self.modify_task(move |mut task| {
             task.signal = None;
+            task
         })
         .await
     }
 
     /// Set the pause flag on the task.
     pub async fn set_pause(&self, pause: bool) -> anyhow::Result<()> {
-        self.modify_task(move |task| {
+        self.modify_task(move |mut task| {
             task.pause = pause;
+            task
         })
         .await
     }
 
     /// Ensure `pr_url` is stored in task parameters.
-    ///
-    /// If already set, returns the existing value immediately.
-    /// If not set: calls `update_pr` on the backend, stores the result in
-    /// `Parameter::PrUrl`, and returns it.
     pub async fn ensure_pr_url(&self) -> anyhow::Result<String> {
         let task = self.get_task().await?;
         if let Some(url) = task.parameters.get(&Parameter::PrUrl).cloned() {
@@ -180,52 +171,81 @@ impl RoleSession {
     }
 
     /// Push current work branch commits to the remote by updating PR state.
-    ///
-    /// Reads `WorkBranch`, `DestinationRepository`, and `DestinationBranch` from
-    /// task parameters and calls `update_pr` on the backend to sync the remote
-    /// state and ensure a PR exists.
     pub async fn update_pr(&self) -> anyhow::Result<String> {
         let task = self.get_task().await?;
-        let work_branch = task
-            .parameters
-            .get(&Parameter::WorkBranch)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("work_branch parameter is not set"))?;
-        let destination_repo = task
-            .parameters
-            .get(&Parameter::DestinationRepository)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("destination_repository parameter is not set"))?;
-        let base_branch = task
-            .parameters
-            .get(&Parameter::DestinationBranch)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("destination_branch parameter is not set"))?;
+        let identity = task.identity().ok_or_else(|| {
+            anyhow::anyhow!("Task #{} is missing routing parameters (destination_repository, destination_branch, work_branch)", self.task_id)
+        })?;
         self.zbobr
             .worktree()
-            .update_pr(&work_branch, &destination_repo, &base_branch)
+            .update_pr(&identity)
             .await
     }
 
-    /// Get a task parameter value. Parameters are stored in the task's parameters HashMap.
+    /// Get a task parameter value.
     pub async fn get_parameter(&self, param: Parameter) -> anyhow::Result<Option<String>> {
-        let task = self.zbobr.tasks().get_task(self.task_id).await?;
+        let task = self.get_task().await?;
         Ok(task.parameters.get(&param).cloned())
     }
 
-    /// Set a task parameter value with automatic conflict detection.
-    /// Parameters are stored in the visible PARAMETERS section.
+    /// Set a task parameter value.
     pub async fn set_parameter(
         &self,
         param: Parameter,
         value: Option<String>,
     ) -> anyhow::Result<()> {
-        self.modify_task(move |task| {
+        self.modify_task(move |mut task| {
             if let Some(v) = value {
                 task.parameters.insert(param, v);
             } else {
                 task.parameters.remove(&param);
             }
+            task
+        })
+        .await
+    }
+
+    /// Get the destination_repository field.
+    pub async fn get_destination_repository(&self) -> anyhow::Result<Option<String>> {
+        let task = self.get_task().await?;
+        Ok(task.destination_repository)
+    }
+
+    /// Set the destination_repository field.
+    pub async fn set_destination_repository(&self, value: Option<String>) -> anyhow::Result<()> {
+        self.modify_task(move |mut task| {
+            task.destination_repository = value;
+            task
+        })
+        .await
+    }
+
+    /// Get the destination_branch field.
+    pub async fn get_destination_branch(&self) -> anyhow::Result<Option<String>> {
+        let task = self.get_task().await?;
+        Ok(task.destination_branch)
+    }
+
+    /// Set the destination_branch field.
+    pub async fn set_destination_branch(&self, value: Option<String>) -> anyhow::Result<()> {
+        self.modify_task(move |mut task| {
+            task.destination_branch = value;
+            task
+        })
+        .await
+    }
+
+    /// Get the work_branch field.
+    pub async fn get_work_branch(&self) -> anyhow::Result<Option<String>> {
+        let task = self.get_task().await?;
+        Ok(task.work_branch)
+    }
+
+    /// Set the work_branch field.
+    pub async fn set_work_branch(&self, value: Option<String>) -> anyhow::Result<()> {
+        self.modify_task(move |mut task| {
+            task.work_branch = value;
+            task
         })
         .await
     }
@@ -261,7 +281,8 @@ impl TaskSession {
 
     /// Read the full task state.
     pub async fn get_task(&self) -> anyhow::Result<Task> {
-        self.zbobr.tasks().get_task(self.task_id).await
+        let weak = self.zbobr.tasks().get_task(self.task_id).await?;
+        weak.snapshot().await
     }
 
     /// Get the current task checklist.
@@ -269,57 +290,56 @@ impl TaskSession {
         Ok(self.get_task().await?.checklist)
     }
 
-    /// Atomically read-modify-write the task with unrestricted access.
-    /// Only the dispatcher should use this.
+    /// Atomically read-modify-write the task with unrestricted access via transient upgrade.
     pub async fn modify_task<F>(&self, mutate: F) -> anyhow::Result<()>
     where
-        F: FnOnce(&mut Task) + Send + 'static,
+        F: FnOnce(Task) -> Task + Send + 'static,
     {
-        self.zbobr
-            .tasks()
-            .modify_task(
-                self.task_id,
-                Box::new(move |mut task| {
-                    mutate(&mut task);
-                    task
-                }),
-            )
+        let weak = self.zbobr.tasks().get_task(self.task_id).await?;
+        let mutable = weak.upgrade().await?;
+        mutable
+            .modify_task(Box::new(move |mut task| {
+                task = mutate(task);
+                task
+            }))
             .await
     }
 
     /// Set the task stage (dispatcher only).
     pub async fn set_stage(&self, stage: Stage) -> anyhow::Result<()> {
-        self.modify_task(move |task| {
-            // if confirm flag is enabled we always pause on any stage transition
+        self.modify_task(move |mut task| {
             if task.confirm && task.stage != stage {
                 task.pause = true;
             }
             task.stage = stage;
+            task
         })
         .await
     }
 
     /// Set the confirm flag on the task (dispatcher only).
-    /// This is convenience used by create_task_with_confirm.
     pub async fn set_confirm(&self, confirm: bool) -> anyhow::Result<()> {
-        self.modify_task(move |task| {
+        self.modify_task(move |mut task| {
             task.confirm = confirm;
+            task
         })
         .await
     }
 
     /// Set the conflict flag (dispatcher only).
     pub async fn set_conflict(&self, conflict: bool) -> anyhow::Result<()> {
-        self.modify_task(move |task| {
+        self.modify_task(move |mut task| {
             task.conflict = conflict;
+            task
         })
         .await
     }
 
     /// Set signal on the task (dispatcher only, no priority check).
     pub async fn set_signal(&self, signal: Option<Signal>) -> anyhow::Result<()> {
-        self.modify_task(move |task| {
+        self.modify_task(move |mut task| {
             task.signal = signal;
+            task
         })
         .await
     }
@@ -331,16 +351,16 @@ impl TaskSession {
         let task = self.get_task().await?;
 
         // Delete placeholder commit and push before marking done.
-        if let Some(work_branch) = task.parameters.get(&Parameter::WorkBranch).cloned() {
+        if let Some(work_branch) = &task.work_branch {
             let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), task_id);
             let work_dir =
-                if let Some(dest_repo) = task.parameters.get(&Parameter::DestinationRepository) {
+                if let Some(ref dest_repo) = task.destination_repository {
                     let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo.as_str());
                     task_dir.path().join(repo_name)
                 } else {
                     task_dir.path().to_path_buf()
                 };
-            if let Err(e) = zbobr_utility::delete_placeholder_commit(&work_dir, &work_branch).await
+            if let Err(e) = zbobr_utility::delete_placeholder_commit(&work_dir, work_branch).await
             {
                 tracing::warn!("Failed to delete placeholder commit for task #{task_id}: {e}");
             } else {
@@ -362,9 +382,10 @@ impl TaskSession {
             tracing::warn!("Failed to post DONE boundary for task #{task_id}: {e}");
         }
 
-        self.modify_task(move |task| {
+        self.modify_task(move |mut task| {
             task.stage = Stage::Done;
             task.signal = None;
+            task
         })
         .await
     }
@@ -379,446 +400,14 @@ impl TaskSession {
         tool: Option<Tool>,
         model: Option<Model>,
     ) -> anyhow::Result<()> {
-        self.zbobr
-            .tasks()
-            .post_task_comment(
-                self.task_id,
-                comment_type,
-                role,
-                hostname,
-                tool,
-                model,
-                body,
-            )
+        let weak = self.zbobr.tasks().get_task(self.task_id).await?;
+        let mutable = weak.upgrade().await?;
+        mutable
+            .post_comment(comment_type, role, hostname, tool, model, body)
             .await
     }
 }
 
-/*
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::ZbobrDispatcherConfig;
-    use async_trait::async_trait;
-    use std::collections::HashMap;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use tokio::sync::Mutex;
-
-    #[test]
-    fn stage_milestone_names() {
-        assert_eq!(Stage::Pending.milestone_name(), "PENDING");
-        assert_eq!(Stage::Planning.milestone_name(), "PLANNING");
-        assert_eq!(Stage::Working.milestone_name(), "WORKING");
-        assert_eq!(Stage::Reviewing.milestone_name(), "REVIEWING");
-        assert_eq!(Stage::Preparing.milestone_name(), "PREPARING");
-        assert_eq!(Stage::Merging.milestone_name(), "MERGING");
-        assert_eq!(Stage::Done.milestone_name(), "DONE");
-    }
-
-    #[test]
-    fn stage_backward_compat() {
-        assert_eq!(
-            Stage::from_milestone_name("PREPARATION"),
-            Some(Stage::Preparing)
-        );
-        assert_eq!(
-            Stage::from_milestone_name("PREPARING"),
-            Some(Stage::Preparing)
-        );
-    }
-
-    #[test]
-    fn stage_display() {
-        assert_eq!(Stage::Planning.to_string(), "PLANNING");
-        assert_eq!(Stage::Working.to_string(), "WORKING");
-        assert_eq!(Stage::Reviewing.to_string(), "REVIEWING");
-        assert_eq!(Stage::Done.to_string(), "DONE");
-    }
-
-    #[test]
-    fn convert_role_to_stage() {
-        assert_eq!(Stage::from(Role::Preparator), Stage::Preparing);
-        assert_eq!(Stage::from(Role::Planner), Stage::Planning);
-        assert_eq!(Stage::from(Role::Worker), Stage::Working);
-        assert_eq!(Stage::from(Role::Reviewer), Stage::Reviewing);
-        assert_eq!(Stage::from(Role::Merger), Stage::Merging);
-        // user is mapped to a neutral stage so conversions remain total
-        assert_eq!(Stage::from(Role::User), Stage::Pending);
-    }
-
-    #[test]
-    fn comment_tag_roundtrip() {
-        let tag = CommentTag::new(
-            CommentType::Request,
-            Role::Planner,
-            "host".to_string(),
-            None,
-            Some(Model::Claude3Opus),
-        );
-        assert_eq!(tag.to_string(), "// REQUEST planner:host:claude-opus");
-        let parsed: CommentTag = tag.to_string().parse().unwrap();
-        assert_eq!(parsed, tag);
-
-        let tag_user = CommentTag::new(
-            CommentType::Request,
-            Role::User,
-            "web".to_string(),
-            None,
-            None,
-        );
-        assert_eq!(tag_user.to_string(), "// REQUEST user:web");
-    }
-
-    #[test]
-    fn try_convert_stage_to_role() {
-        assert_eq!(Role::try_from(Stage::Preparing).unwrap(), Role::Preparator);
-        assert_eq!(Role::try_from(Stage::Planning).unwrap(), Role::Planner);
-        assert_eq!(Role::try_from(Stage::Working).unwrap(), Role::Worker);
-        assert_eq!(Role::try_from(Stage::Reviewing).unwrap(), Role::Reviewer);
-        assert_eq!(Role::try_from(Stage::Merging).unwrap(), Role::Merger);
-        assert!(Role::try_from(Stage::Pending).is_err());
-        assert!(Role::try_from(Stage::Done).is_err());
-    }
-
-    #[test]
-    fn stage_roundtrip_serde() {
-        let stage = Stage::Planning;
-        let json = serde_json::to_string(&stage).unwrap();
-        let back: Stage = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, stage);
-    }
-
-    #[test]
-    fn role_serde_user() {
-        let role = Role::User;
-        let json = serde_json::to_string(&role).unwrap();
-        assert_eq!(json, "\"user\"");
-        let back: Role = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, role);
-    }
-
-    #[test]
-    fn task_serde() {
-        let task = Task {
-            id: 42,
-            title: "Test task".to_string(),
-            description: "Do something".to_string(),
-            stage: Stage::Planning,
-            tool: Some(Tool::Claude),
-            model: Some(Model::Claude3Opus),
-            parameters: HashMap::new(),
-            checklist: vec![],
-            signal: None,
-            conflict: false,
-            pause: false,
-            confirm: false,
-            etag: None,
-        };
-        let json = serde_json::to_string(&task).unwrap();
-        let back: Task = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.id, 42);
-        assert_eq!(back.title, "Test task");
-        assert_eq!(back.stage, Stage::Planning);
-        assert_eq!(back.tool, Some(Tool::Claude));
-        assert_eq!(back.model, Some(Model::Claude3Opus));
-        assert!(!back.conflict);
-        assert!(!back.pause);
-        assert!(!back.confirm);
-    }
-
-    #[test]
-    fn confirm_flag_triggers_pause_on_stage_change() {
-        let mut t = Task {
-            id: 1,
-            title: "x".into(),
-            description: "".into(),
-            stage: Stage::Pending,
-            tool: None,
-            model: None,
-            parameters: HashMap::new(),
-            checklist: vec![],
-            signal: None,
-            conflict: false,
-            pause: false,
-            confirm: true,
-            etag: None,
-        };
-        let new_stage = Stage::Planning;
-        if t.confirm && t.stage != new_stage {
-            t.pause = true;
-        }
-        t.stage = new_stage;
-        assert!(
-            t.pause,
-            "task should have been paused when confirm=true and stage changed"
-        );
-    }
-
-    #[test]
-    fn update_closure_applies_confirm_first() {
-        // simulate the modify_task closure used by the CLI update command
-        let mut task = Task {
-            id: 2,
-            title: "x".into(),
-            description: "".into(),
-            stage: Stage::Pending,
-            tool: None,
-            model: None,
-            parameters: HashMap::new(),
-            checklist: vec![],
-            signal: None,
-            conflict: false,
-            pause: false,
-            confirm: false,
-            etag: None,
-        };
-        let new_confirm = Some(true);
-        let new_stage = Some(Stage::Planning);
-
-        if let Some(c) = new_confirm {
-            task.confirm = c;
-        }
-        if let Some(s) = new_stage {
-            if task.confirm && task.stage != s {
-                task.pause = true;
-            }
-            task.stage = s;
-        }
-
-        assert!(
-            task.pause,
-            "pause must be set when confirm is enabled and stage changes"
-        );
-    }
-
-    // --- Shared async test infrastructure ---
-
-    struct DummyBackend {
-        tasks: Mutex<HashMap<u64, Task>>,
-        next_id: AtomicU64,
-    }
-
-    #[async_trait]
-    impl crate::backend::TaskBackend for DummyBackend {
-        async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
-            let tasks = self.tasks.lock().await;
-            tasks
-                .get(&id)
-                .cloned()
-                .ok_or_else(|| anyhow::anyhow!("not found"))
-        }
-        async fn create_task(
-            &self,
-            title: &str,
-            description: &str,
-            stage: Stage,
-            tool: Option<Tool>,
-            model: Option<Model>,
-            parameters: HashMap<Parameter, String>,
-        ) -> anyhow::Result<u64> {
-            let id = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
-            let task = Task {
-                id,
-                title: title.to_string(),
-                description: description.to_string(),
-                stage,
-                tool,
-                model,
-                parameters,
-                checklist: vec![],
-                signal: None,
-                conflict: false,
-                pause: false,
-                confirm: false,
-                etag: None,
-            };
-            self.tasks.lock().await.insert(id, task);
-            Ok(id)
-        }
-        async fn close_task(&self, _id: u64) -> anyhow::Result<()> {
-            Ok(())
-        }
-        async fn is_task_closed(&self, _id: u64) -> anyhow::Result<bool> {
-            Ok(false)
-        }
-        async fn modify_task(
-            &self,
-            id: u64,
-            mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-        ) -> anyhow::Result<()> {
-            let mut tasks = self.tasks.lock().await;
-            if let Some(t) = tasks.remove(&id) {
-                let t = mutate(t);
-                tasks.insert(id, t);
-                Ok(())
-            } else {
-                Err(anyhow::anyhow!("not found"))
-            }
-        }
-        async fn list_tasks_by_stage(
-            &self,
-            _stage: Stage,
-            _tool: Option<Tool>,
-        ) -> anyhow::Result<Vec<Task>> {
-            Ok(vec![])
-        }
-        async fn get_task_comments(&self, _id: u64) -> anyhow::Result<Vec<String>> {
-            Ok(vec![])
-        }
-        async fn post_task_comment(
-            &self,
-            _id: u64,
-            _body: &str,
-            _role: Role,
-            _hostname: &str,
-            _tool: Option<Tool>,
-            _model: Option<Model>,
-        ) -> anyhow::Result<()> {
-            Ok(())
-        }
-        async fn setup(&self, _force: bool) -> anyhow::Result<()> {
-            Ok(())
-        }
-        async fn validate_connectivity(&self) -> anyhow::Result<()> {
-            Ok(())
-        }
-        fn debug_state(&self) -> String {
-            "dummy".to_string()
-        }
-    }
-
-    struct DummyRepo;
-    #[async_trait]
-    impl crate::backend::WorktreeBackend for DummyRepo {
-        async fn update_worktree(
-            &self,
-            _remote_repo: &str,
-            _base_branch: &str,
-            _work_branch: &str,
-            _workspace_path: &std::path::Path,
-        ) -> anyhow::Result<bool> {
-            Ok(true)
-        }
-
-        async fn update_pr(&self, _work_branch: &str, _destination_repo: &str, _base_branch: &str) -> anyhow::Result<String> {
-            Ok("mock-pr-url".to_string())
-        }
-
-        async fn validate_connectivity(&self) -> anyhow::Result<()> {
-            Ok(())
-        }
-
-        fn debug_state(&self) -> String {
-            "dummy".to_string()
-        }
-    }
-
-    fn make_test_zbobr() -> crate::ZbobrDispatcher {
-        let backend: Arc<dyn crate::backend::TaskBackend> = Arc::new(DummyBackend {
-            tasks: Mutex::new(HashMap::new()),
-            next_id: AtomicU64::new(0),
-        });
-        let repo: Arc<dyn crate::backend::WorktreeBackend> = Arc::new(DummyRepo);
-        crate::ZbobrDispatcher::new_with_backends(ZbobrDispatcherConfig::default(), backend, repo)
-    }
-
-    // asynchronous tests require a runtime; use tokio for the following
-    #[tokio::test]
-    async fn task_session_set_stage_pauses_when_confirm() {
-        let zbobr = make_test_zbobr();
-        let id = zbobr
-            .create_task("t", "", Stage::Pending, None, None, None, None)
-            .await
-            .unwrap();
-        zbobr.task_session(id).set_confirm(true).await.unwrap();
-        zbobr
-            .task_session(id)
-            .set_stage(Stage::Planning)
-            .await
-            .unwrap();
-        let t = zbobr.get_task(id).await.unwrap();
-        assert!(t.pause);
-    }
-
-    #[tokio::test]
-    async fn set_pause_preserves_signal() {
-        // Verify set_pause(true) does not clear the signal — this is the contract
-        // that report_error and ask_user (which call set_pause) must uphold so the
-        // dispatcher can still route the task after the user responds.
-        let zbobr = make_test_zbobr();
-        let id = zbobr
-            .create_task("t", "", Stage::Working, None, None, None, None)
-            .await
-            .unwrap();
-        // Use role_session which has the same set_signal/set_pause methods as MCP commands
-        zbobr
-            .role_session(id)
-            .set_signal(Signal::GoWork)
-            .await
-            .unwrap();
-        zbobr.role_session(id).set_pause(true).await.unwrap();
-        let t = zbobr.get_task(id).await.unwrap();
-        assert_eq!(
-            t.signal,
-            Some(Signal::GoWork),
-            "signal must not be cleared by set_pause"
-        );
-        assert!(t.pause);
-    }
-
-    #[test]
-    fn signal_target_role() {
-        assert_eq!(Signal::GoPrepare.target_role(), Role::Preparator);
-        assert_eq!(Signal::GoPlan.target_role(), Role::Planner);
-        assert_eq!(Signal::GoWork.target_role(), Role::Worker);
-        assert_eq!(Signal::GoReview.target_role(), Role::Reviewer);
-    }
-
-    #[test]
-    fn model_mapping() {
-        // specific mappings
-        assert_eq!(
-            Model::Gpt4o.model_name_for_tool(Tool::Copilot),
-            Some("gpt-4o")
-        );
-        assert_eq!(
-            Model::ClaudeSonnet4_5.model_name_for_tool(Tool::Copilot),
-            Some("claude-sonnet-4.5")
-        );
-        assert_eq!(
-            Model::Claude35Sonnet.model_name_for_tool(Tool::Claude),
-            Some("claude-3-5-sonnet")
-        );
-        assert_eq!(Model::Gpt5_2.model_name_for_tool(Tool::Claude), None);
-
-        // the "default" sentinel should produce the cheapest supported
-        // option for each tool.
-        assert_eq!(
-            Model::Default.model_name_for_tool(Tool::Copilot),
-            Some("gpt-5-mini")
-        );
-        assert_eq!(
-            Model::Default.model_name_for_tool(Tool::Claude),
-            Some("claude-3-5-sonnet")
-        );
-    }
-
-    #[test]
-    fn model_parsing() {
-        assert_eq!("gpt-5.2".parse::<Model>().unwrap(), Model::Gpt5_2);
-        assert_eq!("GPT-5.2".parse::<Model>().unwrap(), Model::Gpt5_2);
-        assert_eq!("gpt-5-2".parse::<Model>().unwrap(), Model::Gpt5_2);
-        assert_eq!(
-            "claude-sonnet-4.5".parse::<Model>().unwrap(),
-            Model::ClaudeSonnet4_5
-        );
-        assert!("invalid-model".parse::<Model>().is_err());
-    }
-}
-*/
-
-// new tests for model-defaulting behaviour
 #[cfg(test)]
 mod comment_model_tests {
     use super::*;
@@ -828,88 +417,102 @@ mod comment_model_tests {
     use std::collections::HashMap;
     use std::sync::{Arc, atomic::AtomicU64};
     use tokio::sync::Mutex;
+    use zbobr_api::backend::{TaskBackend, TaskMut, TaskWeak};
 
-    /// Simple in-memory backend that records posted comments so tests can
-    /// observe them.
+    // Simple in-memory backend for testing
+
+    struct InMemTask {
+        task: Task,
+        closed: bool,
+    }
+
     struct TrackingBackend {
-        tasks: Mutex<HashMap<u64, Task>>,
+        tasks: Mutex<HashMap<u64, InMemTask>>,
         comments: Mutex<HashMap<u64, Vec<Comment>>>,
         next_id: AtomicU64,
+        locks: Mutex<HashMap<u64, Arc<Mutex<()>>>>,
+    }
+
+    struct TrackingWeak {
+        id: u64,
+        backend: Arc<TrackingBackend>,
+    }
+
+    struct TrackingMut {
+        id: u64,
+        backend: Arc<TrackingBackend>,
+        _guard: tokio::sync::OwnedMutexGuard<()>,
+    }
+
+    impl TrackingBackend {
+        async fn task_lock(&self, id: u64) -> Arc<Mutex<()>> {
+            let mut locks = self.locks.lock().await;
+            locks.entry(id).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+        }
     }
 
     #[async_trait]
-    impl crate::backend::TaskBackend for TrackingBackend {
-        async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
-            let tasks = self.tasks.lock().await;
-            tasks
-                .get(&id)
-                .cloned()
+    impl TaskWeak for TrackingWeak {
+        fn task_id(&self) -> u64 { self.id }
+
+        async fn snapshot(&self) -> anyhow::Result<Task> {
+            let tasks = self.backend.tasks.lock().await;
+            tasks.get(&self.id)
+                .map(|t| t.task.clone())
                 .ok_or_else(|| anyhow::anyhow!("not found"))
         }
 
-        async fn create_task(
-            &self,
-            title: &str,
-            description: &str,
-            stage: Stage,
-            parameters: HashMap<Parameter, String>,
-        ) -> anyhow::Result<u64> {
-            let id = self
-                .next_id
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                + 1;
-            let task = Task {
-                id,
-                title: title.to_string(),
-                description: description.to_string(),
-                stage,
-                parameters,
-                checklist: vec![],
-                signal: None,
-                conflict: false,
-                pause: false,
-                confirm: false,
-                etag: None,
-            };
-            self.tasks.lock().await.insert(id, task);
-            Ok(id)
+        async fn upgrade(&self) -> anyhow::Result<Box<dyn TaskMut>> {
+            let lock = self.backend.task_lock(self.id).await;
+            let guard = lock.try_lock_owned().map_err(|_| anyhow::anyhow!("locked"))?;
+            Ok(Box::new(TrackingMut {
+                id: self.id,
+                backend: self.backend.clone(),
+                _guard: guard,
+            }))
         }
 
-        async fn close_task(&self, _id: u64) -> anyhow::Result<()> {
-            Ok(())
+        async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
+            let comments = self.backend.comments.lock().await;
+            Ok(comments.get(&self.id).cloned().unwrap_or_default())
         }
+    }
 
-        async fn is_task_closed(&self, _id: u64) -> anyhow::Result<bool> {
-            Ok(false)
+    #[async_trait]
+    impl TaskMut for TrackingMut {
+        fn task_id(&self) -> u64 { self.id }
+
+        async fn snapshot(&self) -> anyhow::Result<Task> {
+            let tasks = self.backend.tasks.lock().await;
+            tasks.get(&self.id)
+                .map(|t| t.task.clone())
+                .ok_or_else(|| anyhow::anyhow!("not found"))
         }
 
         async fn modify_task(
             &self,
-            id: u64,
             mutate: Box<dyn FnOnce(Task) -> Task + Send>,
         ) -> anyhow::Result<()> {
-            let mut tasks = self.tasks.lock().await;
-            if let Some(t) = tasks.remove(&id) {
-                let t = mutate(t);
-                tasks.insert(id, t);
+            let mut tasks = self.backend.tasks.lock().await;
+            if let Some(t) = tasks.get_mut(&self.id) {
+                let task = t.task.clone();
+                t.task = mutate(task);
                 Ok(())
             } else {
                 Err(anyhow::anyhow!("not found"))
             }
         }
 
-        async fn list_tasks_by_stage(&self, _stage: Stage) -> anyhow::Result<Vec<Task>> {
-            Ok(vec![])
+        async fn close(&self) -> anyhow::Result<()> {
+            let mut tasks = self.backend.tasks.lock().await;
+            if let Some(t) = tasks.get_mut(&self.id) {
+                t.closed = true;
+            }
+            Ok(())
         }
 
-        async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
-            let comments = self.comments.lock().await;
-            Ok(comments.get(&id).cloned().unwrap_or_default())
-        }
-
-        async fn post_task_comment(
+        async fn post_comment(
             &self,
-            id: u64,
             comment_type: CommentType,
             role: Option<Role>,
             hostname: &str,
@@ -917,8 +520,8 @@ mod comment_model_tests {
             model: Option<Model>,
             body: &str,
         ) -> anyhow::Result<()> {
-            let mut comments = self.comments.lock().await;
-            comments.entry(id).or_default().push(Comment {
+            let mut comments = self.backend.comments.lock().await;
+            comments.entry(self.id).or_default().push(Comment {
                 comment_type,
                 timestamp: String::new(),
                 role,
@@ -930,17 +533,67 @@ mod comment_model_tests {
             Ok(())
         }
 
-        async fn setup(&self, _force: bool) -> anyhow::Result<()> {
-            Ok(())
+        fn downgrade(self: Box<Self>) -> Box<dyn TaskWeak> {
+            Box::new(TrackingWeak {
+                id: self.id,
+                backend: self.backend.clone(),
+            })
+        }
+    }
+
+    struct ArcTrackingBackend {
+        inner: Arc<TrackingBackend>,
+    }
+
+    #[async_trait]
+    impl TaskBackend for ArcTrackingBackend {
+        async fn get_task(&self, id: u64) -> anyhow::Result<Box<dyn TaskWeak>> {
+            let tasks = self.inner.tasks.lock().await;
+            if tasks.contains_key(&id) {
+                Ok(Box::new(TrackingWeak {
+                    id,
+                    backend: self.inner.clone(),
+                }))
+            } else {
+                Err(anyhow::anyhow!("not found"))
+            }
         }
 
-        async fn validate_connectivity(&self) -> anyhow::Result<()> {
-            Ok(())
+        async fn list_tasks_by_stage(&self, _stage: Stage) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+            Ok(vec![])
         }
 
-        fn debug_state(&self) -> String {
-            "tracking".to_string()
+        async fn create_task(
+            &self,
+            title: &str,
+            description: &str,
+            stage: Stage,
+            parameters: HashMap<Parameter, String>,
+        ) -> anyhow::Result<u64> {
+            let id = self.inner.next_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            let task = Task {
+                id,
+                title: title.to_string(),
+                description: description.to_string(),
+                stage,
+                destination_repository: None,
+                destination_branch: None,
+                work_branch: None,
+                parameters,
+                checklist: vec![],
+                signal: None,
+                conflict: false,
+                pause: false,
+                confirm: false,
+                etag: None,
+            };
+            self.inner.tasks.lock().await.insert(id, InMemTask { task, closed: false });
+            Ok(id)
         }
+
+        async fn setup(&self, _force: bool) -> anyhow::Result<()> { Ok(()) }
+        async fn validate_connectivity(&self) -> anyhow::Result<()> { Ok(()) }
+        fn debug_state(&self) -> String { "tracking".to_string() }
     }
 
     struct DummyRepo;
@@ -948,32 +601,28 @@ mod comment_model_tests {
     impl crate::backend::WorktreeBackend for DummyRepo {
         async fn update_worktree(
             &self,
-            _remote_repo: &str,
-            _base_branch: &str,
-            _work_branch: &str,
+            _identity: &zbobr_api::TaskIdentity,
             _workspace_path: &std::path::Path,
         ) -> anyhow::Result<bool> {
             Ok(true)
         }
 
-        async fn update_pr(&self, _work_branch: &str, _destination_repo: &str, _base_branch: &str) -> anyhow::Result<String> {
+        async fn update_pr(&self, _identity: &zbobr_api::TaskIdentity) -> anyhow::Result<String> {
             Ok("mock-pr-url".to_string())
         }
 
-        async fn validate_connectivity(&self) -> anyhow::Result<()> {
-            Ok(())
-        }
-
-        fn debug_state(&self) -> String {
-            "dummy".to_string()
-        }
+        async fn validate_connectivity(&self) -> anyhow::Result<()> { Ok(()) }
+        fn debug_state(&self) -> String { "dummy".to_string() }
     }
 
     fn make_dispatcher() -> crate::ZbobrDispatcher {
-        let backend: Arc<dyn crate::backend::TaskBackend> = Arc::new(TrackingBackend {
-            tasks: Mutex::new(HashMap::new()),
-            comments: Mutex::new(HashMap::new()),
-            next_id: AtomicU64::new(0),
+        let backend: Arc<dyn crate::backend::TaskBackend> = Arc::new(ArcTrackingBackend {
+            inner: Arc::new(TrackingBackend {
+                tasks: Mutex::new(HashMap::new()),
+                comments: Mutex::new(HashMap::new()),
+                next_id: AtomicU64::new(0),
+                locks: Mutex::new(HashMap::new()),
+            }),
         });
         let repo: Arc<dyn crate::backend::WorktreeBackend> = Arc::new(DummyRepo);
         crate::ZbobrDispatcher::new_with_backends(ZbobrDispatcherConfig::default(), backend, repo)
@@ -987,16 +636,13 @@ mod comment_model_tests {
             .await
             .unwrap();
 
-        // construct a planner MCP instance with a concrete model and use it to
-        // report an error; the TrackingBackend should record the model field
-        // from the MCP session rather than leaving it None.
         let planner =
             crate::mcp::planner::PlannerMcp::new(zbobr.clone(), id, Tool::Copilot, Model::Gpt5Mini);
 
-        // call helper directly
         let _ = planner.report_error_impl("oops").await;
 
-        let comments = zbobr.tasks().get_task_comments(id).await.unwrap();
+        let weak = zbobr.tasks().get_task(id).await.unwrap();
+        let comments = weak.get_comments().await.unwrap();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].model, Some(Model::Gpt5Mini));
     }
@@ -1022,7 +668,8 @@ mod comment_model_tests {
             .await
             .unwrap();
 
-        let comments = zbobr.tasks().get_task_comments(id).await.unwrap();
+        let weak = zbobr.tasks().get_task(id).await.unwrap();
+        let comments = weak.get_comments().await.unwrap();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].model, None);
     }
@@ -1043,7 +690,6 @@ mod comment_model_tests {
         let tag_user = CommentTag::new(CommentType::Request, None, "web".to_string(), None, None);
         assert_eq!(tag_user.to_string(), "// REQUEST user:web");
 
-        // verify default-model serialization
         let tag_default = CommentTag::new(
             CommentType::Report,
             Some(Role::Planner),
@@ -1058,7 +704,6 @@ mod comment_model_tests {
         let parsed_default: CommentTag = tag_default.to_string().parse().unwrap();
         assert_eq!(parsed_default, tag_default);
 
-        // verify tool field serialization when both tool and model present
         let tag_tool = CommentTag::new(
             CommentType::Report,
             Some(Role::Worker),

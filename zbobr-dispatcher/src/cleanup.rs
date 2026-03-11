@@ -34,26 +34,44 @@ impl ZbobrDispatcher {
 
             let task_id = task_dir.task_id();
 
-            match self.tasks().is_task_closed(task_id).await {
-                Ok(true) => {
+            // Check if task is closed by trying to get it. If get_task fails,
+            // the task was deleted/closed and we can clean up the workspace.
+            match self.tasks().get_task(task_id).await {
+                Ok(weak) => {
+                    match weak.snapshot().await {
+                        Ok(task) if task.stage == crate::Stage::Done => {
+                            if dry_run {
+                                tracing::info!(
+                                    "DRY RUN: Would remove {} (task #{task_id} is DONE)",
+                                    path.display()
+                                );
+                            } else {
+                                tracing::info!("Removing {} (task #{task_id} is DONE)", path.display());
+                                tokio::fs::remove_dir_all(&path).await?;
+                            }
+                        }
+                        Ok(_) => {
+                            tracing::info!(
+                                "Task #{task_id} is open - keeping {}",
+                                entry.path().display()
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to read task #{task_id}: {e} - skipping");
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Task not found — likely closed/deleted
                     if dry_run {
                         tracing::info!(
-                            "DRY RUN: Would remove {} (task #{task_id} is closed)",
+                            "DRY RUN: Would remove {} (task #{task_id} not found)",
                             path.display()
                         );
                     } else {
-                        tracing::info!("Removing {} (task #{task_id} is closed)", path.display());
+                        tracing::info!("Removing {} (task #{task_id} not found)", path.display());
                         tokio::fs::remove_dir_all(&path).await?;
                     }
-                }
-                Ok(false) => {
-                    tracing::info!(
-                        "Task #{task_id} is open - keeping {}",
-                        entry.path().display()
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to check task #{task_id}: {e} - skipping");
                 }
             }
         }
