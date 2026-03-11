@@ -1,6 +1,6 @@
 pub use zbobr_api::task::*;
 
-use crate::{TaskDir, ZbobrDispatcher};
+use crate::{Backends, TaskDir, ZbobrDispatcher};
 
 // ---------------------------------------------------------------------------
 // RoleSession — restricted access for MCP tools during agent sessions.
@@ -14,12 +14,17 @@ use crate::{TaskDir, ZbobrDispatcher};
 #[derive(Clone)]
 pub struct RoleSession {
     zbobr: ZbobrDispatcher,
+    backends: Backends,
     task_id: u64,
 }
 
 impl RoleSession {
-    pub(crate) fn new(zbobr: ZbobrDispatcher, task_id: u64) -> Self {
-        Self { zbobr, task_id }
+    pub(crate) fn new(zbobr: ZbobrDispatcher, backends: Backends, task_id: u64) -> Self {
+        Self {
+            zbobr,
+            backends,
+            task_id,
+        }
     }
 
     pub fn task_id(&self) -> u64 {
@@ -48,7 +53,7 @@ impl RoleSession {
 
     /// Read the full task state.
     pub async fn get_task(&self) -> anyhow::Result<Task> {
-        let weak = self.zbobr.tasks().get_task(self.task_id).await?;
+        let weak = self.backends.tasks().get_task(self.task_id).await?;
         weak.snapshot().await
     }
 
@@ -63,7 +68,7 @@ impl RoleSession {
         &self,
         offset: Option<usize>,
     ) -> anyhow::Result<zbobr_api::HistoryChunk> {
-        self.zbobr.get_history(self.task_id, offset).await
+        self.backends.get_history(self.task_id, offset).await
     }
 
     /// Get the current task checklist.
@@ -82,7 +87,7 @@ impl RoleSession {
     where
         F: FnOnce(Task) -> Task + Send + 'static,
     {
-        let weak = self.zbobr.tasks().get_task(self.task_id).await?;
+        let weak = self.backends.tasks().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
             .modify_task(Box::new(move |mut task| {
@@ -98,7 +103,7 @@ impl RoleSession {
 
     /// Get all comments as structured `Comment` objects.
     pub async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
-        let weak = self.zbobr.tasks().get_task(self.task_id).await?;
+        let weak = self.backends.tasks().get_task(self.task_id).await?;
         weak.get_comments().await
     }
 
@@ -111,7 +116,7 @@ impl RoleSession {
         tool: Option<Tool>,
         model: Option<Model>,
     ) -> anyhow::Result<()> {
-        let weak = self.zbobr.tasks().get_task(self.task_id).await?;
+        let weak = self.backends.tasks().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
             .post_comment(comment_type, role, hostname, tool, model, body)
@@ -176,7 +181,7 @@ impl RoleSession {
         let identity = task.identity().ok_or_else(|| {
             anyhow::anyhow!("Task #{} is missing routing parameters (destination_repository, destination_branch, work_branch)", self.task_id)
         })?;
-        self.zbobr
+        self.backends
             .worktree()
             .update_pr(&identity)
             .await
@@ -262,12 +267,17 @@ impl RoleSession {
 #[derive(Clone)]
 pub struct TaskSession {
     zbobr: ZbobrDispatcher,
+    backends: Backends,
     task_id: u64,
 }
 
 impl TaskSession {
-    pub(crate) fn new(zbobr: ZbobrDispatcher, task_id: u64) -> Self {
-        Self { zbobr, task_id }
+    pub(crate) fn new(zbobr: ZbobrDispatcher, backends: Backends, task_id: u64) -> Self {
+        Self {
+            zbobr,
+            backends,
+            task_id,
+        }
     }
 
     pub fn task_id(&self) -> u64 {
@@ -276,12 +286,12 @@ impl TaskSession {
 
     /// Get a restricted RoleSession view for MCP tool operations.
     pub fn role_session(&self) -> RoleSession {
-        RoleSession::new(self.zbobr.clone(), self.task_id)
+        RoleSession::new(self.zbobr.clone(), self.backends.clone(), self.task_id)
     }
 
     /// Read the full task state.
     pub async fn get_task(&self) -> anyhow::Result<Task> {
-        let weak = self.zbobr.tasks().get_task(self.task_id).await?;
+        let weak = self.backends.tasks().get_task(self.task_id).await?;
         weak.snapshot().await
     }
 
@@ -295,7 +305,7 @@ impl TaskSession {
     where
         F: FnOnce(Task) -> Task + Send + 'static,
     {
-        let weak = self.zbobr.tasks().get_task(self.task_id).await?;
+        let weak = self.backends.tasks().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
             .modify_task(Box::new(move |mut task| {
@@ -400,7 +410,7 @@ impl TaskSession {
         tool: Option<Tool>,
         model: Option<Model>,
     ) -> anyhow::Result<()> {
-        let weak = self.zbobr.tasks().get_task(self.task_id).await?;
+        let weak = self.backends.tasks().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
             .post_comment(comment_type, role, hostname, tool, model, body)
@@ -615,7 +625,7 @@ mod comment_model_tests {
         fn debug_state(&self) -> String { "dummy".to_string() }
     }
 
-    fn make_dispatcher() -> crate::ZbobrDispatcher {
+    fn make_test_parts() -> (crate::ZbobrDispatcher, crate::Backends) {
         let backend: Arc<dyn crate::backend::TaskBackend> = Arc::new(ArcTrackingBackend {
             inner: Arc::new(TrackingBackend {
                 tasks: Mutex::new(HashMap::new()),
@@ -625,23 +635,25 @@ mod comment_model_tests {
             }),
         });
         let repo: Arc<dyn crate::backend::WorktreeBackend> = Arc::new(DummyRepo);
-        crate::ZbobrDispatcher::new_with_backends(ZbobrDispatcherConfig::default(), backend, repo)
+        let zbobr = crate::ZbobrDispatcher::new(ZbobrDispatcherConfig::default());
+        let backends = crate::Backends::new(backend, repo);
+        (zbobr, backends)
     }
 
     #[tokio::test]
     async fn mcp_helper_includes_explicit_model() {
-        let zbobr = make_dispatcher();
+        let (zbobr, backends) = make_test_parts();
         let id = zbobr
-            .create_task("t", "", Stage::Pending, None, None)
+            .create_task(&backends, "t", "", Stage::Pending, None, None)
             .await
             .unwrap();
 
         let planner =
-            crate::mcp::planner::PlannerMcp::new(zbobr.clone(), id, Tool::Copilot, Model::Gpt5Mini);
+            crate::mcp::planner::PlannerMcp::new(zbobr.clone(), backends.clone(), id, Tool::Copilot, Model::Gpt5Mini);
 
         let _ = planner.report_error_impl("oops").await;
 
-        let weak = zbobr.tasks().get_task(id).await.unwrap();
+        let weak = backends.tasks().get_task(id).await.unwrap();
         let comments = weak.get_comments().await.unwrap();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].model, Some(Model::Gpt5Mini));
@@ -649,14 +661,14 @@ mod comment_model_tests {
 
     #[tokio::test]
     async fn dispatcher_posts_have_no_model() {
-        let zbobr = make_dispatcher();
+        let (zbobr, backends) = make_test_parts();
         let id = zbobr
-            .create_task("t", "", Stage::Pending, None, None)
+            .create_task(&backends, "t", "", Stage::Pending, None, None)
             .await
             .unwrap();
 
         zbobr
-            .task_session(id)
+            .task_session(&backends, id)
             .post_comment(
                 CommentType::Error,
                 "dispatcher error",
@@ -668,7 +680,7 @@ mod comment_model_tests {
             .await
             .unwrap();
 
-        let weak = zbobr.tasks().get_task(id).await.unwrap();
+        let weak = backends.tasks().get_task(id).await.unwrap();
         let comments = weak.get_comments().await.unwrap();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].model, None);

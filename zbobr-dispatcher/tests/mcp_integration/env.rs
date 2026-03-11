@@ -9,7 +9,7 @@ use std::{
 };
 
 use zbobr_dispatcher::{
-    ChecklistItem, Comment, Signal, Stage, Task, TaskDir, ZbobrDispatcher, ZbobrDispatcherConfig,
+    Backends, ChecklistItem, Comment, Signal, Stage, Task, TaskDir, ZbobrDispatcher, ZbobrDispatcherConfig,
     ZbobrExecutorConfig, process_task_by_stage,
     backend::TaskBackendExt,
     prompts::Prompts,
@@ -25,12 +25,13 @@ use zbobr_task_backend_github::{ArcTaskBackendGithub, ZbobrTaskBackendGithub, Zb
 static SCENARIO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Shared environment for integration tests.  Holds a live `ZbobrDispatcher`
-/// backed by in-process backends — no CLI binary involved.
+/// and `Backends` — no CLI binary involved.
 pub struct IntegrationTestEnv {
     pub base_path: PathBuf,
     pub workspaces_dir: PathBuf,
     pub name: &'static str,
     pub zbobr: ZbobrDispatcher,
+    pub backends: Backends,
     /// Optional remote repository slug (`owner/repo`) used by GitHub repo-backend tests.
     /// `None` for the filesystem repo backend.
     pub target_repo: Option<String>,
@@ -81,16 +82,17 @@ impl IntegrationTestEnv {
         let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
             Arc::new(ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?);
 
-        let zbobr =
-            ZbobrDispatcher::new_with_backends(dispatcher_config, task_backend, repo_backend);
+        let backends = Backends::new(task_backend, repo_backend);
+        let zbobr = ZbobrDispatcher::new(dispatcher_config);
 
-        zbobr.setup_repository(false).await.ok()?;
+        zbobr.setup_repository(&backends, false).await.ok()?;
 
         Some(Arc::new(IntegrationTestEnv {
             base_path,
             workspaces_dir,
             name,
             zbobr,
+            backends,
             target_repo: None,
             fork_owner: None,
         }))
@@ -144,16 +146,17 @@ impl IntegrationTestEnv {
         let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
             Arc::new(ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?);
 
-        let zbobr =
-            ZbobrDispatcher::new_with_backends(dispatcher_config, task_backend, repo_backend);
+        let backends = Backends::new(task_backend, repo_backend);
+        let zbobr = ZbobrDispatcher::new(dispatcher_config);
 
-        zbobr.setup_repository(false).await.ok()?;
+        zbobr.setup_repository(&backends, false).await.ok()?;
 
         Some(Arc::new(IntegrationTestEnv {
             base_path,
             workspaces_dir,
             name,
             zbobr,
+            backends,
             target_repo: Some(task_repo),
             fork_owner: None,
         }))
@@ -215,16 +218,17 @@ impl IntegrationTestEnv {
             .ok()?,
         );
 
-        let zbobr =
-            ZbobrDispatcher::new_with_backends(dispatcher_config, task_backend, repo_backend);
+        let backends = Backends::new(task_backend, repo_backend);
+        let zbobr = ZbobrDispatcher::new(dispatcher_config);
 
-        zbobr.setup_repository(false).await.ok()?;
+        zbobr.setup_repository(&backends, false).await.ok()?;
 
         Some(Arc::new(IntegrationTestEnv {
             base_path,
             workspaces_dir,
             name,
             zbobr,
+            backends,
             target_repo,
             fork_owner: Some(fork_owner),
         }))
@@ -288,16 +292,17 @@ impl IntegrationTestEnv {
             .ok()?,
         );
 
-        let zbobr =
-            ZbobrDispatcher::new_with_backends(dispatcher_config, task_backend, repo_backend);
+        let backends = Backends::new(task_backend, repo_backend);
+        let zbobr = ZbobrDispatcher::new(dispatcher_config);
 
-        zbobr.setup_repository(false).await.ok()?;
+        zbobr.setup_repository(&backends, false).await.ok()?;
 
         Some(Arc::new(IntegrationTestEnv {
             base_path,
             workspaces_dir,
             name,
             zbobr,
+            backends,
             target_repo: Some(task_repo),
             fork_owner: Some(fork_owner),
         }))
@@ -322,7 +327,7 @@ impl IntegrationTestEnv {
 
     pub async fn create_task(&self, title: &str, description: &str, stage: Stage) -> u64 {
         self.zbobr
-            .create_task(title, description, stage, None, None)
+            .create_task(&self.backends, title, description, stage, None, None)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to create task: {e}", self.name))
     }
@@ -335,13 +340,13 @@ impl IntegrationTestEnv {
         confirm: bool,
     ) -> u64 {
         self.zbobr
-            .create_task_with_confirm(title, description, stage, None, None, confirm)
+            .create_task_with_confirm(&self.backends, title, description, stage, None, None, confirm)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to create task: {e}", self.name))
     }
 
     pub async fn get_task(&self, task_id: u64) -> Task {
-        self.zbobr
+        self.backends
             .tasks().get_task(task_id)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name))
@@ -351,7 +356,7 @@ impl IntegrationTestEnv {
     }
 
     pub async fn get_comments(&self, task_id: u64) -> Vec<Comment> {
-        self.zbobr
+        self.backends
             .tasks().get_task(task_id)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name))
@@ -369,7 +374,7 @@ impl IntegrationTestEnv {
         let id = id.to_string();
         let text = text.to_string();
         self.zbobr
-            .task_session(task_id)
+            .task_session(&self.backends, task_id)
             .modify_task(move |mut task| {
                 task.checklist.push(ChecklistItem {
                     id,
@@ -397,7 +402,7 @@ impl IntegrationTestEnv {
         let dest_repo = dest_repo.to_string();
         let dest_branch = dest_branch.to_string();
         let work_branch = work_branch.to_string();
-        let weak = self.zbobr.tasks().get_task(task_id).await
+        let weak = self.backends.tasks().get_task(task_id).await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name));
         let mutable = weak.upgrade().await
             .unwrap_or_else(|e| panic!("[{}] failed to upgrade task #{task_id}: {e}", self.name));
@@ -418,7 +423,7 @@ impl IntegrationTestEnv {
     }
 
     pub async fn set_task_conflict(&self, task_id: u64, conflict: bool) {
-        let weak = self.zbobr.tasks().get_task(task_id).await
+        let weak = self.backends.tasks().get_task(task_id).await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name));
         let mutable = weak.upgrade().await
             .unwrap_or_else(|e| panic!("[{}] failed to upgrade task #{task_id}: {e}", self.name));
@@ -435,7 +440,7 @@ impl IntegrationTestEnv {
         let signal: Signal = signal
             .parse()
             .unwrap_or_else(|_| panic!("[{}] invalid signal '{signal}'", self.name));
-        self.zbobr
+        self.backends
             .tasks().set_task_signal(task_id, Some(signal))
             .await
             .unwrap_or_else(|e| {
@@ -449,7 +454,7 @@ impl IntegrationTestEnv {
     /// Update the task's stage, simulating a manual stage transition with
     /// respect to the `confirm` flag (sets `pause` when confirm is true).
     pub async fn update_task_stage(&self, task_id: u64, new_stage: Stage) {
-        let weak = self.zbobr.tasks().get_task(task_id).await
+        let weak = self.backends.tasks().get_task(task_id).await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name));
         let mutable = weak.upgrade().await
             .unwrap_or_else(|e| panic!("[{}] failed to upgrade task #{task_id}: {e}", self.name));
@@ -576,7 +581,7 @@ impl IntegrationTestEnv {
             .unwrap_or_else(|| panic!("[{}] task #{task_id} missing routing params", self.name));
 
         self.zbobr
-            .update_worktree(&identity)
+            .update_worktree(&self.backends, &identity)
             .await
             .unwrap_or_else(|e| panic!("[{}] update_worktree failed: {e}", self.name));
 
@@ -608,7 +613,7 @@ impl IntegrationTestEnv {
     ///  3. Builds a `ZbobrExecutorConfig` with the scenario file for `stage`.
     ///  4. Calls `process_task_by_stage` directly (no subprocess).
     pub async fn run_stage(&self, task_id: u64, stage: Stage, scenario: String) {
-        self.zbobr
+        self.backends
             .tasks().set_task_stage(task_id, stage)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to set stage: {e}", self.name));
@@ -664,7 +669,7 @@ impl IntegrationTestEnv {
 
         let task = self.get_task(task_id).await;
 
-        process_task_by_stage(&self.zbobr, &task, &prompts, &executor_config)
+        process_task_by_stage(&self.zbobr, &self.backends, &task, &prompts, &executor_config)
             .await
             .unwrap_or_else(|e| {
                 panic!(

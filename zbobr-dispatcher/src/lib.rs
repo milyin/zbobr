@@ -37,30 +37,22 @@ pub use zbobr_api::config::{BackendConfig, Config};
 
 use crate::backend::{TaskBackend, WorktreeBackend};
 
-/// Central struct holding configuration and backend.
+/// Holds the task and worktree backends as trait objects.
 #[derive(Clone)]
-pub struct ZbobrDispatcher {
-    config: Arc<ZbobrDispatcherConfig>,
-    pub(crate) task_backend: Arc<dyn TaskBackend>,
-    pub(crate) repo_backend: Arc<dyn WorktreeBackend>,
+pub struct Backends {
+    task_backend: Arc<dyn TaskBackend>,
+    repo_backend: Arc<dyn WorktreeBackend>,
 }
 
-impl ZbobrDispatcher {
-    /// Create a new Zbobr instance from config and pre-built backends.
-    pub fn new_with_backends(
-        config: ZbobrDispatcherConfig,
+impl Backends {
+    pub fn new(
         task_backend: Arc<dyn TaskBackend>,
         repo_backend: Arc<dyn WorktreeBackend>,
     ) -> Self {
         Self {
-            config: Arc::new(config),
             task_backend,
             repo_backend,
         }
-    }
-
-    pub fn config(&self) -> &ZbobrDispatcherConfig {
-        &self.config
     }
 
     /// Direct access to the task backend.
@@ -80,9 +72,50 @@ impl ZbobrDispatcher {
         Ok(())
     }
 
+    pub fn debug_state(&self) -> String {
+        format!(
+            "task_backend: {}, repo_backend: {}",
+            self.tasks().debug_state(),
+            self.worktree().debug_state()
+        )
+    }
+
+    /// Fetch comments and description for a task, then extract the history chunk
+    /// at the given `offset` using [`zbobr_api::extract_history_chunk`].
+    pub async fn get_history(
+        &self,
+        id: u64,
+        offset: Option<usize>,
+    ) -> anyhow::Result<zbobr_api::HistoryChunk> {
+        let weak = self.tasks().get_task(id).await?;
+        let comments = weak.get_comments().await?;
+        let task = weak.snapshot().await?;
+        zbobr_api::extract_history_chunk(comments, &task.description, offset)
+    }
+}
+
+/// Central struct holding dispatcher configuration.
+#[derive(Clone)]
+pub struct ZbobrDispatcher {
+    config: Arc<ZbobrDispatcherConfig>,
+}
+
+impl ZbobrDispatcher {
+    /// Create a new Zbobr dispatcher from config.
+    pub fn new(config: ZbobrDispatcherConfig) -> Self {
+        Self {
+            config: Arc::new(config),
+        }
+    }
+
+    pub fn config(&self) -> &ZbobrDispatcherConfig {
+        &self.config
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn create_task(
         &self,
+        backends: &Backends,
         title: &str,
         description: &str,
         stage: Stage,
@@ -90,6 +123,7 @@ impl ZbobrDispatcher {
         destination_branch: Option<String>,
     ) -> anyhow::Result<u64> {
         self.create_task_with_confirm(
+            backends,
             title,
             description,
             stage,
@@ -105,6 +139,7 @@ impl ZbobrDispatcher {
     #[allow(clippy::too_many_arguments)]
     pub async fn create_task_with_confirm(
         &self,
+        backends: &Backends,
         title: &str,
         description: &str,
         stage: Stage,
@@ -114,12 +149,13 @@ impl ZbobrDispatcher {
     ) -> anyhow::Result<u64> {
         let id = {
             let parameters = std::collections::HashMap::new();
-            self.tasks()
+            backends
+                .tasks()
                 .create_task(title, description, stage, parameters)
                 .await?
         };
         // Set promoted fields + confirm flag via modify
-        let weak = self.tasks().get_task(id).await?;
+        let weak = backends.tasks().get_task(id).await?;
         let mutable = weak.upgrade().await?;
         mutable
             .modify_task(Box::new(move |mut task| {
@@ -134,20 +170,7 @@ impl ZbobrDispatcher {
         Ok(id)
     }
 
-    /// Fetch comments and description for a task, then extract the history chunk
-    /// at the given `offset` using [`zbobr_api::extract_history_chunk`].
-    pub async fn get_history(
-        &self,
-        id: u64,
-        offset: Option<usize>,
-    ) -> anyhow::Result<zbobr_api::HistoryChunk> {
-        let weak = self.tasks().get_task(id).await?;
-        let comments = weak.get_comments().await?;
-        let task = weak.snapshot().await?;
-        zbobr_api::extract_history_chunk(comments, &task.description, offset)
-    }
-
-    pub async fn setup_repository(&self, force: bool) -> anyhow::Result<()> {
+    pub async fn setup_repository(&self, backends: &Backends, force: bool) -> anyhow::Result<()> {
         tokio::fs::create_dir_all(&self.config.workspaces)
             .await
             .map_err(|e| {
@@ -161,7 +184,7 @@ impl ZbobrDispatcher {
             "Workspaces directory ready: {}",
             self.config.workspaces.display()
         );
-        self.tasks().setup(force).await
+        backends.tasks().setup(force).await
     }
 
     /// Extract repo name from a remote repo path (last path component).
@@ -173,31 +196,25 @@ impl ZbobrDispatcher {
     /// `TaskDir::new(workspaces, task_id)/repo_name` and delegates to the backend.
     pub async fn update_worktree(
         &self,
+        backends: &Backends,
         identity: &zbobr_api::TaskIdentity,
     ) -> anyhow::Result<bool> {
         let repo_name = Self::extract_repo_name(&identity.destination_repository);
         let task_dir = TaskDir::new(&self.config.workspaces, identity.task_id);
         let workspace_path = task_dir.path().join(repo_name);
-        self.worktree()
+        backends
+            .worktree()
             .update_worktree(identity, &workspace_path)
             .await
     }
 
-    pub fn debug_state(&self) -> String {
-        format!(
-            "task_backend: {}, repo_backend: {}",
-            self.tasks().debug_state(),
-            self.worktree().debug_state()
-        )
-    }
-
     /// Create a TaskSession bound to a specific task (full dispatcher access).
-    pub fn task_session(&self, task_id: u64) -> TaskSession {
-        TaskSession::new(self.clone(), task_id)
+    pub fn task_session(&self, backends: &Backends, task_id: u64) -> TaskSession {
+        TaskSession::new(self.clone(), backends.clone(), task_id)
     }
 
     /// Create a RoleSession bound to a specific task (restricted MCP tool access).
-    pub fn role_session(&self, task_id: u64) -> RoleSession {
-        RoleSession::new(self.clone(), task_id)
+    pub fn role_session(&self, backends: &Backends, task_id: u64) -> RoleSession {
+        RoleSession::new(self.clone(), backends.clone(), task_id)
     }
 }
