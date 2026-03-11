@@ -549,6 +549,15 @@ impl ZbobrRepoBackendGithub {
 
         tracing::info!("Auto-committing uncommitted changes in worktree");
         git(worktree_path, &["add", "-A"]).await?;
+
+        // Check if anything was actually staged (e.g. submodules with dirty working
+        // trees appear in `git status --porcelain` but produce no stageable changes).
+        let nothing_staged = git_check(worktree_path, &["diff", "--cached", "--quiet"]).await?;
+        if nothing_staged {
+            tracing::debug!("Nothing staged after `git add -A`, skipping commit");
+            return Ok(false);
+        }
+
         git(
             worktree_path,
             &["commit", "-m", "chore: auto-commit uncommitted changes"],
