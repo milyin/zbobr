@@ -5,8 +5,10 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 
+use std::sync::Arc;
+
 use crate::{
-    Backends, ZbobrDispatcher,
+    ZbobrDispatcher,
     mcp::{
         common::{
             CheckChecklistItemParam, DeleteChecklistItemParam, GetHistoryParam,
@@ -47,9 +49,9 @@ impl WorkerMcpImpl for WorkerMcp {}
 
 #[tool_router]
 impl WorkerMcp {
-    pub fn new(zbobr: ZbobrDispatcher, backends: Backends, task_id: u64, tool: Tool, model: Model) -> Self {
+    pub fn new(zbobr: ZbobrDispatcher, task_backend: Arc<dyn crate::backend::TaskBackend>, repo_backend: Arc<dyn crate::backend::WorktreeBackend>, task_id: u64, tool: Tool, model: Model) -> Self {
         Self {
-            session: zbobr.role_session(&backends, task_id),
+            session: zbobr.role_session(task_backend, repo_backend, task_id),
             tool_router: Self::tool_router(),
             tool,
             model,

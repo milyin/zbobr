@@ -165,7 +165,7 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
     // report and therefore will route back to the planner.  This mirrors the
     // behaviour of actual workflows where a review usually discovers issues.
     {
-        let weak = env.backends.tasks().get_task(task_id).await
+        let weak = env.task_backend.get_task(task_id).await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", env.name()));
         let mutable = weak.upgrade().await
             .unwrap_or_else(|e| panic!("[{}] failed to upgrade task #{task_id}: {e}", env.name()));
@@ -792,8 +792,7 @@ pub async fn run_plan_history_with_index(env: &IntegrationTestEnv) {
 
     // Directly verify the structured comment history in the backend.
     let weak = env
-        .backends
-        .tasks()
+        .task_backend
         .get_task(task_id)
         .await
         .unwrap_or_else(|e| panic!("[{}] failed to get task: {e}", env.name()));
@@ -919,7 +918,7 @@ pub async fn run_repo_backend_clone(env: &IntegrationTestEnv) {
         panic!("[{}] Task #{task_id} missing routing parameters", env.name())
     });
     env.zbobr
-        .update_worktree(&env.backends, &identity)
+        .update_worktree(env.repo_backend.as_ref(), &identity)
         .await
         .unwrap();
 
@@ -1001,7 +1000,7 @@ pub async fn run_repo_backend_clone_cross_org(env: &IntegrationTestEnv) {
         panic!("[{}] Task #{task_id} missing routing parameters", env.name())
     });
     env.zbobr
-        .update_worktree(&env.backends, &identity)
+        .update_worktree(env.repo_backend.as_ref(), &identity)
         .await
         .unwrap();
 

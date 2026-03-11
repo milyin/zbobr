@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::{
-    Backends,
+    backend::TaskBackend,
     config::{ZbobrDispatcherArgs, ZbobrDispatcherConfig},
     task::Role,
 };
@@ -124,10 +124,10 @@ pub async fn build_full_prompt(
     user_context: &str,
     role: Role,
     task_id: u64,
-    backends: &Backends,
+    task_backend: &dyn TaskBackend,
 ) -> anyhow::Result<String> {
-    let task = backends.tasks().get_task(task_id).await?.snapshot().await?;
-    let history = backends.get_history(task_id, None).await?;
+    let task = task_backend.get_task(task_id).await?.snapshot().await?;
+    let history = crate::get_history(task_backend, task_id, None).await?;
     let history_json = serde_json::to_string_pretty(&history.comments).unwrap_or_default();
     Ok(assemble_prompt(user_context, role, &task, &history_json))
 }
@@ -272,7 +272,7 @@ impl Prompts {
         &self,
         role: Role,
         task_id: u64,
-        backends: &Backends,
+        task_backend: &dyn TaskBackend,
     ) -> anyhow::Result<String> {
         let base_prompt = match role {
             Role::Preparator => load_prompts(&self.preparator, self.base_path.as_ref())?,
@@ -282,7 +282,7 @@ impl Prompts {
             Role::Tester => load_prompts(&self.tester, self.base_path.as_ref())?,
             Role::Merger => load_prompts(&self.merger, self.base_path.as_ref())?,
         };
-        build_full_prompt(&base_prompt, role, task_id, backends).await
+        build_full_prompt(&base_prompt, role, task_id, task_backend).await
     }
 }
 
