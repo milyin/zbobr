@@ -46,9 +46,9 @@ impl MergerMcpImpl for MergerMcp {}
 
 #[tool_router]
 impl MergerMcp {
-    pub fn new(zbobr: ZbobrDispatcher, task_backend: Arc<dyn crate::backend::TaskBackend>, repo_backend: Arc<dyn crate::backend::WorktreeBackend>, task_id: u64, tool: Tool, model: Model) -> Self {
+    pub fn new(zbobr: ZbobrDispatcher, task_backend: Arc<dyn crate::backend::TaskBackend>, task_id: u64, tool: Tool, model: Model) -> Self {
         Self {
-            session: zbobr.role_session(task_backend, repo_backend, task_id),
+            session: zbobr.role_session(task_backend, task_id),
             tool_router: Self::tool_router(),
             tool,
             model,

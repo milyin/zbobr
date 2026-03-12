@@ -14,7 +14,7 @@ use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig}
 use zbobr_utility::{git, git_check, git_output, configure_git_user};
 
 use crate::{
-    Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
+    Comment, CommentType, Parameter, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
     ZbobrExecutorConfig,
     backend::{TaskBackend, WorktreeBackend},
     mcp::common::get_hostname,
@@ -823,7 +823,7 @@ impl<'a> CliRoleRunner<'a> {
         let (work_dir, is_uptodate) = prepare_workspace(self.zbobr, self.task_backend, self.repo_backend, self.task_id, self.role, task_dir.path()).await?;
 
         if matches!(self.role, Role::Preparator) {
-            seed_preparator_defaults(self.zbobr, self.task_backend, self.repo_backend, self.task_id).await?;
+            seed_preparator_defaults(self.zbobr, self.task_backend, self.task_id).await?;
         } else {
             ensure_pr_url(self.zbobr, self.task_backend, self.repo_backend, self.task_id).await?;
         }
@@ -918,7 +918,6 @@ impl<'a> CliRoleRunner<'a> {
             start_mcp_server(
                 self.zbobr.clone(),
                 self.task_backend.clone(),
-                self.repo_backend.clone(),
                 self.role,
                 self.task_id,
                 cli_tool,
@@ -1296,9 +1295,24 @@ async fn prepare_workspace(
 }
 
 async fn ensure_pr_url(zbobr: &ZbobrDispatcher, task_backend: &Arc<dyn TaskBackend>, repo_backend: &Arc<dyn WorktreeBackend>, task_id: u64) -> anyhow::Result<()> {
-    let role_session = zbobr.role_session(task_backend.clone(), repo_backend.clone(), task_id);
-    match role_session.ensure_pr_url().await {
-        Ok(_) => Ok(()),
+    let role_session = zbobr.role_session(task_backend.clone(), task_id);
+    let task = role_session.get_task().await?;
+    if task.parameters.get(&Parameter::PrUrl).is_some() {
+        return Ok(());
+    }
+    let identity = match task.identity() {
+        Some(id) => id,
+        None => {
+            let msg = format!("Task #{task_id} is missing routing parameters (destination_repository, destination_branch, work_branch)");
+            tracing::error!("{msg}");
+            return Err(anyhow::anyhow!(msg));
+        }
+    };
+    match repo_backend.update_pr(&identity).await {
+        Ok(pr_url) => {
+            role_session.set_parameter(Parameter::PrUrl, Some(pr_url)).await?;
+            Ok(())
+        }
         Err(e) => {
             let msg = format!("Could not ensure PR URL for task #{task_id}: {e}");
             tracing::error!("{msg}");
@@ -1318,10 +1332,10 @@ async fn ensure_pr_url(zbobr: &ZbobrDispatcher, task_backend: &Arc<dyn TaskBacke
 /// Pre-populate task parameters from dispatcher config defaults before the
 /// preparator agent runs. Only sets a parameter if it is not already present,
 /// so a previously prepared task (e.g. re-run) keeps its values unchanged.
-async fn seed_preparator_defaults(zbobr: &ZbobrDispatcher, task_backend: &Arc<dyn TaskBackend>, repo_backend: &Arc<dyn WorktreeBackend>, task_id: u64) -> anyhow::Result<()> {
+async fn seed_preparator_defaults(zbobr: &ZbobrDispatcher, task_backend: &Arc<dyn TaskBackend>, task_id: u64) -> anyhow::Result<()> {
     let config = zbobr.config();
     let task = task_backend.get_task(task_id).await?.snapshot().await?;
-    let role_session = zbobr.role_session(task_backend.clone(), repo_backend.clone(), task_id);
+    let role_session = zbobr.role_session(task_backend.clone(), task_id);
 
     if let Some(default_repo) = &config.default_destination_repository
         && task.destination_repository.is_none()
@@ -1345,7 +1359,6 @@ async fn seed_preparator_defaults(zbobr: &ZbobrDispatcher, task_backend: &Arc<dy
 async fn start_mcp_server(
     zbobr: ZbobrDispatcher,
     task_backend: Arc<dyn TaskBackend>,
-    repo_backend: Arc<dyn WorktreeBackend>,
     role: Role,
     task_id: u64,
     tool: Tool,
@@ -1353,7 +1366,7 @@ async fn start_mcp_server(
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
     let server_handle = tokio::spawn(async move {
-        match crate::mcp::run_role_mcp_server(zbobr, task_backend, repo_backend, role, task_id, tool, model).await {
+        match crate::mcp::run_role_mcp_server(zbobr, task_backend, role, task_id, tool, model).await {
             Ok(assigned_port) => {
                 let _ = port_tx.send(assigned_port);
                 tracing::info!("MCP server assigned port {assigned_port}");
@@ -1623,9 +1636,13 @@ async fn perform_auto_commit_and_push(
         Err(e) => tracing::warn!("Failed to check git status for auto-commit: {e}"),
     }
 
-    let role_session = zbobr.task_session(task_backend.clone(), repo_backend.clone(), task_id).role_session();
-    if let Err(e) = role_session.update_pr().await {
-        tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
+    let task = task_backend.get_task(task_id).await?.snapshot().await?;
+    if let Some(identity) = task.identity() {
+        if let Err(e) = repo_backend.update_pr(&identity).await {
+            tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
+        }
+    } else {
+        tracing::warn!("Task #{task_id} missing routing parameters — skipping push");
     }
 
     if zbobr.config().overwrite_author {
@@ -1720,13 +1737,11 @@ async fn rewrite_commit_authors(
                 }
             }
 
-            if let Err(e) = zbobr
-                .task_session(task_backend.clone(), repo_backend.clone(), task_id)
-                .role_session()
-                .update_pr()
-                .await
-            {
-                tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
+            let task = task_backend.get_task(task_id).await?.snapshot().await?;
+            if let Some(identity) = task.identity() {
+                if let Err(e) = repo_backend.update_pr(&identity).await {
+                    tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
+                }
             }
         }
         Ok(output) => {

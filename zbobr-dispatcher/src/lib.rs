@@ -176,9 +176,8 @@ impl ZbobrDispatcher {
     pub fn role_session(
         &self,
         task_backend: Arc<dyn TaskBackend>,
-        repo_backend: Arc<dyn WorktreeBackend>,
         task_id: u64,
     ) -> RoleSession {
-        RoleSession::new(self.clone(), task_backend, repo_backend, task_id)
+        RoleSession::new(self.clone(), task_backend, task_id)
     }
 }

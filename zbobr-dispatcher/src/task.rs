@@ -17,7 +17,6 @@ use crate::{TaskDir, ZbobrDispatcher, backend::{TaskBackend, WorktreeBackend}};
 pub struct RoleSession {
     zbobr: ZbobrDispatcher,
     task_backend: Arc<dyn TaskBackend>,
-    repo_backend: Arc<dyn WorktreeBackend>,
     task_id: u64,
 }
 
@@ -25,13 +24,11 @@ impl RoleSession {
     pub(crate) fn new(
         zbobr: ZbobrDispatcher,
         task_backend: Arc<dyn TaskBackend>,
-        repo_backend: Arc<dyn WorktreeBackend>,
         task_id: u64,
     ) -> Self {
         Self {
             zbobr,
             task_backend,
-            repo_backend,
             task_id,
         }
     }
@@ -172,29 +169,6 @@ impl RoleSession {
         .await
     }
 
-    /// Ensure `pr_url` is stored in task parameters.
-    pub async fn ensure_pr_url(&self) -> anyhow::Result<String> {
-        let task = self.get_task().await?;
-        if let Some(url) = task.parameters.get(&Parameter::PrUrl).cloned() {
-            return Ok(url);
-        }
-        let pr_url = self.update_pr().await?;
-        self.set_parameter(Parameter::PrUrl, Some(pr_url.clone()))
-            .await?;
-        Ok(pr_url)
-    }
-
-    /// Push current work branch commits to the remote by updating PR state.
-    pub async fn update_pr(&self) -> anyhow::Result<String> {
-        let task = self.get_task().await?;
-        let identity = task.identity().ok_or_else(|| {
-            anyhow::anyhow!("Task #{} is missing routing parameters (destination_repository, destination_branch, work_branch)", self.task_id)
-        })?;
-        self.repo_backend
-            .update_pr(&identity)
-            .await
-    }
-
     /// Get a task parameter value.
     pub async fn get_parameter(&self, param: Parameter) -> anyhow::Result<Option<String>> {
         let task = self.get_task().await?;
@@ -301,7 +275,7 @@ impl TaskSession {
 
     /// Get a restricted RoleSession view for MCP tool operations.
     pub fn role_session(&self) -> RoleSession {
-        RoleSession::new(self.zbobr.clone(), self.task_backend.clone(), self.repo_backend.clone(), self.task_id)
+        RoleSession::new(self.zbobr.clone(), self.task_backend.clone(), self.task_id)
     }
 
     /// Read the full task state.
@@ -388,9 +362,8 @@ impl TaskSession {
             if let Err(e) = zbobr_utility::delete_placeholder_commit(&work_dir, work_branch).await
             {
                 tracing::warn!("Failed to delete placeholder commit for task #{task_id}: {e}");
-            } else {
-                let role_session = self.role_session();
-                if let Err(e) = role_session.update_pr().await {
+            } else if let Some(identity) = task.identity() {
+                if let Err(e) = self.repo_backend.update_pr(&identity).await {
                     tracing::warn!(
                         "Failed to push branch after placeholder deletion for task #{task_id}: {e}"
                     );
@@ -656,14 +629,14 @@ mod comment_model_tests {
 
     #[tokio::test]
     async fn mcp_helper_includes_explicit_model() {
-        let (zbobr, task_backend, repo_backend) = make_test_parts();
+        let (zbobr, task_backend, _repo_backend) = make_test_parts();
         let id = zbobr
             .create_task(task_backend.as_ref(), "t", "", Stage::Pending, None, None)
             .await
             .unwrap();
 
         let planner =
-            crate::mcp::planner::PlannerMcp::new(zbobr.clone(), task_backend.clone(), repo_backend.clone(), id, Tool::Copilot, Model::Gpt5Mini);
+            crate::mcp::planner::PlannerMcp::new(zbobr.clone(), task_backend.clone(), id, Tool::Copilot, Model::Gpt5Mini);
 
         let _ = planner.report_error_impl("oops").await;
 
