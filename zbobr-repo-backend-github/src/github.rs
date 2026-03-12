@@ -490,24 +490,39 @@ impl ZbobrRepoBackendGithub {
         let remote_ref = format!("refs/remotes/{remote}/{base_branch}");
         let local_ref = format!("refs/heads/{base_branch}");
 
-        let remote_sha = git_output(bare_dir, &["rev-parse", &remote_ref])
-            .await
-            .with_context(|| format!("Remote ref {remote_ref} not found"))?;
+        let remote_sha = git_output(bare_dir, &["rev-parse", &remote_ref]).await;
 
-        let local_sha = git_output(bare_dir, &["rev-parse", &local_ref]).await;
+        match remote_sha {
+            Ok(remote_sha) => {
+                let local_sha = git_output(bare_dir, &["rev-parse", &local_ref]).await;
 
-        let needs_update = match &local_sha {
-            Ok(sha) => sha.trim() != remote_sha.trim(),
-            Err(_) => true,
-        };
+                let needs_update = match &local_sha {
+                    Ok(sha) => sha.trim() != remote_sha.trim(),
+                    Err(_) => true,
+                };
 
-        if needs_update {
-            tracing::info!("Updating local {local_ref} to match {remote_ref}");
-            git(
-                bare_dir,
-                &["update-ref", &local_ref, remote_sha.trim()],
-            )
-            .await?;
+                if needs_update {
+                    tracing::info!("Updating local {local_ref} to match {remote_ref}");
+                    git(
+                        bare_dir,
+                        &["update-ref", &local_ref, remote_sha.trim()],
+                    )
+                    .await?;
+                }
+            }
+            Err(_) => {
+                let local_exists =
+                    git_check(bare_dir, &["rev-parse", "--verify", &local_ref]).await?;
+                if local_exists {
+                    tracing::warn!(
+                        "Remote ref {remote_ref} not found, using existing local {local_ref}"
+                    );
+                } else {
+                    anyhow::bail!(
+                        "Neither remote ref {remote_ref} nor local ref {local_ref} exist"
+                    );
+                }
+            }
         }
 
         Ok(())
@@ -1514,7 +1529,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
                 workspace_path,
                 &[
                     "log",
-                    &format!("origin/{}..HEAD", base_branch),
+                    &format!("{}..HEAD", base_branch),
                     "--oneline",
                 ],
             )
@@ -1587,8 +1602,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         }
 
         // Phase 9: Merge base → local work (element 4 → 6)
-        let base_ref = format!("origin/{base_branch}");
-        let merged = Self::merge_ref_into_worktree(workspace_path, &base_ref).await?;
+        let merged = Self::merge_ref_into_worktree(workspace_path, base_branch).await?;
         if !merged {
             tracing::warn!(
                 "Merge conflict merging base branch — needs merger"
