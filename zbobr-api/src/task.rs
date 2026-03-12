@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 // -- TaskIdentity --
 
 /// Bundles task routing info for worktree operations.
@@ -10,25 +8,6 @@ pub struct TaskIdentity {
     pub destination_repository: String,
     pub destination_branch: String,
     pub work_branch: String,
-}
-
-// -- Parameter names enum --
-
-/// Standardized parameter names for task configuration.
-/// Note: DestinationRepository, DestinationBranch, and WorkBranch have been
-/// promoted to first-class fields on Task. Only extensible params remain here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum Parameter {
-    PrUrl,
-}
-
-impl Parameter {
-    /// Returns the parameter name as a string.
-    pub fn name(&self) -> &'static str {
-        match self {
-            Parameter::PrUrl => "pr_url",
-        }
-    }
 }
 
 /// Robustly extract the repository name from a string (which could be a URL, local path, or owner/repo).
@@ -899,7 +878,7 @@ pub struct Task {
     pub destination_repository: Option<String>,
     pub destination_branch: Option<String>,
     pub work_branch: Option<String>,
-    pub parameters: HashMap<Parameter, String>,
+    pub pr_url: Option<String>,
     pub checklist: Vec<ChecklistItem>,
     pub signal: Option<Signal>,
     pub conflict: bool,

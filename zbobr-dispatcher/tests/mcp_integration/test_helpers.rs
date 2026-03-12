@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use zbobr_api::task::ChecklistItem;
-use zbobr_dispatcher::{CommentType, Signal, Stage, TaskDir, task::Parameter};
+use zbobr_dispatcher::{CommentType, Signal, Stage, TaskDir};
 
 use super::{env::IntegrationTestEnv, scenarios};
 
@@ -71,7 +71,7 @@ pub async fn run_planning(env: &IntegrationTestEnv) {
         env.name()
     );
     assert!(
-        task.parameters.contains_key(&Parameter::PrUrl),
+        task.pr_url.is_some(),
         "[{}] PR URL should be stored after planning stage",
         env.name()
     );
@@ -128,7 +128,7 @@ pub async fn run_working(env: &IntegrationTestEnv) {
         env.name()
     );
     assert!(
-        task.parameters.contains_key(&Parameter::PrUrl),
+        task.pr_url.is_some(),
         "[{}] PR URL should be stored after working stage",
         env.name()
     );
@@ -200,7 +200,7 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
         env.name()
     );
     assert!(
-        task.parameters.contains_key(&Parameter::PrUrl),
+        task.pr_url.is_some(),
         "[{}] PR URL should be stored after reviewing stage",
         env.name()
     );
@@ -274,7 +274,7 @@ pub async fn run_reviewing_approval(env: &IntegrationTestEnv) {
         env.name()
     );
     assert!(
-        task.parameters.contains_key(&Parameter::PrUrl),
+        task.pr_url.is_some(),
         "[{}] PR URL should be stored after reviewer approval",
         env.name()
     );
@@ -377,7 +377,7 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
         env.name()
     );
     assert!(
-        task.parameters.contains_key(&Parameter::PrUrl),
+        task.pr_url.is_some(),
         "[{}] PR URL should be stored in task parameters after merger",
         env.name()
     );
@@ -1388,9 +1388,9 @@ async fn assert_pr_url_points_to_branch(
     expected_branch: &str,
 ) {
     let pr_url = task
-        .parameters
-        .get(&Parameter::PrUrl)
-        .unwrap_or_else(|| panic!("[{}] pr_url not found in task parameters", env.name()));
+        .pr_url
+        .as_ref()
+        .unwrap_or_else(|| panic!("[{}] pr_url not found on task", env.name()));
 
     // For the GitHub backend the pr_url is an https:// URL — skip git checks.
     if pr_url.starts_with("http") {
@@ -1422,7 +1422,7 @@ async fn assert_pr_has_commits(
     task: &zbobr_dispatcher::Task,
     dest_branch: &str,
 ) {
-    let pr_url = match task.parameters.get(&Parameter::PrUrl) {
+    let pr_url = match task.pr_url.as_ref() {
         Some(u) => u,
         None => return,
     };

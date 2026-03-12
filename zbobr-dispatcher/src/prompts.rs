@@ -305,7 +305,7 @@ mod tests {
             destination_repository: None,
             destination_branch: None,
             work_branch: None,
-            parameters: Default::default(),
+            pr_url: None,
             checklist: vec![],
             signal: None,
             conflict: false,

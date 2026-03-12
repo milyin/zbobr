@@ -28,7 +28,7 @@ pub use mcp::{
 };
 pub use prompts::{Prompts, build_full_prompt, load_prompts, resolve_prompts};
 pub use task::{
-    ChecklistItem, Comment, CommentType, Model, Parameter, RoleSession, Signal, Stage, Task,
+    ChecklistItem, Comment, CommentType, Model, RoleSession, Signal, Stage, Task,
     TaskSession, Tool,
 };
 pub use task_dir::TaskDir;
@@ -103,12 +103,9 @@ impl ZbobrDispatcher {
         destination_branch: Option<String>,
         confirm: bool,
     ) -> anyhow::Result<u64> {
-        let id = {
-            let parameters = std::collections::HashMap::new();
-            task_backend
-                .create_task(title, description, stage, parameters)
-                .await?
-        };
+        let id = task_backend
+            .create_task(title, description, stage)
+            .await?;
         // Set promoted fields + confirm flag via modify
         let weak = task_backend.get_task(id).await?;
         let mutable = weak.upgrade().await?;

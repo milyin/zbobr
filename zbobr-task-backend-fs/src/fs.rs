@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use zbobr_api::{
-    ChecklistItem, Comment, CommentType, Model, Parameter, Role, Stage, Task,
+    ChecklistItem, Comment, CommentType, Model, Role, Stage, Task,
     Tool,
     backend::{TaskBackend, TaskMut, TaskWeak},
 };
@@ -52,37 +52,34 @@ impl TaskFile {
         let mut destination_repository = self.destination_repository.clone();
         let mut destination_branch = self.destination_branch.clone();
         let mut work_branch = self.work_branch.clone();
+        let mut pr_url = None;
 
-        let parameters: Result<HashMap<Parameter, String>, String> = self
-            .parameters
-            .iter()
-            .filter_map(|(k, v)| {
-                match k.as_str() {
-                    // Migration: move old parameter-based routing fields to first-class
-                    "destination_repository" => {
-                        if destination_repository.is_none() {
-                            destination_repository = Some(v.clone());
-                        }
-                        None
+        for (k, v) in &self.parameters {
+            match k.as_str() {
+                // Migration: move old parameter-based routing fields to first-class
+                "destination_repository" => {
+                    if destination_repository.is_none() {
+                        destination_repository = Some(v.clone());
                     }
-                    "destination_branch" => {
-                        if destination_branch.is_none() {
-                            destination_branch = Some(v.clone());
-                        }
-                        None
-                    }
-                    "work_branch" => {
-                        if work_branch.is_none() {
-                            work_branch = Some(v.clone());
-                        }
-                        None
-                    }
-                    "pr_url" => Some(Ok((Parameter::PrUrl, v.clone()))),
-                    _ => Some(Err(format!("Unknown parameter: {}", k))),
                 }
-            })
-            .collect();
-        let parameters = parameters.map_err(|e| anyhow::anyhow!(e))?;
+                "destination_branch" => {
+                    if destination_branch.is_none() {
+                        destination_branch = Some(v.clone());
+                    }
+                }
+                "work_branch" => {
+                    if work_branch.is_none() {
+                        work_branch = Some(v.clone());
+                    }
+                }
+                "pr_url" => {
+                    pr_url = Some(v.clone());
+                }
+                _ => {
+                    anyhow::bail!("Unknown parameter: {}", k);
+                }
+            }
+        }
 
         Ok(Task {
             id: self.id,
@@ -92,7 +89,7 @@ impl TaskFile {
             destination_repository,
             destination_branch,
             work_branch,
-            parameters,
+            pr_url,
             checklist: self.checklist.clone(),
             signal,
             conflict: self.conflict,
@@ -111,11 +108,13 @@ impl TaskFile {
             destination_repository: task.destination_repository.clone(),
             destination_branch: task.destination_branch.clone(),
             work_branch: task.work_branch.clone(),
-            parameters: task
-                .parameters
-                .iter()
-                .map(|(k, v)| (k.name().to_string(), v.clone()))
-                .collect(),
+            parameters: {
+                let mut p = HashMap::new();
+                if let Some(ref url) = task.pr_url {
+                    p.insert("pr_url".to_string(), url.clone());
+                }
+                p
+            },
             conflict: task.conflict,
             pause: task.pause,
             confirm: task.confirm,
@@ -442,7 +441,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
         title: &str,
         description: &str,
         stage: Stage,
-        parameters: HashMap<Parameter, String>,
     ) -> anyhow::Result<u64> {
         let id = self.get_next_id().await?;
 
@@ -454,7 +452,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             destination_repository: None,
             destination_branch: None,
             work_branch: None,
-            parameters,
+            pr_url: None,
             checklist: vec![],
             signal: None,
             conflict: false,
@@ -579,10 +577,9 @@ impl TaskBackend for ArcTaskBackendFs {
         title: &str,
         description: &str,
         stage: Stage,
-        parameters: HashMap<Parameter, String>,
     ) -> anyhow::Result<u64> {
         self.inner
-            .create_task(title, description, stage, parameters)
+            .create_task(title, description, stage)
             .await
     }
 

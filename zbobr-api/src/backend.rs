@@ -1,9 +1,7 @@
-use std::collections::HashMap;
-
 use async_trait::async_trait;
 
 use crate::task::{
-    ChecklistItem, Comment, CommentType, Model, Parameter, Role, Signal, Stage, Task, TaskIdentity,
+    ChecklistItem, Comment, CommentType, Model, Role, Signal, Stage, Task, TaskIdentity,
 };
 use crate::Tool;
 
@@ -104,18 +102,6 @@ pub trait TaskMut: Send + Sync {
         .await
     }
 
-    async fn set_parameter(&self, param: Parameter, value: Option<String>) -> anyhow::Result<()> {
-        self.modify_task(Box::new(move |mut task| {
-            if let Some(v) = value {
-                task.parameters.insert(param, v);
-            } else {
-                task.parameters.remove(&param);
-            }
-            task
-        }))
-        .await
-    }
-
     async fn set_description(&self, desc: String) -> anyhow::Result<()> {
         self.modify_task(Box::new(move |mut task| {
             task.description = desc;
@@ -185,7 +171,6 @@ pub trait TaskBackend: Send + Sync {
         title: &str,
         description: &str,
         stage: Stage,
-        parameters: HashMap<Parameter, String>,
     ) -> anyhow::Result<u64>;
 
     /// Initialize storage with required stages, labels, etc.

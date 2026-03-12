@@ -169,29 +169,6 @@ impl RoleSession {
         .await
     }
 
-    /// Get a task parameter value.
-    pub async fn get_parameter(&self, param: Parameter) -> anyhow::Result<Option<String>> {
-        let task = self.get_task().await?;
-        Ok(task.parameters.get(&param).cloned())
-    }
-
-    /// Set a task parameter value.
-    pub async fn set_parameter(
-        &self,
-        param: Parameter,
-        value: Option<String>,
-    ) -> anyhow::Result<()> {
-        self.modify_task(move |mut task| {
-            if let Some(v) = value {
-                task.parameters.insert(param, v);
-            } else {
-                task.parameters.remove(&param);
-            }
-            task
-        })
-        .await
-    }
-
     /// Get the destination_repository field.
     pub async fn get_destination_repository(&self) -> anyhow::Result<Option<String>> {
         let task = self.get_task().await?;
@@ -566,7 +543,6 @@ mod comment_model_tests {
             title: &str,
             description: &str,
             stage: Stage,
-            parameters: HashMap<Parameter, String>,
         ) -> anyhow::Result<u64> {
             let id = self.inner.next_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
             let task = Task {
@@ -577,7 +553,7 @@ mod comment_model_tests {
                 destination_repository: None,
                 destination_branch: None,
                 work_branch: None,
-                parameters,
+                pr_url: None,
                 checklist: vec![],
                 signal: None,
                 conflict: false,

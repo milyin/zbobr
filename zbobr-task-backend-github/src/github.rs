@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::{Arc, Mutex}, time::Duration};
 
 use async_trait::async_trait;
 use zbobr_api::{
-    Comment, CommentTag, CommentType, Model, Parameter, Role, Signal, Stage, Task,
+    Comment, CommentTag, CommentType, Model, Role, Signal, Stage, Task,
     Tool,
     backend::TaskBackend,
 };
@@ -541,11 +541,7 @@ impl ZbobrTaskBackendGithub {
         let destination_repository = params_map.get("destination_repository").cloned();
         let destination_branch = params_map.get("destination_branch").cloned();
         let work_branch = params_map.get("work_branch").cloned();
-
-        let mut parameters = HashMap::new();
-        if let Some(url) = params_map.get(Parameter::PrUrl.name()) {
-            parameters.insert(Parameter::PrUrl, url.clone());
-        }
+        let pr_url = params_map.get("pr_url").cloned();
 
         let signal = issue
             .labels
@@ -576,7 +572,7 @@ impl ZbobrTaskBackendGithub {
             destination_repository,
             destination_branch,
             work_branch,
-            parameters,
+            pr_url,
             checklist,
             signal,
             conflict,
@@ -589,11 +585,10 @@ impl ZbobrTaskBackendGithub {
     /// Record that an issue was just written to and needs a cooling period.
     /// Build the string parameters map for serialization, including promoted fields.
     fn task_to_string_params(task: &Task) -> HashMap<String, String> {
-        let mut params: HashMap<String, String> = task
-            .parameters
-            .iter()
-            .map(|(k, v)| (k.name().to_string(), v.clone()))
-            .collect();
+        let mut params: HashMap<String, String> = HashMap::new();
+        if let Some(ref v) = task.pr_url {
+            params.insert("pr_url".to_string(), v.clone());
+        }
         if let Some(ref v) = task.destination_repository {
             params.insert("destination_repository".to_string(), v.clone());
         }
@@ -979,14 +974,9 @@ impl TaskBackend for ArcTaskBackendGithub {
         title: &str,
         description: &str,
         stage: Stage,
-        parameters: HashMap<Parameter, String>,
     ) -> anyhow::Result<u64> {
         let (owner, repo) = self.inner.parse_repo()?;
-        let mut params_text: HashMap<String, String> = HashMap::new();
-        if let Some(v) = parameters.get(&Parameter::PrUrl) {
-            params_text.insert(Parameter::PrUrl.name().to_string(), v.clone());
-        }
-        let body = serialize_description_full(description, &params_text, &[]);
+        let body = serialize_description_full(description, &HashMap::new(), &[]);
 
         let stage_number = self.inner.find_stage_number(stage).await?;
 

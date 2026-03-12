@@ -14,7 +14,7 @@ use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig}
 use zbobr_utility::{git, git_check, git_output, configure_git_user};
 
 use crate::{
-    Comment, CommentType, Parameter, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
+    Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
     ZbobrExecutorConfig,
     backend::{TaskBackend, WorktreeBackend},
     mcp::common::get_hostname,
@@ -363,11 +363,8 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     if let Some(ref branch) = task.work_branch {
         println!("Work Branch: {}", branch);
     }
-    if !task.parameters.is_empty() {
-        println!("Parameters:");
-        for (k, v) in &task.parameters {
-            println!("  {}: {}", k.name(), v);
-        }
+    if let Some(ref url) = task.pr_url {
+        println!("PR URL: {}", url);
     }
     if !task.description.is_empty() {
         println!("Description:\n{}", task.description);
@@ -1297,7 +1294,7 @@ async fn prepare_workspace(
 async fn ensure_pr_url(zbobr: &ZbobrDispatcher, task_backend: &Arc<dyn TaskBackend>, repo_backend: &Arc<dyn WorktreeBackend>, task_id: u64) -> anyhow::Result<()> {
     let role_session = zbobr.role_session(task_backend.clone(), task_id);
     let task = role_session.get_task().await?;
-    if task.parameters.get(&Parameter::PrUrl).is_some() {
+    if task.pr_url.is_some() {
         return Ok(());
     }
     let identity = match task.identity() {
@@ -1310,7 +1307,10 @@ async fn ensure_pr_url(zbobr: &ZbobrDispatcher, task_backend: &Arc<dyn TaskBacke
     };
     match repo_backend.update_pr(&identity).await {
         Ok(pr_url) => {
-            role_session.set_parameter(Parameter::PrUrl, Some(pr_url)).await?;
+            role_session.modify_task(move |mut task| {
+                task.pr_url = Some(pr_url);
+                task
+            }).await?;
             Ok(())
         }
         Err(e) => {
