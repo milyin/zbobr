@@ -48,47 +48,16 @@ impl TaskFile {
 
         let signal = self.signal.as_ref().map(|s| s.parse()).transpose()?;
 
-        // Migration: handle old files that still have routing params in parameters map
-        let mut destination_repository = self.destination_repository.clone();
-        let mut destination_branch = self.destination_branch.clone();
-        let mut work_branch = self.work_branch.clone();
-        let mut pr_url = None;
-
-        for (k, v) in &self.parameters {
-            match k.as_str() {
-                // Migration: move old parameter-based routing fields to first-class
-                "destination_repository" => {
-                    if destination_repository.is_none() {
-                        destination_repository = Some(v.clone());
-                    }
-                }
-                "destination_branch" => {
-                    if destination_branch.is_none() {
-                        destination_branch = Some(v.clone());
-                    }
-                }
-                "work_branch" => {
-                    if work_branch.is_none() {
-                        work_branch = Some(v.clone());
-                    }
-                }
-                "pr_url" => {
-                    pr_url = Some(v.clone());
-                }
-                _ => {
-                    anyhow::bail!("Unknown parameter: {}", k);
-                }
-            }
-        }
+        let pr_url = self.parameters.get("pr_url").cloned();
 
         Ok(Task {
             id: self.id,
             title: self.title.clone(),
             description: self.description.clone(),
             stage,
-            destination_repository,
-            destination_branch,
-            work_branch,
+            destination_repository: self.destination_repository.clone(),
+            destination_branch: self.destination_branch.clone(),
+            work_branch: self.work_branch.clone(),
             pr_url,
             checklist: self.checklist.clone(),
             signal,
