@@ -76,6 +76,11 @@ impl GitHubRepo {
     fn name(&self) -> &str {
         self.full_name.split('/').nth(1).unwrap_or("")
     }
+
+    /// Returns a filesystem-safe name for the bare clone directory: "owner__repo"
+    fn bare_dir_name(&self) -> String {
+        format!("{}__{}", self.owner(), self.name())
+    }
 }
 
 fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
@@ -259,7 +264,7 @@ impl ZbobrRepoBackendGithub {
         .await
     }
 
-    /// Ensure a bare clone exists at `repos_dir/{repo_name}.git` with token auth configured.
+    /// Ensure a bare clone exists at `repos_dir/{owner}__{repo_name}.git` with token auth configured.
     async fn ensure_bare_clone_github(
         &self,
         repo: &GitHubRepo,
@@ -267,7 +272,7 @@ impl ZbobrRepoBackendGithub {
         let bare_dir = self
             .backend_config
             .repos_dir
-            .join(format!("{}.git", repo.name()));
+            .join(format!("{}.git", repo.bare_dir_name()));
 
         fs::create_dir_all(&self.backend_config.repos_dir).await?;
 
@@ -277,7 +282,7 @@ impl ZbobrRepoBackendGithub {
                 "https://x-access-token:{token}@github.com/{}.git",
                 repo.full_name
             );
-            let bare_name = format!("{}.git", repo.name());
+            let bare_name = format!("{}.git", repo.bare_dir_name());
             tracing::info!("Creating bare clone of {} at {}", repo.full_name, bare_dir.display());
             git(
                 &self.backend_config.repos_dir,
