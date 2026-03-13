@@ -44,8 +44,8 @@ Read the task description below and set the required parameters for the implemen
 /// Generate hardcoded planner instructions using tool name constants.
 pub fn planner_instructions() -> String {
     use planner_tools::{
-        ASK_USER, DELETE_CHECKLIST_ITEM, GET_CHECKLIST, GET_PARAM_DESTINATION_BRANCH,
-        GET_PARAM_WORK_BRANCH, GET_HISTORY, INSERT_CHECKLIST_ITEM, POST_PLAN, REPORT_ERROR,
+        ASK_USER, DELETE_CHECKLIST_ITEM, GET_CHECKLIST, GET_HISTORY, GET_PARAM_DESTINATION_BRANCH,
+        GET_PARAM_WORK_BRANCH, INSERT_CHECKLIST_ITEM, POST_PLAN, REPORT_ERROR,
         UPDATE_CHECKLIST_ITEM,
     };
     let branch_isolation = crate::mcp::common::branch_isolation_instruction();
@@ -93,7 +93,7 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 pub fn worker_instructions() -> String {
     use worker_tools::{
         ASK_PLANNER, ASK_USER, CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST,
-        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_HISTORY, INSERT_CHECKLIST_ITEM,
+        GET_HISTORY, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, INSERT_CHECKLIST_ITEM,
         REPORT_ERROR, REPORT_RESULTS, UPDATE_CHECKLIST_ITEM,
     };
     let branch_isolation = crate::mcp::common::branch_isolation_instruction();
@@ -183,8 +183,8 @@ Review the implementation changes and ensure they meet coding standards and task
 /// Generate hardcoded tester instructions using tool name constants.
 pub fn tester_instructions() -> String {
     use crate::mcp::tester_tools::{
-        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, GET_HISTORY, REPORT_ERROR, TEST_ACCEPT,
-        TEST_REJECT,
+        GET_HISTORY, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, REPORT_ERROR,
+        TEST_ACCEPT, TEST_REJECT,
     };
     let instructions = format!(
         r#"# Tester Agent

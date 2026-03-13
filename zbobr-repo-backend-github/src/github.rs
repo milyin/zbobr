@@ -1,4 +1,7 @@
-use std::{path::{Path, PathBuf}, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -281,10 +284,7 @@ impl ZbobrRepoBackendGithub {
     }
 
     /// Ensure a bare clone exists at `repos_dir/{owner}__{repo_name}.git` with token auth configured.
-    async fn ensure_bare_clone_github(
-        &self,
-        repo: &GitHubRepo,
-    ) -> anyhow::Result<PathBuf> {
+    async fn ensure_bare_clone_github(&self, repo: &GitHubRepo) -> anyhow::Result<PathBuf> {
         let bare_dir = self
             .backend_config
             .repos_dir
@@ -299,7 +299,11 @@ impl ZbobrRepoBackendGithub {
                 repo.full_name
             );
             let bare_name = format!("{}.git", repo.bare_dir_name());
-            tracing::info!("Creating bare clone of {} at {}", repo.full_name, bare_dir.display());
+            tracing::info!(
+                "Creating bare clone of {} at {}",
+                repo.full_name,
+                bare_dir.display()
+            );
             git(
                 &self.backend_config.repos_dir,
                 &["clone", "--bare", &clone_url, &bare_name],
@@ -311,11 +315,7 @@ impl ZbobrRepoBackendGithub {
 
             // Normalize origin URL to remove embedded token
             let clean_url = format!("https://github.com/{}.git", repo.full_name);
-            git(
-                &bare_dir,
-                &["config", "remote.origin.url", &clean_url],
-            )
-            .await?;
+            git(&bare_dir, &["config", "remote.origin.url", &clean_url]).await?;
         }
 
         // Configure fetch refspec so worktrees get proper origin/* refs
@@ -443,8 +443,12 @@ impl ZbobrRepoBackendGithub {
             .await?;
         }
 
-        zbobr_utility::configure_git_user(workspace_path, &self.git_user_name, &self.git_user_email)
-            .await?;
+        zbobr_utility::configure_git_user(
+            workspace_path,
+            &self.git_user_name,
+            &self.git_user_email,
+        )
+        .await?;
 
         Ok(())
     }
@@ -567,11 +571,7 @@ impl ZbobrRepoBackendGithub {
 
                 if needs_update {
                     tracing::info!("Updating local {local_ref} to match {remote_ref}");
-                    git(
-                        bare_dir,
-                        &["update-ref", &local_ref, remote_sha.trim()],
-                    )
-                    .await?;
+                    git(bare_dir, &["update-ref", &local_ref, remote_sha.trim()]).await?;
                 }
             }
             Err(_) => {
@@ -599,15 +599,9 @@ impl ZbobrRepoBackendGithub {
         push_remote: &str,
         work_branch: &str,
     ) -> anyhow::Result<bool> {
-        let refspec = format!(
-            "refs/heads/{work_branch}:refs/remotes/{push_remote}/{work_branch}"
-        );
+        let refspec = format!("refs/heads/{work_branch}:refs/remotes/{push_remote}/{work_branch}");
 
-        let ok = git_check(
-            bare_dir,
-            &["fetch", push_remote, &refspec],
-        )
-        .await?;
+        let ok = git_check(bare_dir, &["fetch", push_remote, &refspec]).await?;
 
         if ok {
             tracing::info!("Fetched {push_remote}/{work_branch}");
@@ -665,11 +659,7 @@ impl ZbobrRepoBackendGithub {
         }
 
         tracing::info!("Merging {source_ref} into worktree HEAD");
-        let ok = git_check(
-            worktree_path,
-            &["merge", source_ref, "--no-edit"],
-        )
-        .await?;
+        let ok = git_check(worktree_path, &["merge", source_ref, "--no-edit"]).await?;
 
         if ok {
             tracing::info!("Successfully merged {source_ref}");
@@ -735,9 +725,10 @@ impl ZbobrRepoBackendGithub {
                     }
                 }
                 if branch.as_deref() == Some(work_branch)
-                    && let Some(wt) = wt_path {
-                        return Ok((path.clone(), wt));
-                    }
+                    && let Some(wt) = wt_path
+                {
+                    return Ok((path.clone(), wt));
+                }
             }
         }
 
@@ -777,16 +768,13 @@ impl ZbobrRepoBackendGithub {
             .await
             .map_err(octocrab_to_anyhow)?;
 
-        prs.into_iter()
-            .next()
-            .map(|pr| pr.html_url)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "No existing open PR found for head '{}' in {}",
-                    work_branch,
-                    pr_repo_ref.full_name
-                )
-            })
+        prs.into_iter().next().map(|pr| pr.html_url).ok_or_else(|| {
+            anyhow::anyhow!(
+                "No existing open PR found for head '{}' in {}",
+                work_branch,
+                pr_repo_ref.full_name
+            )
+        })
     }
 
     /// Query GitHub for an existing open PR matching `head` → `base`.
@@ -970,9 +958,7 @@ impl RepoBackend for ZbobrRepoBackendGithub {
                 .output()
                 .await?;
             if fetch_work.status.success() {
-                tracing::info!(
-                    "Fetched work branch '{work_branch}' from {push_remote}"
-                );
+                tracing::info!("Fetched work branch '{work_branch}' from {push_remote}");
             } else {
                 tracing::info!(
                     "Work branch '{work_branch}' not found on {push_remote} (may be new)"
@@ -986,7 +972,10 @@ impl RepoBackend for ZbobrRepoBackendGithub {
         let rebase_merge_dir = work_dir.join(".git/rebase-merge");
         let rebase_apply_dir = work_dir.join(".git/rebase-apply");
         if rebase_merge_dir.exists() || rebase_apply_dir.exists() {
-            tracing::warn!("Detected in-progress rebase in {}, aborting", work_dir.display());
+            tracing::warn!(
+                "Detected in-progress rebase in {}, aborting",
+                work_dir.display()
+            );
             let _ = tokio::process::Command::new("git")
                 .args(["rebase", "--abort"])
                 .current_dir(&work_dir)
@@ -995,7 +984,10 @@ impl RepoBackend for ZbobrRepoBackendGithub {
         }
         let merge_head = work_dir.join(".git/MERGE_HEAD");
         if merge_head.exists() {
-            tracing::warn!("Detected in-progress merge in {}, aborting", work_dir.display());
+            tracing::warn!(
+                "Detected in-progress merge in {}, aborting",
+                work_dir.display()
+            );
             let _ = tokio::process::Command::new("git")
                 .args(["merge", "--abort"])
                 .current_dir(&work_dir)
@@ -1079,9 +1071,7 @@ impl RepoBackend for ZbobrRepoBackendGithub {
                     .unwrap_or(false);
 
                 if is_ancestor {
-                    tracing::info!(
-                        "Fast-forwarding local '{work_branch}' to {remote_ref}"
-                    );
+                    tracing::info!("Fast-forwarding local '{work_branch}' to {remote_ref}");
                     let _ = tokio::process::Command::new("git")
                         .args(["merge", "--ff-only", &remote_ref])
                         .current_dir(&work_dir)
@@ -1577,11 +1567,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             // Check if worktree has any commits ahead of base
             let log_out = git_output(
                 workspace_path,
-                &[
-                    "log",
-                    &format!("{}..HEAD", base_branch),
-                    "--oneline",
-                ],
+                &["log", &format!("{}..HEAD", base_branch), "--oneline"],
             )
             .await;
             let has_commits_ahead = log_out
@@ -1624,15 +1610,11 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             }
         };
 
-        let has_merge_in_progress = merge_head.exists()
-            || gitdir_merge_head
-                .as_ref()
-                .is_some_and(|p| p.exists());
+        let has_merge_in_progress =
+            merge_head.exists() || gitdir_merge_head.as_ref().is_some_and(|p| p.exists());
 
         if has_merge_in_progress {
-            tracing::warn!(
-                "Detected in-progress merge in worktree, aborting before proceeding"
-            );
+            tracing::warn!("Detected in-progress merge in worktree, aborting before proceeding");
             let _ = git_check(workspace_path, &["merge", "--abort"]).await;
         }
 
@@ -1644,9 +1626,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             let remote_ref = format!("{push_remote}/{work_branch}");
             let merged = Self::merge_ref_into_worktree(workspace_path, &remote_ref).await?;
             if !merged {
-                tracing::warn!(
-                    "Merge conflict merging remote work branch — needs merger"
-                );
+                tracing::warn!("Merge conflict merging remote work branch — needs merger");
                 return Ok(false);
             }
         }
@@ -1654,9 +1634,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         // Phase 9: Merge base → local work (element 4 → 6)
         let merged = Self::merge_ref_into_worktree(workspace_path, base_branch).await?;
         if !merged {
-            tracing::warn!(
-                "Merge conflict merging base branch — needs merger"
-            );
+            tracing::warn!("Merge conflict merging base branch — needs merger");
             return Ok(false);
         }
 

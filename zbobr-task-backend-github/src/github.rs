@@ -1,9 +1,12 @@
-use std::{collections::HashMap, sync::{Arc, Mutex}, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use zbobr_api::{
-    Comment, CommentTag, CommentType, Model, Parameter, Role, Signal, Stage, Task,
-    Tool,
+    Comment, CommentTag, CommentType, Model, Parameter, Role, Signal, Stage, Task, Tool,
     backend::TaskBackend,
 };
 
@@ -1024,7 +1027,7 @@ mod parse_tests {
         let comment_type = tag.comment_type;
         let role = tag.role;
         let host = tag.hostname;
-          let tool = tag.tool;
+        let tool = tag.tool;
         let model = tag.model;
 
         assert_eq!(comment_type, CommentType::Report);
