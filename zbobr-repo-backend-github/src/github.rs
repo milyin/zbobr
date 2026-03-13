@@ -271,6 +271,21 @@ impl ZbobrRepoBackendGithub {
 
     /// Configure token-based auth on a bare clone via URL rewrite in git config.
     async fn configure_token_auth(&self, bare_dir: &Path) -> anyhow::Result<()> {
+        // Remove any existing insteadOf entries for github.com to avoid stale tokens
+        // accumulating as separate config keys (the token is part of the key).
+        if let Ok(output) = git_output(
+            bare_dir,
+            &["config", "--get-regexp", r"url\..*github\.com.*\.insteadOf"],
+        )
+        .await
+        {
+            for line in output.lines() {
+                if let Some(key) = line.split_whitespace().next() {
+                    let _ = git(bare_dir, &["config", "--unset", key]).await;
+                }
+            }
+        }
+
         let token = &self.backend_config.github_token;
         git(
             bare_dir,
