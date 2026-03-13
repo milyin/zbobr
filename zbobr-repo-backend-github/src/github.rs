@@ -310,13 +310,14 @@ impl ZbobrRepoBackendGithub {
             )
             .await?;
 
-            // Configure URL rewrite for subsequent operations
-            self.configure_token_auth(&bare_dir).await?;
-
             // Normalize origin URL to remove embedded token
             let clean_url = format!("https://github.com/{}.git", repo.full_name);
             git(&bare_dir, &["config", "remote.origin.url", &clean_url]).await?;
         }
+
+        // Configure URL rewrite for subsequent operations (unconditionally,
+        // so token auth is refreshed even when the bare clone already exists)
+        self.configure_token_auth(&bare_dir).await?;
 
         // Configure fetch refspec so worktrees get proper origin/* refs
         git(
@@ -907,6 +908,9 @@ impl RepoBackend for ZbobrRepoBackendGithub {
             );
         }
 
+        // Refresh token auth so subsequent git push operations use the current token
+        self.configure_token_auth(&work_dir).await?;
+
         // Determine same-org vs cross-org mode and set up fork remote BEFORE
         // checking out the work branch — in cross-org mode the work branch
         // lives on the fork remote and must be fetched from there.
@@ -1376,6 +1380,9 @@ impl RepoBackend for ZbobrRepoBackendGithub {
         if !add_origin.success() {
             anyhow::bail!("Failed to add fork as origin remote");
         }
+
+        // Refresh token auth so the push uses the current token
+        self.configure_token_auth(work_dir).await?;
 
         // Push the work branch to the forked repository
         tracing::info!("Pushing work branch '{}' to fork", work_branch);
