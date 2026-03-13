@@ -809,12 +809,15 @@ impl std::fmt::Display for CommentTag {
         // Serialization includes optional tool and model.  Maintain backward
         // compatibility by emitting only hostname:model when tool is absent.
         match (&self.tool, &self.model) {
-            (Some(tool), Some(model)) =>
-                write!(f, "// {} {}:{}:{}:{}", tag_type, role, self.hostname, tool, model),
-            (Some(tool), None) =>
-                write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, tool),
-            (None, Some(model)) =>
-                write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, model),
+            (Some(tool), Some(model)) => write!(
+                f,
+                "// {} {}:{}:{}:{}",
+                tag_type, role, self.hostname, tool, model
+            ),
+            (Some(tool), None) => write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, tool),
+            (None, Some(model)) => {
+                write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, model)
+            }
             (None, None) => write!(f, "// {} {}:{}", tag_type, role, self.hostname),
         }
     }
@@ -834,7 +837,7 @@ impl std::str::FromStr for CommentTag {
         let comment_type = CommentType::parse(tag_type_str)
             .ok_or_else(|| anyhow::anyhow!("Unknown comment type: {}", tag_type_str))?;
 
-let (role, hostname, tool, model) = if rest.is_empty() {
+        let (role, hostname, tool, model) = if rest.is_empty() {
             // no metadata supplied; default to user/request with empty host
             (None, String::new(), None, None)
         } else {
@@ -848,12 +851,14 @@ let (role, hostname, tool, model) = if rest.is_empty() {
 
             // backwards compatibility: three parts used to mean role:host:model
             let (tool, model) = if parts.len() == 3 {
-                (None,
-                 if !parts[2].is_empty() && parts[2] != "unknown" {
-                     Some(Model::from_str(parts[2])?)
-                 } else {
-                     None
-                 })
+                (
+                    None,
+                    if !parts[2].is_empty() && parts[2] != "unknown" {
+                        Some(Model::from_str(parts[2])?)
+                    } else {
+                        None
+                    },
+                )
             } else {
                 let tool = if parts.len() > 2 && !parts[2].is_empty() {
                     Some(Tool::from_str(parts[2])?)

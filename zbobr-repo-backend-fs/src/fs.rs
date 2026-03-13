@@ -98,8 +98,11 @@ impl ZbobrRepoBackendFs {
         zbobr_utility::cleanup_worktree_for_branch(bare_dir, work_branch, workspace_path).await?;
 
         let ws = workspace_path.to_str().unwrap();
-        if git_check(bare_dir, &["rev-parse", &format!("{}^{{commit}}", work_branch)])
-            .await?
+        if git_check(
+            bare_dir,
+            &["rev-parse", &format!("{}^{{commit}}", work_branch)],
+        )
+        .await?
         {
             git(bare_dir, &["worktree", "add", ws, work_branch]).await?;
         } else {
@@ -162,7 +165,12 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
         Ok(is_uptodate)
     }
 
-    async fn update_pr(&self, work_branch: &str, _destination_repo: &str, _base_branch: &str) -> anyhow::Result<String> {
+    async fn update_pr(
+        &self,
+        work_branch: &str,
+        _destination_repo: &str,
+        _base_branch: &str,
+    ) -> anyhow::Result<String> {
         if !self.config.repos_dir.exists() {
             anyhow::bail!("No worktree found for work_branch '{}'", work_branch);
         }
@@ -200,7 +208,8 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
                     }
                 }
                 if branch.as_deref() == Some(work_branch)
-                    && let Some(p) = wt_path {
+                    && let Some(p) = wt_path
+                {
                     return Ok(p);
                 }
             }

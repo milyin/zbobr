@@ -11,7 +11,7 @@ use crate::{
         common::GetHistoryParam,
         traits::{CommonMcpImpl, ReviewerMcpImpl},
     },
-    task::{RoleSession, Model, Tool},
+    task::{Model, RoleSession, Tool},
 };
 
 #[derive(Clone)]

@@ -1,5 +1,5 @@
-use std::{collections::HashMap, path::PathBuf};
 use crate::Tool;
+use std::{collections::HashMap, path::PathBuf};
 
 use async_trait::async_trait;
 
@@ -175,8 +175,6 @@ pub trait RepoBackend: Send + Sync {
     fn debug_state(&self) -> String;
 }
 
-
-
 #[async_trait]
 pub trait WorktreeBackend: Send + Sync {
     /// **Precondition**: `work_branch` must differ from `base_branch`. Passing the same
@@ -186,12 +184,12 @@ pub trait WorktreeBackend: Send + Sync {
     ///    It's important to notice that this clone is not necessarity the direct clone
     ///    of the `remote_repo` in the parameter. It's up to backend how to proxy the
     ///    remote repository, e.g. by creating a fork in own account and locally cloning it.
-    /// 
-    /// 2. Creates in the `workspace_path` a new worktree linked to the main clone for 
+    ///
+    /// 2. Creates in the `workspace_path` a new worktree linked to the main clone for
     /// the branch `work_branch` with `base_branch` as the upstream.
-    /// 
+    ///
     /// Conditions to be met for successful worktree creation:
-    /// 
+    ///
     /// The `base_branch` must exist in the main worktree.
     /// The `work_branch`
     ///  - should either not exist or be an ancestor of `base_branch` in the main worktree.
@@ -203,23 +201,24 @@ pub trait WorktreeBackend: Send + Sync {
     ///  - if the branch is registered in a **non-functional** worktree (empty or missing
     ///    directory, no `.git` entry), the stale reference must be removed before creating
     ///    a new worktree at `workspace_path`.
-    ///  - the `workspace_path` should either not exist or contain the worktree with the 
+    ///  - the `workspace_path` should either not exist or contain the worktree with the
     ///    `work_branch` selected
     ///
     /// Corresponding delete operation is not required: the worktree can be removed with
-    /// `git worktree remove` command 
-    /// 
+    /// `git worktree remove` command
+    ///
     /// Returns boolean value indicating whether the worktree branch is
-    /// successfully created and merged to recent remote updates 
-    /// 
+    /// successfully created and merged to recent remote updates
+    ///
     /// I.e return values:
     /// - `Ok(true)` means the worktree is ready to use and up to date with the `base_branch`.
     /// - `Ok(false)` means the worktree is in a merging conflict state
-    /// - `Err` means the worktree is not ready to use, e.g. due to validation 
+    /// - `Err` means the worktree is not ready to use, e.g. due to validation
     ///    failure or creation failure.
-    /// 
+    ///
     /// The merging `base_branch` into `work_branch` is the responsibility of the caller.
-    async fn update_worktree(&self, 
+    async fn update_worktree(
+        &self,
         remote_repo: &str,
         base_branch: &str,
         work_branch: &str,

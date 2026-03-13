@@ -956,7 +956,12 @@ mod comment_model_tests {
             Ok(true)
         }
 
-        async fn update_pr(&self, _work_branch: &str, _destination_repo: &str, _base_branch: &str) -> anyhow::Result<String> {
+        async fn update_pr(
+            &self,
+            _work_branch: &str,
+            _destination_repo: &str,
+            _base_branch: &str,
+        ) -> anyhow::Result<String> {
             Ok("mock-pr-url".to_string())
         }
 

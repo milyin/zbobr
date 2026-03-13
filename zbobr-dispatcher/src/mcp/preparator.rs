@@ -13,7 +13,7 @@ use crate::{
         },
         traits::{CommonMcpImpl, PreparatorMcpImpl},
     },
-    task::{RoleSession, Model, Tool},
+    task::{Model, RoleSession, Tool},
 };
 
 #[derive(Clone)]

@@ -10,7 +10,7 @@ use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
 
 // bring in the generic git helpers from utility crate
-use zbobr_utility::{git, git_check, git_output, configure_git_user};
+use zbobr_utility::{configure_git_user, git, git_check, git_output};
 
 use crate::{
     Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
@@ -18,7 +18,7 @@ use crate::{
     backend::TaskBackendExt,
     mcp::common::get_hostname,
     prompts::Prompts,
-    task::{Parameter, Role, Tool, Model},
+    task::{Model, Parameter, Role, Tool},
 };
 
 // ---------------------------------------------------------------------------
@@ -792,7 +792,9 @@ impl<'a> CliRoleRunner<'a> {
     }
 
     async fn prompt(&self) -> anyhow::Result<String> {
-        self.prompts.build_prompt(self.role, self.task_id, self.zbobr).await
+        self.prompts
+            .build_prompt(self.role, self.task_id, self.zbobr)
+            .await
     }
 
     async fn run(&self) -> anyhow::Result<()> {
@@ -809,7 +811,8 @@ impl<'a> CliRoleRunner<'a> {
         let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), self.task_id);
         tokio::fs::create_dir_all(task_dir.path()).await?;
 
-        let (work_dir, is_uptodate) = prepare_workspace(self.zbobr, self.task_id, self.role, task_dir.path()).await?;
+        let (work_dir, is_uptodate) =
+            prepare_workspace(self.zbobr, self.task_id, self.role, task_dir.path()).await?;
 
         if matches!(self.role, Role::Preparator) {
             seed_preparator_defaults(self.zbobr, self.task_id).await?;
@@ -867,15 +870,21 @@ impl<'a> CliRoleRunner<'a> {
             if merged_ok {
                 tracing::info!(
                     "Task #{}: normal merge with '{}' succeeded — skipping agent session",
-                    self.task_id, dest_branch
+                    self.task_id,
+                    dest_branch
                 );
-                perform_auto_commit_and_push(self.zbobr, self.task_id, &work_dir, self.role).await?;
-                self.zbobr.task_session(self.task_id).set_stage(Stage::Pending).await?;
+                perform_auto_commit_and_push(self.zbobr, self.task_id, &work_dir, self.role)
+                    .await?;
+                self.zbobr
+                    .task_session(self.task_id)
+                    .set_stage(Stage::Pending)
+                    .await?;
                 return Ok(());
             }
             tracing::info!(
                 "Task #{}: normal merge with '{}' failed — invoking agent to resolve conflicts",
-                self.task_id, dest_branch
+                self.task_id,
+                dest_branch
             );
             // Abort the failed merge so the agent starts with a clean state
             let _ = git(&work_dir, &["merge", "--abort"]).await;
@@ -885,7 +894,10 @@ impl<'a> CliRoleRunner<'a> {
         // content.  If the latest chunk contains no actionable messages the
         // agent session would do useless work, so bail early.
         {
-            let history = self.zbobr.get_history(self.task_id, None).await
+            let history = self
+                .zbobr
+                .get_history(self.task_id, None)
+                .await
                 .context("Pre-flight get_history check failed")?;
             tracing::info!(
                 "Task #{} pre-flight: get_history returned {} comment(s)",
@@ -904,15 +916,14 @@ impl<'a> CliRoleRunner<'a> {
         // its session structs.  we already determined `cli_tool` and `model`
         // above from dispatcher configuration.
         // clone `model` because we'll still need it after the call
-        let (assigned_port, server_handle) =
-            start_mcp_server(
-                self.zbobr.clone(),
-                self.role,
-                self.task_id,
-                cli_tool,
-                model.clone(),
-            )
-            .await?;
+        let (assigned_port, server_handle) = start_mcp_server(
+            self.zbobr.clone(),
+            self.role,
+            self.task_id,
+            cli_tool,
+            model.clone(),
+        )
+        .await?;
 
         let mcp_url = format!(
             "http://127.0.0.1:{assigned_port}/{role}/{task_id}",
@@ -994,10 +1005,7 @@ pub async fn process_task_by_stage(
                 let session = CliRoleRunner::new(zbobr, task.id, role, prompts, executor_config);
                 session.run().await?;
             } else {
-                println!(
-                    "Task #{} is PENDING (no signal) — skipped",
-                    task.id
-                );
+                println!("Task #{} is PENDING (no signal) — skipped", task.id);
                 return Ok(());
             }
         }
@@ -1171,7 +1179,8 @@ pub async fn run_manager_loop(
         let mut active_counts = std::collections::HashMap::new();
         for stage in &active_stages {
             let count = zbobr
-                .tasks().list_tasks_by_stage(*stage)
+                .tasks()
+                .list_tasks_by_stage(*stage)
                 .await
                 .unwrap_or_default()
                 .len();
@@ -1261,7 +1270,7 @@ async fn prepare_workspace(
                     let task_dir = TaskDir::new(zbobr.config().workspaces.as_path(), task_id);
                     let path = task_dir.path().join(repo_name);
                     Ok((path, is_uptodate))
-                },
+                }
                 Err(e) => {
                     let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
                     tracing::error!("{msg}");
@@ -1416,7 +1425,9 @@ async fn finalize_session(
     if execution_interrupted {
         if role == Role::Worker || role == Role::Merger {
             if let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await {
-                tracing::warn!("Auto-commit/push failed during interruption for task #{task_id}: {e}");
+                tracing::warn!(
+                    "Auto-commit/push failed during interruption for task #{task_id}: {e}"
+                );
             }
         }
         task_session.set_stage(Stage::Pending).await?;
@@ -1427,7 +1438,9 @@ async fn finalize_session(
     if let Some(e) = execution_error {
         if role == Role::Worker || role == Role::Merger {
             if let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await {
-                tracing::warn!("Auto-commit/push failed during error handling for task #{task_id}: {e}");
+                tracing::warn!(
+                    "Auto-commit/push failed during error handling for task #{task_id}: {e}"
+                );
             }
         }
         let error_msg = format!("Execution failed: {e}");
@@ -1454,27 +1467,32 @@ async fn finalize_session(
     tracing::info!("Session complete for task #{task_id}");
 
     if (role == Role::Worker || role == Role::Merger)
-        && let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await {
-            tracing::error!("Auto-commit/push failed for task #{task_id}: {e}");
-            let hostname = get_hostname();
-            let msg = format!("Auto-commit/push failed: {e}");
-            if let Err(post_err) = task_session
-                .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
-                .await
-            {
-                tracing::error!("Failed to post auto-commit/push error for task #{task_id}: {post_err}");
-            }
-            if let Err(pause_err) = task_session
-                .modify_task(|task| {
-                    task.pause = true;
-                })
-                .await
-            {
-                tracing::error!("Failed to pause task #{task_id} after auto-commit/push failure: {pause_err}");
-            }
-            task_session.set_stage(Stage::Pending).await?;
-            return Ok(());
+        && let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await
+    {
+        tracing::error!("Auto-commit/push failed for task #{task_id}: {e}");
+        let hostname = get_hostname();
+        let msg = format!("Auto-commit/push failed: {e}");
+        if let Err(post_err) = task_session
+            .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
+            .await
+        {
+            tracing::error!(
+                "Failed to post auto-commit/push error for task #{task_id}: {post_err}"
+            );
         }
+        if let Err(pause_err) = task_session
+            .modify_task(|task| {
+                task.pause = true;
+            })
+            .await
+        {
+            tracing::error!(
+                "Failed to pause task #{task_id} after auto-commit/push failure: {pause_err}"
+            );
+        }
+        task_session.set_stage(Stage::Pending).await?;
+        return Ok(());
+    }
 
     let current_task = zbobr.tasks().get_task(task_id).await?;
     let has_unchecked = current_task.checklist.iter().any(|i| !i.checked);
@@ -1527,7 +1545,8 @@ async fn finalize_session(
             // Retry the merge to verify the agent actually resolved the conflict.
             // If it still fails, pause the task and report to avoid an infinite loop.
             let dest_branch = zbobr
-                .tasks().get_task(task_id)
+                .tasks()
+                .get_task(task_id)
                 .await?
                 .parameters
                 .get(&Parameter::DestinationBranch)
@@ -1633,7 +1652,11 @@ async fn rewrite_commit_authors(
     // Get list of commits that will be rewritten
     let log_output = git_output(
         &git_root_path,
-        &["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"],
+        &[
+            "log",
+            &format!("{}..HEAD", dest_branch),
+            "--format=%H %an <%ae>",
+        ],
     )
     .await?;
 
@@ -1684,7 +1707,11 @@ async fn rewrite_commit_authors(
             // Show post-rebase log to verify changes
             if let Ok(updated_commits) = git_output(
                 &git_root_path,
-                &["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"],
+                &[
+                    "log",
+                    &format!("{}..HEAD", dest_branch),
+                    "--format=%H %an <%ae>",
+                ],
             )
             .await
             {
@@ -1694,12 +1721,7 @@ async fn rewrite_commit_authors(
                 }
             }
 
-            if let Err(e) = zbobr
-                .task_session(task_id)
-                .role_session()
-                .update_pr()
-                .await
-            {
+            if let Err(e) = zbobr.task_session(task_id).role_session().update_pr().await {
                 tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
             }
         }

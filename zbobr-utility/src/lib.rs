@@ -77,7 +77,11 @@ pub async fn configure_git_user(
     git_user_email: &str,
 ) -> Result<()> {
     git(work_dir, &["config", "--local", "user.name", git_user_name]).await?;
-    git(work_dir, &["config", "--local", "user.email", git_user_email]).await?;
+    git(
+        work_dir,
+        &["config", "--local", "user.email", git_user_email],
+    )
+    .await?;
 
     tracing::info!(
         "Configured git user '{}' <{}> in {}",

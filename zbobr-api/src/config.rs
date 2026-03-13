@@ -1,6 +1,6 @@
 use zbobr_utility::config_struct;
 
-use crate::task::{Tool, Model};
+use crate::task::{Model, Tool};
 
 /// Helper structure for per-stage configuration (tool, model, and prompts).
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Default)]
@@ -201,9 +201,7 @@ impl ZbobrDispatcherConfig {
     /// Determine which tool should be used for the given role, falling back
     /// to the global `cli_tool` setting if the stage does not specify one.
     pub fn tool_for_role(&self, role: crate::task::Role) -> crate::task::Tool {
-        self.stage_for_role(role)
-            .tool
-            .unwrap_or(self.tool)
+        self.stage_for_role(role).tool.unwrap_or(self.tool)
     }
 
     /// Determine which model should be used for the given role.  The precedence
