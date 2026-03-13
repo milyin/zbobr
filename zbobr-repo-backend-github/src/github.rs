@@ -828,7 +828,7 @@ impl ZbobrRepoBackendGithub {
 
         prs.into_iter().next().map(|pr| pr.html_url).ok_or_else(|| {
             anyhow::anyhow!(
-                "No existing open PR found for head '{}' -> base '{}' in {}",
+                "No existing open PR found for head '{}' -> base '{:?}' in {}",
                 head,
                 base,
                 full_repo
@@ -837,8 +837,7 @@ impl ZbobrRepoBackendGithub {
     }
 }
 
-#[async_trait]
-impl RepoBackend for ZbobrRepoBackendGithub {
+impl ZbobrRepoBackendGithub {
     async fn clone_and_setup(
         &self,
         target_repo: &str,
@@ -980,11 +979,9 @@ impl RepoBackend for ZbobrRepoBackendGithub {
             if fetch_work.status.success() {
                 tracing::info!("Fetched work branch '{work_branch}' from {push_remote}");
             } else {
-                anyhow::anyhow!(
-                    "No existing open PR found for head '{}' in {}",
-                    head,
-                    full_repo
-                )
+                tracing::info!(
+                    "Work branch '{work_branch}' not found on {push_remote} (may be new)"
+                );
             }
         }
 
@@ -1283,7 +1280,7 @@ impl RepoBackend for ZbobrRepoBackendGithub {
                 if source.status_code.as_u16() == 422 =>
             {
                 tracing::info!("PR already exists for {work_branch}, looking up existing PR");
-                self.find_existing_pr(&pr_repo, work_branch, destination_branch)
+                self.find_existing_pr(&pr_repo, work_branch, Some(destination_branch))
                     .await
             }
             Err(e) => Err(octocrab_to_anyhow(e)),
@@ -1478,30 +1475,6 @@ impl RepoBackend for ZbobrRepoBackendGithub {
         Ok((repo_full, branch))
     }
 
-    async fn validate_connectivity(&self) -> anyhow::Result<()> {
-        let fork_owner = &self.backend_config.fork_owner;
-        let fork_owner_exists = retry_github("check fork owner", || {
-            self.octocrab
-                .get::<serde_json::Value, _, _>(format!("/users/{fork_owner}"), None::<&()>)
-        })
-        .await
-        .is_ok();
-        if !fork_owner_exists {
-            anyhow::bail!(
-                "fork_owner '{fork_owner}' does not exist on GitHub as a user or organization.\n  \
-                 Check your fork_owner setting and ensure the account exists."
-            );
-        }
-
-        Ok(())
-    }
-
-    fn debug_state(&self) -> String {
-        format!(
-            "GitHubRepoBackend(fork_owner={})",
-            self.backend_config.fork_owner
-        )
-    }
 }
 
 #[async_trait]

@@ -1508,19 +1508,6 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
             return Ok(());
         }
-        if let Err(pause_err) = task_session
-            .modify_task(|task| {
-                task.pause = true;
-            })
-            .await
-        {
-            tracing::error!(
-                "Failed to pause task #{task_id} after auto-commit/push failure: {pause_err}"
-            );
-        }
-        task_session.set_stage(Stage::Pending).await?;
-        return Ok(());
-    }
 
     let current_task = task_backend.get_task(task_id).await?.snapshot().await?;
     let has_unchecked = current_task.checklist.iter().any(|i| !i.checked);
