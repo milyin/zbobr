@@ -9,12 +9,7 @@ use crate::{
 /// Log a comments response (typically from get_history). Parses JSON and logs each comment.
 fn log_mcp_comments_response(role_name: &str, task_id: u64, response: &str) {
     // Log exact JSON in debug level
-    tracing::debug!(
-        "[{}#{}] response: {}",
-        role_name,
-        task_id,
-        response
-    );
+    tracing::debug!("[{}#{}] response: {}", role_name, task_id, response);
 
     // Log info level with parsed comments
     if response.starts_with('{') {
@@ -43,12 +38,27 @@ fn log_mcp_comments_response(role_name: &str, task_id: u64, response: &str) {
                 );
             }
         } else {
-            tracing::info!("[{}#{}] get_history response (failed to parse): {}", role_name, task_id, response);
+            tracing::info!(
+                "[{}#{}] get_history response (failed to parse): {}",
+                role_name,
+                task_id,
+                response
+            );
         }
     } else if response.starts_with("Error") {
-        tracing::info!("[{}#{}] get_history error: {}", role_name, task_id, response);
+        tracing::info!(
+            "[{}#{}] get_history error: {}",
+            role_name,
+            task_id,
+            response
+        );
     } else {
-        tracing::info!("[{}#{}] get_history response: {}", role_name, task_id, response);
+        tracing::info!(
+            "[{}#{}] get_history response: {}",
+            role_name,
+            task_id,
+            response
+        );
     }
 }
 
@@ -74,16 +84,34 @@ fn log_mcp_json_response(role_name: &str, task_id: u64, tool_name: &str, respons
                 items.len()
             );
         } else {
-            tracing::info!("[{}#{}] {} response (failed to parse): {}", role_name, task_id, tool_name, response);
+            tracing::info!(
+                "[{}#{}] {} response (failed to parse): {}",
+                role_name,
+                task_id,
+                tool_name,
+                response
+            );
         }
     } else if response.starts_with('{') {
         if serde_json::from_str::<serde_json::Value>(response).is_ok() {
             tracing::info!("[{}#{}] {} succeeded", role_name, task_id, tool_name);
         } else {
-            tracing::info!("[{}#{}] {} response (failed to parse): {}", role_name, task_id, tool_name, response);
+            tracing::info!(
+                "[{}#{}] {} response (failed to parse): {}",
+                role_name,
+                task_id,
+                tool_name,
+                response
+            );
         }
     } else if response.starts_with("Error") {
-        tracing::info!("[{}#{}] {} error: {}", role_name, task_id, tool_name, response);
+        tracing::info!(
+            "[{}#{}] {} error: {}",
+            role_name,
+            task_id,
+            tool_name,
+            response
+        );
     } else {
         tracing::info!("[{}#{}] {}: {}", role_name, task_id, tool_name, response);
     }
@@ -102,14 +130,26 @@ fn log_mcp_string_response(role_name: &str, task_id: u64, tool_name: &str, respo
 
     // Log info level with key information
     if response.starts_with("Error") {
-        tracing::info!("[{}#{}] {} error: {}", role_name, task_id, tool_name, response);
+        tracing::info!(
+            "[{}#{}] {} error: {}",
+            role_name,
+            task_id,
+            tool_name,
+            response
+        );
     } else {
         let display_str = if response.len() > 100 {
             format!("{}...", &response[..100])
         } else {
             response.to_string()
         };
-        tracing::info!("[{}#{}] {} result: {}", role_name, task_id, tool_name, display_str);
+        tracing::info!(
+            "[{}#{}] {} result: {}",
+            role_name,
+            task_id,
+            tool_name,
+            display_str
+        );
     }
 }
 
@@ -179,7 +219,12 @@ pub trait CommonMcpImpl: Send + Sync {
             }
             Err(e) => {
                 let response = format!("Error: {e}");
-                log_mcp_string_response(self.role_name(), self.session().task_id(), "get_history", &response);
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    "get_history",
+                    &response,
+                );
                 response
             }
         }
@@ -210,7 +255,12 @@ pub trait CommonMcpImpl: Send + Sync {
                 self.session().task_id()
             );
             let response = format!("Error posting error message: {e}");
-            log_mcp_string_response(self.role_name(), self.session().task_id(), "report_error", &response);
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                "report_error",
+                &response,
+            );
             return response;
         }
 
@@ -221,7 +271,12 @@ pub trait CommonMcpImpl: Send + Sync {
                 self.session().task_id()
             );
             let response = format!("Error reporting error but error pausing task: {e}");
-            log_mcp_string_response(self.role_name(), self.session().task_id(), "report_error", &response);
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                "report_error",
+                &response,
+            );
             return response;
         }
 
@@ -234,7 +289,12 @@ pub trait CommonMcpImpl: Send + Sync {
         }
 
         let response = "Error reported to user - task paused pending response".to_string();
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "report_error", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "report_error",
+            &response,
+        );
         response
     }
 
@@ -252,7 +312,9 @@ pub trait CommonMcpImpl: Send + Sync {
                 CommentType::Report,
                 message,
                 Some(self.role()),
-                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
+                &hostname,
+                Some(self.mcp_tool()),
+                Some(self.mcp_model()),
             )
             .await
         {
@@ -261,12 +323,22 @@ pub trait CommonMcpImpl: Send + Sync {
                 self.session().task_id()
             );
             let response = format!("Error posting results message: {e}");
-            log_mcp_string_response(self.role_name(), self.session().task_id(), "report_results", &response);
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                "report_results",
+                &response,
+            );
             return response;
         }
 
         let response = "Results reported successfully".to_string();
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "report_results", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "report_results",
+            &response,
+        );
         response
     }
 
@@ -284,7 +356,9 @@ pub trait CommonMcpImpl: Send + Sync {
                 CommentType::Request,
                 message,
                 Some(self.role()),
-                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
+                &hostname,
+                Some(self.mcp_tool()),
+                Some(self.mcp_model()),
             )
             .await
         {
@@ -293,7 +367,12 @@ pub trait CommonMcpImpl: Send + Sync {
                 self.session().task_id()
             );
             let response = format!("Error posting ask_user message: {e}");
-            log_mcp_string_response(self.role_name(), self.session().task_id(), "ask_user", &response);
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                "ask_user",
+                &response,
+            );
             return response;
         }
 
@@ -304,7 +383,12 @@ pub trait CommonMcpImpl: Send + Sync {
                 self.session().task_id()
             );
             let response = format!("Error asking user but error pausing task: {e}");
-            log_mcp_string_response(self.role_name(), self.session().task_id(), "ask_user", &response);
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                "ask_user",
+                &response,
+            );
             return response;
         }
 
@@ -317,7 +401,12 @@ pub trait CommonMcpImpl: Send + Sync {
         }
 
         let response = "User asked for guidance".to_string();
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "ask_user", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "ask_user",
+            &response,
+        );
         response
     }
 
@@ -334,7 +423,12 @@ pub trait CommonMcpImpl: Send + Sync {
             },
             Err(e) => format!("Error: {e}"),
         };
-        log_mcp_json_response(self.role_name(), self.session().task_id(), "get_checklist", &response);
+        log_mcp_json_response(
+            self.role_name(),
+            self.session().task_id(),
+            "get_checklist",
+            &response,
+        );
         response
     }
 
@@ -368,7 +462,12 @@ pub trait CommonMcpImpl: Send + Sync {
             }
             Err(e) => format!("Error: {e}"),
         };
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "check_checklist_item", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "check_checklist_item",
+            &response,
+        );
         response
     }
 
@@ -394,20 +493,35 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(items) => {
                 if items.iter().any(|item| item.id == item_id) {
                     let response = format!("Error: Checklist item with id '{}' already exists", id);
-                    log_mcp_string_response(self.role_name(), self.session().task_id(), "insert_checklist_item", &response);
+                    log_mcp_string_response(
+                        self.role_name(),
+                        self.session().task_id(),
+                        "insert_checklist_item",
+                        &response,
+                    );
                     return response;
                 }
                 if let Some(ref aid) = after
                     && !items.iter().any(|item| item.id == *aid)
                 {
                     let response = format!("Error: Checklist item with id '{}' not found", aid);
-                    log_mcp_string_response(self.role_name(), self.session().task_id(), "insert_checklist_item", &response);
+                    log_mcp_string_response(
+                        self.role_name(),
+                        self.session().task_id(),
+                        "insert_checklist_item",
+                        &response,
+                    );
                     return response;
                 }
             }
             Err(e) => {
                 let response = format!("Error: {e}");
-                log_mcp_string_response(self.role_name(), self.session().task_id(), "insert_checklist_item", &response);
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    "insert_checklist_item",
+                    &response,
+                );
                 return response;
             }
         }
@@ -437,7 +551,12 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(()) => format!("Checklist item '{}' inserted", id),
             Err(e) => format!("Error updating task: {e}"),
         };
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "insert_checklist_item", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "insert_checklist_item",
+            &response,
+        );
         response
     }
 
@@ -463,7 +582,12 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(()) => format!("Checklist item '{}' updated", id),
             Err(e) => format!("Error updating task: {e}"),
         };
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "update_checklist_item", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "update_checklist_item",
+            &response,
+        );
         response
     }
 
@@ -485,18 +609,33 @@ pub trait CommonMcpImpl: Send + Sync {
                             "Error: Cannot delete checked checklist item '{}'. Checked items are preserved as work history.",
                             id
                         );
-                        log_mcp_string_response(self.role_name(), self.session().task_id(), "delete_checklist_item", &response);
+                        log_mcp_string_response(
+                            self.role_name(),
+                            self.session().task_id(),
+                            "delete_checklist_item",
+                            &response,
+                        );
                         return response;
                     }
                 } else {
                     let response = format!("Error: Checklist item with id '{}' not found", id);
-                    log_mcp_string_response(self.role_name(), self.session().task_id(), "delete_checklist_item", &response);
+                    log_mcp_string_response(
+                        self.role_name(),
+                        self.session().task_id(),
+                        "delete_checklist_item",
+                        &response,
+                    );
                     return response;
                 }
             }
             Err(e) => {
                 let response = format!("Error: {e}");
-                log_mcp_string_response(self.role_name(), self.session().task_id(), "delete_checklist_item", &response);
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    "delete_checklist_item",
+                    &response,
+                );
                 return response;
             }
         }
@@ -512,7 +651,12 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(()) => format!("Checklist item '{}' deleted", id),
             Err(e) => format!("Error updating task: {e}"),
         };
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "delete_checklist_item", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "delete_checklist_item",
+            &response,
+        );
         response
     }
 
@@ -651,7 +795,14 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
         // Post the plan as a PLAN comment to preserve history
         if let Err(e) = self
             .session()
-            .post_comment(CommentType::Plan, plan, Some(self.role()), &hostname, Some(self.mcp_tool()), None)
+            .post_comment(
+                CommentType::Plan,
+                plan,
+                Some(self.role()),
+                &hostname,
+                Some(self.mcp_tool()),
+                None,
+            )
             .await
         {
             tracing::error!(
@@ -659,12 +810,22 @@ pub trait PlannerMcpImpl: CommonMcpImpl {
                 self.session().task_id()
             );
             let response = format!("Error posting plan: {e}");
-            log_mcp_string_response(self.role_name(), self.session().task_id(), "post_plan", &response);
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                "post_plan",
+                &response,
+            );
             return response;
         }
 
         let response = "Plan posted and task ready for worker implementation".to_string();
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "post_plan", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "post_plan",
+            &response,
+        );
         response
     }
 
@@ -698,7 +859,9 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
                 CommentType::Request,
                 message,
                 Some(self.role()),
-                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
+                &hostname,
+                Some(self.mcp_tool()),
+                Some(self.mcp_model()),
             )
             .await
         {
@@ -707,7 +870,12 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
                 self.session().task_id()
             );
             let response = format!("Error posting message: {e}");
-            log_mcp_string_response(self.role_name(), self.session().task_id(), "ask_planner", &response);
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                "ask_planner",
+                &response,
+            );
             return response;
         }
 
@@ -718,11 +886,21 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
                 self.session().task_id()
             );
             let response = format!("Message posted but error returning to planner: {e}");
-            log_mcp_string_response(self.role_name(), self.session().task_id(), "ask_planner", &response);
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                "ask_planner",
+                &response,
+            );
             return response;
         }
         let response = "Message posted to planner - task returned for clarification".to_string();
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "ask_planner", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "ask_planner",
+            &response,
+        );
         response
     }
 }
@@ -751,7 +929,9 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
                 CommentType::Report,
                 message,
                 Some(self.role()),
-                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
+                &hostname,
+                Some(self.mcp_tool()),
+                Some(self.mcp_model()),
             )
             .await
         {
@@ -760,7 +940,12 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
             // No signal set — finalize_session will call finish when signal is None.
             "Review accepted — task will be marked done".to_string()
         };
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "review_accept", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "review_accept",
+            &response,
+        );
         response
     }
 
@@ -777,12 +962,19 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
                 CommentType::Reject,
                 message,
                 Some(self.role()),
-                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
+                &hostname,
+                Some(self.mcp_tool()),
+                Some(self.mcp_model()),
             )
             .await
         {
             let response = format!("Error posting review rejection: {e}");
-            log_mcp_string_response(self.role_name(), self.session().task_id(), "review_reject", &response);
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                "review_reject",
+                &response,
+            );
             return response;
         }
         if let Err(e) = self.session().set_signal(crate::Signal::GoPlan).await {
@@ -792,7 +984,12 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
             );
         }
         let response = "Review rejected — task routed back to planner".to_string();
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "review_reject", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "review_reject",
+            &response,
+        );
         response
     }
 }
@@ -822,7 +1019,9 @@ pub trait TesterMcpImpl: CommonMcpImpl {
                 CommentType::Report,
                 message,
                 Some(self.role()),
-                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
+                &hostname,
+                Some(self.mcp_tool()),
+                Some(self.mcp_model()),
             )
             .await
         {
@@ -831,7 +1030,12 @@ pub trait TesterMcpImpl: CommonMcpImpl {
             // No signal set — finalize_session will call finish when signal is None.
             "Testing accepted — task will be marked done".to_string()
         };
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "test_accept", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "test_accept",
+            &response,
+        );
         response
     }
 
@@ -848,12 +1052,19 @@ pub trait TesterMcpImpl: CommonMcpImpl {
                 CommentType::Reject,
                 message,
                 Some(self.role()),
-                &hostname, Some(self.mcp_tool()), Some(self.mcp_model()),
+                &hostname,
+                Some(self.mcp_tool()),
+                Some(self.mcp_model()),
             )
             .await
         {
             let response = format!("Error posting test rejection: {e}");
-            log_mcp_string_response(self.role_name(), self.session().task_id(), "test_reject", &response);
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                "test_reject",
+                &response,
+            );
             return response;
         }
         if let Err(e) = self.session().set_signal(crate::Signal::GoPlan).await {
@@ -863,7 +1074,12 @@ pub trait TesterMcpImpl: CommonMcpImpl {
             );
         }
         let response = "Testing rejected — task routed back to planner".to_string();
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "test_reject", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "test_reject",
+            &response,
+        );
         response
     }
 }

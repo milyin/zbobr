@@ -16,7 +16,7 @@ use crate::{
         },
         traits::{CommonMcpImpl, PlannerMcpImpl},
     },
-    task::{RoleSession, Model, Tool},
+    task::{Model, RoleSession, Tool},
 };
 
 #[derive(Clone)]

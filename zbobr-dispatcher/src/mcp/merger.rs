@@ -13,7 +13,7 @@ use crate::{
         common::{GetHistoryParam, MessageParam},
         traits::{CommonMcpImpl, MergerMcpImpl},
     },
-    task::{RoleSession, Model, Tool},
+    task::{Model, RoleSession, Tool},
 };
 
 #[derive(Clone)]

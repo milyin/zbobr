@@ -133,12 +133,7 @@ pub async fn build_full_prompt(
 }
 
 /// Pure synchronous prompt assembly (used by tests and `build_full_prompt`).
-fn assemble_prompt(
-    user_context: &str,
-    role: Role,
-    task: &Task,
-    history_json: &str,
-) -> String {
+fn assemble_prompt(user_context: &str, role: Role, task: &Task, history_json: &str) -> String {
     let task_title = &task.title;
     let hardcoded = match role {
         Role::Preparator => crate::preparator_instructions(),
@@ -179,11 +174,7 @@ fn assemble_prompt(
     }
 
     // Unchecked checklist items with ids
-    let unchecked: Vec<_> = task
-        .checklist
-        .iter()
-        .filter(|item| !item.checked)
-        .collect();
+    let unchecked: Vec<_> = task.checklist.iter().filter(|item| !item.checked).collect();
     if !unchecked.is_empty() {
         let mut checklist_text = String::from("# Unchecked checklist items\n");
         for item in &unchecked {

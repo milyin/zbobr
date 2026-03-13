@@ -11,7 +11,7 @@ use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
 
 // bring in the generic git helpers from utility crate
-use zbobr_utility::{git, git_check, git_output, configure_git_user};
+use zbobr_utility::{configure_git_user, git, git_check, git_output};
 
 use crate::{
     Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
@@ -874,7 +874,8 @@ impl<'a> CliRoleRunner<'a> {
             if merged_ok {
                 tracing::info!(
                     "Task #{}: normal merge with '{}' succeeded — skipping agent session",
-                    self.task_id, dest_branch
+                    self.task_id,
+                    dest_branch
                 );
                 perform_auto_commit_and_push(self.zbobr, self.task_backend, self.repo_backend, self.task_id, &work_dir, self.role).await?;
                 self.zbobr.task_session(self.task_backend.clone(), self.repo_backend.clone(), self.task_id).set_stage(Stage::Pending).await?;
@@ -882,7 +883,8 @@ impl<'a> CliRoleRunner<'a> {
             }
             tracing::info!(
                 "Task #{}: normal merge with '{}' failed — invoking agent to resolve conflicts",
-                self.task_id, dest_branch
+                self.task_id,
+                dest_branch
             );
             // Abort the failed merge so the agent starts with a clean state
             let _ = git(&work_dir, &["merge", "--abort"]).await;
@@ -1008,10 +1010,7 @@ pub async fn process_task_by_stage(
                 let session = CliRoleRunner::new(zbobr, task_backend, repo_backend, task.id, role, prompts, executor_config);
                 session.run().await?;
             } else {
-                println!(
-                    "Task #{} is PENDING (no signal) — skipped",
-                    task.id
-                );
+                println!("Task #{} is PENDING (no signal) — skipped", task.id);
                 return Ok(());
             }
         }
@@ -1272,7 +1271,7 @@ async fn prepare_workspace(
                     let task_dir = TaskDir::new(zbobr.config().workspaces.as_path(), task_id);
                     let path = task_dir.path().join(repo_name);
                     Ok((path, is_uptodate))
-                },
+                }
                 Err(e) => {
                     let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
                     tracing::error!("{msg}");
@@ -1509,6 +1508,19 @@ async fn finalize_session(
             task_session.set_stage(Stage::Pending).await?;
             return Ok(());
         }
+        if let Err(pause_err) = task_session
+            .modify_task(|task| {
+                task.pause = true;
+            })
+            .await
+        {
+            tracing::error!(
+                "Failed to pause task #{task_id} after auto-commit/push failure: {pause_err}"
+            );
+        }
+        task_session.set_stage(Stage::Pending).await?;
+        return Ok(());
+    }
 
     let current_task = task_backend.get_task(task_id).await?.snapshot().await?;
     let has_unchecked = current_task.checklist.iter().any(|i| !i.checked);
@@ -1676,7 +1688,11 @@ async fn rewrite_commit_authors(
     // Get list of commits that will be rewritten
     let log_output = git_output(
         &git_root_path,
-        &["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"],
+        &[
+            "log",
+            &format!("{}..HEAD", dest_branch),
+            "--format=%H %an <%ae>",
+        ],
     )
     .await?;
 
@@ -1727,7 +1743,11 @@ async fn rewrite_commit_authors(
             // Show post-rebase log to verify changes
             if let Ok(updated_commits) = git_output(
                 &git_root_path,
-                &["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"],
+                &[
+                    "log",
+                    &format!("{}..HEAD", dest_branch),
+                    "--format=%H %an <%ae>",
+                ],
             )
             .await
             {

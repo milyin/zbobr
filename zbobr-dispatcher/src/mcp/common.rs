@@ -12,7 +12,7 @@ where
     D: serde::Deserializer<'de>,
 {
     use serde::de::{self, Deserialize};
-    
+
     #[derive(serde::Deserialize)]
     #[serde(untagged)]
     enum BoolOrString {

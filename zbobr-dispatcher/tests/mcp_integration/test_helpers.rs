@@ -318,31 +318,18 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
 
         // Create an initial file on main so both branches can diverge from it.
         let merge_file = format!("merge_{file_tag}.txt");
-        write_and_commit(repo_path, &merge_file, "base content\n", "Base commit")
-            .await;
+        write_and_commit(repo_path, &merge_file, "base content\n", "Base commit").await;
 
         let work_dir = env
             .prepare_workspace_via_repo_backend(task_id, remote_repo, work_branch)
             .await;
 
         // Diverge: work branch changes the file one way…
-        write_and_commit(
-            &work_dir,
-            &merge_file,
-            "work content\n",
-            "Work divergence",
-        )
-        .await;
+        write_and_commit(&work_dir, &merge_file, "work content\n", "Work divergence").await;
 
         // …and main changes it another way.
         git_in(&work_dir, &["checkout", "main"]).await;
-        write_and_commit(
-            &work_dir,
-            &merge_file,
-            "main content\n",
-            "Main divergence",
-        )
-        .await;
+        write_and_commit(&work_dir, &merge_file, "main content\n", "Main divergence").await;
         git_in(&work_dir, &["checkout", work_branch]).await;
 
         work_dir
@@ -355,7 +342,15 @@ pub async fn run_merging(env: &IntegrationTestEnv) {
     let branch_report = format!("zbobr_fix-{task_report}-test");
     env.update_task_branches(task_report, &dest_repo, "main", &branch_report)
         .await;
-    setup_conflict(env, &repo_path, task_report, &branch_report, &repo_name, "report").await;
+    setup_conflict(
+        env,
+        &repo_path,
+        task_report,
+        &branch_report,
+        &repo_name,
+        "report",
+    )
+    .await;
 
     env.run_stage(
         task_report,
@@ -1440,7 +1435,7 @@ async fn assert_pr_has_commits(
         .unwrap_or_else(|| {
             panic!("[{}] work_branch not set on task", env.name());
         });
-    
+
     // Checkout the work branch to ensure we're comparing the right branch
     let checkout_status = tokio::process::Command::new("git")
         .args(["checkout", &work_branch])
@@ -1448,8 +1443,11 @@ async fn assert_pr_has_commits(
         .status()
         .await
         .unwrap_or_else(|e| panic!("Failed to checkout {work_branch}: {e}"));
-    assert!(checkout_status.success(), "Failed to checkout {work_branch}");
-    
+    assert!(
+        checkout_status.success(),
+        "Failed to checkout {work_branch}"
+    );
+
     // For filesystem-based repos, we check if there are commits on the work branch
     // by verifying at least 2 commits exist (base commit + placeholder commit we added)
     let log_count_output = git_output(&pr_path, &["rev-list", "--all", "--count"]).await;
