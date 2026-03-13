@@ -1219,28 +1219,19 @@ impl RepoBackend for ZbobrRepoBackendGithub {
                 .context("Failed to create placeholder commit")?;
         }
 
-        // In same-org mode there is no "fork" remote — push directly to origin
-        // and use a simple branch name for the PR head.  In cross-org mode push
-        // to the fork remote and prefix the head with the fork owner.
-        let has_fork_remote = tokio::process::Command::new("git")
-            .args(["remote", "get-url", "fork"])
-            .current_dir(&work_dir)
-            .output()
-            .await?
-            .status
-            .success();
-
-        // In cross-org mode push to the fork remote and create the PR inside
-        // the fork.  The user is responsible for retargeting the PR to the
-        // upstream repo.  In same-org mode push directly to origin and create
-        // the PR there.
-        let (push_remote, pr_repo) = if has_fork_remote {
+        // Determine same-org vs cross-org mode by comparing repo owner against
+        // the configured fork owner, rather than relying on the presence of a
+        // "fork" git remote which can be stale.
+        let same_org = repo
+            .owner()
+            .eq_ignore_ascii_case(&self.backend_config.fork_owner);
+        let (push_remote, pr_repo) = if same_org {
+            ("origin", repo.full_name.clone())
+        } else {
             (
                 "fork",
                 format!("{}/{}", self.backend_config.fork_owner, repo.name()),
             )
-        } else {
-            ("origin", repo.full_name.clone())
         };
 
         tracing::info!("Pushing {work_branch} to {push_remote}");
@@ -1300,15 +1291,10 @@ impl RepoBackend for ZbobrRepoBackendGithub {
             anyhow::bail!("Work directory does not exist: {}", work_dir.display());
         }
 
-        let has_fork_remote = tokio::process::Command::new("git")
-            .args(["remote", "get-url", "fork"])
-            .current_dir(&work_dir)
-            .output()
-            .await?
-            .status
-            .success();
-
-        let push_remote = if has_fork_remote { "fork" } else { "origin" };
+        let same_org = repo
+            .owner()
+            .eq_ignore_ascii_case(&self.backend_config.fork_owner);
+        let push_remote = if same_org { "origin" } else { "fork" };
 
         tracing::info!("Pushing {work_branch} to {push_remote}");
         let status = tokio::process::Command::new("git")
@@ -1688,21 +1674,23 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         base_branch: &str,
     ) -> anyhow::Result<String> {
         // 1. Find the worktree and bare_dir for this branch
-        let (bare_dir, worktree_path) = self.find_worktree_for_branch(work_branch).await?;
+        let (_bare_dir, worktree_path) = self.find_worktree_for_branch(work_branch).await?;
 
         // 2. Auto-commit any uncommitted changes
         Self::auto_commit_worktree(&worktree_path).await?;
 
         // 3. Determine push remote and PR repo
-        let has_fork = git_check(&bare_dir, &["remote", "get-url", "fork"]).await?;
         let repo = parse_github_repo(destination_repo)?;
-        let (push_remote, pr_repo) = if has_fork {
+        let same_org = repo
+            .owner()
+            .eq_ignore_ascii_case(&self.backend_config.fork_owner);
+        let (push_remote, pr_repo) = if same_org {
+            ("origin", repo.full_name.clone())
+        } else {
             (
                 "fork",
                 format!("{}/{}", self.backend_config.fork_owner, repo.name()),
             )
-        } else {
-            ("origin", repo.full_name.clone())
         };
 
         // 4. Push to remote (no --force)
