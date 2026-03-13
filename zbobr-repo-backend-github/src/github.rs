@@ -55,6 +55,22 @@ where
     }
 }
 
+/// Extract the backing bare repository path from a worktree's `.git` file.
+///
+/// A worktree's `.git` is a file containing `gitdir: /path/to/bare.git/worktrees/<name>`.
+/// This function reads that file and walks up two parents to find the bare clone directory.
+async fn worktree_bare_dir(workspace_path: &Path) -> Option<PathBuf> {
+    let git_file = workspace_path.join(".git");
+    if !git_file.is_file() {
+        return None;
+    }
+    let content = tokio::fs::read_to_string(&git_file).await.ok()?;
+    let gitdir = content.strip_prefix("gitdir: ")?.trim();
+    // gitdir points to <bare>.git/worktrees/<name>, walk up twice to get <bare>.git
+    let bare = Path::new(gitdir).parent()?.parent()?;
+    Some(bare.to_path_buf())
+}
+
 #[derive(Debug, serde::Deserialize)]
 #[allow(dead_code)]
 struct RepoResponse {
@@ -351,8 +367,51 @@ impl ZbobrRepoBackendGithub {
         workspace_path: &Path,
     ) -> anyhow::Result<()> {
         if workspace_path.exists() {
-            tracing::info!("Worktree already exists at {}", workspace_path.display());
-            return Ok(());
+            // Verify the worktree is linked to the expected bare clone
+            let linked_bare = worktree_bare_dir(workspace_path).await;
+            let bare_canon = bare_dir.canonicalize().ok();
+            let linked_canon = linked_bare.as_ref().and_then(|p| p.canonicalize().ok());
+
+            if bare_canon.is_some() && bare_canon == linked_canon {
+                tracing::info!(
+                    "Worktree already exists at {} and is linked to correct bare clone",
+                    workspace_path.display()
+                );
+                return Ok(());
+            }
+
+            // Stale worktree: linked to a different (old) bare clone
+            tracing::warn!(
+                "Worktree at {} is linked to {:?}, expected {}. Removing stale worktree.",
+                workspace_path.display(),
+                linked_bare
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "unknown".into()),
+                bare_dir.display(),
+            );
+
+            // Clean up the old bare clone's worktree tracking (best-effort)
+            if let Some(ref old_bare) = linked_bare {
+                let _ = git(old_bare, &["worktree", "prune"]).await;
+            }
+
+            // Remove the stale worktree directory
+            if let Err(e) = fs::remove_dir_all(workspace_path).await {
+                tracing::error!(
+                    "Failed to remove stale worktree at {}: {}",
+                    workspace_path.display(),
+                    e
+                );
+                anyhow::bail!(
+                    "Cannot remove stale worktree at {}: {}",
+                    workspace_path.display(),
+                    e
+                );
+            }
+
+            tracing::info!("Removed stale worktree, will recreate from correct bare clone");
+            // Fall through to create a new worktree from the correct bare_dir
         }
 
         let workspace_parent = workspace_path
