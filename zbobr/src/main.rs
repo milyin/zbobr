@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let init = zbobr_dispatcher::init_config::<ZbobrTaskBackendGithubConfig, ZbobrRepoBackendGithubConfig>(
+    let (config, command) = zbobr_dispatcher::init_config::<ZbobrTaskBackendGithubConfig, ZbobrRepoBackendGithubConfig>(
         "zbobr",
         "GitHub-backed AI-powered task dispatcher",
         "GitHub-backed AI-powered task dispatcher that manages tasks through automated stages.\n\n\
@@ -29,15 +29,15 @@ async fn main() -> anyhow::Result<()> {
         "zbobr.toml",
     )?;
 
-    let executor_config = init.config.executor.clone();
+    let executor_config = config.executor.clone();
 
     let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = Arc::new(
-        ArcTaskBackendGithub::new(ZbobrTaskBackendGithub::from_config(init.config.tasks)?),
+        ArcTaskBackendGithub::new(ZbobrTaskBackendGithub::from_config(config.tasks)?),
     );
     let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
-        Arc::new(ZbobrRepoBackendGithub::from_config(init.config.repo)?);
+        Arc::new(ZbobrRepoBackendGithub::from_config(config.repo)?);
 
-    let zbobr = zbobr_dispatcher::ZbobrDispatcher::new(init.config.dispatcher);
+    let zbobr = zbobr_dispatcher::ZbobrDispatcher::new(config.dispatcher);
     task_backend.validate_connectivity().await?;
     repo_backend.validate_connectivity().await?;
 
@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
         zbobr,
         task_backend,
         repo_backend,
-        init.command,
+        command,
         &prompts,
         &executor_config,
     )

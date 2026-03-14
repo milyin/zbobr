@@ -21,7 +21,7 @@ pub use config::{
     ZbobrExecutorConfig, ZbobrExecutorToml,
 };
 pub use generic_config::{
-    GenericConfig, GenericConfigArgs, GenericConfigToml, InitResult, init_config, load_config,
+    GenericConfig, GenericConfigArgs, GenericConfigToml, init_config, load_config,
 };
 pub use mcp::{
     MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, TesterMcp, WorkerMcp, merger_instructions,

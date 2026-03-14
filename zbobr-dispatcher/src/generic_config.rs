@@ -205,12 +205,6 @@ where
     Ok(config)
 }
 
-/// Result of [`init_config`]: parsed CLI and resolved config.
-pub struct InitResult<TC: Config, RC: Config> {
-    pub config: GenericConfig<TC, RC>,
-    pub command: crate::cli::Command,
-}
-
 /// Parse CLI, resolve config location, and load config in one step.
 ///
 /// Combines [`parse_cli`](crate::parse_cli),
@@ -221,7 +215,7 @@ pub fn init_config<TC: Config, RC: Config>(
     app_about: &'static str,
     app_long_about: &'static str,
     default_config_name: &str,
-) -> anyhow::Result<InitResult<TC, RC>>
+) -> anyhow::Result<(GenericConfig<TC, RC>, crate::cli::Command)>
 where
     TC::Args: std::fmt::Debug,
     RC::Args: std::fmt::Debug,
@@ -234,8 +228,5 @@ where
     let config = load_config::<TC, RC>(&loc, cli.settings)
         .with_context(|| format!("Config file: {}", loc.config_path.display()))?;
 
-    Ok(InitResult {
-        config,
-        command: cli.command,
-    })
+    Ok((config, cli.command))
 }
