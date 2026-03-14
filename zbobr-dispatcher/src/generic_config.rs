@@ -18,16 +18,15 @@ use crate::config::{
 /// Root TOML config parametrized by task and repo backend config types.
 ///
 /// Sections:
-/// - `[dispatcher]`       — dispatcher runtime settings
-/// - `[tasks.<backend>]`  — task backend settings (e.g. `[tasks.github]`, `[tasks.fs]`)
-/// - `[repo.<backend>]`   — repo backend settings (e.g. `[repo.github]`, `[repo.fs]`)
-/// - `[executor]`         — executor (AI tool) settings
+/// - `[dispatcher]`  — dispatcher runtime settings
+/// - `[tasks]`       — task backend settings (type determined by `TC`)
+/// - `[repo]`        — repo backend settings (type determined by `RC`)
+/// - `[executor]`    — executor (AI tool) settings
 ///
 /// The TOML structure is enforced by the `TC::Toml` and `RC::Toml` types
-/// via `#[serde(deny_unknown_fields)]`.  Use wrapper config types (e.g.
-/// `ZbobrTaskBackendConfig` from `zbobr-config`) that nest each backend
-/// under a named sub-section to prevent bare keys at the `[tasks]`/`[repo]`
-/// level.
+/// via `#[serde(deny_unknown_fields)]`.  Each binary specifies the concrete
+/// backend config type directly (e.g. `ZbobrTaskBackendFsConfig`,
+/// `ZbobrRepoBackendGithubConfig`).
 #[derive(serde::Deserialize)]
 #[serde(
     default,

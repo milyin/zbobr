@@ -18,7 +18,7 @@ pub use cli::{
 };
 pub use config::{
     ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs,
-    ZbobrExecutorConfig, ZbobrExecutorToml, ZbobrRepoBackendConfig, ZbobrTaskBackendConfig,
+    ZbobrExecutorConfig, ZbobrExecutorToml,
 };
 pub use generic_config::{GenericConfig, GenericConfigArgs, GenericConfigToml};
 pub use mcp::{

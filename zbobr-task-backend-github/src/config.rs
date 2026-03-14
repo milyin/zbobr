@@ -29,13 +29,13 @@ impl ZbobrTaskBackendGithubConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
         if self.github_repo.is_empty() {
             anyhow::bail!(
-                "task repo not set. Use --tasks-github-repo owner/repo or set github_repo in the config file.\n  \
+                "task repo not set. Use --tasks-github-repo owner/repo or set github_repo in [tasks] config.\n  \
                  This is the GitHub repository whose issues the dispatcher processes."
             );
         }
         if self.github_token.is_empty() {
             anyhow::bail!(
-                "GitHub token not set. Set github_token in [tasks.github] config or use --tasks-github-token.\n  \
+                "GitHub token not set. Set github_token in [tasks] config or use --tasks-github-token.\n  \
                  This token needs read/write access to the tasks repo."
             );
         }

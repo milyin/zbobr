@@ -1779,7 +1779,7 @@ async fn rewrite_commit_authors(
 /// selects which sub-backend to use (e.g. `.github` vs `.fs`).
 use zbobr_api::CommentTag;
 
-pub async fn run_zbobr<F>(
+pub async fn run_zbobr<TC, RC, F>(
     app_name: &'static str,
     app_about: &'static str,
     app_long_about: &'static str,
@@ -1787,18 +1787,19 @@ pub async fn run_zbobr<F>(
     build_backends: F,
 ) -> anyhow::Result<()>
 where
+    TC: zbobr_api::config::Config,
+    RC: zbobr_api::config::Config,
+    TC::Args: std::fmt::Debug,
+    RC::Args: std::fmt::Debug,
     F: FnOnce(
-        crate::config::ZbobrTaskBackendConfig,
-        crate::config::ZbobrRepoBackendConfig,
+        TC,
+        RC,
         &crate::config::ZbobrDispatcherConfig,
     ) -> anyhow::Result<(
         std::sync::Arc<dyn crate::backend::TaskBackend>,
         std::sync::Arc<dyn crate::backend::WorktreeBackend>,
     )>,
 {
-    type TC = crate::config::ZbobrTaskBackendConfig;
-    type RC = crate::config::ZbobrRepoBackendConfig;
-
     let cli: GenericCli<
         <TC as zbobr_api::config::Config>::Args,
         <RC as zbobr_api::config::Config>::Args,

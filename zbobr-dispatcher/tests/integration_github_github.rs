@@ -8,7 +8,7 @@
 // ///   cargo test --test integration_github_github -- --ignored
 // ///
 // /// Requires `zbobr_github_test.toml` at the workspace root with both
-// /// `[tasks.github]` and `[repo.github]` sections.
+// /// `[tasks]` and `[repo]` sections.
 mod mcp_integration;
 
 use std::sync::Arc;
@@ -30,15 +30,15 @@ async fn load_credentials() -> (String, String, String, String) {
                 .expect("zbobr_github_test.toml not found; required for GitHub/GitHub tests");
             let tasks = cfg
                 .tasks
-                .expect("[tasks.github] section missing in zbobr_github_test.toml");
+                .expect("[tasks] section missing in zbobr_github_test.toml");
             let repo = cfg
                 .repo
-                .expect("[repo.github] section missing in zbobr_github_test.toml");
+                .expect("[repo] section missing in zbobr_github_test.toml");
             (
-                tasks.github.github_repo,
-                tasks.github.github_token,
-                repo.github.fork_owner,
-                repo.github.github_token,
+                tasks.github_repo.expect("github_repo missing in [tasks]"),
+                tasks.github_token.expect("github_token missing in [tasks]"),
+                repo.fork_owner.expect("fork_owner missing in [repo]"),
+                repo.github_token.expect("github_token missing in [repo]"),
             )
         })
         .await;

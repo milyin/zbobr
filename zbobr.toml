@@ -7,11 +7,11 @@ cli_tool = "copilot"
 # default_destination_repository = "milyin/zbobr"
 # default_destination_branch = "main"
 
-[repo.github]
+[repo]
 # GitHub repo backend settings
 token = "YOUR_GITHUB_TOKEN"
 
-[task.github]
+[tasks]
 # GitHub task backend settings
 token = "YOUR_GITHUB_TOKEN"
 

@@ -2,6 +2,9 @@
 
 use std::sync::Arc;
 
+use zbobr_repo_backend_github::ZbobrRepoBackendGithubConfig;
+use zbobr_task_backend_github::ZbobrTaskBackendGithubConfig;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -12,7 +15,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    zbobr_dispatcher::cli::run_zbobr(
+    zbobr_dispatcher::cli::run_zbobr::<ZbobrTaskBackendGithubConfig, ZbobrRepoBackendGithubConfig, _>(
         "zbobr",
         "GitHub-backed AI-powered task dispatcher",
         "GitHub-backed AI-powered task dispatcher that manages tasks through automated stages.\n\n\
@@ -25,9 +28,9 @@ async fn main() -> anyhow::Result<()> {
         |tc, rc, dispatcher| {
             use zbobr_dispatcher::BackendConfig;
             let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
-                Arc::new(tc.github.build_backend(dispatcher)?);
+                Arc::new(tc.build_backend(dispatcher)?);
             let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
-                Arc::new(rc.github.build_backend(dispatcher)?);
+                Arc::new(rc.build_backend(dispatcher)?);
             Ok((task_backend, repo_backend))
         },
     )
