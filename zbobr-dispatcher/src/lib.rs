@@ -17,7 +17,7 @@ pub use cli::{
     process_task_by_stage, resolve_config_location, run_command, run_manager_loop,
 };
 pub use config::{
-    ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs,
+    ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs,
     ZbobrExecutorConfig, ZbobrExecutorToml,
 };
 pub use generic_config::{
@@ -28,7 +28,7 @@ pub use mcp::{
     planner_instructions, preparator_instructions, reviewer_instructions, tester_instructions,
     worker_instructions,
 };
-pub use prompts::{Prompts, build_full_prompt, load_prompts, resolve_prompts};
+pub use prompts::{Prompts, build_full_prompt, load_prompts};
 pub use task::{
     ChecklistItem, Comment, CommentType, Model, RoleSession, Signal, Stage, Task,
     TaskSession, Tool,

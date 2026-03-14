@@ -80,7 +80,7 @@ pub struct GlobalArgs {
     pub config_file: ConfigFileArg,
 
     #[command(flatten, next_help_heading = "[dispatcher]")]
-    pub dispatcher: crate::ZbobrDispatcherArgs,
+    pub dispatcher: crate::config::ZbobrDispatcherArgs,
 
     #[command(flatten, next_help_heading = "[executor]")]
     pub executor: crate::ZbobrExecutorArgs,

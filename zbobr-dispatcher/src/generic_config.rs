@@ -205,11 +205,10 @@ where
     Ok(config)
 }
 
-/// Result of [`init_config`]: parsed CLI, resolved config, and dispatcher args.
+/// Result of [`init_config`]: parsed CLI and resolved config.
 pub struct InitResult<TC: Config, RC: Config> {
     pub config: GenericConfig<TC, RC>,
     pub command: crate::cli::Command,
-    pub dispatcher_args: ZbobrDispatcherArgs,
 }
 
 /// Parse CLI, resolve config location, and load config in one step.
@@ -232,13 +231,11 @@ where
         crate::cli::parse_cli(app_name, app_about, app_long_about);
 
     let loc = crate::cli::resolve_config_location(&cli.config_file.path, default_config_name)?;
-    let dispatcher_args = cli.settings.dispatcher.clone();
     let config = load_config::<TC, RC>(&loc, cli.settings)
         .with_context(|| format!("Config file: {}", loc.config_path.display()))?;
 
     Ok(InitResult {
         config,
         command: cli.command,
-        dispatcher_args,
     })
 }
