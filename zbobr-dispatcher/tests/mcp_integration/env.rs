@@ -60,8 +60,6 @@ impl IntegrationTestEnv {
         let dispatcher_config = ZbobrDispatcherConfig {
             workspaces: workspaces_dir.clone(),
             tool: Tool::McpTester,
-            git_user_name: "test-bot".to_string(),
-            git_user_email: "test@example.com".to_string(),
             preparator: StageConfig::default(),
             planner: StageConfig::default(),
             worker: StageConfig::default(),
@@ -123,8 +121,6 @@ impl IntegrationTestEnv {
         let dispatcher_config = ZbobrDispatcherConfig {
             workspaces: workspaces_dir.clone(),
             tool: Tool::McpTester,
-            git_user_name: "test-bot".to_string(),
-            git_user_email: "test@example.com".to_string(),
             preparator: StageConfig::default(),
             planner: StageConfig::default(),
             worker: StageConfig::default(),
@@ -188,8 +184,6 @@ impl IntegrationTestEnv {
         let dispatcher_config = ZbobrDispatcherConfig {
             workspaces: workspaces_dir.clone(),
             tool: Tool::McpTester,
-            git_user_name: "test-bot".to_string(),
-            git_user_email: "test@example.com".to_string(),
             preparator: StageConfig::default(),
             planner: StageConfig::default(),
             worker: StageConfig::default(),
@@ -206,16 +200,15 @@ impl IntegrationTestEnv {
             fork_owner: fork_owner.clone(),
             github_token: repo_token,
             repos_dir: base_path.join("repos"),
+            git_user_name: "test-bot".to_string(),
+            git_user_email: "test@example.com".to_string(),
+            overwrite_author: false,
         };
 
         let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
             Arc::new(ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?));
         let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> = Arc::new(
-            ZbobrRepoBackendGithub::from_config(
-                repo_backend_config,
-                "test-bot".to_string(),
-                "test@example.com".to_string(),
-            )
+            ZbobrRepoBackendGithub::from_config(repo_backend_config)
             .ok()?,
         );
 
@@ -261,8 +254,6 @@ impl IntegrationTestEnv {
         let dispatcher_config = ZbobrDispatcherConfig {
             workspaces: workspaces_dir.clone(),
             tool: Tool::McpTester,
-            git_user_name: "test-bot".to_string(),
-            git_user_email: "test@example.com".to_string(),
             preparator: StageConfig::default(),
             planner: StageConfig::default(),
             worker: StageConfig::default(),
@@ -280,16 +271,15 @@ impl IntegrationTestEnv {
             fork_owner: fork_owner.clone(),
             github_token: repo_token,
             repos_dir: base_path.join("repos"),
+            git_user_name: "test-bot".to_string(),
+            git_user_email: "test@example.com".to_string(),
+            overwrite_author: false,
         };
 
         let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
             Arc::new(ArcTaskBackendGithub::new(ZbobrTaskBackendGithub::from_config(task_backend_config).ok()?));
         let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> = Arc::new(
-            ZbobrRepoBackendGithub::from_config(
-                repo_backend_config,
-                "test-bot".to_string(),
-                "test@example.com".to_string(),
-            )
+            ZbobrRepoBackendGithub::from_config(repo_backend_config)
             .ok()?,
         );
 

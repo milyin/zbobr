@@ -13,14 +13,14 @@ pub mod tool_executor;
 use std::sync::Arc;
 
 pub use cli::{
-    Command, ConfigFileArg, GlobalArgs, TaskSubcommand, parse_cli, print_task,
-    process_task_by_stage, run_command, run_manager_loop, run_zbobr,
+    Command, ConfigFileArg, ConfigLocation, GlobalArgs, TaskSubcommand, parse_cli, print_task,
+    process_task_by_stage, resolve_config_location, run_command, run_manager_loop,
 };
 pub use config::{
     ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs,
     ZbobrExecutorConfig, ZbobrExecutorToml,
 };
-pub use generic_config::{GenericConfig, GenericConfigArgs, GenericConfigToml};
+pub use generic_config::{GenericConfig, GenericConfigArgs, GenericConfigToml, load_config};
 pub use mcp::{
     MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, TesterMcp, WorkerMcp, merger_instructions,
     planner_instructions, preparator_instructions, reviewer_instructions, tester_instructions,
@@ -33,7 +33,7 @@ pub use task::{
 };
 pub use task_dir::TaskDir;
 pub use tool_executor::ToolExecutor;
-pub use zbobr_api::config::{BackendConfig, Config};
+pub use zbobr_api::config::Config;
 
 use crate::backend::{TaskBackend, WorktreeBackend};
 

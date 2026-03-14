@@ -7,7 +7,7 @@ pub mod tool_executor;
 
 pub use backend::{TaskBackend, TaskBackendExt, TaskMut, TaskWeak, WorktreeBackend};
 pub use config::{
-    BackendConfig, Config, ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
+    Config, ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
 };
 pub use task::{
     ChecklistItem, Comment, CommentTag, CommentType, HistoryChunk, Model, Role, Signal,

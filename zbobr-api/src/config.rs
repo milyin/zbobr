@@ -71,12 +71,6 @@ pub struct ZbobrDispatcherConfig {
     /// Base directory for resolving prompt file paths.
     #[config(path)]
     pub prompts_path: Option<std::path::PathBuf>,
-    /// Git user name for commits made by the tool.
-    pub git_user_name: String,
-    /// Git user email for commits made by the tool.
-    pub git_user_email: String,
-    /// Rewrite commit authors after each stage completes to match configured git user.
-    pub overwrite_author: bool,
     /// Default destination repository pre-populated into task parameters before the
     /// preparator agent runs (e.g. "owner/repo" or a full git URL). The preparator
     /// may still override this value. When unset the agent must determine the
@@ -103,21 +97,10 @@ impl Default for ZbobrDispatcherConfig {
             merger: StageConfig::default(),
             work_branch_prefix: "zbobr_fix".to_string(),
             prompts_path: None,
-            git_user_name: String::new(),
-            git_user_email: String::new(),
-            overwrite_author: false,
             default_destination_repository: None,
             default_destination_branch: None,
         }
     }
-}
-
-/// Manually implemented; only contains build_backend.
-pub trait BackendConfig: Config {
-    /// The runtime backend type instantiated by this configuration.
-    type Backend;
-    /// Build the backend instance from the resolved configuration.
-    fn build_backend(self, dispatcher: &ZbobrDispatcherConfig) -> anyhow::Result<Self::Backend>;
 }
 
 // Note: zbobr-specific env helpers were removed — configuration now comes
@@ -138,19 +121,6 @@ impl ZbobrDispatcherConfig {
 
     /// Validate that all required fields are set.
     pub fn validate(&self) -> anyhow::Result<()> {
-        if self.git_user_name.is_empty() {
-            anyhow::bail!(
-                "git user name not set. Use --git-user-name NAME or set git_user_name in the config file.\n  \
-                 This is used for git commits made by the tool."
-            );
-        }
-        if self.git_user_email.is_empty() {
-            anyhow::bail!(
-                "git user email not set. Use --git-user-email EMAIL or set git_user_email in the config file.\n  \
-                 This is used for git commits made by the tool."
-            );
-        }
-
         // global tool/model compatibility
         if self.model.model_name_for_tool(self.tool).is_none() {
             anyhow::bail!(

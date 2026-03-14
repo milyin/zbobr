@@ -16,6 +16,12 @@ pub struct ZbobrRepoBackendGithubConfig {
     #[arg(long)]
     #[config(path)]
     pub repos_dir: PathBuf,
+    /// Git user name for commits made by the tool.
+    pub git_user_name: String,
+    /// Git user email for commits made by the tool.
+    pub git_user_email: String,
+    /// Rewrite commit authors after each stage completes to match configured git user.
+    pub overwrite_author: bool,
 }
 
 impl Default for ZbobrRepoBackendGithubConfig {
@@ -24,22 +30,10 @@ impl Default for ZbobrRepoBackendGithubConfig {
             fork_owner: String::new(),
             github_token: String::new(),
             repos_dir: PathBuf::from("./repos"),
+            git_user_name: String::new(),
+            git_user_email: String::new(),
+            overwrite_author: false,
         }
-    }
-}
-
-impl zbobr_api::config::BackendConfig for ZbobrRepoBackendGithubConfig {
-    type Backend = crate::ZbobrRepoBackendGithub;
-
-    fn build_backend(
-        self,
-        dispatcher: &zbobr_api::config::ZbobrDispatcherConfig,
-    ) -> anyhow::Result<Self::Backend> {
-        crate::ZbobrRepoBackendGithub::from_config(
-            self,
-            dispatcher.git_user_name.clone(),
-            dispatcher.git_user_email.clone(),
-        )
     }
 }
 
@@ -56,6 +50,18 @@ impl ZbobrRepoBackendGithubConfig {
             anyhow::bail!(
                 "GitHub token not set. Set github_token in [repo] config or use --repo-github-token.\n  \
                  This token needs read/write access to the organization where repos are forked."
+            );
+        }
+        if self.git_user_name.is_empty() {
+            anyhow::bail!(
+                "git user name not set. Use --repo-git-user-name NAME or set git_user_name in [repo] config.\n  \
+                 This is used for git commits made by the tool."
+            );
+        }
+        if self.git_user_email.is_empty() {
+            anyhow::bail!(
+                "git user email not set. Use --repo-git-user-email EMAIL or set git_user_email in [repo] config.\n  \
+                 This is used for git commits made by the tool."
             );
         }
         Ok(())

@@ -5,13 +5,12 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
-use tokio::process::Command as TokioCommand;
 use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
 
 // bring in the generic git helpers from utility crate
-use zbobr_utility::{configure_git_user, git, git_check, git_output};
+use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
     Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
@@ -32,6 +31,41 @@ pub struct ConfigFileArg {
     /// Path to TOML configuration file
     #[arg(long = "config")]
     pub path: Option<PathBuf>,
+}
+
+/// Resolved config file location.
+pub struct ConfigLocation {
+    pub config_path: PathBuf,
+    pub config_dir: PathBuf,
+}
+
+/// Resolve the config file path and its parent directory.
+///
+/// When `cli_path` is `Some`, the file must exist (its parent is used as
+/// `config_dir`).  When `None`, `default_config_name` in the current
+/// directory is used and `config_dir` is `std::env::current_dir()`.
+pub fn resolve_config_location(
+    cli_path: &Option<PathBuf>,
+    default_config_name: &str,
+) -> anyhow::Result<ConfigLocation> {
+    let config_path = cli_path
+        .clone()
+        .unwrap_or_else(|| default_config_name.into());
+
+    let config_dir = if cli_path.is_some() {
+        std::fs::canonicalize(&config_path)
+            .with_context(|| format!("Cannot resolve config path: {}", config_path.display()))?
+            .parent()
+            .expect("config file must have a parent directory")
+            .to_path_buf()
+    } else {
+        std::env::current_dir()?
+    };
+
+    Ok(ConfigLocation {
+        config_path,
+        config_dir,
+    })
 }
 
 /// Global arguments that should be hoisted before subcommands.
@@ -678,25 +712,22 @@ async fn run_task_subcommand(
         }
         TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
             let task = task_backend.get_task(id).await?.snapshot().await?;
-            let git_user_name = &zbobr.config().git_user_name;
-            let git_user_email = &zbobr.config().git_user_email;
+            let identity = task
+                .identity()
+                .ok_or_else(|| anyhow::anyhow!("Task #{} missing routing parameters", id))?;
 
-            // Ensure task has destination repo and branch
-            let dest_repo = task
-                .destination_repository
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("Task #{} has no destination repository", id))?
-                .clone();
+            let dest_repo = &identity.destination_repository;
+            let dest_branch = &identity.destination_branch;
 
             if dry_run {
                 println!(
-                    "Dry run: would rewrite commit authors to '{} <{}>' in repo '{}' (PR: '{}')",
-                    git_user_name, git_user_email, dest_repo, task.title
+                    "Dry run: would rewrite commit authors in repo '{}' (PR: '{}')",
+                    dest_repo, task.title
                 );
             } else if !force {
                 println!(
-                    "This will rewrite commit authors to '{} <{}>' in repo '{}' (PR: '{}'). Continue? (yes/no)",
-                    git_user_name, git_user_email, dest_repo, task.title
+                    "This will rewrite commit authors in repo '{}' (PR: '{}'). Continue? (yes/no)",
+                    dest_repo, task.title
                 );
                 let mut input = String::new();
                 std::io::stdin().read_line(&mut input)?;
@@ -709,17 +740,11 @@ async fn run_task_subcommand(
             let task_dir = TaskDir::new(zbobr.config().workspaces.as_path(), id);
 
             // Derive the actual git repo directory (work_dir/<repo_name>)
-            let repo_name = std::path::Path::new(&dest_repo)
+            let repo_name = std::path::Path::new(dest_repo)
                 .file_name()
                 .and_then(|n| n.to_str())
                 .ok_or_else(|| anyhow::anyhow!("Cannot extract repo name from: {}", dest_repo))?;
             let repo_dir = task_dir.path().join(repo_name);
-
-            // Fetch latest to ensure we have the destination branch
-            let dest_branch = task
-                .destination_branch
-                .clone()
-                .unwrap_or_else(|| "main".to_string());
 
             // Ensure workspace exists and is set up
             if !repo_dir.exists() {
@@ -731,14 +756,25 @@ async fn run_task_subcommand(
             }
 
             // Fetch the latest from remote
-            git(&repo_dir, &["fetch", "origin", &dest_branch]).await?;
+            git(&repo_dir, &["fetch", "origin", dest_branch]).await?;
 
-            // Call the rewrite_commit_authors function
-            rewrite_commit_authors(zbobr, task_backend, repo_backend, id, &repo_dir, dry_run).await?;
-            if dry_run {
-                println!("Dry run completed. No commits were modified.");
-            } else {
+            if !dry_run {
+                repo_backend
+                    .rewrite_commit_authors(&identity, &repo_dir, dest_branch)
+                    .await?;
                 println!("Successfully rewrote commit authors and pushed");
+            } else {
+                // Show commits that would be rewritten
+                if let Ok(log) = git_output(
+                    &repo_dir,
+                    &["log", &format!("{}..HEAD", dest_branch), "--format=%H %an <%ae>"],
+                ).await {
+                    println!("Commits that would be rewritten:");
+                    for line in log.lines() {
+                        println!("  {}", line);
+                    }
+                }
+                println!("Dry run completed. No commits were modified.");
             }
         }
     }
@@ -877,7 +913,7 @@ impl<'a> CliRoleRunner<'a> {
                     self.task_id,
                     dest_branch
                 );
-                perform_auto_commit_and_push(self.zbobr, self.task_backend, self.repo_backend, self.task_id, &work_dir, self.role).await?;
+                perform_auto_commit_and_push(self.task_backend, self.repo_backend, self.task_id, &work_dir, self.role).await?;
                 self.zbobr.task_session(self.task_backend.clone(), self.repo_backend.clone(), self.task_id).set_stage(Stage::Pending).await?;
                 return Ok(());
             }
@@ -1446,7 +1482,7 @@ async fn finalize_session(
 
     if execution_interrupted {
         if role == Role::Worker || role == Role::Merger {
-            if let Err(e) = perform_auto_commit_and_push(zbobr, task_backend, repo_backend, task_id, work_dir, role).await {
+            if let Err(e) = perform_auto_commit_and_push(task_backend, repo_backend, task_id, work_dir, role).await {
                 tracing::warn!("Auto-commit/push failed during interruption for task #{task_id}: {e}");
             }
         }
@@ -1457,7 +1493,7 @@ async fn finalize_session(
 
     if let Some(e) = execution_error {
         if role == Role::Worker || role == Role::Merger {
-            if let Err(e) = perform_auto_commit_and_push(zbobr, task_backend, repo_backend, task_id, work_dir, role).await {
+            if let Err(e) = perform_auto_commit_and_push(task_backend, repo_backend, task_id, work_dir, role).await {
                 tracing::warn!("Auto-commit/push failed during error handling for task #{task_id}: {e}");
             }
         }
@@ -1486,7 +1522,7 @@ async fn finalize_session(
     tracing::info!("Session complete for task #{task_id}");
 
     if (role == Role::Worker || role == Role::Merger)
-        && let Err(e) = perform_auto_commit_and_push(zbobr, task_backend, repo_backend, task_id, work_dir, role).await {
+        && let Err(e) = perform_auto_commit_and_push(task_backend, repo_backend, task_id, work_dir, role).await {
             tracing::error!("Auto-commit/push failed for task #{task_id}: {e}");
             let hostname = get_hostname();
             let msg = format!("Auto-commit/push failed: {e}");
@@ -1607,7 +1643,6 @@ async fn finalize_session(
 }
 
 async fn perform_auto_commit_and_push(
-    zbobr: &ZbobrDispatcher,
     task_backend: &Arc<dyn TaskBackend>,
     repo_backend: &Arc<dyn WorktreeBackend>,
     task_id: u64,
@@ -1640,209 +1675,15 @@ async fn perform_auto_commit_and_push(
         if let Err(e) = repo_backend.update_pr(&identity).await {
             tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
         }
+        let dest_branch = identity.destination_branch.clone();
+        repo_backend
+            .rewrite_commit_authors(&identity, work_dir, &dest_branch)
+            .await?;
     } else {
         tracing::warn!("Task #{task_id} missing routing parameters — skipping push");
     }
 
-    if zbobr.config().overwrite_author {
-        rewrite_commit_authors(zbobr, task_backend, repo_backend, task_id, work_dir, false).await?;
-    }
-
     Ok(())
 }
 
-async fn rewrite_commit_authors(
-    zbobr: &ZbobrDispatcher,
-    task_backend: &Arc<dyn TaskBackend>,
-    repo_backend: &Arc<dyn WorktreeBackend>,
-    task_id: u64,
-    work_dir: &Path,
-    dry_run: bool,
-) -> anyhow::Result<()> {
-    let task = task_backend.get_task(task_id).await?.snapshot().await?;
-    let dest_branch = task
-        .destination_branch
-        .clone()
-        .unwrap_or_else(|| "main".to_string());
-
-    let git_user_name = &zbobr.config().git_user_name;
-    let git_user_email = &zbobr.config().git_user_email;
-
-    // Get absolute path to the git repository
-    let git_root = git_output(work_dir, &["rev-parse", "--show-toplevel"]).await?;
-    let git_root_path = std::path::PathBuf::from(&git_root);
-
-    // Get list of commits that will be rewritten
-    let log_output = git_output(
-        &git_root_path,
-        &[
-            "log",
-            &format!("{}..HEAD", dest_branch),
-            "--format=%H %an <%ae>",
-        ],
-    )
-    .await?;
-
-    let commits_to_rewrite = log_output
-        .lines()
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>();
-    println!("Commits to be rewritten ({}):", commits_to_rewrite.len());
-    for commit in &commits_to_rewrite {
-        println!("  {}", commit);
-    }
-
-    if dry_run {
-        println!(
-            "\n[DRY-RUN] Skipping actual rebase. These commits would be rewritten with author: {} <{}>",
-            git_user_name, git_user_email
-        );
-        return Ok(());
-    }
-
-    // configure git user locally using helper
-    configure_git_user(&git_root_path, git_user_name, git_user_email).await?;
-
-    // Use git filter-branch to rewrite author/committer in-place.
-    // Unlike rebase --exec, this does not replay changes so it cannot
-    // produce merge conflicts.
-    let filter_cmd = format!(
-        "git filter-branch -f --env-filter '\
-            export GIT_AUTHOR_NAME=\"{name}\";\
-            export GIT_AUTHOR_EMAIL=\"{email}\";\
-            export GIT_COMMITTER_NAME=\"{name}\";\
-            export GIT_COMMITTER_EMAIL=\"{email}\";\
-        ' '{dest}'..HEAD",
-        name = git_user_name,
-        email = git_user_email,
-        dest = dest_branch,
-    );
-    let filter_output = TokioCommand::new("sh")
-        .arg("-c")
-        .arg(&filter_cmd)
-        .current_dir(&git_root_path)
-        .output()
-        .await;
-    match filter_output {
-        Ok(output) if output.status.success() => {
-            println!("Successfully rewrote commit authors");
-
-            // Show post-rebase log to verify changes
-            if let Ok(updated_commits) = git_output(
-                &git_root_path,
-                &[
-                    "log",
-                    &format!("{}..HEAD", dest_branch),
-                    "--format=%H %an <%ae>",
-                ],
-            )
-            .await
-            {
-                println!("Updated commits:");
-                for commit in updated_commits.lines() {
-                    println!("  {}", commit);
-                }
-            }
-
-            let task = task_backend.get_task(task_id).await?.snapshot().await?;
-            if let Some(identity) = task.identity() {
-                if let Err(e) = repo_backend.update_pr(&identity).await {
-                    tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
-                }
-            }
-        }
-        Ok(output) => {
-            return Err(anyhow::anyhow!(
-                "Failed to rewrite commit authors: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-        Err(e) => {
-            return Err(anyhow::anyhow!(
-                "Error running git filter-branch for author rewriting: {}",
-                e
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// run_zbobr
-// ---------------------------------------------------------------------------
-
-/// Standard entry point for a Zbobr CLI application.
-///
-/// The `build_backends` closure receives the resolved task and repo config
-/// and maps them into concrete backend instances — this is where the binary
-/// selects which sub-backend to use (e.g. `.github` vs `.fs`).
 use zbobr_api::CommentTag;
-
-pub async fn run_zbobr<TC, RC, F>(
-    app_name: &'static str,
-    app_about: &'static str,
-    app_long_about: &'static str,
-    default_config_name: &'static str,
-    build_backends: F,
-) -> anyhow::Result<()>
-where
-    TC: zbobr_api::config::Config,
-    RC: zbobr_api::config::Config,
-    TC::Args: std::fmt::Debug,
-    RC::Args: std::fmt::Debug,
-    F: FnOnce(
-        TC,
-        RC,
-        &crate::config::ZbobrDispatcherConfig,
-    ) -> anyhow::Result<(
-        std::sync::Arc<dyn crate::backend::TaskBackend>,
-        std::sync::Arc<dyn crate::backend::WorktreeBackend>,
-    )>,
-{
-    let cli: GenericCli<
-        <TC as zbobr_api::config::Config>::Args,
-        <RC as zbobr_api::config::Config>::Args,
-    > = parse_cli(app_name, app_about, app_long_about);
-
-    let config_path = cli
-        .config_file
-        .path
-        .clone()
-        .unwrap_or_else(|| default_config_name.into());
-
-    let config_dir = if cli.config_file.path.is_some() {
-        std::fs::canonicalize(&config_path)
-            .context(format!(
-                "Cannot resolve config path: {}",
-                config_path.display()
-            ))?
-            .parent()
-            .expect("config file must have a parent directory")
-            .to_path_buf()
-    } else {
-        std::env::current_dir()?
-    };
-
-    let root_toml = crate::GenericConfigToml::<TC, RC>::load(&config_path)
-        .with_context(|| format!("Config file: {}", config_path.display()))?;
-    let config =
-        crate::GenericConfig::<TC, RC>::build(root_toml, cli.settings.clone(), &config_dir);
-    config
-        .dispatcher
-        .validate()
-        .with_context(|| format!("Config file: {}", config_path.display()))?;
-    let executor_config = config.executor.clone();
-
-    let (task_backend, repo_backend) =
-        build_backends(config.tasks, config.repo, &config.dispatcher)?;
-
-    let zbobr = crate::ZbobrDispatcher::new(config.dispatcher.clone());
-    task_backend.validate_connectivity().await?;
-    repo_backend.validate_connectivity().await?;
-
-    let prompts = crate::prompts::resolve_prompts(&cli.settings.dispatcher, zbobr.config());
-    crate::prompts::validate_prompts(&prompts)?;
-
-    run_command(zbobr, task_backend, repo_backend, cli.command, &prompts, &executor_config).await
-}

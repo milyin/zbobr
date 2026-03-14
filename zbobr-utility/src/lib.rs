@@ -168,6 +168,59 @@ pub async fn cleanup_worktree_for_branch(
     Ok(())
 }
 
+/// Rewrite commit authors on a worktree branch using `git filter-branch`.
+///
+/// Rewrites all commits between `dest_branch` and `HEAD` to use the given
+/// `git_user_name` and `git_user_email` as both author and committer.
+/// Unlike rebase, filter-branch does not replay changes, so it cannot
+/// produce merge conflicts.
+pub async fn rewrite_authors_on_worktree(
+    work_dir: &Path,
+    dest_branch: &str,
+    git_user_name: &str,
+    git_user_email: &str,
+) -> Result<()> {
+    // Get absolute path to the git repository
+    let git_root = git_output(work_dir, &["rev-parse", "--show-toplevel"]).await?;
+    let git_root_path = PathBuf::from(&git_root);
+
+    // Configure git user locally
+    configure_git_user(&git_root_path, git_user_name, git_user_email).await?;
+
+    // Use git filter-branch to rewrite author/committer in-place.
+    let filter_cmd = format!(
+        "git filter-branch -f --env-filter '\
+            export GIT_AUTHOR_NAME=\"{name}\";\
+            export GIT_AUTHOR_EMAIL=\"{email}\";\
+            export GIT_COMMITTER_NAME=\"{name}\";\
+            export GIT_COMMITTER_EMAIL=\"{email}\";\
+        ' '{dest}'..HEAD",
+        name = git_user_name,
+        email = git_user_email,
+        dest = dest_branch,
+    );
+    let filter_output = tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg(&filter_cmd)
+        .current_dir(&git_root_path)
+        .output()
+        .await;
+    match filter_output {
+        Ok(output) if output.status.success() => {
+            tracing::info!("Successfully rewrote commit authors");
+            Ok(())
+        }
+        Ok(output) => Err(anyhow::anyhow!(
+            "Failed to rewrite commit authors: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )),
+        Err(e) => Err(anyhow::anyhow!(
+            "Error running git filter-branch for author rewriting: {}",
+            e
+        )),
+    }
+}
+
 /// No-op: placeholder commits are now empty commits that don't need cleanup.
 ///
 /// Kept for backward compatibility with callers.

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use zbobr_dispatcher::run_zbobr;
-use zbobr_repo_backend_fs::ZbobrRepoBackendFsConfig;
-use zbobr_task_backend_fs::ZbobrTaskBackendFsConfig;
+use anyhow::Context;
+use zbobr_repo_backend_fs::{ZbobrRepoBackendFs, ZbobrRepoBackendFsConfig};
+use zbobr_task_backend_fs::{ArcTaskBackendFs, ZbobrTaskBackendFs, ZbobrTaskBackendFsConfig};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -14,7 +14,10 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    run_zbobr::<ZbobrTaskBackendFsConfig, ZbobrRepoBackendFsConfig, _>(
+    let cli: zbobr_dispatcher::cli::GenericCli<
+        <ZbobrTaskBackendFsConfig as zbobr_dispatcher::Config>::Args,
+        <ZbobrRepoBackendFsConfig as zbobr_dispatcher::Config>::Args,
+    > = zbobr_dispatcher::parse_cli(
         "zbobr-fs",
         "Filesystem-backed AI-powered task dispatcher",
         "Filesystem-backed AI-powered task dispatcher that manages tasks through automated stages.\n\n\
@@ -23,15 +26,37 @@ async fn main() -> anyhow::Result<()> {
         Merge conflicts are handled by MERGING sessions when the conflict flag is set.\n\n\
         Ideal for testing, local development, and offline scenarios.\n\n\
         Default config file: zbobr-fs.toml in current directory.",
-        "zbobr-fs.toml",
-        |tc, rc, dispatcher| {
-            use zbobr_dispatcher::BackendConfig;
-            let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
-                Arc::new(tc.build_backend(dispatcher)?);
-            let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
-                Arc::new(rc.build_backend(dispatcher)?);
-            Ok((task_backend, repo_backend))
-        },
+    );
+
+    let loc = zbobr_dispatcher::resolve_config_location(&cli.config_file.path, "zbobr-fs.toml")?;
+    let config = zbobr_dispatcher::load_config::<ZbobrTaskBackendFsConfig, ZbobrRepoBackendFsConfig>(
+        &loc,
+        cli.settings.clone(),
+    )
+    .with_context(|| format!("Config file: {}", loc.config_path.display()))?;
+
+    let executor_config = config.executor.clone();
+
+    let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
+        Arc::new(ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(config.tasks)?));
+    let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
+        Arc::new(ZbobrRepoBackendFs::from_config(config.repo)?);
+
+    let zbobr = zbobr_dispatcher::ZbobrDispatcher::new(config.dispatcher);
+    task_backend.validate_connectivity().await?;
+    repo_backend.validate_connectivity().await?;
+
+    let prompts =
+        zbobr_dispatcher::resolve_prompts(&cli.settings.dispatcher, zbobr.config());
+    zbobr_dispatcher::prompts::validate_prompts(&prompts)?;
+
+    zbobr_dispatcher::run_command(
+        zbobr,
+        task_backend,
+        repo_backend,
+        cli.command,
+        &prompts,
+        &executor_config,
     )
     .await
 }

@@ -12,18 +12,6 @@ pub struct ZbobrTaskBackendGithubConfig {
     pub github_token: String,
 }
 
-impl zbobr_api::config::BackendConfig for ZbobrTaskBackendGithubConfig {
-    type Backend = crate::ArcTaskBackendGithub;
-
-    fn build_backend(
-        self,
-        _dispatcher: &zbobr_api::config::ZbobrDispatcherConfig,
-    ) -> anyhow::Result<Self::Backend> {
-        let inner = crate::ZbobrTaskBackendGithub::from_config(self)?;
-        Ok(crate::ArcTaskBackendGithub::new(inner))
-    }
-}
-
 impl ZbobrTaskBackendGithubConfig {
     /// Validate that all required fields are set.
     pub fn validate(&self) -> anyhow::Result<()> {

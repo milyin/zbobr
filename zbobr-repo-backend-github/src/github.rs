@@ -137,29 +137,11 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
 pub struct ZbobrRepoBackendGithub {
     backend_config: ZbobrRepoBackendGithubConfig,
     octocrab: octocrab::Octocrab,
-    git_user_name: String,
-    git_user_email: String,
 }
 
 impl ZbobrRepoBackendGithub {
-    pub fn new(
-        toml: Option<crate::config::ZbobrRepoBackendGithubToml>,
-        args: crate::config::ZbobrRepoBackendGithubArgs,
-        git_user_name: String,
-        git_user_email: String,
-    ) -> anyhow::Result<Self> {
-        let backend_config = <ZbobrRepoBackendGithubConfig as zbobr_api::config::Config>::build(
-            toml,
-            args,
-            Path::new("."),
-        );
-        Self::from_config(backend_config, git_user_name, git_user_email)
-    }
-
     pub fn from_config(
         backend_config: ZbobrRepoBackendGithubConfig,
-        git_user_name: String,
-        git_user_email: String,
     ) -> anyhow::Result<Self> {
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
@@ -169,8 +151,6 @@ impl ZbobrRepoBackendGithub {
         Ok(Self {
             backend_config,
             octocrab,
-            git_user_name,
-            git_user_email,
         })
     }
 
@@ -460,8 +440,8 @@ impl ZbobrRepoBackendGithub {
 
         zbobr_utility::configure_git_user(
             workspace_path,
-            &self.git_user_name,
-            &self.git_user_email,
+            &self.backend_config.git_user_name,
+            &self.backend_config.git_user_email,
         )
         .await?;
 
@@ -1220,7 +1200,7 @@ impl ZbobrRepoBackendGithub {
             tracing::info!(
                 "No commits ahead of origin/{destination_branch} — creating placeholder commit"
             );
-            zbobr_utility::configure_git_user(&work_dir, &self.git_user_name, &self.git_user_email)
+            zbobr_utility::configure_git_user(&work_dir, &self.backend_config.git_user_name, &self.backend_config.git_user_email)
                 .await
                 .context("Failed to configure git user for placeholder commit")?;
             zbobr_utility::create_placeholder_commit(&work_dir, work_branch)
@@ -1747,6 +1727,35 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             )
         })?;
         let _ = fs::remove_file(&test_path).await;
+
+        Ok(())
+    }
+
+    async fn rewrite_commit_authors(
+        &self,
+        identity: &zbobr_api::task::TaskIdentity,
+        work_dir: &std::path::Path,
+        dest_branch: &str,
+    ) -> anyhow::Result<()> {
+        if !self.backend_config.overwrite_author {
+            return Ok(());
+        }
+
+        zbobr_utility::rewrite_authors_on_worktree(
+            work_dir,
+            dest_branch,
+            &self.backend_config.git_user_name,
+            &self.backend_config.git_user_email,
+        )
+        .await?;
+
+        // Push rewritten commits
+        if let Err(e) = self.update_pr(identity).await {
+            tracing::warn!(
+                "Could not push rewritten commits for task #{}: {e}",
+                identity.task_id
+            );
+        }
 
         Ok(())
     }

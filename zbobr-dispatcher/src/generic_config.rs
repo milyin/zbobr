@@ -2,6 +2,8 @@ use std::path::Path;
 
 use anyhow::Context;
 use zbobr_api::config::Config;
+
+use crate::cli::ConfigLocation;
 use zbobr_executor_claude::ZbobrExecutorClaudeConfig;
 use zbobr_executor_copilot::ZbobrExecutorCopilotConfig;
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
@@ -182,4 +184,23 @@ where
             executor,
         }
     }
+}
+
+/// Load and build a `GenericConfig` from a `ConfigLocation` and CLI args.
+pub fn load_config<TC: Config, RC: Config>(
+    location: &ConfigLocation,
+    args: GenericConfigArgs<TC::Args, RC::Args>,
+) -> anyhow::Result<GenericConfig<TC, RC>>
+where
+    TC::Args: std::fmt::Debug,
+    RC::Args: std::fmt::Debug,
+{
+    let root_toml = GenericConfigToml::<TC, RC>::load(&location.config_path)
+        .with_context(|| format!("Config file: {}", location.config_path.display()))?;
+    let config = GenericConfig::<TC, RC>::build(root_toml, args, &location.config_dir);
+    config
+        .dispatcher
+        .validate()
+        .with_context(|| format!("Config file: {}", location.config_path.display()))?;
+    Ok(config)
 }
