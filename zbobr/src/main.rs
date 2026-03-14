@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use anyhow::Context;
 use zbobr_repo_backend_github::{ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig};
 use zbobr_task_backend_github::{
     ArcTaskBackendGithub, ZbobrTaskBackendGithub, ZbobrTaskBackendGithubConfig,
@@ -18,10 +17,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let cli: zbobr_dispatcher::cli::GenericCli<
-        <ZbobrTaskBackendGithubConfig as zbobr_dispatcher::Config>::Args,
-        <ZbobrRepoBackendGithubConfig as zbobr_dispatcher::Config>::Args,
-    > = zbobr_dispatcher::parse_cli(
+    let init = zbobr_dispatcher::init_config::<ZbobrTaskBackendGithubConfig, ZbobrRepoBackendGithubConfig>(
         "zbobr",
         "GitHub-backed AI-powered task dispatcher",
         "GitHub-backed AI-powered task dispatcher that manages tasks through automated stages.\n\n\
@@ -30,36 +26,30 @@ async fn main() -> anyhow::Result<()> {
         Merge conflicts are handled by MERGING sessions when the conflict flag is set.\n\n\
         Requires a GitHub token: set GH_TOKEN or GITHUB_TOKEN env var.\n\
         Easiest way: export GH_TOKEN=$(gh auth token)",
-    );
+        "zbobr.toml",
+    )?;
 
-    let loc = zbobr_dispatcher::resolve_config_location(&cli.config_file.path, "zbobr.toml")?;
-    let config = zbobr_dispatcher::load_config::<ZbobrTaskBackendGithubConfig, ZbobrRepoBackendGithubConfig>(
-        &loc,
-        cli.settings.clone(),
-    )
-    .with_context(|| format!("Config file: {}", loc.config_path.display()))?;
-
-    let executor_config = config.executor.clone();
+    let executor_config = init.config.executor.clone();
 
     let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> = Arc::new(
-        ArcTaskBackendGithub::new(ZbobrTaskBackendGithub::from_config(config.tasks)?),
+        ArcTaskBackendGithub::new(ZbobrTaskBackendGithub::from_config(init.config.tasks)?),
     );
     let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
-        Arc::new(ZbobrRepoBackendGithub::from_config(config.repo)?);
+        Arc::new(ZbobrRepoBackendGithub::from_config(init.config.repo)?);
 
-    let zbobr = zbobr_dispatcher::ZbobrDispatcher::new(config.dispatcher);
+    let zbobr = zbobr_dispatcher::ZbobrDispatcher::new(init.config.dispatcher);
     task_backend.validate_connectivity().await?;
     repo_backend.validate_connectivity().await?;
 
     let prompts =
-        zbobr_dispatcher::resolve_prompts(&cli.settings.dispatcher, zbobr.config());
+        zbobr_dispatcher::resolve_prompts(&init.dispatcher_args, zbobr.config());
     zbobr_dispatcher::prompts::validate_prompts(&prompts)?;
 
     zbobr_dispatcher::run_command(
         zbobr,
         task_backend,
         repo_backend,
-        cli.command,
+        init.command,
         &prompts,
         &executor_config,
     )

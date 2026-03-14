@@ -204,3 +204,41 @@ where
         .with_context(|| format!("Config file: {}", location.config_path.display()))?;
     Ok(config)
 }
+
+/// Result of [`init_config`]: parsed CLI, resolved config, and dispatcher args.
+pub struct InitResult<TC: Config, RC: Config> {
+    pub config: GenericConfig<TC, RC>,
+    pub command: crate::cli::Command,
+    pub dispatcher_args: ZbobrDispatcherArgs,
+}
+
+/// Parse CLI, resolve config location, and load config in one step.
+///
+/// Combines [`parse_cli`](crate::parse_cli),
+/// [`resolve_config_location`](crate::resolve_config_location), and
+/// [`load_config`] into a single call.
+pub fn init_config<TC: Config, RC: Config>(
+    app_name: &'static str,
+    app_about: &'static str,
+    app_long_about: &'static str,
+    default_config_name: &str,
+) -> anyhow::Result<InitResult<TC, RC>>
+where
+    TC::Args: std::fmt::Debug,
+    RC::Args: std::fmt::Debug,
+    crate::cli::GenericCli<TC::Args, RC::Args>: clap::Parser + clap::CommandFactory,
+{
+    let cli: crate::cli::GenericCli<TC::Args, RC::Args> =
+        crate::cli::parse_cli(app_name, app_about, app_long_about);
+
+    let loc = crate::cli::resolve_config_location(&cli.config_file.path, default_config_name)?;
+    let dispatcher_args = cli.settings.dispatcher.clone();
+    let config = load_config::<TC, RC>(&loc, cli.settings)
+        .with_context(|| format!("Config file: {}", loc.config_path.display()))?;
+
+    Ok(InitResult {
+        config,
+        command: cli.command,
+        dispatcher_args,
+    })
+}
