@@ -35,7 +35,58 @@ pub use zbobr_api::config::Config;
 
 use std::sync::Arc;
 
+use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
+use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
+use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
+
 use crate::backend::{TaskBackend, WorktreeBackend};
+
+#[derive(Clone)]
+struct DispatcherExecutors {
+    claude: ZbobrExecutorClaudeConfig,
+    copilot: ZbobrExecutorCopilotConfig,
+    mcp_tester: ZbobrExecutorMcpTesterConfig,
+}
+
+impl DispatcherExecutors {
+    fn from_config(config: ZbobrExecutorConfig) -> Self {
+        Self {
+            claude: config.claude,
+            copilot: config.copilot,
+            mcp_tester: config.mcp_tester,
+        }
+    }
+
+    fn with_mcp_tester_override(&self, mcp_tester: ZbobrExecutorMcpTesterConfig) -> Self {
+        Self {
+            claude: self.claude.clone(),
+            copilot: self.copilot.clone(),
+            mcp_tester,
+        }
+    }
+
+    fn build_executor(&self, tool: Tool, model: Model) -> Box<dyn ToolExecutor> {
+        match tool {
+            Tool::Copilot => {
+                let mut config = self.copilot.clone();
+                config.default_model = model;
+                Box::new(CopilotExecutor { config })
+            }
+            Tool::Claude => {
+                let mut config = self.claude.clone();
+                config.default_model = model;
+                Box::new(ClaudeExecutor { config })
+            }
+            Tool::McpTester => Box::new(McpTesterExecutor {
+                config: self.mcp_tester.clone(),
+            }),
+        }
+    }
+
+    fn copilot_github_token(&self) -> &str {
+        &self.copilot.copilot_github_token
+    }
+}
 
 /// Fetch comments and description for a task, then extract the history chunk
 /// at the given `offset` using [`zbobr_api::extract_history_chunk`].
@@ -54,18 +105,47 @@ pub async fn get_history(
 #[derive(Clone)]
 pub struct ZbobrDispatcher {
     config: Arc<ZbobrDispatcherConfig>,
+    executors: Arc<DispatcherExecutors>,
 }
 
 impl ZbobrDispatcher {
-    /// Create a new Zbobr dispatcher from config.
+    /// Create a new Zbobr dispatcher from config with default executor settings.
     pub fn new(config: ZbobrDispatcherConfig) -> Self {
+        Self::new_with_executors(config, ZbobrExecutorConfig::default())
+    }
+
+    /// Create a new Zbobr dispatcher from dispatcher and executor config.
+    pub fn new_with_executors(
+        config: ZbobrDispatcherConfig,
+        executor_config: ZbobrExecutorConfig,
+    ) -> Self {
         Self {
             config: Arc::new(config),
+            executors: Arc::new(DispatcherExecutors::from_config(executor_config)),
+        }
+    }
+
+    /// Clone dispatcher with an overridden MCP tester executor config.
+    ///
+    /// This is used for one-off scenario overrides (for example from CLI flags)
+    /// while keeping all other executor settings unchanged.
+    pub fn with_mcp_tester_config(&self, mcp_tester: ZbobrExecutorMcpTesterConfig) -> Self {
+        Self {
+            config: Arc::clone(&self.config),
+            executors: Arc::new(self.executors.with_mcp_tester_override(mcp_tester)),
         }
     }
 
     pub fn config(&self) -> &ZbobrDispatcherConfig {
         &self.config
+    }
+
+    pub(crate) fn build_executor(&self, tool: Tool, model: Model) -> Box<dyn ToolExecutor> {
+        self.executors.build_executor(tool, model)
+    }
+
+    pub(crate) fn copilot_github_token(&self) -> &str {
+        self.executors.copilot_github_token()
     }
 
     #[allow(clippy::too_many_arguments)]

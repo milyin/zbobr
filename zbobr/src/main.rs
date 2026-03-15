@@ -30,12 +30,11 @@ async fn main() -> anyhow::Result<()> {
         "zbobr.toml",
     )?;
 
-    let executor_config = config.executor.clone();
+    let dispatcher =
+        zbobr_dispatcher::ZbobrDispatcher::new_with_executors(config.dispatcher, config.executor);
 
     let task_backend = TaskBackendGithub::from_config(config.tasks)?;
     let repo_backend = ZbobrRepoBackendGithub::from_config(config.repo)?;
-
-    let dispatcher = zbobr_dispatcher::ZbobrDispatcher::new(config.dispatcher);
     task_backend.validate_connectivity().await?;
     repo_backend.validate_connectivity().await?;
 
@@ -48,7 +47,6 @@ async fn main() -> anyhow::Result<()> {
         repo_backend,
         command,
         prompt_builder,
-        &executor_config,
     )
     .await
 }

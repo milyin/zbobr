@@ -5,16 +5,13 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
 use zbobr_api::prompt::PromptBuilder;
-use zbobr_executor_claude::ClaudeExecutor;
-use zbobr_executor_copilot::CopilotExecutor;
-use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
+use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 
 // bring in the generic git helpers from utility crate
 use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
     Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
-    ZbobrExecutorConfig,
     backend::{TaskBackend, WorktreeBackend},
     mcp::common::get_hostname,
     prompts::ConfiguredPromptBuilder,
@@ -450,7 +447,6 @@ pub async fn run_command<
     repo_backend: RB,
     command: Command,
     prompt_builder: ConfiguredPromptBuilder<PB>,
-    executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match command {
         Command::Setup { force } => {
@@ -466,7 +462,6 @@ pub async fn run_command<
                 &repo_backend,
                 subcommand,
                 prompt_builder.clone(),
-                executor_config,
             )
             .await?;
         }
@@ -482,7 +477,6 @@ pub async fn run_command<
                 interval,
                 cleanup_interval,
                 prompt_builder.clone(),
-                executor_config,
             )
             .await?;
         }
@@ -500,7 +494,6 @@ async fn run_task_subcommand<
     repo_backend: &RB,
     subcommand: TaskSubcommand,
     prompt_builder: ConfiguredPromptBuilder<PB>,
-    executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match subcommand {
         TaskSubcommand::Create {
@@ -651,7 +644,6 @@ async fn run_task_subcommand<
                 task,
                 Role::Preparator,
                 prompt_builder.clone(),
-                executor_config,
             );
             if show_prompt {
                 println!("{}", session.prompt().await?);
@@ -667,7 +659,6 @@ async fn run_task_subcommand<
                 task,
                 Role::Planner,
                 prompt_builder.clone(),
-                executor_config,
             );
             if show_prompt {
                 println!("{}", session.prompt().await?);
@@ -683,7 +674,6 @@ async fn run_task_subcommand<
                 task,
                 Role::Worker,
                 prompt_builder.clone(),
-                executor_config,
             );
             if show_prompt {
                 println!("{}", session.prompt().await?);
@@ -699,7 +689,6 @@ async fn run_task_subcommand<
                 task,
                 Role::Reviewer,
                 prompt_builder.clone(),
-                executor_config,
             );
             if show_prompt {
                 println!("{}", session.prompt().await?);
@@ -715,7 +704,6 @@ async fn run_task_subcommand<
                 task,
                 Role::Merger,
                 prompt_builder.clone(),
-                executor_config,
             );
             if show_prompt {
                 println!("{}", session.prompt().await?);
@@ -751,20 +739,16 @@ async fn run_task_subcommand<
             } else {
                 None
             };
-            let effective_executor_config = match mcp_tester_config_override {
-                Some(mcp_tester) => ZbobrExecutorConfig {
-                    mcp_tester,
-                    ..executor_config.clone()
-                },
-                None => executor_config.clone(),
+            let effective_dispatcher = match mcp_tester_config_override {
+                Some(mcp_tester) => zbobr.with_mcp_tester_config(mcp_tester),
+                None => zbobr.clone(),
             };
             process_task_by_stage(
-                zbobr,
+                &effective_dispatcher,
                 task_backend,
                 repo_backend,
                 &task_obj,
                 prompt_builder,
-                &effective_executor_config,
             )
             .await?;
         }
@@ -861,7 +845,6 @@ struct CliRoleRunner<
     task_id: u64,
     role: Role,
     prompt_builder: ConfiguredPromptBuilder<PB>,
-    executor_config: &'a ZbobrExecutorConfig,
 }
 
 impl<
@@ -878,7 +861,6 @@ impl<
         task_id: u64,
         role: Role,
         prompt_builder: ConfiguredPromptBuilder<PB>,
-        executor_config: &'a ZbobrExecutorConfig,
     ) -> Self {
         Self {
             zbobr,
@@ -887,7 +869,6 @@ impl<
             task_id,
             role,
             prompt_builder,
-            executor_config,
         }
     }
 
@@ -1075,21 +1056,15 @@ impl<
         );
 
         let prompt_text = self.prompt().await?;
-        // apply the resolved model to the executor configuration; dispatcher
-        // configuration takes precedence over whatever the executor may have
-        // been initialized with.
-        let mut exec_cfg = self.executor_config.clone();
-        match cli_tool {
-            Tool::Copilot => exec_cfg.copilot.default_model = model.clone(),
-            Tool::Claude => exec_cfg.claude.default_model = model.clone(),
-            Tool::McpTester => {
-                // mcp-tester doesn't use models; ignore
-            }
-        }
+        let executor = self.zbobr.build_executor(cli_tool, model.clone());
+        let copilot_token = match cli_tool {
+            Tool::Copilot => self.zbobr.copilot_github_token(),
+            _ => "",
+        };
 
         let outcome = execute_tool(
-            cli_tool,
-            &exec_cfg,
+            executor,
+            copilot_token,
             self.task_id,
             self.role,
             assigned_port,
@@ -1097,8 +1072,6 @@ impl<
             &work_dir,
             &mcp_url,
             self.zbobr,
-            self.task_backend,
-            self.repo_backend,
         )
         .await;
 
@@ -1138,7 +1111,6 @@ pub async fn process_task_by_stage<
     repo_backend: &RB,
     task: &Task,
     prompt_builder: ConfiguredPromptBuilder<PB>,
-    executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match task.stage {
         Stage::Pending => {
@@ -1156,7 +1128,6 @@ pub async fn process_task_by_stage<
                     task.id,
                     Role::Merger,
                     prompt_builder.clone(),
-                    executor_config,
                 );
                 session.run().await?;
             } else if let Some(signal) = task.signal {
@@ -1168,7 +1139,6 @@ pub async fn process_task_by_stage<
                     task.id,
                     role,
                     prompt_builder.clone(),
-                    executor_config,
                 );
                 session.run().await?;
             } else {
@@ -1190,7 +1160,6 @@ pub async fn process_task_by_stage<
                 task.id,
                 role,
                 prompt_builder.clone(),
-                executor_config,
             );
             session.run().await?;
         }
@@ -1213,7 +1182,6 @@ pub async fn run_manager_loop<
     interval_secs: u64,
     cleanup_interval_secs: u64,
     prompt_builder: ConfiguredPromptBuilder<PB>,
-    executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     tracing::info!(
         "Manager loop started (task_backend: {}, repo_backend: {})",
@@ -1309,7 +1277,6 @@ pub async fn run_manager_loop<
                 task.id,
                 role,
                 prompt_builder.clone(),
-                executor_config,
             );
             if let Err(e) = session.run().await {
                 tracing::error!("{:?} session failed: {e}", role);
@@ -1546,12 +1513,9 @@ struct SessionOutcome {
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn execute_tool<
-    TB: TaskBackend + Clone + Send + Sync + 'static,
-    RB: WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    cli_tool: Tool,
-    executor_config: &ZbobrExecutorConfig,
+async fn execute_tool(
+    executor: Box<dyn ToolExecutor>,
+    copilot_token: &str,
     task_id: u64,
     role: Role,
     assigned_port: u16,
@@ -1559,25 +1523,8 @@ async fn execute_tool<
     work_dir: &Path,
     mcp_url: &str,
     zbobr: &ZbobrDispatcher,
-    _task_backend: &TB,
-    _repo_backend: &RB,
 ) -> SessionOutcome {
-    let executor: Box<dyn ToolExecutor> = match cli_tool {
-        Tool::Copilot => Box::new(CopilotExecutor {
-            config: executor_config.copilot.clone(),
-        }),
-        Tool::Claude => Box::new(ClaudeExecutor {
-            config: executor_config.claude.clone(),
-        }),
-        Tool::McpTester => Box::new(McpTesterExecutor {
-            config: executor_config.mcp_tester.clone(),
-        }),
-    };
     let agent_token = &zbobr.config().agent_github_token;
-    let copilot_token = match cli_tool {
-        Tool::Copilot => &executor_config.copilot.copilot_github_token,
-        _ => "",
-    };
 
     tokio::select! {
         result = executor.execute(task_id, role, assigned_port, prompt, work_dir, mcp_url, agent_token, copilot_token) => {

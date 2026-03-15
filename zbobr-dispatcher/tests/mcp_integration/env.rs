@@ -10,7 +10,6 @@ use std::{
 
 use zbobr_dispatcher::{
     ChecklistItem, Comment, Signal, Stage, Task, TaskDir, ZbobrDispatcher, ZbobrDispatcherConfig,
-    ZbobrExecutorConfig,
     backend::{TaskBackend, TaskBackendExt, WorktreeBackend},
     config::StageConfig,
     process_task_by_stage,
@@ -628,7 +627,7 @@ impl<
     /// Internally:
     ///  1. Sets the task's stage to `stage`.
     ///  2. Writes the scenario to a temporary file.
-    ///  3. Builds a `ZbobrExecutorConfig` with the scenario file for `stage`.
+    ///  3. Overrides dispatcher MCP tester config with the scenario file for `stage`.
     ///  4. Calls `process_task_by_stage` directly (no subprocess).
     pub async fn run_stage(&self, task_id: u64, stage: Stage, scenario: String) {
         self.task_backend
@@ -670,22 +669,18 @@ impl<
             other => panic!("[{}] run_stage: unsupported stage {:?}", self.name, other),
         };
 
-        let executor_config = ZbobrExecutorConfig {
-            mcp_tester: mcp_tester_config,
-            ..Default::default()
-        };
+        let stage_dispatcher = self.zbobr.with_mcp_tester_config(mcp_tester_config);
 
         let prompt_builder = ConfiguredPromptBuilder::from(PromptsConfig::default());
 
         let task = self.get_task(task_id).await;
 
         process_task_by_stage(
-            &self.zbobr,
+            &stage_dispatcher,
             &self.task_backend,
             &self.repo_backend,
             &task,
             prompt_builder,
-            &executor_config,
         )
         .await
         .unwrap_or_else(|e| {
