@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use zbobr_dispatcher::backend::{TaskBackend as _, WorktreeBackend as _};
 
 use zbobr_repo_backend_fs::{ZbobrRepoBackendFs, ZbobrRepoBackendFsConfig};
 use zbobr_task_backend_fs::{ArcTaskBackendFs, ZbobrTaskBackendFs, ZbobrTaskBackendFsConfig};
@@ -13,7 +13,10 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let (config, command) = zbobr_dispatcher::init_config::<ZbobrTaskBackendFsConfig, ZbobrRepoBackendFsConfig>(
+    let (config, command) = zbobr_dispatcher::init_config::<
+        ZbobrTaskBackendFsConfig,
+        ZbobrRepoBackendFsConfig,
+    >(
         "zbobr-fs",
         "Filesystem-backed AI-powered task dispatcher",
         "Filesystem-backed AI-powered task dispatcher that manages tasks through automated stages.\n\n\
@@ -27,10 +30,8 @@ async fn main() -> anyhow::Result<()> {
 
     let executor_config = config.executor.clone();
 
-    let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
-        Arc::new(ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(config.tasks)?));
-    let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
-        Arc::new(ZbobrRepoBackendFs::from_config(config.repo)?);
+    let task_backend = ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(config.tasks)?);
+    let repo_backend = ZbobrRepoBackendFs::from_config(config.repo)?;
 
     let zbobr = zbobr_dispatcher::ZbobrDispatcher::new(config.dispatcher);
     task_backend.validate_connectivity().await?;

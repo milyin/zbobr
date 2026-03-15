@@ -5,10 +5,9 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 
-use std::sync::Arc;
-
 use crate::{
     ZbobrDispatcher,
+    backend::TaskBackend,
     mcp::{
         common::{
             DeleteChecklistItemParam, DescriptionParam, GetHistoryParam, InsertChecklistItemParam,
@@ -20,15 +19,17 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct PlannerMcp {
-    session: RoleSession,
+pub struct PlannerMcp<TB: TaskBackend + Clone + Send + Sync + 'static> {
+    session: RoleSession<TB>,
     tool_router: ToolRouter<Self>,
     tool: Tool,
     model: Model,
 }
 
-impl CommonMcpImpl for PlannerMcp {
-    fn session(&self) -> &RoleSession {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> CommonMcpImpl for PlannerMcp<TB> {
+    type TB = TB;
+
+    fn session(&self) -> &RoleSession<TB> {
         &self.session
     }
 
@@ -45,11 +46,11 @@ impl CommonMcpImpl for PlannerMcp {
     }
 }
 
-impl PlannerMcpImpl for PlannerMcp {}
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> PlannerMcpImpl for PlannerMcp<TB> {}
 
 #[tool_router]
-impl PlannerMcp {
-    pub fn new(zbobr: ZbobrDispatcher, task_backend: Arc<dyn crate::backend::TaskBackend>, task_id: u64, tool: Tool, model: Model) -> Self {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> PlannerMcp<TB> {
+    pub fn new(zbobr: ZbobrDispatcher, task_backend: TB, task_id: u64, tool: Tool, model: Model) -> Self {
         Self {
             session: zbobr.role_session(task_backend, task_id),
             tool_router: Self::tool_router(),
@@ -127,7 +128,7 @@ impl PlannerMcp {
 }
 
 #[tool_handler]
-impl ServerHandler for PlannerMcp {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> ServerHandler for PlannerMcp<TB> {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -139,7 +140,7 @@ impl ServerHandler for PlannerMcp {
     }
 }
 
-impl PlannerMcp {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> PlannerMcp<TB> {
     /// Generate API documentation for planner tools
     pub fn generate_api_docs() -> String {
         let tools = Self::tool_router();
@@ -153,7 +154,7 @@ mod tests {
 
     #[tokio::test]
     async fn tools_match_common_list() {
-        let tools = PlannerMcp::tool_router().list_all();
+        let tools = PlannerMcp::<crate::backend::DummyBackend>::tool_router().list_all();
         let mut names: Vec<_> = tools.iter().map(|t| t.name.as_ref()).collect();
         names.sort();
         let mut expected = crate::mcp::planner_tools::ALL_TOOLS.to_vec();

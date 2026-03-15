@@ -5,10 +5,9 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 
-use std::sync::Arc;
-
 use crate::{
     ZbobrDispatcher,
+    backend::TaskBackend,
     mcp::{
         common::{
             GetHistoryParam, MessageParam, SetDestinationBranchParam, SetDestinationRepositoryParam,
@@ -19,15 +18,17 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct PreparatorMcp {
-    session: RoleSession,
+pub struct PreparatorMcp<TB: TaskBackend + Clone + Send + Sync + 'static> {
+    session: RoleSession<TB>,
     tool_router: ToolRouter<Self>,
     tool: Tool,
     model: Model,
 }
 
-impl CommonMcpImpl for PreparatorMcp {
-    fn session(&self) -> &RoleSession {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> CommonMcpImpl for PreparatorMcp<TB> {
+    type TB = TB;
+
+    fn session(&self) -> &RoleSession<TB> {
         &self.session
     }
 
@@ -44,11 +45,11 @@ impl CommonMcpImpl for PreparatorMcp {
     }
 }
 
-impl PreparatorMcpImpl for PreparatorMcp {}
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> PreparatorMcpImpl for PreparatorMcp<TB> {}
 
 #[tool_router]
-impl PreparatorMcp {
-    pub fn new(zbobr: ZbobrDispatcher, task_backend: Arc<dyn crate::backend::TaskBackend>, task_id: u64, tool: Tool, model: Model) -> Self {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> PreparatorMcp<TB> {
+    pub fn new(zbobr: ZbobrDispatcher, task_backend: TB, task_id: u64, tool: Tool, model: Model) -> Self {
         Self {
             session: zbobr.role_session(task_backend, task_id),
             tool_router: Self::tool_router(),
@@ -122,7 +123,7 @@ impl PreparatorMcp {
 }
 
 #[tool_handler]
-impl ServerHandler for PreparatorMcp {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> ServerHandler for PreparatorMcp<TB> {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -135,7 +136,7 @@ impl ServerHandler for PreparatorMcp {
     }
 }
 
-impl PreparatorMcp {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> PreparatorMcp<TB> {
     /// Generate API documentation for preparator tools
     pub fn generate_api_docs() -> String {
         let tools = Self::tool_router();
@@ -149,7 +150,7 @@ mod tests {
 
     #[tokio::test]
     async fn tools_match_common_list() {
-        let tools = PreparatorMcp::tool_router().list_all();
+        let tools = PreparatorMcp::<crate::backend::DummyBackend>::tool_router().list_all();
         let mut names: Vec<_> = tools.iter().map(|t| t.name.as_ref()).collect();
         names.sort();
         let mut expected = crate::mcp::preparator_tools::ALL_TOOLS.to_vec();

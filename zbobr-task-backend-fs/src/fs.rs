@@ -483,6 +483,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
 
 /// Arc-wrapped FS backend that properly returns TaskWeak/TaskMut handles.
 /// This is the primary way to use ZbobrTaskBackendFs.
+#[derive(Clone)]
 pub struct ArcTaskBackendFs {
     inner: Arc<ZbobrTaskBackendFs>,
 }

@@ -1,9 +1,11 @@
 use rmcp::handler::server::router::tool::ToolRouter;
 use serde_json::Value;
 
-use std::sync::Arc;
-
-use crate::{ZbobrDispatcher, backend::TaskBackend, task::{Role, Tool, Model}};
+use crate::{
+    ZbobrDispatcher,
+    backend::TaskBackend,
+    task::{Model, Role, Tool},
+};
 
 // Custom deserializer for boolean that accepts both bool and string values
 // This handles cases where HTTP clients stringify all parameters
@@ -349,9 +351,9 @@ pub(crate) async fn serve_mcp(
 
 /// Run the MCP HTTP server scoped to a role (planner or worker) and task.
 /// Returns the actual port that was assigned (spawns server in background).
-pub async fn run_role_mcp_server(
+pub async fn run_role_mcp_server<TB: TaskBackend + Clone + Send + Sync + 'static>(
     zbobr: ZbobrDispatcher,
-    task_backend: Arc<dyn TaskBackend>,
+    task_backend: TB,
     role: Role,
     task_id: u64,
     tool: Tool,
@@ -388,7 +390,13 @@ pub async fn run_role_mcp_server(
             let svc = StreamableHttpService::new(
                 move || {
                     tracing::debug!("Creating new PlannerMcp instance for task {task_id}");
-                    Ok(super::planner::PlannerMcp::new(zbobr.clone(), task_backend.clone(), task_id, tool, model.clone()))
+                    Ok(super::planner::PlannerMcp::new(
+                        zbobr.clone(),
+                        task_backend.clone(),
+                        task_id,
+                        tool,
+                        model.clone(),
+                    ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
                 Default::default(),
@@ -400,7 +408,13 @@ pub async fn run_role_mcp_server(
             let svc = StreamableHttpService::new(
                 move || {
                     tracing::debug!("Creating new WorkerMcp instance for task {task_id}");
-                    Ok(super::worker::WorkerMcp::new(zbobr.clone(), task_backend.clone(), task_id, tool, model.clone()))
+                    Ok(super::worker::WorkerMcp::new(
+                        zbobr.clone(),
+                        task_backend.clone(),
+                        task_id,
+                        tool,
+                        model.clone(),
+                    ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
                 Default::default(),
@@ -412,7 +426,13 @@ pub async fn run_role_mcp_server(
             let svc = StreamableHttpService::new(
                 move || {
                     tracing::debug!("Creating new ReviewerMcp instance for task {task_id}");
-                    Ok(super::reviewer::ReviewerMcp::new(zbobr.clone(), task_backend.clone(), task_id, tool, model.clone()))
+                    Ok(super::reviewer::ReviewerMcp::new(
+                        zbobr.clone(),
+                        task_backend.clone(),
+                        task_id,
+                        tool,
+                        model.clone(),
+                    ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
                 Default::default(),
@@ -424,7 +444,13 @@ pub async fn run_role_mcp_server(
             let svc = StreamableHttpService::new(
                 move || {
                     tracing::debug!("Creating new TesterMcp instance for task {task_id}");
-                    Ok(super::tester::TesterMcp::new(zbobr.clone(), task_backend.clone(), task_id, tool, model.clone()))
+                    Ok(super::tester::TesterMcp::new(
+                        zbobr.clone(),
+                        task_backend.clone(),
+                        task_id,
+                        tool,
+                        model.clone(),
+                    ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
                 Default::default(),
@@ -436,7 +462,13 @@ pub async fn run_role_mcp_server(
             let svc = StreamableHttpService::new(
                 move || {
                     tracing::debug!("Creating new MergerMcp instance for task {task_id}");
-                    Ok(super::merger::MergerMcp::new(zbobr.clone(), task_backend.clone(), task_id, tool, model.clone()))
+                    Ok(super::merger::MergerMcp::new(
+                        zbobr.clone(),
+                        task_backend.clone(),
+                        task_id,
+                        tool,
+                        model.clone(),
+                    ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
                 Default::default(),

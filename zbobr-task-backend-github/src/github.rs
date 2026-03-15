@@ -915,6 +915,7 @@ impl TaskMut for GithubTaskMut {
 // ---------------------------------------------------------------------------
 
 /// Arc-wrapped GitHub backend that properly returns TaskWeak/TaskMut handles.
+#[derive(Clone)]
 pub struct ArcTaskBackendGithub {
     inner: Arc<ZbobrTaskBackendGithub>,
 }

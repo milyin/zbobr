@@ -1,8 +1,9 @@
 pub use zbobr_api::task::*;
 
-use std::sync::Arc;
-
-use crate::{TaskDir, ZbobrDispatcher, backend::{TaskBackend, WorktreeBackend}};
+use crate::{
+    TaskDir, ZbobrDispatcher,
+    backend::{TaskBackend, WorktreeBackend},
+};
 
 // ---------------------------------------------------------------------------
 // RoleSession — restricted access for MCP tools during agent sessions.
@@ -14,18 +15,14 @@ use crate::{TaskDir, ZbobrDispatcher, backend::{TaskBackend, WorktreeBackend}};
 /// Restricted task session for MCP tool operations.
 /// Stage and conflict flag are protected — only the dispatcher may change them.
 #[derive(Clone)]
-pub struct RoleSession {
+pub struct RoleSession<TB: TaskBackend> {
     zbobr: ZbobrDispatcher,
-    task_backend: Arc<dyn TaskBackend>,
+    task_backend: TB,
     task_id: u64,
 }
 
-impl RoleSession {
-    pub(crate) fn new(
-        zbobr: ZbobrDispatcher,
-        task_backend: Arc<dyn TaskBackend>,
-        task_id: u64,
-    ) -> Self {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> RoleSession<TB> {
+    pub(crate) fn new(zbobr: ZbobrDispatcher, task_backend: TB, task_id: u64) -> Self {
         Self {
             zbobr,
             task_backend,
@@ -74,7 +71,7 @@ impl RoleSession {
         &self,
         offset: Option<usize>,
     ) -> anyhow::Result<zbobr_api::HistoryChunk> {
-        crate::get_history(self.task_backend.as_ref(), self.task_id, offset).await
+        crate::get_history(&self.task_backend, self.task_id, offset).await
     }
 
     /// Get the current task checklist.
@@ -224,18 +221,22 @@ impl RoleSession {
 /// Full-access task session for the dispatcher.
 /// Can change stage, conflict flag, and all other fields.
 #[derive(Clone)]
-pub struct TaskSession {
+pub struct TaskSession<TB: TaskBackend, RB: WorktreeBackend> {
     zbobr: ZbobrDispatcher,
-    task_backend: Arc<dyn TaskBackend>,
-    repo_backend: Arc<dyn WorktreeBackend>,
+    task_backend: TB,
+    repo_backend: RB,
     task_id: u64,
 }
 
-impl TaskSession {
+impl<
+    TB: TaskBackend + Clone + Send + Sync + 'static,
+    RB: WorktreeBackend + Clone + Send + Sync + 'static,
+> TaskSession<TB, RB>
+{
     pub(crate) fn new(
         zbobr: ZbobrDispatcher,
-        task_backend: Arc<dyn TaskBackend>,
-        repo_backend: Arc<dyn WorktreeBackend>,
+        task_backend: TB,
+        repo_backend: RB,
         task_id: u64,
     ) -> Self {
         Self {
@@ -251,7 +252,7 @@ impl TaskSession {
     }
 
     /// Get a restricted RoleSession view for MCP tool operations.
-    pub fn role_session(&self) -> RoleSession {
+    pub fn role_session(&self) -> RoleSession<TB> {
         RoleSession::new(self.zbobr.clone(), self.task_backend.clone(), self.task_id)
     }
 
@@ -329,15 +330,13 @@ impl TaskSession {
         // Delete placeholder commit and push before marking done.
         if let Some(work_branch) = &task.work_branch {
             let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), task_id);
-            let work_dir =
-                if let Some(ref dest_repo) = task.destination_repository {
-                    let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo.as_str());
-                    task_dir.path().join(repo_name)
-                } else {
-                    task_dir.path().to_path_buf()
-                };
-            if let Err(e) = zbobr_utility::delete_placeholder_commit(&work_dir, work_branch).await
-            {
+            let work_dir = if let Some(ref dest_repo) = task.destination_repository {
+                let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo.as_str());
+                task_dir.path().join(repo_name)
+            } else {
+                task_dir.path().to_path_buf()
+            };
+            if let Err(e) = zbobr_utility::delete_placeholder_commit(&work_dir, work_branch).await {
                 tracing::warn!("Failed to delete placeholder commit for task #{task_id}: {e}");
             } else if let Some(identity) = task.identity() {
                 if let Err(e) = self.repo_backend.update_pr(&identity).await {
@@ -422,24 +421,32 @@ mod comment_model_tests {
     impl TrackingBackend {
         async fn task_lock(&self, id: u64) -> Arc<Mutex<()>> {
             let mut locks = self.locks.lock().await;
-            locks.entry(id).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+            locks
+                .entry(id)
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
         }
     }
 
     #[async_trait]
     impl TaskWeak for TrackingWeak {
-        fn task_id(&self) -> u64 { self.id }
+        fn task_id(&self) -> u64 {
+            self.id
+        }
 
         async fn snapshot(&self) -> anyhow::Result<Task> {
             let tasks = self.backend.tasks.lock().await;
-            tasks.get(&self.id)
+            tasks
+                .get(&self.id)
                 .map(|t| t.task.clone())
                 .ok_or_else(|| anyhow::anyhow!("not found"))
         }
 
         async fn upgrade(&self) -> anyhow::Result<Box<dyn TaskMut>> {
             let lock = self.backend.task_lock(self.id).await;
-            let guard = lock.try_lock_owned().map_err(|_| anyhow::anyhow!("locked"))?;
+            let guard = lock
+                .try_lock_owned()
+                .map_err(|_| anyhow::anyhow!("locked"))?;
             Ok(Box::new(TrackingMut {
                 id: self.id,
                 backend: self.backend.clone(),
@@ -455,11 +462,14 @@ mod comment_model_tests {
 
     #[async_trait]
     impl TaskMut for TrackingMut {
-        fn task_id(&self) -> u64 { self.id }
+        fn task_id(&self) -> u64 {
+            self.id
+        }
 
         async fn snapshot(&self) -> anyhow::Result<Task> {
             let tasks = self.backend.tasks.lock().await;
-            tasks.get(&self.id)
+            tasks
+                .get(&self.id)
                 .map(|t| t.task.clone())
                 .ok_or_else(|| anyhow::anyhow!("not found"))
         }
@@ -516,6 +526,7 @@ mod comment_model_tests {
         }
     }
 
+    #[derive(Clone)]
     struct ArcTrackingBackend {
         inner: Arc<TrackingBackend>,
     }
@@ -534,7 +545,10 @@ mod comment_model_tests {
             }
         }
 
-        async fn list_tasks_by_stage(&self, _stage: Stage) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+        async fn list_tasks_by_stage(
+            &self,
+            _stage: Stage,
+        ) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
             Ok(vec![])
         }
 
@@ -544,7 +558,11 @@ mod comment_model_tests {
             description: &str,
             stage: Stage,
         ) -> anyhow::Result<u64> {
-            let id = self.inner.next_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            let id = self
+                .inner
+                .next_id
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                + 1;
             let task = Task {
                 id,
                 title: title.to_string(),
@@ -561,16 +579,30 @@ mod comment_model_tests {
                 confirm: false,
                 etag: None,
             };
-            self.inner.tasks.lock().await.insert(id, InMemTask { task, closed: false });
+            self.inner.tasks.lock().await.insert(
+                id,
+                InMemTask {
+                    task,
+                    closed: false,
+                },
+            );
             Ok(id)
         }
 
-        async fn setup(&self, _force: bool) -> anyhow::Result<()> { Ok(()) }
-        async fn validate_connectivity(&self) -> anyhow::Result<()> { Ok(()) }
-        fn debug_state(&self) -> String { "tracking".to_string() }
+        async fn setup(&self, _force: bool) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn validate_connectivity(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn debug_state(&self) -> String {
+            "tracking".to_string()
+        }
     }
 
+    #[derive(Clone)]
     struct DummyRepo;
+
     #[async_trait]
     impl crate::backend::WorktreeBackend for DummyRepo {
         async fn update_worktree(
@@ -585,20 +617,24 @@ mod comment_model_tests {
             Ok("mock-pr-url".to_string())
         }
 
-        async fn validate_connectivity(&self) -> anyhow::Result<()> { Ok(()) }
-        fn debug_state(&self) -> String { "dummy".to_string() }
+        async fn validate_connectivity(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn debug_state(&self) -> String {
+            "dummy".to_string()
+        }
     }
 
-    fn make_test_parts() -> (crate::ZbobrDispatcher, Arc<dyn crate::backend::TaskBackend>, Arc<dyn crate::backend::WorktreeBackend>) {
-        let backend: Arc<dyn crate::backend::TaskBackend> = Arc::new(ArcTrackingBackend {
+    fn make_test_parts() -> (crate::ZbobrDispatcher, ArcTrackingBackend, DummyRepo) {
+        let backend = ArcTrackingBackend {
             inner: Arc::new(TrackingBackend {
                 tasks: Mutex::new(HashMap::new()),
                 comments: Mutex::new(HashMap::new()),
                 next_id: AtomicU64::new(0),
                 locks: Mutex::new(HashMap::new()),
             }),
-        });
-        let repo: Arc<dyn crate::backend::WorktreeBackend> = Arc::new(DummyRepo);
+        };
+        let repo = DummyRepo;
         let zbobr = crate::ZbobrDispatcher::new(ZbobrDispatcherConfig::default());
         (zbobr, backend, repo)
     }
@@ -607,12 +643,17 @@ mod comment_model_tests {
     async fn mcp_helper_includes_explicit_model() {
         let (zbobr, task_backend, _repo_backend) = make_test_parts();
         let id = zbobr
-            .create_task(task_backend.as_ref(), "t", "", Stage::Pending, None, None)
+            .create_task(&task_backend, "t", "", Stage::Pending, None, None)
             .await
             .unwrap();
 
-        let planner =
-            crate::mcp::planner::PlannerMcp::new(zbobr.clone(), task_backend.clone(), id, Tool::Copilot, Model::Gpt5Mini);
+        let planner = crate::mcp::planner::PlannerMcp::new(
+            zbobr.clone(),
+            task_backend.clone(),
+            id,
+            Tool::Copilot,
+            Model::Gpt5Mini,
+        );
 
         let _ = planner.report_error_impl("oops").await;
 
@@ -626,7 +667,7 @@ mod comment_model_tests {
     async fn dispatcher_posts_have_no_model() {
         let (zbobr, task_backend, repo_backend) = make_test_parts();
         let id = zbobr
-            .create_task(task_backend.as_ref(), "t", "", Stage::Pending, None, None)
+            .create_task(&task_backend, "t", "", Stage::Pending, None, None)
             .await
             .unwrap();
 
@@ -635,10 +676,10 @@ mod comment_model_tests {
             .post_comment(
                 CommentType::Error,
                 "dispatcher error",
-                None,
+                None::<Role>,
                 "host",
-                None,
-                None,
+                None::<Tool>,
+                None::<Model>,
             )
             .await
             .unwrap();

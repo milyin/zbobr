@@ -44,7 +44,7 @@ async fn load_credentials() -> (String, String, Option<String>) {
 
 async fn get_env() -> Arc<IntegrationTestEnv> {
     let (fork_owner, repo_token, target_repo) = load_credentials().await;
-    IntegrationTestEnv::init_fs_github("fs_github", fork_owner, repo_token, target_repo)
+    mcp_integration::env::init_fs_github("fs_github", fork_owner, repo_token, target_repo)
         .await
         .expect("failed to initialise FS/GitHub environment; check credentials")
 }

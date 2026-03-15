@@ -1,5 +1,6 @@
 use crate::{
     CommentType, Signal,
+    backend::TaskBackend,
     mcp::common::get_hostname,
     task::{ChecklistItem, Role, RoleSession, Tool, Model},
 };
@@ -156,7 +157,8 @@ fn log_mcp_string_response(role_name: &str, task_id: u64, tool_name: &str, respo
 /// Common trait for MCP services (Planner, Worker) - shared implementations
 #[allow(async_fn_in_trait)]
 pub trait CommonMcpImpl: Send + Sync {
-    fn session(&self) -> &RoleSession;
+    type TB: TaskBackend + Clone + Send + Sync + 'static;
+    fn session(&self) -> &RoleSession<Self::TB>;
     fn role(&self) -> Role;
 
     /// Returns the tool that is executing this MCP session

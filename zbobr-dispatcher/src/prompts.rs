@@ -78,12 +78,12 @@ fn assemble_prompt(user_context: &str, role: Role, task: &Task, history_json: &s
     };
 
     let api_docs = match role {
-        Role::Preparator => crate::PreparatorMcp::generate_api_docs(),
-        Role::Planner => crate::PlannerMcp::generate_api_docs(),
-        Role::Worker => crate::WorkerMcp::generate_api_docs(),
-        Role::Reviewer => crate::ReviewerMcp::generate_api_docs(),
-        Role::Tester => crate::TesterMcp::generate_api_docs(),
-        Role::Merger => crate::MergerMcp::generate_api_docs(),
+        Role::Preparator => crate::PreparatorMcp::<crate::backend::DummyBackend>::generate_api_docs(),
+        Role::Planner => crate::PlannerMcp::<crate::backend::DummyBackend>::generate_api_docs(),
+        Role::Worker => crate::WorkerMcp::<crate::backend::DummyBackend>::generate_api_docs(),
+        Role::Reviewer => crate::ReviewerMcp::<crate::backend::DummyBackend>::generate_api_docs(),
+        Role::Tester => crate::TesterMcp::<crate::backend::DummyBackend>::generate_api_docs(),
+        Role::Merger => crate::MergerMcp::<crate::backend::DummyBackend>::generate_api_docs(),
     };
 
     let mut sections = vec![hardcoded];

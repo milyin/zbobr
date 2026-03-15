@@ -134,6 +134,7 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
 // ZbobrRepoBackendGithub
 // ============================================================================
 
+#[derive(Clone)]
 pub struct ZbobrRepoBackendGithub {
     backend_config: ZbobrRepoBackendGithubConfig,
     octocrab: octocrab::Octocrab,

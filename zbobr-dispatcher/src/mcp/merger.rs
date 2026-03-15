@@ -5,10 +5,9 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 
-use std::sync::Arc;
-
 use crate::{
     ZbobrDispatcher,
+    backend::TaskBackend,
     mcp::{
         common::{GetHistoryParam, MessageParam},
         traits::{CommonMcpImpl, MergerMcpImpl},
@@ -17,15 +16,17 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct MergerMcp {
-    session: RoleSession,
+pub struct MergerMcp<TB: TaskBackend + Clone + Send + Sync + 'static> {
+    session: RoleSession<TB>,
     tool_router: ToolRouter<Self>,
     tool: Tool,
     model: Model,
 }
 
-impl CommonMcpImpl for MergerMcp {
-    fn session(&self) -> &RoleSession {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> CommonMcpImpl for MergerMcp<TB> {
+    type TB = TB;
+
+    fn session(&self) -> &RoleSession<TB> {
         &self.session
     }
 
@@ -42,11 +43,11 @@ impl CommonMcpImpl for MergerMcp {
     }
 }
 
-impl MergerMcpImpl for MergerMcp {}
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> MergerMcpImpl for MergerMcp<TB> {}
 
 #[tool_router]
-impl MergerMcp {
-    pub fn new(zbobr: ZbobrDispatcher, task_backend: Arc<dyn crate::backend::TaskBackend>, task_id: u64, tool: Tool, model: Model) -> Self {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> MergerMcp<TB> {
+    pub fn new(zbobr: ZbobrDispatcher, task_backend: TB, task_id: u64, tool: Tool, model: Model) -> Self {
         Self {
             session: zbobr.role_session(task_backend, task_id),
             tool_router: Self::tool_router(),
@@ -93,7 +94,7 @@ impl MergerMcp {
 }
 
 #[tool_handler]
-impl ServerHandler for MergerMcp {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> ServerHandler for MergerMcp<TB> {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -105,7 +106,7 @@ impl ServerHandler for MergerMcp {
     }
 }
 
-impl MergerMcp {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> MergerMcp<TB> {
     /// Generate API documentation for merger tools
     pub fn generate_api_docs() -> String {
         let tools = Self::tool_router();

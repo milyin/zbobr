@@ -47,7 +47,7 @@ async fn load_credentials() -> (String, String, String, String) {
 
 async fn get_env() -> Arc<IntegrationTestEnv> {
     let (task_repo, task_token, fork_owner, repo_token) = load_credentials().await;
-    IntegrationTestEnv::init_github_github(
+    mcp_integration::env::init_github_github(
         "github_github",
         task_repo,
         task_token,

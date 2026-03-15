@@ -10,8 +10,6 @@ pub mod task;
 pub mod task_dir;
 pub mod tool_executor;
 
-use std::sync::Arc;
-
 pub use cli::{
     Command, ConfigFileArg, ConfigLocation, GlobalArgs, TaskSubcommand, parse_cli, print_task,
     process_task_by_stage, resolve_config_location, run_command, run_manager_loop,
@@ -36,6 +34,8 @@ pub use task::{
 pub use task_dir::TaskDir;
 pub use tool_executor::ToolExecutor;
 pub use zbobr_api::config::Config;
+
+use std::sync::Arc;
 
 use crate::backend::{TaskBackend, WorktreeBackend};
 
@@ -162,21 +162,21 @@ impl ZbobrDispatcher {
     }
 
     /// Create a TaskSession bound to a specific task (full dispatcher access).
-    pub fn task_session(
+    pub fn task_session<TB: TaskBackend + Clone + Send + Sync + 'static, RB: WorktreeBackend + Clone + Send + Sync + 'static>(
         &self,
-        task_backend: Arc<dyn TaskBackend>,
-        repo_backend: Arc<dyn WorktreeBackend>,
+        task_backend: TB,
+        repo_backend: RB,
         task_id: u64,
-    ) -> TaskSession {
+    ) -> TaskSession<TB, RB> {
         TaskSession::new(self.clone(), task_backend, repo_backend, task_id)
     }
 
     /// Create a RoleSession bound to a specific task (restricted MCP tool access).
-    pub fn role_session(
+    pub fn role_session<TB: TaskBackend + Clone + Send + Sync + 'static>(
         &self,
-        task_backend: Arc<dyn TaskBackend>,
+        task_backend: TB,
         task_id: u64,
-    ) -> RoleSession {
+    ) -> RoleSession<TB> {
         RoleSession::new(self.clone(), task_backend, task_id)
     }
 }

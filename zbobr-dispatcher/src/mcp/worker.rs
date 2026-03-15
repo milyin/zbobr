@@ -5,10 +5,9 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 
-use std::sync::Arc;
-
 use crate::{
     ZbobrDispatcher,
+    backend::TaskBackend,
     mcp::{
         common::{
             CheckChecklistItemParam, DeleteChecklistItemParam, GetHistoryParam,
@@ -20,15 +19,17 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct WorkerMcp {
-    session: RoleSession,
+pub struct WorkerMcp<TB: TaskBackend + Clone + Send + Sync + 'static> {
+    session: RoleSession<TB>,
     tool_router: ToolRouter<Self>,
     tool: Tool,
     model: Model,
 }
 
-impl CommonMcpImpl for WorkerMcp {
-    fn session(&self) -> &RoleSession {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> CommonMcpImpl for WorkerMcp<TB> {
+    type TB = TB;
+
+    fn session(&self) -> &RoleSession<TB> {
         &self.session
     }
 
@@ -45,11 +46,17 @@ impl CommonMcpImpl for WorkerMcp {
     }
 }
 
-impl WorkerMcpImpl for WorkerMcp {}
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> WorkerMcpImpl for WorkerMcp<TB> {}
 
 #[tool_router]
-impl WorkerMcp {
-    pub fn new(zbobr: ZbobrDispatcher, task_backend: Arc<dyn crate::backend::TaskBackend>, task_id: u64, tool: Tool, model: Model) -> Self {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> WorkerMcp<TB> {
+    pub fn new(
+        zbobr: ZbobrDispatcher,
+        task_backend: TB,
+        task_id: u64,
+        tool: Tool,
+        model: Model,
+    ) -> Self {
         Self {
             session: zbobr.role_session(task_backend, task_id),
             tool_router: Self::tool_router(),
@@ -145,7 +152,7 @@ impl WorkerMcp {
 }
 
 #[tool_handler]
-impl ServerHandler for WorkerMcp {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> ServerHandler for WorkerMcp<TB> {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -158,7 +165,7 @@ impl ServerHandler for WorkerMcp {
     }
 }
 
-impl WorkerMcp {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> WorkerMcp<TB> {
     /// Generate API documentation for worker tools
     pub fn generate_api_docs() -> String {
         let tools = Self::tool_router();
@@ -172,7 +179,7 @@ mod tests {
 
     #[tokio::test]
     async fn tools_match_common_list() {
-        let tools = WorkerMcp::tool_router().list_all();
+        let tools = WorkerMcp::<crate::backend::DummyBackend>::tool_router().list_all();
         let mut names: Vec<_> = tools.iter().map(|t| t.name.as_ref()).collect();
         names.sort();
         let mut expected = crate::mcp::worker_tools::ALL_TOOLS.to_vec();

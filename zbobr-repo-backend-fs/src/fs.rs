@@ -14,6 +14,7 @@ use crate::config::ZbobrRepoBackendFsConfig;
 /// - Bare clones are stored at `repos_dir/repo_name.git`
 /// - Worktrees are created via `git worktree add` pointing to the bare clone
 /// - Multiple tasks can share the same bare clone
+#[derive(Clone)]
 pub struct ZbobrRepoBackendFs {
     config: ZbobrRepoBackendFsConfig,
 }

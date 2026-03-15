@@ -5,10 +5,9 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 
-use std::sync::Arc;
-
 use crate::{
     ZbobrDispatcher,
+    backend::TaskBackend,
     mcp::{
         common::GetHistoryParam,
         traits::{CommonMcpImpl, ReviewerMcpImpl},
@@ -17,15 +16,17 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct ReviewerMcp {
-    session: RoleSession,
+pub struct ReviewerMcp<TB: TaskBackend + Clone + Send + Sync + 'static> {
+    session: RoleSession<TB>,
     tool_router: ToolRouter<Self>,
     tool: Tool,
     model: Model,
 }
 
-impl CommonMcpImpl for ReviewerMcp {
-    fn session(&self) -> &RoleSession {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> CommonMcpImpl for ReviewerMcp<TB> {
+    type TB = TB;
+
+    fn session(&self) -> &RoleSession<TB> {
         &self.session
     }
 
@@ -42,11 +43,11 @@ impl CommonMcpImpl for ReviewerMcp {
     }
 }
 
-impl ReviewerMcpImpl for ReviewerMcp {}
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> ReviewerMcpImpl for ReviewerMcp<TB> {}
 
 #[tool_router]
-impl ReviewerMcp {
-    pub fn new(zbobr: ZbobrDispatcher, task_backend: Arc<dyn crate::backend::TaskBackend>, task_id: u64, tool: Tool, model: Model) -> Self {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> ReviewerMcp<TB> {
+    pub fn new(zbobr: ZbobrDispatcher, task_backend: TB, task_id: u64, tool: Tool, model: Model) -> Self {
         Self {
             session: zbobr.role_session(task_backend, task_id),
             tool_router: Self::tool_router(),
@@ -102,7 +103,7 @@ impl ReviewerMcp {
 }
 
 #[tool_handler]
-impl ServerHandler for ReviewerMcp {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> ServerHandler for ReviewerMcp<TB> {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -115,7 +116,7 @@ impl ServerHandler for ReviewerMcp {
     }
 }
 
-impl ReviewerMcp {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static> ReviewerMcp<TB> {
     /// Generate API documentation for reviewer tools
     pub fn generate_api_docs() -> String {
         let tools = Self::tool_router();

@@ -8,7 +8,7 @@ use std::{
     },
 };
 
-use zbobr_dispatcher::{
+use zbobr_dispatcher::{backend::TaskWeak, 
     ChecklistItem, Comment, Signal, Stage, Task, TaskDir, ZbobrDispatcher, ZbobrDispatcherConfig,
     ZbobrExecutorConfig, process_task_by_stage,
     backend::{TaskBackend, TaskBackendExt, WorktreeBackend},
@@ -26,13 +26,13 @@ static SCENARIO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Shared environment for integration tests.  Holds a live `ZbobrDispatcher`
 /// and backends — no CLI binary involved.
-pub struct IntegrationTestEnv {
+pub struct IntegrationTestEnv<TB: TaskBackend + Clone + Send + Sync + 'static, RB: WorktreeBackend + Clone + Send + Sync + 'static> {
     pub base_path: PathBuf,
     pub workspaces_dir: PathBuf,
     pub name: &'static str,
     pub zbobr: ZbobrDispatcher,
-    pub task_backend: Arc<dyn TaskBackend>,
-    pub repo_backend: Arc<dyn WorktreeBackend>,
+    pub task_backend: TB,
+    pub repo_backend: RB,
     /// Optional remote repository slug (`owner/repo`) used by GitHub repo-backend tests.
     /// `None` for the filesystem repo backend.
     pub target_repo: Option<String>,
@@ -40,11 +40,13 @@ pub struct IntegrationTestEnv {
     fork_owner: Option<String>,
 }
 
-impl IntegrationTestEnv {
+impl<TB: TaskBackend + Clone + Send + Sync + 'static, RB: WorktreeBackend + Clone + Send + Sync + 'static> IntegrationTestEnv<TB, RB> {
     /// Construct an environment backed by two filesystem backends.
     ///
     /// Returns `None` when `mcp-tester` is not installed (tests are skipped).
-    pub async fn init_fs_fs(name: &'static str) -> Option<Arc<Self>> {
+    }
+
+pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<ArcTaskBackendFs, ZbobrRepoBackendFs>>> {
         if !check_mcp_tester().await {
             return None;
         }
@@ -76,14 +78,12 @@ impl IntegrationTestEnv {
             repos_dir: base_path.join("repos"),
         };
 
-        let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
-            Arc::new(ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?));
-        let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
-            Arc::new(ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?);
+        let task_backend = ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?);
+        let repo_backend = ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?;
 
         let zbobr = ZbobrDispatcher::new(dispatcher_config);
 
-        zbobr.setup_repository(task_backend.as_ref(), false).await.ok()?;
+        zbobr.setup_repository(&task_backend, false).await.ok()?;
 
         Some(Arc::new(IntegrationTestEnv {
             base_path,
@@ -104,7 +104,7 @@ impl IntegrationTestEnv {
         name: &'static str,
         task_repo: String,
         task_token: String,
-    ) -> Option<Arc<Self>> {
+    ) -> Option<Arc<IntegrationTestEnv<ArcTaskBackendGithub, ZbobrRepoBackendFs>>> {
         install_rustls_provider();
         if !check_mcp_tester().await {
             return None;
@@ -138,14 +138,12 @@ impl IntegrationTestEnv {
             repos_dir: base_path.join("repos"),
         };
 
-        let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
-            Arc::new(ArcTaskBackendGithub::new(ZbobrTaskBackendGithub::from_config(task_backend_config).ok()?));
-        let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> =
-            Arc::new(ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?);
+        let task_backend = ArcTaskBackendGithub::new(ZbobrTaskBackendGithub::from_config(task_backend_config).ok()?);
+        let repo_backend = ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?;
 
         let zbobr = ZbobrDispatcher::new(dispatcher_config);
 
-        zbobr.setup_repository(task_backend.as_ref(), false).await.ok()?;
+        zbobr.setup_repository(&task_backend, false).await.ok()?;
 
         Some(Arc::new(IntegrationTestEnv {
             base_path,
@@ -167,7 +165,7 @@ impl IntegrationTestEnv {
         fork_owner: String,
         repo_token: String,
         target_repo: Option<String>,
-    ) -> Option<Arc<Self>> {
+    ) -> Option<Arc<IntegrationTestEnv<ArcTaskBackendFs, ZbobrRepoBackendGithub>>> {
         install_rustls_provider();
         if !check_mcp_tester().await {
             return None;
@@ -205,16 +203,12 @@ impl IntegrationTestEnv {
             overwrite_author: false,
         };
 
-        let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
-            Arc::new(ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?));
-        let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> = Arc::new(
-            ZbobrRepoBackendGithub::from_config(repo_backend_config)
-            .ok()?,
-        );
+        let task_backend = ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?);
+        let repo_backend = ZbobrRepoBackendGithub::from_config(repo_backend_config).ok()?;
 
         let zbobr = ZbobrDispatcher::new(dispatcher_config);
 
-        zbobr.setup_repository(task_backend.as_ref(), false).await.ok()?;
+        zbobr.setup_repository(&task_backend, false).await.ok()?;
 
         Some(Arc::new(IntegrationTestEnv {
             base_path,
@@ -237,7 +231,7 @@ impl IntegrationTestEnv {
         task_token: String,
         fork_owner: String,
         repo_token: String,
-    ) -> Option<Arc<Self>> {
+    ) -> Option<Arc<IntegrationTestEnv<ArcTaskBackendGithub, ZbobrRepoBackendGithub>>> {
         install_rustls_provider();
         if !check_mcp_tester().await {
             return None;
@@ -276,16 +270,12 @@ impl IntegrationTestEnv {
             overwrite_author: false,
         };
 
-        let task_backend: Arc<dyn zbobr_dispatcher::backend::TaskBackend> =
-            Arc::new(ArcTaskBackendGithub::new(ZbobrTaskBackendGithub::from_config(task_backend_config).ok()?));
-        let repo_backend: Arc<dyn zbobr_dispatcher::backend::WorktreeBackend> = Arc::new(
-            ZbobrRepoBackendGithub::from_config(repo_backend_config)
-            .ok()?,
-        );
+        let task_backend = ArcTaskBackendGithub::new(ZbobrTaskBackendGithub::from_config(task_backend_config).ok()?);
+        let repo_backend = ZbobrRepoBackendGithub::from_config(repo_backend_config).ok()?;
 
         let zbobr = ZbobrDispatcher::new(dispatcher_config);
 
-        zbobr.setup_repository(task_backend.as_ref(), false).await.ok()?;
+        zbobr.setup_repository(&task_backend, false).await.ok()?;
 
         Some(Arc::new(IntegrationTestEnv {
             base_path,
@@ -298,6 +288,8 @@ impl IntegrationTestEnv {
             fork_owner: Some(fork_owner),
         }))
     }
+
+    impl<TB: TaskBackend + Clone + Send + Sync + 'static, RB: WorktreeBackend + Clone + Send + Sync + 'static> IntegrationTestEnv<TB, RB> {
 
     // -----------------------------------------------------------------------
     // Identification
@@ -318,7 +310,7 @@ impl IntegrationTestEnv {
 
     pub async fn create_task(&self, title: &str, description: &str, stage: Stage) -> u64 {
         self.zbobr
-            .create_task(self.task_backend.as_ref(), title, description, stage, None, None)
+            .create_task(&self.task_backend, title, description, stage, None, None)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to create task: {e}", self.name))
     }
@@ -331,7 +323,7 @@ impl IntegrationTestEnv {
         confirm: bool,
     ) -> u64 {
         self.zbobr
-            .create_task_with_confirm(self.task_backend.as_ref(), title, description, stage, None, None, confirm)
+            .create_task_with_confirm(&self.task_backend, title, description, stage, None, None, confirm)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to create task: {e}", self.name))
     }
@@ -572,7 +564,7 @@ impl IntegrationTestEnv {
             .unwrap_or_else(|| panic!("[{}] task #{task_id} missing routing params", self.name));
 
         self.zbobr
-            .update_worktree(self.repo_backend.as_ref(), &identity)
+            .update_worktree(&self.repo_backend, &identity)
             .await
             .unwrap_or_else(|e| panic!("[{}] update_worktree failed: {e}", self.name));
 
