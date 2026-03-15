@@ -12,7 +12,7 @@ use zbobr_dispatcher::{
     ChecklistItem, Comment, Signal, Stage, Task, TaskDir, ZbobrDispatcher, ZbobrDispatcherConfig,
     ZbobrExecutorConfig, process_task_by_stage,
     backend::{TaskBackend, TaskBackendExt, WorktreeBackend},
-    prompts::Prompts,
+    prompts::PromptsConfig,
     config::StageConfig,
     task::Tool,
 };
@@ -648,15 +648,7 @@ impl IntegrationTestEnv {
             ..Default::default()
         };
 
-        let prompts = Prompts {
-            base_path: None,
-            preparator: vec![],
-            planner: vec![],
-            worker: vec![],
-            reviewer: vec![],
-            tester: vec![],
-            merger: vec![],
-        };
+        let prompts = PromptsConfig::default();
 
         let task = self.get_task(task_id).await;
 

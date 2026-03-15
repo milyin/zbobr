@@ -3,20 +3,22 @@ workspaces = "./workspaces"
 git_user_name = "Copilot"
 git_user_email = "copilot@example.com"
 cli_tool = "copilot"
-# Base directory for resolving relative prompt file paths
-prompts_path = "./prompts"
 
-# Example: override settings for individual stages
+# Example: override tool/model for individual stages
 # [dispatcher.preparator]
 # tool = "copilot"
 # model = "gpt-5-mini"
-# prompts = ["prep.md"]
 #
-# [dispatcher.worker]
-# prompts = ["worker.md", "common.md"]
 # Default destination repository pre-populated for preparator agent (e.g. "owner/repo")
 # default_destination_repository = "milyin/zbobr"
 # default_destination_branch = "main"
+
+[prompts]
+# Base directory for resolving relative prompt file paths
+path = "./prompts"
+# Per-stage prompt files (paths relative to `path` above)
+# preparator = ["prep.md"]
+# worker = ["worker.md", "common.md"]
 
 [tasks]
 # Filesystem task backend settings

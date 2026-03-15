@@ -2,41 +2,11 @@ use std::path::PathBuf;
 
 use crate::{
     backend::TaskBackend,
-    config::ZbobrDispatcherConfig,
     task::Role,
 };
 
 use zbobr_api::Task;
-
-/// Resolved prompt file paths for each role.
-#[derive(Debug, Clone)]
-pub struct Prompts {
-    pub base_path: Option<PathBuf>,
-    pub preparator: Vec<PathBuf>,
-    pub planner: Vec<PathBuf>,
-    pub worker: Vec<PathBuf>,
-    pub reviewer: Vec<PathBuf>,
-    pub tester: Vec<PathBuf>,
-    pub merger: Vec<PathBuf>,
-}
-
-impl Prompts {
-    /// Build prompts from the fully-resolved dispatcher config.
-    ///
-    /// The config already has CLI args merged over TOML defaults via
-    /// `ZbobrDispatcherConfig::build()`, so no separate args struct is needed.
-    pub fn from_config(config: &ZbobrDispatcherConfig) -> Self {
-        Self {
-            base_path: config.prompts_path.clone(),
-            preparator: config.preparator.prompts.clone(),
-            planner: config.planner.prompts.clone(),
-            worker: config.worker.prompts.clone(),
-            reviewer: config.reviewer.prompts.clone(),
-            tester: config.tester.prompts.clone(),
-            merger: config.merger.prompts.clone(),
-        }
-    }
-}
+pub use zbobr_api::config::PromptsConfig;
 
 /// Load and concatenate multiple prompt files.
 /// Relative paths are resolved relative to `base_path` if provided, otherwise cwd.
@@ -151,36 +121,36 @@ fn assemble_prompt(user_context: &str, role: Role, task: &Task, history_json: &s
 
 /// Validate that all specified prompt files exist.
 /// Returns an error listing all missing files if any are not found.
-pub fn validate_prompts(prompts: &Prompts) -> anyhow::Result<()> {
+pub fn validate_prompts(prompts: &PromptsConfig) -> anyhow::Result<()> {
     let mut missing_files = Vec::new();
 
     for path in &prompts.preparator {
-        if !file_exists(path, prompts.base_path.as_ref()) {
+        if !file_exists(path, prompts.path.as_ref()) {
             missing_files.push(path.clone());
         }
     }
     for path in &prompts.planner {
-        if !file_exists(path, prompts.base_path.as_ref()) {
+        if !file_exists(path, prompts.path.as_ref()) {
             missing_files.push(path.clone());
         }
     }
     for path in &prompts.worker {
-        if !file_exists(path, prompts.base_path.as_ref()) {
+        if !file_exists(path, prompts.path.as_ref()) {
             missing_files.push(path.clone());
         }
     }
     for path in &prompts.reviewer {
-        if !file_exists(path, prompts.base_path.as_ref()) {
+        if !file_exists(path, prompts.path.as_ref()) {
             missing_files.push(path.clone());
         }
     }
     for path in &prompts.tester {
-        if !file_exists(path, prompts.base_path.as_ref()) {
+        if !file_exists(path, prompts.path.as_ref()) {
             missing_files.push(path.clone());
         }
     }
     for path in &prompts.merger {
-        if !file_exists(path, prompts.base_path.as_ref()) {
+        if !file_exists(path, prompts.path.as_ref()) {
             missing_files.push(path.clone());
         }
     }
@@ -220,24 +190,15 @@ fn file_exists(path: &PathBuf, base_path: Option<&PathBuf>) -> bool {
     resolved_path.exists()
 }
 
-impl Prompts {
-    /// Build the full prompt for the given role.
-    pub async fn build_prompt(
-        &self,
-        role: Role,
-        task_id: u64,
-        task_backend: &dyn TaskBackend,
-    ) -> anyhow::Result<String> {
-        let base_prompt = match role {
-            Role::Preparator => load_prompts(&self.preparator, self.base_path.as_ref())?,
-            Role::Planner => load_prompts(&self.planner, self.base_path.as_ref())?,
-            Role::Worker => load_prompts(&self.worker, self.base_path.as_ref())?,
-            Role::Reviewer => load_prompts(&self.reviewer, self.base_path.as_ref())?,
-            Role::Tester => load_prompts(&self.tester, self.base_path.as_ref())?,
-            Role::Merger => load_prompts(&self.merger, self.base_path.as_ref())?,
-        };
-        build_full_prompt(&base_prompt, role, task_id, task_backend).await
-    }
+/// Build the full prompt for the given role using the prompts config.
+pub async fn build_prompt_for_role(
+    prompts: &PromptsConfig,
+    role: Role,
+    task_id: u64,
+    task_backend: &dyn TaskBackend,
+) -> anyhow::Result<String> {
+    let base_prompt = load_prompts(prompts.prompts_for_role(role), prompts.path.as_ref())?;
+    build_full_prompt(&base_prompt, role, task_id, task_backend).await
 }
 
 #[cfg(test)]
@@ -274,17 +235,6 @@ mod tests {
         let mut f = fs::File::create(&path).unwrap();
         f.write_all(content.as_bytes()).unwrap();
         path
-    }
-
-    fn default_config() -> ZbobrDispatcherConfig {
-        let mut cfg = ZbobrDispatcherConfig::default();
-        cfg.preparator.prompts = vec![];
-        cfg.planner.prompts = vec![];
-        cfg.worker.prompts = vec![];
-        cfg.reviewer.prompts = vec![];
-        cfg.merger.prompts = vec![];
-        cfg.prompts_path = None;
-        cfg
     }
 
     // --- load_prompts ---
@@ -342,34 +292,25 @@ mod tests {
         assert_eq!(result, "absolute content");
     }
 
-    // --- Prompts::from_config ---
+    // --- PromptsConfig ---
 
     #[test]
-    fn from_config_maps_all_fields() {
-        let config = default_config();
-        let prompts = Prompts::from_config(&config);
-        assert_eq!(prompts.preparator, config.preparator.prompts);
-        assert_eq!(prompts.planner, config.planner.prompts);
-        assert_eq!(prompts.worker, config.worker.prompts);
-        assert_eq!(prompts.reviewer, config.reviewer.prompts);
-        assert_eq!(prompts.merger, config.merger.prompts);
-        assert_eq!(prompts.base_path, None);
-    }
-
-    #[test]
-    fn from_config_picks_up_base_path() {
-        let mut config = default_config();
-        config.prompts_path = Some(PathBuf::from("/config/prompts"));
-        let prompts = Prompts::from_config(&config);
-        assert_eq!(prompts.base_path, Some(PathBuf::from("/config/prompts")));
-    }
-
-    #[test]
-    fn from_config_picks_up_stage_prompts() {
-        let mut config = default_config();
-        config.preparator.prompts = vec![PathBuf::from("stage.md")];
-        let prompts = Prompts::from_config(&config);
-        assert_eq!(prompts.preparator, vec![PathBuf::from("stage.md")]);
+    fn prompts_for_role_returns_correct_paths() {
+        let prompts = PromptsConfig {
+            path: None,
+            preparator: vec![PathBuf::from("prep.md")],
+            planner: vec![PathBuf::from("plan.md")],
+            worker: vec![PathBuf::from("work.md")],
+            reviewer: vec![PathBuf::from("review.md")],
+            tester: vec![PathBuf::from("test.md")],
+            merger: vec![PathBuf::from("merge.md")],
+        };
+        assert_eq!(prompts.prompts_for_role(Role::Preparator), &[PathBuf::from("prep.md")]);
+        assert_eq!(prompts.prompts_for_role(Role::Planner), &[PathBuf::from("plan.md")]);
+        assert_eq!(prompts.prompts_for_role(Role::Worker), &[PathBuf::from("work.md")]);
+        assert_eq!(prompts.prompts_for_role(Role::Reviewer), &[PathBuf::from("review.md")]);
+        assert_eq!(prompts.prompts_for_role(Role::Tester), &[PathBuf::from("test.md")]);
+        assert_eq!(prompts.prompts_for_role(Role::Merger), &[PathBuf::from("merge.md")]);
     }
 
     // --- assemble_prompt ---
@@ -427,8 +368,8 @@ mod tests {
     fn validate_prompts_succeeds_with_existing_files() {
         let dir = TempDir::new().unwrap();
         let worker_file = write_file(&dir, "worker.md", "content");
-        let prompts = Prompts {
-            base_path: None,
+        let prompts = PromptsConfig {
+            path: None,
             preparator: vec![],
             planner: vec![],
             worker: vec![worker_file],
@@ -441,22 +382,14 @@ mod tests {
 
     #[test]
     fn validate_prompts_succeeds_with_empty_prompts() {
-        let prompts = Prompts {
-            base_path: None,
-            preparator: vec![],
-            planner: vec![],
-            worker: vec![],
-            reviewer: vec![],
-            tester: vec![],
-            merger: vec![],
-        };
+        let prompts = PromptsConfig::default();
         assert!(validate_prompts(&prompts).is_ok());
     }
 
     #[test]
     fn validate_prompts_fails_with_missing_file() {
-        let prompts = Prompts {
-            base_path: None,
+        let prompts = PromptsConfig {
+            path: None,
             preparator: vec![],
             planner: vec![],
             worker: vec![PathBuf::from("/nonexistent/worker.md")],
@@ -473,8 +406,8 @@ mod tests {
 
     #[test]
     fn validate_prompts_lists_all_missing_files() {
-        let prompts = Prompts {
-            base_path: None,
+        let prompts = PromptsConfig {
+            path: None,
             preparator: vec![PathBuf::from("/missing1.md")],
             planner: vec![PathBuf::from("/missing2.md")],
             worker: vec![],
@@ -493,8 +426,8 @@ mod tests {
     fn validate_prompts_resolves_relative_paths_with_base_path() {
         let dir = TempDir::new().unwrap();
         write_file(&dir, "worker.md", "content");
-        let prompts = Prompts {
-            base_path: Some(dir.path().to_path_buf()),
+        let prompts = PromptsConfig {
+            path: Some(dir.path().to_path_buf()),
             preparator: vec![],
             planner: vec![],
             worker: vec![PathBuf::from("worker.md")],
@@ -508,8 +441,8 @@ mod tests {
     #[test]
     fn validate_prompts_detects_missing_relative_paths_with_base_path() {
         let dir = TempDir::new().unwrap();
-        let prompts = Prompts {
-            base_path: Some(dir.path().to_path_buf()),
+        let prompts = PromptsConfig {
+            path: Some(dir.path().to_path_buf()),
             preparator: vec![],
             planner: vec![],
             worker: vec![PathBuf::from("missing.md")],

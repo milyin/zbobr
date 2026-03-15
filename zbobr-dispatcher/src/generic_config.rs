@@ -8,6 +8,8 @@ use zbobr_executor_claude::ZbobrExecutorClaudeConfig;
 use zbobr_executor_copilot::ZbobrExecutorCopilotConfig;
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 
+use zbobr_api::config::{PromptsConfig, PromptsConfigArgs, PromptsConfigToml};
+
 use crate::config::{
     ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs,
     ZbobrExecutorConfig, ZbobrExecutorToml,
@@ -42,6 +44,7 @@ pub struct GenericConfigToml<TC: Config, RC: Config> {
     pub tasks: Option<TC::Toml>,
     pub repo: Option<RC::Toml>,
     pub executor: Option<ZbobrExecutorToml>,
+    pub prompts: Option<PromptsConfigToml>,
 }
 
 impl<TC: Config, RC: Config> Default for GenericConfigToml<TC, RC> {
@@ -51,6 +54,7 @@ impl<TC: Config, RC: Config> Default for GenericConfigToml<TC, RC> {
             tasks: None,
             repo: None,
             executor: None,
+            prompts: None,
         }
     }
 }
@@ -93,6 +97,7 @@ where
     pub tasks: TA,
     pub repo: RA,
     pub executor: ZbobrExecutorArgs,
+    pub prompts: PromptsConfigArgs,
 }
 
 impl<TA, RA> clap::FromArgMatches for GenericConfigArgs<TA, RA>
@@ -107,6 +112,7 @@ where
             tasks: TA::from_matches_prefixed(matches, "tasks.")?,
             repo: RA::from_matches_prefixed(matches, "repo.")?,
             executor: ZbobrExecutorArgs::from_matches_prefixed(matches, "")?,
+            prompts: PromptsConfigArgs::from_matches_prefixed(matches, "prompts.")?,
         })
     }
 
@@ -127,6 +133,7 @@ where
         cmd = TA::augment_args_prefixed(cmd, "tasks.");
         cmd = RA::augment_args_prefixed(cmd, "repo.");
         cmd = ZbobrExecutorArgs::augment_args_prefixed(cmd, "");
+        cmd = PromptsConfigArgs::augment_args_prefixed(cmd, "prompts.");
         cmd
     }
 
@@ -145,6 +152,7 @@ pub struct GenericConfig<TC: Config, RC: Config> {
     pub tasks: TC,
     pub repo: RC,
     pub executor: ZbobrExecutorConfig,
+    pub prompts: PromptsConfig,
 }
 
 impl<TC: Config, RC: Config> GenericConfig<TC, RC>
@@ -177,11 +185,14 @@ where
             }
         };
 
+        let prompts = PromptsConfig::build(toml.prompts, args.prompts, config_dir);
+
         Self {
             dispatcher,
             tasks,
             repo,
             executor,
+            prompts,
         }
     }
 }

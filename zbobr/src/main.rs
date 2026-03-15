@@ -41,8 +41,8 @@ async fn main() -> anyhow::Result<()> {
     task_backend.validate_connectivity().await?;
     repo_backend.validate_connectivity().await?;
 
-    let prompts = zbobr_dispatcher::Prompts::from_config(zbobr.config());
-    zbobr_dispatcher::prompts::validate_prompts(&prompts)?;
+    let prompts = config.prompts;
+    zbobr_dispatcher::validate_prompts(&prompts)?;
 
     zbobr_dispatcher::run_command(
         zbobr,

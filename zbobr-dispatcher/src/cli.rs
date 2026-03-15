@@ -17,7 +17,7 @@ use crate::{
     ZbobrExecutorConfig,
     backend::{TaskBackend, WorktreeBackend},
     mcp::common::get_hostname,
-    prompts::Prompts,
+    prompts::PromptsConfig,
     task::{Role, Tool, Model},
 };
 
@@ -445,7 +445,7 @@ pub async fn run_command(
     task_backend: Arc<dyn TaskBackend>,
     repo_backend: Arc<dyn WorktreeBackend>,
     command: Command,
-    prompts: &Prompts,
+    prompts: &PromptsConfig,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match command {
@@ -474,7 +474,7 @@ async fn run_task_subcommand(
     task_backend: &Arc<dyn TaskBackend>,
     repo_backend: &Arc<dyn WorktreeBackend>,
     subcommand: TaskSubcommand,
-    prompts: &Prompts,
+    prompts: &PromptsConfig,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match subcommand {
@@ -788,7 +788,7 @@ async fn run_role_command(
     task: u64,
     role: Role,
     show_prompt: bool,
-    prompts: &Prompts,
+    prompts: &PromptsConfig,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     let session = CliRoleRunner::new(zbobr, task_backend, repo_backend, task, role, prompts, executor_config);
@@ -810,7 +810,7 @@ struct CliRoleRunner<'a> {
     repo_backend: &'a Arc<dyn WorktreeBackend>,
     task_id: u64,
     role: Role,
-    prompts: &'a Prompts,
+    prompts: &'a PromptsConfig,
     executor_config: &'a ZbobrExecutorConfig,
 }
 
@@ -821,7 +821,7 @@ impl<'a> CliRoleRunner<'a> {
         repo_backend: &'a Arc<dyn WorktreeBackend>,
         task_id: u64,
         role: Role,
-        prompts: &'a Prompts,
+        prompts: &'a PromptsConfig,
         executor_config: &'a ZbobrExecutorConfig,
     ) -> Self {
         Self {
@@ -836,7 +836,7 @@ impl<'a> CliRoleRunner<'a> {
     }
 
     async fn prompt(&self) -> anyhow::Result<String> {
-        self.prompts.build_prompt(self.role, self.task_id, self.task_backend.as_ref()).await
+        crate::prompts::build_prompt_for_role(self.prompts, self.role, self.task_id, self.task_backend.as_ref()).await
     }
 
     async fn run(&self) -> anyhow::Result<()> {
@@ -1026,7 +1026,7 @@ pub async fn process_task_by_stage(
     task_backend: &Arc<dyn TaskBackend>,
     repo_backend: &Arc<dyn WorktreeBackend>,
     task: &Task,
-    prompts: &Prompts,
+    prompts: &PromptsConfig,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match task.stage {
@@ -1074,14 +1074,14 @@ pub async fn run_manager_loop(
     repo_backend: &Arc<dyn WorktreeBackend>,
     interval_secs: u64,
     cleanup_interval_secs: u64,
-    prompts: &Prompts,
+    prompts: &PromptsConfig,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     tracing::info!("Manager loop started (task_backend: {}, repo_backend: {})", task_backend.debug_state(), repo_backend.debug_state());
     tracing::info!("Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s");
     tracing::info!("Global CLI Tool default: {:?}", zbobr.config().tool);
     tracing::info!("Global model default: {:?}", zbobr.config().model);
-    if let Some(ref base) = prompts.base_path {
+    if let Some(ref base) = prompts.path {
         tracing::info!("Prompts base path: {}", base.display());
     }
 
@@ -1096,7 +1096,7 @@ pub async fn run_manager_loop(
     ] {
         let tool = zbobr.config().tool_for_role(*role);
         let model = zbobr.config().model_for_role(*role);
-        let stage_prompts = zbobr.config().stage_for_role(*role).prompts.clone();
+        let stage_prompts = prompts.prompts_for_role(*role);
         tracing::info!(
             "Stage {:?}: tool={:?}, model={:?}, prompt_files={:?}",
             role,
@@ -1105,52 +1105,6 @@ pub async fn run_manager_loop(
             stage_prompts
         );
     }
-
-    tracing::info!(
-        "Preparator prompt files: {}",
-        prompts
-            .preparator
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("; ")
-    );
-    tracing::info!(
-        "Planner prompt files: {}",
-        prompts
-            .planner
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("; ")
-    );
-    tracing::info!(
-        "Worker prompt files: {}",
-        prompts
-            .worker
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("; ")
-    );
-    tracing::info!(
-        "Reviewer prompt files: {}",
-        prompts
-            .reviewer
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("; ")
-    );
-    tracing::info!(
-        "Merger prompt files: {}",
-        prompts
-            .merger
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("; ")
-    );
 
     let mut last_cleanup = std::time::Instant::now();
 

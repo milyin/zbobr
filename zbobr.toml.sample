@@ -38,25 +38,30 @@ git_user_email = "your.email@example.com"
 # agent_github_token = ""
 
 
-# Base directory for resolving relative prompt file paths
-# prompts_path = "./prompts"
-
-# Stage-specific overrides. Each table lives under the [dispatcher] section,
-# e.g. `[dispatcher.preparator]`.  All fields are optional; unspecified values
-# fall back to the global defaults (`cli_tool` and the executor-configured
-# model) or to an empty prompt list.
+# Stage-specific overrides for tool and model. Each table lives under the
+# [dispatcher] section, e.g. `[dispatcher.preparator]`.  All fields are
+# optional; unspecified values fall back to the global defaults.
 #
 # [dispatcher.preparator]
 # tool = "claude"
 # model = "gpt-5"
-# prompts = ["preparator.md", "common.md"]
 #
 # [dispatcher.planner]
 # tool = "copilot"
 # model = "gpt-5-mini"
-# prompts = ["planner.md"]
 #
 # (other stages work similarly)
+
+[prompts]
+# Base directory for resolving relative prompt file paths
+# path = "./prompts"
+#
+# Per-stage prompt files (paths relative to `path` above)
+# preparator = ["preparator.md", "common.md"]
+# planner = ["planner.md"]
+# worker = ["worker.md"]
+# reviewer = ["reviewer.md"]
+# merger = ["merger.md"]
 
 [tasks.github]
 # Task project repository ("owner/repo") - where tasks are tracked

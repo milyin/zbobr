@@ -28,7 +28,7 @@ pub use mcp::{
     planner_instructions, preparator_instructions, reviewer_instructions, tester_instructions,
     worker_instructions,
 };
-pub use prompts::{Prompts, build_full_prompt, load_prompts};
+pub use prompts::{PromptsConfig, build_full_prompt, build_prompt_for_role, load_prompts, validate_prompts};
 pub use task::{
     ChecklistItem, Comment, CommentType, Model, RoleSession, Signal, Stage, Task,
     TaskSession, Tool,
