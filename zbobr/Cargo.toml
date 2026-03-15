@@ -12,6 +12,7 @@ default-run = "zbobr"
 
 [dependencies]
 zbobr-dispatcher = { workspace = true }
+zbobr-prompts = { workspace = true }
 zbobr-task-backend-github = { workspace = true }
 zbobr-repo-backend-github = { workspace = true }
 zbobr-task-backend-fs = { workspace = true }

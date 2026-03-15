@@ -1,4 +1,5 @@
 use zbobr_dispatcher::backend::{TaskBackend as _, WorktreeBackend as _};
+use zbobr_prompts::DefaultPromptBuilder;
 
 use zbobr_repo_backend_fs::{ZbobrRepoBackendFs, ZbobrRepoBackendFsConfig};
 use zbobr_task_backend_fs::{ArcTaskBackendFs, ZbobrTaskBackendFs, ZbobrTaskBackendFsConfig};
@@ -40,12 +41,15 @@ async fn main() -> anyhow::Result<()> {
     let prompts = config.prompts;
     zbobr_dispatcher::validate_prompts(&prompts)?;
 
+    let prompt_builder = DefaultPromptBuilder;
+
     zbobr_dispatcher::run_command(
         zbobr,
         task_backend,
         repo_backend,
         command,
         &prompts,
+        &prompt_builder,
         &executor_config,
     )
     .await

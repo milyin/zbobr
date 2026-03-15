@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 zbobr-api = { version = "0.1.0", path = "../zbobr-api" }
-zbobr-prompts = { version = "0.1.0", path = "../zbobr-prompts" }
 zbobr-utility = { version = "0.1.0", path = "../zbobr-utility" }
 zbobr-executor-claude = { version = "0.1.0", path = "../zbobr-executor-claude" }
 zbobr-executor-copilot = { version = "0.1.0", path = "../zbobr-executor-copilot" }
@@ -25,6 +24,7 @@ paste.workspace = true
 toml = { workspace = true }
 
 [dev-dependencies]
+zbobr-prompts = { version = "0.1.0", path = "../zbobr-prompts" }
 zbobr-task-backend-github = { version = "0.1.0", path = "../zbobr-task-backend-github" }
 zbobr-task-backend-fs = { version = "0.1.0", path = "../zbobr-task-backend-fs" }
 zbobr-repo-backend-github = { version = "0.1.0", path = "../zbobr-repo-backend-github" }

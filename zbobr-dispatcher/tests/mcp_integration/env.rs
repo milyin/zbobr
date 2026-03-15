@@ -16,6 +16,7 @@ use zbobr_dispatcher::{backend::TaskWeak,
     config::StageConfig,
     task::Tool,
 };
+use zbobr_prompts::DefaultPromptBuilder;
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_repo_backend_fs::{ZbobrRepoBackendFs, ZbobrRepoBackendFsConfig};
 use zbobr_repo_backend_github::{ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig};
@@ -644,7 +645,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
 
         let task = self.get_task(task_id).await;
 
-        process_task_by_stage(&self.zbobr, &self.task_backend, &self.repo_backend, &task, &prompts, &executor_config)
+        process_task_by_stage(&self.zbobr, &self.task_backend, &self.repo_backend, &task, &prompts, &DefaultPromptBuilder, &executor_config)
             .await
             .unwrap_or_else(|e| {
                 panic!(

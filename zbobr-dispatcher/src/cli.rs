@@ -11,6 +11,8 @@ use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig}
 // bring in the generic git helpers from utility crate
 use zbobr_utility::{git, git_check, git_output};
 
+use zbobr_api::prompt::PromptBuilder;
+
 use crate::{
     Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
     ZbobrExecutorConfig,
@@ -448,6 +450,7 @@ pub async fn run_command<
     repo_backend: RB,
     command: Command,
     prompts: &PromptsConfig,
+    prompt_builder: &dyn PromptBuilder,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match command {
@@ -464,6 +467,7 @@ pub async fn run_command<
                 &repo_backend,
                 subcommand,
                 prompts,
+                prompt_builder,
                 executor_config,
             )
             .await?;
@@ -480,6 +484,7 @@ pub async fn run_command<
                 interval,
                 cleanup_interval,
                 prompts,
+                prompt_builder,
                 executor_config,
             )
             .await?;
@@ -497,6 +502,7 @@ async fn run_task_subcommand<
     repo_backend: &RB,
     subcommand: TaskSubcommand,
     prompts: &PromptsConfig,
+    prompt_builder: &dyn PromptBuilder,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match subcommand {
@@ -649,6 +655,7 @@ async fn run_task_subcommand<
                 Role::Preparator,
                 show_prompt,
                 prompts,
+                prompt_builder,
                 executor_config,
             )
             .await?;
@@ -662,6 +669,7 @@ async fn run_task_subcommand<
                 Role::Planner,
                 show_prompt,
                 prompts,
+                prompt_builder,
                 executor_config,
             )
             .await?;
@@ -675,6 +683,7 @@ async fn run_task_subcommand<
                 Role::Worker,
                 show_prompt,
                 prompts,
+                prompt_builder,
                 executor_config,
             )
             .await?;
@@ -688,6 +697,7 @@ async fn run_task_subcommand<
                 Role::Reviewer,
                 show_prompt,
                 prompts,
+                prompt_builder,
                 executor_config,
             )
             .await?;
@@ -701,6 +711,7 @@ async fn run_task_subcommand<
                 Role::Merger,
                 show_prompt,
                 prompts,
+                prompt_builder,
                 executor_config,
             )
             .await?;
@@ -746,6 +757,7 @@ async fn run_task_subcommand<
                 repo_backend,
                 &task_obj,
                 prompts,
+                prompt_builder,
                 &effective_executor_config,
             )
             .await?;
@@ -838,6 +850,7 @@ async fn run_role_command<
     role: Role,
     show_prompt: bool,
     prompts: &PromptsConfig,
+    prompt_builder: &dyn PromptBuilder,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     let session = CliRoleRunner::new(
@@ -847,6 +860,7 @@ async fn run_role_command<
         task,
         role,
         prompts,
+        prompt_builder,
         executor_config,
     );
     if show_prompt {
@@ -872,6 +886,7 @@ struct CliRoleRunner<
     task_id: u64,
     role: Role,
     prompts: &'a PromptsConfig,
+    prompt_builder: &'a dyn PromptBuilder,
     executor_config: &'a ZbobrExecutorConfig,
 }
 
@@ -888,6 +903,7 @@ impl<
         task_id: u64,
         role: Role,
         prompts: &'a PromptsConfig,
+        prompt_builder: &'a dyn PromptBuilder,
         executor_config: &'a ZbobrExecutorConfig,
     ) -> Self {
         Self {
@@ -897,6 +913,7 @@ impl<
             task_id,
             role,
             prompts,
+            prompt_builder,
             executor_config,
         }
     }
@@ -907,6 +924,7 @@ impl<
             self.role,
             self.task_id,
             self.task_backend,
+            self.prompt_builder,
         )
         .await
     }
@@ -1151,6 +1169,7 @@ pub async fn process_task_by_stage<
     repo_backend: &RB,
     task: &Task,
     prompts: &PromptsConfig,
+    prompt_builder: &dyn PromptBuilder,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match task.stage {
@@ -1169,6 +1188,7 @@ pub async fn process_task_by_stage<
                     task.id,
                     Role::Merger,
                     prompts,
+                    prompt_builder,
                     executor_config,
                 );
                 session.run().await?;
@@ -1181,6 +1201,7 @@ pub async fn process_task_by_stage<
                     task.id,
                     role,
                     prompts,
+                    prompt_builder,
                     executor_config,
                 );
                 session.run().await?;
@@ -1203,6 +1224,7 @@ pub async fn process_task_by_stage<
                 task.id,
                 role,
                 prompts,
+                prompt_builder,
                 executor_config,
             );
             session.run().await?;
@@ -1225,6 +1247,7 @@ pub async fn run_manager_loop<
     interval_secs: u64,
     cleanup_interval_secs: u64,
     prompts: &PromptsConfig,
+    prompt_builder: &dyn PromptBuilder,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     tracing::info!(
@@ -1321,6 +1344,7 @@ pub async fn run_manager_loop<
                 task.id,
                 role,
                 prompts,
+                prompt_builder,
                 executor_config,
             );
             if let Err(e) = session.run().await {

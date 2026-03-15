@@ -1,5 +1,4 @@
 pub mod common;
-pub mod instructions;
 pub mod traits;
 
 // Re-export commonly used tool name modules from `common` so they are
@@ -19,10 +18,6 @@ pub use common::{
     CheckChecklistItemParam, DeleteChecklistItemParam, DescriptionParam, InsertChecklistItemParam,
     MessageParam, SetDestinationBranchParam, SetDestinationRepositoryParam, SetWorkBranchParam,
     UpdateChecklistItemParam, run_role_mcp_server,
-};
-pub use instructions::{
-    merger_instructions, planner_instructions, preparator_instructions, reviewer_instructions,
-    tester_instructions, worker_instructions,
 };
 pub use merger::MergerMcp;
 pub use planner::PlannerMcp;

@@ -22,9 +22,7 @@ pub use generic_config::{
     GenericConfig, GenericConfigArgs, GenericConfigToml, init_config, load_config,
 };
 pub use mcp::{
-    MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, TesterMcp, WorkerMcp, merger_instructions,
-    planner_instructions, preparator_instructions, reviewer_instructions, tester_instructions,
-    worker_instructions,
+    MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, TesterMcp, WorkerMcp,
 };
 pub use prompts::{PromptsConfig, build_full_prompt, build_prompt_for_role, load_prompts, validate_prompts};
 pub use task::{
