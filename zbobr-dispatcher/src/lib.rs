@@ -2,7 +2,6 @@ pub mod backend;
 pub mod cleanup;
 pub mod cli;
 pub mod config;
-pub mod generic_config;
 pub mod mcp;
 pub mod prompts;
 pub mod setup;
@@ -16,9 +15,6 @@ pub use cli::{
 };
 pub use config::{
     ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs, ZbobrExecutorToml,
-};
-pub use generic_config::{
-    GenericConfig, GenericConfigArgs, GenericConfigToml, init_config, load_config,
 };
 pub use mcp::{MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, TesterMcp, WorkerMcp};
 pub use prompts::{

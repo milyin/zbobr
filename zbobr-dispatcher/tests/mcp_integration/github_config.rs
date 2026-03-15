@@ -2,22 +2,24 @@
 
 use std::path::PathBuf;
 
-use zbobr_dispatcher::GenericConfigToml;
-use zbobr_repo_backend_github::ZbobrRepoBackendGithubConfig;
-use zbobr_task_backend_github::ZbobrTaskBackendGithubConfig;
+use zbobr_dispatcher::config::ZbobrDispatcherToml;
 
 /// Configuration loaded from `zbobr_github_test.toml` at the workspace root.
 ///
-/// Uses the production `GenericConfigToml` type with concrete GitHub backend
-/// configs.  Each section is optional so that only the tests relevant to the
-/// present credentials are activated:
+/// Each section is optional so that only the tests relevant to the present
+/// credentials are activated:
 /// - `[tasks]` → enables GitHub task-backend tests
 /// - `[repo]`  → enables GitHub repo-backend tests
 ///
 /// A section being absent causes the corresponding test combination to be
 /// skipped gracefully rather than failing.
-pub type GitHubTestConfigToml =
-    GenericConfigToml<ZbobrTaskBackendGithubConfig, ZbobrRepoBackendGithubConfig>;
+#[derive(serde::Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct GitHubTestConfigToml {
+    pub dispatcher: Option<ZbobrDispatcherToml>,
+    pub tasks: Option<zbobr_task_backend_github::ZbobrTaskBackendGithubToml>,
+    pub repo: Option<zbobr_repo_backend_github::ZbobrRepoBackendGithubToml>,
+}
 
 /// Wrapper around the parsed TOML that also carries a dispatcher section for
 /// legacy callers that inspect `dispatcher.agent_token`.

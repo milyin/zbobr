@@ -67,7 +67,6 @@ pub fn resolve_config_location(
 
 /// Global arguments that should be hoisted before subcommands.
 /// This includes only dispatcher and executor config, not backend-specific settings.
-/// For a full CLI with backend-specific options, use GenericCli<TA, RA> instead.
 #[derive(Args, Clone)]
 pub struct GlobalArgs {
     #[command(
@@ -266,25 +265,6 @@ pub enum TaskSubcommand {
 // ---------------------------------------------------------------------------
 // CLI parsing
 // ---------------------------------------------------------------------------
-
-/// Standard CLI structure for Zbobr dispatcher apps
-#[derive(clap::Parser)]
-pub struct GenericCli<
-    TTaskArgs: zbobr_utility::PrefixedArgs + Default + Clone + std::fmt::Debug,
-    TRepoArgs: zbobr_utility::PrefixedArgs + Default + Clone + std::fmt::Debug,
-> {
-    #[command(
-        flatten,
-        next_help_heading = "[config] Meta options and config file overrides"
-    )]
-    pub config_file: ConfigFileArg,
-
-    #[command(flatten)]
-    pub settings: crate::GenericConfigArgs<TTaskArgs, TRepoArgs>,
-
-    #[command(subcommand)]
-    pub command: Command,
-}
 
 /// Parse CLI allowing global options both before and after the subcommand.
 ///

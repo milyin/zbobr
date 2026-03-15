@@ -1,7 +1,51 @@
+use anyhow::Context;
+use clap::Parser;
 use zbobr_dispatcher::backend::{TaskBackend as _, WorktreeBackend as _};
+use zbobr_dispatcher::config::{
+    Config as _, PromptsArgs, PromptsConfig, PromptsToml, ZbobrDispatcherArgs,
+    ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs, ZbobrExecutorConfig,
+    ZbobrExecutorToml,
+};
+use zbobr_dispatcher::{Command, ConfigFileArg};
+use zbobr_utility::config_struct;
 
-use zbobr_repo_backend_fs::{ZbobrRepoBackendFs, ZbobrRepoBackendFsConfig};
-use zbobr_task_backend_fs::{ArcTaskBackendFs, ZbobrTaskBackendFs, ZbobrTaskBackendFsConfig};
+use zbobr_repo_backend_fs::{
+    ZbobrRepoBackendFs, ZbobrRepoBackendFsArgs, ZbobrRepoBackendFsConfig, ZbobrRepoBackendFsToml,
+};
+use zbobr_task_backend_fs::{
+    ArcTaskBackendFs, ZbobrTaskBackendFs, ZbobrTaskBackendFsArgs, ZbobrTaskBackendFsConfig,
+    ZbobrTaskBackendFsToml,
+};
+
+#[derive(Clone, Default)]
+#[config_struct]
+struct RootConfig {
+    #[config(nested)]
+    dispatcher: ZbobrDispatcherConfig,
+    #[config(nested)]
+    tasks: ZbobrTaskBackendFsConfig,
+    #[config(nested)]
+    repo: ZbobrRepoBackendFsConfig,
+    #[config(nested)]
+    executor: ZbobrExecutorConfig,
+    #[config(nested)]
+    prompts: PromptsConfig,
+}
+
+#[derive(Parser)]
+struct Cli {
+    #[command(
+        flatten,
+        next_help_heading = "[config] Meta options and config file overrides"
+    )]
+    config_file: ConfigFileArg,
+
+    #[command(flatten)]
+    settings: RootConfigArgs,
+
+    #[command(subcommand)]
+    command: Command,
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -13,10 +57,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let (config, command) = zbobr_dispatcher::init_config::<
-        ZbobrTaskBackendFsConfig,
-        ZbobrRepoBackendFsConfig,
-    >(
+    let cli: Cli = zbobr_dispatcher::parse_cli(
         "zbobr-fs",
         "Filesystem-backed AI-powered task dispatcher",
         "Filesystem-backed AI-powered task dispatcher that manages tasks through automated stages.\n\n\
@@ -25,14 +66,35 @@ async fn main() -> anyhow::Result<()> {
         Merge conflicts are handled by MERGING sessions when the conflict flag is set.\n\n\
         Ideal for testing, local development, and offline scenarios.\n\n\
         Default config file: zbobr-fs.toml in current directory.",
-        "zbobr-fs.toml",
-    )?;
+    );
+
+    let location =
+        zbobr_dispatcher::resolve_config_location(&cli.config_file.path, "zbobr-fs.toml")?;
+
+    let root_toml = if location.config_path.exists() {
+        let content = std::fs::read_to_string(&location.config_path)
+            .with_context(|| format!("Failed to read {}", location.config_path.display()))?;
+        let parsed: RootConfigToml = toml::from_str(&content)
+            .with_context(|| format!("Failed to parse {}", location.config_path.display()))?;
+        Some(parsed)
+    } else {
+        None
+    };
+
+    let config = RootConfig::build(root_toml, cli.settings, &location.config_dir);
+
+    config
+        .dispatcher
+        .validate()
+        .with_context(|| format!("Config file: {}", location.config_path.display()))?;
+
+    let command = cli.command;
 
     let zbobr = zbobr_dispatcher::ZbobrDispatcher::new_with_executors(
         config.dispatcher,
-        config.claude,
-        config.copilot,
-        config.mcp_tester,
+        config.executor.claude,
+        config.executor.copilot,
+        config.executor.mcp_tester,
     );
 
     let task_backend = ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(config.tasks)?);
