@@ -6,9 +6,7 @@ use std::{
 
 use async_trait::async_trait;
 use zbobr_api::{
-    Comment, CommentTag, CommentType, Model, Role, Signal, Stage, Task,
-    Tool,
-    backend::TaskBackend,
+    Comment, CommentTag, CommentType, Model, Role, Signal, Stage, Task, Tool, backend::TaskBackend,
 };
 
 use crate::{
@@ -136,7 +134,7 @@ struct MilestoneResponse {
 /// This handles GitHub API eventual consistency for list/filter queries.
 const COOLING_DURATION: Duration = Duration::from_secs(3);
 
-pub struct ZbobrTaskBackendGithub {
+pub struct ZbobrTaskBackendGithubImpl {
     backend_config: ZbobrTaskBackendGithubConfig,
     octocrab: octocrab::Octocrab,
     cooling_deadlines: Mutex<HashMap<u64, tokio::time::Instant>>,
@@ -145,19 +143,7 @@ pub struct ZbobrTaskBackendGithub {
     task_locks: std::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>,
 }
 
-impl ZbobrTaskBackendGithub {
-    pub fn new(
-        toml: Option<crate::config::ZbobrTaskBackendGithubToml>,
-        args: crate::config::ZbobrTaskBackendGithubArgs,
-    ) -> anyhow::Result<Self> {
-        let backend_config = <ZbobrTaskBackendGithubConfig as zbobr_api::config::Config>::build(
-            toml,
-            args,
-            std::path::Path::new("."),
-        );
-        Self::from_config(backend_config)
-    }
-
+impl ZbobrTaskBackendGithubImpl {
     pub fn from_config(backend_config: ZbobrTaskBackendGithubConfig) -> anyhow::Result<Self> {
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
@@ -726,7 +712,11 @@ impl ZbobrTaskBackendGithub {
                 Some(etag) => etag,
                 None => {
                     let sp = Self::task_to_string_params(&current_task);
-                    serialize_description_full(&current_task.description, &sp, &current_task.checklist)
+                    serialize_description_full(
+                        &current_task.description,
+                        &sp,
+                        &current_task.checklist,
+                    )
                 }
             };
             if current_body != expected_desc {
@@ -830,17 +820,19 @@ impl ZbobrTaskBackendGithub {
 // GithubTaskWeak / GithubTaskMut
 // ---------------------------------------------------------------------------
 
-use zbobr_api::backend::{TaskWeak, TaskMut};
 use tokio::sync::OwnedMutexGuard;
+use zbobr_api::backend::{TaskMut, TaskWeak};
 
 struct GithubTaskWeak {
     id: u64,
-    backend: Arc<ZbobrTaskBackendGithub>,
+    backend: Arc<ZbobrTaskBackendGithubImpl>,
 }
 
 #[async_trait]
 impl TaskWeak for GithubTaskWeak {
-    fn task_id(&self) -> u64 { self.id }
+    fn task_id(&self) -> u64 {
+        self.id
+    }
 
     async fn snapshot(&self) -> anyhow::Result<Task> {
         self.backend.read_task(self.id).await
@@ -848,9 +840,9 @@ impl TaskWeak for GithubTaskWeak {
 
     async fn upgrade(&self) -> anyhow::Result<Box<dyn TaskMut>> {
         let lock = self.backend.task_lock(self.id);
-        let guard = lock.try_lock_owned().map_err(|_| {
-            anyhow::anyhow!("Task {} is already exclusively locked", self.id)
-        })?;
+        let guard = lock
+            .try_lock_owned()
+            .map_err(|_| anyhow::anyhow!("Task {} is already exclusively locked", self.id))?;
         Ok(Box::new(GithubTaskMut {
             id: self.id,
             backend: self.backend.clone(),
@@ -865,13 +857,15 @@ impl TaskWeak for GithubTaskWeak {
 
 struct GithubTaskMut {
     id: u64,
-    backend: Arc<ZbobrTaskBackendGithub>,
+    backend: Arc<ZbobrTaskBackendGithubImpl>,
     _guard: OwnedMutexGuard<()>,
 }
 
 #[async_trait]
 impl TaskMut for GithubTaskMut {
-    fn task_id(&self) -> u64 { self.id }
+    fn task_id(&self) -> u64 {
+        self.id
+    }
 
     async fn snapshot(&self) -> anyhow::Result<Task> {
         self.backend.read_task(self.id).await
@@ -897,9 +891,9 @@ impl TaskMut for GithubTaskMut {
         model: Option<Model>,
         body: &str,
     ) -> anyhow::Result<()> {
-        self.backend.post_task_comment_internal(
-            self.id, comment_type, role, hostname, tool, model, body,
-        ).await
+        self.backend
+            .post_task_comment_internal(self.id, comment_type, role, hostname, tool, model, body)
+            .await
     }
 
     fn downgrade(self: Box<Self>) -> Box<dyn TaskWeak> {
@@ -916,20 +910,20 @@ impl TaskMut for GithubTaskMut {
 
 /// Arc-wrapped GitHub backend that properly returns TaskWeak/TaskMut handles.
 #[derive(Clone)]
-pub struct ArcTaskBackendGithub {
-    inner: Arc<ZbobrTaskBackendGithub>,
+pub struct TaskBackendGithub {
+    inner: Arc<ZbobrTaskBackendGithubImpl>,
 }
 
-impl ArcTaskBackendGithub {
-    pub fn new(backend: ZbobrTaskBackendGithub) -> Self {
-        Self {
-            inner: Arc::new(backend),
-        }
+impl TaskBackendGithub {
+    pub fn from_config(config: ZbobrTaskBackendGithubConfig) -> anyhow::Result<Self> {
+        Ok(Self {
+            inner: Arc::new(ZbobrTaskBackendGithubImpl::from_config(config)?),
+        })
     }
 }
 
 #[async_trait]
-impl TaskBackend for ArcTaskBackendGithub {
+impl TaskBackend for TaskBackendGithub {
     async fn get_task(&self, id: u64) -> anyhow::Result<Box<dyn TaskWeak>> {
         // Verify the task exists
         let _task = self.inner.read_task(id).await?;
@@ -939,10 +933,7 @@ impl TaskBackend for ArcTaskBackendGithub {
         }))
     }
 
-    async fn list_tasks_by_stage(
-        &self,
-        stage: Stage,
-    ) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+    async fn list_tasks_by_stage(&self, stage: Stage) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
         self.inner.await_all_cooling().await;
         let stage_number = match self.inner.find_stage_number(stage).await? {
             Some(n) => n,
@@ -956,7 +947,8 @@ impl TaskBackend for ArcTaskBackendGithub {
         ];
 
         let issues: Vec<IssueResponse> = retry_github("list issues", || {
-            self.inner.octocrab
+            self.inner
+                .octocrab
                 .get(format!("/repos/{owner}/{repo}/issues"), Some(&params))
         })
         .await?;
@@ -965,7 +957,7 @@ impl TaskBackend for ArcTaskBackendGithub {
         for issue in issues {
             let id = issue.number;
             // Verify it parses correctly
-            let _task = ZbobrTaskBackendGithub::issue_to_task(issue);
+            let _task = ZbobrTaskBackendGithubImpl::issue_to_task(issue);
             result.push(Box::new(GithubTaskWeak {
                 id,
                 backend: self.inner.clone(),
@@ -1006,7 +998,8 @@ impl TaskBackend for ArcTaskBackendGithub {
     async fn validate_connectivity(&self) -> anyhow::Result<()> {
         let (owner, repo) = self.inner.parse_repo()?;
         let task_repo_exists = retry_github("check task repo", || {
-            self.inner.octocrab
+            self.inner
+                .octocrab
                 .get::<RepoResponse, _, _>(format!("/repos/{owner}/{repo}"), None::<&()>)
         })
         .await
@@ -1023,7 +1016,10 @@ impl TaskBackend for ArcTaskBackendGithub {
     }
 
     fn debug_state(&self) -> String {
-        format!("GitHubTaskBackend({})", self.inner.backend_config.github_repo)
+        format!(
+            "GitHubTaskBackend({})",
+            self.inner.backend_config.github_repo
+        )
     }
 }
 

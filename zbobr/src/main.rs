@@ -3,9 +3,7 @@
 use zbobr_dispatcher::backend::{TaskBackend as _, WorktreeBackend as _};
 
 use zbobr_repo_backend_github::{ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig};
-use zbobr_task_backend_github::{
-    ArcTaskBackendGithub, ZbobrTaskBackendGithub, ZbobrTaskBackendGithubConfig,
-};
+use zbobr_task_backend_github::{TaskBackendGithub, ZbobrTaskBackendGithubConfig};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -34,8 +32,7 @@ async fn main() -> anyhow::Result<()> {
 
     let executor_config = config.executor.clone();
 
-    let task_backend =
-        ArcTaskBackendGithub::new(ZbobrTaskBackendGithub::from_config(config.tasks)?);
+    let task_backend = TaskBackendGithub::from_config(config.tasks)?;
     let repo_backend = ZbobrRepoBackendGithub::from_config(config.repo)?;
 
     let zbobr = zbobr_dispatcher::ZbobrDispatcher::new(config.dispatcher);

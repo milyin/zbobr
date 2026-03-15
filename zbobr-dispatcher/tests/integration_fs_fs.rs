@@ -9,13 +9,14 @@ mod mcp_integration;
 use std::sync::Arc;
 
 use mcp_integration::{IntegrationTestEnv, test_helpers};
-use zbobr_repo_backend_fs::ZbobrRepoBackendFs;
-use zbobr_task_backend_fs::ArcTaskBackendFs;
-use zbobr_repo_backend_github::ZbobrRepoBackendGithub;
-use zbobr_task_backend_github::ArcTaskBackendGithub;
 use tokio::sync::OnceCell;
+use zbobr_repo_backend_fs::ZbobrRepoBackendFs;
+use zbobr_repo_backend_github::ZbobrRepoBackendGithub;
+use zbobr_task_backend_fs::ArcTaskBackendFs;
+use zbobr_task_backend_github::TaskBackendGithub;
 
-static ENV: OnceCell<Option<Arc<IntegrationTestEnv<ArcTaskBackendFs, ZbobrRepoBackendFs>>>> = OnceCell::const_new();
+static ENV: OnceCell<Option<Arc<IntegrationTestEnv<ArcTaskBackendFs, ZbobrRepoBackendFs>>>> =
+    OnceCell::const_new();
 // tokio::sync::Mutex serializes tests — no poison semantics, works across runtimes.
 static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

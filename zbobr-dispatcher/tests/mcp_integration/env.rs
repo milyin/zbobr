@@ -20,7 +20,7 @@ use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_repo_backend_fs::{ZbobrRepoBackendFs, ZbobrRepoBackendFsConfig};
 use zbobr_repo_backend_github::{ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig};
 use zbobr_task_backend_fs::{ArcTaskBackendFs, ZbobrTaskBackendFs, ZbobrTaskBackendFsConfig};
-use zbobr_task_backend_github::{ArcTaskBackendGithub, ZbobrTaskBackendGithub, ZbobrTaskBackendGithubConfig};
+use zbobr_task_backend_github::{TaskBackendGithub, ZbobrTaskBackendGithubConfig};
 
 static SCENARIO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -104,7 +104,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
         name: &'static str,
         task_repo: String,
         task_token: String,
-    ) -> Option<Arc<IntegrationTestEnv<ArcTaskBackendGithub, ZbobrRepoBackendFs>>> {
+    ) -> Option<Arc<IntegrationTestEnv<TaskBackendGithub, ZbobrRepoBackendFs>>> {
         install_rustls_provider();
         if !check_mcp_tester().await {
             return None;
@@ -138,7 +138,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
             repos_dir: base_path.join("repos"),
         };
 
-        let task_backend = ArcTaskBackendGithub::new(ZbobrTaskBackendGithub::from_config(task_backend_config).ok()?);
+        let task_backend = TaskBackendGithub::new(ZbobrTaskBackendGithubImpl::from_config(task_backend_config).ok()?);
         let repo_backend = ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?;
 
         let zbobr = ZbobrDispatcher::new(dispatcher_config);
@@ -231,7 +231,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
         task_token: String,
         fork_owner: String,
         repo_token: String,
-    ) -> Option<Arc<IntegrationTestEnv<ArcTaskBackendGithub, ZbobrRepoBackendGithub>>> {
+    ) -> Option<Arc<IntegrationTestEnv<TaskBackendGithub, ZbobrRepoBackendGithub>>> {
         install_rustls_provider();
         if !check_mcp_tester().await {
             return None;
@@ -270,7 +270,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
             overwrite_author: false,
         };
 
-        let task_backend = ArcTaskBackendGithub::new(ZbobrTaskBackendGithub::from_config(task_backend_config).ok()?);
+        let task_backend = TaskBackendGithub::new(ZbobrTaskBackendGithubImpl::from_config(task_backend_config).ok()?);
         let repo_backend = ZbobrRepoBackendGithub::from_config(repo_backend_config).ok()?;
 
         let zbobr = ZbobrDispatcher::new(dispatcher_config);
