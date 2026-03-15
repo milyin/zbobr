@@ -684,7 +684,7 @@ impl<
             &self.task_backend,
             &self.repo_backend,
             &task,
-            &prompt_builder,
+            prompt_builder,
             &executor_config,
         )
         .await

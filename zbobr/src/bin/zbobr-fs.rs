@@ -45,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
         task_backend,
         repo_backend,
         command,
-        &prompt_builder,
+        prompt_builder,
         &executor_config,
     )
     .await

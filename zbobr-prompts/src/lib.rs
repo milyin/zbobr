@@ -4,6 +4,7 @@ use zbobr_api::prompt::{
 };
 
 /// Default prompt builder providing the standard zbobr instructions for each role.
+#[derive(Clone, Copy, Default)]
 pub struct DefaultPromptBuilder;
 
 /// Instruction shared across multiple role prompts explaining branch isolation rules.

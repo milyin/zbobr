@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
+use zbobr_api::prompt::PromptBuilder;
 use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
@@ -442,12 +443,13 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
 pub async fn run_command<
     TB: TaskBackend + Clone + Send + Sync + 'static,
     RB: WorktreeBackend + Clone + Send + Sync + 'static,
+    PB: PromptBuilder + Clone + Send + Sync + 'static,
 >(
     zbobr: ZbobrDispatcher,
     task_backend: TB,
     repo_backend: RB,
     command: Command,
-    prompt_builder: &ConfiguredPromptBuilder,
+    prompt_builder: ConfiguredPromptBuilder<PB>,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match command {
@@ -463,7 +465,7 @@ pub async fn run_command<
                 &task_backend,
                 &repo_backend,
                 subcommand,
-                prompt_builder,
+                prompt_builder.clone(),
                 executor_config,
             )
             .await?;
@@ -479,7 +481,7 @@ pub async fn run_command<
                 &repo_backend,
                 interval,
                 cleanup_interval,
-                prompt_builder,
+                prompt_builder.clone(),
                 executor_config,
             )
             .await?;
@@ -491,12 +493,13 @@ pub async fn run_command<
 async fn run_task_subcommand<
     TB: TaskBackend + Clone + Send + Sync + 'static,
     RB: WorktreeBackend + Clone + Send + Sync + 'static,
+    PB: PromptBuilder + Clone + Send + Sync + 'static,
 >(
     zbobr: &ZbobrDispatcher,
     task_backend: &TB,
     repo_backend: &RB,
     subcommand: TaskSubcommand,
-    prompt_builder: &ConfiguredPromptBuilder,
+    prompt_builder: ConfiguredPromptBuilder<PB>,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match subcommand {
@@ -647,7 +650,7 @@ async fn run_task_subcommand<
                 repo_backend,
                 task,
                 Role::Preparator,
-                prompt_builder,
+                prompt_builder.clone(),
                 executor_config,
             );
             if show_prompt {
@@ -663,7 +666,7 @@ async fn run_task_subcommand<
                 repo_backend,
                 task,
                 Role::Planner,
-                prompt_builder,
+                prompt_builder.clone(),
                 executor_config,
             );
             if show_prompt {
@@ -679,7 +682,7 @@ async fn run_task_subcommand<
                 repo_backend,
                 task,
                 Role::Worker,
-                prompt_builder,
+                prompt_builder.clone(),
                 executor_config,
             );
             if show_prompt {
@@ -695,7 +698,7 @@ async fn run_task_subcommand<
                 repo_backend,
                 task,
                 Role::Reviewer,
-                prompt_builder,
+                prompt_builder.clone(),
                 executor_config,
             );
             if show_prompt {
@@ -711,7 +714,7 @@ async fn run_task_subcommand<
                 repo_backend,
                 task,
                 Role::Merger,
-                prompt_builder,
+                prompt_builder.clone(),
                 executor_config,
             );
             if show_prompt {
@@ -850,13 +853,14 @@ struct CliRoleRunner<
     'a,
     TB: TaskBackend + Clone + Send + Sync + 'static,
     RB: WorktreeBackend + Clone + Send + Sync + 'static,
+    PB: PromptBuilder + Clone + Send + Sync + 'static,
 > {
     zbobr: &'a ZbobrDispatcher,
     task_backend: &'a TB,
     repo_backend: &'a RB,
     task_id: u64,
     role: Role,
-    prompt_builder: &'a ConfiguredPromptBuilder,
+    prompt_builder: ConfiguredPromptBuilder<PB>,
     executor_config: &'a ZbobrExecutorConfig,
 }
 
@@ -864,7 +868,8 @@ impl<
     'a,
     TB: TaskBackend + Clone + Send + Sync + 'static,
     RB: WorktreeBackend + Clone + Send + Sync + 'static,
-> CliRoleRunner<'a, TB, RB>
+    PB: PromptBuilder + Clone + Send + Sync + 'static,
+> CliRoleRunner<'a, TB, RB, PB>
 {
     fn new(
         zbobr: &'a ZbobrDispatcher,
@@ -872,7 +877,7 @@ impl<
         repo_backend: &'a RB,
         task_id: u64,
         role: Role,
-        prompt_builder: &'a ConfiguredPromptBuilder,
+        prompt_builder: ConfiguredPromptBuilder<PB>,
         executor_config: &'a ZbobrExecutorConfig,
     ) -> Self {
         Self {
@@ -1126,12 +1131,13 @@ impl<
 pub async fn process_task_by_stage<
     TB: TaskBackend + Clone + Send + Sync + 'static,
     RB: WorktreeBackend + Clone + Send + Sync + 'static,
+    PB: PromptBuilder + Clone + Send + Sync + 'static,
 >(
     zbobr: &ZbobrDispatcher,
     task_backend: &TB,
     repo_backend: &RB,
     task: &Task,
-    prompt_builder: &ConfiguredPromptBuilder,
+    prompt_builder: ConfiguredPromptBuilder<PB>,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match task.stage {
@@ -1149,7 +1155,7 @@ pub async fn process_task_by_stage<
                     repo_backend,
                     task.id,
                     Role::Merger,
-                    prompt_builder,
+                    prompt_builder.clone(),
                     executor_config,
                 );
                 session.run().await?;
@@ -1161,7 +1167,7 @@ pub async fn process_task_by_stage<
                     repo_backend,
                     task.id,
                     role,
-                    prompt_builder,
+                    prompt_builder.clone(),
                     executor_config,
                 );
                 session.run().await?;
@@ -1183,7 +1189,7 @@ pub async fn process_task_by_stage<
                 repo_backend,
                 task.id,
                 role,
-                prompt_builder,
+                prompt_builder.clone(),
                 executor_config,
             );
             session.run().await?;
@@ -1199,13 +1205,14 @@ pub async fn process_task_by_stage<
 pub async fn run_manager_loop<
     TB: TaskBackend + Clone + Send + Sync + 'static,
     RB: WorktreeBackend + Clone + Send + Sync + 'static,
+    PB: PromptBuilder + Clone + Send + Sync + 'static,
 >(
     zbobr: &ZbobrDispatcher,
     task_backend: &TB,
     repo_backend: &RB,
     interval_secs: u64,
     cleanup_interval_secs: u64,
-    prompt_builder: &ConfiguredPromptBuilder,
+    prompt_builder: ConfiguredPromptBuilder<PB>,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     tracing::info!(
@@ -1301,7 +1308,7 @@ pub async fn run_manager_loop<
                 repo_backend,
                 task.id,
                 role,
-                prompt_builder,
+                prompt_builder.clone(),
                 executor_config,
             );
             if let Err(e) = session.run().await {

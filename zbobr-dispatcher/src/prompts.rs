@@ -10,16 +10,23 @@ use zbobr_api::prompt::{
 };
 use zbobr_prompts::DefaultPromptBuilder;
 
-pub struct ConfiguredPromptBuilder {
+#[derive(Clone)]
+pub struct ConfiguredPromptBuilder<PB: PromptBuilder + Clone = DefaultPromptBuilder> {
     prompts: PromptsConfig,
-    builder: DefaultPromptBuilder,
+    builder: PB,
 }
 
-impl ConfiguredPromptBuilder {
+impl ConfiguredPromptBuilder<DefaultPromptBuilder> {
     pub fn new(prompts: PromptsConfig) -> Self {
+        Self::with_builder(prompts, DefaultPromptBuilder)
+    }
+}
+
+impl<PB: PromptBuilder + Clone> ConfiguredPromptBuilder<PB> {
+    pub fn with_builder(prompts: PromptsConfig, builder: PB) -> Self {
         Self {
             prompts,
-            builder: DefaultPromptBuilder,
+            builder,
         }
     }
 
@@ -41,11 +48,44 @@ impl ConfiguredPromptBuilder {
         task_id: u64,
         task_backend: &dyn TaskBackend,
     ) -> anyhow::Result<String> {
-        build_prompt_for_role(&self.prompts, role, task_id, task_backend, &self.builder).await
+        build_prompt_for_role(
+            &self.prompts,
+            role,
+            task_id,
+            task_backend,
+            self.builder.clone(),
+        )
+        .await
     }
 }
 
-impl From<PromptsConfig> for ConfiguredPromptBuilder {
+impl<PB: PromptBuilder + Clone> PromptBuilder for ConfiguredPromptBuilder<PB> {
+    fn preparator_instructions(&self, tools: &PreparatorToolNames) -> String {
+        self.builder.preparator_instructions(tools)
+    }
+
+    fn planner_instructions(&self, tools: &PlannerToolNames) -> String {
+        self.builder.planner_instructions(tools)
+    }
+
+    fn worker_instructions(&self, tools: &WorkerToolNames) -> String {
+        self.builder.worker_instructions(tools)
+    }
+
+    fn reviewer_instructions(&self, tools: &ReviewerToolNames) -> String {
+        self.builder.reviewer_instructions(tools)
+    }
+
+    fn tester_instructions(&self, tools: &TesterToolNames) -> String {
+        self.builder.tester_instructions(tools)
+    }
+
+    fn merger_instructions(&self, tools: &MergerToolNames) -> String {
+        self.builder.merger_instructions(tools)
+    }
+}
+
+impl From<PromptsConfig> for ConfiguredPromptBuilder<DefaultPromptBuilder> {
     fn from(prompts: PromptsConfig) -> Self {
         Self::new(prompts)
     }
@@ -100,7 +140,7 @@ pub async fn build_full_prompt(
     role: Role,
     task_id: u64,
     task_backend: &dyn TaskBackend,
-    prompt_builder: &dyn PromptBuilder,
+    prompt_builder: impl PromptBuilder,
 ) -> anyhow::Result<String> {
     let task = task_backend.get_task(task_id).await?.snapshot().await?;
     let history = crate::get_history(task_backend, task_id, None).await?;
@@ -110,7 +150,7 @@ pub async fn build_full_prompt(
         role,
         &task,
         &history_json,
-        prompt_builder,
+        &prompt_builder,
     ))
 }
 
@@ -120,7 +160,7 @@ fn assemble_prompt(
     role: Role,
     task: &Task,
     history_json: &str,
-    prompt_builder: &dyn PromptBuilder,
+    prompt_builder: &impl PromptBuilder,
 ) -> String {
     let task_title = &task.title;
     let hardcoded = match role {
@@ -239,7 +279,7 @@ pub async fn build_prompt_for_role(
     role: Role,
     task_id: u64,
     task_backend: &dyn TaskBackend,
-    prompt_builder: &dyn PromptBuilder,
+    prompt_builder: impl PromptBuilder,
 ) -> anyhow::Result<String> {
     let base_prompt = load_prompts(prompts.prompts_for_role(role), prompts.path.as_ref())?;
     build_full_prompt(&base_prompt, role, task_id, task_backend, prompt_builder).await
