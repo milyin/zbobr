@@ -12,7 +12,7 @@ use zbobr_api::config::{PromptsConfig, PromptsConfigArgs, PromptsConfigToml};
 
 use crate::config::{
     ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs,
-    ZbobrExecutorConfig, ZbobrExecutorToml,
+    ZbobrExecutorToml,
 };
 
 // ---------------------------------------------------------------------------
@@ -151,7 +151,9 @@ pub struct GenericConfig<TC: Config, RC: Config> {
     pub dispatcher: ZbobrDispatcherConfig,
     pub tasks: TC,
     pub repo: RC,
-    pub executor: ZbobrExecutorConfig,
+    pub claude: ZbobrExecutorClaudeConfig,
+    pub copilot: ZbobrExecutorCopilotConfig,
+    pub mcp_tester: ZbobrExecutorMcpTesterConfig,
     pub prompts: PromptsConfig,
 }
 
@@ -172,18 +174,15 @@ where
         let tasks = TC::build(toml.tasks, args.tasks, config_dir);
         let repo = RC::build(toml.repo, args.repo, config_dir);
 
-        let executor = {
-            let t = toml.executor.unwrap_or_default();
-            ZbobrExecutorConfig {
-                claude: ZbobrExecutorClaudeConfig::build(t.claude, args.executor.claude),
-                copilot: ZbobrExecutorCopilotConfig::build(t.copilot, args.executor.copilot),
-                mcp_tester: ZbobrExecutorMcpTesterConfig::build(
-                    t.mcp_tester,
-                    args.executor.mcp_tester,
-                    config_dir,
-                ),
-            }
-        };
+        let executor_toml = toml.executor.unwrap_or_default();
+        let claude = ZbobrExecutorClaudeConfig::build(executor_toml.claude, args.executor.claude);
+        let copilot =
+            ZbobrExecutorCopilotConfig::build(executor_toml.copilot, args.executor.copilot);
+        let mcp_tester = ZbobrExecutorMcpTesterConfig::build(
+            executor_toml.mcp_tester,
+            args.executor.mcp_tester,
+            config_dir,
+        );
 
         let prompts = PromptsConfig::build(toml.prompts, args.prompts, config_dir);
 
@@ -191,7 +190,9 @@ where
             dispatcher,
             tasks,
             repo,
-            executor,
+            claude,
+            copilot,
+            mcp_tester,
             prompts,
         }
     }

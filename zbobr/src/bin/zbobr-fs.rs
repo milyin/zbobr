@@ -28,8 +28,12 @@ async fn main() -> anyhow::Result<()> {
         "zbobr-fs.toml",
     )?;
 
-    let zbobr =
-        zbobr_dispatcher::ZbobrDispatcher::new_with_executors(config.dispatcher, config.executor);
+    let zbobr = zbobr_dispatcher::ZbobrDispatcher::new_with_executors(
+        config.dispatcher,
+        config.claude,
+        config.copilot,
+        config.mcp_tester,
+    );
 
     let task_backend = ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(config.tasks)?);
     let repo_backend = ZbobrRepoBackendFs::from_config(config.repo)?;

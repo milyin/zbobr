@@ -15,8 +15,7 @@ pub use cli::{
     process_task_by_stage, resolve_config_location, run_command, run_manager_loop,
 };
 pub use config::{
-    ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs, ZbobrExecutorConfig,
-    ZbobrExecutorToml,
+    ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs, ZbobrExecutorToml,
 };
 pub use generic_config::{
     GenericConfig, GenericConfigArgs, GenericConfigToml, init_config, load_config,
@@ -41,53 +40,6 @@ use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig}
 
 use crate::backend::{TaskBackend, WorktreeBackend};
 
-#[derive(Clone)]
-struct DispatcherExecutors {
-    claude: ZbobrExecutorClaudeConfig,
-    copilot: ZbobrExecutorCopilotConfig,
-    mcp_tester: ZbobrExecutorMcpTesterConfig,
-}
-
-impl DispatcherExecutors {
-    fn from_config(config: ZbobrExecutorConfig) -> Self {
-        Self {
-            claude: config.claude,
-            copilot: config.copilot,
-            mcp_tester: config.mcp_tester,
-        }
-    }
-
-    fn with_mcp_tester_override(&self, mcp_tester: ZbobrExecutorMcpTesterConfig) -> Self {
-        Self {
-            claude: self.claude.clone(),
-            copilot: self.copilot.clone(),
-            mcp_tester,
-        }
-    }
-
-    fn build_executor(&self, tool: Tool, model: Model) -> Box<dyn ToolExecutor> {
-        match tool {
-            Tool::Copilot => {
-                let mut config = self.copilot.clone();
-                config.default_model = model;
-                Box::new(CopilotExecutor { config })
-            }
-            Tool::Claude => {
-                let mut config = self.claude.clone();
-                config.default_model = model;
-                Box::new(ClaudeExecutor { config })
-            }
-            Tool::McpTester => Box::new(McpTesterExecutor {
-                config: self.mcp_tester.clone(),
-            }),
-        }
-    }
-
-    fn copilot_github_token(&self) -> &str {
-        &self.copilot.copilot_github_token
-    }
-}
-
 /// Fetch comments and description for a task, then extract the history chunk
 /// at the given `offset` using [`zbobr_api::extract_history_chunk`].
 pub async fn get_history(
@@ -105,23 +57,34 @@ pub async fn get_history(
 #[derive(Clone)]
 pub struct ZbobrDispatcher {
     config: Arc<ZbobrDispatcherConfig>,
-    executors: Arc<DispatcherExecutors>,
+    claude: Arc<ZbobrExecutorClaudeConfig>,
+    copilot: Arc<ZbobrExecutorCopilotConfig>,
+    mcp_tester: Arc<ZbobrExecutorMcpTesterConfig>,
 }
 
 impl ZbobrDispatcher {
     /// Create a new Zbobr dispatcher from config with default executor settings.
     pub fn new(config: ZbobrDispatcherConfig) -> Self {
-        Self::new_with_executors(config, ZbobrExecutorConfig::default())
+        Self::new_with_executors(
+            config,
+            ZbobrExecutorClaudeConfig::default(),
+            ZbobrExecutorCopilotConfig::default(),
+            ZbobrExecutorMcpTesterConfig::default(),
+        )
     }
 
-    /// Create a new Zbobr dispatcher from dispatcher and executor config.
+    /// Create a new Zbobr dispatcher from dispatcher and executor configs.
     pub fn new_with_executors(
         config: ZbobrDispatcherConfig,
-        executor_config: ZbobrExecutorConfig,
+        claude: ZbobrExecutorClaudeConfig,
+        copilot: ZbobrExecutorCopilotConfig,
+        mcp_tester: ZbobrExecutorMcpTesterConfig,
     ) -> Self {
         Self {
             config: Arc::new(config),
-            executors: Arc::new(DispatcherExecutors::from_config(executor_config)),
+            claude: Arc::new(claude),
+            copilot: Arc::new(copilot),
+            mcp_tester: Arc::new(mcp_tester),
         }
     }
 
@@ -132,7 +95,9 @@ impl ZbobrDispatcher {
     pub fn with_mcp_tester_config(&self, mcp_tester: ZbobrExecutorMcpTesterConfig) -> Self {
         Self {
             config: Arc::clone(&self.config),
-            executors: Arc::new(self.executors.with_mcp_tester_override(mcp_tester)),
+            claude: Arc::clone(&self.claude),
+            copilot: Arc::clone(&self.copilot),
+            mcp_tester: Arc::new(mcp_tester),
         }
     }
 
@@ -141,11 +106,25 @@ impl ZbobrDispatcher {
     }
 
     pub(crate) fn build_executor(&self, tool: Tool, model: Model) -> Box<dyn ToolExecutor> {
-        self.executors.build_executor(tool, model)
+        match tool {
+            Tool::Copilot => {
+                let mut config = self.copilot.as_ref().clone();
+                config.default_model = model;
+                Box::new(CopilotExecutor { config })
+            }
+            Tool::Claude => {
+                let mut config = self.claude.as_ref().clone();
+                config.default_model = model;
+                Box::new(ClaudeExecutor { config })
+            }
+            Tool::McpTester => Box::new(McpTesterExecutor {
+                config: self.mcp_tester.as_ref().clone(),
+            }),
+        }
     }
 
     pub(crate) fn copilot_github_token(&self) -> &str {
-        self.executors.copilot_github_token()
+        &self.copilot.copilot_github_token
     }
 
     #[allow(clippy::too_many_arguments)]

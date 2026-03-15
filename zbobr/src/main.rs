@@ -30,8 +30,12 @@ async fn main() -> anyhow::Result<()> {
         "zbobr.toml",
     )?;
 
-    let dispatcher =
-        zbobr_dispatcher::ZbobrDispatcher::new_with_executors(config.dispatcher, config.executor);
+    let dispatcher = zbobr_dispatcher::ZbobrDispatcher::new_with_executors(
+        config.dispatcher,
+        config.claude,
+        config.copilot,
+        config.mcp_tester,
+    );
 
     let task_backend = TaskBackendGithub::from_config(config.tasks)?;
     let repo_backend = ZbobrRepoBackendGithub::from_config(config.repo)?;

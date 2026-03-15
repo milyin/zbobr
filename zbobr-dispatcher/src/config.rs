@@ -13,7 +13,9 @@ use zbobr_utility::config_struct;
 
 #[derive(Clone, Default)]
 #[config_struct]
-/// Executor configuration section.
+/// Executor configuration section used for TOML/CLI parsing.
+///
+/// Runtime ownership lives directly on `ZbobrDispatcher` as separate fields.
 pub struct ZbobrExecutorConfig {
     /// Claude-specific defaults
     #[config(nested)]
