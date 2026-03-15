@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 
-use crate::{
-    backend::TaskBackend,
-    task::Role,
-};
+use crate::{backend::TaskBackend, task::Role};
 
 use zbobr_api::Task;
 pub use zbobr_api::config::PromptsConfig;
+use zbobr_api::prompt::{
+    MergerToolNames, PlannerToolNames, PreparatorToolNames, PromptBuilder, ReviewerToolNames,
+    TesterToolNames, WorkerToolNames,
+};
 
 /// Load and concatenate multiple prompt files.
 /// Relative paths are resolved relative to `base_path` if provided, otherwise cwd.
@@ -47,49 +48,49 @@ pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::R
 }
 
 /// Build full prompt with sections in order:
-/// 1. Role description (hardcoded instructions)
-/// 2. MCP API docs
-/// 3. Custom prompts (user context from prompt files)
-/// 4. Task title
-/// 5. Recent task history (latest chunk from get_history)
-/// 6. Unchecked checklist items with ids
+/// 1. Role description (from PromptBuilder)
+/// 2. Custom prompts (user context from prompt files)
+/// 3. Task title
+/// 4. Recent task history (latest chunk from get_history)
+/// 5. Unchecked checklist items with ids
 pub async fn build_full_prompt(
     user_context: &str,
     role: Role,
     task_id: u64,
     task_backend: &dyn TaskBackend,
+    prompt_builder: &dyn PromptBuilder,
 ) -> anyhow::Result<String> {
     let task = task_backend.get_task(task_id).await?.snapshot().await?;
     let history = crate::get_history(task_backend, task_id, None).await?;
     let history_json = serde_json::to_string_pretty(&history.comments).unwrap_or_default();
-    Ok(assemble_prompt(user_context, role, &task, &history_json))
+    Ok(assemble_prompt(
+        user_context,
+        role,
+        &task,
+        &history_json,
+        prompt_builder,
+    ))
 }
 
 /// Pure synchronous prompt assembly (used by tests and `build_full_prompt`).
-fn assemble_prompt(user_context: &str, role: Role, task: &Task, history_json: &str) -> String {
+fn assemble_prompt(
+    user_context: &str,
+    role: Role,
+    task: &Task,
+    history_json: &str,
+    prompt_builder: &dyn PromptBuilder,
+) -> String {
     let task_title = &task.title;
     let hardcoded = match role {
-        Role::Preparator => crate::preparator_instructions(),
-        Role::Planner => crate::planner_instructions(),
-        Role::Worker => crate::worker_instructions(),
-        Role::Reviewer => crate::reviewer_instructions(),
-        Role::Tester => crate::tester_instructions(),
-        Role::Merger => crate::merger_instructions(),
-    };
-
-    let api_docs = match role {
-        Role::Preparator => crate::PreparatorMcp::<crate::backend::DummyBackend>::generate_api_docs(),
-        Role::Planner => crate::PlannerMcp::<crate::backend::DummyBackend>::generate_api_docs(),
-        Role::Worker => crate::WorkerMcp::<crate::backend::DummyBackend>::generate_api_docs(),
-        Role::Reviewer => crate::ReviewerMcp::<crate::backend::DummyBackend>::generate_api_docs(),
-        Role::Tester => crate::TesterMcp::<crate::backend::DummyBackend>::generate_api_docs(),
-        Role::Merger => crate::MergerMcp::<crate::backend::DummyBackend>::generate_api_docs(),
+        Role::Preparator => prompt_builder.preparator_instructions(&PreparatorToolNames),
+        Role::Planner => prompt_builder.planner_instructions(&PlannerToolNames),
+        Role::Worker => prompt_builder.worker_instructions(&WorkerToolNames),
+        Role::Reviewer => prompt_builder.reviewer_instructions(&ReviewerToolNames),
+        Role::Tester => prompt_builder.tester_instructions(&TesterToolNames),
+        Role::Merger => prompt_builder.merger_instructions(&MergerToolNames),
     };
 
     let mut sections = vec![hardcoded];
-
-    // MCP API docs
-    sections.push(api_docs);
 
     // Custom prompts from prompt files
     if !user_context.is_empty() {
@@ -196,9 +197,10 @@ pub async fn build_prompt_for_role(
     role: Role,
     task_id: u64,
     task_backend: &dyn TaskBackend,
+    prompt_builder: &dyn PromptBuilder,
 ) -> anyhow::Result<String> {
     let base_prompt = load_prompts(prompts.prompts_for_role(role), prompts.path.as_ref())?;
-    build_full_prompt(&base_prompt, role, task_id, task_backend).await
+    build_full_prompt(&base_prompt, role, task_id, task_backend, prompt_builder).await
 }
 
 #[cfg(test)]
@@ -208,6 +210,7 @@ mod tests {
     use tempfile::TempDir;
 
     use zbobr_api::Stage;
+    use zbobr_prompts::DefaultPromptBuilder;
 
     use super::*;
 
@@ -305,26 +308,52 @@ mod tests {
             tester: vec![PathBuf::from("test.md")],
             merger: vec![PathBuf::from("merge.md")],
         };
-        assert_eq!(prompts.prompts_for_role(Role::Preparator), &[PathBuf::from("prep.md")]);
-        assert_eq!(prompts.prompts_for_role(Role::Planner), &[PathBuf::from("plan.md")]);
-        assert_eq!(prompts.prompts_for_role(Role::Worker), &[PathBuf::from("work.md")]);
-        assert_eq!(prompts.prompts_for_role(Role::Reviewer), &[PathBuf::from("review.md")]);
-        assert_eq!(prompts.prompts_for_role(Role::Tester), &[PathBuf::from("test.md")]);
-        assert_eq!(prompts.prompts_for_role(Role::Merger), &[PathBuf::from("merge.md")]);
+        assert_eq!(
+            prompts.prompts_for_role(Role::Preparator),
+            &[PathBuf::from("prep.md")]
+        );
+        assert_eq!(
+            prompts.prompts_for_role(Role::Planner),
+            &[PathBuf::from("plan.md")]
+        );
+        assert_eq!(
+            prompts.prompts_for_role(Role::Worker),
+            &[PathBuf::from("work.md")]
+        );
+        assert_eq!(
+            prompts.prompts_for_role(Role::Reviewer),
+            &[PathBuf::from("review.md")]
+        );
+        assert_eq!(
+            prompts.prompts_for_role(Role::Tester),
+            &[PathBuf::from("test.md")]
+        );
+        assert_eq!(
+            prompts.prompts_for_role(Role::Merger),
+            &[PathBuf::from("merge.md")]
+        );
     }
 
     // --- assemble_prompt ---
 
     #[test]
     fn assemble_prompt_includes_user_context() {
-        let prompt = assemble_prompt("my custom instructions", Role::Worker, &dummy_task(""), "");
+        let pb = DefaultPromptBuilder;
+        let prompt = assemble_prompt(
+            "my custom instructions",
+            Role::Worker,
+            &dummy_task(""),
+            "",
+            &pb,
+        );
         assert!(prompt.contains("my custom instructions"));
     }
 
     #[test]
     fn assemble_prompt_empty_context_omits_user_section() {
-        let prompt_empty = assemble_prompt("", Role::Worker, &dummy_task(""), "");
-        let prompt_with = assemble_prompt("UNIQUE_MARKER", Role::Worker, &dummy_task(""), "");
+        let pb = DefaultPromptBuilder;
+        let prompt_empty = assemble_prompt("", Role::Worker, &dummy_task(""), "", &pb);
+        let prompt_with = assemble_prompt("UNIQUE_MARKER", Role::Worker, &dummy_task(""), "", &pb);
         assert!(!prompt_empty.contains("UNIQUE_MARKER"));
         // With context is longer (has the extra context section)
         assert!(prompt_with.len() > prompt_empty.len());
@@ -337,15 +366,17 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = write_file(&dir, "worker.md", "do the work carefully");
         let loaded = load_prompts(&[path], None).unwrap();
-        let result = assemble_prompt(&loaded, Role::Worker, &dummy_task(""), "");
+        let pb = DefaultPromptBuilder;
+        let result = assemble_prompt(&loaded, Role::Worker, &dummy_task(""), "", &pb);
         assert!(result.contains("do the work carefully"));
     }
 
     #[test]
     fn no_prompt_files_gives_empty_context() {
         let loaded = load_prompts(&[] as &[PathBuf], None).unwrap();
-        let result = assemble_prompt(&loaded, Role::Worker, &dummy_task(""), "");
-        let expected = assemble_prompt("", Role::Worker, &dummy_task(""), "");
+        let pb = DefaultPromptBuilder;
+        let result = assemble_prompt(&loaded, Role::Worker, &dummy_task(""), "", &pb);
+        let expected = assemble_prompt("", Role::Worker, &dummy_task(""), "", &pb);
         assert_eq!(result, expected);
     }
 
@@ -358,7 +389,8 @@ mod tests {
             Some(&dir.path().to_path_buf()),
         )
         .unwrap();
-        let result = assemble_prompt(&loaded, Role::Reviewer, &dummy_task(""), "");
+        let pb = DefaultPromptBuilder;
+        let result = assemble_prompt(&loaded, Role::Reviewer, &dummy_task(""), "", &pb);
         assert!(result.contains("review carefully"));
     }
 

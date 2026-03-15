@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 zbobr-api = { version = "0.1.0", path = "../zbobr-api" }
+zbobr-prompts = { version = "0.1.0", path = "../zbobr-prompts" }
 zbobr-utility = { version = "0.1.0", path = "../zbobr-utility" }
 zbobr-executor-claude = { version = "0.1.0", path = "../zbobr-executor-claude" }
 zbobr-executor-copilot = { version = "0.1.0", path = "../zbobr-executor-copilot" }
