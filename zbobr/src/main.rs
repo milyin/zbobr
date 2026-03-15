@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let task_backend = TaskBackendGithub::from_config(config.tasks)?;
     let repo_backend = ZbobrRepoBackendGithub::from_config(config.repo)?;
 
-    let zbobr = zbobr_dispatcher::ZbobrDispatcher::new(config.dispatcher);
+    let dispatcher = zbobr_dispatcher::ZbobrDispatcher::new(config.dispatcher);
     task_backend.validate_connectivity().await?;
     repo_backend.validate_connectivity().await?;
 
@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
     prompt_builder.validate()?;
 
     zbobr_dispatcher::run_command(
-        zbobr,
+        dispatcher,
         task_backend,
         repo_backend,
         command,
