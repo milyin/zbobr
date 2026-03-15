@@ -8,15 +8,15 @@ use std::{
     },
 };
 
-use zbobr_dispatcher::{backend::TaskWeak, 
+use zbobr_dispatcher::{
     ChecklistItem, Comment, Signal, Stage, Task, TaskDir, ZbobrDispatcher, ZbobrDispatcherConfig,
-    ZbobrExecutorConfig, process_task_by_stage,
+    ZbobrExecutorConfig,
     backend::{TaskBackend, TaskBackendExt, WorktreeBackend},
-    prompts::PromptsConfig,
     config::StageConfig,
+    process_task_by_stage,
+    prompts::{ConfiguredPromptBuilder, PromptsConfig},
     task::Tool,
 };
-use zbobr_prompts::DefaultPromptBuilder;
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_repo_backend_fs::{ZbobrRepoBackendFs, ZbobrRepoBackendFsConfig};
 use zbobr_repo_backend_github::{ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig};
@@ -27,7 +27,10 @@ static SCENARIO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Shared environment for integration tests.  Holds a live `ZbobrDispatcher`
 /// and backends — no CLI binary involved.
-pub struct IntegrationTestEnv<TB: TaskBackend + Clone + Send + Sync + 'static, RB: WorktreeBackend + Clone + Send + Sync + 'static> {
+pub struct IntegrationTestEnv<
+    TB: TaskBackend + Clone + Send + Sync + 'static,
+    RB: WorktreeBackend + Clone + Send + Sync + 'static,
+> {
     pub base_path: PathBuf,
     pub workspaces_dir: PathBuf,
     pub name: &'static str,
@@ -41,13 +44,17 @@ pub struct IntegrationTestEnv<TB: TaskBackend + Clone + Send + Sync + 'static, R
     fork_owner: Option<String>,
 }
 
-impl<TB: TaskBackend + Clone + Send + Sync + 'static, RB: WorktreeBackend + Clone + Send + Sync + 'static> IntegrationTestEnv<TB, RB> {
+impl<
+    TB: TaskBackend + Clone + Send + Sync + 'static,
+    RB: WorktreeBackend + Clone + Send + Sync + 'static,
+> IntegrationTestEnv<TB, RB>
+{
     /// Construct an environment backed by two filesystem backends.
     ///
     /// Returns `None` when `mcp-tester` is not installed (tests are skipped).
-    }
-
-pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<ArcTaskBackendFs, ZbobrRepoBackendFs>>> {
+    pub async fn init_fs_fs(
+        name: &'static str,
+    ) -> Option<Arc<IntegrationTestEnv<ArcTaskBackendFs, ZbobrRepoBackendFs>>> {
         if !check_mcp_tester().await {
             return None;
         }
@@ -79,7 +86,8 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
             repos_dir: base_path.join("repos"),
         };
 
-        let task_backend = ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?);
+        let task_backend =
+            ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?);
         let repo_backend = ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?;
 
         let zbobr = ZbobrDispatcher::new(dispatcher_config);
@@ -139,7 +147,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
             repos_dir: base_path.join("repos"),
         };
 
-        let task_backend = TaskBackendGithub::new(ZbobrTaskBackendGithubImpl::from_config(task_backend_config).ok()?);
+        let task_backend = TaskBackendGithub::from_config(task_backend_config).ok()?;
         let repo_backend = ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?;
 
         let zbobr = ZbobrDispatcher::new(dispatcher_config);
@@ -204,7 +212,8 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
             overwrite_author: false,
         };
 
-        let task_backend = ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?);
+        let task_backend =
+            ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?);
         let repo_backend = ZbobrRepoBackendGithub::from_config(repo_backend_config).ok()?;
 
         let zbobr = ZbobrDispatcher::new(dispatcher_config);
@@ -271,7 +280,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
             overwrite_author: false,
         };
 
-        let task_backend = TaskBackendGithub::new(ZbobrTaskBackendGithubImpl::from_config(task_backend_config).ok()?);
+        let task_backend = TaskBackendGithub::from_config(task_backend_config).ok()?;
         let repo_backend = ZbobrRepoBackendGithub::from_config(repo_backend_config).ok()?;
 
         let zbobr = ZbobrDispatcher::new(dispatcher_config);
@@ -289,8 +298,6 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
             fork_owner: Some(fork_owner),
         }))
     }
-
-    impl<TB: TaskBackend + Clone + Send + Sync + 'static, RB: WorktreeBackend + Clone + Send + Sync + 'static> IntegrationTestEnv<TB, RB> {
 
     // -----------------------------------------------------------------------
     // Identification
@@ -324,7 +331,15 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
         confirm: bool,
     ) -> u64 {
         self.zbobr
-            .create_task_with_confirm(&self.task_backend, title, description, stage, None, None, confirm)
+            .create_task_with_confirm(
+                &self.task_backend,
+                title,
+                description,
+                stage,
+                None,
+                None,
+                confirm,
+            )
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to create task: {e}", self.name))
     }
@@ -358,7 +373,11 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
         let id = id.to_string();
         let text = text.to_string();
         self.zbobr
-            .task_session(self.task_backend.clone(), self.repo_backend.clone(), task_id)
+            .task_session(
+                self.task_backend.clone(),
+                self.repo_backend.clone(),
+                task_id,
+            )
             .modify_task(move |mut task| {
                 task.checklist.push(ChecklistItem {
                     id,
@@ -386,9 +405,14 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
         let dest_repo = dest_repo.to_string();
         let dest_branch = dest_branch.to_string();
         let work_branch = work_branch.to_string();
-        let weak = self.task_backend.get_task(task_id).await
+        let weak = self
+            .task_backend
+            .get_task(task_id)
+            .await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name));
-        let mutable = weak.upgrade().await
+        let mutable = weak
+            .upgrade()
+            .await
             .unwrap_or_else(|e| panic!("[{}] failed to upgrade task #{task_id}: {e}", self.name));
         mutable
             .modify_task(Box::new(move |mut task| {
@@ -407,17 +431,21 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
     }
 
     pub async fn set_task_conflict(&self, task_id: u64, conflict: bool) {
-        let weak = self.task_backend.get_task(task_id).await
+        let weak = self
+            .task_backend
+            .get_task(task_id)
+            .await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name));
-        let mutable = weak.upgrade().await
+        let mutable = weak
+            .upgrade()
+            .await
             .unwrap_or_else(|e| panic!("[{}] failed to upgrade task #{task_id}: {e}", self.name));
-        mutable.set_conflict(conflict).await
-            .unwrap_or_else(|e| {
-                panic!(
-                    "[{}] failed to set conflict on task #{task_id}: {e}",
-                    self.name
-                )
-            });
+        mutable.set_conflict(conflict).await.unwrap_or_else(|e| {
+            panic!(
+                "[{}] failed to set conflict on task #{task_id}: {e}",
+                self.name
+            )
+        });
     }
 
     pub async fn update_task_signal(&self, task_id: u64, signal: &str) {
@@ -438,9 +466,14 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
     /// Update the task's stage, simulating a manual stage transition with
     /// respect to the `confirm` flag (sets `pause` when confirm is true).
     pub async fn update_task_stage(&self, task_id: u64, new_stage: Stage) {
-        let weak = self.task_backend.get_task(task_id).await
+        let weak = self
+            .task_backend
+            .get_task(task_id)
+            .await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name));
-        let mutable = weak.upgrade().await
+        let mutable = weak
+            .upgrade()
+            .await
             .unwrap_or_else(|e| panic!("[{}] failed to upgrade task #{task_id}: {e}", self.name));
         mutable
             .modify_task(Box::new(move |mut task| {
@@ -561,7 +594,8 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
         _work_branch: &str,
     ) -> PathBuf {
         let task = self.get_task(task_id).await;
-        let identity = task.identity()
+        let identity = task
+            .identity()
             .unwrap_or_else(|| panic!("[{}] task #{task_id} missing routing params", self.name));
 
         self.zbobr
@@ -641,18 +675,25 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv<Arc
             ..Default::default()
         };
 
-        let prompts = PromptsConfig::default();
+        let prompt_builder = ConfiguredPromptBuilder::from(PromptsConfig::default());
 
         let task = self.get_task(task_id).await;
 
-        process_task_by_stage(&self.zbobr, &self.task_backend, &self.repo_backend, &task, &prompts, &DefaultPromptBuilder, &executor_config)
-            .await
-            .unwrap_or_else(|e| {
-                panic!(
-                    "[{}] process_task_by_stage failed for task #{task_id}: {e}",
-                    self.name
-                )
-            });
+        process_task_by_stage(
+            &self.zbobr,
+            &self.task_backend,
+            &self.repo_backend,
+            &task,
+            &prompt_builder,
+            &executor_config,
+        )
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "[{}] process_task_by_stage failed for task #{task_id}: {e}",
+                self.name
+            )
+        });
     }
 }
 

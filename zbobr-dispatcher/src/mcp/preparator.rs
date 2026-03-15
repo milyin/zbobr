@@ -49,7 +49,13 @@ impl<TB: TaskBackend + Clone + Send + Sync + 'static> PreparatorMcpImpl for Prep
 
 #[tool_router]
 impl<TB: TaskBackend + Clone + Send + Sync + 'static> PreparatorMcp<TB> {
-    pub fn new(zbobr: ZbobrDispatcher, task_backend: TB, task_id: u64, tool: Tool, model: Model) -> Self {
+    pub fn new(
+        zbobr: ZbobrDispatcher,
+        task_backend: TB,
+        task_id: u64,
+        tool: Tool,
+        model: Model,
+    ) -> Self {
         Self {
             session: zbobr.role_session(task_backend, task_id),
             tool_router: Self::tool_router(),

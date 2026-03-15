@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 
+use crate::Tool;
 use crate::task::{
     ChecklistItem, Comment, CommentType, Model, Role, Signal, Stage, Task, TaskIdentity,
 };
-use crate::Tool;
 
 /// Read-only handle to a task. Returned by `TaskBackend::get_task()` and `TaskBackend::list_tasks()`.
 #[async_trait]
@@ -28,10 +28,8 @@ pub trait TaskMut: Send + Sync {
     async fn snapshot(&self) -> anyhow::Result<Task>;
 
     /// Core mutation primitive — reads task, applies closure, writes back.
-    async fn modify_task(
-        &self,
-        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-    ) -> anyhow::Result<()>;
+    async fn modify_task(&self, mutate: Box<dyn FnOnce(Task) -> Task + Send>)
+    -> anyhow::Result<()>;
 
     /// Close the task.
     async fn close(&self) -> anyhow::Result<()>;

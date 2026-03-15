@@ -2,7 +2,7 @@ use crate::{
     CommentType, Signal,
     backend::TaskBackend,
     mcp::common::get_hostname,
-    task::{ChecklistItem, Role, RoleSession, Tool, Model},
+    task::{ChecklistItem, Model, Role, RoleSession, Tool},
 };
 
 // Helper functions for logging MCP responses
@@ -673,7 +673,12 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(None) => "destination_repository is not set".to_string(),
             Err(e) => format!("Error: {e}"),
         };
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "get_param_destination_repository", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "get_param_destination_repository",
+            &response,
+        );
         response
     }
 
@@ -688,7 +693,12 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(()) => "destination_repository updated".to_string(),
             Err(e) => format!("Error: {e}"),
         };
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "set_param_destination_repository", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "set_param_destination_repository",
+            &response,
+        );
         response
     }
 
@@ -703,7 +713,12 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(None) => "destination_branch is not set".to_string(),
             Err(e) => format!("Error: {e}"),
         };
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "get_param_destination_branch", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "get_param_destination_branch",
+            &response,
+        );
         response
     }
 
@@ -718,7 +733,12 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(()) => "destination_branch updated".to_string(),
             Err(e) => format!("Error: {e}"),
         };
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "set_param_destination_branch", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "set_param_destination_branch",
+            &response,
+        );
         response
     }
 
@@ -733,7 +753,12 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(None) => "work_branch is not set".to_string(),
             Err(e) => format!("Error: {e}"),
         };
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "get_param_work_branch", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "get_param_work_branch",
+            &response,
+        );
         response
     }
 
@@ -754,7 +779,12 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(()) => "work_branch updated".to_string(),
             Err(e) => format!("Error: {e}"),
         };
-        log_mcp_string_response(self.role_name(), self.session().task_id(), "set_param_work_branch", &response);
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "set_param_work_branch",
+            &response,
+        );
         response
     }
 }

@@ -1,7 +1,6 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
 use zbobr_dispatcher::backend::{TaskBackend as _, WorktreeBackend as _};
-use zbobr_prompts::DefaultPromptBuilder;
 
 use zbobr_repo_backend_github::{ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig};
 use zbobr_task_backend_github::{TaskBackendGithub, ZbobrTaskBackendGithubConfig};
@@ -40,17 +39,14 @@ async fn main() -> anyhow::Result<()> {
     task_backend.validate_connectivity().await?;
     repo_backend.validate_connectivity().await?;
 
-    let prompts = config.prompts;
-    zbobr_dispatcher::validate_prompts(&prompts)?;
-
-    let prompt_builder = DefaultPromptBuilder;
+    let prompt_builder = zbobr_dispatcher::ConfiguredPromptBuilder::from(config.prompts);
+    prompt_builder.validate()?;
 
     zbobr_dispatcher::run_command(
         zbobr,
         task_backend,
         repo_backend,
         command,
-        &prompts,
         &prompt_builder,
         &executor_config,
     )

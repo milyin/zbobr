@@ -47,7 +47,13 @@ impl<TB: TaskBackend + Clone + Send + Sync + 'static> TesterMcpImpl for TesterMc
 
 #[tool_router]
 impl<TB: TaskBackend + Clone + Send + Sync + 'static> TesterMcp<TB> {
-    pub fn new(zbobr: ZbobrDispatcher, task_backend: TB, task_id: u64, tool: Tool, model: Model) -> Self {
+    pub fn new(
+        zbobr: ZbobrDispatcher,
+        task_backend: TB,
+        task_id: u64,
+        tool: Tool,
+        model: Model,
+    ) -> Self {
         Self {
             session: zbobr.role_session(task_backend, task_id),
             tool_router: Self::tool_router(),

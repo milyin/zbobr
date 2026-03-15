@@ -141,9 +141,7 @@ pub struct ZbobrRepoBackendGithub {
 }
 
 impl ZbobrRepoBackendGithub {
-    pub fn from_config(
-        backend_config: ZbobrRepoBackendGithubConfig,
-    ) -> anyhow::Result<Self> {
+    pub fn from_config(backend_config: ZbobrRepoBackendGithubConfig) -> anyhow::Result<Self> {
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(backend_config.github_token.clone())
@@ -1201,9 +1199,13 @@ impl ZbobrRepoBackendGithub {
             tracing::info!(
                 "No commits ahead of origin/{destination_branch} — creating placeholder commit"
             );
-            zbobr_utility::configure_git_user(&work_dir, &self.backend_config.git_user_name, &self.backend_config.git_user_email)
-                .await
-                .context("Failed to configure git user for placeholder commit")?;
+            zbobr_utility::configure_git_user(
+                &work_dir,
+                &self.backend_config.git_user_name,
+                &self.backend_config.git_user_email,
+            )
+            .await
+            .context("Failed to configure git user for placeholder commit")?;
             zbobr_utility::create_placeholder_commit(&work_dir, work_branch)
                 .await
                 .context("Failed to create placeholder commit")?;
@@ -1455,7 +1457,6 @@ impl ZbobrRepoBackendGithub {
 
         Ok((repo_full, branch))
     }
-
 }
 
 #[async_trait]
@@ -1626,10 +1627,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         Ok(true)
     }
 
-    async fn update_pr(
-        &self,
-        identity: &zbobr_api::task::TaskIdentity,
-    ) -> anyhow::Result<String> {
+    async fn update_pr(&self, identity: &zbobr_api::task::TaskIdentity) -> anyhow::Result<String> {
         let work_branch = &identity.work_branch;
         let destination_repo = &identity.destination_repository;
         let base_branch = &identity.destination_branch;

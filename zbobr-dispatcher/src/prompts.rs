@@ -8,6 +8,48 @@ use zbobr_api::prompt::{
     MergerToolNames, PlannerToolNames, PreparatorToolNames, PromptBuilder, ReviewerToolNames,
     TesterToolNames, WorkerToolNames,
 };
+use zbobr_prompts::DefaultPromptBuilder;
+
+pub struct ConfiguredPromptBuilder {
+    prompts: PromptsConfig,
+    builder: DefaultPromptBuilder,
+}
+
+impl ConfiguredPromptBuilder {
+    pub fn new(prompts: PromptsConfig) -> Self {
+        Self {
+            prompts,
+            builder: DefaultPromptBuilder,
+        }
+    }
+
+    pub fn base_path(&self) -> Option<&PathBuf> {
+        self.prompts.path.as_ref()
+    }
+
+    pub fn prompt_files_for_role(&self, role: Role) -> &[PathBuf] {
+        self.prompts.prompts_for_role(role)
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        validate_prompts(&self.prompts)
+    }
+
+    pub async fn build_for_role(
+        &self,
+        role: Role,
+        task_id: u64,
+        task_backend: &dyn TaskBackend,
+    ) -> anyhow::Result<String> {
+        build_prompt_for_role(&self.prompts, role, task_id, task_backend, &self.builder).await
+    }
+}
+
+impl From<PromptsConfig> for ConfiguredPromptBuilder {
+    fn from(prompts: PromptsConfig) -> Self {
+        Self::new(prompts)
+    }
+}
 
 /// Load and concatenate multiple prompt files.
 /// Relative paths are resolved relative to `base_path` if provided, otherwise cwd.

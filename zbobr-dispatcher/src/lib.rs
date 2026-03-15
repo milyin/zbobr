@@ -15,19 +15,19 @@ pub use cli::{
     process_task_by_stage, resolve_config_location, run_command, run_manager_loop,
 };
 pub use config::{
-    ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs,
-    ZbobrExecutorConfig, ZbobrExecutorToml,
+    ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs, ZbobrExecutorConfig,
+    ZbobrExecutorToml,
 };
 pub use generic_config::{
     GenericConfig, GenericConfigArgs, GenericConfigToml, init_config, load_config,
 };
-pub use mcp::{
-    MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, TesterMcp, WorkerMcp,
+pub use mcp::{MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, TesterMcp, WorkerMcp};
+pub use prompts::{
+    ConfiguredPromptBuilder, PromptsConfig, build_full_prompt, build_prompt_for_role, load_prompts,
+    validate_prompts,
 };
-pub use prompts::{PromptsConfig, build_full_prompt, build_prompt_for_role, load_prompts, validate_prompts};
 pub use task::{
-    ChecklistItem, Comment, CommentType, Model, RoleSession, Signal, Stage, Task,
-    TaskSession, Tool,
+    ChecklistItem, Comment, CommentType, Model, RoleSession, Signal, Stage, Task, TaskSession, Tool,
 };
 pub use task_dir::TaskDir;
 pub use tool_executor::ToolExecutor;
@@ -103,9 +103,7 @@ impl ZbobrDispatcher {
         destination_branch: Option<String>,
         confirm: bool,
     ) -> anyhow::Result<u64> {
-        let id = task_backend
-            .create_task(title, description, stage)
-            .await?;
+        let id = task_backend.create_task(title, description, stage).await?;
         // Set promoted fields + confirm flag via modify
         let weak = task_backend.get_task(id).await?;
         let mutable = weak.upgrade().await?;
@@ -122,7 +120,11 @@ impl ZbobrDispatcher {
         Ok(id)
     }
 
-    pub async fn setup_repository(&self, task_backend: &dyn TaskBackend, force: bool) -> anyhow::Result<()> {
+    pub async fn setup_repository(
+        &self,
+        task_backend: &dyn TaskBackend,
+        force: bool,
+    ) -> anyhow::Result<()> {
         tokio::fs::create_dir_all(&self.config.workspaces)
             .await
             .map_err(|e| {
@@ -160,7 +162,10 @@ impl ZbobrDispatcher {
     }
 
     /// Create a TaskSession bound to a specific task (full dispatcher access).
-    pub fn task_session<TB: TaskBackend + Clone + Send + Sync + 'static, RB: WorktreeBackend + Clone + Send + Sync + 'static>(
+    pub fn task_session<
+        TB: TaskBackend + Clone + Send + Sync + 'static,
+        RB: WorktreeBackend + Clone + Send + Sync + 'static,
+    >(
         &self,
         task_backend: TB,
         repo_backend: RB,

@@ -11,14 +11,12 @@ use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig}
 // bring in the generic git helpers from utility crate
 use zbobr_utility::{git, git_check, git_output};
 
-use zbobr_api::prompt::PromptBuilder;
-
 use crate::{
     Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
     ZbobrExecutorConfig,
     backend::{TaskBackend, WorktreeBackend},
     mcp::common::get_hostname,
-    prompts::PromptsConfig,
+    prompts::ConfiguredPromptBuilder,
     task::{Model, Role, Tool},
 };
 
@@ -449,8 +447,7 @@ pub async fn run_command<
     task_backend: TB,
     repo_backend: RB,
     command: Command,
-    prompts: &PromptsConfig,
-    prompt_builder: &dyn PromptBuilder,
+    prompt_builder: &ConfiguredPromptBuilder,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match command {
@@ -466,7 +463,6 @@ pub async fn run_command<
                 &task_backend,
                 &repo_backend,
                 subcommand,
-                prompts,
                 prompt_builder,
                 executor_config,
             )
@@ -483,7 +479,6 @@ pub async fn run_command<
                 &repo_backend,
                 interval,
                 cleanup_interval,
-                prompts,
                 prompt_builder,
                 executor_config,
             )
@@ -501,8 +496,7 @@ async fn run_task_subcommand<
     task_backend: &TB,
     repo_backend: &RB,
     subcommand: TaskSubcommand,
-    prompts: &PromptsConfig,
-    prompt_builder: &dyn PromptBuilder,
+    prompt_builder: &ConfiguredPromptBuilder,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match subcommand {
@@ -647,74 +641,84 @@ async fn run_task_subcommand<
             println!("Deleted task #{}", id);
         }
         TaskSubcommand::Prepare { task, show_prompt } => {
-            run_role_command(
+            let session = CliRoleRunner::new(
                 zbobr,
                 task_backend,
                 repo_backend,
                 task,
                 Role::Preparator,
-                show_prompt,
-                prompts,
                 prompt_builder,
                 executor_config,
-            )
-            .await?;
+            );
+            if show_prompt {
+                println!("{}", session.prompt().await?);
+            } else {
+                session.run().await?;
+            }
         }
         TaskSubcommand::Plan { task, show_prompt } => {
-            run_role_command(
+            let session = CliRoleRunner::new(
                 zbobr,
                 task_backend,
                 repo_backend,
                 task,
                 Role::Planner,
-                show_prompt,
-                prompts,
                 prompt_builder,
                 executor_config,
-            )
-            .await?;
+            );
+            if show_prompt {
+                println!("{}", session.prompt().await?);
+            } else {
+                session.run().await?;
+            }
         }
         TaskSubcommand::Work { task, show_prompt } => {
-            run_role_command(
+            let session = CliRoleRunner::new(
                 zbobr,
                 task_backend,
                 repo_backend,
                 task,
                 Role::Worker,
-                show_prompt,
-                prompts,
                 prompt_builder,
                 executor_config,
-            )
-            .await?;
+            );
+            if show_prompt {
+                println!("{}", session.prompt().await?);
+            } else {
+                session.run().await?;
+            }
         }
         TaskSubcommand::Review { task, show_prompt } => {
-            run_role_command(
+            let session = CliRoleRunner::new(
                 zbobr,
                 task_backend,
                 repo_backend,
                 task,
                 Role::Reviewer,
-                show_prompt,
-                prompts,
                 prompt_builder,
                 executor_config,
-            )
-            .await?;
+            );
+            if show_prompt {
+                println!("{}", session.prompt().await?);
+            } else {
+                session.run().await?;
+            }
         }
         TaskSubcommand::Merge { task, show_prompt } => {
-            run_role_command(
+            let session = CliRoleRunner::new(
                 zbobr,
                 task_backend,
                 repo_backend,
                 task,
                 Role::Merger,
-                show_prompt,
-                prompts,
                 prompt_builder,
                 executor_config,
-            )
-            .await?;
+            );
+            if show_prompt {
+                println!("{}", session.prompt().await?);
+            } else {
+                session.run().await?;
+            }
         }
         TaskSubcommand::Process {
             task,
@@ -756,7 +760,6 @@ async fn run_task_subcommand<
                 task_backend,
                 repo_backend,
                 &task_obj,
-                prompts,
                 prompt_builder,
                 &effective_executor_config,
             )
@@ -839,38 +842,6 @@ async fn run_task_subcommand<
     Ok(())
 }
 
-async fn run_role_command<
-    TB: TaskBackend + Clone + Send + Sync + 'static,
-    RB: WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    zbobr: &ZbobrDispatcher,
-    task_backend: &TB,
-    repo_backend: &RB,
-    task: u64,
-    role: Role,
-    show_prompt: bool,
-    prompts: &PromptsConfig,
-    prompt_builder: &dyn PromptBuilder,
-    executor_config: &ZbobrExecutorConfig,
-) -> anyhow::Result<()> {
-    let session = CliRoleRunner::new(
-        zbobr,
-        task_backend,
-        repo_backend,
-        task,
-        role,
-        prompts,
-        prompt_builder,
-        executor_config,
-    );
-    if show_prompt {
-        println!("{}", session.prompt().await?);
-    } else {
-        session.run().await?;
-    }
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
 // CliRoleRunner — CLI-side role execution
 // ---------------------------------------------------------------------------
@@ -885,8 +856,7 @@ struct CliRoleRunner<
     repo_backend: &'a RB,
     task_id: u64,
     role: Role,
-    prompts: &'a PromptsConfig,
-    prompt_builder: &'a dyn PromptBuilder,
+    prompt_builder: &'a ConfiguredPromptBuilder,
     executor_config: &'a ZbobrExecutorConfig,
 }
 
@@ -902,8 +872,7 @@ impl<
         repo_backend: &'a RB,
         task_id: u64,
         role: Role,
-        prompts: &'a PromptsConfig,
-        prompt_builder: &'a dyn PromptBuilder,
+        prompt_builder: &'a ConfiguredPromptBuilder,
         executor_config: &'a ZbobrExecutorConfig,
     ) -> Self {
         Self {
@@ -912,21 +881,15 @@ impl<
             repo_backend,
             task_id,
             role,
-            prompts,
             prompt_builder,
             executor_config,
         }
     }
 
     async fn prompt(&self) -> anyhow::Result<String> {
-        crate::prompts::build_prompt_for_role(
-            self.prompts,
-            self.role,
-            self.task_id,
-            self.task_backend,
-            self.prompt_builder,
-        )
-        .await
+        self.prompt_builder
+            .build_for_role(self.role, self.task_id, self.task_backend)
+            .await
     }
 
     async fn run(&self) -> anyhow::Result<()> {
@@ -1119,7 +1082,7 @@ impl<
             }
         }
 
-        let (execution_interrupted, execution_error) = execute_tool(
+        let outcome = execute_tool(
             cli_tool,
             &exec_cfg,
             self.task_id,
@@ -1134,22 +1097,22 @@ impl<
         )
         .await;
 
-        finalize_session(
+        if let Some(e) = finalize_session(
             self.zbobr,
             self.task_backend,
             self.repo_backend,
             self.task_id,
             self.role,
             &work_dir,
-            execution_interrupted,
-            execution_error.as_ref(),
+            outcome,
         )
-        .await?;
-
-        server_handle.abort();
-        if let Some(e) = execution_error {
+        .await?
+        {
+            server_handle.abort();
             return Err(e);
         }
+
+        server_handle.abort();
 
         Ok(())
     }
@@ -1168,8 +1131,7 @@ pub async fn process_task_by_stage<
     task_backend: &TB,
     repo_backend: &RB,
     task: &Task,
-    prompts: &PromptsConfig,
-    prompt_builder: &dyn PromptBuilder,
+    prompt_builder: &ConfiguredPromptBuilder,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     match task.stage {
@@ -1187,7 +1149,6 @@ pub async fn process_task_by_stage<
                     repo_backend,
                     task.id,
                     Role::Merger,
-                    prompts,
                     prompt_builder,
                     executor_config,
                 );
@@ -1200,7 +1161,6 @@ pub async fn process_task_by_stage<
                     repo_backend,
                     task.id,
                     role,
-                    prompts,
                     prompt_builder,
                     executor_config,
                 );
@@ -1223,7 +1183,6 @@ pub async fn process_task_by_stage<
                 repo_backend,
                 task.id,
                 role,
-                prompts,
                 prompt_builder,
                 executor_config,
             );
@@ -1246,8 +1205,7 @@ pub async fn run_manager_loop<
     repo_backend: &RB,
     interval_secs: u64,
     cleanup_interval_secs: u64,
-    prompts: &PromptsConfig,
-    prompt_builder: &dyn PromptBuilder,
+    prompt_builder: &ConfiguredPromptBuilder,
     executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
     tracing::info!(
@@ -1258,7 +1216,7 @@ pub async fn run_manager_loop<
     tracing::info!("Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s");
     tracing::info!("Global CLI Tool default: {:?}", zbobr.config().tool);
     tracing::info!("Global model default: {:?}", zbobr.config().model);
-    if let Some(ref base) = prompts.path {
+    if let Some(base) = prompt_builder.base_path() {
         tracing::info!("Prompts base path: {}", base.display());
     }
 
@@ -1273,7 +1231,7 @@ pub async fn run_manager_loop<
     ] {
         let tool = zbobr.config().tool_for_role(*role);
         let model = zbobr.config().model_for_role(*role);
-        let stage_prompts = prompts.prompts_for_role(*role);
+        let stage_prompts = prompt_builder.prompt_files_for_role(*role);
         tracing::info!(
             "Stage {:?}: tool={:?}, model={:?}, prompt_files={:?}",
             role,
@@ -1343,7 +1301,6 @@ pub async fn run_manager_loop<
                 repo_backend,
                 task.id,
                 role,
-                prompts,
                 prompt_builder,
                 executor_config,
             );
@@ -1576,6 +1533,11 @@ async fn start_mcp_server<TB: TaskBackend + Clone + Send + Sync + 'static>(
     Ok((assigned_port, server_handle))
 }
 
+struct SessionOutcome {
+    execution_interrupted: bool,
+    execution_error: Option<anyhow::Error>,
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn execute_tool<
     TB: TaskBackend + Clone + Send + Sync + 'static,
@@ -1592,7 +1554,7 @@ async fn execute_tool<
     zbobr: &ZbobrDispatcher,
     _task_backend: &TB,
     _repo_backend: &RB,
-) -> (bool, Option<anyhow::Error>) {
+) -> SessionOutcome {
     let executor: Box<dyn ToolExecutor> = match cli_tool {
         Tool::Copilot => Box::new(CopilotExecutor {
             config: executor_config.copilot.clone(),
@@ -1613,16 +1575,25 @@ async fn execute_tool<
     tokio::select! {
         result = executor.execute(task_id, role, assigned_port, prompt, work_dir, mcp_url, agent_token, copilot_token) => {
             match result {
-                Ok(()) => (false, None),
+                Ok(()) => SessionOutcome {
+                    execution_interrupted: false,
+                    execution_error: None,
+                },
                 Err(e) => {
                     tracing::error!("Tool execution failed: {e}");
-                    (false, Some(e))
+                    SessionOutcome {
+                        execution_interrupted: false,
+                        execution_error: Some(e),
+                    }
                 }
             }
         }
         _ = tokio::signal::ctrl_c() => {
             tracing::warn!("Received shutdown signal during execution");
-            (true, None)
+            SessionOutcome {
+                execution_interrupted: true,
+                execution_error: None,
+            }
         }
     }
 }
@@ -1637,37 +1608,32 @@ async fn finalize_session<
     task_id: u64,
     role: Role,
     work_dir: &Path,
-    execution_interrupted: bool,
-    execution_error: Option<&anyhow::Error>,
-) -> anyhow::Result<()> {
+    outcome: SessionOutcome,
+) -> anyhow::Result<Option<anyhow::Error>> {
     let task_session = zbobr.task_session(task_backend.clone(), repo_backend.clone(), task_id);
 
-    if execution_interrupted {
-        if role == Role::Worker || role == Role::Merger {
-            if let Err(e) =
+    if outcome.execution_interrupted {
+        if matches!(role, Role::Worker | Role::Merger)
+            && let Err(e) =
                 perform_auto_commit_and_push(task_backend, repo_backend, task_id, work_dir, role)
                     .await
-            {
-                tracing::warn!(
-                    "Auto-commit/push failed during interruption for task #{task_id}: {e}"
-                );
-            }
+        {
+            tracing::warn!("Auto-commit/push failed during interruption for task #{task_id}: {e}");
         }
         task_session.set_stage(Stage::Pending).await?;
         tracing::info!("Session interrupted for task #{task_id}, moved to PENDING");
-        return Ok(());
+        return Ok(None);
     }
 
-    if let Some(e) = execution_error {
-        if role == Role::Worker || role == Role::Merger {
-            if let Err(e) =
+    if let Some(e) = outcome.execution_error.as_ref() {
+        if matches!(role, Role::Worker | Role::Merger)
+            && let Err(e) =
                 perform_auto_commit_and_push(task_backend, repo_backend, task_id, work_dir, role)
                     .await
-            {
-                tracing::warn!(
-                    "Auto-commit/push failed during error handling for task #{task_id}: {e}"
-                );
-            }
+        {
+            tracing::warn!(
+                "Auto-commit/push failed during error handling for task #{task_id}: {e}"
+            );
         }
         let error_msg = format!("Execution failed: {e}");
         let hostname = get_hostname();
@@ -1688,7 +1654,7 @@ async fn finalize_session<
         }
         task_session.set_stage(Stage::Pending).await?;
         tracing::info!("Session failed for task #{task_id}, moved to PENDING with pause");
-        return Ok(());
+        return Ok(outcome.execution_error);
     }
 
     tracing::info!("Session complete for task #{task_id}");
@@ -1720,7 +1686,7 @@ async fn finalize_session<
             );
         }
         task_session.set_stage(Stage::Pending).await?;
-        return Ok(());
+        return Ok(None);
     }
 
     let current_task = task_backend.get_task(task_id).await?.snapshot().await?;
@@ -1765,7 +1731,7 @@ async fn finalize_session<
             //   GoTest (report_error)       → preserved as-is (task paused)
             if !current_task.pause && current_task.signal.is_none() {
                 task_session.finish().await?;
-                return Ok(());
+                return Ok(None);
             }
             task_session.set_stage(Stage::Pending).await?;
         }
@@ -1817,7 +1783,7 @@ async fn finalize_session<
         }
     }
 
-    Ok(())
+    Ok(None)
 }
 
 async fn perform_auto_commit_and_push<

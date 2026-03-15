@@ -6,8 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use zbobr_api::{
-    ChecklistItem, Comment, CommentType, Model, Role, Stage, Task,
-    Tool,
+    ChecklistItem, Comment, CommentType, Model, Role, Stage, Task, Tool,
     backend::{TaskBackend, TaskMut, TaskWeak},
 };
 
@@ -398,10 +397,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
         anyhow::bail!("ZbobrTaskBackendFs must be wrapped in Arc and accessed via ArcTaskBackendFs")
     }
 
-    async fn list_tasks_by_stage(
-        &self,
-        _stage: Stage,
-    ) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+    async fn list_tasks_by_stage(&self, _stage: Stage) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
         anyhow::bail!("ZbobrTaskBackendFs must be wrapped in Arc and accessed via ArcTaskBackendFs")
     }
 
@@ -507,10 +503,7 @@ impl TaskBackend for ArcTaskBackendFs {
         }))
     }
 
-    async fn list_tasks_by_stage(
-        &self,
-        stage: Stage,
-    ) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+    async fn list_tasks_by_stage(&self, stage: Stage) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
         let task_ids = self.inner.list_task_files().await?;
         let mut result: Vec<Box<dyn TaskWeak>> = Vec::new();
 
@@ -548,9 +541,7 @@ impl TaskBackend for ArcTaskBackendFs {
         description: &str,
         stage: Stage,
     ) -> anyhow::Result<u64> {
-        self.inner
-            .create_task(title, description, stage)
-            .await
+        self.inner.create_task(title, description, stage).await
     }
 
     async fn setup(&self, force: bool) -> anyhow::Result<()> {
