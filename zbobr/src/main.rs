@@ -94,13 +94,6 @@ async fn main() -> anyhow::Result<()> {
 
     let command = cli.command;
 
-    let mut dispatcher = zbobr_dispatcher::ZbobrDispatcher::new_with_executors(
-        config.dispatcher,
-        config.executor.claude,
-        config.executor.copilot,
-        config.executor.mcp_tester,
-    );
-
     let task_backend = TaskBackendGithub::from_config(config.tasks)?;
     let repo_backend = ZbobrRepoBackendGithub::from_config(config.repo)?;
     task_backend.validate_connectivity().await?;
@@ -109,9 +102,15 @@ async fn main() -> anyhow::Result<()> {
     let prompt_builder = zbobr_dispatcher::ConfiguredPromptBuilder::from(config.prompts);
     prompt_builder.validate()?;
 
-    dispatcher.set_task_backend(Arc::new(task_backend));
-    dispatcher.set_repo_backend(Arc::new(repo_backend));
-    dispatcher.set_prompt_builder(prompt_builder);
+    let dispatcher = zbobr_dispatcher::ZbobrDispatcherBuilder::new()
+        .with_config(Arc::new(config.dispatcher))
+        .with_task_backend(Arc::new(task_backend) as Arc<dyn zbobr_dispatcher::backend::TaskBackend>)
+        .with_repo_backend(Arc::new(repo_backend) as Arc<dyn zbobr_dispatcher::backend::WorktreeBackend>)
+        .with_claude(Arc::new(config.executor.claude))
+        .with_copilot(Arc::new(config.executor.copilot))
+        .with_mcp_tester(Arc::new(config.executor.mcp_tester))
+        .with_prompt_builder(prompt_builder)
+        .build();
 
     dispatcher.run_command(command).await
 }

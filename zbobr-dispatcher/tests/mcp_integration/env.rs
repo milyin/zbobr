@@ -9,7 +9,8 @@ use std::{
 };
 
 use zbobr_dispatcher::{
-    ChecklistItem, Comment, Signal, Stage, Task, TaskDir, ZbobrDispatcher, ZbobrDispatcherConfig,
+    ChecklistItem, Comment, Signal, Stage, Task, TaskDir, ZbobrDispatcher,
+    ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
     backend::{TaskBackend, TaskBackendExt, WorktreeBackend},
     cli::process_task_by_stage,
     config::StageConfig,
@@ -75,16 +76,23 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
         repos_dir: base_path.join("repos"),
     };
 
-    let task_backend =
-        ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?);
-    let repo_backend = ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?;
+    let task_backend: Arc<dyn TaskBackend> = Arc::new(
+        ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?),
+    );
+    let repo_backend: Arc<dyn WorktreeBackend> =
+        Arc::new(ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?);
 
-    let zbobr = ZbobrDispatcher::new(dispatcher_config);
+    let zbobr = ZbobrDispatcherBuilder::new()
+        .with_config(Arc::new(dispatcher_config))
+        .with_task_backend(Arc::clone(&task_backend))
+        .with_repo_backend(Arc::clone(&repo_backend))
+        .with_prompt_builder(ConfiguredPromptBuilder::from(PromptsConfig::default()))
+        .build();
 
-    zbobr.setup_repository(&task_backend, false).await.ok()?;
-
-    let task_backend: Arc<dyn TaskBackend> = Arc::new(task_backend);
-    let repo_backend: Arc<dyn WorktreeBackend> = Arc::new(repo_backend);
+    zbobr
+        .setup_repository(&*task_backend, false)
+        .await
+        .ok()?;
 
     Some(Arc::new(IntegrationTestEnv {
         base_path,
@@ -139,15 +147,22 @@ pub async fn init_github_fs(
         repos_dir: base_path.join("repos"),
     };
 
-    let task_backend = TaskBackendGithub::from_config(task_backend_config).ok()?;
-    let repo_backend = ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?;
+    let task_backend: Arc<dyn TaskBackend> =
+        Arc::new(TaskBackendGithub::from_config(task_backend_config).ok()?);
+    let repo_backend: Arc<dyn WorktreeBackend> =
+        Arc::new(ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?);
 
-    let zbobr = ZbobrDispatcher::new(dispatcher_config);
+    let zbobr = ZbobrDispatcherBuilder::new()
+        .with_config(Arc::new(dispatcher_config))
+        .with_task_backend(Arc::clone(&task_backend))
+        .with_repo_backend(Arc::clone(&repo_backend))
+        .with_prompt_builder(ConfiguredPromptBuilder::from(PromptsConfig::default()))
+        .build();
 
-    zbobr.setup_repository(&task_backend, false).await.ok()?;
-
-    let task_backend: Arc<dyn TaskBackend> = Arc::new(task_backend);
-    let repo_backend: Arc<dyn WorktreeBackend> = Arc::new(repo_backend);
+    zbobr
+        .setup_repository(&*task_backend, false)
+        .await
+        .ok()?;
 
     Some(Arc::new(IntegrationTestEnv {
         base_path,
@@ -207,16 +222,23 @@ pub async fn init_fs_github(
         overwrite_author: false,
     };
 
-    let task_backend =
-        ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?);
-    let repo_backend = ZbobrRepoBackendGithub::from_config(repo_backend_config).ok()?;
+    let task_backend: Arc<dyn TaskBackend> = Arc::new(
+        ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?),
+    );
+    let repo_backend: Arc<dyn WorktreeBackend> =
+        Arc::new(ZbobrRepoBackendGithub::from_config(repo_backend_config).ok()?);
 
-    let zbobr = ZbobrDispatcher::new(dispatcher_config);
+    let zbobr = ZbobrDispatcherBuilder::new()
+        .with_config(Arc::new(dispatcher_config))
+        .with_task_backend(Arc::clone(&task_backend))
+        .with_repo_backend(Arc::clone(&repo_backend))
+        .with_prompt_builder(ConfiguredPromptBuilder::from(PromptsConfig::default()))
+        .build();
 
-    zbobr.setup_repository(&task_backend, false).await.ok()?;
-
-    let task_backend: Arc<dyn TaskBackend> = Arc::new(task_backend);
-    let repo_backend: Arc<dyn WorktreeBackend> = Arc::new(repo_backend);
+    zbobr
+        .setup_repository(&*task_backend, false)
+        .await
+        .ok()?;
 
     Some(Arc::new(IntegrationTestEnv {
         base_path,
@@ -278,15 +300,22 @@ pub async fn init_github_github(
         overwrite_author: false,
     };
 
-    let task_backend = TaskBackendGithub::from_config(task_backend_config).ok()?;
-    let repo_backend = ZbobrRepoBackendGithub::from_config(repo_backend_config).ok()?;
+    let task_backend: Arc<dyn TaskBackend> =
+        Arc::new(TaskBackendGithub::from_config(task_backend_config).ok()?);
+    let repo_backend: Arc<dyn WorktreeBackend> =
+        Arc::new(ZbobrRepoBackendGithub::from_config(repo_backend_config).ok()?);
 
-    let zbobr = ZbobrDispatcher::new(dispatcher_config);
+    let zbobr = ZbobrDispatcherBuilder::new()
+        .with_config(Arc::new(dispatcher_config))
+        .with_task_backend(Arc::clone(&task_backend))
+        .with_repo_backend(Arc::clone(&repo_backend))
+        .with_prompt_builder(ConfiguredPromptBuilder::from(PromptsConfig::default()))
+        .build();
 
-    zbobr.setup_repository(&task_backend, false).await.ok()?;
-
-    let task_backend: Arc<dyn TaskBackend> = Arc::new(task_backend);
-    let repo_backend: Arc<dyn WorktreeBackend> = Arc::new(repo_backend);
+    zbobr
+        .setup_repository(&*task_backend, false)
+        .await
+        .ok()?;
 
     Some(Arc::new(IntegrationTestEnv {
         base_path,
@@ -672,10 +701,7 @@ impl IntegrationTestEnv {
             other => panic!("[{}] run_stage: unsupported stage {:?}", self.name, other),
         };
 
-        let mut stage_dispatcher = self.zbobr.with_mcp_tester_config(mcp_tester_config);
-        stage_dispatcher.set_task_backend(Arc::clone(&self.task_backend));
-        stage_dispatcher.set_repo_backend(Arc::clone(&self.repo_backend));
-        stage_dispatcher.set_prompt_builder(ConfiguredPromptBuilder::from(PromptsConfig::default()));
+        let stage_dispatcher = self.zbobr.with_mcp_tester_config(mcp_tester_config);
 
         let task = self.get_task(task_id).await;
 

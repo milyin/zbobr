@@ -30,6 +30,7 @@ pub use zbobr_api::config::Config;
 
 use std::sync::Arc;
 
+use typesafe_builder::{Builder, _TypesafeBuilderEmpty, _TypesafeBuilderFilled};
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
@@ -50,46 +51,25 @@ pub async fn get_history(
 }
 
 /// Central struct holding dispatcher configuration, backends, and executor settings.
-#[derive(Clone)]
+#[derive(Clone, Builder)]
 pub struct ZbobrDispatcher {
+    #[builder(required)]
     config: Arc<ZbobrDispatcherConfig>,
+    #[builder(required)]
+    task_backend: Arc<dyn TaskBackend>,
+    #[builder(required)]
+    repo_backend: Arc<dyn WorktreeBackend>,
+    #[builder(default = "Arc::new(ZbobrExecutorClaudeConfig::default())")]
     claude: Arc<ZbobrExecutorClaudeConfig>,
+    #[builder(default = "Arc::new(ZbobrExecutorCopilotConfig::default())")]
     copilot: Arc<ZbobrExecutorCopilotConfig>,
+    #[builder(default = "Arc::new(ZbobrExecutorMcpTesterConfig::default())")]
     mcp_tester: Arc<ZbobrExecutorMcpTesterConfig>,
-    task_backend: Option<Arc<dyn TaskBackend>>,
-    repo_backend: Option<Arc<dyn WorktreeBackend>>,
+    #[builder(optional)]
     prompt_builder: Option<ConfiguredPromptBuilder>,
 }
 
 impl ZbobrDispatcher {
-    /// Create a new Zbobr dispatcher from config with default executor settings.
-    pub fn new(config: ZbobrDispatcherConfig) -> Self {
-        Self::new_with_executors(
-            config,
-            ZbobrExecutorClaudeConfig::default(),
-            ZbobrExecutorCopilotConfig::default(),
-            ZbobrExecutorMcpTesterConfig::default(),
-        )
-    }
-
-    /// Create a new Zbobr dispatcher from dispatcher and executor configs.
-    pub fn new_with_executors(
-        config: ZbobrDispatcherConfig,
-        claude: ZbobrExecutorClaudeConfig,
-        copilot: ZbobrExecutorCopilotConfig,
-        mcp_tester: ZbobrExecutorMcpTesterConfig,
-    ) -> Self {
-        Self {
-            config: Arc::new(config),
-            claude: Arc::new(claude),
-            copilot: Arc::new(copilot),
-            mcp_tester: Arc::new(mcp_tester),
-            task_backend: None,
-            repo_backend: None,
-            prompt_builder: None,
-        }
-    }
-
     /// Clone dispatcher with an overridden MCP tester executor config.
     ///
     /// This is used for one-off scenario overrides (for example from CLI flags)
@@ -106,32 +86,6 @@ impl ZbobrDispatcher {
         }
     }
 
-    // -- Setters --
-
-    pub fn set_task_backend(&mut self, backend: Arc<dyn TaskBackend>) {
-        self.task_backend = Some(backend);
-    }
-
-    pub fn set_repo_backend(&mut self, backend: Arc<dyn WorktreeBackend>) {
-        self.repo_backend = Some(backend);
-    }
-
-    pub fn set_prompt_builder(&mut self, builder: ConfiguredPromptBuilder) {
-        self.prompt_builder = Some(builder);
-    }
-
-    pub fn set_claude_config(&mut self, config: ZbobrExecutorClaudeConfig) {
-        self.claude = Arc::new(config);
-    }
-
-    pub fn set_copilot_config(&mut self, config: ZbobrExecutorCopilotConfig) {
-        self.copilot = Arc::new(config);
-    }
-
-    pub fn set_mcp_tester_config(&mut self, config: ZbobrExecutorMcpTesterConfig) {
-        self.mcp_tester = Arc::new(config);
-    }
-
     // -- Getters --
 
     pub fn config(&self) -> &ZbobrDispatcherConfig {
@@ -139,11 +93,11 @@ impl ZbobrDispatcher {
     }
 
     pub fn task_backend(&self) -> &Arc<dyn TaskBackend> {
-        self.task_backend.as_ref().expect("task_backend not set on ZbobrDispatcher")
+        &self.task_backend
     }
 
     pub fn repo_backend(&self) -> &Arc<dyn WorktreeBackend> {
-        self.repo_backend.as_ref().expect("repo_backend not set on ZbobrDispatcher")
+        &self.repo_backend
     }
 
     pub fn prompt_builder(&self) -> &ConfiguredPromptBuilder {
