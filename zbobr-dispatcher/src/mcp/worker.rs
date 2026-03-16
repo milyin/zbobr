@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -19,17 +21,15 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct WorkerMcp<TB: TaskBackend + Clone + Send + Sync + 'static> {
-    session: RoleSession<TB>,
+pub struct WorkerMcp {
+    session: RoleSession,
     tool_router: ToolRouter<Self>,
     tool: Tool,
     model: Model,
 }
 
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> CommonMcpImpl for WorkerMcp<TB> {
-    type TB = TB;
-
-    fn session(&self) -> &RoleSession<TB> {
+impl CommonMcpImpl for WorkerMcp {
+    fn session(&self) -> &RoleSession {
         &self.session
     }
 
@@ -46,13 +46,13 @@ impl<TB: TaskBackend + Clone + Send + Sync + 'static> CommonMcpImpl for WorkerMc
     }
 }
 
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> WorkerMcpImpl for WorkerMcp<TB> {}
+impl WorkerMcpImpl for WorkerMcp {}
 
 #[tool_router]
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> WorkerMcp<TB> {
+impl WorkerMcp {
     pub fn new(
         zbobr: ZbobrDispatcher,
-        task_backend: TB,
+        task_backend: Arc<dyn TaskBackend>,
         task_id: u64,
         tool: Tool,
         model: Model,
@@ -152,7 +152,7 @@ impl<TB: TaskBackend + Clone + Send + Sync + 'static> WorkerMcp<TB> {
 }
 
 #[tool_handler]
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> ServerHandler for WorkerMcp<TB> {
+impl ServerHandler for WorkerMcp {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -165,7 +165,7 @@ impl<TB: TaskBackend + Clone + Send + Sync + 'static> ServerHandler for WorkerMc
     }
 }
 
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> WorkerMcp<TB> {
+impl WorkerMcp {
     /// Generate API documentation for worker tools
     pub fn generate_api_docs() -> String {
         let tools = Self::tool_router();
@@ -179,7 +179,7 @@ mod tests {
 
     #[tokio::test]
     async fn tools_match_common_list() {
-        let tools = WorkerMcp::<crate::backend::DummyBackend>::tool_router().list_all();
+        let tools = WorkerMcp::tool_router().list_all();
         let mut names: Vec<_> = tools.iter().map(|t| t.name.as_ref()).collect();
         names.sort();
         let mut expected = crate::mcp::worker_tools::ALL_TOOLS.to_vec();

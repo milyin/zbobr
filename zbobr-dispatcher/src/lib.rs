@@ -11,7 +11,7 @@ pub mod tool_executor;
 
 pub use cli::{
     Command, ConfigFileArg, ConfigLocation, GlobalArgs, TaskSubcommand, parse_cli, print_task,
-    process_task_by_stage, resolve_config_location, run_command, run_manager_loop,
+    resolve_config_location,
 };
 pub use config::{
     ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs, ZbobrExecutorToml,
@@ -49,13 +49,16 @@ pub async fn get_history(
     zbobr_api::extract_history_chunk(comments, &task.description, offset)
 }
 
-/// Central struct holding dispatcher configuration.
+/// Central struct holding dispatcher configuration, backends, and executor settings.
 #[derive(Clone)]
 pub struct ZbobrDispatcher {
     config: Arc<ZbobrDispatcherConfig>,
     claude: Arc<ZbobrExecutorClaudeConfig>,
     copilot: Arc<ZbobrExecutorCopilotConfig>,
     mcp_tester: Arc<ZbobrExecutorMcpTesterConfig>,
+    task_backend: Option<Arc<dyn TaskBackend>>,
+    repo_backend: Option<Arc<dyn WorktreeBackend>>,
+    prompt_builder: Option<ConfiguredPromptBuilder>,
 }
 
 impl ZbobrDispatcher {
@@ -81,6 +84,9 @@ impl ZbobrDispatcher {
             claude: Arc::new(claude),
             copilot: Arc::new(copilot),
             mcp_tester: Arc::new(mcp_tester),
+            task_backend: None,
+            repo_backend: None,
+            prompt_builder: None,
         }
     }
 
@@ -94,11 +100,54 @@ impl ZbobrDispatcher {
             claude: Arc::clone(&self.claude),
             copilot: Arc::clone(&self.copilot),
             mcp_tester: Arc::new(mcp_tester),
+            task_backend: self.task_backend.clone(),
+            repo_backend: self.repo_backend.clone(),
+            prompt_builder: self.prompt_builder.clone(),
         }
     }
 
+    // -- Setters --
+
+    pub fn set_task_backend(&mut self, backend: Arc<dyn TaskBackend>) {
+        self.task_backend = Some(backend);
+    }
+
+    pub fn set_repo_backend(&mut self, backend: Arc<dyn WorktreeBackend>) {
+        self.repo_backend = Some(backend);
+    }
+
+    pub fn set_prompt_builder(&mut self, builder: ConfiguredPromptBuilder) {
+        self.prompt_builder = Some(builder);
+    }
+
+    pub fn set_claude_config(&mut self, config: ZbobrExecutorClaudeConfig) {
+        self.claude = Arc::new(config);
+    }
+
+    pub fn set_copilot_config(&mut self, config: ZbobrExecutorCopilotConfig) {
+        self.copilot = Arc::new(config);
+    }
+
+    pub fn set_mcp_tester_config(&mut self, config: ZbobrExecutorMcpTesterConfig) {
+        self.mcp_tester = Arc::new(config);
+    }
+
+    // -- Getters --
+
     pub fn config(&self) -> &ZbobrDispatcherConfig {
         &self.config
+    }
+
+    pub fn task_backend(&self) -> &Arc<dyn TaskBackend> {
+        self.task_backend.as_ref().expect("task_backend not set on ZbobrDispatcher")
+    }
+
+    pub fn repo_backend(&self) -> &Arc<dyn WorktreeBackend> {
+        self.repo_backend.as_ref().expect("repo_backend not set on ZbobrDispatcher")
+    }
+
+    pub fn prompt_builder(&self) -> &ConfiguredPromptBuilder {
+        self.prompt_builder.as_ref().expect("prompt_builder not set on ZbobrDispatcher")
     }
 
     pub(crate) fn build_executor(&self, tool: Tool, model: Model) -> Box<dyn ToolExecutor> {
@@ -217,24 +266,21 @@ impl ZbobrDispatcher {
     }
 
     /// Create a TaskSession bound to a specific task (full dispatcher access).
-    pub fn task_session<
-        TB: TaskBackend + Clone + Send + Sync + 'static,
-        RB: WorktreeBackend + Clone + Send + Sync + 'static,
-    >(
+    pub fn task_session(
         &self,
-        task_backend: TB,
-        repo_backend: RB,
+        task_backend: Arc<dyn TaskBackend>,
+        repo_backend: Arc<dyn WorktreeBackend>,
         task_id: u64,
-    ) -> TaskSession<TB, RB> {
+    ) -> TaskSession {
         TaskSession::new(self.clone(), task_backend, repo_backend, task_id)
     }
 
     /// Create a RoleSession bound to a specific task (restricted MCP tool access).
-    pub fn role_session<TB: TaskBackend + Clone + Send + Sync + 'static>(
+    pub fn role_session(
         &self,
-        task_backend: TB,
+        task_backend: Arc<dyn TaskBackend>,
         task_id: u64,
-    ) -> RoleSession<TB> {
+    ) -> RoleSession {
         RoleSession::new(self.clone(), task_backend, task_id)
     }
 }

@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::{backend::TaskBackend, task::Role};
 
@@ -11,19 +12,17 @@ use zbobr_api::prompt::{
 use zbobr_prompts::DefaultPromptBuilder;
 
 #[derive(Clone)]
-pub struct ConfiguredPromptBuilder<PB: PromptBuilder + Clone = DefaultPromptBuilder> {
+pub struct ConfiguredPromptBuilder {
     prompts: PromptsConfig,
-    builder: PB,
+    builder: Arc<dyn PromptBuilder + Send + Sync>,
 }
 
-impl ConfiguredPromptBuilder<DefaultPromptBuilder> {
+impl ConfiguredPromptBuilder {
     pub fn new(prompts: PromptsConfig) -> Self {
-        Self::with_builder(prompts, DefaultPromptBuilder)
+        Self::with_builder(prompts, Arc::new(DefaultPromptBuilder))
     }
-}
 
-impl<PB: PromptBuilder + Clone> ConfiguredPromptBuilder<PB> {
-    pub fn with_builder(prompts: PromptsConfig, builder: PB) -> Self {
+    pub fn with_builder(prompts: PromptsConfig, builder: Arc<dyn PromptBuilder + Send + Sync>) -> Self {
         Self {
             prompts,
             builder,
@@ -53,13 +52,13 @@ impl<PB: PromptBuilder + Clone> ConfiguredPromptBuilder<PB> {
             role,
             task_id,
             task_backend,
-            self.builder.clone(),
+            &*self.builder,
         )
         .await
     }
 }
 
-impl<PB: PromptBuilder + Clone> PromptBuilder for ConfiguredPromptBuilder<PB> {
+impl PromptBuilder for ConfiguredPromptBuilder {
     fn preparator_instructions(&self, tools: &PreparatorToolNames) -> String {
         self.builder.preparator_instructions(tools)
     }
@@ -85,7 +84,7 @@ impl<PB: PromptBuilder + Clone> PromptBuilder for ConfiguredPromptBuilder<PB> {
     }
 }
 
-impl From<PromptsConfig> for ConfiguredPromptBuilder<DefaultPromptBuilder> {
+impl From<PromptsConfig> for ConfiguredPromptBuilder {
     fn from(prompts: PromptsConfig) -> Self {
         Self::new(prompts)
     }
@@ -140,7 +139,7 @@ pub async fn build_full_prompt(
     role: Role,
     task_id: u64,
     task_backend: &dyn TaskBackend,
-    prompt_builder: impl PromptBuilder,
+    prompt_builder: &dyn PromptBuilder,
 ) -> anyhow::Result<String> {
     let task = task_backend.get_task(task_id).await?.snapshot().await?;
     let history = crate::get_history(task_backend, task_id, None).await?;
@@ -150,7 +149,7 @@ pub async fn build_full_prompt(
         role,
         &task,
         &history_json,
-        &prompt_builder,
+        prompt_builder,
     ))
 }
 
@@ -160,7 +159,7 @@ fn assemble_prompt(
     role: Role,
     task: &Task,
     history_json: &str,
-    prompt_builder: &impl PromptBuilder,
+    prompt_builder: &dyn PromptBuilder,
 ) -> String {
     let task_title = &task.title;
     let hardcoded = match role {
@@ -279,7 +278,7 @@ pub async fn build_prompt_for_role(
     role: Role,
     task_id: u64,
     task_backend: &dyn TaskBackend,
-    prompt_builder: impl PromptBuilder,
+    prompt_builder: &dyn PromptBuilder,
 ) -> anyhow::Result<String> {
     let base_prompt = load_prompts(prompts.prompts_for_role(role), prompts.path.as_ref())?;
     build_full_prompt(&base_prompt, role, task_id, task_backend, prompt_builder).await

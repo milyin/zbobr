@@ -14,11 +14,8 @@ use super::{env::IntegrationTestEnv, scenarios};
 // Preparation
 // ---------------------------------------------------------------------------
 
-pub async fn run_preparation<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_preparation(
+    env: &IntegrationTestEnv,
 ) {
     let repo_path = env.create_git_repo("repo_preparation").await;
     let task_id = env
@@ -45,11 +42,8 @@ pub async fn run_preparation<
 // Planning
 // ---------------------------------------------------------------------------
 
-pub async fn run_planning<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_planning(
+    env: &IntegrationTestEnv,
 ) {
     let repo_path = env.create_git_repo("repo_planning").await;
     let task_id = env
@@ -94,11 +88,8 @@ pub async fn run_planning<
 // Working
 // ---------------------------------------------------------------------------
 
-pub async fn run_working<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_working(
+    env: &IntegrationTestEnv,
 ) {
     let repo_path = env.create_git_repo("repo_working").await;
     let task_id = env
@@ -156,11 +147,8 @@ pub async fn run_working<
 // Reviewing
 // ---------------------------------------------------------------------------
 
-pub async fn run_reviewing<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_reviewing(
+    env: &IntegrationTestEnv,
 ) {
     let repo_path = env.create_git_repo("repo_reviewing").await;
     let task_id = env
@@ -241,11 +229,8 @@ pub async fn run_reviewing<
 // Reviewing — approval path (no issues → DONE + PR)
 // ---------------------------------------------------------------------------
 
-pub async fn run_reviewing_approval<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_reviewing_approval(
+    env: &IntegrationTestEnv,
 ) {
     let repo_path = env.create_git_repo("repo_reviewing_approval").await;
     let task_id = env
@@ -319,11 +304,8 @@ pub async fn run_reviewing_approval<
 // Merging
 // ---------------------------------------------------------------------------
 
-pub async fn run_merging<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_merging(
+    env: &IntegrationTestEnv,
 ) {
     let repo_path = env.create_git_repo("repo_merging").await;
     let dest_repo = env
@@ -447,11 +429,8 @@ pub async fn run_merging<
     );
 }
 
-pub async fn run_merging_with_real_conflict<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_merging_with_real_conflict(
+    env: &IntegrationTestEnv,
 ) {
     let repo_path = env.create_git_repo("repo_merging_conflict").await;
     let repo_path_str = repo_path.to_string_lossy().to_string();
@@ -579,11 +558,8 @@ pub async fn run_merging_with_real_conflict<
 
 /// Verify the automatic conflict-detection path executed by the role session
 /// code.
-pub async fn run_conflict_detection<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_conflict_detection(
+    env: &IntegrationTestEnv,
 ) {
     if env.target_repo.is_some() {
         eprintln!(
@@ -666,11 +642,8 @@ pub async fn run_conflict_detection<
 // report_error signal preservation
 // ---------------------------------------------------------------------------
 
-pub async fn run_report_error_preserves_signal<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_report_error_preserves_signal(
+    env: &IntegrationTestEnv,
 ) {
     let repo_path = env.create_git_repo("repo_report_error").await;
     let dest_repo = env
@@ -721,11 +694,8 @@ pub async fn run_report_error_preserves_signal<
 // Signal Preservation During Conflict Resolution
 // ---------------------------------------------------------------------------
 
-pub async fn run_signal_preservation_during_conflict<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_signal_preservation_during_conflict(
+    env: &IntegrationTestEnv,
 ) {
     if env.target_repo.is_some() {
         eprintln!(
@@ -820,11 +790,8 @@ pub async fn run_signal_preservation_during_conflict<
 ///  - returns the task description as a user Reply comment when no plan exists
 ///  - returns only the plan and subsequent comments up to the next plan for each offset
 ///  - returns an error for an out-of-range offset
-pub async fn run_plan_history_with_index<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_plan_history_with_index(
+    env: &IntegrationTestEnv,
 ) {
     let repo_path = env.create_git_repo("repo_plan_history").await;
     const TASK_DESCRIPTION: &str = "Plan history MCP test description";
@@ -943,11 +910,8 @@ const CROSS_ORG_DEST_REPO: &str = "octocat/Spoon-Knife";
 
 /// Test `clone_and_setup` against a same-org target (`env.target_repo`).
 /// Skipped when the repo backend is not GitHub or `target_repo` is not set.
-pub async fn run_repo_backend_clone<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_repo_backend_clone(
+    env: &IntegrationTestEnv,
 ) {
     let Some(target) = env.target_repo.as_deref() else {
         eprintln!(
@@ -984,7 +948,7 @@ pub async fn run_repo_backend_clone<
         )
     });
     env.zbobr
-        .update_worktree(&env.repo_backend, &identity)
+        .update_worktree(&*env.repo_backend, &identity)
         .await
         .unwrap();
 
@@ -1038,11 +1002,8 @@ pub async fn run_repo_backend_clone<
 
 /// Test `clone_and_setup` against `octocat/Spoon-Knife` (cross-org).
 /// Skipped when the repo backend is not GitHub.
-pub async fn run_repo_backend_clone_cross_org<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_repo_backend_clone_cross_org(
+    env: &IntegrationTestEnv,
 ) {
     if env.fork_owner().is_none() {
         eprintln!(
@@ -1074,7 +1035,7 @@ pub async fn run_repo_backend_clone_cross_org<
         )
     });
     env.zbobr
-        .update_worktree(&env.repo_backend, &identity)
+        .update_worktree(&*env.repo_backend, &identity)
         .await
         .unwrap();
 
@@ -1142,11 +1103,8 @@ pub async fn run_repo_backend_clone_cross_org<
 // Repo backend — same-org planning / working / reviewing / merging
 // ---------------------------------------------------------------------------
 
-pub async fn run_repo_backend_planning<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_repo_backend_planning(
+    env: &IntegrationTestEnv,
 ) {
     let Some(target) = env.target_repo.as_deref() else {
         eprintln!(
@@ -1165,11 +1123,8 @@ pub async fn run_repo_backend_planning<
     repo_backend_planning_for(env, target, "plan").await;
 }
 
-pub async fn run_repo_backend_working<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_repo_backend_working(
+    env: &IntegrationTestEnv,
 ) {
     let Some(target) = env.target_repo.as_deref() else {
         eprintln!(
@@ -1188,11 +1143,8 @@ pub async fn run_repo_backend_working<
     repo_backend_working_for(env, target, "work").await;
 }
 
-pub async fn run_repo_backend_reviewing<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_repo_backend_reviewing(
+    env: &IntegrationTestEnv,
 ) {
     let Some(target) = env.target_repo.as_deref() else {
         eprintln!(
@@ -1211,11 +1163,8 @@ pub async fn run_repo_backend_reviewing<
     repo_backend_reviewing_for(env, target, "review").await;
 }
 
-pub async fn run_repo_backend_merging<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_repo_backend_merging(
+    env: &IntegrationTestEnv,
 ) {
     let Some(target) = env.target_repo.as_deref() else {
         eprintln!(
@@ -1238,11 +1187,8 @@ pub async fn run_repo_backend_merging<
 // Repo backend — cross-org planning / working / reviewing / merging
 // ---------------------------------------------------------------------------
 
-pub async fn run_repo_backend_planning_cross_org<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_repo_backend_planning_cross_org(
+    env: &IntegrationTestEnv,
 ) {
     if env.fork_owner().is_none() {
         eprintln!(
@@ -1254,11 +1200,8 @@ pub async fn run_repo_backend_planning_cross_org<
     repo_backend_planning_for(env, CROSS_ORG_DEST_REPO, "xorg-plan").await;
 }
 
-pub async fn run_repo_backend_working_cross_org<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_repo_backend_working_cross_org(
+    env: &IntegrationTestEnv,
 ) {
     if env.fork_owner().is_none() {
         eprintln!(
@@ -1270,11 +1213,8 @@ pub async fn run_repo_backend_working_cross_org<
     repo_backend_working_for(env, CROSS_ORG_DEST_REPO, "xorg-work").await;
 }
 
-pub async fn run_repo_backend_reviewing_cross_org<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_repo_backend_reviewing_cross_org(
+    env: &IntegrationTestEnv,
 ) {
     if env.fork_owner().is_none() {
         eprintln!(
@@ -1286,11 +1226,8 @@ pub async fn run_repo_backend_reviewing_cross_org<
     repo_backend_reviewing_for(env, CROSS_ORG_DEST_REPO, "xorg-review").await;
 }
 
-pub async fn run_repo_backend_merging_cross_org<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_repo_backend_merging_cross_org(
+    env: &IntegrationTestEnv,
 ) {
     if env.fork_owner().is_none() {
         eprintln!(
@@ -1307,11 +1244,8 @@ pub async fn run_repo_backend_merging_cross_org<
 // ---------------------------------------------------------------------------
 
 /// Verify that a stage change with `confirm=true` triggers an automatic pause.
-pub async fn run_cli_confirm_flag<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_cli_confirm_flag(
+    env: &IntegrationTestEnv,
 ) {
     let task_id = env
         .create_task_with_confirm("Confirm test", "desc", Stage::Pending, true)
@@ -1638,11 +1572,8 @@ async fn assert_github_pr_has_commits(env: &IntegrationTestEnv, pr_url: &str, de
 /// entry, Rule 2.3 fires and sets GoWork (has_unchecked=true).  If the signal
 /// were *not* cleared, Rule 2 would see `signal.is_some()` and preserve the
 /// pre-set GoReview instead.
-pub async fn run_entry_clears_signal_for_worker<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_entry_clears_signal_for_worker(
+    env: &IntegrationTestEnv,
 ) {
     let repo_path = env.create_git_repo("repo_entry_clear_worker").await;
     let dest_repo = env
@@ -1685,11 +1616,8 @@ pub async fn run_entry_clears_signal_for_worker<
 /// Verify that after a Merger session:
 ///   - conflict == false (cleared on entry)
 ///   - signal == Some(GoWork) (preserved; Merger entry must not clear it)
-pub async fn run_entry_clears_conflict_preserves_signal_for_merger<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_entry_clears_conflict_preserves_signal_for_merger(
+    env: &IntegrationTestEnv,
 ) {
     let repo_path = env.create_git_repo("repo_entry_clear_merger").await;
     let dest_repo = env
@@ -1762,11 +1690,8 @@ pub async fn run_entry_clears_conflict_preserves_signal_for_merger<
 /// Runs Planning from a clean state (no pre-set signal) and verifies that
 /// GoWork is emitted afterwards.  This is a focused test for the fix to the
 /// Planner exit path (it previously emitted no signal at all).
-pub async fn run_planner_sets_go_work_on_exit<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_planner_sets_go_work_on_exit(
+    env: &IntegrationTestEnv,
 ) {
     let repo_path = env.create_git_repo("repo_planner_exit").await;
     let dest_repo = env
@@ -1807,11 +1732,8 @@ pub async fn run_planner_sets_go_work_on_exit<
 /// A more direct test: pre-set a higher-priority signal (GoPrepare) on a
 /// Planning task.  If Rule 2 works, GoPrepare is preserved; if the exit logic
 /// erroneously overrides it, GoWork appears instead.
-pub async fn run_exit_preserves_agent_set_signal<
-    TB: zbobr_dispatcher::backend::TaskBackend + Clone + Send + Sync + 'static,
-    RB: zbobr_dispatcher::backend::WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    env: &IntegrationTestEnv<TB, RB>,
+pub async fn run_exit_preserves_agent_set_signal(
+    env: &IntegrationTestEnv,
 ) {
     let repo_path = env.create_git_repo("repo_exit_preserve").await;
     let dest_repo = env

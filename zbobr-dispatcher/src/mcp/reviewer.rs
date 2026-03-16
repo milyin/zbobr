@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -16,17 +18,15 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct ReviewerMcp<TB: TaskBackend + Clone + Send + Sync + 'static> {
-    session: RoleSession<TB>,
+pub struct ReviewerMcp {
+    session: RoleSession,
     tool_router: ToolRouter<Self>,
     tool: Tool,
     model: Model,
 }
 
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> CommonMcpImpl for ReviewerMcp<TB> {
-    type TB = TB;
-
-    fn session(&self) -> &RoleSession<TB> {
+impl CommonMcpImpl for ReviewerMcp {
+    fn session(&self) -> &RoleSession {
         &self.session
     }
 
@@ -43,13 +43,13 @@ impl<TB: TaskBackend + Clone + Send + Sync + 'static> CommonMcpImpl for Reviewer
     }
 }
 
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> ReviewerMcpImpl for ReviewerMcp<TB> {}
+impl ReviewerMcpImpl for ReviewerMcp {}
 
 #[tool_router]
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> ReviewerMcp<TB> {
+impl ReviewerMcp {
     pub fn new(
         zbobr: ZbobrDispatcher,
-        task_backend: TB,
+        task_backend: Arc<dyn TaskBackend>,
         task_id: u64,
         tool: Tool,
         model: Model,
@@ -109,7 +109,7 @@ impl<TB: TaskBackend + Clone + Send + Sync + 'static> ReviewerMcp<TB> {
 }
 
 #[tool_handler]
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> ServerHandler for ReviewerMcp<TB> {
+impl ServerHandler for ReviewerMcp {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -122,7 +122,7 @@ impl<TB: TaskBackend + Clone + Send + Sync + 'static> ServerHandler for Reviewer
     }
 }
 
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> ReviewerMcp<TB> {
+impl ReviewerMcp {
     /// Generate API documentation for reviewer tools
     pub fn generate_api_docs() -> String {
         let tools = Self::tool_router();

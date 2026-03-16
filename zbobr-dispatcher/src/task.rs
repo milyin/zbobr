@@ -1,5 +1,7 @@
 pub use zbobr_api::task::*;
 
+use std::sync::Arc;
+
 use crate::{
     TaskDir, ZbobrDispatcher,
     backend::{TaskBackend, WorktreeBackend},
@@ -15,14 +17,14 @@ use crate::{
 /// Restricted task session for MCP tool operations.
 /// Stage and conflict flag are protected — only the dispatcher may change them.
 #[derive(Clone)]
-pub struct RoleSession<TB: TaskBackend> {
+pub struct RoleSession {
     zbobr: ZbobrDispatcher,
-    task_backend: TB,
+    task_backend: Arc<dyn TaskBackend>,
     task_id: u64,
 }
 
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> RoleSession<TB> {
-    pub(crate) fn new(zbobr: ZbobrDispatcher, task_backend: TB, task_id: u64) -> Self {
+impl RoleSession {
+    pub(crate) fn new(zbobr: ZbobrDispatcher, task_backend: Arc<dyn TaskBackend>, task_id: u64) -> Self {
         Self {
             zbobr,
             task_backend,
@@ -71,7 +73,7 @@ impl<TB: TaskBackend + Clone + Send + Sync + 'static> RoleSession<TB> {
         &self,
         offset: Option<usize>,
     ) -> anyhow::Result<zbobr_api::HistoryChunk> {
-        crate::get_history(&self.task_backend, self.task_id, offset).await
+        crate::get_history(&*self.task_backend, self.task_id, offset).await
     }
 
     /// Get the current task checklist.
@@ -221,22 +223,18 @@ impl<TB: TaskBackend + Clone + Send + Sync + 'static> RoleSession<TB> {
 /// Full-access task session for the dispatcher.
 /// Can change stage, conflict flag, and all other fields.
 #[derive(Clone)]
-pub struct TaskSession<TB: TaskBackend, RB: WorktreeBackend> {
+pub struct TaskSession {
     zbobr: ZbobrDispatcher,
-    task_backend: TB,
-    repo_backend: RB,
+    task_backend: Arc<dyn TaskBackend>,
+    repo_backend: Arc<dyn WorktreeBackend>,
     task_id: u64,
 }
 
-impl<
-    TB: TaskBackend + Clone + Send + Sync + 'static,
-    RB: WorktreeBackend + Clone + Send + Sync + 'static,
-> TaskSession<TB, RB>
-{
+impl TaskSession {
     pub(crate) fn new(
         zbobr: ZbobrDispatcher,
-        task_backend: TB,
-        repo_backend: RB,
+        task_backend: Arc<dyn TaskBackend>,
+        repo_backend: Arc<dyn WorktreeBackend>,
         task_id: u64,
     ) -> Self {
         Self {
@@ -252,8 +250,8 @@ impl<
     }
 
     /// Get a restricted RoleSession view for MCP tool operations.
-    pub fn role_session(&self) -> RoleSession<TB> {
-        RoleSession::new(self.zbobr.clone(), self.task_backend.clone(), self.task_id)
+    pub fn role_session(&self) -> RoleSession {
+        RoleSession::new(self.zbobr.clone(), Arc::clone(&self.task_backend), self.task_id)
     }
 
     /// Read the full task state.
@@ -625,16 +623,16 @@ mod comment_model_tests {
         }
     }
 
-    fn make_test_parts() -> (crate::ZbobrDispatcher, ArcTrackingBackend, DummyRepo) {
-        let backend = ArcTrackingBackend {
+    fn make_test_parts() -> (crate::ZbobrDispatcher, Arc<ArcTrackingBackend>, Arc<DummyRepo>) {
+        let backend = Arc::new(ArcTrackingBackend {
             inner: Arc::new(TrackingBackend {
                 tasks: Mutex::new(HashMap::new()),
                 comments: Mutex::new(HashMap::new()),
                 next_id: AtomicU64::new(0),
                 locks: Mutex::new(HashMap::new()),
             }),
-        };
-        let repo = DummyRepo;
+        });
+        let repo = Arc::new(DummyRepo);
         let zbobr = crate::ZbobrDispatcher::new(ZbobrDispatcherConfig::default());
         (zbobr, backend, repo)
     }
@@ -643,13 +641,13 @@ mod comment_model_tests {
     async fn mcp_helper_includes_explicit_model() {
         let (zbobr, task_backend, _repo_backend) = make_test_parts();
         let id = zbobr
-            .create_task(&task_backend, "t", "", Stage::Pending, None, None)
+            .create_task(&*task_backend, "t", "", Stage::Pending, None, None)
             .await
             .unwrap();
 
         let planner = crate::mcp::planner::PlannerMcp::new(
             zbobr.clone(),
-            task_backend.clone(),
+            task_backend.clone() as Arc<dyn TaskBackend>,
             id,
             Tool::Copilot,
             Model::Gpt5Mini,
@@ -667,12 +665,12 @@ mod comment_model_tests {
     async fn dispatcher_posts_have_no_model() {
         let (zbobr, task_backend, repo_backend) = make_test_parts();
         let id = zbobr
-            .create_task(&task_backend, "t", "", Stage::Pending, None, None)
+            .create_task(&*task_backend, "t", "", Stage::Pending, None, None)
             .await
             .unwrap();
 
         zbobr
-            .task_session(task_backend.clone(), repo_backend.clone(), id)
+            .task_session(task_backend.clone() as Arc<dyn TaskBackend>, repo_backend.clone() as Arc<dyn WorktreeBackend>, id)
             .post_comment(
                 CommentType::Error,
                 "dispatcher error",

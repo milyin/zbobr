@@ -1,5 +1,7 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
+use std::sync::Arc;
+
 use anyhow::Context;
 use clap::Parser;
 use zbobr_dispatcher::backend::{TaskBackend as _, WorktreeBackend as _};
@@ -92,7 +94,7 @@ async fn main() -> anyhow::Result<()> {
 
     let command = cli.command;
 
-    let dispatcher = zbobr_dispatcher::ZbobrDispatcher::new_with_executors(
+    let mut dispatcher = zbobr_dispatcher::ZbobrDispatcher::new_with_executors(
         config.dispatcher,
         config.executor.claude,
         config.executor.copilot,
@@ -107,12 +109,9 @@ async fn main() -> anyhow::Result<()> {
     let prompt_builder = zbobr_dispatcher::ConfiguredPromptBuilder::from(config.prompts);
     prompt_builder.validate()?;
 
-    zbobr_dispatcher::run_command(
-        dispatcher,
-        task_backend,
-        repo_backend,
-        command,
-        prompt_builder,
-    )
-    .await
+    dispatcher.set_task_backend(Arc::new(task_backend));
+    dispatcher.set_repo_backend(Arc::new(repo_backend));
+    dispatcher.set_prompt_builder(prompt_builder);
+
+    dispatcher.run_command(command).await
 }

@@ -1,10 +1,10 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
-use zbobr_api::prompt::PromptBuilder;
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 
 // bring in the generic git helpers from utility crate
@@ -12,9 +12,7 @@ use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
     Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
-    backend::{TaskBackend, WorktreeBackend},
     mcp::common::get_hostname,
-    prompts::ConfiguredPromptBuilder,
     task::{Model, Role, Tool},
 };
 
@@ -416,65 +414,37 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
 // Command dispatch
 // ---------------------------------------------------------------------------
 
-/// Run the given command against the dispatcher.
-pub async fn run_command<
-    TB: TaskBackend + Clone + Send + Sync + 'static,
-    RB: WorktreeBackend + Clone + Send + Sync + 'static,
-    PB: PromptBuilder + Clone + Send + Sync + 'static,
->(
-    zbobr: ZbobrDispatcher,
-    task_backend: TB,
-    repo_backend: RB,
-    command: Command,
-    prompt_builder: ConfiguredPromptBuilder<PB>,
-) -> anyhow::Result<()> {
-    match command {
-        Command::Setup { force } => {
-            zbobr.setup(&task_backend, force).await?;
-        }
-        Command::Cleanup { dry_run } => {
-            zbobr.cleanup_closed_tasks(&task_backend, dry_run).await?;
-        }
-        Command::Task { subcommand } => {
-            run_task_subcommand(
-                &zbobr,
-                &task_backend,
-                &repo_backend,
-                subcommand,
-                prompt_builder.clone(),
-            )
-            .await?;
-        }
-        Command::Loop {
-            interval,
-            cleanup_interval,
-            ..
-        } => {
-            run_manager_loop(
-                &zbobr,
-                &task_backend,
-                &repo_backend,
+impl ZbobrDispatcher {
+    /// Run the given command against the dispatcher.
+    pub async fn run_command(&self, command: Command) -> anyhow::Result<()> {
+        match command {
+            Command::Setup { force } => {
+                self.setup(&**self.task_backend(), force).await?;
+            }
+            Command::Cleanup { dry_run } => {
+                self.cleanup_closed_tasks(&**self.task_backend(), dry_run).await?;
+            }
+            Command::Task { subcommand } => {
+                run_task_subcommand(self, subcommand).await?;
+            }
+            Command::Loop {
                 interval,
                 cleanup_interval,
-                prompt_builder.clone(),
-            )
-            .await?;
+                ..
+            } => {
+                run_manager_loop(self, interval, cleanup_interval).await?;
+            }
         }
+        Ok(())
     }
-    Ok(())
 }
 
-async fn run_task_subcommand<
-    TB: TaskBackend + Clone + Send + Sync + 'static,
-    RB: WorktreeBackend + Clone + Send + Sync + 'static,
-    PB: PromptBuilder + Clone + Send + Sync + 'static,
->(
+async fn run_task_subcommand(
     zbobr: &ZbobrDispatcher,
-    task_backend: &TB,
-    repo_backend: &RB,
     subcommand: TaskSubcommand,
-    prompt_builder: ConfiguredPromptBuilder<PB>,
 ) -> anyhow::Result<()> {
+    let task_backend = zbobr.task_backend();
+    let repo_backend = zbobr.repo_backend();
     match subcommand {
         TaskSubcommand::Create {
             title,
@@ -488,7 +458,7 @@ async fn run_task_subcommand<
                 .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", stage))?;
             let id = zbobr
                 .create_task(
-                    task_backend,
+                    &**task_backend,
                     &title,
                     &description,
                     stage,
@@ -498,7 +468,7 @@ async fn run_task_subcommand<
                 .await?;
             if confirm {
                 zbobr
-                    .task_session(task_backend.clone(), repo_backend.clone(), id)
+                    .task_session(Arc::clone(task_backend), Arc::clone(repo_backend), id)
                     .set_confirm(true)
                     .await?;
             }
@@ -617,14 +587,7 @@ async fn run_task_subcommand<
             println!("Deleted task #{}", id);
         }
         TaskSubcommand::Prepare { task, show_prompt } => {
-            let session = CliRoleRunner::new(
-                zbobr,
-                task_backend,
-                repo_backend,
-                task,
-                Role::Preparator,
-                prompt_builder.clone(),
-            );
+            let session = CliRoleRunner::new(zbobr, task, Role::Preparator);
             if show_prompt {
                 println!("{}", session.prompt().await?);
             } else {
@@ -632,14 +595,7 @@ async fn run_task_subcommand<
             }
         }
         TaskSubcommand::Plan { task, show_prompt } => {
-            let session = CliRoleRunner::new(
-                zbobr,
-                task_backend,
-                repo_backend,
-                task,
-                Role::Planner,
-                prompt_builder.clone(),
-            );
+            let session = CliRoleRunner::new(zbobr, task, Role::Planner);
             if show_prompt {
                 println!("{}", session.prompt().await?);
             } else {
@@ -647,14 +603,7 @@ async fn run_task_subcommand<
             }
         }
         TaskSubcommand::Work { task, show_prompt } => {
-            let session = CliRoleRunner::new(
-                zbobr,
-                task_backend,
-                repo_backend,
-                task,
-                Role::Worker,
-                prompt_builder.clone(),
-            );
+            let session = CliRoleRunner::new(zbobr, task, Role::Worker);
             if show_prompt {
                 println!("{}", session.prompt().await?);
             } else {
@@ -662,14 +611,7 @@ async fn run_task_subcommand<
             }
         }
         TaskSubcommand::Review { task, show_prompt } => {
-            let session = CliRoleRunner::new(
-                zbobr,
-                task_backend,
-                repo_backend,
-                task,
-                Role::Reviewer,
-                prompt_builder.clone(),
-            );
+            let session = CliRoleRunner::new(zbobr, task, Role::Reviewer);
             if show_prompt {
                 println!("{}", session.prompt().await?);
             } else {
@@ -677,14 +619,7 @@ async fn run_task_subcommand<
             }
         }
         TaskSubcommand::Merge { task, show_prompt } => {
-            let session = CliRoleRunner::new(
-                zbobr,
-                task_backend,
-                repo_backend,
-                task,
-                Role::Merger,
-                prompt_builder.clone(),
-            );
+            let session = CliRoleRunner::new(zbobr, task, Role::Merger);
             if show_prompt {
                 println!("{}", session.prompt().await?);
             } else {
@@ -723,14 +658,7 @@ async fn run_task_subcommand<
                 Some(mcp_tester) => zbobr.with_mcp_tester_config(mcp_tester),
                 None => zbobr.clone(),
             };
-            process_task_by_stage(
-                &effective_dispatcher,
-                task_backend,
-                repo_backend,
-                &task_obj,
-                prompt_builder,
-            )
-            .await?;
+            process_task_by_stage(&effective_dispatcher, &task_obj).await?;
         }
         TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
             let task = task_backend.get_task(id).await?.snapshot().await?;
@@ -813,48 +741,25 @@ async fn run_task_subcommand<
 // CliRoleRunner — CLI-side role execution
 // ---------------------------------------------------------------------------
 
-struct CliRoleRunner<
-    'a,
-    TB: TaskBackend + Clone + Send + Sync + 'static,
-    RB: WorktreeBackend + Clone + Send + Sync + 'static,
-    PB: PromptBuilder + Clone + Send + Sync + 'static,
-> {
+struct CliRoleRunner<'a> {
     zbobr: &'a ZbobrDispatcher,
-    task_backend: &'a TB,
-    repo_backend: &'a RB,
     task_id: u64,
     role: Role,
-    prompt_builder: ConfiguredPromptBuilder<PB>,
 }
 
-impl<
-    'a,
-    TB: TaskBackend + Clone + Send + Sync + 'static,
-    RB: WorktreeBackend + Clone + Send + Sync + 'static,
-    PB: PromptBuilder + Clone + Send + Sync + 'static,
-> CliRoleRunner<'a, TB, RB, PB>
-{
-    fn new(
-        zbobr: &'a ZbobrDispatcher,
-        task_backend: &'a TB,
-        repo_backend: &'a RB,
-        task_id: u64,
-        role: Role,
-        prompt_builder: ConfiguredPromptBuilder<PB>,
-    ) -> Self {
+impl<'a> CliRoleRunner<'a> {
+    fn new(zbobr: &'a ZbobrDispatcher, task_id: u64, role: Role) -> Self {
         Self {
             zbobr,
-            task_backend,
-            repo_backend,
             task_id,
             role,
-            prompt_builder,
         }
     }
 
     async fn prompt(&self) -> anyhow::Result<String> {
-        self.prompt_builder
-            .build_for_role(self.role, self.task_id, self.task_backend)
+        self.zbobr
+            .prompt_builder()
+            .build_for_role(self.role, self.task_id, &**self.zbobr.task_backend())
             .await
     }
 
@@ -866,8 +771,8 @@ impl<
 
         self.zbobr
             .task_session(
-                self.task_backend.clone(),
-                self.repo_backend.clone(),
+                Arc::clone(self.zbobr.task_backend()),
+                Arc::clone(self.zbobr.repo_backend()),
                 self.task_id,
             )
             .set_stage(self.role.into())
@@ -878,8 +783,6 @@ impl<
 
         let (work_dir, is_uptodate) = prepare_workspace(
             self.zbobr,
-            self.task_backend,
-            self.repo_backend,
             self.task_id,
             self.role,
             task_dir.path(),
@@ -887,15 +790,9 @@ impl<
         .await?;
 
         if matches!(self.role, Role::Preparator) {
-            seed_preparator_defaults(self.zbobr, self.task_backend, self.task_id).await?;
+            seed_preparator_defaults(self.zbobr, self.task_id).await?;
         } else {
-            ensure_pr_url(
-                self.zbobr,
-                self.task_backend,
-                self.repo_backend,
-                self.task_id,
-            )
-            .await?;
+            ensure_pr_url(self.zbobr, self.task_id).await?;
         }
 
         // If the work branch has diverged from the base branch, defer to the
@@ -908,8 +805,8 @@ impl<
                 self.task_id
             );
             let task_session = self.zbobr.task_session(
-                self.task_backend.clone(),
-                self.repo_backend.clone(),
+                Arc::clone(self.zbobr.task_backend()),
+                Arc::clone(self.zbobr.repo_backend()),
                 self.task_id,
             );
             task_session.set_conflict(true).await?;
@@ -925,8 +822,8 @@ impl<
         // For all other roles: clear the signal that caused entry.
         if self.role == Role::Merger {
             let task_session = self.zbobr.task_session(
-                self.task_backend.clone(),
-                self.repo_backend.clone(),
+                Arc::clone(self.zbobr.task_backend()),
+                Arc::clone(self.zbobr.repo_backend()),
                 self.task_id,
             );
             task_session
@@ -935,8 +832,8 @@ impl<
                 .context("Failed to clear conflict flag on Merger entry")?;
         } else {
             let task_session = self.zbobr.task_session(
-                self.task_backend.clone(),
-                self.repo_backend.clone(),
+                Arc::clone(self.zbobr.task_backend()),
+                Arc::clone(self.zbobr.repo_backend()),
                 self.task_id,
             );
             task_session
@@ -949,7 +846,8 @@ impl<
         // to invoke the agent — just commit the merge and return.
         if self.role == Role::Merger {
             let task = self
-                .task_backend
+                .zbobr
+                .task_backend()
                 .get_task(self.task_id)
                 .await?
                 .snapshot()
@@ -968,8 +866,7 @@ impl<
                     dest_branch
                 );
                 perform_auto_commit_and_push(
-                    self.task_backend,
-                    self.repo_backend,
+                    self.zbobr,
                     self.task_id,
                     &work_dir,
                     self.role,
@@ -977,8 +874,8 @@ impl<
                 .await?;
                 self.zbobr
                     .task_session(
-                        self.task_backend.clone(),
-                        self.repo_backend.clone(),
+                        Arc::clone(self.zbobr.task_backend()),
+                        Arc::clone(self.zbobr.repo_backend()),
                         self.task_id,
                     )
                     .set_stage(Stage::Pending)
@@ -998,9 +895,10 @@ impl<
         // content.  If the latest chunk contains no actionable messages the
         // agent session would do useless work, so bail early.
         {
-            let history = crate::get_history(self.task_backend, self.task_id, None)
-                .await
-                .context("Pre-flight get_history check failed")?;
+            let history =
+                crate::get_history(&**self.zbobr.task_backend(), self.task_id, None)
+                    .await
+                    .context("Pre-flight get_history check failed")?;
             tracing::info!(
                 "Task #{} pre-flight: get_history returned {} comment(s)",
                 self.task_id,
@@ -1020,7 +918,6 @@ impl<
         // clone `model` because we'll still need it after the call
         let (assigned_port, server_handle) = start_mcp_server(
             self.zbobr.clone(),
-            self.task_backend.clone(),
             self.role,
             self.task_id,
             cli_tool,
@@ -1057,8 +954,6 @@ impl<
 
         if let Some(e) = finalize_session(
             self.zbobr,
-            self.task_backend,
-            self.repo_backend,
             self.task_id,
             self.role,
             &work_dir,
@@ -1081,16 +976,9 @@ impl<
 // ---------------------------------------------------------------------------
 
 /// Process a task according to its current stage (single-step).
-pub async fn process_task_by_stage<
-    TB: TaskBackend + Clone + Send + Sync + 'static,
-    RB: WorktreeBackend + Clone + Send + Sync + 'static,
-    PB: PromptBuilder + Clone + Send + Sync + 'static,
->(
+pub async fn process_task_by_stage(
     zbobr: &ZbobrDispatcher,
-    task_backend: &TB,
-    repo_backend: &RB,
     task: &Task,
-    prompt_builder: ConfiguredPromptBuilder<PB>,
 ) -> anyhow::Result<()> {
     match task.stage {
         Stage::Pending => {
@@ -1101,25 +989,11 @@ pub async fn process_task_by_stage<
             // Conflict flag takes priority: route to Merger to resolve the
             // diverged work branch before any other role runs.
             if task.conflict {
-                let session = CliRoleRunner::new(
-                    zbobr,
-                    task_backend,
-                    repo_backend,
-                    task.id,
-                    Role::Merger,
-                    prompt_builder.clone(),
-                );
+                let session = CliRoleRunner::new(zbobr, task.id, Role::Merger);
                 session.run().await?;
             } else if let Some(signal) = task.signal {
                 let role = signal.target_role();
-                let session = CliRoleRunner::new(
-                    zbobr,
-                    task_backend,
-                    repo_backend,
-                    task.id,
-                    role,
-                    prompt_builder.clone(),
-                );
+                let session = CliRoleRunner::new(zbobr, task.id, role);
                 session.run().await?;
             } else {
                 println!("Task #{} is PENDING (no signal) — skipped", task.id);
@@ -1133,14 +1007,7 @@ pub async fn process_task_by_stage<
         | Stage::Testing
         | Stage::Merging => {
             let role = Role::try_from(task.stage).unwrap();
-            let session = CliRoleRunner::new(
-                zbobr,
-                task_backend,
-                repo_backend,
-                task.id,
-                role,
-                prompt_builder.clone(),
-            );
+            let session = CliRoleRunner::new(zbobr, task.id, role);
             session.run().await?;
         }
         Stage::Done => {
@@ -1151,18 +1018,14 @@ pub async fn process_task_by_stage<
 }
 
 /// Main manager loop: polls for tasks and dispatches role sessions.
-pub async fn run_manager_loop<
-    TB: TaskBackend + Clone + Send + Sync + 'static,
-    RB: WorktreeBackend + Clone + Send + Sync + 'static,
-    PB: PromptBuilder + Clone + Send + Sync + 'static,
->(
+pub async fn run_manager_loop(
     zbobr: &ZbobrDispatcher,
-    task_backend: &TB,
-    repo_backend: &RB,
     interval_secs: u64,
     cleanup_interval_secs: u64,
-    prompt_builder: ConfiguredPromptBuilder<PB>,
 ) -> anyhow::Result<()> {
+    let task_backend = zbobr.task_backend();
+    let repo_backend = zbobr.repo_backend();
+    let prompt_builder = zbobr.prompt_builder();
     tracing::info!(
         "Manager loop started (task_backend: {}, repo_backend: {})",
         task_backend.debug_state(),
@@ -1203,7 +1066,7 @@ pub async fn run_manager_loop<
 
         if last_cleanup.elapsed().as_secs() >= cleanup_interval_secs {
             tracing::info!("Running workspaces cleanup...");
-            if let Err(e) = zbobr.cleanup_closed_tasks(task_backend, false).await {
+            if let Err(e) = zbobr.cleanup_closed_tasks(&**task_backend, false).await {
                 tracing::warn!("Cleanup failed: {e}");
             }
             last_cleanup = std::time::Instant::now();
@@ -1250,14 +1113,7 @@ pub async fn run_manager_loop<
                 task.signal,
                 role
             );
-            let session = CliRoleRunner::new(
-                zbobr,
-                task_backend,
-                repo_backend,
-                task.id,
-                role,
-                prompt_builder.clone(),
-            );
+            let session = CliRoleRunner::new(zbobr, task.id, role);
             if let Err(e) = session.run().await {
                 tracing::error!("{:?} session failed: {e}", role);
             }
@@ -1322,17 +1178,14 @@ pub async fn run_manager_loop<
 // Low-level helpers
 // ---------------------------------------------------------------------------
 
-async fn prepare_workspace<
-    TB: TaskBackend + Clone + Send + Sync + 'static,
-    RB: WorktreeBackend + Clone + Send + Sync + 'static,
->(
+async fn prepare_workspace(
     zbobr: &ZbobrDispatcher,
-    task_backend: &TB,
-    repo_backend: &RB,
     task_id: u64,
     role: Role,
     task_dir: &Path,
 ) -> anyhow::Result<(PathBuf, bool)> {
+    let task_backend = zbobr.task_backend();
+    let repo_backend = zbobr.repo_backend();
     match role {
         Role::Preparator => Ok((task_dir.to_path_buf(), true)),
         Role::Merger => {
@@ -1349,7 +1202,7 @@ async fn prepare_workspace<
             let identity = task.identity().ok_or_else(|| {
                 anyhow::anyhow!("Task #{task_id} is missing routing parameters (destination_repository, destination_branch, work_branch)")
             })?;
-            match zbobr.update_worktree(repo_backend, &identity).await {
+            match zbobr.update_worktree(&**repo_backend, &identity).await {
                 Ok(is_uptodate) => {
                     let dest_repo = &identity.destination_repository;
                     let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo);
@@ -1362,7 +1215,7 @@ async fn prepare_workspace<
                     tracing::error!("{msg}");
                     let hostname = get_hostname();
                     if let Err(post_err) = zbobr
-                        .task_session(task_backend.clone(), repo_backend.clone(), task_id)
+                        .task_session(Arc::clone(task_backend), Arc::clone(repo_backend), task_id)
                         .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
                         .await
                     {
@@ -1375,16 +1228,13 @@ async fn prepare_workspace<
     }
 }
 
-async fn ensure_pr_url<
-    TB: TaskBackend + Clone + Send + Sync + 'static,
-    RB: WorktreeBackend + Clone + Send + Sync + 'static,
->(
+async fn ensure_pr_url(
     zbobr: &ZbobrDispatcher,
-    task_backend: &TB,
-    repo_backend: &RB,
     task_id: u64,
 ) -> anyhow::Result<()> {
-    let role_session = zbobr.role_session(task_backend.clone(), task_id);
+    let task_backend = zbobr.task_backend();
+    let repo_backend = zbobr.repo_backend();
+    let role_session = zbobr.role_session(Arc::clone(task_backend), task_id);
     let task = role_session.get_task().await?;
     if task.pr_url.is_some() {
         return Ok(());
@@ -1414,7 +1264,7 @@ async fn ensure_pr_url<
             tracing::error!("{msg}");
             let hostname = get_hostname();
             let task_session =
-                zbobr.task_session(task_backend.clone(), repo_backend.clone(), task_id);
+                zbobr.task_session(Arc::clone(task_backend), Arc::clone(repo_backend), task_id);
             if let Err(post_err) = task_session
                 .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
                 .await
@@ -1429,14 +1279,14 @@ async fn ensure_pr_url<
 /// Pre-populate task parameters from dispatcher config defaults before the
 /// preparator agent runs. Only sets a parameter if it is not already present,
 /// so a previously prepared task (e.g. re-run) keeps its values unchanged.
-async fn seed_preparator_defaults<TB: TaskBackend + Clone + Send + Sync + 'static>(
+async fn seed_preparator_defaults(
     zbobr: &ZbobrDispatcher,
-    task_backend: &TB,
     task_id: u64,
 ) -> anyhow::Result<()> {
+    let task_backend = zbobr.task_backend();
     let config = zbobr.config();
     let task = task_backend.get_task(task_id).await?.snapshot().await?;
-    let role_session = zbobr.role_session(task_backend.clone(), task_id);
+    let role_session = zbobr.role_session(Arc::clone(task_backend), task_id);
 
     if let Some(default_repo) = &config.default_destination_repository
         && task.destination_repository.is_none()
@@ -1457,15 +1307,15 @@ async fn seed_preparator_defaults<TB: TaskBackend + Clone + Send + Sync + 'stati
     Ok(())
 }
 
-async fn start_mcp_server<TB: TaskBackend + Clone + Send + Sync + 'static>(
+async fn start_mcp_server(
     zbobr: ZbobrDispatcher,
-    task_backend: TB,
     role: Role,
     task_id: u64,
     tool: Tool,
     model: Model,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
+    let task_backend = Arc::clone(zbobr.task_backend());
     let server_handle = tokio::spawn(async move {
         match crate::mcp::run_role_mcp_server(zbobr, task_backend, role, task_id, tool, model).await
         {
@@ -1532,24 +1382,21 @@ async fn execute_tool(
     }
 }
 
-async fn finalize_session<
-    TB: TaskBackend + Clone + Send + Sync + 'static,
-    RB: WorktreeBackend + Clone + Send + Sync + 'static,
->(
+async fn finalize_session(
     zbobr: &ZbobrDispatcher,
-    task_backend: &TB,
-    repo_backend: &RB,
     task_id: u64,
     role: Role,
     work_dir: &Path,
     outcome: SessionOutcome,
 ) -> anyhow::Result<Option<anyhow::Error>> {
-    let task_session = zbobr.task_session(task_backend.clone(), repo_backend.clone(), task_id);
+    let task_backend = zbobr.task_backend();
+    let repo_backend = zbobr.repo_backend();
+    let task_session = zbobr.task_session(Arc::clone(task_backend), Arc::clone(repo_backend), task_id);
 
     if outcome.execution_interrupted {
         if matches!(role, Role::Worker | Role::Merger)
             && let Err(e) =
-                perform_auto_commit_and_push(task_backend, repo_backend, task_id, work_dir, role)
+                perform_auto_commit_and_push(zbobr, task_id, work_dir, role)
                     .await
         {
             tracing::warn!("Auto-commit/push failed during interruption for task #{task_id}: {e}");
@@ -1562,7 +1409,7 @@ async fn finalize_session<
     if let Some(e) = outcome.execution_error.as_ref() {
         if matches!(role, Role::Worker | Role::Merger)
             && let Err(e) =
-                perform_auto_commit_and_push(task_backend, repo_backend, task_id, work_dir, role)
+                perform_auto_commit_and_push(zbobr, task_id, work_dir, role)
                     .await
         {
             tracing::warn!(
@@ -1595,7 +1442,7 @@ async fn finalize_session<
 
     if (role == Role::Worker || role == Role::Merger)
         && let Err(e) =
-            perform_auto_commit_and_push(task_backend, repo_backend, task_id, work_dir, role).await
+            perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await
     {
         tracing::error!("Auto-commit/push failed for task #{task_id}: {e}");
         let hostname = get_hostname();
@@ -1720,16 +1567,14 @@ async fn finalize_session<
     Ok(None)
 }
 
-async fn perform_auto_commit_and_push<
-    TB: TaskBackend + Clone + Send + Sync + 'static,
-    RB: WorktreeBackend + Clone + Send + Sync + 'static,
->(
-    task_backend: &TB,
-    repo_backend: &RB,
+async fn perform_auto_commit_and_push(
+    zbobr: &ZbobrDispatcher,
     task_id: u64,
     work_dir: &Path,
     role: Role,
 ) -> anyhow::Result<()> {
+    let task_backend = zbobr.task_backend();
+    let repo_backend = zbobr.repo_backend();
     tracing::info!("Checking for uncommitted changes in {}", work_dir.display());
 
     match git_output(work_dir, &["status", "--porcelain"]).await {

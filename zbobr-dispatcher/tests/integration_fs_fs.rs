@@ -10,17 +10,12 @@ use std::sync::Arc;
 
 use mcp_integration::{IntegrationTestEnv, test_helpers};
 use tokio::sync::OnceCell;
-use zbobr_repo_backend_fs::ZbobrRepoBackendFs;
-use zbobr_repo_backend_github::ZbobrRepoBackendGithub;
-use zbobr_task_backend_fs::ArcTaskBackendFs;
-use zbobr_task_backend_github::TaskBackendGithub;
 
-static ENV: OnceCell<Option<Arc<IntegrationTestEnv<ArcTaskBackendFs, ZbobrRepoBackendFs>>>> =
-    OnceCell::const_new();
+static ENV: OnceCell<Option<Arc<IntegrationTestEnv>>> = OnceCell::const_new();
 // tokio::sync::Mutex serializes tests — no poison semantics, works across runtimes.
 static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-async fn get_env() -> Option<Arc<IntegrationTestEnv<ArcTaskBackendFs, ZbobrRepoBackendFs>>> {
+async fn get_env() -> Option<Arc<IntegrationTestEnv>> {
     ENV.get_or_init(|| async { mcp_integration::env::init_fs_fs("fs_fs").await })
         .await
         .clone()

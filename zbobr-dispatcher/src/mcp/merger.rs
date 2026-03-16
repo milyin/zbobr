@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -16,17 +18,15 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct MergerMcp<TB: TaskBackend + Clone + Send + Sync + 'static> {
-    session: RoleSession<TB>,
+pub struct MergerMcp {
+    session: RoleSession,
     tool_router: ToolRouter<Self>,
     tool: Tool,
     model: Model,
 }
 
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> CommonMcpImpl for MergerMcp<TB> {
-    type TB = TB;
-
-    fn session(&self) -> &RoleSession<TB> {
+impl CommonMcpImpl for MergerMcp {
+    fn session(&self) -> &RoleSession {
         &self.session
     }
 
@@ -43,13 +43,13 @@ impl<TB: TaskBackend + Clone + Send + Sync + 'static> CommonMcpImpl for MergerMc
     }
 }
 
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> MergerMcpImpl for MergerMcp<TB> {}
+impl MergerMcpImpl for MergerMcp {}
 
 #[tool_router]
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> MergerMcp<TB> {
+impl MergerMcp {
     pub fn new(
         zbobr: ZbobrDispatcher,
-        task_backend: TB,
+        task_backend: Arc<dyn TaskBackend>,
         task_id: u64,
         tool: Tool,
         model: Model,
@@ -100,7 +100,7 @@ impl<TB: TaskBackend + Clone + Send + Sync + 'static> MergerMcp<TB> {
 }
 
 #[tool_handler]
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> ServerHandler for MergerMcp<TB> {
+impl ServerHandler for MergerMcp {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -112,7 +112,7 @@ impl<TB: TaskBackend + Clone + Send + Sync + 'static> ServerHandler for MergerMc
     }
 }
 
-impl<TB: TaskBackend + Clone + Send + Sync + 'static> MergerMcp<TB> {
+impl MergerMcp {
     /// Generate API documentation for merger tools
     pub fn generate_api_docs() -> String {
         let tools = Self::tool_router();

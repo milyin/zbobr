@@ -351,9 +351,9 @@ pub(crate) async fn serve_mcp(
 
 /// Run the MCP HTTP server scoped to a role (planner or worker) and task.
 /// Returns the actual port that was assigned (spawns server in background).
-pub async fn run_role_mcp_server<TB: TaskBackend + Clone + Send + Sync + 'static>(
+pub async fn run_role_mcp_server(
     zbobr: ZbobrDispatcher,
-    task_backend: TB,
+    task_backend: std::sync::Arc<dyn TaskBackend>,
     role: Role,
     task_id: u64,
     tool: Tool,
