@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -8,8 +6,6 @@ use rmcp::{
 };
 
 use crate::{
-    ZbobrDispatcher,
-    backend::TaskBackend,
     mcp::{
         common::GetHistoryParam,
         traits::{CommonMcpImpl, TesterMcpImpl},
@@ -24,6 +20,7 @@ pub struct TesterMcp {
     tool: Tool,
     model: Model,
     stage_name: String,
+    transitions: std::collections::HashMap<String, String>,
 }
 
 impl CommonMcpImpl for TesterMcp {
@@ -46,6 +43,10 @@ impl CommonMcpImpl for TesterMcp {
     fn stage_name(&self) -> &str {
         &self.stage_name
     }
+
+    fn transitions(&self) -> &std::collections::HashMap<String, String> {
+        &self.transitions
+    }
 }
 
 impl TesterMcpImpl for TesterMcp {}
@@ -53,19 +54,19 @@ impl TesterMcpImpl for TesterMcp {}
 #[tool_router]
 impl TesterMcp {
     pub fn new(
-        zbobr: ZbobrDispatcher,
-        task_backend: Arc<dyn TaskBackend>,
-        task_id: u64,
+        session: RoleSession,
         tool: Tool,
         model: Model,
         stage_name: String,
+        transitions: std::collections::HashMap<String, String>,
     ) -> Self {
         Self {
-            session: zbobr.role_session(task_backend, task_id),
+            session,
             tool_router: Self::tool_router(),
             tool,
             model,
             stage_name,
+            transitions,
         }
     }
 

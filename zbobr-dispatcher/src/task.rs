@@ -15,12 +15,14 @@ use crate::{
 // ---------------------------------------------------------------------------
 
 /// Restricted task session for MCP tool operations.
-/// Stage and conflict flag are protected — only the dispatcher may change them.
+/// State and stack are protected — only the dispatcher may change them.
 #[derive(Clone)]
 pub struct RoleSession {
     zbobr: ZbobrDispatcher,
     task_backend: Arc<dyn TaskBackend>,
     task_id: u64,
+    /// Tracks the last MCP tool call that matched a transition key.
+    last_mapped_tool: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl RoleSession {
@@ -29,6 +31,21 @@ impl RoleSession {
             zbobr,
             task_backend,
             task_id,
+            last_mapped_tool: Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+
+    pub(crate) fn with_shared_tracker(
+        zbobr: ZbobrDispatcher,
+        task_backend: Arc<dyn TaskBackend>,
+        task_id: u64,
+        tracker: Arc<std::sync::Mutex<Option<String>>>,
+    ) -> Self {
+        Self {
+            zbobr,
+            task_backend,
+            task_id,
+            last_mapped_tool: tracker,
         }
     }
 
@@ -205,6 +222,23 @@ impl RoleSession {
             task
         })
         .await
+    }
+
+    /// Record a tool call for transition mapping.
+    /// If `tool_name` is a key in `transitions`, it becomes the last mapped tool.
+    pub fn record_tool_call(
+        &self,
+        tool_name: &str,
+        transitions: &std::collections::HashMap<String, String>,
+    ) {
+        if transitions.contains_key(tool_name) {
+            *self.last_mapped_tool.lock().unwrap() = Some(tool_name.to_string());
+        }
+    }
+
+    /// Get the last MCP tool call that matched a transition key.
+    pub fn last_mapped_tool(&self) -> Option<String> {
+        self.last_mapped_tool.lock().unwrap().clone()
     }
 }
 
@@ -662,13 +696,13 @@ mod comment_model_tests {
             .await
             .unwrap();
 
+        let session = zbobr.role_session(task_backend.clone() as Arc<dyn TaskBackend>, id);
         let planner = crate::mcp::planner::PlannerMcp::new(
-            zbobr.clone(),
-            task_backend.clone() as Arc<dyn TaskBackend>,
-            id,
+            session,
             Tool::Copilot,
             Model::Gpt5Mini,
             "planning".to_string(),
+            std::collections::HashMap::new(),
         );
 
         let _ = planner.report_error_impl("oops").await;

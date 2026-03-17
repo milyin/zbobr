@@ -883,6 +883,7 @@ impl<'a> CliStageRunner<'a> {
             }
         }
 
+        let tool_tracker = Arc::new(std::sync::Mutex::new(None::<String>));
         let (assigned_port, server_handle) = start_mcp_server(
             self.zbobr.clone(),
             role,
@@ -890,6 +891,8 @@ impl<'a> CliStageRunner<'a> {
             cli_tool,
             model.clone(),
             self.stage_def.name.clone(),
+            self.stage_def.transitions.clone(),
+            Arc::clone(&tool_tracker),
         )
         .await?;
 
@@ -920,6 +923,9 @@ impl<'a> CliStageRunner<'a> {
         )
         .await;
 
+        // Read the last mapped tool from the shared tracker
+        let last_mapped_tool = tool_tracker.lock().unwrap().clone();
+
         if let Some(e) = finalize_stage_session(
             self.zbobr,
             self.task_id,
@@ -927,6 +933,7 @@ impl<'a> CliStageRunner<'a> {
             self.pipeline,
             &work_dir,
             outcome,
+            last_mapped_tool.as_deref(),
         )
         .await?
         {
@@ -1287,11 +1294,13 @@ async fn start_mcp_server(
     tool: Tool,
     model: Model,
     stage_name: String,
+    transitions: std::collections::HashMap<String, String>,
+    tool_tracker: Arc<std::sync::Mutex<Option<String>>>,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
     let task_backend = Arc::clone(zbobr.task_backend());
     let server_handle = tokio::spawn(async move {
-        match crate::mcp::run_role_mcp_server(zbobr, task_backend, role, task_id, tool, model, stage_name).await
+        match crate::mcp::run_role_mcp_server(zbobr, task_backend, role, task_id, tool, model, stage_name, transitions, tool_tracker).await
         {
             Ok(assigned_port) => {
                 let _ = port_tx.send(assigned_port);
@@ -1363,6 +1372,7 @@ async fn finalize_stage_session(
     _pipeline: &PipelineConfig,
     work_dir: &Path,
     outcome: SessionOutcome,
+    last_mapped_tool: Option<&str>,
 ) -> anyhow::Result<Option<anyhow::Error>> {
     let role = stage_def.role;
     let task_backend = zbobr.task_backend();
@@ -1495,7 +1505,7 @@ async fn finalize_stage_session(
     // that signal takes priority.
     let current_task = task_backend.get_task(task_id).await?.snapshot().await?;
     if !current_task.pause && current_task.signal.is_none() {
-        let signal = compute_post_stage_signal(stage_def, None);
+        let signal = compute_post_stage_signal(stage_def, last_mapped_tool);
         task_session.set_signal(Some(&signal)).await?;
     }
     task_session.set_state(&pending_state).await?;

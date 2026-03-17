@@ -174,6 +174,15 @@ pub trait CommonMcpImpl: Send + Sync {
     /// The dispatcher sets this when constructing the MCP service.
     fn stage_name(&self) -> &str;
 
+    /// Returns the transitions map from the stage definition.
+    /// Used to record tool calls for automatic signal computation.
+    fn transitions(&self) -> &std::collections::HashMap<String, String>;
+
+    /// Record a tool call for transition mapping.
+    fn record_tool(&self, tool_name: &str) {
+        self.session().record_tool_call(tool_name, self.transitions());
+    }
+
     async fn get_history_impl(&self, offset: Option<usize>) -> String {
         tracing::info!(
             "[{}#{}] get_history offset={:?}",
@@ -961,8 +970,8 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
         {
             format!("Error posting review acceptance: {e}")
         } else {
-            // No signal set — finalize_session will call finish when signal is None.
-            "Review accepted — task will be marked done".to_string()
+            self.record_tool("review_accept");
+            "Review accepted".to_string()
         };
         log_mcp_string_response(
             self.role_name(),
@@ -1001,13 +1010,8 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
             );
             return response;
         }
-        if let Err(e) = self.session().set_signal("go_planning").await {
-            tracing::warn!(
-                "Failed to set GoPlan signal for task {}: {e}",
-                self.session().task_id()
-            );
-        }
-        let response = "Review rejected — task routed back to planner".to_string();
+        self.record_tool("review_reject");
+        let response = "Review rejected".to_string();
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
@@ -1051,8 +1055,8 @@ pub trait TesterMcpImpl: CommonMcpImpl {
         {
             format!("Error posting test acceptance: {e}")
         } else {
-            // No signal set — finalize_session will call finish when signal is None.
-            "Testing accepted — task will be marked done".to_string()
+            self.record_tool("test_accept");
+            "Testing accepted".to_string()
         };
         log_mcp_string_response(
             self.role_name(),
@@ -1091,13 +1095,8 @@ pub trait TesterMcpImpl: CommonMcpImpl {
             );
             return response;
         }
-        if let Err(e) = self.session().set_signal("go_planning").await {
-            tracing::warn!(
-                "Failed to set GoPlan signal for task {}: {e}",
-                self.session().task_id()
-            );
-        }
-        let response = "Testing rejected — task routed back to planner".to_string();
+        self.record_tool("test_reject");
+        let response = "Testing rejected".to_string();
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),

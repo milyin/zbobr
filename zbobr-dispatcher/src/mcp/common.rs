@@ -4,7 +4,7 @@ use serde_json::Value;
 use crate::{
     ZbobrDispatcher,
     backend::TaskBackend,
-    task::{Model, Role, Tool},
+    task::{Model, Role, RoleSession, Tool},
 };
 
 // Custom deserializer for boolean that accepts both bool and string values
@@ -359,6 +359,8 @@ pub async fn run_role_mcp_server(
     tool: Tool,
     model: Model,
     stage_name: String,
+    transitions: std::collections::HashMap<String, String>,
+    tool_tracker: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 ) -> anyhow::Result<u16> {
     let base_port = zbobr.config().base_port;
     use rmcp::transport::streamable_http_server::{
@@ -367,6 +369,9 @@ pub async fn run_role_mcp_server(
 
     let path = format!("/{}/{}", role, task_id);
 
+    let session: RoleSession =
+        zbobr.role_session_with_tracker(task_backend.clone(), task_id, tool_tracker);
+
     let router = match role {
         Role::Preparator => {
             tracing::info!("Creating PreparatorMcp service for task {task_id} at path {path}");
@@ -374,12 +379,11 @@ pub async fn run_role_mcp_server(
                 move || {
                     tracing::debug!("Creating new PreparatorMcp instance for task {task_id}");
                     Ok(super::preparator::PreparatorMcp::new(
-                        zbobr.clone(),
-                        task_backend.clone(),
-                        task_id,
+                        session.clone(),
                         tool,
                         model.clone(),
                         stage_name.clone(),
+                        transitions.clone(),
                     ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
@@ -393,12 +397,11 @@ pub async fn run_role_mcp_server(
                 move || {
                     tracing::debug!("Creating new PlannerMcp instance for task {task_id}");
                     Ok(super::planner::PlannerMcp::new(
-                        zbobr.clone(),
-                        task_backend.clone(),
-                        task_id,
+                        session.clone(),
                         tool,
                         model.clone(),
                         stage_name.clone(),
+                        transitions.clone(),
                     ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
@@ -412,12 +415,11 @@ pub async fn run_role_mcp_server(
                 move || {
                     tracing::debug!("Creating new WorkerMcp instance for task {task_id}");
                     Ok(super::worker::WorkerMcp::new(
-                        zbobr.clone(),
-                        task_backend.clone(),
-                        task_id,
+                        session.clone(),
                         tool,
                         model.clone(),
                         stage_name.clone(),
+                        transitions.clone(),
                     ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
@@ -431,12 +433,11 @@ pub async fn run_role_mcp_server(
                 move || {
                     tracing::debug!("Creating new ReviewerMcp instance for task {task_id}");
                     Ok(super::reviewer::ReviewerMcp::new(
-                        zbobr.clone(),
-                        task_backend.clone(),
-                        task_id,
+                        session.clone(),
                         tool,
                         model.clone(),
                         stage_name.clone(),
+                        transitions.clone(),
                     ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
@@ -450,12 +451,11 @@ pub async fn run_role_mcp_server(
                 move || {
                     tracing::debug!("Creating new TesterMcp instance for task {task_id}");
                     Ok(super::tester::TesterMcp::new(
-                        zbobr.clone(),
-                        task_backend.clone(),
-                        task_id,
+                        session.clone(),
                         tool,
                         model.clone(),
                         stage_name.clone(),
+                        transitions.clone(),
                     ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
@@ -469,12 +469,11 @@ pub async fn run_role_mcp_server(
                 move || {
                     tracing::debug!("Creating new MergerMcp instance for task {task_id}");
                     Ok(super::merger::MergerMcp::new(
-                        zbobr.clone(),
-                        task_backend.clone(),
-                        task_id,
+                        session.clone(),
                         tool,
                         model.clone(),
                         stage_name.clone(),
+                        transitions.clone(),
                     ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),

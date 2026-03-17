@@ -237,4 +237,14 @@ impl ZbobrDispatcher {
     ) -> RoleSession {
         RoleSession::new(self.clone(), task_backend, task_id)
     }
+
+    /// Create a RoleSession with a shared tool call tracker.
+    pub fn role_session_with_tracker(
+        &self,
+        task_backend: Arc<dyn TaskBackend>,
+        task_id: u64,
+        tracker: Arc<std::sync::Mutex<Option<String>>>,
+    ) -> RoleSession {
+        RoleSession::with_shared_tracker(self.clone(), task_backend, task_id, tracker)
+    }
 }
