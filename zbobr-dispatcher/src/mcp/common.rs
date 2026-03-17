@@ -358,6 +358,7 @@ pub async fn run_role_mcp_server(
     task_id: u64,
     tool: Tool,
     model: Model,
+    stage_name: String,
 ) -> anyhow::Result<u16> {
     let base_port = zbobr.config().base_port;
     use rmcp::transport::streamable_http_server::{
@@ -378,6 +379,7 @@ pub async fn run_role_mcp_server(
                         task_id,
                         tool,
                         model.clone(),
+                        stage_name.clone(),
                     ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
@@ -396,6 +398,7 @@ pub async fn run_role_mcp_server(
                         task_id,
                         tool,
                         model.clone(),
+                        stage_name.clone(),
                     ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
@@ -414,6 +417,7 @@ pub async fn run_role_mcp_server(
                         task_id,
                         tool,
                         model.clone(),
+                        stage_name.clone(),
                     ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
@@ -432,6 +436,7 @@ pub async fn run_role_mcp_server(
                         task_id,
                         tool,
                         model.clone(),
+                        stage_name.clone(),
                     ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
@@ -450,6 +455,7 @@ pub async fn run_role_mcp_server(
                         task_id,
                         tool,
                         model.clone(),
+                        stage_name.clone(),
                     ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),
@@ -468,6 +474,7 @@ pub async fn run_role_mcp_server(
                         task_id,
                         tool,
                         model.clone(),
+                        stage_name.clone(),
                     ))
                 },
                 std::sync::Arc::new(LocalSessionManager::default()),

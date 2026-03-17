@@ -6,11 +6,11 @@ use anyhow::Context;
 use clap::Parser;
 use zbobr_dispatcher::backend::{TaskBackend as _, WorktreeBackend as _};
 use zbobr_dispatcher::config::{
-    Config as _, PromptsArgs, PromptsConfig, PromptsToml, ZbobrDispatcherArgs,
-    ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs, ZbobrExecutorConfig,
-    ZbobrExecutorToml,
+    Config as _, ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
+    ZbobrExecutorArgs, ZbobrExecutorConfig, ZbobrExecutorToml,
 };
-use zbobr_dispatcher::{Command, ConfigFileArg};
+use zbobr_dispatcher::{Command, ConfigFileArg, ConfiguredPromptBuilder};
+use zbobr_api::config::PipelineConfig;
 use zbobr_utility::config_struct;
 
 use zbobr_repo_backend_github::{
@@ -33,8 +33,6 @@ struct RootConfig {
     repo: ZbobrRepoBackendGithubConfig,
     #[config(nested)]
     executor: ZbobrExecutorConfig,
-    #[config(nested)]
-    prompts: PromptsConfig,
 }
 
 #[derive(Parser)]
@@ -67,8 +65,6 @@ async fn main() -> anyhow::Result<()> {
         "GitHub-backed AI-powered task dispatcher",
         "GitHub-backed AI-powered task dispatcher that manages tasks through automated stages.\n\n\
         Tasks are stored in GitHub issues and work is done via pull requests.\n\
-        Tasks flow through: PENDING -> PREPARING -> PLANNING -> WORKING -> REVIEWING -> DONE.\n\
-        Merge conflicts are handled by MERGING sessions when the conflict flag is set.\n\n\
         Requires a GitHub token: set GH_TOKEN or GITHUB_TOKEN env var.\n\
         Easiest way: export GH_TOKEN=$(gh auth token)",
     );
@@ -92,6 +88,10 @@ async fn main() -> anyhow::Result<()> {
         .validate()
         .with_context(|| format!("Config file: {}", location.config_path.display()))?;
 
+    // Load pipeline config from TOML (stages section)
+    let pipeline = load_pipeline_config(&location.config_path)?;
+    pipeline.validate()?;
+
     let command = cli.command;
 
     let task_backend = TaskBackendGithub::from_config(config.tasks)?;
@@ -99,8 +99,7 @@ async fn main() -> anyhow::Result<()> {
     task_backend.validate_connectivity().await?;
     repo_backend.validate_connectivity().await?;
 
-    let prompt_builder = zbobr_dispatcher::ConfiguredPromptBuilder::from(config.prompts);
-    prompt_builder.validate()?;
+    let prompt_builder = ConfiguredPromptBuilder::new(Some(location.config_dir.clone()));
 
     let dispatcher = zbobr_dispatcher::ZbobrDispatcherBuilder::new()
         .with_config(Arc::new(config.dispatcher))
@@ -112,5 +111,27 @@ async fn main() -> anyhow::Result<()> {
         .with_prompt_builder(prompt_builder)
         .build();
 
-    dispatcher.run_command(command).await
+    dispatcher.run_command(command, &pipeline).await
+}
+
+/// Load pipeline configuration from the TOML file.
+/// Looks for a `[pipeline]` section with `stages = [...]`.
+fn load_pipeline_config(config_path: &std::path::Path) -> anyhow::Result<PipelineConfig> {
+    if !config_path.exists() {
+        // Return empty pipeline — will fail validation if stages are needed
+        return Ok(PipelineConfig { stages: vec![] });
+    }
+    let content = std::fs::read_to_string(config_path)
+        .with_context(|| format!("Failed to read {}", config_path.display()))?;
+
+    #[derive(serde::Deserialize, Default)]
+    struct Wrapper {
+        #[serde(default)]
+        pipeline: Option<PipelineConfig>,
+    }
+
+    let wrapper: Wrapper = toml::from_str(&content)
+        .with_context(|| format!("Failed to parse pipeline config from {}", config_path.display()))?;
+
+    Ok(wrapper.pipeline.unwrap_or(PipelineConfig { stages: vec![] }))
 }

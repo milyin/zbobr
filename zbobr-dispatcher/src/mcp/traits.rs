@@ -1,5 +1,5 @@
 use crate::{
-    CommentType, Signal,
+    CommentType,
     mcp::common::get_hostname,
     task::{ChecklistItem, Model, Role, RoleSession, Tool},
 };
@@ -169,18 +169,10 @@ pub trait CommonMcpImpl: Send + Sync {
         self.role().as_str()
     }
 
-    /// Returns the signal that should re-trigger this role after an interruption
+    /// Returns the name of the current stage, used to compute the retry signal
     /// (e.g. after `report_error` or `ask_user` pauses the task).
-    fn retry_signal(&self) -> Signal {
-        match self.role() {
-            Role::Preparator => Signal::GoPrepare,
-            Role::Planner => Signal::GoPlan,
-            Role::Worker => Signal::GoWork,
-            Role::Reviewer => Signal::GoReview,
-            Role::Tester => Signal::GoTest,
-            Role::Merger => Signal::GoWork,
-        }
-    }
+    /// The dispatcher sets this when constructing the MCP service.
+    fn stage_name(&self) -> &str;
 
     async fn get_history_impl(&self, offset: Option<usize>) -> String {
         tracing::info!(
@@ -280,8 +272,9 @@ pub trait CommonMcpImpl: Send + Sync {
             return response;
         }
 
-        // Set the retry signal so the task returns to this role after the user intervenes.
-        if let Err(e) = self.session().set_signal(self.retry_signal()).await {
+        // Set the retry signal so the task returns to this stage after the user intervenes.
+        let retry = format!("go_{}", self.stage_name());
+        if let Err(e) = self.session().set_signal(&retry).await {
             tracing::warn!(
                 "Failed to set retry signal for task {} after reporting error: {e}",
                 self.session().task_id()
@@ -392,8 +385,9 @@ pub trait CommonMcpImpl: Send + Sync {
             return response;
         }
 
-        // Set the retry signal so the task returns to this role after the user responds.
-        if let Err(e) = self.session().set_signal(self.retry_signal()).await {
+        // Set the retry signal so the task returns to this stage after the user responds.
+        let retry = format!("go_{}", self.stage_name());
+        if let Err(e) = self.session().set_signal(&retry).await {
             tracing::warn!(
                 "Failed to set retry signal for task {} after asking user: {e}",
                 self.session().task_id()
@@ -910,7 +904,7 @@ pub trait WorkerMcpImpl: CommonMcpImpl {
         }
 
         // Pass task back to planner agent for clarification or re-planning
-        if let Err(e) = self.session().set_signal(crate::Signal::GoPlan).await {
+        if let Err(e) = self.session().set_signal("go_planning").await {
             tracing::error!(
                 "Failed to set signal GoPlan for task {} after ask_planner: {e}",
                 self.session().task_id()
@@ -1007,7 +1001,7 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
             );
             return response;
         }
-        if let Err(e) = self.session().set_signal(crate::Signal::GoPlan).await {
+        if let Err(e) = self.session().set_signal("go_planning").await {
             tracing::warn!(
                 "Failed to set GoPlan signal for task {}: {e}",
                 self.session().task_id()
@@ -1097,7 +1091,7 @@ pub trait TesterMcpImpl: CommonMcpImpl {
             );
             return response;
         }
-        if let Err(e) = self.session().set_signal(crate::Signal::GoPlan).await {
+        if let Err(e) = self.session().set_signal("go_planning").await {
             tracing::warn!(
                 "Failed to set GoPlan signal for task {}: {e}",
                 self.session().task_id()

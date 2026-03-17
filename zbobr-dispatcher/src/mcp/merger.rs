@@ -23,6 +23,7 @@ pub struct MergerMcp {
     tool_router: ToolRouter<Self>,
     tool: Tool,
     model: Model,
+    stage_name: String,
 }
 
 impl CommonMcpImpl for MergerMcp {
@@ -41,6 +42,10 @@ impl CommonMcpImpl for MergerMcp {
     fn mcp_model(&self) -> Model {
         self.model.clone()
     }
+
+    fn stage_name(&self) -> &str {
+        &self.stage_name
+    }
 }
 
 impl MergerMcpImpl for MergerMcp {}
@@ -53,12 +58,14 @@ impl MergerMcp {
         task_id: u64,
         tool: Tool,
         model: Model,
+        stage_name: String,
     ) -> Self {
         Self {
             session: zbobr.role_session(task_backend, task_id),
             tool_router: Self::tool_router(),
             tool,
             model,
+            stage_name,
         }
     }
 

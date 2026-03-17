@@ -26,6 +26,7 @@ pub struct PlannerMcp {
     tool_router: ToolRouter<Self>,
     tool: Tool,
     model: Model,
+    stage_name: String,
 }
 
 impl CommonMcpImpl for PlannerMcp {
@@ -44,6 +45,10 @@ impl CommonMcpImpl for PlannerMcp {
     fn mcp_model(&self) -> Model {
         self.model.clone()
     }
+
+    fn stage_name(&self) -> &str {
+        &self.stage_name
+    }
 }
 
 impl PlannerMcpImpl for PlannerMcp {}
@@ -56,12 +61,14 @@ impl PlannerMcp {
         task_id: u64,
         tool: Tool,
         model: Model,
+        stage_name: String,
     ) -> Self {
         Self {
             session: zbobr.role_session(task_backend, task_id),
             tool_router: Self::tool_router(),
             tool,
             model,
+            stage_name,
         }
     }
 

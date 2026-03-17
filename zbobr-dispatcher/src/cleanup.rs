@@ -42,7 +42,7 @@ impl ZbobrDispatcher {
             // the task was deleted/closed and we can clean up the workspace.
             match task_backend.get_task(task_id).await {
                 Ok(weak) => match weak.snapshot().await {
-                    Ok(task) if task.stage == crate::Stage::Done => {
+                    Ok(task) if task.state == "DONE" => {
                         if dry_run {
                             tracing::info!(
                                 "DRY RUN: Would remove {} (task #{task_id} is DONE)",

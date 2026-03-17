@@ -253,77 +253,13 @@ pub fn extract_history_chunk(
     })
 }
 
-/// Workflow stage (maps to GitHub milestones internally).
+/// An entry on the task's call stack, recording which mode+stage to return to.
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
-pub enum Stage {
-    Pending,
-    Preparing,
-    Planning,
-    Working,
-    Reviewing,
-    Testing,
-    Merging,
-    Done,
-}
-
-impl Stage {
-    pub fn milestone_name(&self) -> &'static str {
-        match self {
-            Stage::Pending => "PENDING",
-            Stage::Preparing => "PREPARING",
-            Stage::Planning => "PLANNING",
-            Stage::Working => "WORKING",
-            Stage::Reviewing => "REVIEWING",
-            Stage::Testing => "TESTING",
-            Stage::Merging => "MERGING",
-            Stage::Done => "DONE",
-        }
-    }
-
-    pub fn from_milestone_name(name: &str) -> Option<Self> {
-        match name {
-            "PENDING" => Some(Stage::Pending),
-            "PREPARING" | "PREPARATION" => Some(Stage::Preparing),
-            "PLANNING" => Some(Stage::Planning),
-            "WORKING" => Some(Stage::Working),
-            "REVIEWING" => Some(Stage::Reviewing),
-            "TESTING" => Some(Stage::Testing),
-            "MERGING" => Some(Stage::Merging),
-            "DONE" => Some(Stage::Done),
-            _ => None,
-        }
-    }
-
-    /// Returns a priority value for task selection by stage proximity.
-    /// Lower values = higher priority (closer to completion).
-    pub fn priority(&self) -> u8 {
-        match self {
-            Stage::Testing => 0,
-            Stage::Reviewing => 1,
-            Stage::Merging => 2,
-            Stage::Working => 3,
-            Stage::Planning => 4,
-            Stage::Preparing => 5,
-            Stage::Pending => 6,
-            Stage::Done => 7,
-        }
-    }
-}
-
-impl std::fmt::Display for Stage {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.milestone_name())
-    }
+pub struct StackEntry {
+    pub mode: String,
+    pub stage: String,
 }
 
 /// Role for task execution (planner, worker, reviewer, merger, or user).
@@ -359,42 +295,6 @@ impl Role {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Conversion helpers
-// ---------------------------------------------------------------------------
-
-impl From<Role> for Stage {
-    fn from(role: Role) -> Stage {
-        match role {
-            Role::Preparator => Stage::Preparing,
-            Role::Planner => Stage::Planning,
-            Role::Worker => Stage::Working,
-            Role::Reviewer => Stage::Reviewing,
-            Role::Tester => Stage::Testing,
-            Role::Merger => Stage::Merging,
-        }
-    }
-}
-
-impl std::convert::TryFrom<Stage> for Role {
-    type Error = anyhow::Error;
-
-    fn try_from(stage: Stage) -> Result<Self, Self::Error> {
-        match stage {
-            Stage::Preparing => Ok(Role::Preparator),
-            Stage::Planning => Ok(Role::Planner),
-            Stage::Working => Ok(Role::Worker),
-            Stage::Reviewing => Ok(Role::Reviewer),
-            Stage::Testing => Ok(Role::Tester),
-            Stage::Merging => Ok(Role::Merger),
-            other => Err(anyhow::anyhow!(
-                "cannot convert stage {:?} into a role",
-                other
-            )),
-        }
-    }
-}
-
 impl std::fmt::Display for Role {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
@@ -415,91 +315,6 @@ impl std::str::FromStr for Role {
     }
 }
 
-/// Signal for task flow control (mapped to labels in GitHub backend).
-/// Ordered by priority (highest to lowest): GoPrepare > GoPlan > GoWork > GoReview > GoTest.
-///
-/// Note: there is no GoMerge signal. Merging is triggered by the `conflict`
-/// flag on the Task struct, which is set automatically when a work branch
-/// diverges from its base branch.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-pub enum Signal {
-    #[serde(rename = "go_prepare")]
-    GoPrepare = 1,
-    #[serde(rename = "go_plan")]
-    GoPlan = 2,
-    #[serde(rename = "go_work")]
-    GoWork = 3,
-    #[serde(rename = "go_review")]
-    GoReview = 4,
-    #[serde(rename = "go_test")]
-    GoTest = 5,
-}
-
-impl Signal {
-    /// Returns the plain signal name.
-    pub fn name(&self) -> &'static str {
-        match self {
-            Signal::GoReview => "go_review",
-            Signal::GoTest => "go_test",
-            Signal::GoWork => "go_work",
-            Signal::GoPlan => "go_plan",
-            Signal::GoPrepare => "go_prepare",
-        }
-    }
-
-    /// Returns all available signals in priority order.
-    pub fn all() -> &'static [Signal] {
-        &[
-            Signal::GoPrepare,
-            Signal::GoPlan,
-            Signal::GoWork,
-            Signal::GoReview,
-            Signal::GoTest,
-        ]
-    }
-
-    /// Maps signal to the role that should execute the session.
-    pub fn target_role(&self) -> Role {
-        match self {
-            Signal::GoReview => Role::Reviewer,
-            Signal::GoTest => Role::Tester,
-            Signal::GoWork => Role::Worker,
-            Signal::GoPlan => Role::Planner,
-            Signal::GoPrepare => Role::Preparator,
-        }
-    }
-}
-
-impl std::fmt::Display for Signal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.name())
-    }
-}
-
-impl std::str::FromStr for Signal {
-    type Err = anyhow::Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().replace('_', "").as_str() {
-            "goreview" | "go-review" => Ok(Signal::GoReview),
-            "gotest" | "go-test" => Ok(Signal::GoTest),
-            "gowork" | "go-work" => Ok(Signal::GoWork),
-            "goplan" | "go-plan" => Ok(Signal::GoPlan),
-            "goprepare" | "go-prepare" => Ok(Signal::GoPrepare),
-            _ => Err(anyhow::anyhow!("Unknown signal: {}", s)),
-        }
-    }
-}
 
 /// AI Tool/Agent to use.
 #[derive(
@@ -879,17 +694,21 @@ pub struct Task {
     pub id: u64,
     pub title: String,
     pub description: String,
-    pub stage: Stage,
+    /// Task state: empty | "DONE" | "PAUSE" | "READY" | "{MODE}_PENDING" | "{MODE}_{STAGE}"
+    pub state: String,
     pub destination_repository: Option<String>,
     pub destination_branch: Option<String>,
     pub work_branch: Option<String>,
     pub pr_url: Option<String>,
     pub checklist: Vec<ChecklistItem>,
-    pub signal: Option<Signal>,
-    pub conflict: bool,
+    /// Signal for flow control: go_{stage}, call_{mode}, return
+    pub signal: Option<String>,
+    /// Call stack for mode call/return semantics.
+    #[serde(default)]
+    pub stack: Vec<StackEntry>,
     pub pause: bool,
     /// When true the dispatcher will automatically set the pause flag any time
-    /// the task's stage is changed.  This gives human operators an opportunity to
+    /// the task's state is changed.  This gives human operators an opportunity to
     /// review a transition before the next processing step occurs.
     pub confirm: bool,
     /// ETag for optimistic locking to prevent concurrent update conflicts.

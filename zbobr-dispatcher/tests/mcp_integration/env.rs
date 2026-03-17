@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -8,14 +9,14 @@ use std::{
     },
 };
 
+use zbobr_api::config::{PipelineConfig, StageDefinition};
 use zbobr_dispatcher::{
-    ChecklistItem, Comment, Signal, Stage, Task, TaskDir, ZbobrDispatcher,
+    ChecklistItem, Comment, Task, TaskDir, ZbobrDispatcher,
     ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
     backend::{TaskBackend, TaskBackendExt, WorktreeBackend},
-    cli::process_task_by_stage,
-    config::StageConfig,
-    prompts::{ConfiguredPromptBuilder, PromptsConfig},
-    task::Tool,
+    cli::process_task,
+    prompts::ConfiguredPromptBuilder,
+    task::{Role, Tool},
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_repo_backend_fs::{ZbobrRepoBackendFs, ZbobrRepoBackendFsConfig};
@@ -60,12 +61,6 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
     let dispatcher_config = ZbobrDispatcherConfig {
         workspaces: workspaces_dir.clone(),
         tool: Tool::McpTester,
-        preparator: StageConfig::default(),
-        planner: StageConfig::default(),
-        worker: StageConfig::default(),
-        reviewer: StageConfig::default(),
-        tester: StageConfig::default(),
-        merger: StageConfig::default(),
         ..ZbobrDispatcherConfig::default()
     };
 
@@ -86,7 +81,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
         .with_config(Arc::new(dispatcher_config))
         .with_task_backend(Arc::clone(&task_backend))
         .with_repo_backend(Arc::clone(&repo_backend))
-        .with_prompt_builder(ConfiguredPromptBuilder::from(PromptsConfig::default()))
+        .with_prompt_builder(ConfiguredPromptBuilder::new(None))
         .build();
 
     zbobr
@@ -130,12 +125,6 @@ pub async fn init_github_fs(
     let dispatcher_config = ZbobrDispatcherConfig {
         workspaces: workspaces_dir.clone(),
         tool: Tool::McpTester,
-        preparator: StageConfig::default(),
-        planner: StageConfig::default(),
-        worker: StageConfig::default(),
-        reviewer: StageConfig::default(),
-        tester: StageConfig::default(),
-        merger: StageConfig::default(),
         ..ZbobrDispatcherConfig::default()
     };
 
@@ -156,7 +145,7 @@ pub async fn init_github_fs(
         .with_config(Arc::new(dispatcher_config))
         .with_task_backend(Arc::clone(&task_backend))
         .with_repo_backend(Arc::clone(&repo_backend))
-        .with_prompt_builder(ConfiguredPromptBuilder::from(PromptsConfig::default()))
+        .with_prompt_builder(ConfiguredPromptBuilder::new(None))
         .build();
 
     zbobr
@@ -201,12 +190,6 @@ pub async fn init_fs_github(
     let dispatcher_config = ZbobrDispatcherConfig {
         workspaces: workspaces_dir.clone(),
         tool: Tool::McpTester,
-        preparator: StageConfig::default(),
-        planner: StageConfig::default(),
-        worker: StageConfig::default(),
-        reviewer: StageConfig::default(),
-        tester: StageConfig::default(),
-        merger: StageConfig::default(),
         ..ZbobrDispatcherConfig::default()
     };
 
@@ -232,7 +215,7 @@ pub async fn init_fs_github(
         .with_config(Arc::new(dispatcher_config))
         .with_task_backend(Arc::clone(&task_backend))
         .with_repo_backend(Arc::clone(&repo_backend))
-        .with_prompt_builder(ConfiguredPromptBuilder::from(PromptsConfig::default()))
+        .with_prompt_builder(ConfiguredPromptBuilder::new(None))
         .build();
 
     zbobr
@@ -278,12 +261,6 @@ pub async fn init_github_github(
     let dispatcher_config = ZbobrDispatcherConfig {
         workspaces: workspaces_dir.clone(),
         tool: Tool::McpTester,
-        preparator: StageConfig::default(),
-        planner: StageConfig::default(),
-        worker: StageConfig::default(),
-        reviewer: StageConfig::default(),
-        tester: StageConfig::default(),
-        merger: StageConfig::default(),
         ..ZbobrDispatcherConfig::default()
     };
 
@@ -309,7 +286,7 @@ pub async fn init_github_github(
         .with_config(Arc::new(dispatcher_config))
         .with_task_backend(Arc::clone(&task_backend))
         .with_repo_backend(Arc::clone(&repo_backend))
-        .with_prompt_builder(ConfiguredPromptBuilder::from(PromptsConfig::default()))
+        .with_prompt_builder(ConfiguredPromptBuilder::new(None))
         .build();
 
     zbobr
@@ -347,9 +324,9 @@ impl IntegrationTestEnv {
     // Task utilities
     // -----------------------------------------------------------------------
 
-    pub async fn create_task(&self, title: &str, description: &str, stage: Stage) -> u64 {
+    pub async fn create_task(&self, title: &str, description: &str, state: &str) -> u64 {
         self.zbobr
-            .create_task(&*self.task_backend, title, description, stage, None, None)
+            .create_task(&*self.task_backend, title, description, state, None, None)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to create task: {e}", self.name))
     }
@@ -358,7 +335,7 @@ impl IntegrationTestEnv {
         &self,
         title: &str,
         description: &str,
-        stage: Stage,
+        state: &str,
         confirm: bool,
     ) -> u64 {
         self.zbobr
@@ -366,7 +343,7 @@ impl IntegrationTestEnv {
                 &*self.task_backend,
                 title,
                 description,
-                stage,
+                state,
                 None,
                 None,
                 confirm,
@@ -461,28 +438,7 @@ impl IntegrationTestEnv {
             });
     }
 
-    pub async fn set_task_conflict(&self, task_id: u64, conflict: bool) {
-        let weak = self
-            .task_backend
-            .get_task(task_id)
-            .await
-            .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name));
-        let mutable = weak
-            .upgrade()
-            .await
-            .unwrap_or_else(|e| panic!("[{}] failed to upgrade task #{task_id}: {e}", self.name));
-        mutable.set_conflict(conflict).await.unwrap_or_else(|e| {
-            panic!(
-                "[{}] failed to set conflict on task #{task_id}: {e}",
-                self.name
-            )
-        });
-    }
-
     pub async fn update_task_signal(&self, task_id: u64, signal: &str) {
-        let signal: Signal = signal
-            .parse()
-            .unwrap_or_else(|_| panic!("[{}] invalid signal '{signal}'", self.name));
         self.task_backend
             .set_task_signal(task_id, Some(signal))
             .await
@@ -494,9 +450,10 @@ impl IntegrationTestEnv {
             });
     }
 
-    /// Update the task's stage, simulating a manual stage transition with
+    /// Update the task's state, simulating a manual state transition with
     /// respect to the `confirm` flag (sets `pause` when confirm is true).
-    pub async fn update_task_stage(&self, task_id: u64, new_stage: Stage) {
+    pub async fn update_task_state(&self, task_id: u64, new_state: &str) {
+        let new_state = new_state.to_string();
         let weak = self
             .task_backend
             .get_task(task_id)
@@ -508,16 +465,16 @@ impl IntegrationTestEnv {
             .unwrap_or_else(|e| panic!("[{}] failed to upgrade task #{task_id}: {e}", self.name));
         mutable
             .modify_task(Box::new(move |mut task| {
-                if task.confirm && task.stage != new_stage {
+                if task.confirm && task.state != new_state {
                     task.pause = true;
                 }
-                task.stage = new_stage;
+                task.state = new_state;
                 task
             }))
             .await
             .unwrap_or_else(|e| {
                 panic!(
-                    "[{}] failed to update task #{task_id} stage: {e}",
+                    "[{}] failed to update task #{task_id} state: {e}",
                     self.name
                 )
             });
@@ -653,19 +610,20 @@ impl IntegrationTestEnv {
     // Stage runner
     // -----------------------------------------------------------------------
 
-    /// Run the dispatcher for the given stage against `task_id`, using the
+    /// Run the dispatcher for the given role against `task_id`, using the
     /// provided scenario YAML string as the mcp-tester script.
     ///
     /// Internally:
-    ///  1. Sets the task's stage to `stage`.
+    ///  1. Sets the task's state to `"READY"` so the pipeline dispatches this role.
     ///  2. Writes the scenario to a temporary file.
-    ///  3. Overrides dispatcher MCP tester config with the scenario file for `stage`.
-    ///  4. Calls `process_task_by_stage` directly (no subprocess).
-    pub async fn run_stage(&self, task_id: u64, stage: Stage, scenario: String) {
+    ///  3. Builds a single-stage pipeline for the given role.
+    ///  4. Overrides dispatcher MCP tester config with the scenario file for the role.
+    ///  5. Calls `process_task` directly (no subprocess).
+    pub async fn run_stage(&self, task_id: u64, role: Role, scenario: String) {
         self.task_backend
-            .set_task_stage(task_id, stage)
+            .set_task_state(task_id, "READY")
             .await
-            .unwrap_or_else(|e| panic!("[{}] failed to set stage: {e}", self.name));
+            .unwrap_or_else(|e| panic!("[{}] failed to set task state: {e}", self.name));
 
         let idx = SCENARIO_COUNTER.fetch_add(1, Ordering::Relaxed);
         let scenarios_dir = self.base_path.join("scenarios").join(format!("{idx}"));
@@ -677,39 +635,59 @@ impl IntegrationTestEnv {
             .await
             .expect("failed to write scenario file");
 
-        let mcp_tester_config = match stage {
-            Stage::Preparing => ZbobrExecutorMcpTesterConfig {
+        let mcp_tester_config = match role {
+            Role::Preparator => ZbobrExecutorMcpTesterConfig {
                 preparation: Some(scenario_path),
                 ..Default::default()
             },
-            Stage::Planning => ZbobrExecutorMcpTesterConfig {
+            Role::Planner => ZbobrExecutorMcpTesterConfig {
                 planning: Some(scenario_path),
                 ..Default::default()
             },
-            Stage::Working => ZbobrExecutorMcpTesterConfig {
+            Role::Worker => ZbobrExecutorMcpTesterConfig {
                 working: Some(scenario_path),
                 ..Default::default()
             },
-            Stage::Reviewing => ZbobrExecutorMcpTesterConfig {
+            Role::Reviewer => ZbobrExecutorMcpTesterConfig {
                 reviewing: Some(scenario_path),
                 ..Default::default()
             },
-            Stage::Merging => ZbobrExecutorMcpTesterConfig {
+            Role::Tester => ZbobrExecutorMcpTesterConfig {
+                testing: Some(scenario_path),
+                ..Default::default()
+            },
+            Role::Merger => ZbobrExecutorMcpTesterConfig {
                 merging: Some(scenario_path),
                 ..Default::default()
             },
-            other => panic!("[{}] run_stage: unsupported stage {:?}", self.name, other),
+        };
+
+        // Build a minimal single-stage pipeline for the given role so that
+        // process_task dispatches exactly this role when state is "READY".
+        let stage_name = role.as_str().to_string();
+        let pipeline = PipelineConfig {
+            stages: vec![StageDefinition {
+                name: stage_name.clone(),
+                role,
+                model: None,
+                tool: Some(Tool::McpTester),
+                main_prompt: None,
+                additional_prompts: vec![],
+                transitions: HashMap::new(),
+                is_start: true,
+                mode: "main".to_string(),
+            }],
         };
 
         let stage_dispatcher = self.zbobr.with_mcp_tester_config(mcp_tester_config);
 
         let task = self.get_task(task_id).await;
 
-        process_task_by_stage(&stage_dispatcher, &task)
+        process_task(&stage_dispatcher, &task, &pipeline)
             .await
             .unwrap_or_else(|e| {
                 panic!(
-                    "[{}] process_task_by_stage failed for task #{task_id}: {e}",
+                    "[{}] process_task failed for task #{task_id}: {e}",
                     self.name
                 )
             });

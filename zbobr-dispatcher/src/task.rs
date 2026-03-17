@@ -86,7 +86,7 @@ impl RoleSession {
     /// The closure receives a mutable `Task` reference and may modify `description`,
     /// `parameters`, `checklist`, `signal`, and `pause`.
     ///
-    /// **Protected fields**: `stage` and `conflict` are saved before the mutation
+    /// **Protected fields**: `state` and `stack` are saved before the mutation
     /// and restored afterwards, so MCP tools cannot change them.
     pub async fn modify_task<F>(&self, mutate: F) -> anyhow::Result<()>
     where
@@ -96,11 +96,11 @@ impl RoleSession {
         let mutable = weak.upgrade().await?;
         mutable
             .modify_task(Box::new(move |mut task| {
-                let saved_stage = task.stage;
-                let saved_conflict = task.conflict;
+                let saved_state = task.state.clone();
+                let saved_stack = task.stack.clone();
                 task = mutate(task);
-                task.stage = saved_stage;
-                task.conflict = saved_conflict;
+                task.state = saved_state;
+                task.stack = saved_stack;
                 task
             }))
             .await
@@ -129,22 +129,16 @@ impl RoleSession {
     }
 
     /// Get the current signal on the task.
-    pub async fn get_signal(&self) -> anyhow::Result<Option<Signal>> {
+    pub async fn get_signal(&self) -> anyhow::Result<Option<String>> {
         let task = self.get_task().await?;
         Ok(task.signal)
     }
 
-    /// Set signal on the task, respecting priority (higher priority signals cannot be overwritten by lower).
-    pub async fn set_signal(&self, new_signal: Signal) -> anyhow::Result<()> {
+    /// Set signal on the task.
+    pub async fn set_signal(&self, new_signal: &str) -> anyhow::Result<()> {
+        let signal = new_signal.to_string();
         self.modify_task(move |mut task| {
-            // Only set if new signal has higher or equal priority (lower enum value)
-            if let Some(current_signal) = task.signal
-                && new_signal > current_signal
-            {
-                // new_signal has lower priority, don't overwrite
-                return task;
-            }
-            task.signal = Some(new_signal);
+            task.signal = Some(signal);
             task
         })
         .await
@@ -280,13 +274,14 @@ impl TaskSession {
             .await
     }
 
-    /// Set the task stage (dispatcher only).
-    pub async fn set_stage(&self, stage: Stage) -> anyhow::Result<()> {
+    /// Set the task state (dispatcher only).
+    pub async fn set_state(&self, state: &str) -> anyhow::Result<()> {
+        let state = state.to_string();
         self.modify_task(move |mut task| {
-            if task.confirm && task.stage != stage {
+            if task.confirm && task.state != state {
                 task.pause = true;
             }
-            task.stage = stage;
+            task.state = state;
             task
         })
         .await
@@ -301,17 +296,9 @@ impl TaskSession {
         .await
     }
 
-    /// Set the conflict flag (dispatcher only).
-    pub async fn set_conflict(&self, conflict: bool) -> anyhow::Result<()> {
-        self.modify_task(move |mut task| {
-            task.conflict = conflict;
-            task
-        })
-        .await
-    }
-
-    /// Set signal on the task (dispatcher only, no priority check).
-    pub async fn set_signal(&self, signal: Option<Signal>) -> anyhow::Result<()> {
+    /// Set signal on the task (dispatcher only).
+    pub async fn set_signal(&self, signal: Option<&str>) -> anyhow::Result<()> {
+        let signal = signal.map(|s| s.to_string());
         self.modify_task(move |mut task| {
             task.signal = signal;
             task
@@ -319,8 +306,35 @@ impl TaskSession {
         .await
     }
 
+    /// Push an entry onto the task's call stack.
+    pub async fn push_stack(&self, mode: &str, stage: &str) -> anyhow::Result<()> {
+        let entry = crate::task::StackEntry {
+            mode: mode.to_string(),
+            stage: stage.to_string(),
+        };
+        self.modify_task(move |mut task| {
+            task.stack.push(entry);
+            task
+        })
+        .await
+    }
+
+    /// Pop the top entry from the task's call stack.
+    pub async fn pop_stack(&self) -> anyhow::Result<Option<crate::task::StackEntry>> {
+        let task = self.get_task().await?;
+        let popped = task.stack.last().cloned();
+        if popped.is_some() {
+            self.modify_task(move |mut task| {
+                task.stack.pop();
+                task
+            })
+            .await?;
+        }
+        Ok(popped)
+    }
+
     /// Finish the task: delete placeholder commit, push branch, post Done comment,
-    /// then set stage to Done and clear signal.
+    /// then set state to DONE and clear signal.
     pub async fn finish(&self) -> anyhow::Result<()> {
         let task_id = self.task_id;
         let task = self.get_task().await?;
@@ -355,7 +369,7 @@ impl TaskSession {
         }
 
         self.modify_task(move |mut task| {
-            task.stage = Stage::Done;
+            task.state = "DONE".to_string();
             task.signal = None;
             task
         })
@@ -543,9 +557,8 @@ mod comment_model_tests {
             }
         }
 
-        async fn list_tasks_by_stage(
+        async fn list_tasks(
             &self,
-            _stage: Stage,
         ) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
             Ok(vec![])
         }
@@ -554,7 +567,7 @@ mod comment_model_tests {
             &self,
             title: &str,
             description: &str,
-            stage: Stage,
+            state: &str,
         ) -> anyhow::Result<u64> {
             let id = self
                 .inner
@@ -565,14 +578,14 @@ mod comment_model_tests {
                 id,
                 title: title.to_string(),
                 description: description.to_string(),
-                stage,
+                state: state.to_string(),
                 destination_repository: None,
                 destination_branch: None,
                 work_branch: None,
                 pr_url: None,
                 checklist: vec![],
                 signal: None,
-                conflict: false,
+                stack: vec![],
                 pause: false,
                 confirm: false,
                 etag: None,
@@ -645,7 +658,7 @@ mod comment_model_tests {
     async fn mcp_helper_includes_explicit_model() {
         let (zbobr, task_backend, _repo_backend) = make_test_parts();
         let id = zbobr
-            .create_task(&*task_backend, "t", "", Stage::Pending, None, None)
+            .create_task(&*task_backend, "t", "", "READY", None, None)
             .await
             .unwrap();
 
@@ -655,6 +668,7 @@ mod comment_model_tests {
             id,
             Tool::Copilot,
             Model::Gpt5Mini,
+            "planning".to_string(),
         );
 
         let _ = planner.report_error_impl("oops").await;
@@ -669,7 +683,7 @@ mod comment_model_tests {
     async fn dispatcher_posts_have_no_model() {
         let (zbobr, task_backend, repo_backend) = make_test_parts();
         let id = zbobr
-            .create_task(&*task_backend, "t", "", Stage::Pending, None, None)
+            .create_task(&*task_backend, "t", "", "READY", None, None)
             .await
             .unwrap();
 

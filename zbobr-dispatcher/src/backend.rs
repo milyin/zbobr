@@ -13,17 +13,14 @@ impl zbobr_api::backend::TaskBackend for DummyBackend {
     async fn get_task(&self, _id: u64) -> anyhow::Result<Box<dyn zbobr_api::backend::TaskWeak>> {
         unimplemented!()
     }
-    async fn list_tasks_by_stage(
-        &self,
-        _stage: zbobr_api::Stage,
-    ) -> anyhow::Result<Vec<Box<dyn zbobr_api::backend::TaskWeak>>> {
+    async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn zbobr_api::backend::TaskWeak>>> {
         unimplemented!()
     }
     async fn create_task(
         &self,
         _title: &str,
         _description: &str,
-        _stage: zbobr_api::Stage,
+        _state: &str,
     ) -> anyhow::Result<u64> {
         unimplemented!()
     }

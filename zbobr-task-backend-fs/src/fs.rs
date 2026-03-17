@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use zbobr_api::{
-    ChecklistItem, Comment, CommentType, Model, Role, Stage, Task, Tool,
+    ChecklistItem, Comment, CommentType, Model, Role, StackEntry, Task, Tool,
     backend::{TaskBackend, TaskMut, TaskWeak},
 };
 
@@ -18,7 +18,12 @@ struct TaskFile {
     id: u64,
     title: String,
     description: String,
-    stage: String,
+    /// Task state string (e.g. "READY", "main_PENDING", "main_working", "DONE")
+    #[serde(default)]
+    state: String,
+    /// Legacy field — migrated to `state` on read.
+    #[serde(default)]
+    stage: Option<String>,
 
     // First-class routing fields (promoted from parameters)
     #[serde(default)]
@@ -30,22 +35,28 @@ struct TaskFile {
 
     parameters: HashMap<String, String>,
     #[serde(default)]
-    conflict: bool,
-    #[serde(default)]
     pause: bool,
     #[serde(default)]
     confirm: bool,
     checklist: Vec<ChecklistItem>,
     signal: Option<String>,
+    #[serde(default)]
+    stack: Vec<StackEntry>,
     closed: bool,
 }
 
 impl TaskFile {
     fn to_task(&self) -> anyhow::Result<Task> {
-        let stage = Stage::from_milestone_name(&self.stage)
-            .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", self.stage))?;
-
-        let signal = self.signal.as_ref().map(|s| s.parse()).transpose()?;
+        // Migrate legacy `stage` field to `state` if present
+        let state = if self.state.is_empty() {
+            if let Some(ref stage) = self.stage {
+                stage.clone()
+            } else {
+                String::new()
+            }
+        } else {
+            self.state.clone()
+        };
 
         let pr_url = self.parameters.get("pr_url").cloned();
 
@@ -53,14 +64,14 @@ impl TaskFile {
             id: self.id,
             title: self.title.clone(),
             description: self.description.clone(),
-            stage,
+            state,
             destination_repository: self.destination_repository.clone(),
             destination_branch: self.destination_branch.clone(),
             work_branch: self.work_branch.clone(),
             pr_url,
             checklist: self.checklist.clone(),
-            signal,
-            conflict: self.conflict,
+            signal: self.signal.clone(),
+            stack: self.stack.clone(),
             pause: self.pause,
             confirm: self.confirm,
             etag: None,
@@ -72,7 +83,8 @@ impl TaskFile {
             id: task.id,
             title: task.title.clone(),
             description: task.description.clone(),
-            stage: task.stage.milestone_name().to_string(),
+            state: task.state.clone(),
+            stage: None,
             destination_repository: task.destination_repository.clone(),
             destination_branch: task.destination_branch.clone(),
             work_branch: task.work_branch.clone(),
@@ -83,11 +95,11 @@ impl TaskFile {
                 }
                 p
             },
-            conflict: task.conflict,
             pause: task.pause,
             confirm: task.confirm,
             checklist: task.checklist.clone(),
-            signal: task.signal.map(|s| s.name().to_string()),
+            signal: task.signal.clone(),
+            stack: task.stack.clone(),
             closed,
         }
     }
@@ -397,7 +409,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
         anyhow::bail!("ZbobrTaskBackendFs must be wrapped in Arc and accessed via ArcTaskBackendFs")
     }
 
-    async fn list_tasks_by_stage(&self, _stage: Stage) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+    async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
         anyhow::bail!("ZbobrTaskBackendFs must be wrapped in Arc and accessed via ArcTaskBackendFs")
     }
 
@@ -405,7 +417,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
         &self,
         title: &str,
         description: &str,
-        stage: Stage,
+        state: &str,
     ) -> anyhow::Result<u64> {
         let id = self.get_next_id().await?;
 
@@ -413,14 +425,14 @@ impl TaskBackend for ZbobrTaskBackendFs {
             id,
             title: title.to_string(),
             description: description.to_string(),
-            stage,
+            state: state.to_string(),
             destination_repository: None,
             destination_branch: None,
             work_branch: None,
             pr_url: None,
             checklist: vec![],
             signal: None,
-            conflict: false,
+            stack: vec![],
             pause: false,
             confirm: false,
             etag: None,
@@ -503,7 +515,7 @@ impl TaskBackend for ArcTaskBackendFs {
         }))
     }
 
-    async fn list_tasks_by_stage(&self, stage: Stage) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+    async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
         let task_ids = self.inner.list_task_files().await?;
         let mut result: Vec<Box<dyn TaskWeak>> = Vec::new();
 
@@ -522,7 +534,8 @@ impl TaskBackend for ArcTaskBackendFs {
                 Err(_) => continue,
             };
 
-            if task.stage != stage {
+            // Filter out completed tasks
+            if task.state == "DONE" {
                 continue;
             }
 
@@ -539,9 +552,9 @@ impl TaskBackend for ArcTaskBackendFs {
         &self,
         title: &str,
         description: &str,
-        stage: Stage,
+        state: &str,
     ) -> anyhow::Result<u64> {
-        self.inner.create_task(title, description, stage).await
+        self.inner.create_task(title, description, state).await
     }
 
     async fn setup(&self, force: bool) -> anyhow::Result<()> {

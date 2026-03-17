@@ -5,6 +5,7 @@ pub mod config;
 pub mod mcp;
 pub mod prompts;
 pub mod setup;
+pub mod state_machine;
 pub mod task;
 pub mod task_dir;
 pub mod tool_executor;
@@ -18,11 +19,10 @@ pub use config::{
 };
 pub use mcp::{MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, TesterMcp, WorkerMcp};
 pub use prompts::{
-    ConfiguredPromptBuilder, PromptsConfig, build_full_prompt, build_prompt_for_role, load_prompts,
-    validate_prompts,
+    ConfiguredPromptBuilder, build_full_prompt, load_prompts, validate_stage_prompts,
 };
 pub use task::{
-    ChecklistItem, Comment, CommentType, Model, RoleSession, Signal, Stage, Task, TaskSession, Tool,
+    ChecklistItem, Comment, CommentType, Model, RoleSession, StackEntry, Task, TaskSession, Tool,
 };
 pub use task_dir::TaskDir;
 pub use tool_executor::ToolExecutor;
@@ -132,7 +132,7 @@ impl ZbobrDispatcher {
         task_backend: &dyn TaskBackend,
         title: &str,
         description: &str,
-        stage: Stage,
+        state: &str,
         destination_repository: Option<String>,
         destination_branch: Option<String>,
     ) -> anyhow::Result<u64> {
@@ -140,7 +140,7 @@ impl ZbobrDispatcher {
             task_backend,
             title,
             description,
-            stage,
+            state,
             destination_repository,
             destination_branch,
             false,
@@ -156,12 +156,12 @@ impl ZbobrDispatcher {
         task_backend: &dyn TaskBackend,
         title: &str,
         description: &str,
-        stage: Stage,
+        state: &str,
         destination_repository: Option<String>,
         destination_branch: Option<String>,
         confirm: bool,
     ) -> anyhow::Result<u64> {
-        let id = task_backend.create_task(title, description, stage).await?;
+        let id = task_backend.create_task(title, description, state).await?;
         // Set promoted fields + confirm flag via modify
         let weak = task_backend.get_task(id).await?;
         let mutable = weak.upgrade().await?;

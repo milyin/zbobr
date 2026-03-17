@@ -5,8 +5,8 @@
 
 use std::path::PathBuf;
 
-use zbobr_api::task::ChecklistItem;
-use zbobr_dispatcher::{CommentType, Signal, Stage, TaskDir};
+use zbobr_api::task::{ChecklistItem, Role};
+use zbobr_dispatcher::{CommentType, TaskDir};
 
 use super::{env::IntegrationTestEnv, scenarios};
 
@@ -19,12 +19,12 @@ pub async fn run_preparation(
 ) {
     let repo_path = env.create_git_repo("repo_preparation").await;
     let task_id = env
-        .create_task("Dummy Task", "Dummy task description", Stage::Preparing)
+        .create_task("Dummy Task", "Dummy task description", "READY")
         .await;
 
     env.run_stage(
         task_id,
-        Stage::Preparing,
+        Role::Preparator,
         scenarios::preparation_scenario(&repo_path.to_string_lossy()),
     )
     .await;
@@ -32,7 +32,7 @@ pub async fn run_preparation(
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some(Signal::GoPlan),
+        Some("go_planning".to_string()),
         "[{}] Preparator should emit go_plan after setting repo/branches",
         env.name()
     );
@@ -47,7 +47,7 @@ pub async fn run_planning(
 ) {
     let repo_path = env.create_git_repo("repo_planning").await;
     let task_id = env
-        .create_task("Dummy Task", "Dummy task description", Stage::Preparing)
+        .create_task("Dummy Task", "Dummy task description", "READY")
         .await;
 
     let dest_repo = env
@@ -64,13 +64,13 @@ pub async fn run_planning(
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    env.run_stage(task_id, Stage::Planning, scenarios::planning_scenario())
+    env.run_stage(task_id, Role::Planner, scenarios::planning_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some(Signal::GoWork),
+        Some("go_working".to_string()),
         "[{}] Planner should emit go_work after posting plan",
         env.name()
     );
@@ -93,7 +93,7 @@ pub async fn run_working(
 ) {
     let repo_path = env.create_git_repo("repo_working").await;
     let task_id = env
-        .create_task("Dummy Task", "Dummy task description", Stage::Working)
+        .create_task("Dummy Task", "Dummy task description", "READY")
         .await;
 
     let dest_repo = env
@@ -110,7 +110,7 @@ pub async fn run_working(
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    env.run_stage(task_id, Stage::Working, scenarios::working_scenario())
+    env.run_stage(task_id, Role::Worker, scenarios::working_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
@@ -122,7 +122,7 @@ pub async fn run_working(
     );
     assert_eq!(
         task.signal,
-        Some(Signal::GoReview),
+        Some("go_reviewing".to_string()),
         "[{}] Worker should emit go_review when all checklist items are checked",
         env.name()
     );
@@ -152,7 +152,7 @@ pub async fn run_reviewing(
 ) {
     let repo_path = env.create_git_repo("repo_reviewing").await;
     let task_id = env
-        .create_task("Dummy Task", "Dummy task description", Stage::Reviewing)
+        .create_task("Dummy Task", "Dummy task description", "READY")
         .await;
 
     let dest_repo = env
@@ -197,7 +197,7 @@ pub async fn run_reviewing(
             });
     }
 
-    env.run_stage(task_id, Stage::Reviewing, scenarios::reviewing_scenario())
+    env.run_stage(task_id, Role::Reviewer, scenarios::reviewing_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
@@ -211,7 +211,7 @@ pub async fn run_reviewing(
     );
     assert_eq!(
         task.signal,
-        Some(Signal::GoPlan),
+        Some("go_planning".to_string()),
         "[{}] Reviewer should emit go_plan to route to planner",
         env.name()
     );
@@ -234,7 +234,7 @@ pub async fn run_reviewing_approval(
 ) {
     let repo_path = env.create_git_repo("repo_reviewing_approval").await;
     let task_id = env
-        .create_task("Dummy Task", "Dummy task description", Stage::Reviewing)
+        .create_task("Dummy Task", "Dummy task description", "READY")
         .await;
 
     let dest_repo = env
@@ -272,7 +272,7 @@ pub async fn run_reviewing_approval(
 
     env.run_stage(
         task_id,
-        Stage::Reviewing,
+        Role::Reviewer,
         scenarios::reviewing_approval_scenario(),
     )
     .await;
@@ -280,14 +280,14 @@ pub async fn run_reviewing_approval(
     let task = env.get_task(task_id).await;
     // approval path routes to tester via GoTest signal
     assert_eq!(
-        task.stage,
-        Stage::Pending,
+        task.state,
+        "main_PENDING",
         "[{}] Reviewer approval should route to tester (Pending + GoTest signal)",
         env.name()
     );
     assert_eq!(
         task.signal,
-        Some(Signal::GoTest),
+        Some("go_testing".to_string()),
         "[{}] Reviewer approval should emit GoTest signal",
         env.name()
     );
@@ -357,7 +357,7 @@ pub async fn run_merging(
 
     // ---- report ending ----
     let task_report = env
-        .create_task("Dummy Task", "Dummy task description", Stage::Merging)
+        .create_task("Dummy Task", "Dummy task description", "READY")
         .await;
     let branch_report = format!("zbobr_fix-{task_report}-test");
     env.update_task_branches(task_report, &dest_repo, "main", &branch_report)
@@ -374,7 +374,7 @@ pub async fn run_merging(
 
     env.run_stage(
         task_report,
-        Stage::Merging,
+        Role::Merger,
         scenarios::merging_scenario("report"),
     )
     .await;
@@ -403,14 +403,14 @@ pub async fn run_merging(
 
     // ---- ask ending ----
     let task_ask = env
-        .create_task("Dummy Task", "Dummy task description", Stage::Merging)
+        .create_task("Dummy Task", "Dummy task description", "READY")
         .await;
     let branch_ask = format!("zbobr_fix-{task_ask}-test");
     env.update_task_branches(task_ask, &dest_repo, "main", &branch_ask)
         .await;
     setup_conflict(env, &repo_path, task_ask, &branch_ask, &repo_name, "ask").await;
 
-    env.run_stage(task_ask, Stage::Merging, scenarios::merging_scenario("ask"))
+    env.run_stage(task_ask, Role::Merger, scenarios::merging_scenario("ask"))
         .await;
 
     let task_ask_data = env.get_task(task_ask).await;
@@ -444,7 +444,7 @@ pub async fn run_merging_with_real_conflict(
         .create_task(
             "Conflict task",
             "Test merging with real conflicts",
-            Stage::Merging,
+            "READY",
         )
         .await;
     let work_branch = format!("zbobr_conflict-{task_id}-test");
@@ -531,7 +531,7 @@ pub async fn run_merging_with_real_conflict(
 
     env.run_stage(
         task_id,
-        Stage::Merging,
+        Role::Merger,
         scenarios::merging_conflict_scenario(),
     )
     .await;
@@ -543,11 +543,6 @@ pub async fn run_merging_with_real_conflict(
             .iter()
             .any(|c| c.text.contains("Detected merge conflicts")),
         "[{}] Merger should report detected conflicts",
-        env.name()
-    );
-    assert!(
-        !task.conflict,
-        "[{}] Merger should clear the conflict flag",
         env.name()
     );
 }
@@ -595,7 +590,7 @@ pub async fn run_conflict_detection(
         .create_task(
             "Conflict Detection",
             "Dummy task description",
-            Stage::Working,
+            "READY",
         )
         .await;
     env.update_task_branches(task_id, &repo_path_str, "main", work_branch)
@@ -605,18 +600,13 @@ pub async fn run_conflict_detection(
     // has diverged from main, sets conflict=true, and exits without invoking
     // the mcp-tester agent.  The workspace is left clean (no unmerged paths)
     // — the actual merge attempt happens when the Merger runs.
-    env.run_stage(task_id, Stage::Working, scenarios::working_scenario())
+    env.run_stage(task_id, Role::Worker, scenarios::working_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
-    assert!(
-        task.conflict,
-        "[{}] Conflict flag should be set after automatic conflict detection",
-        env.name()
-    );
     assert_eq!(
-        task.stage,
-        Stage::Pending,
+        task.state,
+        "main_PENDING",
         "[{}] Task should return to Pending after conflict detection",
         env.name()
     );
@@ -625,17 +615,11 @@ pub async fn run_conflict_detection(
     // and invoke the agent to resolve it.
     env.run_stage(
         task_id,
-        Stage::Merging,
+        Role::Merger,
         scenarios::merging_conflict_scenario(),
     )
     .await;
 
-    let task = env.get_task(task_id).await;
-    assert!(
-        !task.conflict,
-        "[{}] Conflict flag should be cleared after Merger session",
-        env.name()
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -652,7 +636,7 @@ pub async fn run_report_error_preserves_signal(
         .map(|r| format!("https://github.com/{r}"))
         .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
     let task_id = env
-        .create_task("Error Task", "Dummy task description", Stage::Working)
+        .create_task("Error Task", "Dummy task description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-err-test");
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
@@ -663,7 +647,7 @@ pub async fn run_report_error_preserves_signal(
 
     env.run_stage(
         task_id,
-        Stage::Working,
+        Role::Worker,
         scenarios::worker_report_error_scenario(),
     )
     .await;
@@ -684,7 +668,7 @@ pub async fn run_report_error_preserves_signal(
     );
     assert_eq!(
         task.signal,
-        Some(Signal::GoWork),
+        Some("go_working".to_string()),
         "[{}] report_error must not clear the signal",
         env.name()
     );
@@ -730,7 +714,7 @@ pub async fn run_signal_preservation_during_conflict(
         .create_task(
             "Signal Preservation Test",
             "Test that signal is preserved during merge conflict resolution",
-            Stage::Working,
+            "READY",
         )
         .await;
 
@@ -742,18 +726,13 @@ pub async fn run_signal_preservation_during_conflict(
     // this signal must survive intact through the early-merge exit path.
     env.update_task_signal(task_id, "go_work").await;
 
-    env.run_stage(task_id, Stage::Working, scenarios::working_scenario())
+    env.run_stage(task_id, Role::Worker, scenarios::working_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
-    assert!(
-        task.conflict,
-        "[{}] Conflict flag should be set after automatic conflict detection",
-        env.name()
-    );
     assert_eq!(
         task.signal,
-        Some(Signal::GoWork),
+        Some("go_working".to_string()),
         "[{}] Signal must be preserved when conflict detection exits before clearing step",
         env.name()
     );
@@ -761,22 +740,15 @@ pub async fn run_signal_preservation_during_conflict(
     // Run the Merger stage to resolve the conflict.
     env.run_stage(
         task_id,
-        Stage::Merging,
+        Role::Merger,
         scenarios::merging_conflict_scenario(),
     )
     .await;
 
-    let task = env.get_task(task_id).await;
-    assert!(
-        !task.conflict,
-        "[{}] Conflict flag should be cleared after Merger session",
-        env.name()
-    );
-
     // CRITICAL: The signal should STILL be present after Merger finishes!
     assert_eq!(
         task.signal,
-        Some(Signal::GoWork),
+        Some("go_working".to_string()),
         "[{}] Signal should be preserved after Merger completes",
         env.name()
     );
@@ -802,7 +774,7 @@ pub async fn run_plan_history_with_index(
         .map(|r| format!("https://github.com/{r}"))
         .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
     let task_id = env
-        .create_task("Plan History Task", TASK_DESCRIPTION, Stage::Planning)
+        .create_task("Plan History Task", TASK_DESCRIPTION, "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-plan-history");
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
@@ -810,7 +782,7 @@ pub async fn run_plan_history_with_index(
 
     env.run_stage(
         task_id,
-        Stage::Planning,
+        Role::Planner,
         scenarios::multiple_plans_scenario(TASK_DESCRIPTION),
     )
     .await;
@@ -933,7 +905,7 @@ pub async fn run_repo_backend_clone(
         .create_task(
             "Clone test",
             "Test clone_and_setup via repo backend",
-            Stage::Pending,
+            "main_PENDING",
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-clone-test");
@@ -1020,7 +992,7 @@ pub async fn run_repo_backend_clone_cross_org(
         .create_task(
             "Clone cross-org test",
             "Test clone_and_setup with cross-org repo (octocat/Spoon-Knife)",
-            Stage::Pending,
+            "main_PENDING",
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-clone-xorg");
@@ -1248,10 +1220,10 @@ pub async fn run_cli_confirm_flag(
     env: &IntegrationTestEnv,
 ) {
     let task_id = env
-        .create_task_with_confirm("Confirm test", "desc", Stage::Pending, true)
+        .create_task_with_confirm("Confirm test", "desc", "main_PENDING", true)
         .await;
 
-    env.update_task_stage(task_id, Stage::Planning).await;
+    env.update_task_state(task_id, "READY").await;
 
     let task = env.get_task(task_id).await;
     assert!(
@@ -1270,7 +1242,7 @@ async fn repo_backend_planning_for(env: &IntegrationTestEnv, target: &str, suffi
         .create_task(
             "Repo backend planning",
             "Dummy task description",
-            Stage::Pending,
+            "main_PENDING",
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-{suffix}-test");
@@ -1279,13 +1251,13 @@ async fn repo_backend_planning_for(env: &IntegrationTestEnv, target: &str, suffi
     env.prepare_workspace_via_repo_backend(task_id, target, &work_branch)
         .await;
 
-    env.run_stage(task_id, Stage::Planning, scenarios::planning_scenario())
+    env.run_stage(task_id, Role::Planner, scenarios::planning_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some(Signal::GoWork),
+        Some("go_working".to_string()),
         "[{}] Planner should emit go_work after posting plan",
         env.name()
     );
@@ -1296,7 +1268,7 @@ async fn repo_backend_working_for(env: &IntegrationTestEnv, target: &str, suffix
         .create_task(
             "Repo backend working",
             "Dummy task description",
-            Stage::Working,
+            "READY",
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-{suffix}-test");
@@ -1305,13 +1277,13 @@ async fn repo_backend_working_for(env: &IntegrationTestEnv, target: &str, suffix
     env.prepare_workspace_via_repo_backend(task_id, target, &work_branch)
         .await;
 
-    env.run_stage(task_id, Stage::Working, scenarios::working_scenario())
+    env.run_stage(task_id, Role::Worker, scenarios::working_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some(Signal::GoReview),
+        Some("go_reviewing".to_string()),
         "[{}] Worker should emit go_review",
         env.name()
     );
@@ -1322,7 +1294,7 @@ async fn repo_backend_reviewing_for(env: &IntegrationTestEnv, target: &str, suff
         .create_task(
             "Repo backend reviewing",
             "Dummy task description",
-            Stage::Reviewing,
+            "READY",
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-{suffix}-test");
@@ -1331,13 +1303,13 @@ async fn repo_backend_reviewing_for(env: &IntegrationTestEnv, target: &str, suff
     env.prepare_workspace_via_repo_backend(task_id, target, &work_branch)
         .await;
 
-    env.run_stage(task_id, Stage::Reviewing, scenarios::reviewing_scenario())
+    env.run_stage(task_id, Role::Reviewer, scenarios::reviewing_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some(Signal::GoPlan),
+        Some("go_planning".to_string()),
         "[{}] Reviewer should emit go_plan to route to planner",
         env.name()
     );
@@ -1348,7 +1320,7 @@ async fn repo_backend_merging_for(env: &IntegrationTestEnv, target: &str, suffix
         .create_task(
             "Repo backend merging",
             "Dummy task description",
-            Stage::Merging,
+            "READY",
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-{suffix}-test");
@@ -1359,7 +1331,7 @@ async fn repo_backend_merging_for(env: &IntegrationTestEnv, target: &str, suffix
 
     env.run_stage(
         task_id,
-        Stage::Merging,
+        Role::Merger,
         scenarios::merging_scenario("report"),
     )
     .await;
@@ -1585,7 +1557,7 @@ pub async fn run_entry_clears_signal_for_worker(
         .create_task(
             "Entry Clear Worker",
             "Dummy task description",
-            Stage::Working,
+            "READY",
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-entry-test");
@@ -1597,7 +1569,7 @@ pub async fn run_entry_clears_signal_for_worker(
 
     env.run_stage(
         task_id,
-        Stage::Working,
+        Role::Worker,
         scenarios::working_scenario_with_unchecked_item(),
     )
     .await;
@@ -1605,7 +1577,7 @@ pub async fn run_entry_clears_signal_for_worker(
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some(Signal::GoWork),
+        Some("go_working".to_string()),
         "[{}] Entry should have cleared GoReview; exit with unchecked item should set GoWork",
         env.name()
     );
@@ -1634,7 +1606,7 @@ pub async fn run_entry_clears_conflict_preserves_signal_for_merger(
         .create_task(
             "Entry Clear Merger",
             "Dummy task description",
-            Stage::Merging,
+            "READY",
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-merger-entry-test");
@@ -1660,26 +1632,20 @@ pub async fn run_entry_clears_conflict_preserves_signal_for_merger(
     )
     .await;
 
-    // Set both conflict=true and GoWork signal — Merger must clear conflict only.
-    env.set_task_conflict(task_id, true).await;
-    env.update_task_signal(task_id, "go_work").await;
+    // Set GoWork signal before running Merger.
+    env.update_task_signal(task_id, "go_working").await;
 
     env.run_stage(
         task_id,
-        Stage::Merging,
+        Role::Merger,
         scenarios::merging_scenario("report"),
     )
     .await;
 
     let task = env.get_task(task_id).await;
-    assert!(
-        !task.conflict,
-        "[{}] Entry to Merging must clear the conflict flag",
-        env.name()
-    );
     assert_eq!(
         task.signal,
-        Some(Signal::GoWork),
+        Some("go_working".to_string()),
         "[{}] Entry to Merging must NOT clear the signal",
         env.name()
     );
@@ -1703,7 +1669,7 @@ pub async fn run_planner_sets_go_work_on_exit(
         .create_task(
             "Planner Exit Test",
             "Dummy task description",
-            Stage::Preparing,
+            "READY",
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-test");
@@ -1711,13 +1677,13 @@ pub async fn run_planner_sets_go_work_on_exit(
         .await;
 
     // No signal pre-set; Planner should emit GoWork on exit.
-    env.run_stage(task_id, Stage::Planning, scenarios::planning_scenario())
+    env.run_stage(task_id, Role::Planner, scenarios::planning_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some(Signal::GoWork),
+        Some("go_working".to_string()),
         "[{}] Planner exit (Rule 2.2) must set GoWork when no signal is already present",
         env.name()
     );
@@ -1745,7 +1711,7 @@ pub async fn run_exit_preserves_agent_set_signal(
         .create_task(
             "Exit Preserve Test",
             "Dummy task description",
-            Stage::Preparing,
+            "READY",
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-exit-preserve");
@@ -1763,7 +1729,7 @@ pub async fn run_exit_preserves_agent_set_signal(
     // signal) is set, NOT GoWork (the normal Planner exit signal).
     env.run_stage(
         task_id,
-        Stage::Planning,
+        Role::Planner,
         scenarios::planning_report_error_scenario(),
     )
     .await;
@@ -1771,7 +1737,7 @@ pub async fn run_exit_preserves_agent_set_signal(
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some(Signal::GoPlan),
+        Some("go_planning".to_string()),
         "[{}] Agent-set signal (GoPlan via report_error retry) must not be overridden by exit logic",
         env.name()
     );

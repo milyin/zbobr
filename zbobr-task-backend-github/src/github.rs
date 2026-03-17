@@ -6,7 +6,8 @@ use std::{
 
 use async_trait::async_trait;
 use zbobr_api::{
-    Comment, CommentTag, CommentType, Model, Role, Signal, Stage, Task, Tool, backend::TaskBackend,
+    Comment, CommentTag, CommentType, Model, Role, Task, Tool, backend::TaskBackend,
+    task::StackEntry,
 };
 
 use crate::{
@@ -94,13 +95,7 @@ struct IssueResponse {
     body: Option<String>,
     #[allow(dead_code)]
     state: String,
-    milestone: Option<IssueMilestone>,
     labels: Vec<IssueLabel>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct IssueMilestone {
-    title: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -118,12 +113,6 @@ struct CommentResponse {
 #[allow(dead_code)]
 struct RepoResponse {
     full_name: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct MilestoneResponse {
-    number: u64,
-    title: String,
 }
 
 // ============================================================================
@@ -158,16 +147,24 @@ impl ZbobrTaskBackendGithubImpl {
         })
     }
 
-    /// Convert a Signal to its GitHub label representation.
-    fn signal_to_label(signal: Signal) -> String {
-        format!("signal:{}", signal.name())
+    /// Convert a signal string to its GitHub label representation.
+    fn signal_to_label(signal: &str) -> String {
+        format!("signal:{}", signal)
     }
 
-    /// Parse a GitHub label string back to a Signal.
-    fn label_to_signal(label: &str) -> Option<Signal> {
-        label
-            .strip_prefix("signal:")
-            .and_then(|name| name.parse().ok())
+    /// Parse a GitHub label string back to a signal string.
+    fn label_to_signal(label: &str) -> Option<&str> {
+        label.strip_prefix("signal:")
+    }
+
+    /// Convert a state string to its GitHub label representation.
+    fn state_to_label(state: &str) -> String {
+        format!("state:{}", state)
+    }
+
+    /// Parse a GitHub label string back to a state string.
+    fn label_to_state(label: &str) -> Option<&str> {
+        label.strip_prefix("state:")
     }
 
     /// Convert a flag name to its GitHub label representation.
@@ -184,12 +181,6 @@ impl ZbobrTaskBackendGithubImpl {
         self.backend_config.parse_repo()
     }
 
-    async fn find_stage_number(&self, stage: Stage) -> anyhow::Result<Option<u64>> {
-        let title = stage.milestone_name();
-        let stages = self.list_stages().await?;
-        Ok(stages.into_iter().find(|(_, t)| t == title).map(|(n, _)| n))
-    }
-
     /// Low-level: write the raw serialized task body.
     async fn update_task_description(&self, id: u64, description: &str) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
@@ -203,38 +194,64 @@ impl ZbobrTaskBackendGithubImpl {
         Ok(())
     }
 
-    /// Apply a stage change on a GitHub issue (update milestone).
-    async fn apply_stage_change(&self, id: u64, stage: Stage) -> anyhow::Result<()> {
-        let stage_number = self
-            .find_stage_number(stage)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Milestone '{}' not found", stage))?;
-
+    /// Apply a state change on a GitHub issue (remove old state labels, add new one).
+    async fn apply_state_change(&self, id: u64, state: &str) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
-        let url = format!("/repos/{owner}/{repo}/issues/{id}");
-        let body = serde_json::json!({ "milestone": stage_number });
-        retry_github("set issue milestone", || {
-            self.octocrab.patch(url.clone(), Some(&body))
+
+        // Fetch current labels and remove all existing state: labels
+        let issue: IssueResponse = retry_github("get issue labels", || {
+            self.octocrab
+                .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
         })
-        .await
-        .map(|_: serde_json::Value| ())?;
+        .await?;
+        for label in &issue.labels {
+            if Self::label_to_state(&label.name).is_some() {
+                let _ = retry_github("remove state label", || async {
+                    self.octocrab
+                        .issues(owner, repo)
+                        .remove_label(id, &label.name)
+                        .await
+                })
+                .await;
+            }
+        }
+
+        // Add new state label
+        if !state.is_empty() {
+            let label = Self::state_to_label(state);
+            let labels: Vec<String> = vec![label];
+            retry_github("add state label", || async {
+                self.octocrab
+                    .issues(owner, repo)
+                    .add_labels(id, &labels)
+                    .await
+            })
+            .await?;
+        }
+
         Ok(())
     }
 
     /// Apply a signal change on a GitHub issue (remove old signal labels, add new one).
-    async fn apply_signal_change(&self, id: u64, signal: Option<Signal>) -> anyhow::Result<()> {
+    async fn apply_signal_change(&self, id: u64, signal: Option<&str>) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        // Remove all existing signal labels
-        for sig in Signal::all() {
-            let label = Self::signal_to_label(*sig);
-            let _ = retry_github("remove signal label", || async {
-                self.octocrab
-                    .issues(owner, repo)
-                    .remove_label(id, &label)
-                    .await
-            })
-            .await;
+        // Fetch current labels and remove all existing signal: labels
+        let issue: IssueResponse = retry_github("get issue labels", || {
+            self.octocrab
+                .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
+        })
+        .await?;
+        for label in &issue.labels {
+            if Self::label_to_signal(&label.name).is_some() {
+                let _ = retry_github("remove signal label", || async {
+                    self.octocrab
+                        .issues(owner, repo)
+                        .remove_label(id, &label.name)
+                        .await
+                })
+                .await;
+            }
         }
 
         // Add new signal label if provided
@@ -253,21 +270,16 @@ impl ZbobrTaskBackendGithubImpl {
         Ok(())
     }
 
-    /// Apply flag changes on a GitHub issue (sync conflict and pause labels).
+    /// Apply flag changes on a GitHub issue (sync pause/confirm labels).
     async fn apply_flag_change(
         &self,
         id: u64,
-        conflict: bool,
         pause: bool,
         confirm: bool,
     ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        for (flag_name, desired) in [
-            ("conflict", conflict),
-            ("pause", pause),
-            ("confirm", confirm),
-        ] {
+        for (flag_name, desired) in [("pause", pause), ("confirm", confirm)] {
             let label = Self::flag_to_label(flag_name);
             if desired {
                 let labels: Vec<String> = vec![label];
@@ -388,47 +400,6 @@ impl ZbobrTaskBackendGithubImpl {
         Ok(())
     }
 
-    async fn list_stages(&self) -> anyhow::Result<Vec<(u64, String)>> {
-        let (owner, repo) = self.parse_repo()?;
-        let milestones: Vec<MilestoneResponse> = retry_github("list milestones", || {
-            self.octocrab
-                .get(format!("/repos/{owner}/{repo}/milestones"), None::<&()>)
-        })
-        .await?;
-        Ok(milestones
-            .into_iter()
-            .map(|m| (m.number, m.title))
-            .collect())
-    }
-
-    async fn create_stage(&self, stage: Stage) -> anyhow::Result<()> {
-        let (owner, repo) = self.parse_repo()?;
-        let url = format!("/repos/{owner}/{repo}/milestones");
-        let title = stage.milestone_name();
-        let description = stage_description(stage);
-        let body = serde_json::json!({
-            "title": title,
-            "description": description,
-            "state": "open"
-        });
-        retry_github("create milestone", || {
-            self.octocrab.post(url.clone(), Some(&body))
-        })
-        .await
-        .map(|_: serde_json::Value| ())?;
-        Ok(())
-    }
-
-    async fn delete_stage(&self, number: u64) -> anyhow::Result<()> {
-        let (owner, repo) = self.parse_repo()?;
-        let url = format!("/repos/{owner}/{repo}/milestones/{number}");
-        let _response = retry_github("delete milestone", || {
-            self.octocrab._delete(url.clone(), None::<&()>)
-        })
-        .await?;
-        Ok(())
-    }
-
     async fn setup(&self, force: bool) -> anyhow::Result<()> {
         tracing::info!(
             "Setting up GitHub repo: {} (force: {})",
@@ -439,62 +410,12 @@ impl ZbobrTaskBackendGithubImpl {
         // Ensure the task repo exists
         self.ensure_task_repo_exists().await?;
 
-        // Create stages
-        let desired_stages = [
-            Stage::Pending,
-            Stage::Preparing,
-            Stage::Planning,
-            Stage::Working,
-            Stage::Reviewing,
-            Stage::Testing,
-            Stage::Merging,
-            Stage::Done,
-        ];
-        let existing = self.list_stages().await?;
-        let existing_titles: Vec<&str> = existing.iter().map(|(_, t)| t.as_str()).collect();
-
-        for stage in &desired_stages {
-            let title = stage.milestone_name();
-            if existing_titles.contains(&title) {
-                tracing::info!("Stage '{title}' already exists");
-            } else {
-                tracing::info!("Creating stage '{title}'");
-                self.create_stage(*stage).await?;
-            }
-        }
-
-        // Delete extra stages
-        let desired_titles: Vec<&str> = desired_stages.iter().map(|s| s.milestone_name()).collect();
-        for (number, title) in &existing {
-            if !desired_titles.contains(&title.as_str()) {
-                tracing::info!("Deleting stage '{title}'");
-                self.delete_stage(*number).await?;
-            }
-        }
-
-        // Create labels
+        // Create flag labels
         let existing_labels = self.list_labels().await?;
 
-        const SIGNAL_LABEL_COLOR: &str = "5319e7";
         const FLAG_LABEL_COLOR: &str = "f9d0c4";
 
-        for signal in Signal::all() {
-            let signal_label = Self::signal_to_label(*signal);
-            let signal_desc = format!("Signal: {}", signal.name());
-            if !existing_labels.contains(&signal_label) {
-                tracing::info!("Creating label '{signal_label}'");
-                self.create_label(&signal_label, SIGNAL_LABEL_COLOR, &signal_desc)
-                    .await?;
-            } else if force {
-                tracing::info!("Updating label '{signal_label}' (force)");
-                self.update_label(&signal_label, SIGNAL_LABEL_COLOR, &signal_desc)
-                    .await?;
-            } else {
-                tracing::info!("Label '{signal_label}' already exists");
-            }
-        }
-
-        for flag_name in ["conflict", "pause", "confirm"] {
+        for flag_name in ["pause", "confirm"] {
             let flag_label = Self::flag_to_label(flag_name);
             let flag_desc = format!("Flag: {}", flag_name);
             if !existing_labels.contains(&flag_label) {
@@ -519,30 +440,35 @@ impl ZbobrTaskBackendGithubImpl {
 
     /// Parse an IssueResponse into a Task.
     fn issue_to_task(issue: IssueResponse) -> Task {
-        let stage = match issue.milestone.as_ref().map(|m| m.title.as_str()) {
-            Some(t) => Stage::from_milestone_name(t).unwrap_or(Stage::Planning),
-            _ => Stage::Planning,
-        };
-
         let body = issue.body.unwrap_or_default();
         let (description, params_map, checklist) = parse_description_full(&body);
 
-        // Promoted fields: read from params_map where they were stored in old format
+        // Promoted fields: read from params_map where they were stored
         let destination_repository = params_map.get("destination_repository").cloned();
         let destination_branch = params_map.get("destination_branch").cloned();
         let work_branch = params_map.get("work_branch").cloned();
         let pr_url = params_map.get("pr_url").cloned();
 
+        // stack is stored as JSON in params_map
+        let stack: Vec<StackEntry> = params_map
+            .get("stack")
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+
+        // state is stored as a label
+        let state = issue
+            .labels
+            .iter()
+            .find_map(|l| Self::label_to_state(&l.name))
+            .unwrap_or("")
+            .to_string();
+
+        // signal is stored as a label
         let signal = issue
             .labels
             .iter()
-            .filter_map(|l| Self::label_to_signal(&l.name))
-            .min();
-
-        let conflict = issue
-            .labels
-            .iter()
-            .any(|l| Self::label_to_flag(&l.name) == Some("conflict"));
+            .find_map(|l| Self::label_to_signal(&l.name))
+            .map(|s| s.to_string());
 
         let pause = issue
             .labels
@@ -558,21 +484,20 @@ impl ZbobrTaskBackendGithubImpl {
             id: issue.number,
             title: issue.title,
             description,
-            stage,
+            state,
             destination_repository,
             destination_branch,
             work_branch,
             pr_url,
             checklist,
             signal,
-            conflict,
+            stack,
             pause,
             confirm,
             etag: Some(body),
         }
     }
 
-    /// Record that an issue was just written to and needs a cooling period.
     /// Build the string parameters map for serialization, including promoted fields.
     fn task_to_string_params(task: &Task) -> HashMap<String, String> {
         let mut params: HashMap<String, String> = HashMap::new();
@@ -587,6 +512,11 @@ impl ZbobrTaskBackendGithubImpl {
         }
         if let Some(ref v) = task.work_branch {
             params.insert("work_branch".to_string(), v.clone());
+        }
+        if !task.stack.is_empty() {
+            if let Ok(json) = serde_json::to_string(&task.stack) {
+                params.insert("stack".to_string(), json);
+            }
         }
         params
     }
@@ -681,9 +611,8 @@ impl ZbobrTaskBackendGithubImpl {
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
     ) -> anyhow::Result<()> {
         let task = self.fetch_task(id).await?;
-        let original_stage = task.stage;
-        let original_signal = task.signal;
-        let original_conflict = task.conflict;
+        let original_state = task.state.clone();
+        let original_signal = task.signal.clone();
         let original_pause = task.pause;
         let original_confirm = task.confirm;
         let expected_description = task.etag.clone().unwrap_or_else(|| {
@@ -726,18 +655,14 @@ impl ZbobrTaskBackendGithubImpl {
             }
         }
 
-        if task.stage != original_stage {
-            self.apply_stage_change(id, task.stage).await?;
+        if task.state != original_state {
+            self.apply_state_change(id, &task.state).await?;
         }
         if task.signal != original_signal {
-            self.apply_signal_change(id, task.signal).await?;
+            self.apply_signal_change(id, task.signal.as_deref()).await?;
         }
-        if task.conflict != original_conflict
-            || task.pause != original_pause
-            || task.confirm != original_confirm
-        {
-            self.apply_flag_change(id, task.conflict, task.pause, task.confirm)
-                .await?;
+        if task.pause != original_pause || task.confirm != original_confirm {
+            self.apply_flag_change(id, task.pause, task.confirm).await?;
         }
 
         self.record_cooling(id);
@@ -933,18 +858,11 @@ impl TaskBackend for TaskBackendGithub {
         }))
     }
 
-    async fn list_tasks_by_stage(&self, stage: Stage) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+    async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
         self.inner.await_all_cooling().await;
-        let stage_number = match self.inner.find_stage_number(stage).await? {
-            Some(n) => n,
-            None => return Ok(vec![]),
-        };
 
         let (owner, repo) = self.inner.parse_repo()?;
-        let params = vec![
-            ("milestone", stage_number.to_string()),
-            ("state", "open".to_string()),
-        ];
+        let params = vec![("state", "open".to_string()), ("per_page", "100".to_string())];
 
         let issues: Vec<IssueResponse> = retry_github("list issues", || {
             self.inner
@@ -970,25 +888,26 @@ impl TaskBackend for TaskBackendGithub {
         &self,
         title: &str,
         description: &str,
-        stage: Stage,
+        state: &str,
     ) -> anyhow::Result<u64> {
         let (owner, repo) = self.inner.parse_repo()?;
         let body = serialize_description_full(description, &HashMap::new(), &[]);
 
-        let stage_number = self.inner.find_stage_number(stage).await?;
-
         let issue = retry_github("create issue", || async {
             let issues = self.inner.octocrab.issues(owner, repo);
-            let mut builder = issues.create(title).body(body.clone());
-
-            if let Some(n) = stage_number {
-                builder = builder.milestone(n);
-            }
-
+            let builder = issues.create(title).body(body.clone());
             builder.send().await
         })
         .await?;
-        Ok(issue.number)
+
+        let issue_id = issue.number;
+
+        // Apply the initial state as a label
+        if !state.is_empty() {
+            self.inner.apply_state_change(issue_id, state).await?;
+        }
+
+        Ok(issue_id)
     }
 
     async fn setup(&self, force: bool) -> anyhow::Result<()> {
@@ -1023,19 +942,6 @@ impl TaskBackend for TaskBackendGithub {
     }
 }
 
-/// Stage descriptions.
-fn stage_description(stage: Stage) -> &'static str {
-    match stage {
-        Stage::Pending => "Task is pending dispatch",
-        Stage::Preparing => "Task parameters are being set",
-        Stage::Planning => "Task is in planning",
-        Stage::Working => "Task is in work",
-        Stage::Reviewing => "Task is in review",
-        Stage::Testing => "Task is undergoing comprehensive testing",
-        Stage::Merging => "Task is in merge conflict resolution",
-        Stage::Done => "Task is complete",
-    }
-}
 
 /*
 #[cfg(test)]
