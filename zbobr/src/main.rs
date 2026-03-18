@@ -1,6 +1,7 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
 mod commands;
+mod init;
 
 use std::sync::Arc;
 
@@ -74,6 +75,11 @@ async fn main() -> anyhow::Result<()> {
         Requires a GitHub token: set GH_TOKEN or GITHUB_TOKEN env var.\n\
         Easiest way: export GH_TOKEN=$(gh auth token)",
     );
+
+    // Handle init before config loading — no existing config needed
+    if let Command::Init { ref directory } = cli.command {
+        return init::init_workspace(directory).await;
+    }
 
     let location = zbobr_dispatcher::resolve_config_location(&cli.config_file.path, "zbobr.toml")?;
 

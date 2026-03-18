@@ -1,17 +1,334 @@
-/// Returns the default built-in prompt text for one of the 6 known roles,
-/// or `None` for custom roles. Used as a fallback when no prompt file is
-/// configured for a role.
-pub fn default_prompt(role_name: &str) -> Option<&'static str> {
-    match role_name {
-        "preparator" => Some(PREPARATOR_PROMPT),
-        "planner" => Some(PLANNER_PROMPT),
-        "worker" => Some(WORKER_PROMPT),
-        "reviewer" => Some(REVIEWER_PROMPT),
-        "tester" => Some(TESTER_PROMPT),
-        "merger" => Some(MERGER_PROMPT),
-        _ => None,
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition};
+
+/// Initialize a new zbobr workspace at the given directory.
+///
+/// Creates the directory (if it does not exist), writes a complete `zbobr.toml`
+/// config file, creates prompt files for each predefined role, and creates
+/// the required subdirectories.
+pub async fn init_workspace(dest: &Path) -> anyhow::Result<()> {
+    // Create destination directory
+    tokio::fs::create_dir_all(dest).await?;
+
+    let config_path = dest.join("zbobr.toml");
+    if config_path.exists() {
+        anyhow::bail!(
+            "zbobr.toml already exists at {}. Remove it first to re-initialize.",
+            config_path.display()
+        );
+    }
+
+    // Create subdirectories
+    let prompts_dir = dest.join("prompts");
+    let workspaces_dir = dest.join("workspaces");
+    let repos_dir = dest.join("repos");
+    tokio::fs::create_dir_all(&prompts_dir).await?;
+    tokio::fs::create_dir_all(&workspaces_dir).await?;
+    tokio::fs::create_dir_all(&repos_dir).await?;
+
+    // Write prompt files
+    for (role, content) in ROLE_PROMPTS {
+        let path = prompts_dir.join(format!("{role}.md"));
+        tokio::fs::write(&path, content).await?;
+        println!("  wrote {}", path.display());
+    }
+
+    // Build pipeline config and serialize it
+    let pipeline = default_pipeline();
+    let pipeline_toml = toml::to_string_pretty(&pipeline)?;
+
+    // Build full config
+    let config_content = format!(
+        "{STATIC_CONFIG_HEADER}\n\n# --- Pipeline configuration (stages and roles) ---\n\n[pipeline]\n{pipeline_toml}"
+    );
+    tokio::fs::write(&config_path, &config_content).await?;
+    println!("  wrote {}", config_path.display());
+
+    println!(
+        "\nWorkspace initialized at {}.\nEdit zbobr.toml to configure backends and tokens before running.",
+        dest.display()
+    );
+    Ok(())
+}
+
+/// Static TOML header for non-pipeline config sections.
+const STATIC_CONFIG_HEADER: &str = r#"# zbobr configuration
+# See documentation for all available options.
+
+[dispatcher]
+# Directory where task workspaces are created
+workspaces = "./workspaces"
+# Base port for MCP servers (scans upward to find available port)
+base_port = 3000
+# Read-only GitHub token passed to agent processes (security boundary)
+agent_github_token = "not-configured"
+# Default executor tool: "copilot", "claude", or "mcp_tester"
+tool = "claude"
+# Default AI model (tool-specific, e.g. "default", "claude_opus_4_6", "gpt5")
+model = "default"
+# Prefix for work branches
+work_branch_prefix = "zbobr_fix"
+# Default destination repository (owner/repo) — prepopulated before preparator runs
+# default_destination_repository = "owner/repo"
+# Default destination branch — prepopulated before preparator runs
+# default_destination_branch = "main"
+# Mode to invoke on merge conflicts (e.g. "conflict")
+on_conflict = "conflict"
+
+[tasks]
+# GitHub task backend: repository for storing tasks as issues
+github_repo = "owner/repo"
+# GitHub token for task backend (or set ZBOBR_TASK_GITHUB_TOKEN env var)
+github_token = ""
+
+[repo]
+# GitHub repo backend: fork owner for work branches
+fork_owner = ""
+# GitHub token for repo operations
+github_token = ""
+# Local directory for bare repo clones
+repos_dir = "./repos"
+# Git user identity for commits
+git_user_name = "zbobr"
+git_user_email = "zbobr@example.com"
+# Rewrite commit authors to match git_user_name/email
+overwrite_author = false
+
+[executor.claude]
+# Claude executor defaults
+default_model = "claude_opus_4_6"
+
+[executor.copilot]
+# Copilot executor defaults
+default_model = "default"
+# copilot_github_token = ""  # or set COPILOT_GITHUB_TOKEN env var
+
+# [executor.mcp_tester]
+# MCP tester scenario files (per-role)
+# preparation = "scenarios/preparation.yaml"
+# planning = "scenarios/planning.yaml"
+# working = "scenarios/working.yaml"
+# reviewing = "scenarios/reviewing.yaml"
+# testing = "scenarios/testing.yaml"
+# merging = "scenarios/merging.yaml""#;
+
+/// Build the default pipeline configuration with predefined stages and roles.
+fn default_pipeline() -> PipelineConfig {
+    let stages = vec![
+        // Main mode: full task processing pipeline
+        StageDefinition {
+            name: "preparing".into(),
+            role: "preparator".into(),
+            mode: "main".into(),
+            is_start: true,
+            transitions: HashMap::from([("default".into(), "go_planning".into())]),
+            ..stage_defaults()
+        },
+        StageDefinition {
+            name: "planning".into(),
+            role: "planner".into(),
+            mode: "main".into(),
+            transitions: HashMap::from([
+                ("default".into(), "go_working".into()),
+                ("ask_user".into(), "go_planning".into()),
+            ]),
+            ..stage_defaults()
+        },
+        StageDefinition {
+            name: "working".into(),
+            role: "worker".into(),
+            mode: "main".into(),
+            transitions: HashMap::from([
+                ("default".into(), "go_reviewing".into()),
+                ("ask_user".into(), "go_working".into()),
+                ("ask_planner".into(), "go_planning".into()),
+            ]),
+            ..stage_defaults()
+        },
+        StageDefinition {
+            name: "reviewing".into(),
+            role: "reviewer".into(),
+            mode: "main".into(),
+            transitions: HashMap::from([
+                ("review_accept".into(), "go_merging".into()),
+                ("review_reject".into(), "go_working".into()),
+                ("default".into(), "go_merging".into()),
+            ]),
+            ..stage_defaults()
+        },
+        StageDefinition {
+            name: "merging".into(),
+            role: "merger".into(),
+            mode: "main".into(),
+            transitions: HashMap::from([("default".into(), "return".into())]),
+            ..stage_defaults()
+        },
+        // Conflict mode: invoked when work branch diverges
+        StageDefinition {
+            name: "merging".into(),
+            role: "merger".into(),
+            mode: "conflict".into(),
+            is_start: true,
+            transitions: HashMap::from([("default".into(), "return".into())]),
+            ..stage_defaults()
+        },
+    ];
+
+    let roles = HashMap::from([
+        (
+            "preparator".into(),
+            RoleDefinition {
+                tools: vec![
+                    "get_history",
+                    "report_error",
+                    "report_results",
+                    "ask_user",
+                    "get_param_destination_repository",
+                    "set_param_destination_repository",
+                    "get_param_destination_branch",
+                    "set_param_destination_branch",
+                    "set_param_work_branch_postfix",
+                    "get_param_work_branch",
+                ]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+                prompt: Some(PathBuf::from("prompts/preparator.md")),
+            },
+        ),
+        (
+            "planner".into(),
+            RoleDefinition {
+                tools: vec![
+                    "get_history",
+                    "report_error",
+                    "ask_user",
+                    "post_plan",
+                    "get_checklist",
+                    "insert_checklist_item",
+                    "update_checklist_item",
+                    "delete_checklist_item",
+                    "get_param_destination_branch",
+                    "get_param_work_branch",
+                ]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+                prompt: Some(PathBuf::from("prompts/planner.md")),
+            },
+        ),
+        (
+            "worker".into(),
+            RoleDefinition {
+                tools: vec![
+                    "get_history",
+                    "report_error",
+                    "report_results",
+                    "ask_user",
+                    "ask_planner",
+                    "get_checklist",
+                    "insert_checklist_item",
+                    "update_checklist_item",
+                    "check_checklist_item",
+                    "delete_checklist_item",
+                    "get_param_destination_branch",
+                    "get_param_work_branch",
+                ]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+                prompt: Some(PathBuf::from("prompts/worker.md")),
+            },
+        ),
+        (
+            "reviewer".into(),
+            RoleDefinition {
+                tools: vec![
+                    "get_history",
+                    "report_error",
+                    "review_accept",
+                    "review_reject",
+                    "ask_user",
+                    "get_param_destination_branch",
+                    "get_param_work_branch",
+                ]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+                prompt: Some(PathBuf::from("prompts/reviewer.md")),
+            },
+        ),
+        (
+            "tester".into(),
+            RoleDefinition {
+                tools: vec![
+                    "get_history",
+                    "report_error",
+                    "test_accept",
+                    "test_reject",
+                    "ask_user",
+                    "get_param_destination_branch",
+                    "get_param_work_branch",
+                ]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+                prompt: Some(PathBuf::from("prompts/tester.md")),
+            },
+        ),
+        (
+            "merger".into(),
+            RoleDefinition {
+                tools: vec![
+                    "get_history",
+                    "report_error",
+                    "report_results",
+                    "ask_user",
+                    "get_param_destination_branch",
+                    "get_param_work_branch",
+                ]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+                prompt: Some(PathBuf::from("prompts/merger.md")),
+            },
+        ),
+    ]);
+
+    PipelineConfig {
+        stages,
+        roles,
     }
 }
+
+fn stage_defaults() -> StageDefinition {
+    StageDefinition {
+        name: String::new(),
+        role: String::new(),
+        mode: String::new(),
+        model: None,
+        tool: None,
+        main_prompt: None,
+        additional_prompts: vec![],
+        transitions: HashMap::new(),
+        is_start: false,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Default role prompts
+// ---------------------------------------------------------------------------
+
+const ROLE_PROMPTS: &[(&str, &str)] = &[
+    ("preparator", PREPARATOR_PROMPT),
+    ("planner", PLANNER_PROMPT),
+    ("worker", WORKER_PROMPT),
+    ("reviewer", REVIEWER_PROMPT),
+    ("tester", TESTER_PROMPT),
+    ("merger", MERGER_PROMPT),
+];
 
 const PREPARATOR_PROMPT: &str = r#"# Preparator Agent
 

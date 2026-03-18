@@ -9,7 +9,6 @@ zbobr-utility = { version = "0.1.0", path = "../zbobr-utility" }
 zbobr-executor-claude = { version = "0.1.0", path = "../zbobr-executor-claude" }
 zbobr-executor-copilot = { version = "0.1.0", path = "../zbobr-executor-copilot" }
 zbobr-executor-mcp-tester = { version = "0.1.0", path = "../zbobr-executor-mcp-tester" }
-zbobr-prompts = { version = "0.1.0", path = "../zbobr-prompts" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -18,6 +18,11 @@ use zbobr_dispatcher::{TaskDir, ZbobrDispatcher, print_task};
 /// Top-level commands.
 #[derive(Subcommand)]
 pub enum Command {
+    /// Initialize a new zbobr workspace with config, prompts, and directories
+    Init {
+        /// Destination directory for the new workspace
+        directory: PathBuf,
+    },
     /// Initialize a task project: create repo if needed, set up stages and labels
     Setup {
         /// Force overwrite existing labels
@@ -206,6 +211,9 @@ pub async fn run_command(
     pipeline: &PipelineConfig,
 ) -> anyhow::Result<()> {
     match command {
+        Command::Init { .. } => {
+            unreachable!("Init is handled before dispatcher setup in main()")
+        }
         Command::Setup { force } => {
             zbobr.setup(&**zbobr.task_backend(), force).await?;
         }

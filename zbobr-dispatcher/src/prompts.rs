@@ -119,25 +119,15 @@ pub async fn build_full_prompt(
 /// Pure synchronous prompt assembly (used by tests and `build_full_prompt`).
 fn assemble_prompt(
     user_context: &str,
-    role_name: &str,
+    _role_name: &str,
     task: &Task,
     history_json: &str,
 ) -> String {
     let task_title = &task.title;
 
-    // Use hardcoded default prompt as the base, if available for this role.
-    // If user_context already contains a role prompt (from file), it comes after.
-    let hardcoded = zbobr_prompts::default_prompt(role_name)
-        .unwrap_or("")
-        .to_string();
-
     let mut sections = Vec::new();
 
-    if !hardcoded.is_empty() {
-        sections.push(hardcoded);
-    }
-
-    // Custom prompts from prompt files
+    // Prompts from configured prompt files
     if !user_context.is_empty() {
         sections.push(user_context.to_owned());
     }

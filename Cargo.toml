@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["zbobr-dispatcher", "zbobr-executor-copilot", "zbobr-executor-claude", "zbobr-executor-mcp-tester", "zbobr-task-backend-github", "zbobr-task-backend-fs", "zbobr-repo-backend-github", "zbobr-repo-backend-fs", "zbobr-api", "zbobr-macros", "zbobr-utility", "zbobr", "zbobr-prompts"]
+members = ["zbobr-dispatcher", "zbobr-executor-copilot", "zbobr-executor-claude", "zbobr-executor-mcp-tester", "zbobr-task-backend-github", "zbobr-task-backend-fs", "zbobr-repo-backend-github", "zbobr-repo-backend-fs", "zbobr-api", "zbobr-macros", "zbobr-utility", "zbobr"]
 
 [workspace.package]
 edition = "2024"
@@ -18,7 +18,6 @@ zbobr-executor-claude = { path = "zbobr-executor-claude" }
 zbobr-executor-mcp-tester = { path = "zbobr-executor-mcp-tester" }
 zbobr-utility = { path = "zbobr-utility" }
 zbobr-macros = { path = "zbobr-macros" }
-zbobr-prompts = { path = "zbobr-prompts" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

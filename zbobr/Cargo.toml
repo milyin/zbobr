@@ -13,7 +13,6 @@ default-run = "zbobr"
 [dependencies]
 zbobr-dispatcher = { workspace = true }
 zbobr-api = { workspace = true }
-zbobr-prompts = { workspace = true }
 zbobr-utility = { workspace = true }
 zbobr-task-backend-github = { workspace = true }
 zbobr-repo-backend-github = { workspace = true }
