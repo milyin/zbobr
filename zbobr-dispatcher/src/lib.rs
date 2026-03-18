@@ -11,8 +11,8 @@ pub mod task_dir;
 pub mod tool_executor;
 
 pub use cli::{
-    Command, ConfigFileArg, ConfigLocation, GlobalArgs, TaskSubcommand, parse_cli, print_task,
-    resolve_config_location,
+    ConfigFileArg, ConfigLocation, GlobalArgs, parse_cli, print_task, process_task,
+    resolve_config_location, run_manager_loop, run_role_subcommand,
 };
 pub use config::{
     ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs, ZbobrExecutorToml,
@@ -104,7 +104,7 @@ impl ZbobrDispatcher {
         self.prompt_builder.as_ref().expect("prompt_builder not set on ZbobrDispatcher")
     }
 
-    pub(crate) fn build_executor(&self, tool: Tool, model: Model) -> Box<dyn ToolExecutor> {
+    pub fn build_executor(&self, tool: Tool, model: Model) -> Box<dyn ToolExecutor> {
         match tool {
             Tool::Copilot => {
                 let mut config = self.copilot.as_ref().clone();
@@ -122,7 +122,7 @@ impl ZbobrDispatcher {
         }
     }
 
-    pub(crate) fn copilot_github_token(&self) -> &str {
+    pub fn copilot_github_token(&self) -> &str {
         &self.copilot.copilot_github_token
     }
 

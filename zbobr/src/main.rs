@@ -1,5 +1,7 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
+mod commands;
+
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -9,7 +11,7 @@ use zbobr_dispatcher::config::{
     Config as _, ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
     ZbobrExecutorArgs, ZbobrExecutorConfig, ZbobrExecutorToml,
 };
-use zbobr_dispatcher::{Command, ConfigFileArg, ConfiguredPromptBuilder};
+use zbobr_dispatcher::{ConfigFileArg, ConfiguredPromptBuilder};
 use zbobr_api::config::{PipelineConfig, PipelineArgs, PipelineToml};
 use zbobr_utility::config_struct;
 
@@ -21,6 +23,8 @@ use zbobr_task_backend_github::{
     TaskBackendGithub, ZbobrTaskBackendGithubArgs, ZbobrTaskBackendGithubConfig,
     ZbobrTaskBackendGithubToml,
 };
+
+use commands::Command;
 
 #[derive(Clone, Default)]
 #[config_struct]
@@ -112,6 +116,5 @@ async fn main() -> anyhow::Result<()> {
         .with_prompt_builder(prompt_builder)
         .build();
 
-    dispatcher.run_command(command, &pipeline).await
+    commands::run_command(&dispatcher, command, &pipeline).await
 }
-
