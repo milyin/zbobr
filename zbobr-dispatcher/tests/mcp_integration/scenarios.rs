@@ -2,12 +2,6 @@
 //! Shared across all backend-combination test files.
 
 pub fn preparation_scenario(repo_path: &str) -> String {
-    use zbobr_dispatcher::mcp::preparator_tools::{
-        GET_HISTORY, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_DESTINATION_REPOSITORY,
-        GET_PARAM_WORK_BRANCH, SET_PARAM_DESTINATION_BRANCH, SET_PARAM_DESTINATION_REPOSITORY,
-        SET_PARAM_WORK_BRANCH_POSTFIX,
-    };
-
     format!(
         r#"name: Preparator Comprehensive Test
 description: Verify all PREPARATION MCP functions
@@ -18,7 +12,7 @@ steps:
 - name: Get plan (returns task description when no plan exists)
   operation:
     type: tool_call
-    tool: {GET_HISTORY}
+    tool: get_history
   assertions:
     - type: success
     - type: contains
@@ -28,7 +22,7 @@ steps:
 - name: Set destination repository
   operation:
     type: tool_call
-    tool: {SET_PARAM_DESTINATION_REPOSITORY}
+    tool: set_param_destination_repository
     arguments:
       value: "{repo_path}"
   assertions:
@@ -37,7 +31,7 @@ steps:
 - name: Get destination repository
   operation:
     type: tool_call
-    tool: {GET_PARAM_DESTINATION_REPOSITORY}
+    tool: get_param_destination_repository
   assertions:
     - type: success
     - type: equals
@@ -47,7 +41,7 @@ steps:
 - name: Set destination branch
   operation:
     type: tool_call
-    tool: {SET_PARAM_DESTINATION_BRANCH}
+    tool: set_param_destination_branch
     arguments:
       value: "main"
   assertions:
@@ -56,7 +50,7 @@ steps:
 - name: Get destination branch
   operation:
     type: tool_call
-    tool: {GET_PARAM_DESTINATION_BRANCH}
+    tool: get_param_destination_branch
   assertions:
     - type: success
     - type: equals
@@ -66,7 +60,7 @@ steps:
 - name: Set work branch postfix
   operation:
     type: tool_call
-    tool: {SET_PARAM_WORK_BRANCH_POSTFIX}
+    tool: set_param_work_branch_postfix
     arguments:
       value: "test"
   assertions:
@@ -75,7 +69,7 @@ steps:
 - name: Get work branch
   operation:
     type: tool_call
-    tool: {GET_PARAM_WORK_BRANCH}
+    tool: get_param_work_branch
   assertions:
     - type: success
     - type: contains
@@ -87,11 +81,6 @@ steps:
 }
 
 pub fn planning_scenario() -> String {
-    use zbobr_dispatcher::mcp::planner_tools::{
-        GET_HISTORY, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, INSERT_CHECKLIST_ITEM,
-        POST_PLAN,
-    };
-
     format!(
         r#"name: Planner Comprehensive Test
 description: Verify all PLANNING MCP functions
@@ -102,14 +91,14 @@ steps:
 - name: Get plan (initially returns task description)
   operation:
     type: tool_call
-    tool: {GET_HISTORY}
+    tool: get_history
   assertions:
     - type: success
 
 - name: Post implementation plan
   operation:
     type: tool_call
-    tool: {POST_PLAN}
+    tool: post_plan
     arguments:
       description: "Step 1: analyse the codebase.\nStep 2: implement the feature.\nStep 3: write tests."
   assertions:
@@ -118,7 +107,7 @@ steps:
 - name: Get plan (verify posted content)
   operation:
     type: tool_call
-    tool: {GET_HISTORY}
+    tool: get_history
   assertions:
     - type: success
     - type: contains
@@ -128,7 +117,7 @@ steps:
 - name: Insert checklist item for worker
   operation:
     type: tool_call
-    tool: {INSERT_CHECKLIST_ITEM}
+    tool: insert_checklist_item
     arguments:
       id: "step-1"
       text: "Analyse the codebase"
@@ -138,7 +127,7 @@ steps:
 - name: Get destination branch
   operation:
     type: tool_call
-    tool: {GET_PARAM_DESTINATION_BRANCH}
+    tool: get_param_destination_branch
   assertions:
     - type: success
     - type: equals
@@ -148,7 +137,7 @@ steps:
 - name: Get work branch
   operation:
     type: tool_call
-    tool: {GET_PARAM_WORK_BRANCH}
+    tool: get_param_work_branch
   assertions:
     - type: success
     - type: contains
@@ -158,7 +147,7 @@ steps:
 - name: Post plan as final action (finishes session)
   operation:
     type: tool_call
-    tool: {POST_PLAN}
+    tool: post_plan
     arguments:
       description: "Final plan: analyse codebase, implement feature, write tests."
   assertions:
@@ -170,8 +159,6 @@ steps:
 /// Minimal working scenario that leaves one unchecked checklist item.
 /// Used to verify that exit rule 2.3 sets GoWork (has_unchecked=true).
 pub fn working_scenario_with_unchecked_item() -> String {
-    use zbobr_dispatcher::mcp::worker_tools::{INSERT_CHECKLIST_ITEM, REPORT_RESULTS};
-
     format!(
         r#"name: Worker With Unchecked Item
 description: Insert an unchecked item and finish
@@ -182,7 +169,7 @@ steps:
 - name: Insert unchecked checklist item
   operation:
     type: tool_call
-    tool: {INSERT_CHECKLIST_ITEM}
+    tool: insert_checklist_item
     arguments:
       id: "u1"
       text: "Unchecked work item"
@@ -192,7 +179,7 @@ steps:
 - name: Report results without checking item
   operation:
     type: tool_call
-    tool: {REPORT_RESULTS}
+    tool: report_results
     arguments:
       message: "Work reported with unchecked item."
   assertions:
@@ -202,12 +189,6 @@ steps:
 }
 
 pub fn working_scenario() -> String {
-    use zbobr_dispatcher::mcp::worker_tools::{
-        CHECK_CHECKLIST_ITEM, DELETE_CHECKLIST_ITEM, GET_CHECKLIST, GET_HISTORY,
-        GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, INSERT_CHECKLIST_ITEM, REPORT_RESULTS,
-        UPDATE_CHECKLIST_ITEM,
-    };
-
     const PRIMARY_ID: &str = "w1";
     const TEMP_ID: &str = "w2";
 
@@ -221,14 +202,14 @@ steps:
 - name: Get plan
   operation:
     type: tool_call
-    tool: {GET_HISTORY}
+    tool: get_history
   assertions:
     - type: success
 
 - name: Get destination branch
   operation:
     type: tool_call
-    tool: {GET_PARAM_DESTINATION_BRANCH}
+    tool: get_param_destination_branch
   assertions:
     - type: success
     - type: equals
@@ -238,7 +219,7 @@ steps:
 - name: Get work branch
   operation:
     type: tool_call
-    tool: {GET_PARAM_WORK_BRANCH}
+    tool: get_param_work_branch
   assertions:
     - type: success
     - type: contains
@@ -248,7 +229,7 @@ steps:
 - name: Get checklist (initially empty)
   operation:
     type: tool_call
-    tool: {GET_CHECKLIST}
+    tool: get_checklist
   assertions:
     - type: success
     - type: contains
@@ -258,7 +239,7 @@ steps:
 - name: Insert primary checklist item
   operation:
     type: tool_call
-    tool: {INSERT_CHECKLIST_ITEM}
+    tool: insert_checklist_item
     arguments:
       id: "{PRIMARY_ID}"
       text: "Implement worker stage integration coverage"
@@ -268,7 +249,7 @@ steps:
 - name: Update primary checklist item
   operation:
     type: tool_call
-    tool: {UPDATE_CHECKLIST_ITEM}
+    tool: update_checklist_item
     arguments:
       id: "{PRIMARY_ID}"
       text: "Implement and validate worker stage integration coverage"
@@ -278,7 +259,7 @@ steps:
 - name: Check primary checklist item
   operation:
     type: tool_call
-    tool: {CHECK_CHECKLIST_ITEM}
+    tool: check_checklist_item
     arguments:
       id: "{PRIMARY_ID}"
       checked: true
@@ -288,7 +269,7 @@ steps:
 - name: Insert temporary checklist item
   operation:
     type: tool_call
-    tool: {INSERT_CHECKLIST_ITEM}
+    tool: insert_checklist_item
     arguments:
       id: "{TEMP_ID}"
       text: "Temporary item to verify delete"
@@ -298,7 +279,7 @@ steps:
 - name: Delete temporary checklist item
   operation:
     type: tool_call
-    tool: {DELETE_CHECKLIST_ITEM}
+    tool: delete_checklist_item
     arguments:
       id: "{TEMP_ID}"
   assertions:
@@ -310,7 +291,7 @@ steps:
 - name: Report results and finish
   operation:
     type: tool_call
-    tool: {REPORT_RESULTS}
+    tool: report_results
     arguments:
       message: "Worker complete."
   assertions:
@@ -320,12 +301,6 @@ steps:
 }
 
 pub fn reviewing_scenario() -> String {
-    // checklist operations aren't exported by reviewer_tools, so pull them
-    // from worker_tools (they're otherwise the same constants).
-    use zbobr_dispatcher::mcp::reviewer_tools::{
-        GET_HISTORY, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, REVIEW_REJECT,
-    };
-
     format!(
         r#"name: Reviewer Comprehensive Test
 description: Verify core REVIEWING MCP functions
@@ -336,14 +311,14 @@ steps:
 - name: Get plan
   operation:
     type: tool_call
-    tool: {GET_HISTORY}
+    tool: get_history
   assertions:
     - type: success
 
 - name: Get destination branch
   operation:
     type: tool_call
-    tool: {GET_PARAM_DESTINATION_BRANCH}
+    tool: get_param_destination_branch
   assertions:
     - type: success
     - type: equals
@@ -353,7 +328,7 @@ steps:
 - name: Get work branch
   operation:
     type: tool_call
-    tool: {GET_PARAM_WORK_BRANCH}
+    tool: get_param_work_branch
   assertions:
     - type: success
     - type: contains
@@ -363,7 +338,7 @@ steps:
 - name: Reject review (simulate discovered issue)
   operation:
     type: tool_call
-    tool: {REVIEW_REJECT}
+    tool: review_reject
     arguments:
       message: "Reviewer complete. Found a problem during review."
   assertions:
@@ -375,8 +350,6 @@ steps:
 /// Scenario where the reviewer finds no issues — task should be marked DONE instead
 /// of routing back to the planner.
 pub fn reviewing_approval_scenario() -> String {
-    use zbobr_dispatcher::mcp::reviewer_tools::{GET_HISTORY, REVIEW_ACCEPT};
-
     format!(
         r#"name: Reviewer Approval Test
 description: Reviewer finds no issues — task will be marked DONE
@@ -387,14 +360,14 @@ steps:
 - name: Get plan
   operation:
     type: tool_call
-    tool: {GET_HISTORY}
+    tool: get_history
   assertions:
     - type: success
 
 - name: Accept review (no issues found)
   operation:
     type: tool_call
-    tool: {REVIEW_ACCEPT}
+    tool: review_accept
     arguments:
       message: "Reviewer approved. No issues found."
   assertions:
@@ -407,8 +380,6 @@ steps:
 /// Used to verify that the retry signal (GoPlan) overrides the normal exit
 /// signal (GoWork) when the agent sets a signal mid-session.
 pub fn planning_report_error_scenario() -> String {
-    use zbobr_dispatcher::mcp::planner_tools::REPORT_ERROR;
-
     format!(
         r#"name: Planner Report Error Test
 description: Planner reports an error to verify retry signal
@@ -419,7 +390,7 @@ steps:
 - name: Report error
   operation:
     type: tool_call
-    tool: {REPORT_ERROR}
+    tool: report_error
     arguments:
       message: "Something went wrong during planning"
   assertions:
@@ -429,35 +400,29 @@ steps:
 }
 
 pub fn merging_scenario(ending: &str) -> String {
-    use zbobr_dispatcher::mcp::merger_tools::{
-        ASK_USER, GET_HISTORY, GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH, REPORT_RESULTS,
-    };
-
     let ending_step = match ending {
-        "report" => format!(
-            r#"
+        "report" => r#"
 - name: Report results and finish
   operation:
     type: tool_call
-    tool: {REPORT_RESULTS}
+    tool: report_results
     arguments:
       message: "Merger complete."
   assertions:
     - type: success
 "#
-        ),
-        "ask" => format!(
-            r#"
+        .to_string(),
+        "ask" => r#"
 - name: Ask user
   operation:
     type: tool_call
-    tool: {ASK_USER}
+    tool: ask_user
     arguments:
       message: "Need guidance on merge"
   assertions:
     - type: success
 "#
-        ),
+        .to_string(),
         _ => panic!("unknown merging ending: {ending}"),
     };
 
@@ -471,14 +436,14 @@ steps:
 - name: Get plan
   operation:
     type: tool_call
-    tool: {GET_HISTORY}
+    tool: get_history
   assertions:
     - type: success
 
 - name: Get destination branch
   operation:
     type: tool_call
-    tool: {GET_PARAM_DESTINATION_BRANCH}
+    tool: get_param_destination_branch
   assertions:
     - type: success
     - type: equals
@@ -488,7 +453,7 @@ steps:
 - name: Get work branch
   operation:
     type: tool_call
-    tool: {GET_PARAM_WORK_BRANCH}
+    tool: get_param_work_branch
   assertions:
     - type: success
     - type: contains
@@ -501,8 +466,6 @@ steps:
 /// Scenario that calls `report_error` during a worker session.
 /// Used to verify that report_error sets the pause flag but leaves the signal intact.
 pub fn worker_report_error_scenario() -> String {
-    use zbobr_dispatcher::mcp::worker_tools::REPORT_ERROR;
-
     format!(
         r#"name: Worker Report Error Test
 description: Verify report_error sets pause without clearing signal
@@ -513,7 +476,7 @@ steps:
 - name: Report error
   operation:
     type: tool_call
-    tool: {REPORT_ERROR}
+    tool: report_error
     arguments:
       message: "Something went wrong during work"
   assertions:
@@ -527,8 +490,6 @@ steps:
 /// The `description` parameter is the task description, used to verify that
 /// GET_HISTORY returns it as a user request comment when no plan has been posted.
 pub fn multiple_plans_scenario(description: &str) -> String {
-    use zbobr_dispatcher::mcp::planner_tools::{GET_HISTORY, POST_PLAN, REPORT_ERROR};
-
     format!(
         r#"name: Multiple Plans History Test
 description: Verify GET_HISTORY with offset parameter and plan isolation
@@ -539,7 +500,7 @@ steps:
 - name: Get plan before any plan exists (returns task description as user request comment)
   operation:
     type: tool_call
-    tool: {GET_HISTORY}
+    tool: get_history
   assertions:
     - type: success
     - type: contains
@@ -549,7 +510,7 @@ steps:
 - name: Post first plan
   operation:
     type: tool_call
-    tool: {POST_PLAN}
+    tool: post_plan
     arguments:
       description: "First plan: step A, then step B"
   assertions:
@@ -558,7 +519,7 @@ steps:
 - name: Add error comment between plans (simulates activity between plan versions)
   operation:
     type: tool_call
-    tool: {REPORT_ERROR}
+    tool: report_error
     arguments:
       message: "Issue found after first plan: needs revision"
   assertions:
@@ -567,7 +528,7 @@ steps:
 - name: Post second plan
   operation:
     type: tool_call
-    tool: {POST_PLAN}
+    tool: post_plan
     arguments:
       description: "Second plan: revised step X, then step Y"
   assertions:
@@ -576,7 +537,7 @@ steps:
 - name: Get latest history (default, no offset) - should return both plans (single chunk, no cuts)
   operation:
     type: tool_call
-    tool: {GET_HISTORY}
+    tool: get_history
   assertions:
     - type: success
     - type: contains
@@ -595,7 +556,7 @@ steps:
 - name: Get offset 0 - should return same chunk (oldest = latest when single chunk)
   operation:
     type: tool_call
-    tool: {GET_HISTORY}
+    tool: get_history
     arguments:
       offset: 0
   assertions:
@@ -610,7 +571,7 @@ steps:
 - name: Get offset 1 - should return out-of-range (no cut boundaries, single chunk)
   operation:
     type: tool_call
-    tool: {GET_HISTORY}
+    tool: get_history
     arguments:
       offset: 1
   assertions:
@@ -624,8 +585,6 @@ steps:
 }
 
 pub fn merging_conflict_scenario() -> String {
-    use zbobr_dispatcher::mcp::merger_tools::{GET_HISTORY, REPORT_RESULTS};
-
     format!(
         r#"name: Merger Conflict Resolution Test
 description: Test handling of real merge conflicts
@@ -636,14 +595,14 @@ steps:
 - name: Get plan
   operation:
     type: tool_call
-    tool: {GET_HISTORY}
+    tool: get_history
   assertions:
     - type: success
 
 - name: Report conflict resolution
   operation:
     type: tool_call
-    tool: {REPORT_RESULTS}
+    tool: report_results
     arguments:
       message: "Detected merge conflicts in conflict_file.txt."
   assertions:

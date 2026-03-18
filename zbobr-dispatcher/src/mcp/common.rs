@@ -1,10 +1,9 @@
-use rmcp::handler::server::router::tool::ToolRouter;
-use serde_json::Value;
+use std::collections::HashSet;
 
 use crate::{
     ZbobrDispatcher,
     backend::TaskBackend,
-    task::{Model, Role, RoleSession, Tool},
+    task::{Model, RoleSession, Tool},
 };
 
 // Custom deserializer for boolean that accepts both bool and string values
@@ -32,19 +31,6 @@ where
     }
 }
 
-// Instruction shared across all role prompts explaining branch isolation rules.
-pub fn branch_isolation_instruction() -> String {
-    use planner_tools::{GET_PARAM_DESTINATION_BRANCH, GET_PARAM_WORK_BRANCH};
-    format!(
-        "Workspace branch isolation. Your working directory is already the repository with the \
-        work branch checked out. Use ONLY the destination and work branches with names provided \
-        by the MCP tools `{GET_PARAM_DESTINATION_BRANCH}`, `{GET_PARAM_WORK_BRANCH}`. \
-        Do not make changes in the destination branch: this is for reference only. \
-        Do NOT fetch or use any other branches. Do NOT look at branches other than the work \
-        and destination branches. If you need temporary or experimental branches, prefix their \
-        names with the work branch name to avoid interfering with other agents.",
-    )
-}
 
 /// Get the current hostname, or "unknown" if it cannot be determined.
 pub fn get_hostname() -> String {
@@ -151,149 +137,6 @@ pub struct GetHistoryParam {
     pub offset: Option<usize>,
 }
 
-macro_rules! mcp_tools {
-    ($mod_name:ident, $($name:ident = $val:expr),* $(,)?) => {
-        pub mod $mod_name {
-            $(pub const $name: &str = $val;)*
-            pub const ALL_TOOLS: &[&str] = &[$($val),*];
-        }
-    }
-}
-
-mcp_tools! {
-    preparator_tools,
-    GET_HISTORY = "get_history",
-    REPORT_ERROR = "report_error",
-    SET_PARAM_DESTINATION_REPOSITORY = "set_param_destination_repository",
-    SET_PARAM_DESTINATION_BRANCH = "set_param_destination_branch",
-    SET_PARAM_WORK_BRANCH_POSTFIX = "set_param_work_branch_postfix",
-    GET_PARAM_DESTINATION_REPOSITORY = "get_param_destination_repository",
-    GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
-    GET_PARAM_WORK_BRANCH = "get_param_work_branch",
-    REPORT_RESULTS = "report_results",
-}
-
-mcp_tools! {
-    planner_tools,
-    GET_HISTORY = "get_history",
-    POST_PLAN = "post_plan",
-    GET_CHECKLIST = "get_checklist",
-    INSERT_CHECKLIST_ITEM = "insert_checklist_item",
-    UPDATE_CHECKLIST_ITEM = "update_checklist_item",
-    DELETE_CHECKLIST_ITEM = "delete_checklist_item",
-    REPORT_ERROR = "report_error",
-    ASK_USER = "ask_user",
-    GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
-    GET_PARAM_WORK_BRANCH = "get_param_work_branch",
-}
-
-mcp_tools! {
-    worker_tools,
-    GET_HISTORY = "get_history",
-    REPORT_ERROR = "report_error",
-    ASK_USER = "ask_user",
-    ASK_PLANNER = "ask_planner",
-    GET_CHECKLIST = "get_checklist",
-    INSERT_CHECKLIST_ITEM = "insert_checklist_item",
-    UPDATE_CHECKLIST_ITEM = "update_checklist_item",
-    CHECK_CHECKLIST_ITEM = "check_checklist_item",
-    DELETE_CHECKLIST_ITEM = "delete_checklist_item",
-    GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
-    GET_PARAM_WORK_BRANCH = "get_param_work_branch",
-    REPORT_RESULTS = "report_results",
-}
-
-mcp_tools! {
-    reviewer_tools,
-    GET_HISTORY = "get_history",
-    REPORT_ERROR = "report_error",
-    GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
-    GET_PARAM_WORK_BRANCH = "get_param_work_branch",
-    REVIEW_ACCEPT = "review_accept",
-    REVIEW_REJECT = "review_reject",
-}
-
-mcp_tools! {
-    tester_tools,
-    GET_HISTORY = "get_history",
-    REPORT_ERROR = "report_error",
-    GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
-    GET_PARAM_WORK_BRANCH = "get_param_work_branch",
-    TEST_ACCEPT = "test_accept",
-    TEST_REJECT = "test_reject",
-}
-
-mcp_tools! {
-    merger_tools,
-    GET_HISTORY = "get_history",
-    REPORT_ERROR = "report_error",
-    ASK_USER = "ask_user",
-    GET_PARAM_DESTINATION_BRANCH = "get_param_destination_branch",
-    GET_PARAM_WORK_BRANCH = "get_param_work_branch",
-    REPORT_RESULTS = "report_results",
-}
-
-/// Generate concise API documentation from a tool router
-pub(crate) fn generate_api_docs_from_router<T: Send + Sync + 'static>(
-    router: &ToolRouter<T>,
-    role_name: &str,
-) -> String {
-    let tools = router.list_all();
-
-    let mut doc = format!("## {} MCP API\n\n", role_name);
-    doc.push_str("Available tools (all pre-scoped to your task):\n\n");
-
-    for tool in tools {
-        doc.push_str(&format!("### `{}`\n\n", tool.name));
-        doc.push_str(&format!(
-            "{}\n\n",
-            tool.description.as_deref().unwrap_or("No description")
-        ));
-
-        // Parameters
-        let schema = &tool.input_schema;
-        let properties_obj = schema.get("properties").and_then(|v: &Value| v.as_object());
-
-        if let Some(properties) = properties_obj {
-            if !properties.is_empty() {
-                doc.push_str("**Parameters:**\n");
-                for (name, prop_val) in properties {
-                    let required_arr = schema.get("required").and_then(|v: &Value| v.as_array());
-                    let required = required_arr
-                        .map(|arr| {
-                            arr.iter()
-                                .any(|v: &Value| v.as_str() == Some(name.as_str()))
-                        })
-                        .unwrap_or(false);
-                    let desc = match prop_val.get("description") {
-                        Some(v) => v.as_str().unwrap_or(""),
-                        None => "",
-                    };
-                    let type_str = match prop_val.get("type") {
-                        Some(v) => v.as_str().unwrap_or("any"),
-                        None => "any",
-                    };
-                    doc.push_str(&format!(
-                        "- `{}` ({}{}) - {}\n",
-                        name,
-                        type_str,
-                        if required { ", required" } else { "" },
-                        desc
-                    ));
-                }
-                doc.push('\n');
-            } else {
-                doc.push_str("**Parameters:** None\n\n");
-            }
-        } else {
-            doc.push_str("**Parameters:** None\n\n");
-        }
-
-        doc.push_str("---\n\n");
-    }
-
-    doc
-}
 
 /// Bind to an available port starting from the given base port.
 ///
@@ -349,17 +192,18 @@ pub(crate) async fn serve_mcp(
     Ok(port)
 }
 
-/// Run the MCP HTTP server scoped to a role (planner or worker) and task.
+/// Run the MCP HTTP server scoped to a role and task.
 /// Returns the actual port that was assigned (spawns server in background).
 pub async fn run_role_mcp_server(
     zbobr: ZbobrDispatcher,
     task_backend: std::sync::Arc<dyn TaskBackend>,
-    role: Role,
+    role_name: &str,
     task_id: u64,
     tool: Tool,
     model: Model,
     stage_name: String,
     transitions: std::collections::HashMap<String, String>,
+    allowed_tools: HashSet<String>,
     tool_tracker: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 ) -> anyhow::Result<u16> {
     let base_port = zbobr.config().base_port;
@@ -367,121 +211,30 @@ pub async fn run_role_mcp_server(
         StreamableHttpService, session::local::LocalSessionManager,
     };
 
-    let path = format!("/{}/{}", role, task_id);
+    let path = format!("/{}/{}", role_name, task_id);
 
     let session: RoleSession =
         zbobr.role_session_with_tracker(task_backend.clone(), task_id, tool_tracker);
 
-    let router = match role {
-        Role::Preparator => {
-            tracing::info!("Creating PreparatorMcp service for task {task_id} at path {path}");
-            let svc = StreamableHttpService::new(
-                move || {
-                    tracing::debug!("Creating new PreparatorMcp instance for task {task_id}");
-                    Ok(super::preparator::PreparatorMcp::new(
-                        session.clone(),
-                        tool,
-                        model.clone(),
-                        stage_name.clone(),
-                        transitions.clone(),
-                    ))
-                },
-                std::sync::Arc::new(LocalSessionManager::default()),
-                Default::default(),
-            );
-            axum::Router::new().nest_service(&path, svc)
-        }
-        Role::Planner => {
-            tracing::info!("Creating PlannerMcp service for task {task_id} at path {path}");
-            let svc = StreamableHttpService::new(
-                move || {
-                    tracing::debug!("Creating new PlannerMcp instance for task {task_id}");
-                    Ok(super::planner::PlannerMcp::new(
-                        session.clone(),
-                        tool,
-                        model.clone(),
-                        stage_name.clone(),
-                        transitions.clone(),
-                    ))
-                },
-                std::sync::Arc::new(LocalSessionManager::default()),
-                Default::default(),
-            );
-            axum::Router::new().nest_service(&path, svc)
-        }
-        Role::Worker => {
-            tracing::info!("Creating WorkerMcp service for task {task_id} at path {path}");
-            let svc = StreamableHttpService::new(
-                move || {
-                    tracing::debug!("Creating new WorkerMcp instance for task {task_id}");
-                    Ok(super::worker::WorkerMcp::new(
-                        session.clone(),
-                        tool,
-                        model.clone(),
-                        stage_name.clone(),
-                        transitions.clone(),
-                    ))
-                },
-                std::sync::Arc::new(LocalSessionManager::default()),
-                Default::default(),
-            );
-            axum::Router::new().nest_service(&path, svc)
-        }
-        Role::Reviewer => {
-            tracing::info!("Creating ReviewerMcp service for task {task_id} at path {path}");
-            let svc = StreamableHttpService::new(
-                move || {
-                    tracing::debug!("Creating new ReviewerMcp instance for task {task_id}");
-                    Ok(super::reviewer::ReviewerMcp::new(
-                        session.clone(),
-                        tool,
-                        model.clone(),
-                        stage_name.clone(),
-                        transitions.clone(),
-                    ))
-                },
-                std::sync::Arc::new(LocalSessionManager::default()),
-                Default::default(),
-            );
-            axum::Router::new().nest_service(&path, svc)
-        }
-        Role::Tester => {
-            tracing::info!("Creating TesterMcp service for task {task_id} at path {path}");
-            let svc = StreamableHttpService::new(
-                move || {
-                    tracing::debug!("Creating new TesterMcp instance for task {task_id}");
-                    Ok(super::tester::TesterMcp::new(
-                        session.clone(),
-                        tool,
-                        model.clone(),
-                        stage_name.clone(),
-                        transitions.clone(),
-                    ))
-                },
-                std::sync::Arc::new(LocalSessionManager::default()),
-                Default::default(),
-            );
-            axum::Router::new().nest_service(&path, svc)
-        }
-        Role::Merger => {
-            tracing::info!("Creating MergerMcp service for task {task_id} at path {path}");
-            let svc = StreamableHttpService::new(
-                move || {
-                    tracing::debug!("Creating new MergerMcp instance for task {task_id}");
-                    Ok(super::merger::MergerMcp::new(
-                        session.clone(),
-                        tool,
-                        model.clone(),
-                        stage_name.clone(),
-                        transitions.clone(),
-                    ))
-                },
-                std::sync::Arc::new(LocalSessionManager::default()),
-                Default::default(),
-            );
-            axum::Router::new().nest_service(&path, svc)
-        }
-    };
+    let role_name_owned = role_name.to_string();
+    tracing::info!("Creating UnifiedMcp service for task {task_id} role '{role_name}' at path {path}");
+    let svc = StreamableHttpService::new(
+        move || {
+            tracing::debug!("Creating new UnifiedMcp instance for task {task_id} role '{}'", role_name_owned);
+            Ok(super::unified::UnifiedMcp::new(
+                session.clone(),
+                allowed_tools.clone(),
+                role_name_owned.clone(),
+                tool,
+                model.clone(),
+                stage_name.clone(),
+                transitions.clone(),
+            ))
+        },
+        std::sync::Arc::new(LocalSessionManager::default()),
+        Default::default(),
+    );
+    let router = axum::Router::new().nest_service(&path, svc);
 
     serve_mcp(base_port, &path, router).await
 }

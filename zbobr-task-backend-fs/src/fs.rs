@@ -605,7 +605,7 @@ mod parse_tests {
         let input = "// REPORT worker:localhost:claude-opus-4.6\n\nThis is the report body\nWith multiple lines";
         let (tag, body) = split_tag_body(input);
         assert_eq!(tag.comment_type, CommentType::Report);
-        assert_eq!(tag.role, Some(Role::Worker));
+        assert_eq!(tag.role, Some("worker".to_string()));
         assert_eq!(tag.hostname, "localhost");
         assert_eq!(tag.tool, None);
         assert_eq!(tag.model, Some(Model::from_str("claude-opus-4.6").unwrap()));
@@ -617,7 +617,7 @@ mod parse_tests {
         let input = "// ERROR planner:skynet:gpt-4o\n\nAn error occurred";
         let (tag, body) = split_tag_body(input);
         assert_eq!(tag.comment_type, CommentType::Error);
-        assert_eq!(tag.role, Some(Role::Planner));
+        assert_eq!(tag.role, Some("planner".to_string()));
         assert_eq!(tag.hostname, "skynet");
         assert_eq!(tag.tool, None);
         assert_eq!(tag.model, Some(Model::from_str("gpt-4o").unwrap()));
@@ -641,7 +641,7 @@ mod parse_tests {
         let input = "// REPORT reviewer:host\n\nBody text";
         let (tag, body) = split_tag_body(input);
         assert_eq!(tag.comment_type, CommentType::Report);
-        assert_eq!(tag.role, Some(Role::Reviewer));
+        assert_eq!(tag.role, Some("reviewer".to_string()));
         assert_eq!(tag.hostname, "host");
         assert_eq!(tag.tool, None);
         assert_eq!(tag.model, None);
@@ -677,7 +677,7 @@ mod parse_tests {
         let input = "// REQUEST planner:skynet:gpt-4o\n\nPlease respond";
         let (tag, body) = split_tag_body(input);
         assert_eq!(tag.comment_type, CommentType::Request);
-        assert_eq!(tag.role, Some(Role::Planner));
+        assert_eq!(tag.role, Some("planner".to_string()));
         assert_eq!(tag.hostname, "skynet");
         assert_eq!(tag.tool, None);
         assert_eq!(tag.model, Some(Model::from_str("gpt-4o").unwrap()));
@@ -690,7 +690,7 @@ mod parse_tests {
             "// PLAN planner:localhost:claude-opus-4.6\n\nStep 1: analyse\nStep 2: implement";
         let (tag, body) = split_tag_body(input);
         assert_eq!(tag.comment_type, CommentType::Plan);
-        assert_eq!(tag.role, Some(Role::Planner));
+        assert_eq!(tag.role, Some("planner".to_string()));
         assert_eq!(tag.hostname, "localhost");
         assert_eq!(tag.tool, None);
         assert_eq!(tag.model, Some(Model::from_str("claude-opus-4.6").unwrap()));
@@ -702,7 +702,7 @@ mod parse_tests {
         let input = "// REPORT worker:localhost:copilot:gpt-5-mini\n\nbody";
         let (tag, body) = split_tag_body(input);
         assert_eq!(tag.comment_type, CommentType::Report);
-        assert_eq!(tag.role, Some(Role::Worker));
+        assert_eq!(tag.role, Some("worker".to_string()));
         assert_eq!(tag.hostname, "localhost");
         assert_eq!(tag.tool, Some(Tool::Copilot));
         assert_eq!(tag.model, Some(Model::from_str("gpt-5-mini").unwrap()));

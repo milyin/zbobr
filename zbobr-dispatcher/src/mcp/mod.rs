@@ -1,27 +1,10 @@
 pub mod common;
 pub mod traits;
-
-// Re-export commonly used tool name modules from `common` so they are
-// available as `zbobr_dispatcher::mcp::<role>_tools` for tests and callers.
-pub use common::{
-    merger_tools, planner_tools, preparator_tools, reviewer_tools, tester_tools, worker_tools,
-};
-
-pub mod merger;
-pub mod planner;
-pub mod preparator;
-pub mod reviewer;
-pub mod tester;
-pub mod worker;
+pub mod unified;
 
 pub use common::{
     CheckChecklistItemParam, DeleteChecklistItemParam, DescriptionParam, InsertChecklistItemParam,
     MessageParam, SetDestinationBranchParam, SetDestinationRepositoryParam, SetWorkBranchParam,
     UpdateChecklistItemParam, run_role_mcp_server,
 };
-pub use merger::MergerMcp;
-pub use planner::PlannerMcp;
-pub use preparator::PreparatorMcp;
-pub use reviewer::ReviewerMcp;
-pub use tester::TesterMcp;
-pub use worker::WorkerMcp;
+pub use unified::UnifiedMcp;

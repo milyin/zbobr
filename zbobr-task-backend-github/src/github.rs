@@ -1023,7 +1023,7 @@ mod parse_tests {
         let model = tag.model;
 
         assert_eq!(comment_type, CommentType::Report);
-        assert_eq!(role, Some(Role::Worker));
+        assert_eq!(role, Some("worker".to_string()));
         assert_eq!(host, "localhost");
         assert_eq!(tool, None);
         assert_eq!(model, Some(Model::from_str("claude-opus-4.6").unwrap()));
@@ -1041,7 +1041,7 @@ mod parse_tests {
         let model = tag.model;
 
         assert_eq!(comment_type, CommentType::Error);
-        assert_eq!(role, Some(Role::Planner));
+        assert_eq!(role, Some("planner".to_string()));
         assert_eq!(host, "skynet");
         assert_eq!(tool, None);
         assert_eq!(model, Some(Model::from_str("gpt-4o").unwrap()));
@@ -1077,7 +1077,7 @@ mod parse_tests {
         let model = tag.model;
 
         assert_eq!(comment_type, CommentType::Report);
-        assert_eq!(role, Some(Role::Reviewer));
+        assert_eq!(role, Some("reviewer".to_string()));
         assert_eq!(host, "host");
         assert_eq!(tool, None);
         assert_eq!(model, None);
@@ -1119,7 +1119,7 @@ mod parse_tests {
         let model = tag.model;
 
         assert_eq!(comment_type, CommentType::Request);
-        assert_eq!(role, Some(Role::Planner));
+        assert_eq!(role, Some("planner".to_string()));
         assert_eq!(host, "skynet");
         assert_eq!(tool, None);
         assert_eq!(model, Some(Model::from_str("gpt-4o").unwrap()));
@@ -1138,7 +1138,7 @@ mod parse_tests {
         let model = tag.model;
 
         assert_eq!(comment_type, CommentType::Plan);
-        assert_eq!(role, Some(Role::Planner));
+        assert_eq!(role, Some("planner".to_string()));
         assert_eq!(host, "localhost");
         assert_eq!(tool, None);
         assert_eq!(model, Some(Model::from_str("claude-opus-4.6").unwrap()));

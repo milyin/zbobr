@@ -17,7 +17,7 @@ pub use cli::{
 pub use config::{
     ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs, ZbobrExecutorToml,
 };
-pub use mcp::{MergerMcp, PlannerMcp, PreparatorMcp, ReviewerMcp, TesterMcp, WorkerMcp};
+pub use mcp::UnifiedMcp;
 pub use prompts::{
     ConfiguredPromptBuilder, build_full_prompt, load_prompts, validate_stage_prompts,
 };

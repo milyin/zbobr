@@ -1,32 +1,20 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::{backend::TaskBackend, task::Role};
+use crate::backend::TaskBackend;
 
 use zbobr_api::Task;
-use zbobr_api::config::StageDefinition;
-use zbobr_api::prompt::{
-    MergerToolNames, PlannerToolNames, PreparatorToolNames, PromptBuilder, ReviewerToolNames,
-    TesterToolNames, WorkerToolNames,
-};
-use zbobr_prompts::DefaultPromptBuilder;
+use zbobr_api::config::{PipelineConfig, StageDefinition};
 
 #[derive(Clone)]
 pub struct ConfiguredPromptBuilder {
     base_path: Option<PathBuf>,
-    builder: Arc<dyn PromptBuilder + Send + Sync>,
+    pipeline: Arc<PipelineConfig>,
 }
 
 impl ConfiguredPromptBuilder {
-    pub fn new(base_path: Option<PathBuf>) -> Self {
-        Self::with_builder(base_path, Arc::new(DefaultPromptBuilder))
-    }
-
-    pub fn with_builder(
-        base_path: Option<PathBuf>,
-        builder: Arc<dyn PromptBuilder + Send + Sync>,
-    ) -> Self {
-        Self { base_path, builder }
+    pub fn new(base_path: Option<PathBuf>, pipeline: Arc<PipelineConfig>) -> Self {
+        Self { base_path, pipeline }
     }
 
     pub fn base_path(&self) -> Option<&PathBuf> {
@@ -40,50 +28,28 @@ impl ConfiguredPromptBuilder {
         task_id: u64,
         task_backend: &dyn TaskBackend,
     ) -> anyhow::Result<String> {
-        let prompt_files = prompt_files_for_stage(stage_def);
+        let prompt_files = prompt_files_for_stage(stage_def, &self.pipeline);
         let base_prompt = load_prompts(&prompt_files, self.base_path.as_ref())?;
         build_full_prompt(
             &base_prompt,
-            stage_def.role,
+            &stage_def.role,
             task_id,
             task_backend,
-            &*self.builder,
         )
         .await
     }
 }
 
-impl PromptBuilder for ConfiguredPromptBuilder {
-    fn preparator_instructions(&self, tools: &PreparatorToolNames) -> String {
-        self.builder.preparator_instructions(tools)
-    }
-
-    fn planner_instructions(&self, tools: &PlannerToolNames) -> String {
-        self.builder.planner_instructions(tools)
-    }
-
-    fn worker_instructions(&self, tools: &WorkerToolNames) -> String {
-        self.builder.worker_instructions(tools)
-    }
-
-    fn reviewer_instructions(&self, tools: &ReviewerToolNames) -> String {
-        self.builder.reviewer_instructions(tools)
-    }
-
-    fn tester_instructions(&self, tools: &TesterToolNames) -> String {
-        self.builder.tester_instructions(tools)
-    }
-
-    fn merger_instructions(&self, tools: &MergerToolNames) -> String {
-        self.builder.merger_instructions(tools)
-    }
-}
-
 /// Collect prompt file paths from a StageDefinition.
-pub fn prompt_files_for_stage(stage_def: &StageDefinition) -> Vec<PathBuf> {
+/// If no main_prompt is specified, tries the role's prompt from the pipeline config.
+pub fn prompt_files_for_stage(stage_def: &StageDefinition, pipeline: &PipelineConfig) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if let Some(ref main) = stage_def.main_prompt {
         files.push(main.clone());
+    } else if let Some(role_def) = pipeline.role_definition(&stage_def.role) {
+        if let Some(ref prompt_path) = role_def.prompt {
+            files.push(prompt_path.clone());
+        }
     }
     files.extend(stage_def.additional_prompts.iter().cloned());
     files
@@ -128,49 +94,48 @@ pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::R
 }
 
 /// Build full prompt with sections in order:
-/// 1. Role description (from PromptBuilder)
+/// 1. Role description (from built-in default or prompt file)
 /// 2. Custom prompts (user context from prompt files)
 /// 3. Task title
 /// 4. Recent task history (latest chunk from get_history)
 /// 5. Unchecked checklist items with ids
 pub async fn build_full_prompt(
     user_context: &str,
-    role: Role,
+    role_name: &str,
     task_id: u64,
     task_backend: &dyn TaskBackend,
-    prompt_builder: &dyn PromptBuilder,
 ) -> anyhow::Result<String> {
     let task = task_backend.get_task(task_id).await?.snapshot().await?;
     let history = crate::get_history(task_backend, task_id, None).await?;
     let history_json = serde_json::to_string_pretty(&history.comments).unwrap_or_default();
     Ok(assemble_prompt(
         user_context,
-        role,
+        role_name,
         &task,
         &history_json,
-        prompt_builder,
     ))
 }
 
 /// Pure synchronous prompt assembly (used by tests and `build_full_prompt`).
 fn assemble_prompt(
     user_context: &str,
-    role: Role,
+    role_name: &str,
     task: &Task,
     history_json: &str,
-    prompt_builder: &dyn PromptBuilder,
 ) -> String {
     let task_title = &task.title;
-    let hardcoded = match role {
-        Role::Preparator => prompt_builder.preparator_instructions(&PreparatorToolNames),
-        Role::Planner => prompt_builder.planner_instructions(&PlannerToolNames),
-        Role::Worker => prompt_builder.worker_instructions(&WorkerToolNames),
-        Role::Reviewer => prompt_builder.reviewer_instructions(&ReviewerToolNames),
-        Role::Tester => prompt_builder.tester_instructions(&TesterToolNames),
-        Role::Merger => prompt_builder.merger_instructions(&MergerToolNames),
-    };
 
-    let mut sections = vec![hardcoded];
+    // Use hardcoded default prompt as the base, if available for this role.
+    // If user_context already contains a role prompt (from file), it comes after.
+    let hardcoded = zbobr_prompts::default_prompt(role_name)
+        .unwrap_or("")
+        .to_string();
+
+    let mut sections = Vec::new();
+
+    if !hardcoded.is_empty() {
+        sections.push(hardcoded);
+    }
 
     // Custom prompts from prompt files
     if !user_context.is_empty() {
@@ -203,12 +168,13 @@ fn assemble_prompt(
 /// Validate that all prompt files referenced by stage definitions exist.
 pub fn validate_stage_prompts(
     stages: &[StageDefinition],
+    pipeline: &PipelineConfig,
     base_path: Option<&PathBuf>,
 ) -> anyhow::Result<()> {
     let mut missing_files = Vec::new();
 
     for stage in stages {
-        for path in prompt_files_for_stage(stage) {
+        for path in prompt_files_for_stage(stage, pipeline) {
             if !file_exists(&path, base_path) {
                 missing_files.push(path);
             }
@@ -255,8 +221,6 @@ mod tests {
     use std::{fs, io::Write};
 
     use tempfile::TempDir;
-
-    use zbobr_prompts::DefaultPromptBuilder;
 
     use super::*;
 
@@ -345,22 +309,19 @@ mod tests {
 
     #[test]
     fn assemble_prompt_includes_user_context() {
-        let pb = DefaultPromptBuilder;
         let prompt = assemble_prompt(
             "my custom instructions",
-            Role::Worker,
+            "worker",
             &dummy_task(""),
             "",
-            &pb,
         );
         assert!(prompt.contains("my custom instructions"));
     }
 
     #[test]
     fn assemble_prompt_empty_context_omits_user_section() {
-        let pb = DefaultPromptBuilder;
-        let prompt_empty = assemble_prompt("", Role::Worker, &dummy_task(""), "", &pb);
-        let prompt_with = assemble_prompt("UNIQUE_MARKER", Role::Worker, &dummy_task(""), "", &pb);
+        let prompt_empty = assemble_prompt("", "worker", &dummy_task(""), "");
+        let prompt_with = assemble_prompt("UNIQUE_MARKER", "worker", &dummy_task(""), "");
         assert!(!prompt_empty.contains("UNIQUE_MARKER"));
         // With context is longer (has the extra context section)
         assert!(prompt_with.len() > prompt_empty.len());
@@ -373,17 +334,15 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = write_file(&dir, "worker.md", "do the work carefully");
         let loaded = load_prompts(&[path], None).unwrap();
-        let pb = DefaultPromptBuilder;
-        let result = assemble_prompt(&loaded, Role::Worker, &dummy_task(""), "", &pb);
+        let result = assemble_prompt(&loaded, "worker", &dummy_task(""), "");
         assert!(result.contains("do the work carefully"));
     }
 
     #[test]
     fn no_prompt_files_gives_empty_context() {
         let loaded = load_prompts(&[] as &[PathBuf], None).unwrap();
-        let pb = DefaultPromptBuilder;
-        let result = assemble_prompt(&loaded, Role::Worker, &dummy_task(""), "", &pb);
-        let expected = assemble_prompt("", Role::Worker, &dummy_task(""), "", &pb);
+        let result = assemble_prompt(&loaded, "worker", &dummy_task(""), "");
+        let expected = assemble_prompt("", "worker", &dummy_task(""), "");
         assert_eq!(result, expected);
     }
 
@@ -396,8 +355,7 @@ mod tests {
             Some(&dir.path().to_path_buf()),
         )
         .unwrap();
-        let pb = DefaultPromptBuilder;
-        let result = assemble_prompt(&loaded, Role::Reviewer, &dummy_task(""), "", &pb);
+        let result = assemble_prompt(&loaded, "reviewer", &dummy_task(""), "");
         assert!(result.contains("review carefully"));
     }
 }

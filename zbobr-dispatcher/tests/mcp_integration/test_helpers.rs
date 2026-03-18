@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use zbobr_api::task::{ChecklistItem, Role};
+use zbobr_api::task::ChecklistItem;
 use zbobr_dispatcher::{CommentType, TaskDir};
 
 use super::{env::IntegrationTestEnv, scenarios};
@@ -24,7 +24,7 @@ pub async fn run_preparation(
 
     env.run_stage(
         task_id,
-        Role::Preparator,
+        "preparator",
         scenarios::preparation_scenario(&repo_path.to_string_lossy()),
     )
     .await;
@@ -64,7 +64,7 @@ pub async fn run_planning(
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    env.run_stage(task_id, Role::Planner, scenarios::planning_scenario())
+    env.run_stage(task_id, "planner", scenarios::planning_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
@@ -110,7 +110,7 @@ pub async fn run_working(
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    env.run_stage(task_id, Role::Worker, scenarios::working_scenario())
+    env.run_stage(task_id, "worker", scenarios::working_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
@@ -197,7 +197,7 @@ pub async fn run_reviewing(
             });
     }
 
-    env.run_stage(task_id, Role::Reviewer, scenarios::reviewing_scenario())
+    env.run_stage(task_id, "reviewer", scenarios::reviewing_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
@@ -272,7 +272,7 @@ pub async fn run_reviewing_approval(
 
     env.run_stage(
         task_id,
-        Role::Reviewer,
+        "reviewer",
         scenarios::reviewing_approval_scenario(),
     )
     .await;
@@ -374,7 +374,7 @@ pub async fn run_merging(
 
     env.run_stage(
         task_report,
-        Role::Merger,
+        "merger",
         scenarios::merging_scenario("report"),
     )
     .await;
@@ -410,7 +410,7 @@ pub async fn run_merging(
         .await;
     setup_conflict(env, &repo_path, task_ask, &branch_ask, &repo_name, "ask").await;
 
-    env.run_stage(task_ask, Role::Merger, scenarios::merging_scenario("ask"))
+    env.run_stage(task_ask, "merger", scenarios::merging_scenario("ask"))
         .await;
 
     let task_ask_data = env.get_task(task_ask).await;
@@ -531,7 +531,7 @@ pub async fn run_merging_with_real_conflict(
 
     env.run_stage(
         task_id,
-        Role::Merger,
+        "merger",
         scenarios::merging_conflict_scenario(),
     )
     .await;
@@ -600,7 +600,7 @@ pub async fn run_conflict_detection(
     // has diverged from main, sets conflict=true, and exits without invoking
     // the mcp-tester agent.  The workspace is left clean (no unmerged paths)
     // — the actual merge attempt happens when the Merger runs.
-    env.run_stage(task_id, Role::Worker, scenarios::working_scenario())
+    env.run_stage(task_id, "worker", scenarios::working_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
@@ -615,7 +615,7 @@ pub async fn run_conflict_detection(
     // and invoke the agent to resolve it.
     env.run_stage(
         task_id,
-        Role::Merger,
+        "merger",
         scenarios::merging_conflict_scenario(),
     )
     .await;
@@ -647,7 +647,7 @@ pub async fn run_report_error_preserves_signal(
 
     env.run_stage(
         task_id,
-        Role::Worker,
+        "worker",
         scenarios::worker_report_error_scenario(),
     )
     .await;
@@ -727,7 +727,7 @@ pub async fn run_signal_preservation_during_conflict(
     // with "call_merging" to invoke the merge-resolution mode.
     env.update_task_signal(task_id, "go_work").await;
 
-    env.run_stage(task_id, Role::Worker, scenarios::working_scenario())
+    env.run_stage(task_id, "worker", scenarios::working_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
@@ -741,7 +741,7 @@ pub async fn run_signal_preservation_during_conflict(
     // Run the Merger stage to resolve the conflict.
     env.run_stage(
         task_id,
-        Role::Merger,
+        "merger",
         scenarios::merging_conflict_scenario(),
     )
     .await;
@@ -786,7 +786,7 @@ pub async fn run_plan_history_with_index(
 
     env.run_stage(
         task_id,
-        Role::Planner,
+        "planner",
         scenarios::multiple_plans_scenario(TASK_DESCRIPTION),
     )
     .await;
@@ -1255,7 +1255,7 @@ async fn repo_backend_planning_for(env: &IntegrationTestEnv, target: &str, suffi
     env.prepare_workspace_via_repo_backend(task_id, target, &work_branch)
         .await;
 
-    env.run_stage(task_id, Role::Planner, scenarios::planning_scenario())
+    env.run_stage(task_id, "planner", scenarios::planning_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
@@ -1281,7 +1281,7 @@ async fn repo_backend_working_for(env: &IntegrationTestEnv, target: &str, suffix
     env.prepare_workspace_via_repo_backend(task_id, target, &work_branch)
         .await;
 
-    env.run_stage(task_id, Role::Worker, scenarios::working_scenario())
+    env.run_stage(task_id, "worker", scenarios::working_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
@@ -1307,7 +1307,7 @@ async fn repo_backend_reviewing_for(env: &IntegrationTestEnv, target: &str, suff
     env.prepare_workspace_via_repo_backend(task_id, target, &work_branch)
         .await;
 
-    env.run_stage(task_id, Role::Reviewer, scenarios::reviewing_scenario())
+    env.run_stage(task_id, "reviewer", scenarios::reviewing_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
@@ -1335,7 +1335,7 @@ async fn repo_backend_merging_for(env: &IntegrationTestEnv, target: &str, suffix
 
     env.run_stage(
         task_id,
-        Role::Merger,
+        "merger",
         scenarios::merging_scenario("report"),
     )
     .await;
@@ -1573,7 +1573,7 @@ pub async fn run_entry_clears_signal_for_worker(
 
     env.run_stage(
         task_id,
-        Role::Worker,
+        "worker",
         scenarios::working_scenario_with_unchecked_item(),
     )
     .await;
@@ -1641,7 +1641,7 @@ pub async fn run_entry_clears_conflict_preserves_signal_for_merger(
 
     env.run_stage(
         task_id,
-        Role::Merger,
+        "merger",
         scenarios::merging_scenario("report"),
     )
     .await;
@@ -1681,7 +1681,7 @@ pub async fn run_planner_sets_go_work_on_exit(
         .await;
 
     // No signal pre-set; Planner should emit GoWork on exit.
-    env.run_stage(task_id, Role::Planner, scenarios::planning_scenario())
+    env.run_stage(task_id, "planner", scenarios::planning_scenario())
         .await;
 
     let task = env.get_task(task_id).await;
@@ -1733,7 +1733,7 @@ pub async fn run_exit_preserves_agent_set_signal(
     // signal) is set, NOT GoWork (the normal Planner exit signal).
     env.run_stage(
         task_id,
-        Role::Planner,
+        "planner",
         scenarios::planning_report_error_scenario(),
     )
     .await;

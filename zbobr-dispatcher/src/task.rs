@@ -697,8 +697,15 @@ mod comment_model_tests {
             .unwrap();
 
         let session = zbobr.role_session(task_backend.clone() as Arc<dyn TaskBackend>, id);
-        let planner = crate::mcp::planner::PlannerMcp::new(
+        let allowed_tools: std::collections::HashSet<String> =
+            ["get_history", "report_error", "post_plan"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+        let planner = crate::mcp::unified::UnifiedMcp::new(
             session,
+            allowed_tools,
+            "planner".to_string(),
             Tool::Copilot,
             Model::Gpt5Mini,
             "planning".to_string(),
@@ -726,7 +733,7 @@ mod comment_model_tests {
             .post_comment(
                 CommentType::Error,
                 "dispatcher error",
-                None::<Role>,
+                None::<String>,
                 "host",
                 None::<Tool>,
                 None::<Model>,
@@ -744,7 +751,7 @@ mod comment_model_tests {
     fn comment_tag_roundtrip_models() {
         let tag = CommentTag::new(
             CommentType::Request,
-            Some(Role::Planner),
+            Some("planner".to_string()),
             "host".to_string(),
             None,
             Some(Model::Gpt5Mini),
@@ -758,7 +765,7 @@ mod comment_model_tests {
 
         let tag_default = CommentTag::new(
             CommentType::Report,
-            Some(Role::Planner),
+            Some("planner".to_string()),
             "host".to_string(),
             Some(Tool::Copilot),
             Some(Model::Default),
@@ -772,7 +779,7 @@ mod comment_model_tests {
 
         let tag_tool = CommentTag::new(
             CommentType::Report,
-            Some(Role::Worker),
+            Some("worker".to_string()),
             "host".to_string(),
             Some(Tool::Copilot),
             Some(Model::Gpt5Mini),

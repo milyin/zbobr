@@ -35,6 +35,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use crate::task::{Tool, Model};
+    use zbobr_api::config::StageDefinition;
 
     fn test_config_dir() -> PathBuf {
         PathBuf::from("/test/config")
@@ -304,10 +305,34 @@ mod tests {
         cfg.preparator.tool = Some(Tool::Claude);
         cfg.preparator.model = Some(Model::ClaudeOpus4_5);
 
-        assert_eq!(cfg.tool_for_role(Role::Preparator), Tool::Claude);
-        assert_eq!(cfg.tool_for_role(Role::Planner), Tool::Copilot);
-        assert_eq!(cfg.model_for_role(Role::Preparator), Model::ClaudeOpus4_5);
-        assert_eq!(cfg.model_for_role(Role::Planner), Model::Gpt5);
+        // Stage with overrides → uses stage-level settings
+        let prep_stage = StageDefinition {
+            name: "preparing".to_string(),
+            role: "preparator".to_string(),
+            tool: Some(Tool::Claude),
+            model: Some(Model::ClaudeOpus4_5),
+            main_prompt: None,
+            additional_prompts: vec![],
+            transitions: std::collections::HashMap::new(),
+            is_start: false,
+            mode: "main".to_string(),
+        };
+        // Stage without overrides → falls back to global config
+        let plan_stage = StageDefinition {
+            name: "planning".to_string(),
+            role: "planner".to_string(),
+            tool: None,
+            model: None,
+            main_prompt: None,
+            additional_prompts: vec![],
+            transitions: std::collections::HashMap::new(),
+            is_start: false,
+            mode: "main".to_string(),
+        };
+        assert_eq!(cfg.tool_for_stage(&prep_stage), Tool::Claude);
+        assert_eq!(cfg.tool_for_stage(&plan_stage), Tool::Copilot);
+        assert_eq!(cfg.model_for_stage(&prep_stage), Model::ClaudeOpus4_5);
+        assert_eq!(cfg.model_for_stage(&plan_stage), Model::Gpt5);
     }
 
     #[test]

@@ -13,7 +13,7 @@ use zbobr_utility::{git, git_check, git_output};
 use crate::{
     Comment, CommentType, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
     mcp::common::get_hostname,
-    task::{Model, Role, Tool},
+    task::{Model, Tool},
 };
 use zbobr_api::config::{PipelineConfig, StageDefinition};
 
@@ -403,7 +403,7 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
         for (i, c) in discussion.iter().enumerate() {
             let tag = CommentTag {
                 comment_type: c.comment_type,
-                role: c.role,
+                role: c.role.clone(),
                 hostname: c.hostname.clone(),
                 tool: c.tool,
                 model: c.model.clone(),
@@ -559,19 +559,19 @@ async fn run_task_subcommand(
             println!("Deleted task #{}", id);
         }
         TaskSubcommand::Prepare { task, show_prompt } => {
-            run_role_subcommand(zbobr, task, Role::Preparator, show_prompt, pipeline).await?;
+            run_role_subcommand(zbobr, task, "preparator", show_prompt, pipeline).await?;
         }
         TaskSubcommand::Plan { task, show_prompt } => {
-            run_role_subcommand(zbobr, task, Role::Planner, show_prompt, pipeline).await?;
+            run_role_subcommand(zbobr, task, "planner", show_prompt, pipeline).await?;
         }
         TaskSubcommand::Work { task, show_prompt } => {
-            run_role_subcommand(zbobr, task, Role::Worker, show_prompt, pipeline).await?;
+            run_role_subcommand(zbobr, task, "worker", show_prompt, pipeline).await?;
         }
         TaskSubcommand::Review { task, show_prompt } => {
-            run_role_subcommand(zbobr, task, Role::Reviewer, show_prompt, pipeline).await?;
+            run_role_subcommand(zbobr, task, "reviewer", show_prompt, pipeline).await?;
         }
         TaskSubcommand::Merge { task, show_prompt } => {
-            run_role_subcommand(zbobr, task, Role::Merger, show_prompt, pipeline).await?;
+            run_role_subcommand(zbobr, task, "merger", show_prompt, pipeline).await?;
         }
         TaskSubcommand::Process {
             task,
@@ -689,13 +689,13 @@ async fn run_task_subcommand(
 async fn run_role_subcommand(
     zbobr: &ZbobrDispatcher,
     task_id: u64,
-    role: Role,
+    role: &str,
     show_prompt: bool,
     pipeline: &PipelineConfig,
 ) -> anyhow::Result<()> {
     let stage_def = pipeline
         .find_stage_by_role(role)
-        .ok_or_else(|| anyhow::anyhow!("No stage definition found for role {:?} in pipeline", role))?;
+        .ok_or_else(|| anyhow::anyhow!("No stage definition found for role '{}' in pipeline", role))?;
     let runner = CliStageRunner::new(zbobr, task_id, stage_def, pipeline);
     if show_prompt {
         println!("{}", runner.prompt().await?);
@@ -747,7 +747,7 @@ impl<'a> CliStageRunner<'a> {
     }
 
     async fn run(&self) -> anyhow::Result<()> {
-        let role = self.stage_def.role;
+        let role = &self.stage_def.role;
         let cli_tool = self.zbobr.config().tool_for_stage(self.stage_def);
         let model = self.zbobr.config().model_for_stage(self.stage_def);
 
@@ -772,7 +772,7 @@ impl<'a> CliStageRunner<'a> {
         )
         .await?;
 
-        if matches!(role, Role::Preparator) {
+        if role == "preparator" {
             seed_preparator_defaults(self.zbobr, self.task_id).await?;
         } else {
             ensure_pr_url(self.zbobr, self.task_id).await?;
@@ -780,7 +780,7 @@ impl<'a> CliStageRunner<'a> {
 
         // If the work branch has diverged and on_conflict is configured,
         // push current stage onto stack and signal the conflict mode.
-        if !is_uptodate && role != Role::Merger {
+        if !is_uptodate && role != "merger" {
             if let Some(ref conflict_mode) = self.zbobr.config().on_conflict {
                 tracing::info!(
                     "Task #{} work branch diverged — calling conflict mode '{}'",
@@ -817,7 +817,7 @@ impl<'a> CliStageRunner<'a> {
         }
 
         // For Merger role: try a normal git merge first.
-        if role == Role::Merger {
+        if role == "merger" {
             let task = self
                 .zbobr
                 .task_backend()
@@ -843,8 +843,7 @@ impl<'a> CliStageRunner<'a> {
                     self.task_id,
                     &work_dir,
                     role,
-                )
-                .await?;
+                ).await?;
                 // Compute post-stage signal from transitions
                 let signal = compute_post_stage_signal(self.stage_def, None);
                 let task_session = self.zbobr.task_session(
@@ -883,6 +882,18 @@ impl<'a> CliStageRunner<'a> {
             }
         }
 
+        let allowed_tools: std::collections::HashSet<String> = self
+            .pipeline
+            .role_definition(role)
+            .map(|d| d.tools.iter().cloned().collect())
+            .unwrap_or_else(|| {
+                // No explicit role definition — allow all tools for backward compatibility.
+                crate::mcp::unified::ALL_TOOL_NAMES
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            });
+
         let tool_tracker = Arc::new(std::sync::Mutex::new(None::<String>));
         let (assigned_port, server_handle) = start_mcp_server(
             self.zbobr.clone(),
@@ -892,15 +903,14 @@ impl<'a> CliStageRunner<'a> {
             model.clone(),
             self.stage_def.name.clone(),
             self.stage_def.transitions.clone(),
+            allowed_tools,
             Arc::clone(&tool_tracker),
         )
         .await?;
 
         let mcp_url = format!(
-            "http://127.0.0.1:{assigned_port}/{role}/{task_id}",
-            assigned_port = assigned_port,
-            role = role,
-            task_id = self.task_id,
+            "http://127.0.0.1:{}/{}/{}",
+            assigned_port, role, self.task_id,
         );
 
         let prompt_text = self.prompt().await?;
@@ -1161,14 +1171,14 @@ pub async fn run_manager_loop(
 async fn prepare_workspace(
     zbobr: &ZbobrDispatcher,
     task_id: u64,
-    role: Role,
+    role: &str,
     task_dir: &Path,
 ) -> anyhow::Result<(PathBuf, bool)> {
     let task_backend = zbobr.task_backend();
     let repo_backend = zbobr.repo_backend();
     match role {
-        Role::Preparator => Ok((task_dir.to_path_buf(), true)),
-        Role::Merger => {
+        "preparator" => Ok((task_dir.to_path_buf(), true)),
+        "merger" => {
             let task = task_backend.get_task(task_id).await?.snapshot().await?;
             let dest_repo = task
                 .destination_repository
@@ -1289,18 +1299,20 @@ async fn seed_preparator_defaults(
 
 async fn start_mcp_server(
     zbobr: ZbobrDispatcher,
-    role: Role,
+    role_name: &str,
     task_id: u64,
     tool: Tool,
     model: Model,
     stage_name: String,
     transitions: std::collections::HashMap<String, String>,
+    allowed_tools: std::collections::HashSet<String>,
     tool_tracker: Arc<std::sync::Mutex<Option<String>>>,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
     let task_backend = Arc::clone(zbobr.task_backend());
+    let role_name = role_name.to_string();
     let server_handle = tokio::spawn(async move {
-        match crate::mcp::run_role_mcp_server(zbobr, task_backend, role, task_id, tool, model, stage_name, transitions, tool_tracker).await
+        match crate::mcp::run_role_mcp_server(zbobr, task_backend, &role_name, task_id, tool, model, stage_name, transitions, allowed_tools, tool_tracker).await
         {
             Ok(assigned_port) => {
                 let _ = port_tx.send(assigned_port);
@@ -1330,7 +1342,7 @@ async fn execute_tool(
     executor: Box<dyn ToolExecutor>,
     copilot_token: &str,
     task_id: u64,
-    role: Role,
+    role: &str,
     assigned_port: u16,
     prompt: &str,
     work_dir: &Path,
@@ -1374,14 +1386,14 @@ async fn finalize_stage_session(
     outcome: SessionOutcome,
     last_mapped_tool: Option<&str>,
 ) -> anyhow::Result<Option<anyhow::Error>> {
-    let role = stage_def.role;
+    let role = stage_def.role.as_str();
     let task_backend = zbobr.task_backend();
     let repo_backend = zbobr.repo_backend();
     let task_session = zbobr.task_session(Arc::clone(task_backend), Arc::clone(repo_backend), task_id);
     let pending_state = format!("{}_PENDING", stage_def.mode);
 
     if outcome.execution_interrupted {
-        if matches!(role, Role::Worker | Role::Merger)
+        if (role == "worker" || role == "merger")
             && let Err(e) =
                 perform_auto_commit_and_push(zbobr, task_id, work_dir, role)
                     .await
@@ -1394,7 +1406,7 @@ async fn finalize_stage_session(
     }
 
     if let Some(e) = outcome.execution_error.as_ref() {
-        if matches!(role, Role::Worker | Role::Merger)
+        if (role == "worker" || role == "merger")
             && let Err(e) =
                 perform_auto_commit_and_push(zbobr, task_id, work_dir, role)
                     .await
@@ -1427,7 +1439,7 @@ async fn finalize_stage_session(
 
     tracing::info!("Session complete for task #{task_id}");
 
-    if (role == Role::Worker || role == Role::Merger)
+    if (role == "worker" || role == "merger")
         && let Err(e) =
             perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await
     {
@@ -1458,7 +1470,7 @@ async fn finalize_stage_session(
     }
 
     // Merger: verify the merge actually succeeded
-    if role == Role::Merger {
+    if role == "merger" {
         let dest_branch = task_backend
             .get_task(task_id)
             .await?
@@ -1517,7 +1529,7 @@ async fn perform_auto_commit_and_push(
     zbobr: &ZbobrDispatcher,
     task_id: u64,
     work_dir: &Path,
-    role: Role,
+    role: &str,
 ) -> anyhow::Result<()> {
     let task_backend = zbobr.task_backend();
     let repo_backend = zbobr.repo_backend();
@@ -1530,7 +1542,7 @@ async fn perform_auto_commit_and_push(
                 if let Err(e) = git(work_dir, &["add", "."]).await {
                     tracing::warn!("Failed to stage changes for auto-commit: {e}");
                 }
-                let commit_msg = format!("Auto-commit by {} agent", role.as_str());
+                let commit_msg = format!("Auto-commit by {} agent", role);
                 match git(work_dir, &["commit", "-m", &commit_msg]).await {
                     Ok(_) => tracing::info!("Auto-commit successful"),
                     Err(e) => tracing::warn!("Auto-commit failed: {e}"),

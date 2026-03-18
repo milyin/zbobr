@@ -1,0 +1,370 @@
+use std::collections::{HashMap, HashSet};
+
+use rmcp::{
+    ErrorData as McpError, RoleServer, ServerHandler,
+    handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
+    model::{
+        CallToolRequestParams, CallToolResult, Content, ServerCapabilities, ServerInfo,
+        Tool as McpToolDef,
+    },
+    tool, tool_router,
+};
+use rmcp::service::RequestContext;
+
+use crate::{
+    mcp::common::{
+        CheckChecklistItemParam, DeleteChecklistItemParam, DescriptionParam, GetHistoryParam,
+        InsertChecklistItemParam, MessageParam, SetDestinationBranchParam,
+        SetDestinationRepositoryParam, UpdateChecklistItemParam,
+    },
+    mcp::traits::CommonMcpImpl,
+    task::{Model, RoleSession, Tool},
+};
+
+/// A single unified MCP server that defines ALL possible tools and filters them
+/// at runtime based on the role's `allowed_tools` set.
+#[derive(Clone)]
+pub struct UnifiedMcp {
+    session: RoleSession,
+    tool_router: ToolRouter<Self>,
+    allowed_tools: HashSet<String>,
+    role_name: String,
+    tool: Tool,
+    model: Model,
+    stage_name: String,
+    transitions: HashMap<String, String>,
+}
+
+impl CommonMcpImpl for UnifiedMcp {
+    fn session(&self) -> &RoleSession {
+        &self.session
+    }
+
+    fn role(&self) -> String {
+        self.role_name.clone()
+    }
+
+    fn mcp_tool(&self) -> Tool {
+        self.tool
+    }
+
+    fn mcp_model(&self) -> Model {
+        self.model.clone()
+    }
+
+    fn role_name(&self) -> &str {
+        &self.role_name
+    }
+
+    fn stage_name(&self) -> &str {
+        &self.stage_name
+    }
+
+    fn transitions(&self) -> &HashMap<String, String> {
+        &self.transitions
+    }
+}
+
+/// All possible tool names across all roles.
+pub const ALL_TOOL_NAMES: &[&str] = &[
+    "get_history",
+    "report_error",
+    "report_results",
+    "ask_user",
+    "ask_planner",
+    "post_plan",
+    "get_checklist",
+    "insert_checklist_item",
+    "update_checklist_item",
+    "check_checklist_item",
+    "delete_checklist_item",
+    "get_param_destination_repository",
+    "set_param_destination_repository",
+    "get_param_destination_branch",
+    "set_param_destination_branch",
+    "set_param_work_branch_postfix",
+    "get_param_work_branch",
+    "review_accept",
+    "review_reject",
+    "test_accept",
+    "test_reject",
+];
+
+#[tool_router]
+impl UnifiedMcp {
+    pub fn new(
+        session: RoleSession,
+        allowed_tools: HashSet<String>,
+        role_name: String,
+        tool: Tool,
+        model: Model,
+        stage_name: String,
+        transitions: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            session,
+            tool_router: Self::tool_router(),
+            allowed_tools,
+            role_name,
+            tool,
+            model,
+            stage_name,
+            transitions,
+        }
+    }
+
+    // -- All tools defined here. Filtering happens in ServerHandler impl. --
+
+    #[tool(
+        description = "Get task history chunk. Optional offset: chunk index (0 = oldest, omitted = latest). Response includes current_chunk and last_chunk for navigation."
+    )]
+    async fn get_history(&self, Parameters(params): Parameters<GetHistoryParam>) -> String {
+        self.get_history_impl(params.offset).await
+    }
+
+    #[tool(description = "Report an error to the user and pause task processing")]
+    async fn report_error(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.report_error_impl(&params.message).await
+    }
+
+    #[tool(
+        description = "Provide a brief and concise report of your results and finish your work. These reports add up to discussion and shorten the context for further agent calls, so they MUST be compact."
+    )]
+    async fn report_results(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.report_results_impl(&params.message).await
+    }
+
+    #[tool(
+        description = "Post a message to the user and pause task processing until user responds"
+    )]
+    async fn ask_user(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.ask_user_impl(&params.message).await
+    }
+
+    #[tool(
+        description = "Post a message to the planner and pass the task back for clarification or re-planning"
+    )]
+    async fn ask_planner(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.ask_planner_impl(&params.message).await
+    }
+
+    #[tool(description = "Post the implementation plan for this task and finish your session")]
+    async fn post_plan(&self, Parameters(params): Parameters<DescriptionParam>) -> String {
+        self.post_plan_impl(&params.description).await
+    }
+
+    #[tool(description = "Get the task checklist as a list of checkbox items")]
+    async fn get_checklist(&self) -> String {
+        self.get_checklist_impl().await
+    }
+
+    #[tool(description = "Insert a new checklist item (always created in unchecked state)")]
+    async fn insert_checklist_item(
+        &self,
+        Parameters(params): Parameters<InsertChecklistItemParam>,
+    ) -> String {
+        self.insert_checklist_item_impl(&params.id, params.after_id.clone(), &params.text)
+            .await
+    }
+
+    #[tool(description = "Update a checklist item's text")]
+    async fn update_checklist_item(
+        &self,
+        Parameters(params): Parameters<UpdateChecklistItemParam>,
+    ) -> String {
+        self.update_checklist_item_impl(&params.id, &params.text)
+            .await
+    }
+
+    #[tool(description = "Check or uncheck a checklist item")]
+    async fn check_checklist_item(
+        &self,
+        Parameters(params): Parameters<CheckChecklistItemParam>,
+    ) -> String {
+        self.check_checklist_item_impl(&params.id, params.checked)
+            .await
+    }
+
+    #[tool(
+        description = "Delete an unchecked checklist item (checked items are preserved as history)"
+    )]
+    async fn delete_checklist_item(
+        &self,
+        Parameters(params): Parameters<DeleteChecklistItemParam>,
+    ) -> String {
+        self.delete_checklist_item_impl(&params.id).await
+    }
+
+    #[tool(description = "Get the destination repository URL for this task (read-only)")]
+    async fn get_param_destination_repository(&self) -> String {
+        self.get_destination_repository_impl().await
+    }
+
+    #[tool(
+        description = "Set the destination repository for this task (full git URL, local path, or 'owner/repo')"
+    )]
+    async fn set_param_destination_repository(
+        &self,
+        Parameters(params): Parameters<SetDestinationRepositoryParam>,
+    ) -> String {
+        self.set_destination_repository_impl(params.value).await
+    }
+
+    #[tool(description = "Get the destination branch name for this task (read-only)")]
+    async fn get_param_destination_branch(&self) -> String {
+        self.get_destination_branch_impl().await
+    }
+
+    #[tool(description = "Set the destination branch name for this task (e.g. 'main')")]
+    async fn set_param_destination_branch(
+        &self,
+        Parameters(params): Parameters<SetDestinationBranchParam>,
+    ) -> String {
+        self.set_destination_branch_impl(params.value).await
+    }
+
+    #[tool(
+        description = "Set the work branch postfix for this task (the postfix segment, e.g. 'implement-feature')"
+    )]
+    async fn set_param_work_branch_postfix(
+        &self,
+        Parameters(params): Parameters<SetDestinationBranchParam>,
+    ) -> String {
+        self.set_work_branch_postfix_impl(params.value).await
+    }
+
+    #[tool(description = "Get the work branch name for this task (read-only)")]
+    async fn get_param_work_branch(&self) -> String {
+        self.get_work_branch_impl().await
+    }
+
+    #[tool(
+        description = "Accept the review: the implementation is correct and the task is done. Provide a concise summary of what was reviewed and confirmed."
+    )]
+    async fn review_accept(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.review_accept_impl(&params.message).await
+    }
+
+    #[tool(
+        description = "Reject the review: the implementation has issues that need to be addressed. Provide a concise description of the problems found."
+    )]
+    async fn review_reject(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.review_reject_impl(&params.message).await
+    }
+
+    #[tool(
+        description = "Accept the testing: all tests pass and requirements are met. Provide a concise summary of all testing performed and results."
+    )]
+    async fn test_accept(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.test_accept_impl(&params.message).await
+    }
+
+    #[tool(
+        description = "Reject the testing: tests failed or requirements not met. Provide a concise description of all test failures and what needs to be fixed."
+    )]
+    async fn test_reject(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.test_reject_impl(&params.message).await
+    }
+}
+
+// Manual ServerHandler implementation with tool filtering
+impl ServerHandler for UnifiedMcp {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo {
+            capabilities: ServerCapabilities::builder().enable_tools().build(),
+            instructions: Some(format!(
+                "{} tools: MCP server for task management.",
+                self.role_name
+            )),
+            ..Default::default()
+        }
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, McpError> {
+        let all_tools = self.tool_router.list_all();
+        let filtered: Vec<McpToolDef> = all_tools
+            .into_iter()
+            .filter(|t| self.allowed_tools.contains(t.name.as_ref()))
+            .collect();
+        Ok(rmcp::model::ListToolsResult {
+            meta: None,
+            tools: filtered,
+            next_cursor: None,
+        })
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let tool_name = request.name.as_ref();
+        if !self.allowed_tools.contains(tool_name) {
+            return Ok(CallToolResult {
+                content: vec![Content::text(format!(
+                    "Error: tool '{}' is not available for role '{}'",
+                    tool_name, self.role_name
+                ))],
+                structured_content: None,
+                is_error: Some(true),
+                meta: None,
+            });
+        }
+        let tcc = ToolCallContext::new(self, request, context);
+        self.tool_router.call(tcc).await.map_err(McpError::from)
+    }
+}
+
+impl UnifiedMcp {
+    /// Generate API documentation for the tools available to this role.
+    pub fn generate_api_docs(allowed_tools: &HashSet<String>) -> String {
+        let router = Self::tool_router();
+        let all_tools = router.list_all();
+        let filtered: Vec<_> = all_tools
+            .iter()
+            .filter(|t| allowed_tools.contains(t.name.as_ref()))
+            .collect();
+
+        let mut doc = String::from("## MCP API\n\nAvailable tools (all pre-scoped to your task):\n\n");
+        for tool in filtered {
+            doc.push_str(&format!("### `{}`\n\n", tool.name));
+            doc.push_str(&format!(
+                "{}\n\n",
+                tool.description.as_deref().unwrap_or("No description")
+            ));
+            doc.push_str("---\n\n");
+        }
+        doc
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_tool_names_match_router() {
+        let router = UnifiedMcp::tool_router();
+        let mut router_names: Vec<_> = router.list_all().iter().map(|t| t.name.to_string()).collect();
+        router_names.sort();
+        let mut expected: Vec<_> = ALL_TOOL_NAMES.iter().map(|s| s.to_string()).collect();
+        expected.sort();
+        assert_eq!(router_names, expected, "ALL_TOOL_NAMES diverged from router");
+    }
+
+    #[test]
+    fn filtering_works() {
+        let router = UnifiedMcp::tool_router();
+        let allowed: HashSet<String> = ["get_history", "report_error"].iter().map(|s| s.to_string()).collect();
+        let all_tools = router.list_all();
+        let filtered: Vec<_> = all_tools
+            .iter()
+            .filter(|t| allowed.contains(t.name.as_ref()))
+            .collect();
+        assert_eq!(filtered.len(), 2);
+    }
+}

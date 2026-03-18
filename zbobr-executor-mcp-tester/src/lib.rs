@@ -2,10 +2,7 @@ use std::{path::Path, process::Stdio};
 
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use zbobr_api::{
-    task::Role,
-    tool_executor::{ToolExecutor, format_command_for_log},
-};
+use zbobr_api::tool_executor::{ToolExecutor, format_command_for_log};
 
 pub mod config;
 pub use config::{
@@ -22,7 +19,7 @@ impl ToolExecutor for McpTesterExecutor {
     async fn execute(
         &self,
         task_id: u64,
-        role: Role,
+        role: &str,
         _port: u16,
         _prompt: &str,
         work_dir: &Path,
@@ -30,15 +27,15 @@ impl ToolExecutor for McpTesterExecutor {
         _agent_github_token: &str,
         _copilot_github_token: &str,
     ) -> anyhow::Result<()> {
-        let scenario_path = self.config.scenario_for_role(role).ok_or_else(|| {
+        let scenario_path = self.config.scenario_for_stage(role).ok_or_else(|| {
             anyhow::anyhow!(
-                "No scenario file configured for role {:?} in [executor.mcp-tester]",
+                "No scenario file configured for stage '{}' in [executor.mcp-tester]",
                 role
             )
         })?;
 
         tracing::info!(
-            "Starting mcp-tester for task #{task_id} role {role:?} with scenario {}",
+            "Starting mcp-tester for task #{task_id} stage '{role}' with scenario {}",
             scenario_path.display()
         );
         tracing::info!("MCP endpoint: {mcp_url}");
@@ -125,8 +122,6 @@ impl ToolExecutor for McpTesterExecutor {
 mod tests {
     use std::path::Path;
 
-    use zbobr_api::Role;
-
     use super::*;
 
     #[tokio::test]
@@ -138,7 +133,7 @@ mod tests {
         let result = executor
             .execute(
                 42,
-                Role::Preparator,
+                "preparation",
                 0,
                 "",
                 Path::new("."),

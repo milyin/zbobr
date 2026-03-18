@@ -3,7 +3,7 @@ use std::{path::Path, process::Stdio};
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use zbobr_api::{
-    task::{Role, Tool},
+    task::Tool,
     tool_executor::{ToolExecutor, format_command_for_log},
 };
 
@@ -20,7 +20,7 @@ impl ToolExecutor for ClaudeExecutor {
     async fn execute(
         &self,
         task_id: u64,
-        role: Role,
+        role: &str,
         _port: u16,
         prompt: &str,
         work_dir: &Path,
@@ -57,7 +57,7 @@ impl ToolExecutor for ClaudeExecutor {
         tracing::info!("MCP endpoint: {mcp_url}");
         tracing::debug!("MCP config JSON: {}", mcp_config_str);
 
-        let permission_mode = if role == Role::Planner {
+        let permission_mode = if role == "planner" {
             "plan"
         } else {
             "acceptEdits"

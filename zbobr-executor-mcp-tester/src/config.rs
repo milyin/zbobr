@@ -1,11 +1,12 @@
 use std::path::{Path, PathBuf};
 
-use zbobr_api::task::Role;
 use zbobr_utility::{config_struct, resolve_path};
 
 #[derive(Clone, Default)]
 #[config_struct]
 /// Configuration for the mcp-tester executor.
+///
+/// Supports the legacy per-role fields (preparation, planning, etc.)
 pub struct ZbobrExecutorMcpTesterConfig {
     pub preparation: Option<PathBuf>,
     pub planning: Option<PathBuf>,
@@ -52,15 +53,17 @@ impl ZbobrExecutorMcpTesterConfig {
         }
     }
 
-    /// Get the scenario file path for the given role.
-    pub fn scenario_for_role(&self, role: Role) -> Option<&PathBuf> {
-        match role {
-            Role::Preparator => self.preparation.as_ref(),
-            Role::Planner => self.planning.as_ref(),
-            Role::Worker => self.working.as_ref(),
-            Role::Reviewer => self.reviewing.as_ref(),
-            Role::Tester => self.testing.as_ref(),
-            Role::Merger => self.merging.as_ref(),
+    /// Get the scenario file path for the given stage name.
+    /// Uses legacy per-role field mapping for backward compatibility.
+    pub fn scenario_for_stage(&self, stage_name: &str) -> Option<&PathBuf> {
+        match stage_name {
+            "preparation" | "preparator" => self.preparation.as_ref(),
+            "planning" | "planner" => self.planning.as_ref(),
+            "working" | "worker" => self.working.as_ref(),
+            "reviewing" | "reviewer" => self.reviewing.as_ref(),
+            "testing" | "tester" => self.testing.as_ref(),
+            "merging" | "merger" => self.merging.as_ref(),
+            _ => None,
         }
     }
 }

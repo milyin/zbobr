@@ -16,7 +16,7 @@ use zbobr_dispatcher::{
     backend::{TaskBackend, TaskBackendExt, WorktreeBackend},
     cli::process_task,
     prompts::ConfiguredPromptBuilder,
-    task::{Role, Tool},
+    task::Tool,
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_repo_backend_fs::{ZbobrRepoBackendFs, ZbobrRepoBackendFsConfig};
@@ -82,7 +82,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
         .with_config(Arc::new(dispatcher_config))
         .with_task_backend(Arc::clone(&task_backend))
         .with_repo_backend(Arc::clone(&repo_backend))
-        .with_prompt_builder(ConfiguredPromptBuilder::new(None))
+        .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(PipelineConfig { stages: vec![], roles: Default::default() })))
         .build();
 
     zbobr
@@ -146,7 +146,7 @@ pub async fn init_github_fs(
         .with_config(Arc::new(dispatcher_config))
         .with_task_backend(Arc::clone(&task_backend))
         .with_repo_backend(Arc::clone(&repo_backend))
-        .with_prompt_builder(ConfiguredPromptBuilder::new(None))
+        .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(PipelineConfig { stages: vec![], roles: Default::default() })))
         .build();
 
     zbobr
@@ -216,7 +216,7 @@ pub async fn init_fs_github(
         .with_config(Arc::new(dispatcher_config))
         .with_task_backend(Arc::clone(&task_backend))
         .with_repo_backend(Arc::clone(&repo_backend))
-        .with_prompt_builder(ConfiguredPromptBuilder::new(None))
+        .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(PipelineConfig { stages: vec![], roles: Default::default() })))
         .build();
 
     zbobr
@@ -287,7 +287,7 @@ pub async fn init_github_github(
         .with_config(Arc::new(dispatcher_config))
         .with_task_backend(Arc::clone(&task_backend))
         .with_repo_backend(Arc::clone(&repo_backend))
-        .with_prompt_builder(ConfiguredPromptBuilder::new(None))
+        .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(PipelineConfig { stages: vec![], roles: Default::default() })))
         .build();
 
     zbobr
@@ -620,7 +620,7 @@ impl IntegrationTestEnv {
     ///  3. Builds a single-stage pipeline for the given role.
     ///  4. Overrides dispatcher MCP tester config with the scenario file for the role.
     ///  5. Calls `process_task` directly (no subprocess).
-    pub async fn run_stage(&self, task_id: u64, role: Role, scenario: String) {
+    pub async fn run_stage(&self, task_id: u64, role: &str, scenario: String) {
         self.task_backend
             .set_task_state(task_id, "READY")
             .await
@@ -645,66 +645,69 @@ impl IntegrationTestEnv {
             .expect("failed to write scenario file");
 
         let mcp_tester_config = match role {
-            Role::Preparator => ZbobrExecutorMcpTesterConfig {
+            "preparator" => ZbobrExecutorMcpTesterConfig {
                 preparation: Some(scenario_path),
                 ..Default::default()
             },
-            Role::Planner => ZbobrExecutorMcpTesterConfig {
+            "planner" => ZbobrExecutorMcpTesterConfig {
                 planning: Some(scenario_path),
                 ..Default::default()
             },
-            Role::Worker => ZbobrExecutorMcpTesterConfig {
+            "worker" => ZbobrExecutorMcpTesterConfig {
                 working: Some(scenario_path),
                 ..Default::default()
             },
-            Role::Reviewer => ZbobrExecutorMcpTesterConfig {
+            "reviewer" => ZbobrExecutorMcpTesterConfig {
                 reviewing: Some(scenario_path),
                 ..Default::default()
             },
-            Role::Tester => ZbobrExecutorMcpTesterConfig {
+            "tester" => ZbobrExecutorMcpTesterConfig {
                 testing: Some(scenario_path),
                 ..Default::default()
             },
-            Role::Merger => ZbobrExecutorMcpTesterConfig {
+            "merger" => ZbobrExecutorMcpTesterConfig {
                 merging: Some(scenario_path),
                 ..Default::default()
             },
+            other => panic!("[{}] unknown role: {other}", self.name),
         };
 
         // Build a minimal single-stage pipeline for the given role so that
         // process_task dispatches exactly this role when state is "READY".
         // Transitions mirror the old hardcoded post-stage signal behavior.
         let stage_name = match role {
-            Role::Preparator => "preparing",
-            Role::Planner => "planning",
-            Role::Worker => "working",
-            Role::Reviewer => "reviewing",
-            Role::Tester => "testing",
-            Role::Merger => "merging",
+            "preparator" => "preparing",
+            "planner" => "planning",
+            "worker" => "working",
+            "reviewer" => "reviewing",
+            "tester" => "testing",
+            "merger" => "merging",
+            other => panic!("[{}] unknown role for stage name: {other}", self.name),
         }
         .to_string();
         let transitions: HashMap<String, String> = match role {
-            Role::Preparator => [("default".into(), "go_planning".into())].into(),
-            Role::Planner => [("default".into(), "go_working".into())].into(),
-            Role::Worker => [("default".into(), "go_reviewing".into())].into(),
-            Role::Reviewer => [
+            "preparator" => [("default".into(), "go_planning".into())].into(),
+            "planner" => [("default".into(), "go_working".into())].into(),
+            "worker" => [("default".into(), "go_reviewing".into())].into(),
+            "reviewer" => [
                 ("review_accept".into(), "go_testing".into()),
                 ("review_reject".into(), "go_planning".into()),
                 ("default".into(), "go_testing".into()),
             ]
             .into(),
-            Role::Tester => [
+            "tester" => [
                 ("test_accept".into(), "return".into()),
                 ("test_reject".into(), "go_planning".into()),
                 ("default".into(), "return".into()),
             ]
             .into(),
-            Role::Merger => [("default".into(), "return".into())].into(),
+            "merger" => [("default".into(), "return".into())].into(),
+            other => panic!("[{}] unknown role for transitions: {other}", self.name),
         };
         let pipeline = PipelineConfig {
             stages: vec![StageDefinition {
                 name: stage_name.clone(),
-                role,
+                role: role.to_string(),
                 model: None,
                 tool: Some(Tool::McpTester),
                 main_prompt: None,
@@ -713,6 +716,7 @@ impl IntegrationTestEnv {
                 is_start: true,
                 mode: "main".to_string(),
             }],
+            roles: Default::default(),
         };
 
         let stage_dispatcher = self.zbobr.with_mcp_tester_config(mcp_tester_config);

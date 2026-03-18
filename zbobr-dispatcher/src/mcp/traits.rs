@@ -153,7 +153,8 @@ fn log_mcp_string_response(role_name: &str, task_id: u64, tool_name: &str, respo
     }
 }
 
-/// Common trait for MCP services (Planner, Worker) - shared implementations
+/// Common trait for all MCP services — unified across all roles.
+/// Per-role traits have been removed; all tool implementations live here.
 #[allow(async_fn_in_trait)]
 pub trait CommonMcpImpl: Send + Sync {
     fn session(&self) -> &RoleSession;
@@ -165,17 +166,17 @@ pub trait CommonMcpImpl: Send + Sync {
     /// Returns the concrete model currently in use by the agent tool
     fn mcp_model(&self) -> Model;
 
-    fn role_name(&self) -> &'static str {
-        self.role().as_str()
+    fn role_name(&self) -> &str {
+        // Default: delegate to role() — but UnifiedMcp overrides this to avoid clone
+        // This won't work with type alias, so implementors should override
+        "unknown"
     }
 
     /// Returns the name of the current stage, used to compute the retry signal
     /// (e.g. after `report_error` or `ask_user` pauses the task).
-    /// The dispatcher sets this when constructing the MCP service.
     fn stage_name(&self) -> &str;
 
     /// Returns the transitions map from the stage definition.
-    /// Used to record tool calls for automatic signal computation.
     fn transitions(&self) -> &std::collections::HashMap<String, String>;
 
     /// Record a tool call for transition mapping.
@@ -413,6 +414,95 @@ pub trait CommonMcpImpl: Send + Sync {
         response
     }
 
+    // -- Planner-specific tools (now in CommonMcpImpl) --
+
+    async fn post_plan_impl(&self, plan: &str) -> String {
+        tracing::info!("[{}#{}] post_plan", self.role_name(), self.session().task_id());
+        let hostname = get_hostname();
+
+        if let Err(e) = self
+            .session()
+            .post_comment(
+                CommentType::Plan,
+                plan,
+                Some(self.role()),
+                &hostname,
+                Some(self.mcp_tool()),
+                None,
+            )
+            .await
+        {
+            tracing::error!(
+                "Failed to post plan comment for task {}: {e}",
+                self.session().task_id()
+            );
+            let response = format!("Error posting plan: {e}");
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                "post_plan",
+                &response,
+            );
+            return response;
+        }
+
+        let response = "Plan posted and task ready for worker implementation".to_string();
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "post_plan",
+            &response,
+        );
+        response
+    }
+
+    // -- Worker-specific: ask_planner --
+
+    async fn ask_planner_impl(&self, message: &str) -> String {
+        tracing::info!("[{}#{}] ask_planner", self.role_name(), self.session().task_id());
+        let hostname = get_hostname();
+
+        if let Err(e) = self
+            .session()
+            .post_comment(
+                CommentType::Request,
+                message,
+                Some(self.role()),
+                &hostname,
+                Some(self.mcp_tool()),
+                Some(self.mcp_model()),
+            )
+            .await
+        {
+            tracing::error!(
+                "Failed to post ask_planner message for task {}: {e}",
+                self.session().task_id()
+            );
+            let response = format!("Error posting message: {e}");
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                "ask_planner",
+                &response,
+            );
+            return response;
+        }
+
+        // Record the tool call; the signal is computed from transitions by finalize_stage_session.
+        self.record_tool("ask_planner");
+
+        let response = "Message posted to planner - task returned for clarification".to_string();
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "ask_planner",
+            &response,
+        );
+        response
+    }
+
+    // -- Checklist tools --
+
     async fn get_checklist_impl(&self) -> String {
         tracing::info!(
             "[{}#{}] get_checklist",
@@ -455,9 +545,6 @@ pub trait CommonMcpImpl: Send + Sync {
             .await
         {
             Ok(()) => {
-                // Checklist item state updated; signal transitions are handled by
-                // the main/run loop after a role session completes. Do not set
-                // task signal here to avoid racing state transitions.
                 format!(
                     "Checklist item '{}' checked state updated to {}",
                     id, checked
@@ -663,6 +750,8 @@ pub trait CommonMcpImpl: Send + Sync {
         response
     }
 
+    // -- Parameter getters/setters --
+
     async fn get_destination_repository_impl(&self) -> String {
         tracing::info!(
             "[{}#{}] get_param_destination_repository",
@@ -788,166 +877,8 @@ pub trait CommonMcpImpl: Send + Sync {
         );
         response
     }
-}
 
-/// Preparator-specific MCP implementations
-#[allow(async_fn_in_trait)]
-pub trait PreparatorMcpImpl: CommonMcpImpl {
-    async fn get_param_destination_repository_impl(&self) -> String {
-        self.get_destination_repository_impl().await
-    }
-
-    async fn set_param_destination_repository_impl(&self, value: Option<String>) -> String {
-        self.set_destination_repository_impl(value).await
-    }
-
-    async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_destination_branch_impl().await
-    }
-
-    async fn set_param_destination_branch_impl(&self, value: Option<String>) -> String {
-        self.set_destination_branch_impl(value).await
-    }
-
-    async fn get_param_work_branch_impl(&self) -> String {
-        self.get_work_branch_impl().await
-    }
-
-    async fn set_param_work_branch_postfix_impl(&self, value: Option<String>) -> String {
-        self.set_work_branch_postfix_impl(value).await
-    }
-}
-
-/// Planner-specific MCP implementations
-#[allow(async_fn_in_trait)]
-pub trait PlannerMcpImpl: CommonMcpImpl {
-    async fn post_plan_impl(&self, plan: &str) -> String {
-        tracing::info!("[planner#{}] post_plan", self.session().task_id());
-        let hostname = get_hostname();
-
-        // Post the plan as a PLAN comment to preserve history
-        if let Err(e) = self
-            .session()
-            .post_comment(
-                CommentType::Plan,
-                plan,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                None,
-            )
-            .await
-        {
-            tracing::error!(
-                "Failed to post plan comment for task {}: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Error posting plan: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                "post_plan",
-                &response,
-            );
-            return response;
-        }
-
-        let response = "Plan posted and task ready for worker implementation".to_string();
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "post_plan",
-            &response,
-        );
-        response
-    }
-
-    async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_destination_branch_impl().await
-    }
-
-    async fn get_param_work_branch_impl(&self) -> String {
-        self.get_work_branch_impl().await
-    }
-}
-
-/// Worker-specific MCP implementations
-#[allow(async_fn_in_trait)]
-pub trait WorkerMcpImpl: CommonMcpImpl {
-    async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_destination_branch_impl().await
-    }
-
-    async fn get_param_work_branch_impl(&self) -> String {
-        self.get_work_branch_impl().await
-    }
-
-    async fn ask_planner_impl(&self, message: &str) -> String {
-        tracing::info!("[worker#{}] ask_planner", self.session().task_id());
-        let hostname = get_hostname();
-
-        if let Err(e) = self
-            .session()
-            .post_comment(
-                CommentType::Request,
-                message,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-            )
-            .await
-        {
-            tracing::error!(
-                "Failed to post worker->planner message for task {}: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Error posting message: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                "ask_planner",
-                &response,
-            );
-            return response;
-        }
-
-        // Pass task back to planner agent for clarification or re-planning
-        if let Err(e) = self.session().set_signal("go_planning").await {
-            tracing::error!(
-                "Failed to set signal GoPlan for task {} after ask_planner: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Message posted but error returning to planner: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                "ask_planner",
-                &response,
-            );
-            return response;
-        }
-        let response = "Message posted to planner - task returned for clarification".to_string();
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "ask_planner",
-            &response,
-        );
-        response
-    }
-}
-
-/// Reviewer-specific MCP implementations
-#[allow(async_fn_in_trait)]
-pub trait ReviewerMcpImpl: CommonMcpImpl {
-    async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_destination_branch_impl().await
-    }
-
-    async fn get_param_work_branch_impl(&self) -> String {
-        self.get_work_branch_impl().await
-    }
+    // -- Reviewer-specific tools --
 
     async fn review_accept_impl(&self, message: &str) -> String {
         tracing::info!(
@@ -1020,19 +951,8 @@ pub trait ReviewerMcpImpl: CommonMcpImpl {
         );
         response
     }
-}
 
-// -- Tester MCP service --
-
-#[allow(async_fn_in_trait)]
-pub trait TesterMcpImpl: CommonMcpImpl {
-    async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_destination_branch_impl().await
-    }
-
-    async fn get_param_work_branch_impl(&self) -> String {
-        self.get_work_branch_impl().await
-    }
+    // -- Tester-specific tools --
 
     async fn test_accept_impl(&self, message: &str) -> String {
         tracing::info!(
@@ -1104,18 +1024,5 @@ pub trait TesterMcpImpl: CommonMcpImpl {
             &response,
         );
         response
-    }
-}
-
-// -- Merger MCP service --
-
-#[allow(async_fn_in_trait)]
-pub trait MergerMcpImpl: CommonMcpImpl {
-    async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_destination_branch_impl().await
-    }
-
-    async fn get_param_work_branch_impl(&self) -> String {
-        self.get_work_branch_impl().await
     }
 }

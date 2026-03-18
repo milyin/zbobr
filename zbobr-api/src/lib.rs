@@ -11,10 +11,6 @@ pub use config::{
     Config, PipelineConfig, StageDefinition, ZbobrDispatcherArgs, ZbobrDispatcherConfig,
     ZbobrDispatcherToml,
 };
-pub use prompt::{
-    MergerToolNames, PlannerToolNames, PreparatorToolNames, PromptBuilder, ReviewerToolNames,
-    TesterToolNames, WorkerToolNames,
-};
 pub use task::{
     ChecklistItem, Comment, CommentTag, CommentType, HistoryChunk, Model, Role, StackEntry, Task,
     TaskIdentity, Tool, extract_history_chunk, extract_repo_name,

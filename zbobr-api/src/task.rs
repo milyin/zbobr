@@ -262,58 +262,8 @@ pub struct StackEntry {
     pub stage: String,
 }
 
-/// Role for task execution (planner, worker, reviewer, merger, or user).
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub enum Role {
-    #[serde(rename = "preparator")]
-    Preparator,
-    #[serde(rename = "planner")]
-    Planner,
-    #[serde(rename = "worker")]
-    Worker,
-    #[serde(rename = "reviewer")]
-    Reviewer,
-    #[serde(rename = "tester")]
-    Tester,
-    #[serde(rename = "merger")]
-    Merger,
-}
-
-impl Role {
-    /// Returns the role name as a string.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Role::Preparator => "preparator",
-            Role::Planner => "planner",
-            Role::Worker => "worker",
-            Role::Reviewer => "reviewer",
-            Role::Tester => "tester",
-            Role::Merger => "merger",
-        }
-    }
-}
-
-impl std::fmt::Display for Role {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl std::str::FromStr for Role {
-    type Err = anyhow::Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "preparator" => Ok(Role::Preparator),
-            "planner" => Ok(Role::Planner),
-            "worker" => Ok(Role::Worker),
-            "reviewer" => Ok(Role::Reviewer),
-            "merger" => Ok(Role::Merger),
-            _ => Err(anyhow::anyhow!("Unknown role: {}", s)),
-        }
-    }
-}
+/// Role for task execution — now a plain string to support configurable roles.
+pub type Role = String;
 
 
 /// AI Tool/Agent to use.
@@ -648,7 +598,11 @@ impl std::str::FromStr for CommentTag {
                 return Err(anyhow::anyhow!("Invalid tag format: {}", s));
             }
 
-            let role = Role::from_str(parts[0]).ok();
+            let role = if parts[0] == "user" {
+                None
+            } else {
+                Some(parts[0].to_string())
+            };
             let hostname = parts[1].to_string();
 
             // backwards compatibility: three parts used to mean role:host:model

@@ -99,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
     task_backend.validate_connectivity().await?;
     repo_backend.validate_connectivity().await?;
 
-    let prompt_builder = ConfiguredPromptBuilder::new(Some(location.config_dir.clone()));
+    let prompt_builder = ConfiguredPromptBuilder::new(Some(location.config_dir.clone()), Arc::new(pipeline.clone()));
 
     let dispatcher = zbobr_dispatcher::ZbobrDispatcherBuilder::new()
         .with_config(Arc::new(config.dispatcher))
@@ -119,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
 fn load_pipeline_config(config_path: &std::path::Path) -> anyhow::Result<PipelineConfig> {
     if !config_path.exists() {
         // Return empty pipeline — will fail validation if stages are needed
-        return Ok(PipelineConfig { stages: vec![] });
+        return Ok(PipelineConfig { stages: vec![], roles: Default::default() });
     }
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read {}", config_path.display()))?;
@@ -133,5 +133,5 @@ fn load_pipeline_config(config_path: &std::path::Path) -> anyhow::Result<Pipelin
     let wrapper: Wrapper = toml::from_str(&content)
         .with_context(|| format!("Failed to parse pipeline config from {}", config_path.display()))?;
 
-    Ok(wrapper.pipeline.unwrap_or(PipelineConfig { stages: vec![] }))
+    Ok(wrapper.pipeline.unwrap_or(PipelineConfig { stages: vec![], roles: Default::default() }))
 }
