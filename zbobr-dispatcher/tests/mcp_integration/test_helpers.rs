@@ -265,7 +265,10 @@ pub async fn run_reviewing_approval(
     write_and_commit(
         &work_dir,
         "ZBOBR_PLACEHOLDER.md",
-        &format!("placeholder for task #{task_id}\n"),
+        &format!(
+            "placeholder for task #{task_id} at {:?}\n",
+            std::time::SystemTime::now()
+        ),
         "chore: add placeholder for PR",
     )
     .await;
@@ -474,8 +477,17 @@ pub async fn run_merging_with_real_conflict(
         .prepare_workspace_via_repo_backend(task_id, &remote_repo, &work_branch)
         .await;
 
-    // Set up conflicting history in the workspace
+    // Set up conflicting history in the workspace.
+    // Reset work branch to main so we get a clean divergence regardless of
+    // stale state from previous test runs.
     if env.target_repo.is_some() {
+        git_in(&work_dir, &["reset", "--hard", "main"]).await;
+        git_in(
+            &work_dir,
+            &["push", "origin", &format!("HEAD:{work_branch}"), "--force"],
+        )
+        .await;
+
         write_and_commit(
             &work_dir,
             "conflict_file.txt",
@@ -516,7 +528,8 @@ pub async fn run_merging_with_real_conflict(
         git_in(&work_dir, &["checkout", &work_branch]).await;
     }
 
-    // Confirm there is a merge conflict.
+    // Confirm there is a merge conflict, then abort so the workspace is clean
+    // for the merger role to handle the conflict itself.
     let merge = tokio::process::Command::new("git")
         .args(["merge", "main", "--no-edit"])
         .current_dir(&work_dir)
@@ -528,6 +541,7 @@ pub async fn run_merging_with_real_conflict(
         "[{}] Expected merge conflict but merge succeeded",
         env.name()
     );
+    git_in(&work_dir, &["merge", "--abort"]).await;
 
     env.run_stage(
         task_id,
@@ -1330,8 +1344,21 @@ async fn repo_backend_merging_for(env: &IntegrationTestEnv, target: &str, suffix
     let work_branch = format!("zbobr_fix-{task_id}-{suffix}-test");
     env.update_task_branches(task_id, target, "main", &work_branch)
         .await;
-    env.prepare_workspace_via_repo_backend(task_id, target, &work_branch)
+    let work_dir = env
+        .prepare_workspace_via_repo_backend(task_id, target, &work_branch)
         .await;
+
+    // Add a placeholder commit so the work branch differs from main (PR requires changes).
+    write_and_commit(
+        &work_dir,
+        "ZBOBR_PLACEHOLDER.md",
+        &format!(
+            "placeholder for task #{task_id} at {:?}\n",
+            std::time::SystemTime::now()
+        ),
+        "chore: add placeholder for PR",
+    )
+    .await;
 
     env.run_stage(
         task_id,
@@ -1340,15 +1367,24 @@ async fn repo_backend_merging_for(env: &IntegrationTestEnv, target: &str, suffix
     )
     .await;
 
-    let comments: Vec<zbobr_dispatcher::Comment> = env.get_comments(task_id).await;
+    // When there are no merge conflicts the merger performs a fast-path
+    // auto-merge and skips the agent session, so no "Merger complete."
+    // comment is posted.  Assert on the task state instead: a successful
+    // merge should leave the task in PENDING with the "return" signal
+    // computed from the stage transitions.
+    let task = env.get_task(task_id).await;
     assert!(
-        comments.iter().any(|c| c.text.contains("Merger complete.")),
-        "[{}] Merger report not found in discussion",
-        env.name()
+        task.state.contains("PENDING") || task.state == "DONE",
+        "[{}] Merger should leave task in PENDING or DONE state, got: {}",
+        env.name(),
+        task.state,
     );
 }
 
 async fn write_and_commit(repo: &PathBuf, file: &str, content: &str, msg: &str) {
+    // Ensure git identity is configured (cloned worktrees may not have it).
+    git_in(repo, &["config", "user.name", "test-bot"]).await;
+    git_in(repo, &["config", "user.email", "test@example.com"]).await;
     tokio::fs::write(repo.join(file), content).await.unwrap();
     git_in(repo, &["add", file]).await;
     git_in(repo, &["commit", "-m", msg]).await;
@@ -1631,7 +1667,10 @@ pub async fn run_entry_clears_conflict_preserves_signal_for_merger(
     write_and_commit(
         &work_dir,
         "ZBOBR_PLACEHOLDER.md",
-        &format!("placeholder for task #{task_id}\n"),
+        &format!(
+            "placeholder for task #{task_id} at {:?}\n",
+            std::time::SystemTime::now()
+        ),
         "chore: add placeholder for PR",
     )
     .await;
