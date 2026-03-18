@@ -44,9 +44,12 @@ pub struct StageDefinition {
 }
 
 /// Pipeline configuration: the set of all stage definitions plus role definitions.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+#[config_struct]
 pub struct PipelineConfig {
+    #[config(skip_args)]
     pub stages: Vec<StageDefinition>,
+    #[config(skip_args)]
     #[serde(default)]
     pub roles: HashMap<String, RoleDefinition>,
 }

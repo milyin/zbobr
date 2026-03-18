@@ -8,8 +8,8 @@ pub mod tool_executor;
 
 pub use backend::{TaskBackend, TaskBackendExt, TaskMut, TaskWeak, WorktreeBackend};
 pub use config::{
-    Config, PipelineConfig, StageDefinition, ZbobrDispatcherArgs, ZbobrDispatcherConfig,
-    ZbobrDispatcherToml,
+    Config, PipelineConfig, PipelineConfigArgs, PipelineConfigToml, StageDefinition,
+    ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
 };
 pub use task::{
     ChecklistItem, Comment, CommentTag, CommentType, HistoryChunk, Model, Role, StackEntry, Task,

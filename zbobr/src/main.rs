@@ -10,7 +10,7 @@ use zbobr_dispatcher::config::{
     ZbobrExecutorArgs, ZbobrExecutorConfig, ZbobrExecutorToml,
 };
 use zbobr_dispatcher::{Command, ConfigFileArg, ConfiguredPromptBuilder};
-use zbobr_api::config::PipelineConfig;
+use zbobr_api::config::{PipelineConfig, PipelineArgs, PipelineToml};
 use zbobr_utility::config_struct;
 
 use zbobr_repo_backend_github::{
@@ -33,6 +33,8 @@ struct RootConfig {
     repo: ZbobrRepoBackendGithubConfig,
     #[config(nested)]
     executor: ZbobrExecutorConfig,
+    #[config(nested)]
+    pipeline: PipelineConfig,
 }
 
 #[derive(Parser)]
@@ -88,11 +90,10 @@ async fn main() -> anyhow::Result<()> {
         .validate()
         .with_context(|| format!("Config file: {}", location.config_path.display()))?;
 
-    // Load pipeline config from TOML (stages section)
-    let pipeline = load_pipeline_config(&location.config_path)?;
-    pipeline.validate()?;
+    config.pipeline.validate()?;
 
     let command = cli.command;
+    let pipeline = config.pipeline;
 
     let task_backend = TaskBackendGithub::from_config(config.tasks)?;
     let repo_backend = ZbobrRepoBackendGithub::from_config(config.repo)?;
@@ -114,24 +115,3 @@ async fn main() -> anyhow::Result<()> {
     dispatcher.run_command(command, &pipeline).await
 }
 
-/// Load pipeline configuration from the TOML file.
-/// Looks for a `[pipeline]` section with `stages = [...]`.
-fn load_pipeline_config(config_path: &std::path::Path) -> anyhow::Result<PipelineConfig> {
-    if !config_path.exists() {
-        // Return empty pipeline — will fail validation if stages are needed
-        return Ok(PipelineConfig { stages: vec![], roles: Default::default() });
-    }
-    let content = std::fs::read_to_string(config_path)
-        .with_context(|| format!("Failed to read {}", config_path.display()))?;
-
-    #[derive(serde::Deserialize, Default)]
-    struct Wrapper {
-        #[serde(default)]
-        pipeline: Option<PipelineConfig>,
-    }
-
-    let wrapper: Wrapper = toml::from_str(&content)
-        .with_context(|| format!("Failed to parse pipeline config from {}", config_path.display()))?;
-
-    Ok(wrapper.pipeline.unwrap_or(PipelineConfig { stages: vec![], roles: Default::default() }))
-}
