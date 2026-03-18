@@ -16,7 +16,7 @@ pub trait Config: Sized {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct RoleDefinition {
     pub tools: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<PathBuf>,
 }
 
@@ -27,20 +27,24 @@ pub struct RoleDefinition {
 pub struct StageDefinition {
     pub name: String,
     pub role: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<Model>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<Tool>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub main_prompt: Option<PathBuf>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub additional_prompts: Vec<PathBuf>,
     /// MCP operation name (or "default") → signal string (go_X, call_X, return).
     #[serde(default)]
     pub transitions: HashMap<String, String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub is_start: bool,
     pub mode: String,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 /// Pipeline configuration: the set of all stage definitions plus role definitions.

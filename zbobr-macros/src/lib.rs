@@ -159,6 +159,7 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
 
             if !config_meta.skip_toml {
                 toml_fields.push(quote! {
+                    #[serde(skip_serializing_if = "Option::is_none")]
                     #rename_attr_tokens
                     #(#other_attrs)*
                     #field_vis #field_ident: Option<#nested_toml_ty>,
@@ -294,6 +295,7 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
 
             if !config_meta.skip_toml {
                 toml_fields.push(quote! {
+                    #[serde(skip_serializing_if = "Option::is_none")]
                     #rename_attr_tokens
                     #(#other_attrs)*
                     #field_vis #field_ident: Option<#value_ty>,
@@ -441,7 +443,7 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
         }
 
         #(#attrs)*
-        #[derive(Debug, Clone, ::serde::Deserialize, Default)]
+        #[derive(Debug, Clone, ::serde::Serialize, ::serde::Deserialize, Default)]
         #[serde(default, deny_unknown_fields)]
         #vis struct #toml_ident #generics #where_clause {
             #(#toml_fields)*

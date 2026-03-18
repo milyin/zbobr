@@ -1,7 +1,15 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition};
+use zbobr_api::config::{PipelineConfig, PipelineToml, RoleDefinition, StageDefinition};
+use zbobr_api::task::{Model, Tool};
+use zbobr_dispatcher::config::{ZbobrDispatcherToml, ZbobrExecutorToml};
+use zbobr_executor_claude::ZbobrExecutorClaudeToml;
+use zbobr_executor_copilot::ZbobrExecutorCopilotToml;
+use zbobr_repo_backend_github::ZbobrRepoBackendGithubToml;
+use zbobr_task_backend_github::ZbobrTaskBackendGithubToml;
+
+use super::RootConfigToml;
 
 /// Initialize a new zbobr workspace at the given directory.
 ///
@@ -35,13 +43,11 @@ pub async fn init_workspace(dest: &Path) -> anyhow::Result<()> {
         println!("  wrote {}", path.display());
     }
 
-    // Build pipeline config and serialize it
-    let pipeline = default_pipeline();
-    let pipeline_toml = toml::to_string_pretty(&pipeline)?;
-
-    // Build full config
+    // Build full config from RootConfigToml structure
+    let config = default_config_toml();
     let config_content = format!(
-        "{STATIC_CONFIG_HEADER}\n\n# --- Pipeline configuration (stages and roles) ---\n\n[pipeline]\n{pipeline_toml}"
+        "# zbobr configuration\n# See documentation for all available options.\n\n{}",
+        toml::to_string_pretty(&config)?
     );
     tokio::fs::write(&config_path, &config_content).await?;
     println!("  wrote {}", config_path.display());
@@ -53,66 +59,50 @@ pub async fn init_workspace(dest: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Static TOML header for non-pipeline config sections.
-const STATIC_CONFIG_HEADER: &str = r#"# zbobr configuration
-# See documentation for all available options.
+/// Build a default `RootConfigToml` with sensible example values.
+fn default_config_toml() -> RootConfigToml {
+    let pipeline = default_pipeline();
 
-[dispatcher]
-# Directory where task workspaces are created
-workspaces = "./workspaces"
-# Base port for MCP servers (scans upward to find available port)
-base_port = 3000
-# Read-only GitHub token passed to agent processes (security boundary)
-agent_github_token = "not-configured"
-# Default executor tool: "copilot", "claude", or "mcp_tester"
-tool = "claude"
-# Default AI model (tool-specific, e.g. "default", "claude_opus_4_6", "gpt5")
-model = "default"
-# Prefix for work branches
-work_branch_prefix = "zbobr_fix"
-# Default destination repository (owner/repo) — prepopulated before preparator runs
-# default_destination_repository = "owner/repo"
-# Default destination branch — prepopulated before preparator runs
-# default_destination_branch = "main"
-# Mode to invoke on merge conflicts (e.g. "conflict")
-on_conflict = "conflict"
-
-[tasks]
-# GitHub task backend: repository for storing tasks as issues
-github_repo = "owner/repo"
-# GitHub token for task backend (or set ZBOBR_TASK_GITHUB_TOKEN env var)
-github_token = ""
-
-[repo]
-# GitHub repo backend: fork owner for work branches
-fork_owner = ""
-# GitHub token for repo operations
-github_token = ""
-# Local directory for bare repo clones
-repos_dir = "./repos"
-# Git user identity for commits
-git_user_name = "zbobr"
-git_user_email = "zbobr@example.com"
-# Rewrite commit authors to match git_user_name/email
-overwrite_author = false
-
-[executor.claude]
-# Claude executor defaults
-default_model = "claude_opus_4_6"
-
-[executor.copilot]
-# Copilot executor defaults
-default_model = "default"
-# copilot_github_token = ""  # or set COPILOT_GITHUB_TOKEN env var
-
-# [executor.mcp_tester]
-# MCP tester scenario files (per-role)
-# preparation = "scenarios/preparation.yaml"
-# planning = "scenarios/planning.yaml"
-# working = "scenarios/working.yaml"
-# reviewing = "scenarios/reviewing.yaml"
-# testing = "scenarios/testing.yaml"
-# merging = "scenarios/merging.yaml""#;
+    RootConfigToml {
+        dispatcher: Some(ZbobrDispatcherToml {
+            workspaces: Some(PathBuf::from("./workspaces")),
+            base_port: Some(3000),
+            agent_github_token: Some("not-configured".into()),
+            tool: Some(Tool::Claude),
+            model: Some(Model::Default),
+            work_branch_prefix: Some("zbobr_fix".into()),
+            default_destination_repository: None,
+            default_destination_branch: None,
+            on_conflict: Some("conflict".into()),
+        }),
+        tasks: Some(ZbobrTaskBackendGithubToml {
+            github_repo: Some("owner/repo".into()),
+            github_token: Some(String::new()),
+        }),
+        repo: Some(ZbobrRepoBackendGithubToml {
+            fork_owner: Some(String::new()),
+            github_token: Some(String::new()),
+            repos_dir: Some(PathBuf::from("./repos")),
+            git_user_name: Some("zbobr".into()),
+            git_user_email: Some("zbobr@example.com".into()),
+            overwrite_author: Some(false),
+        }),
+        executor: Some(ZbobrExecutorToml {
+            claude: Some(ZbobrExecutorClaudeToml {
+                default_model: Some(Model::ClaudeOpus4_6),
+            }),
+            copilot: Some(ZbobrExecutorCopilotToml {
+                default_model: Some(Model::Default),
+                copilot_github_token: None,
+            }),
+            mcp_tester: None,
+        }),
+        pipeline: Some(PipelineToml {
+            stages: Some(pipeline.stages),
+            roles: Some(pipeline.roles),
+        }),
+    }
+}
 
 /// Build the default pipeline configuration with predefined stages and roles.
 fn default_pipeline() -> PipelineConfig {
