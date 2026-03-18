@@ -61,6 +61,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
     let dispatcher_config = ZbobrDispatcherConfig {
         workspaces: workspaces_dir.clone(),
         tool: Tool::McpTester,
+        on_conflict: Some("merging".to_string()),
         ..ZbobrDispatcherConfig::default()
     };
 
@@ -624,6 +625,14 @@ impl IntegrationTestEnv {
             .set_task_state(task_id, "READY")
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to set task state: {e}", self.name));
+        // Clear leftover stack from previous stages so the state machine
+        // dispatches cleanly from the start stage.  Signal is preserved so
+        // that tests which set a signal before calling run_stage can verify
+        // the entry/exit behavior.
+        self.task_backend
+            .set_task_stack(task_id, vec![])
+            .await
+            .unwrap_or_else(|e| panic!("[{}] failed to clear task stack: {e}", self.name));
 
         let idx = SCENARIO_COUNTER.fetch_add(1, Ordering::Relaxed);
         let scenarios_dir = self.base_path.join("scenarios").join(format!("{idx}"));
@@ -664,7 +673,34 @@ impl IntegrationTestEnv {
 
         // Build a minimal single-stage pipeline for the given role so that
         // process_task dispatches exactly this role when state is "READY".
-        let stage_name = role.as_str().to_string();
+        // Transitions mirror the old hardcoded post-stage signal behavior.
+        let stage_name = match role {
+            Role::Preparator => "preparing",
+            Role::Planner => "planning",
+            Role::Worker => "working",
+            Role::Reviewer => "reviewing",
+            Role::Tester => "testing",
+            Role::Merger => "merging",
+        }
+        .to_string();
+        let transitions: HashMap<String, String> = match role {
+            Role::Preparator => [("default".into(), "go_planning".into())].into(),
+            Role::Planner => [("default".into(), "go_working".into())].into(),
+            Role::Worker => [("default".into(), "go_reviewing".into())].into(),
+            Role::Reviewer => [
+                ("review_accept".into(), "go_testing".into()),
+                ("review_reject".into(), "go_planning".into()),
+                ("default".into(), "go_testing".into()),
+            ]
+            .into(),
+            Role::Tester => [
+                ("test_accept".into(), "return".into()),
+                ("test_reject".into(), "go_planning".into()),
+                ("default".into(), "return".into()),
+            ]
+            .into(),
+            Role::Merger => [("default".into(), "return".into())].into(),
+        };
         let pipeline = PipelineConfig {
             stages: vec![StageDefinition {
                 name: stage_name.clone(),
@@ -673,7 +709,7 @@ impl IntegrationTestEnv {
                 tool: Some(Tool::McpTester),
                 main_prompt: None,
                 additional_prompts: vec![],
-                transitions: HashMap::new(),
+                transitions,
                 is_start: true,
                 mode: "main".to_string(),
             }],

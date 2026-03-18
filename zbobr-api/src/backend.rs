@@ -181,6 +181,13 @@ pub trait TaskBackendExt: TaskBackend {
         let mutable = weak.upgrade().await?;
         mutable.set_signal(signal).await
     }
+
+    /// Set the stack on a task.
+    async fn set_task_stack(&self, id: u64, stack: Vec<StackEntry>) -> anyhow::Result<()> {
+        let weak = self.get_task(id).await?;
+        let mutable = weak.upgrade().await?;
+        mutable.set_stack(stack).await
+    }
 }
 
 impl<T: TaskBackend + ?Sized> TaskBackendExt for T {}
