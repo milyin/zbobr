@@ -44,7 +44,7 @@ pub enum Command {
         #[arg(long, short = 'n')]
         dry_run: bool,
     },
-    /// Manage tasks (create, show, update, delete) and run role sessions
+    /// Manage tasks (create, show, update, delete)
     Task {
         #[command(subcommand)]
         subcommand: TaskSubcommand,
