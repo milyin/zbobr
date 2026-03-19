@@ -611,6 +611,162 @@ impl IntegrationTestEnv {
     // Stage runner
     // -----------------------------------------------------------------------
 
+    /// Run the dispatcher with a full pipeline config and per-role scenario map.
+    ///
+    /// Unlike `run_stage`, this accepts an arbitrary `PipelineConfig` with any
+    /// stage/role/mode names. Scenarios are mapped via the generic `scenarios`
+    /// HashMap in the mcp-tester config.
+    pub async fn run_pipeline(
+        &self,
+        task_id: u64,
+        pipeline: &PipelineConfig,
+        role_scenarios: &HashMap<String, String>,
+    ) {
+        self.task_backend
+            .set_task_state(task_id, "READY")
+            .await
+            .unwrap_or_else(|e| panic!("[{}] failed to set task state: {e}", self.name));
+        self.task_backend
+            .set_task_stack(task_id, vec![])
+            .await
+            .unwrap_or_else(|e| panic!("[{}] failed to clear task stack: {e}", self.name));
+
+        let idx = SCENARIO_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let scenarios_dir = self.base_path.join("scenarios").join(format!("{idx}"));
+        tokio::fs::create_dir_all(&scenarios_dir)
+            .await
+            .expect("failed to create scenarios directory");
+
+        let mut scenario_paths: HashMap<String, std::path::PathBuf> = HashMap::new();
+        for (role, yaml) in role_scenarios {
+            let path = scenarios_dir.join(format!("{role}.yml"));
+            tokio::fs::write(&path, yaml)
+                .await
+                .expect("failed to write scenario file");
+            scenario_paths.insert(role.clone(), path);
+        }
+
+        let mcp_tester_config = ZbobrExecutorMcpTesterConfig {
+            scenarios: scenario_paths,
+            ..Default::default()
+        };
+
+        let stage_dispatcher = self.zbobr.with_mcp_tester_config(mcp_tester_config);
+
+        let task = self.get_task(task_id).await;
+
+        process_task(&stage_dispatcher, &task, pipeline)
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "[{}] process_task failed for task #{task_id}: {e}",
+                    self.name
+                )
+            });
+    }
+
+    /// Keep calling `process_task` until the task is no longer actionable
+    /// (DONE, PAUSE, or no progress).  Returns the number of iterations.
+    pub async fn run_to_completion(
+        &self,
+        task_id: u64,
+        pipeline: &PipelineConfig,
+        role_scenarios: &HashMap<String, String>,
+        max_iterations: usize,
+    ) -> usize {
+        for i in 0..max_iterations {
+            let task = self.get_task(task_id).await;
+            if task.state == "DONE" || task.state == "PAUSE" {
+                return i;
+            }
+            if task.pause {
+                return i;
+            }
+            // If state is PENDING but no signal, nothing to do
+            if task.state.ends_with("_PENDING") && task.signal.is_none() {
+                return i;
+            }
+
+            let idx = SCENARIO_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let scenarios_dir = self.base_path.join("scenarios").join(format!("{idx}"));
+            tokio::fs::create_dir_all(&scenarios_dir)
+                .await
+                .expect("failed to create scenarios directory");
+
+            let mut scenario_paths: HashMap<String, std::path::PathBuf> = HashMap::new();
+            for (role, yaml) in role_scenarios {
+                let path = scenarios_dir.join(format!("{role}.yml"));
+                tokio::fs::write(&path, yaml)
+                    .await
+                    .expect("failed to write scenario file");
+                scenario_paths.insert(role.clone(), path);
+            }
+
+            let mcp_tester_config = ZbobrExecutorMcpTesterConfig {
+                scenarios: scenario_paths,
+                ..Default::default()
+            };
+
+            let stage_dispatcher = self.zbobr.with_mcp_tester_config(mcp_tester_config);
+            let task = self.get_task(task_id).await;
+
+            process_task(&stage_dispatcher, &task, pipeline)
+                .await
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "[{}] process_task iteration {i} failed for task #{task_id}: {e}",
+                        self.name
+                    )
+                });
+        }
+        max_iterations
+    }
+
+    /// Continue processing a task with the same pipeline and scenarios.
+    ///
+    /// Unlike `run_pipeline`, this does NOT reset state/stack — it resumes
+    /// from the current task state (e.g. after a signal transition set state
+    /// to `{mode}_PENDING`).
+    pub async fn continue_pipeline(
+        &self,
+        task_id: u64,
+        pipeline: &PipelineConfig,
+        role_scenarios: &HashMap<String, String>,
+    ) {
+        let idx = SCENARIO_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let scenarios_dir = self.base_path.join("scenarios").join(format!("{idx}"));
+        tokio::fs::create_dir_all(&scenarios_dir)
+            .await
+            .expect("failed to create scenarios directory");
+
+        let mut scenario_paths: HashMap<String, std::path::PathBuf> = HashMap::new();
+        for (role, yaml) in role_scenarios {
+            let path = scenarios_dir.join(format!("{role}.yml"));
+            tokio::fs::write(&path, yaml)
+                .await
+                .expect("failed to write scenario file");
+            scenario_paths.insert(role.clone(), path);
+        }
+
+        let mcp_tester_config = ZbobrExecutorMcpTesterConfig {
+            scenarios: scenario_paths,
+            ..Default::default()
+        };
+
+        let stage_dispatcher = self.zbobr.with_mcp_tester_config(mcp_tester_config);
+
+        let task = self.get_task(task_id).await;
+
+        process_task(&stage_dispatcher, &task, pipeline)
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "[{}] process_task (continue) failed for task #{task_id}: {e}",
+                    self.name
+                )
+            });
+    }
+
     /// Run the dispatcher for the given role against `task_id`, using the
     /// provided scenario YAML string as the mcp-tester script.
     ///

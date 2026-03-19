@@ -397,6 +397,7 @@ async fn run_task_subcommand(
                     reviewing: executor_mcp_tester_reviewing,
                     testing: executor_mcp_tester_testing,
                     merging: executor_mcp_tester_merging,
+                    scenarios: Default::default(),
                 })
             } else {
                 None
