@@ -22,7 +22,7 @@ pub use prompts::{
     ConfiguredPromptBuilder, build_full_prompt, load_prompts, validate_stage_prompts,
 };
 pub use task::{
-    ChecklistItem, Comment, CommentType, Model, RoleSession, StackEntry, Task, TaskSession, Tool,
+    ChecklistItem, Comment, Model, RoleSession, StackEntry, Task, TaskSession, Tool,
 };
 pub use task_dir::TaskDir;
 pub use tool_executor::ToolExecutor;
@@ -238,13 +238,14 @@ impl ZbobrDispatcher {
         RoleSession::new(self.clone(), task_backend, task_id)
     }
 
-    /// Create a RoleSession with a shared tool call tracker.
+    /// Create a RoleSession with a shared tool call tracker and comment buffer.
     pub fn role_session_with_tracker(
         &self,
         task_backend: Arc<dyn TaskBackend>,
         task_id: u64,
         tracker: Arc<std::sync::Mutex<Option<String>>>,
+        comment_buffer: task::CommentBuffer,
     ) -> RoleSession {
-        RoleSession::with_shared_tracker(self.clone(), task_backend, task_id, tracker)
+        RoleSession::with_shared_tracker(self.clone(), task_backend, task_id, tracker, comment_buffer)
     }
 }

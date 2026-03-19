@@ -10,11 +10,12 @@ use clap::{Args, Parser};
 use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
-    Comment, CommentType, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
+    Comment, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
     mcp::common::get_hostname,
     task::{Model, Tool},
 };
 use zbobr_api::config::{PipelineConfig, StageDefinition};
+use zbobr_api::CommentTag;
 
 // ---------------------------------------------------------------------------
 // CLI types
@@ -200,13 +201,12 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     if !task.description.is_empty() {
         println!("Description:\n{}", task.description);
     }
-    // show latest plan comment if present (old tasks used to store this in
-    // `task.plan` so we try to mimic that behaviour for convenience)
+    // show latest plan comment if present (look for [post_plan] section marker)
     if !discussion.is_empty()
         && let Some(plan_comment) = discussion
             .iter()
             .rev()
-            .find(|c| c.comment_type == CommentType::Plan)
+            .find(|c| c.text.starts_with("[post_plan]"))
     {
         println!("Plan (from comment):\n{}", plan_comment.text);
     }
@@ -220,13 +220,14 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     if !discussion.is_empty() {
         println!("Discussion ({} comment(s)):", discussion.len());
         for (i, c) in discussion.iter().enumerate() {
-            let tag = CommentTag {
-                comment_type: c.comment_type,
-                role: c.role.clone(),
-                hostname: c.hostname.clone(),
-                tool: c.tool,
-                model: c.model.clone(),
-            };
+            let tag = CommentTag::new(
+                c.stage.clone(),
+                c.hostname.clone(),
+                c.tool,
+                c.model.clone(),
+                c.boundary,
+                c.hidden,
+            );
             println!("  [{}] {}\n{}", i + 1, tag, c.text);
         }
     }
@@ -447,6 +448,8 @@ impl<'a> CliStageRunner<'a> {
             });
 
         let tool_tracker = Arc::new(std::sync::Mutex::new(None::<String>));
+        let comment_buffer: crate::task::CommentBuffer =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
         let (assigned_port, server_handle) = start_mcp_server(
             self.zbobr.clone(),
             role,
@@ -457,6 +460,7 @@ impl<'a> CliStageRunner<'a> {
             self.stage_def.transitions.clone(),
             allowed_tools,
             Arc::clone(&tool_tracker),
+            Arc::clone(&comment_buffer),
         )
         .await?;
 
@@ -496,6 +500,7 @@ impl<'a> CliStageRunner<'a> {
             &work_dir,
             outcome,
             last_mapped_tool.as_deref(),
+            comment_buffer,
         )
         .await?
         {
@@ -758,7 +763,7 @@ async fn prepare_workspace(
                     let hostname = get_hostname();
                     if let Err(post_err) = zbobr
                         .task_session(Arc::clone(task_backend), Arc::clone(repo_backend), task_id)
-                        .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
+                        .post_comment("error", &hostname, None, None, &msg, false, true)
                         .await
                     {
                         tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -808,7 +813,7 @@ async fn ensure_pr_url(
             let task_session =
                 zbobr.task_session(Arc::clone(task_backend), Arc::clone(repo_backend), task_id);
             if let Err(post_err) = task_session
-                .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
+                .post_comment("error", &hostname, None, None, &msg, false, true)
                 .await
             {
                 tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -859,12 +864,13 @@ async fn start_mcp_server(
     transitions: std::collections::HashMap<String, String>,
     allowed_tools: std::collections::HashSet<String>,
     tool_tracker: Arc<std::sync::Mutex<Option<String>>>,
+    comment_buffer: crate::task::CommentBuffer,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
     let task_backend = Arc::clone(zbobr.task_backend());
     let role_name = role_name.to_string();
     let server_handle = tokio::spawn(async move {
-        match crate::mcp::run_role_mcp_server(zbobr, task_backend, &role_name, task_id, tool, model, stage_name, transitions, allowed_tools, tool_tracker).await
+        match crate::mcp::run_role_mcp_server(zbobr, task_backend, &role_name, task_id, tool, model, stage_name, transitions, allowed_tools, tool_tracker, comment_buffer).await
         {
             Ok(assigned_port) => {
                 let _ = port_tx.send(assigned_port);
@@ -937,12 +943,48 @@ async fn finalize_stage_session(
     work_dir: &Path,
     outcome: SessionOutcome,
     last_mapped_tool: Option<&str>,
+    comment_buffer: crate::task::CommentBuffer,
 ) -> anyhow::Result<Option<anyhow::Error>> {
     let role = stage_def.role.as_str();
     let task_backend = zbobr.task_backend();
     let repo_backend = zbobr.repo_backend();
     let task_session = zbobr.task_session(Arc::clone(task_backend), Arc::clone(repo_backend), task_id);
     let pending_state = format!("{}_PENDING", stage_def.mode);
+
+    // Flush buffered MCP comments as a single combined comment signed by stage name.
+    {
+        let buffered: Vec<crate::task::BufferedComment> = {
+            let mut buf = comment_buffer.lock().unwrap();
+            std::mem::take(&mut *buf)
+        };
+        if !buffered.is_empty() {
+            let boundary = buffered.iter().any(|c| c.boundary);
+            let hostname = get_hostname();
+            let combined_text = buffered
+                .iter()
+                .map(|c| c.body.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            let cli_tool = zbobr.config().tool_for_stage(stage_def);
+            let model = zbobr.config().model_for_stage(stage_def);
+            if let Err(e) = task_session
+                .post_comment(
+                    &stage_def.name,
+                    &hostname,
+                    Some(cli_tool),
+                    Some(model),
+                    &combined_text,
+                    boundary,
+                    false,
+                )
+                .await
+            {
+                tracing::error!(
+                    "Failed to flush buffered comments for task #{task_id}: {e}"
+                );
+            }
+        }
+    }
 
     if outcome.execution_interrupted {
         if (role == "worker" || role == "merger")
@@ -970,7 +1012,7 @@ async fn finalize_stage_session(
         let error_msg = format!("Execution failed: {e}");
         let hostname = get_hostname();
         if let Err(post_err) = task_session
-            .post_comment(CommentType::Error, &error_msg, None, &hostname, None, None)
+            .post_comment("error", &hostname, None, None, &error_msg, false, true)
             .await
         {
             tracing::error!("Failed to post error to task #{task_id}: {post_err}");
@@ -999,7 +1041,7 @@ async fn finalize_stage_session(
         let hostname = get_hostname();
         let msg = format!("Auto-commit/push failed: {e}");
         if let Err(post_err) = task_session
-            .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
+            .post_comment("error", &hostname, None, None, &msg, false, true)
             .await
         {
             tracing::error!(
@@ -1043,7 +1085,7 @@ async fn finalize_stage_session(
             tracing::error!("task #{task_id}: {msg}");
             let hostname = get_hostname();
             if let Err(e) = task_session
-                .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
+                .post_comment("error", &hostname, None, None, &msg, false, true)
                 .await
             {
                 tracing::warn!(
@@ -1121,5 +1163,3 @@ async fn perform_auto_commit_and_push(
 
     Ok(())
 }
-
-use zbobr_api::CommentTag;

@@ -12,7 +12,7 @@ pub use config::{
     ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
 };
 pub use task::{
-    ChecklistItem, Comment, CommentTag, CommentType, HistoryChunk, Model, Role, StackEntry, Task,
-    TaskIdentity, Tool, extract_history_chunk, extract_repo_name,
+    ChecklistItem, Comment, CommentTag, HistoryChunk, Model, Role, StackEntry, Task, TaskIdentity,
+    Tool, extract_history_chunk, extract_repo_name,
 };
 pub use tool_executor::{ToolExecutor, format_command_for_log};

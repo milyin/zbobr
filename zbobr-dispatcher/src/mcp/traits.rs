@@ -1,7 +1,6 @@
 use crate::{
-    CommentType,
     mcp::common::get_hostname,
-    task::{ChecklistItem, Model, Role, RoleSession, Tool},
+    task::{ChecklistItem, Model, RoleSession, Tool},
 };
 
 // Helper functions for logging MCP responses
@@ -30,10 +29,10 @@ fn log_mcp_comments_response(role_name: &str, task_id: u64, response: &str) {
                     stripped_text.to_string()
                 };
                 tracing::info!(
-                    "[{}#{}] comment type={:?} text={}",
+                    "[{}#{}] comment stage={} text={}",
                     role_name,
                     task_id,
-                    comment.comment_type,
+                    comment.stage,
                     display_text
                 );
             }
@@ -158,19 +157,14 @@ fn log_mcp_string_response(role_name: &str, task_id: u64, tool_name: &str, respo
 #[allow(async_fn_in_trait)]
 pub trait CommonMcpImpl: Send + Sync {
     fn session(&self) -> &RoleSession;
-    fn role(&self) -> Role;
+
+    fn role_name(&self) -> &str;
 
     /// Returns the tool that is executing this MCP session
     fn mcp_tool(&self) -> Tool;
 
     /// Returns the concrete model currently in use by the agent tool
     fn mcp_model(&self) -> Model;
-
-    fn role_name(&self) -> &str {
-        // Default: delegate to role() — but UnifiedMcp overrides this to avoid clone
-        // This won't work with type alias, so implementors should override
-        "unknown"
-    }
 
     /// Returns the name of the current stage, used to compute the retry signal
     /// (e.g. after `report_error` or `ask_user` pauses the task).
@@ -239,17 +233,11 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
         let hostname = get_hostname();
+        let body = format!("[report_error]\n{message}");
 
         if let Err(e) = self
             .session()
-            .post_comment(
-                CommentType::Error,
-                message,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-            )
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), false, false, true)
             .await
         {
             tracing::error!(
@@ -308,17 +296,11 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
         let hostname = get_hostname();
+        let body = format!("[report_results]\n{message}");
 
         if let Err(e) = self
             .session()
-            .post_comment(
-                CommentType::Report,
-                message,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-            )
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, false, false)
             .await
         {
             tracing::error!(
@@ -352,17 +334,11 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
         let hostname = get_hostname();
+        let body = format!("[ask_user]\n{message}");
 
         if let Err(e) = self
             .session()
-            .post_comment(
-                CommentType::Request,
-                message,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-            )
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), false, false, false)
             .await
         {
             tracing::error!(
@@ -419,17 +395,11 @@ pub trait CommonMcpImpl: Send + Sync {
     async fn post_plan_impl(&self, plan: &str) -> String {
         tracing::info!("[{}#{}] post_plan", self.role_name(), self.session().task_id());
         let hostname = get_hostname();
+        let body = format!("[post_plan]\n{plan}");
 
         if let Err(e) = self
             .session()
-            .post_comment(
-                CommentType::Plan,
-                plan,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                None,
-            )
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, false, false)
             .await
         {
             tracing::error!(
@@ -461,17 +431,11 @@ pub trait CommonMcpImpl: Send + Sync {
     async fn ask_planner_impl(&self, message: &str) -> String {
         tracing::info!("[{}#{}] ask_planner", self.role_name(), self.session().task_id());
         let hostname = get_hostname();
+        let body = format!("[ask_planner]\n{message}");
 
         if let Err(e) = self
             .session()
-            .post_comment(
-                CommentType::Request,
-                message,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-            )
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, false, false)
             .await
         {
             tracing::error!(
@@ -887,16 +851,10 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
         let hostname = get_hostname();
+        let body = format!("[review_accept]\n{message}");
         let response = if let Err(e) = self
             .session()
-            .post_comment(
-                CommentType::Report,
-                message,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-            )
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, false, false)
             .await
         {
             format!("Error posting review acceptance: {e}")
@@ -920,16 +878,10 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
         let hostname = get_hostname();
+        let body = format!("[review_reject]\n{message}");
         if let Err(e) = self
             .session()
-            .post_comment(
-                CommentType::Reject,
-                message,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-            )
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, true, false)
             .await
         {
             let response = format!("Error posting review rejection: {e}");
@@ -961,16 +913,10 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
         let hostname = get_hostname();
+        let body = format!("[test_accept]\n{message}");
         let response = if let Err(e) = self
             .session()
-            .post_comment(
-                CommentType::Report,
-                message,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-            )
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, false, false)
             .await
         {
             format!("Error posting test acceptance: {e}")
@@ -994,16 +940,10 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
         let hostname = get_hostname();
+        let body = format!("[test_reject]\n{message}");
         if let Err(e) = self
             .session()
-            .post_comment(
-                CommentType::Reject,
-                message,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-            )
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, true, false)
             .await
         {
             let response = format!("Error posting test rejection: {e}");

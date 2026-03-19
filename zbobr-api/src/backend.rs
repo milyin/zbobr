@@ -1,9 +1,6 @@
 use async_trait::async_trait;
 
-use crate::Tool;
-use crate::task::{
-    ChecklistItem, Comment, CommentType, Model, Role, StackEntry, Task, TaskIdentity,
-};
+use crate::task::{ChecklistItem, Comment, Model, StackEntry, Task, TaskIdentity, Tool};
 
 /// Read-only handle to a task. Returned by `TaskBackend::get_task()` and `TaskBackend::list_tasks()`.
 #[async_trait]
@@ -119,12 +116,13 @@ pub trait TaskMut: Send + Sync {
     /// Post a structured comment (requires exclusive access).
     async fn post_comment(
         &self,
-        comment_type: CommentType,
-        role: Option<Role>,
+        stage: &str,
         hostname: &str,
         tool: Option<Tool>,
         model: Option<Model>,
         body: &str,
+        boundary: bool,
+        hidden: bool,
     ) -> anyhow::Result<()>;
 
     /// Release exclusive access, return read-only handle.

@@ -8,6 +8,22 @@ use crate::{
 };
 
 // ---------------------------------------------------------------------------
+// Comment buffering
+// ---------------------------------------------------------------------------
+
+/// A comment buffered during an MCP stage, to be flushed as a single combined
+/// comment at the end of the stage. Each entry's `body` is already prefixed
+/// with `[tool_name]\n` by the MCP tool that posted it.
+#[derive(Debug, Clone)]
+pub struct BufferedComment {
+    pub body: String,
+    pub boundary: bool,
+}
+
+/// Shared comment buffer used to group per-stage MCP comments.
+pub type CommentBuffer = Arc<std::sync::Mutex<Vec<BufferedComment>>>;
+
+// ---------------------------------------------------------------------------
 // RoleSession — restricted access for MCP tools during agent sessions.
 //
 // Cannot modify: stage, conflict, confirm (those are dispatcher-only transitions).
@@ -23,6 +39,9 @@ pub struct RoleSession {
     task_id: u64,
     /// Tracks the last MCP tool call that matched a transition key.
     last_mapped_tool: Arc<std::sync::Mutex<Option<String>>>,
+    /// When present, `post_comment` appends to this buffer instead of posting
+    /// directly. The buffer is flushed as a single combined comment at stage end.
+    comment_buffer: Option<CommentBuffer>,
 }
 
 impl RoleSession {
@@ -32,6 +51,7 @@ impl RoleSession {
             task_backend,
             task_id,
             last_mapped_tool: Arc::new(std::sync::Mutex::new(None)),
+            comment_buffer: None,
         }
     }
 
@@ -40,12 +60,14 @@ impl RoleSession {
         task_backend: Arc<dyn TaskBackend>,
         task_id: u64,
         tracker: Arc<std::sync::Mutex<Option<String>>>,
+        comment_buffer: CommentBuffer,
     ) -> Self {
         Self {
             zbobr,
             task_backend,
             task_id,
             last_mapped_tool: tracker,
+            comment_buffer: Some(comment_buffer),
         }
     }
 
@@ -86,11 +108,36 @@ impl RoleSession {
 
     /// Get a history chunk at the given offset.
     /// `offset` is 0-based (0 = oldest chunk); `None` returns the last chunk.
+    ///
+    /// When a comment buffer is active, buffered (not-yet-flushed) comments are
+    /// appended to the backend comments so that the agent can see its own
+    /// output during the session.
     pub async fn get_history(
         &self,
         offset: Option<usize>,
     ) -> anyhow::Result<zbobr_api::HistoryChunk> {
-        crate::get_history(&*self.task_backend, self.task_id, offset).await
+        if let Some(ref buffer) = self.comment_buffer {
+            let weak = self.task_backend.get_task(self.task_id).await?;
+            let mut comments = weak.get_comments().await?;
+            let task = weak.snapshot().await?;
+            // Append buffered comments so the agent can see its own posts.
+            let buffered = buffer.lock().unwrap();
+            for bc in buffered.iter() {
+                comments.push(Comment {
+                    timestamp: String::new(),
+                    stage: String::new(),
+                    hostname: String::new(),
+                    tool: None,
+                    model: None,
+                    text: bc.body.clone(),
+                    boundary: bc.boundary,
+                    hidden: false,
+                });
+            }
+            zbobr_api::extract_history_chunk(comments, &task.description, offset)
+        } else {
+            crate::get_history(&*self.task_backend, self.task_id, offset).await
+        }
     }
 
     /// Get the current task checklist.
@@ -129,19 +176,33 @@ impl RoleSession {
         weak.get_comments().await
     }
 
+    /// Post a comment. When `buffered` is true and a comment buffer is active,
+    /// the comment is accumulated and will be flushed at stage end. When false
+    /// (or no buffer), the comment is posted immediately to the backend.
     pub async fn post_comment(
         &self,
-        comment_type: CommentType,
         body: &str,
-        role: Option<Role>,
+        stage: &str,
         hostname: &str,
         tool: Option<Tool>,
         model: Option<Model>,
+        buffered: bool,
+        boundary: bool,
+        hidden: bool,
     ) -> anyhow::Result<()> {
+        if buffered {
+            if let Some(ref buffer) = self.comment_buffer {
+                buffer.lock().unwrap().push(BufferedComment {
+                    body: body.to_string(),
+                    boundary,
+                });
+                return Ok(());
+            }
+        }
         let weak = self.task_backend.get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
-            .post_comment(comment_type, role, hostname, tool, model, body)
+            .post_comment(stage, hostname, tool, model, body, boundary, hidden)
             .await
     }
 
@@ -393,10 +454,10 @@ impl TaskSession {
             }
         }
 
-        // Post DONE boundary comment.
+        // Post DONE boundary comment (hidden + boundary).
         let hostname = crate::mcp::common::get_hostname();
         if let Err(e) = self
-            .post_comment(CommentType::Done, "", None, &hostname, None, None)
+            .post_comment("done", &hostname, None, None, "", true, true)
             .await
         {
             tracing::warn!("Failed to post DONE boundary for task #{task_id}: {e}");
@@ -410,20 +471,21 @@ impl TaskSession {
         .await
     }
 
-    /// Post a structured comment with type, body, and optional role/model metadata.
+    /// Post a structured comment directly to the backend.
     pub async fn post_comment(
         &self,
-        comment_type: CommentType,
-        body: &str,
-        role: Option<Role>,
+        stage: &str,
         hostname: &str,
         tool: Option<Tool>,
         model: Option<Model>,
+        body: &str,
+        boundary: bool,
+        hidden: bool,
     ) -> anyhow::Result<()> {
         let weak = self.task_backend.get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
-            .post_comment(comment_type, role, hostname, tool, model, body)
+            .post_comment(stage, hostname, tool, model, body, boundary, hidden)
             .await
     }
 }
@@ -544,22 +606,24 @@ mod comment_model_tests {
 
         async fn post_comment(
             &self,
-            comment_type: CommentType,
-            role: Option<Role>,
+            stage: &str,
             hostname: &str,
             tool: Option<Tool>,
             model: Option<Model>,
             body: &str,
+            boundary: bool,
+            hidden: bool,
         ) -> anyhow::Result<()> {
             let mut comments = self.backend.comments.lock().await;
             comments.entry(self.id).or_default().push(Comment {
-                comment_type,
                 timestamp: String::new(),
-                role,
+                stage: stage.to_string(),
                 hostname: hostname.to_string(),
                 tool,
                 model,
                 text: body.to_string(),
+                boundary,
+                hidden,
             });
             Ok(())
         }
@@ -712,12 +776,16 @@ mod comment_model_tests {
             std::collections::HashMap::new(),
         );
 
+        // report_error is unbuffered — goes straight to backend
         let _ = planner.report_error_impl("oops").await;
 
         let weak = task_backend.get_task(id).await.unwrap();
         let comments = weak.get_comments().await.unwrap();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].model, Some(Model::Gpt5Mini));
+        assert_eq!(comments[0].tool, Some(Tool::Copilot));
+        assert!(comments[0].hidden);
+        assert!(comments[0].text.starts_with("[report_error]"));
     }
 
     #[tokio::test]
@@ -730,14 +798,7 @@ mod comment_model_tests {
 
         zbobr
             .task_session(task_backend.clone() as Arc<dyn TaskBackend>, repo_backend.clone() as Arc<dyn WorktreeBackend>, id)
-            .post_comment(
-                CommentType::Error,
-                "dispatcher error",
-                None::<String>,
-                "host",
-                None::<Tool>,
-                None::<Model>,
-            )
+            .post_comment("error", "host", None, None, "dispatcher error", false, true)
             .await
             .unwrap();
 
@@ -745,50 +806,45 @@ mod comment_model_tests {
         let comments = weak.get_comments().await.unwrap();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].model, None);
+        assert_eq!(comments[0].tool, None);
     }
 
     #[test]
-    fn comment_tag_roundtrip_models() {
+    fn comment_tag_roundtrip() {
         let tag = CommentTag::new(
-            CommentType::Request,
-            Some("planner".to_string()),
+            "planning".to_string(),
             "host".to_string(),
-            None,
+            Some(Tool::Copilot),
             Some(Model::Gpt5Mini),
+            false,
+            false,
         );
-        assert_eq!(tag.to_string(), "// REQUEST planner:host:gpt-5-mini");
+        assert_eq!(tag.to_string(), "// planning:host:copilot:gpt-5-mini");
         let parsed: CommentTag = tag.to_string().parse().unwrap();
         assert_eq!(parsed, tag);
 
-        let tag_user = CommentTag::new(CommentType::Request, None, "web".to_string(), None, None);
-        assert_eq!(tag_user.to_string(), "// REQUEST user:web");
+        let tag_no_tool = CommentTag::new(
+            "done".to_string(),
+            "web".to_string(),
+            None,
+            None,
+            true,
+            true,
+        );
+        assert_eq!(tag_no_tool.to_string(), "// done:web:boundary:hidden");
+        let parsed_no_tool: CommentTag = tag_no_tool.to_string().parse().unwrap();
+        assert_eq!(parsed_no_tool, tag_no_tool);
 
-        let tag_default = CommentTag::new(
-            CommentType::Report,
-            Some("planner".to_string()),
+        let tag_tool_no_model = CommentTag::new(
+            "working".to_string(),
             "host".to_string(),
-            Some(Tool::Copilot),
-            Some(Model::Default),
+            Some(Tool::Claude),
+            None,
+            false,
+            false,
         );
-        assert_eq!(
-            tag_default.to_string(),
-            "// REPORT planner:host:copilot:default"
-        );
-        let parsed_default: CommentTag = tag_default.to_string().parse().unwrap();
-        assert_eq!(parsed_default, tag_default);
-
-        let tag_tool = CommentTag::new(
-            CommentType::Report,
-            Some("worker".to_string()),
-            "host".to_string(),
-            Some(Tool::Copilot),
-            Some(Model::Gpt5Mini),
-        );
-        assert_eq!(
-            tag_tool.to_string(),
-            "// REPORT worker:host:copilot:gpt-5-mini"
-        );
-        let parsed_tool: CommentTag = tag_tool.to_string().parse().unwrap();
-        assert_eq!(parsed_tool, tag_tool);
+        assert_eq!(tag_tool_no_model.to_string(), "// working:host:claude");
+        let parsed_tnm: CommentTag = tag_tool_no_model.to_string().parse().unwrap();
+        assert_eq!(parsed_tnm, tag_tool_no_model);
     }
 }

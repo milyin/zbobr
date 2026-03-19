@@ -44,112 +44,41 @@ pub struct ChecklistItem {
     pub text: String,
 }
 
-// -- Comment types --
-
-/// Comment type classification.
-///
-/// Variants:
-/// - `Error`    — posted by `report_error` MCP tool when an agent encounters an unrecoverable
-///   problem; also posted by the dispatcher/CLI on execution failure.
-/// - `Report`   — posted by `report_results` MCP tool to deliver a role's completion output.
-/// - `Plan`     — posted by `post_plan` MCP tool (planner role) to record the implementation plan.
-/// - `Request`  — posted for user-originated messages and for questions raised by `ask_user` (and
-///   similar ASK_xxx MCP tools) that pause the task waiting for a human response.
-/// - `Reject`   — posted by reviewer/tester when rejecting work; acts as a context chunk boundary
-///   and contains the rejection message. Visible in GET_HISTORY as the first comment of a new chunk.
-/// - `Done`     — posted by the dispatcher when a task is accepted and marked complete; acts as a
-///   context chunk boundary but is excluded from GET_HISTORY results.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
-)]
-pub enum CommentType {
-    /// Unrecoverable error from an agent or the dispatcher.
-    #[serde(rename = "error")]
-    Error,
-    /// Completion report from an agent role.
-    #[serde(rename = "report")]
-    Report,
-    /// Implementation plan posted by the planner role.
-    #[serde(rename = "plan")]
-    Plan,
-    /// User message or agent request awaiting a human response (ASK_xxx operations).
-    #[serde(rename = "request")]
-    Request,
-    /// Rejection posted by a reviewer or tester; also serves as a context chunk boundary.
-    /// Contains the rejection message and is included in GET_HISTORY as the first comment of a chunk.
-    #[serde(rename = "reject")]
-    Reject,
-    /// Completion marker posted by the dispatcher after a task is accepted and marked done.
-    /// Serves as a context chunk boundary; excluded from GET_HISTORY results.
-    #[serde(rename = "done")]
-    Done,
-}
-
-impl CommentType {
-    /// Returns the comment type as a string.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            CommentType::Error => "error",
-            CommentType::Report => "report",
-            CommentType::Plan => "plan",
-            CommentType::Request => "request",
-            CommentType::Reject => "reject",
-            CommentType::Done => "done",
-        }
-    }
-
-    /// Parse from string representation, returning `None` on unknown input.
-    pub fn parse(s: &str) -> Option<Self> {
-        let s = s.to_ascii_lowercase();
-        match s.as_str() {
-            "error" => Some(CommentType::Error),
-            "report" => Some(CommentType::Report),
-            "plan" => Some(CommentType::Plan),
-            "request" => Some(CommentType::Request),
-            "reject" => Some(CommentType::Reject),
-            "done" => Some(CommentType::Done),
-            _ => None,
-        }
-    }
-
-    /// Returns `true` for comment types that act as context chunk boundaries
-    /// (`Reject` and `Done`). Used by GET_HISTORY to split the comment history into chunks.
-    pub fn is_cut(&self) -> bool {
-        matches!(self, CommentType::Reject | CommentType::Done)
-    }
-}
-
-// Implement the standard `FromStr` trait so callers can use `.parse()` and to
-// appease the `clippy::should_implement_trait` lint.  The inherent `from_str`
-// method above remains available for callers who prefer an `Option`-returning
-// convenience.
-impl std::str::FromStr for CommentType {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        CommentType::parse(s).ok_or(())
-    }
-}
+// -- Comment --
 
 /// A structured comment with metadata.
+///
+/// The `stage` field identifies which stage posted the comment (e.g. "planning",
+/// "working"). The body text may contain `[tool_name]` section headers added by
+/// MCP tools (e.g. `[report_results]`, `[post_plan]`).
+///
+/// `boundary` marks history-chunk boundaries (reject, done).
+/// `hidden` marks comments that are excluded from `get_history` results (errors,
+/// done markers).
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
 pub struct Comment {
-    #[schemars(description = "Comment type (error, report, plan, or request)")]
-    pub comment_type: CommentType,
-    #[schemars(description = "Timestamp when comment was created (ISO 8601 format)")]
+    #[schemars(description = "Timestamp when comment was created")]
     pub timestamp: String,
-    #[schemars(description = "Role of the comment author (None if user-originated)")]
-    pub role: Option<Role>,
+    #[schemars(description = "Stage that posted this comment")]
+    pub stage: String,
     #[schemars(description = "Hostname of the system posting the comment")]
     pub hostname: String,
-    #[schemars(description = "Execution tool that produced the comment (if known)")]
+    #[schemars(description = "Tool that executed this comment (e.g. copilot, claude)")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<Tool>,
-    #[schemars(description = "AI model used (if applicable)")]
+    #[schemars(description = "Model used by the tool")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<Model>,
-    #[schemars(description = "Comment text without signature/tag")]
+    #[schemars(description = "Comment text (may contain [tool] section headers)")]
     pub text: String,
+    #[schemars(description = "True if this comment is a history-chunk boundary")]
+    #[serde(default)]
+    pub boundary: bool,
+    #[schemars(description = "True if this comment is hidden from get_history")]
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 /// Result of extracting a history chunk, including navigation metadata.
@@ -163,15 +92,15 @@ pub struct HistoryChunk {
     pub comments: Vec<Comment>,
 }
 
-/// Prepend a task description as a synthetic `Request` comment, then extract
-/// the chunk at `offset` from the comment history.
+/// Prepend a task description as a synthetic comment, then extract the chunk
+/// at `offset` from the comment history.
 ///
-/// Chunks are delimited by "cut" comments (`Reject` / `Done`).
+/// Chunks are delimited by boundary comments.
 /// Chunks are numbered 0 to N where 0 is the oldest and N is the newest.
 /// When `offset` is `None`, the last (newest) chunk is returned.
 ///
-/// Non-actionable comments (`Error` and `Done`) are filtered out.
-/// Returns an empty `comments` vec when the chunk has no actionable messages.
+/// Hidden comments are filtered out.
+/// Returns an empty `comments` vec when the chunk has no visible messages.
 /// Returns `Err` only for hard failures (offset out of range).
 pub fn extract_history_chunk(
     mut comments: Vec<Comment>,
@@ -183,13 +112,14 @@ pub fn extract_history_chunk(
         comments.insert(
             0,
             Comment {
-                comment_type: CommentType::Request,
                 timestamp: String::new(),
-                role: None,
+                stage: String::new(),
                 hostname: String::new(),
                 tool: None,
                 model: None,
                 text: description.to_owned(),
+                boundary: false,
+                hidden: false,
             },
         );
     }
@@ -202,11 +132,11 @@ pub fn extract_history_chunk(
         });
     }
 
-    // Find cut-boundary indices.
+    // Find boundary indices.
     let cut_indices: Vec<usize> = comments
         .iter()
         .enumerate()
-        .filter(|(_, c)| c.comment_type.is_cut())
+        .filter(|(_, c)| c.boundary)
         .map(|(i, _)| i)
         .collect();
 
@@ -239,10 +169,10 @@ pub fn extract_history_chunk(
         (cut_indices[target_chunk - 1], cut_indices[target_chunk])
     };
 
-    // Filter out Error and Done comments.
+    // Filter out hidden comments.
     let chunk_comments = comments[start_idx..end_idx]
         .iter()
-        .filter(|c| c.comment_type != CommentType::Error && c.comment_type != CommentType::Done)
+        .filter(|c| !c.hidden)
         .cloned()
         .collect();
 
@@ -495,83 +425,55 @@ impl std::str::FromStr for Model {
     }
 }
 
-/// Tag for GitHub-specific comment formatting (e.g., `// REPORT role:host:model`).
+/// Tag for comment formatting. Contains stage name, hostname, and optional tool/model.
 ///
-/// The `model` field is optional and is mainly used by MCP handlers to record the
-/// concrete LLM model that generated the message (for example, a Copilot or
-/// Claude session).  Dispatcher-originated messages normally leave this field
-/// unset, so that comments created by internal code do not imply any model.
-/// Agents should supply the model explicitly when they know it; the tag merely
-/// serializes whatever value is provided.
-///
-/// This type handles only serialization/deserialization.  Logic for deciding when
-/// to include a model (and what value to use) lives in the dispatcher and MCP
-/// helpers rather than here.
+/// Format: `// {stage}:{hostname}[:{tool}[:{model}]]` with optional `:boundary` or `:hidden` flags.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommentTag {
-    pub comment_type: CommentType,
-    pub role: Option<Role>,
+    pub stage: String,
     pub hostname: String,
-    /// Which tool executed the action that produced this comment (if any).
     pub tool: Option<Tool>,
     pub model: Option<Model>,
+    pub boundary: bool,
+    pub hidden: bool,
 }
 
 impl CommentTag {
-    /// Create a new CommentTag.
     pub fn new(
-        comment_type: CommentType,
-        role: Option<Role>,
+        stage: String,
         hostname: String,
         tool: Option<Tool>,
         model: Option<Model>,
+        boundary: bool,
+        hidden: bool,
     ) -> Self {
         Self {
-            comment_type,
-            role,
+            stage,
             hostname,
             tool,
             model,
+            boundary,
+            hidden,
         }
     }
 }
 
 impl std::fmt::Display for CommentTag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let tag_type = match self.comment_type {
-            CommentType::Error => "ERROR",
-            CommentType::Report => "REPORT",
-            CommentType::Plan => "PLAN",
-            CommentType::Request => "REQUEST",
-            CommentType::Reject => "REJECT",
-            CommentType::Done => "DONE",
-        };
-
-        // All tag types now follow the same serialization rules.  REQUEST no
-        // longer has special handling because it may carry a role/host/model,
-        // and we want to be able to see `// REQUEST planner:foo:bar` or
-        // `// REQUEST user:host` in the log.
-        // role is always present now
-        let role = self
-            .role
-            .as_ref()
-            .map(|r| r.to_string())
-            .unwrap_or_else(|| "user".to_string());
-
-        // Serialization includes optional tool and model.  Maintain backward
-        // compatibility by emitting only hostname:model when tool is absent.
-        match (&self.tool, &self.model) {
-            (Some(tool), Some(model)) => write!(
-                f,
-                "// {} {}:{}:{}:{}",
-                tag_type, role, self.hostname, tool, model
-            ),
-            (Some(tool), None) => write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, tool),
-            (None, Some(model)) => {
-                write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, model)
+        write!(f, "// {}:{}", self.stage, self.hostname)?;
+        if let Some(ref tool) = self.tool {
+            write!(f, ":{tool}")?;
+            if let Some(ref model) = self.model {
+                write!(f, ":{model}")?;
             }
-            (None, None) => write!(f, "// {} {}:{}", tag_type, role, self.hostname),
         }
+        if self.boundary {
+            write!(f, ":boundary")?;
+        }
+        if self.hidden {
+            write!(f, ":hidden")?;
+        }
+        Ok(())
     }
 }
 
@@ -580,64 +482,50 @@ impl std::str::FromStr for CommentTag {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.trim_start_matches("//").trim_start();
-        let (tag_type_str, rest) = if let Some(pos) = s.find(' ') {
-            (&s[..pos], &s[pos + 1..])
-        } else {
-            (s, "")
-        };
+        let parts: Vec<&str> = s.split(':').collect();
+        if parts.len() < 2 {
+            return Err(anyhow::anyhow!("Invalid tag format: {}", s));
+        }
 
-        let comment_type = CommentType::parse(tag_type_str)
-            .ok_or_else(|| anyhow::anyhow!("Unknown comment type: {}", tag_type_str))?;
+        let stage = parts[0].to_string();
+        let hostname = parts[1].to_string();
 
-        let (role, hostname, tool, model) = if rest.is_empty() {
-            // no metadata supplied; default to user/request with empty host
-            (None, String::new(), None, None)
-        } else {
-            let parts: Vec<&str> = rest.split(':').collect();
-            if parts.len() < 2 {
-                return Err(anyhow::anyhow!("Invalid tag format: {}", s));
+        // Remaining parts are optional tool, model, and flags (boundary/hidden).
+        let rest = &parts[2..];
+        let flags = ["boundary", "hidden"];
+        let mut tool: Option<Tool> = None;
+        let mut model: Option<Model> = None;
+        let mut boundary = false;
+        let mut hidden = false;
+
+        let mut i = 0;
+        while i < rest.len() {
+            let part = rest[i];
+            if flags.contains(&part) {
+                if part == "boundary" {
+                    boundary = true;
+                } else {
+                    hidden = true;
+                }
+            } else if tool.is_none() {
+                if let Ok(t) = part.parse::<Tool>() {
+                    tool = Some(t);
+                }
+            } else if model.is_none() {
+                if let Ok(m) = part.parse::<Model>() {
+                    model = Some(m);
+                }
             }
-
-            let role = if parts[0] == "user" {
-                None
-            } else {
-                Some(parts[0].to_string())
-            };
-            let hostname = parts[1].to_string();
-
-            // backwards compatibility: three parts used to mean role:host:model
-            let (tool, model) = if parts.len() == 3 {
-                (
-                    None,
-                    if !parts[2].is_empty() && parts[2] != "unknown" {
-                        Some(Model::from_str(parts[2])?)
-                    } else {
-                        None
-                    },
-                )
-            } else {
-                let tool = if parts.len() > 2 && !parts[2].is_empty() {
-                    Some(Tool::from_str(parts[2])?)
-                } else {
-                    None
-                };
-                let model = if parts.len() > 3 && !parts[3].is_empty() && parts[3] != "unknown" {
-                    Some(Model::from_str(parts[3])?)
-                } else {
-                    None
-                };
-                (tool, model)
-            };
-
-            (role, hostname, tool, model)
-        };
+            i += 1;
+        }
 
         Ok(CommentTag {
-            comment_type,
-            role,
+            stage,
             hostname,
             tool,
             model,
+            boundary,
+            hidden,
         })
     }
 }

@@ -40,8 +40,8 @@ impl CommonMcpImpl for UnifiedMcp {
         &self.session
     }
 
-    fn role(&self) -> String {
-        self.role_name.clone()
+    fn role_name(&self) -> &str {
+        &self.role_name
     }
 
     fn mcp_tool(&self) -> Tool {
@@ -50,10 +50,6 @@ impl CommonMcpImpl for UnifiedMcp {
 
     fn mcp_model(&self) -> Model {
         self.model.clone()
-    }
-
-    fn role_name(&self) -> &str {
-        &self.role_name
     }
 
     fn stage_name(&self) -> &str {

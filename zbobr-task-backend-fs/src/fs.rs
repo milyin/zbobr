@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use zbobr_api::{
-    ChecklistItem, Comment, CommentType, Model, Role, StackEntry, Task, Tool,
+    ChecklistItem, Comment, Model, StackEntry, Task, Tool,
     backend::{TaskBackend, TaskMut, TaskWeak},
 };
 
@@ -362,23 +362,25 @@ impl TaskMut for FsTaskMut {
 
     async fn post_comment(
         &self,
-        comment_type: CommentType,
-        role: Option<Role>,
+        stage: &str,
         hostname: &str,
         tool: Option<Tool>,
         model: Option<Model>,
         body: &str,
+        boundary: bool,
+        hidden: bool,
     ) -> anyhow::Result<()> {
         let mut comments = self.backend.read_comments_structured(self.id).await?;
 
         let new_comment = Comment {
-            comment_type,
             timestamp: format!("{:?}", std::time::SystemTime::now()),
-            role,
+            stage: stage.to_string(),
             hostname: hostname.to_string(),
             tool,
             model,
             text: body.to_string(),
+            boundary,
+            hidden,
         };
 
         comments.push(new_comment);
@@ -572,140 +574,59 @@ impl TaskBackend for ArcTaskBackendFs {
 
 #[cfg(test)]
 mod parse_tests {
-    use std::str::FromStr;
-
     use zbobr_api::task::CommentTag;
 
-    use super::*;
-
-    fn split_tag_body(input: &str) -> (CommentTag, String) {
-        let mut parts = input.splitn(2, '\n');
-        let tag_line = parts.next().unwrap_or("");
-        let rest = parts.next();
-
-        eprintln!("split_tag_body: tag_line={:?}", tag_line);
-        match tag_line.parse::<CommentTag>() {
-            Ok(tag) => {
-                eprintln!("split_tag_body: parsed tag={:?}", tag);
-                let body = rest.unwrap_or("").trim_start().to_string();
-                (tag, body)
-            }
-            Err(err) => {
-                eprintln!("split_tag_body: parse error={:?}", err);
-                (
-                    CommentTag::new(CommentType::Request, None, String::new(), None, None),
-                    input.to_string(),
-                )
-            }
-        }
-    }
-
     #[test]
-    fn test_parse_comment_tag_report_with_body() {
-        let input = "// REPORT worker:localhost:claude-opus-4.6\n\nThis is the report body\nWith multiple lines";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Report);
-        assert_eq!(tag.role, Some("worker".to_string()));
+    fn test_parse_comment_tag_simple() {
+        let input = "// planning:localhost";
+        let tag: CommentTag = input.parse().unwrap();
+        assert_eq!(tag.stage, "planning");
         assert_eq!(tag.hostname, "localhost");
-        assert_eq!(tag.tool, None);
-        assert_eq!(tag.model, Some(Model::from_str("claude-opus-4.6").unwrap()));
-        assert_eq!(body, "This is the report body\nWith multiple lines");
+        assert!(!tag.boundary);
+        assert!(!tag.hidden);
     }
 
     #[test]
-    fn test_parse_comment_tag_error_with_body() {
-        let input = "// ERROR planner:skynet:gpt-4o\n\nAn error occurred";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Error);
-        assert_eq!(tag.role, Some("planner".to_string()));
+    fn test_parse_comment_tag_boundary() {
+        let input = "// reviewing:skynet:boundary";
+        let tag: CommentTag = input.parse().unwrap();
+        assert_eq!(tag.stage, "reviewing");
         assert_eq!(tag.hostname, "skynet");
-        assert_eq!(tag.tool, None);
-        assert_eq!(tag.model, Some(Model::from_str("gpt-4o").unwrap()));
-        assert_eq!(body, "An error occurred");
+        assert!(tag.boundary);
+        assert!(!tag.hidden);
     }
 
     #[test]
-    fn test_parse_comment_tag_request_with_body() {
-        let input = "// REQUEST\n\nThis is a user request";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Request);
-        assert_eq!(tag.role, None);
-        assert_eq!(tag.hostname, "");
-        assert_eq!(tag.tool, None);
-        assert_eq!(tag.model, None);
-        assert_eq!(body, "This is a user request");
-    }
-
-    #[test]
-    fn test_parse_comment_tag_report_no_model() {
-        let input = "// REPORT reviewer:host\n\nBody text";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Report);
-        assert_eq!(tag.role, Some("reviewer".to_string()));
+    fn test_parse_comment_tag_hidden() {
+        let input = "// working:host:hidden";
+        let tag: CommentTag = input.parse().unwrap();
+        assert_eq!(tag.stage, "working");
         assert_eq!(tag.hostname, "host");
-        assert_eq!(tag.tool, None);
-        assert_eq!(tag.model, None);
-        assert_eq!(body, "Body text");
+        assert!(!tag.boundary);
+        assert!(tag.hidden);
     }
 
     #[test]
-    fn test_parse_comment_tag_no_tag_treated_as_request() {
-        let input = "This is just text without a tag";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Request);
-        assert_eq!(tag.role, None);
-        assert_eq!(tag.hostname, "");
-        assert_eq!(tag.tool, None);
-        assert_eq!(tag.model, None);
-        assert_eq!(body, "This is just text without a tag");
+    fn test_parse_comment_tag_boundary_hidden() {
+        let input = "// done:host:boundary:hidden";
+        let tag: CommentTag = input.parse().unwrap();
+        assert_eq!(tag.stage, "done");
+        assert!(tag.boundary);
+        assert!(tag.hidden);
     }
 
     #[test]
-    fn test_parse_comment_tag_bogus_tag_preserves_first_line() {
-        let input = "// NOTATAG\nfull body goes here";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Request);
-        assert_eq!(tag.role, None);
-        assert_eq!(tag.hostname, "");
-        assert_eq!(tag.tool, None);
-        assert_eq!(tag.model, None);
-        assert_eq!(body, "// NOTATAG\nfull body goes here");
-    }
+    fn test_comment_tag_roundtrip() {
+        let tag = CommentTag::new("planning".into(), "localhost".into(), None, None, false, false);
+        let s = tag.to_string();
+        assert_eq!(s, "// planning:localhost");
+        let parsed: CommentTag = s.parse().unwrap();
+        assert_eq!(parsed, tag);
 
-    #[test]
-    fn test_parse_comment_tag_request_with_meta() {
-        let input = "// REQUEST planner:skynet:gpt-4o\n\nPlease respond";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Request);
-        assert_eq!(tag.role, Some("planner".to_string()));
-        assert_eq!(tag.hostname, "skynet");
-        assert_eq!(tag.tool, None);
-        assert_eq!(tag.model, Some(Model::from_str("gpt-4o").unwrap()));
-        assert_eq!(body, "Please respond");
-    }
-
-    #[test]
-    fn test_parse_comment_tag_plan_with_body() {
-        let input =
-            "// PLAN planner:localhost:claude-opus-4.6\n\nStep 1: analyse\nStep 2: implement";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Plan);
-        assert_eq!(tag.role, Some("planner".to_string()));
-        assert_eq!(tag.hostname, "localhost");
-        assert_eq!(tag.tool, None);
-        assert_eq!(tag.model, Some(Model::from_str("claude-opus-4.6").unwrap()));
-        assert_eq!(body, "Step 1: analyse\nStep 2: implement");
-    }
-
-    #[test]
-    fn test_parse_comment_tag_with_tool_and_model() {
-        let input = "// REPORT worker:localhost:copilot:gpt-5-mini\n\nbody";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Report);
-        assert_eq!(tag.role, Some("worker".to_string()));
-        assert_eq!(tag.hostname, "localhost");
-        assert_eq!(tag.tool, Some(Tool::Copilot));
-        assert_eq!(tag.model, Some(Model::from_str("gpt-5-mini").unwrap()));
-        assert_eq!(body, "body");
+        let tag2 = CommentTag::new("reviewing".into(), "host".into(), None, None, true, true);
+        let s2 = tag2.to_string();
+        assert_eq!(s2, "// reviewing:host:boundary:hidden");
+        let parsed2: CommentTag = s2.parse().unwrap();
+        assert_eq!(parsed2, tag2);
     }
 }
