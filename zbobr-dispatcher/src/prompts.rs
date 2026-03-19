@@ -229,6 +229,7 @@ mod tests {
             stack: vec![],
             pause: false,
             confirm: false,
+            worktree_retries: 0,
             etag: None,
         }
     }

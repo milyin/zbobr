@@ -477,6 +477,11 @@ impl ZbobrTaskBackendGithubImpl {
             .iter()
             .any(|l| Self::label_to_flag(&l.name) == Some("confirm"));
 
+        let worktree_retries: u32 = params_map
+            .get("worktree_retries")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+
         Task {
             id: issue.number,
             title: issue.title,
@@ -491,6 +496,7 @@ impl ZbobrTaskBackendGithubImpl {
             stack,
             pause,
             confirm,
+            worktree_retries,
             etag: Some(body),
         }
     }
@@ -514,6 +520,9 @@ impl ZbobrTaskBackendGithubImpl {
             if let Ok(json) = serde_json::to_string(&task.stack) {
                 params.insert("stack".to_string(), json);
             }
+        }
+        if task.worktree_retries > 0 {
+            params.insert("worktree_retries".to_string(), task.worktree_retries.to_string());
         }
         params
     }

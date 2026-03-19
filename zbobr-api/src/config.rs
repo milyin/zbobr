@@ -144,12 +144,31 @@ impl PipelineConfig {
                             stage.mode, stage.name, op, target, target, stage.mode
                         );
                     }
-                } else if let Some(target_mode) = signal.strip_prefix("call_") {
+                } else if signal.starts_with("call_") {
+                    // Support compound call signals: "call_mode,go_stage"
+                    let call_part = signal.split(',').next().unwrap();
+                    let target_mode = call_part.strip_prefix("call_").unwrap();
                     if !modes.contains(&target_mode) {
                         anyhow::bail!(
-                            "Stage '{}/{}' transition '{}' → 'call_{}' references unknown mode '{}'",
-                            stage.mode, stage.name, op, target_mode, target_mode
+                            "Stage '{}/{}' transition '{}' → '{}' references unknown mode '{}'",
+                            stage.mode, stage.name, op, signal, target_mode
                         );
+                    }
+                    // Validate the after-return signal if present
+                    if let Some(after_return) = signal.split_once(',').map(|(_, s)| s.trim()) {
+                        if let Some(target_stage) = after_return.strip_prefix("go_") {
+                            if self.stage_by_name(&stage.mode, target_stage).is_none() {
+                                anyhow::bail!(
+                                    "Stage '{}/{}' transition '{}' → '{}' after-return references unknown stage '{}' in mode '{}'",
+                                    stage.mode, stage.name, op, signal, target_stage, stage.mode
+                                );
+                            }
+                        } else if after_return != "return" {
+                            anyhow::bail!(
+                                "Stage '{}/{}' transition '{}' → '{}' after-return signal '{}' is invalid (expected go_X or return)",
+                                stage.mode, stage.name, op, signal, after_return
+                            );
+                        }
                     }
                 } else if signal != "return" {
                     anyhow::bail!(
@@ -223,6 +242,14 @@ pub struct ZbobrDispatcherConfig {
     pub default_destination_branch: Option<String>,
     /// Mode to call when a merge conflict is detected.
     pub on_conflict: Option<String>,
+    /// Mode to call when the worktree identity is undefined (no routing params).
+    pub on_undefined: Option<String>,
+    /// Max retries for undefined worktree handler before pausing.
+    #[arg(default_value = "1")]
+    pub max_retries_undefined: u32,
+    /// Max retries for conflict worktree handler before pausing.
+    #[arg(default_value = "5")]
+    pub max_retries_conflict: u32,
 }
 
 impl Default for ZbobrDispatcherConfig {
@@ -237,6 +264,9 @@ impl Default for ZbobrDispatcherConfig {
             default_destination_repository: None,
             default_destination_branch: None,
             on_conflict: None,
+            on_undefined: None,
+            max_retries_undefined: 1,
+            max_retries_conflict: 5,
         }
     }
 }

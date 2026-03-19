@@ -402,10 +402,10 @@ impl TaskSession {
     }
 
     /// Push an entry onto the task's call stack.
-    pub async fn push_stack(&self, mode: &str, stage: &str) -> anyhow::Result<()> {
+    pub async fn push_stack(&self, mode: &str, signal: &str) -> anyhow::Result<()> {
         let entry = crate::task::StackEntry {
             mode: mode.to_string(),
-            stage: stage.to_string(),
+            signal: signal.to_string(),
         };
         self.modify_task(move |mut task| {
             task.stack.push(entry);
@@ -686,6 +686,7 @@ mod comment_model_tests {
                 stack: vec![],
                 pause: false,
                 confirm: false,
+                worktree_retries: 0,
                 etag: None,
             };
             self.inner.tasks.lock().await.insert(

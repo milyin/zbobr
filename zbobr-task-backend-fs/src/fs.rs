@@ -42,6 +42,8 @@ struct TaskFile {
     signal: Option<String>,
     #[serde(default)]
     stack: Vec<StackEntry>,
+    #[serde(default)]
+    worktree_retries: u32,
     closed: bool,
 }
 
@@ -74,6 +76,7 @@ impl TaskFile {
             stack: self.stack.clone(),
             pause: self.pause,
             confirm: self.confirm,
+            worktree_retries: self.worktree_retries,
             etag: None,
         })
     }
@@ -100,6 +103,7 @@ impl TaskFile {
             checklist: task.checklist.clone(),
             signal: task.signal.clone(),
             stack: task.stack.clone(),
+            worktree_retries: task.worktree_retries,
             closed,
         }
     }
@@ -437,6 +441,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             stack: vec![],
             pause: false,
             confirm: false,
+            worktree_retries: 0,
             etag: None,
         };
 

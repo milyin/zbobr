@@ -183,13 +183,23 @@ pub fn extract_history_chunk(
     })
 }
 
-/// An entry on the task's call stack, recording which mode+stage to return to.
+/// An entry on the task's call stack, recording which mode to return to
+/// and which signal to emit upon return (e.g. "go_working").
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct StackEntry {
     pub mode: String,
-    pub stage: String,
+    /// Signal to emit when returning to this mode (e.g. "go_working").
+    #[serde(alias = "stage")]
+    pub signal: String,
+}
+
+/// A worktree problem detected before stage execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorktreeProblem {
+    Undefined,
+    Conflict,
 }
 
 /// Role for task execution — now a plain string to support configurable roles.
@@ -553,6 +563,10 @@ pub struct Task {
     /// the task's state is changed.  This gives human operators an opportunity to
     /// review a transition before the next processing step occurs.
     pub confirm: bool,
+    /// Number of consecutive worktree-problem retries for this task.
+    /// Reset to 0 when a stage proceeds normally past worktree detection.
+    #[serde(default)]
+    pub worktree_retries: u32,
     /// ETag for optimistic locking to prevent concurrent update conflicts.
     /// Used to detect if the task has been modified between read and write operations.
     #[serde(skip)]

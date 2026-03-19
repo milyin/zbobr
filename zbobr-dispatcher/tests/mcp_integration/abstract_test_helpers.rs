@@ -222,6 +222,9 @@ pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
+    // Use compound call signal: "call_aux,go_done_step"
+    // After returning from aux, the stack-aware Done handler pops go_done_step
+    // and fires it in the main mode.
     let pipeline = build_pipeline(vec![
         StageDef {
             name: "step_one",
@@ -235,7 +238,14 @@ pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
             role: "role_two",
             mode: "main",
             is_start: false,
-            transitions: vec![("default", "call_aux")],
+            transitions: vec![("default", "call_aux,go_done_step")],
+        },
+        StageDef {
+            name: "done_step",
+            role: "role_done",
+            mode: "main",
+            is_start: false,
+            transitions: vec![("default", "return")],
         },
         StageDef {
             name: "aux_step",
@@ -249,6 +259,7 @@ pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
     let scenarios = scenarios_map(vec![
         ("role_one", abstract_scenarios::report_and_finish_scenario()),
         ("role_two", abstract_scenarios::report_and_finish_scenario()),
+        ("role_done", abstract_scenarios::report_and_finish_scenario()),
         ("role_aux", abstract_scenarios::report_and_finish_scenario()),
     ]);
 
@@ -257,16 +268,34 @@ pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     assert_eq!(task.signal, Some("go_step_two".to_string()));
 
-    // Step 2: main/step_two → call_aux
+    // Step 2: main/step_two → call_aux (compound signal parsed)
     env.continue_pipeline(task_id, &pipeline, &scenarios).await;
     let task = env.get_task(task_id).await;
-    assert_eq!(task.signal, Some("call_aux".to_string()));
+    assert_eq!(
+        task.signal,
+        Some("call_aux".to_string()),
+        "compound call should be split, signal is call_aux"
+    );
+    assert_eq!(
+        task.stack.len(),
+        1,
+        "compound call should push after-return onto stack"
+    );
+    assert_eq!(task.stack[0].mode, "main");
+    assert_eq!(task.stack[0].signal, "go_done_step");
 
-    // Run to completion: aux_step → return → Done
+    // Step 3: aux/aux_step → return → stack pop → go_done_step
+    env.continue_pipeline(task_id, &pipeline, &scenarios).await;
+    // After return, state machine resolves Done, stack pops go_done_step
+    // run_to_completion will handle the remaining transitions
     env.run_to_completion(task_id, &pipeline, &scenarios, 5)
         .await;
     let task = env.get_task(task_id).await;
-    assert_eq!(task.state, "DONE", "Return from aux should complete");
+    assert_eq!(
+        task.state, "DONE",
+        "Return from aux should fire go_done_step, then done_step returns → DONE"
+    );
+    assert!(task.stack.is_empty(), "Stack should be empty after completion");
 }
 
 // ===========================================================================
@@ -341,9 +370,35 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
         Some("call_merging".to_string()),
         "Diverged work branch should trigger call_merging"
     );
-    assert!(
-        !task.stack.is_empty(),
+    assert_eq!(
+        task.stack.len(),
+        1,
         "Stack should have the caller stage pushed"
+    );
+    assert_eq!(task.stack[0].mode, "main");
+    assert_eq!(
+        task.stack[0].signal, "go_work",
+        "Stack entry should have signal go_work (re-run interrupted stage)"
+    );
+
+    // Step 2: run the conflict handler (merging/resolve) → return
+    env.continue_pipeline(task_id, &pipeline, &scenarios).await;
+    let task = env.get_task(task_id).await;
+    assert_eq!(task.signal, Some("return".to_string()));
+    assert_eq!(task.state, "merging_PENDING");
+
+    // Step 3: process return → stack pop → go_work in main mode
+    env.continue_pipeline(task_id, &pipeline, &scenarios).await;
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.signal,
+        Some("go_work".to_string()),
+        "After return from conflict, signal should be go_work (popped from stack)"
+    );
+    assert_eq!(task.state, "main_PENDING");
+    assert!(
+        task.stack.is_empty(),
+        "Stack should be empty after pop"
     );
 }
 
@@ -526,4 +581,250 @@ pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert!(task.pause, "ask_user should set pause flag");
+}
+
+// ===========================================================================
+// Test 10: Automatic undefined worktree handler
+// ===========================================================================
+
+/// Scenario that sets routing params (simulating preparator work).
+fn preparator_scenario(repo_path: &str) -> String {
+    format!(
+        r#"name: Preparator Scenario
+description: Set routing params and report results
+timeout: 60
+stop_on_failure: true
+
+steps:
+- name: Set destination repository
+  operation:
+    type: tool_call
+    tool: set_param_destination_repository
+    arguments:
+      value: "{repo_path}"
+  assertions:
+    - type: success
+
+- name: Set destination branch
+  operation:
+    type: tool_call
+    tool: set_param_destination_branch
+    arguments:
+      value: "main"
+  assertions:
+    - type: success
+
+- name: Set work branch postfix
+  operation:
+    type: tool_call
+    tool: set_param_work_branch_postfix
+    arguments:
+      value: "test"
+  assertions:
+    - type: success
+
+- name: Report results
+  operation:
+    type: tool_call
+    tool: report_results
+    arguments:
+      message: "Params set"
+  assertions:
+    - type: success
+"#,
+        repo_path = repo_path,
+    )
+}
+
+pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
+    if env.target_repo.is_some() {
+        eprintln!(
+            "[{}] Skipping run_auto_undefined: requires local repo",
+            env.name()
+        );
+        return;
+    }
+
+    let repo_path = env.create_git_repo("repo_auto_undefined").await;
+    // Create task WITHOUT identity fields — no routing params
+    let task_id = env
+        .create_task("Undefined test", "Undefined test description", "READY")
+        .await;
+    // DO NOT set branches — this triggers the "undefined" worktree problem
+
+    let pipeline = build_pipeline(vec![
+        StageDef {
+            name: "working",
+            role: "role_work",
+            mode: "main",
+            is_start: true,
+            transitions: vec![("default", "return")],
+        },
+        StageDef {
+            name: "preparing",
+            role: "role_prep",
+            mode: "preparing",
+            is_start: true,
+            transitions: vec![("default", "return")],
+        },
+    ]);
+
+    // Create a custom dispatcher with on_undefined set
+    let scenarios = scenarios_map(vec![
+        ("role_work", abstract_scenarios::report_and_finish_scenario()),
+        (
+            "role_prep",
+            preparator_scenario(&repo_path.to_string_lossy()),
+        ),
+    ]);
+
+    // Override the dispatcher config to set on_undefined
+    let config = zbobr_dispatcher::ZbobrDispatcherConfig {
+        workspaces: env.workspaces_dir.clone(),
+        tool: Tool::McpTester,
+        on_conflict: Some("merging".to_string()),
+        on_undefined: Some("preparing".to_string()),
+        ..zbobr_dispatcher::ZbobrDispatcherConfig::default()
+    };
+    let zbobr_with_undefined = zbobr_dispatcher::ZbobrDispatcherBuilder::new()
+        .with_config(std::sync::Arc::new(config))
+        .with_task_backend(std::sync::Arc::clone(&env.task_backend))
+        .with_repo_backend(std::sync::Arc::clone(&env.repo_backend))
+        .with_prompt_builder(zbobr_dispatcher::prompts::ConfiguredPromptBuilder::new(
+            None,
+            std::sync::Arc::new(PipelineConfig {
+                stages: vec![],
+                roles: Default::default(),
+            }),
+        ))
+        .build();
+
+    // First call: should detect undefined identity, dispatch to preparing mode
+    {
+        let task = env.get_task(task_id).await;
+        let idx = std::sync::atomic::AtomicU64::new(0);
+        let scenarios_dir = env
+            .base_path
+            .join("scenarios")
+            .join(format!("undefined_{}", idx.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        tokio::fs::create_dir_all(&scenarios_dir)
+            .await
+            .expect("failed to create scenarios directory");
+        let mut scenario_paths = HashMap::new();
+        for (role, yaml) in &scenarios {
+            let path = scenarios_dir.join(format!("{role}.yml"));
+            tokio::fs::write(&path, yaml)
+                .await
+                .expect("failed to write scenario file");
+            scenario_paths.insert(role.clone(), path);
+        }
+        let mcp_tester_config = zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig {
+            scenarios: scenario_paths,
+            ..Default::default()
+        };
+        let dispatcher = zbobr_with_undefined.with_mcp_tester_config(mcp_tester_config);
+        zbobr_dispatcher::cli::process_task(&dispatcher, &task, &pipeline)
+            .await
+            .unwrap();
+    }
+
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.signal,
+        Some("call_preparing".to_string()),
+        "Undefined identity should trigger call_preparing"
+    );
+    assert_eq!(task.stack.len(), 1, "Stack should have go_working");
+    assert_eq!(task.stack[0].mode, "main");
+    assert_eq!(task.stack[0].signal, "go_working");
+    assert_eq!(task.worktree_retries, 1, "worktree_retries should be incremented");
+}
+
+// ===========================================================================
+// Test 11: Worktree retry limit
+// ===========================================================================
+
+pub async fn run_retry_limit(env: &IntegrationTestEnv) {
+    if env.target_repo.is_some() {
+        eprintln!(
+            "[{}] Skipping run_retry_limit: requires local repo",
+            env.name()
+        );
+        return;
+    }
+
+    let repo_path = env.create_git_repo("repo_retry_limit").await;
+    let work_branch = "zbobr_conflict-retry-limit";
+
+    // Create diverging branches
+    git_in(&repo_path, &["checkout", "-b", work_branch]).await;
+    write_and_commit(
+        &repo_path,
+        "conflict_file.txt",
+        "work version\n",
+        "Work change",
+    )
+    .await;
+    git_in(&repo_path, &["checkout", "main"]).await;
+    write_and_commit(
+        &repo_path,
+        "conflict_file.txt",
+        "main version\n",
+        "Main change",
+    )
+    .await;
+
+    let task_id = env
+        .create_task("Retry limit test", "Retry limit test description", "READY")
+        .await;
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", work_branch)
+        .await;
+
+    // Set worktree_retries to the max already (simulating prior retries)
+    {
+        let weak = env.task_backend.get_task(task_id).await.unwrap();
+        let mutable = weak.upgrade().await.unwrap();
+        mutable
+            .modify_task(Box::new(|mut task| {
+                task.worktree_retries = 5; // at the limit (max_retries_conflict defaults to 5)
+                task
+            }))
+            .await
+            .unwrap();
+    }
+
+    let pipeline = build_pipeline(vec![
+        StageDef {
+            name: "work",
+            role: "role_work",
+            mode: "main",
+            is_start: true,
+            transitions: vec![("default", "return")],
+        },
+        StageDef {
+            name: "resolve",
+            role: "role_resolve",
+            mode: "merging",
+            is_start: true,
+            transitions: vec![("default", "return")],
+        },
+    ]);
+
+    let scenarios = scenarios_map(vec![
+        ("role_work", abstract_scenarios::report_and_finish_scenario()),
+        ("role_resolve", abstract_scenarios::report_and_finish_scenario()),
+    ]);
+
+    env.run_pipeline(task_id, &pipeline, &scenarios).await;
+
+    let task = env.get_task(task_id).await;
+    assert!(
+        task.pause,
+        "Task should be paused when retry limit is reached"
+    );
+    assert_eq!(
+        task.state, "main_PENDING",
+        "Task should be in PENDING state"
+    );
 }

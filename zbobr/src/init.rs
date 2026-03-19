@@ -74,6 +74,9 @@ fn default_config_toml() -> RootConfigToml {
             default_destination_repository: None,
             default_destination_branch: None,
             on_conflict: Some("conflict".into()),
+            on_undefined: Some("preparing".into()),
+            max_retries_undefined: Some(1),
+            max_retries_conflict: Some(5),
         }),
         tasks: Some(ZbobrTaskBackendGithubToml {
             github_repo: Some("owner/repo".into()),
@@ -107,19 +110,12 @@ fn default_config_toml() -> RootConfigToml {
 /// Build the default pipeline configuration with predefined stages and roles.
 fn default_pipeline() -> PipelineConfig {
     let stages = vec![
-        // Main mode: full task processing pipeline
-        StageDefinition {
-            name: "preparing".into(),
-            role: "preparator".into(),
-            mode: "main".into(),
-            is_start: true,
-            transitions: HashMap::from([("default".into(), "go_planning".into())]),
-            ..stage_defaults()
-        },
+        // Main mode: starts at planning (preparing is now its own mode)
         StageDefinition {
             name: "planning".into(),
             role: "planner".into(),
             mode: "main".into(),
+            is_start: true,
             transitions: HashMap::from([
                 ("default".into(), "go_working".into()),
                 ("ask_user".into(), "go_planning".into()),
@@ -152,6 +148,15 @@ fn default_pipeline() -> PipelineConfig {
             name: "merging".into(),
             role: "merger".into(),
             mode: "main".into(),
+            transitions: HashMap::from([("default".into(), "return".into())]),
+            ..stage_defaults()
+        },
+        // Preparing mode: auto-called when identity is undefined
+        StageDefinition {
+            name: "preparing".into(),
+            role: "preparator".into(),
+            mode: "preparing".into(),
+            is_start: true,
             transitions: HashMap::from([("default".into(), "return".into())]),
             ..stage_defaults()
         },

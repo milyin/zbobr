@@ -313,28 +313,32 @@ impl<'a> CliStageRunner<'a> {
         let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), self.task_id);
         tokio::fs::create_dir_all(task_dir.path()).await?;
 
-        let (work_dir, is_uptodate) = prepare_workspace(
+        // Seed default config values (unconditional)
+        seed_defaults(self.zbobr, self.task_id).await?;
+
+        // Unified worktree detection and problem handling
+        let work_dir = match detect_and_handle_worktree(
             self.zbobr,
             self.task_id,
-            role,
+            self.stage_def,
             task_dir.path(),
         )
-        .await?;
-
-        // TODO: The preparator/ensure_pr split should be driven by a stage-level
-        // config flag, not by role name. To be fixed separately.
-        if role == "preparator" {
-            seed_preparator_defaults(self.zbobr, self.task_id).await?;
-        } else {
-            ensure_pr_url(self.zbobr, self.task_id).await?;
-        }
-
-        // Always attempt to merge upstream into the work branch.
-        if !is_uptodate
-            && merge_upstream(self.zbobr, self.task_id, self.stage_def, &work_dir).await?
+        .await?
         {
-            return Ok(());
+            WorktreeResult::Ready(path) => path,
+            WorktreeResult::HandlerCalled | WorktreeResult::Paused => return Ok(()),
+        };
+
+        // Ensure PR URL if identity exists
+        {
+            let task = self.zbobr.task_backend().get_task(self.task_id).await?.snapshot().await?;
+            if task.identity().is_some() {
+                ensure_pr_url(self.zbobr, self.task_id).await?;
+            }
         }
+
+        // Reset worktree retries on successful worktree setup
+        reset_worktree_retries(self.zbobr, self.task_id).await?;
 
         // Clear the triggering signal before the agent session starts.
         {
@@ -465,6 +469,26 @@ fn compute_post_stage_signal(
     "return".to_string()
 }
 
+/// Parse a compound call signal like "call_aux,go_step_three".
+/// Returns `Some((call_part, after_return))` if compound, `None` otherwise.
+fn parse_compound_call(signal: &str) -> Option<(&str, &str)> {
+    if !signal.starts_with("call_") {
+        return None;
+    }
+    let (call_part, after) = signal.split_once(',')?;
+    Some((call_part, after.trim()))
+}
+
+/// Result of worktree detection before a stage runs.
+enum WorktreeResult {
+    /// Worktree is ready; proceed with stage execution at this path.
+    Ready(PathBuf),
+    /// A worktree problem handler mode was called; the caller should return.
+    HandlerCalled,
+    /// The task was paused due to unresolvable worktree problem.
+    Paused,
+}
+
 // ---------------------------------------------------------------------------
 // Stage processing helpers
 // ---------------------------------------------------------------------------
@@ -497,8 +521,20 @@ pub async fn process_task(
                 Arc::clone(zbobr.repo_backend()),
                 task.id,
             );
-            task_session.finish().await?;
-            println!("Task #{} completed", task.id);
+            if let Some(entry) = task_session.pop_stack().await? {
+                // Return from sub-mode — fire the stored after-return signal
+                task_session.set_signal(Some(&entry.signal)).await?;
+                task_session
+                    .set_state(&format!("{}_PENDING", entry.mode))
+                    .await?;
+                println!(
+                    "Task #{} returning to mode '{}' with signal '{}'",
+                    task.id, entry.mode, entry.signal
+                );
+            } else {
+                task_session.finish().await?;
+                println!("Task #{} completed", task.id);
+            }
         }
         crate::state_machine::StateAction::Paused => {
             println!("Task #{} is paused — skipped", task.id);
@@ -612,8 +648,27 @@ pub async fn run_manager_loop(
                         Arc::clone(repo_backend),
                         task.id,
                     );
-                    if let Err(e) = task_session.finish().await {
-                        tracing::error!("Failed to finish task #{}: {e}", task.id);
+                    match task_session.pop_stack().await {
+                        Ok(Some(entry)) => {
+                            // Return from sub-mode — fire stored after-return signal
+                            if let Err(e) = task_session.set_signal(Some(&entry.signal)).await {
+                                tracing::error!("Failed to set return signal for task #{}: {e}", task.id);
+                            }
+                            if let Err(e) = task_session
+                                .set_state(&format!("{}_PENDING", entry.mode))
+                                .await
+                            {
+                                tracing::error!("Failed to set return state for task #{}: {e}", task.id);
+                            }
+                        }
+                        Ok(None) => {
+                            if let Err(e) = task_session.finish().await {
+                                tracing::error!("Failed to finish task #{}: {e}", task.id);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to pop stack for task #{}: {e}", task.id);
+                        }
                     }
                 }
                 crate::state_machine::StateAction::Paused | crate::state_machine::StateAction::Idle => {}
@@ -658,117 +713,259 @@ pub async fn run_manager_loop(
 // Low-level helpers
 // ---------------------------------------------------------------------------
 
-async fn prepare_workspace(
-    zbobr: &ZbobrDispatcher,
-    task_id: u64,
-    role: &str,
-    task_dir: &Path,
-) -> anyhow::Result<(PathBuf, bool)> {
-    let task_backend = zbobr.task_backend();
-    let repo_backend = zbobr.repo_backend();
-    match role {
-        "preparator" => {
-            // TODO: preparator workspace handling should be driven by a stage-level
-            // config flag, not by role name. To be fixed separately.
-            Ok((task_dir.to_path_buf(), true))
-        }
-        _ => {
-            let task = task_backend.get_task(task_id).await?.snapshot().await?;
-            let identity = task.identity().ok_or_else(|| {
-                anyhow::anyhow!("Task #{task_id} is missing routing parameters (destination_repository, destination_branch, work_branch)")
-            })?;
-            match zbobr.update_worktree(&**repo_backend, &identity).await {
-                Ok(is_uptodate) => {
-                    let dest_repo = &identity.destination_repository;
-                    let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo);
-                    let task_dir = TaskDir::new(zbobr.config().workspaces.as_path(), task_id);
-                    let path = task_dir.path().join(repo_name);
-                    Ok((path, is_uptodate))
-                }
-                Err(e) => {
-                    let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
-                    tracing::error!("{msg}");
-                    let hostname = get_hostname();
-                    if let Err(post_err) = zbobr
-                        .task_session(Arc::clone(task_backend), Arc::clone(repo_backend), task_id)
-                        .post_comment("error", &hostname, None, None, &msg, false, true)
-                        .await
-                    {
-                        tracing::warn!("Failed to post error to task discussion: {post_err}");
-                    }
-                    Err(anyhow::anyhow!(msg))
-                }
-            }
-        }
-    }
-}
-
-/// Attempt to merge upstream (origin/{dest_branch}) into the work branch.
-/// Returns `true` if the caller should return early (conflict mode triggered
-/// or task paused), `false` if execution should continue normally.
-async fn merge_upstream(
+/// Unified worktree detection and problem dispatch.
+///
+/// Checks whether the task has a valid identity (routing params), sets up the
+/// worktree, and attempts to merge upstream. If a problem is detected (undefined
+/// identity or merge conflict), dispatches to the configured handler mode.
+async fn detect_and_handle_worktree(
     zbobr: &ZbobrDispatcher,
     task_id: u64,
     stage_def: &StageDefinition,
-    work_dir: &Path,
-) -> anyhow::Result<bool> {
-    let task = zbobr.task_backend()
-        .get_task(task_id).await?.snapshot().await?;
-    let dest_branch = task.destination_branch.clone()
-        .unwrap_or_else(|| "main".to_string());
+    task_dir: &Path,
+) -> anyhow::Result<WorktreeResult> {
+    let task_backend = zbobr.task_backend();
+    let repo_backend = zbobr.repo_backend();
+    let task = task_backend.get_task(task_id).await?.snapshot().await?;
 
-    let merged_ok = git_check(
-        work_dir,
-        &["merge", &format!("origin/{}", dest_branch), "--no-edit"],
-    ).await.context("Failed to run git merge for upstream sync")?;
+    // 1. Check if identity is defined
+    let identity = match task.identity() {
+        Some(id) => id,
+        None => {
+            // If we ARE the undefined handler mode, proceed with task_dir
+            if zbobr.config().on_undefined.as_deref() == Some(&stage_def.mode) {
+                return Ok(WorktreeResult::Ready(task_dir.to_path_buf()));
+            }
+            // Otherwise, dispatch to undefined handler
+            return handle_worktree_problem(
+                zbobr,
+                task_id,
+                stage_def,
+                zbobr_api::task::WorktreeProblem::Undefined,
+            )
+            .await;
+        }
+    };
 
-    if merged_ok {
-        // Continue normally, agent runs on up-to-date branch.
-        // The merge commit will be pushed in finalize_stage_session.
-        return Ok(false);
+    // 2. Update worktree
+    let is_uptodate = match zbobr.update_worktree(&**repo_backend, &identity).await {
+        Ok(up) => up,
+        Err(e) => {
+            let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
+            tracing::error!("{msg}");
+            let hostname = get_hostname();
+            if let Err(post_err) = zbobr
+                .task_session(Arc::clone(task_backend), Arc::clone(repo_backend), task_id)
+                .post_comment("error", &hostname, None, None, &msg, false, true)
+                .await
+            {
+                tracing::warn!("Failed to post error to task discussion: {post_err}");
+            }
+            return Err(anyhow::anyhow!(msg));
+        }
+    };
+
+    // 3. Compute work_dir from identity
+    let dest_repo = &identity.destination_repository;
+    let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo);
+    let work_dir = TaskDir::new(zbobr.config().workspaces.as_path(), task_id)
+        .path()
+        .join(repo_name);
+
+    // 4. If up-to-date, no merge needed
+    if is_uptodate {
+        return Ok(WorktreeResult::Ready(work_dir));
     }
 
-    let _ = git(work_dir, &["merge", "--abort"]).await;
+    // 5. Attempt merge
+    let dest_branch = task
+        .destination_branch
+        .clone()
+        .unwrap_or_else(|| "main".to_string());
 
-    let Some(ref conflict_mode) = zbobr.config().on_conflict else {
-        // No on_conflict configured — continue with conflicts in working tree.
+    // If we ARE the conflict handler, start the merge but don't abort on failure —
+    // the agent needs to see conflict markers in the working tree.
+    let is_conflict_handler = zbobr.config().on_conflict.as_deref() == Some(&stage_def.mode);
+
+    let merged_ok = git_check(
+        &work_dir,
+        &["merge", &format!("origin/{}", dest_branch), "--no-edit"],
+    )
+    .await
+    .context("Failed to run git merge for upstream sync")?;
+
+    if merged_ok {
+        return Ok(WorktreeResult::Ready(work_dir));
+    }
+
+    if is_conflict_handler {
+        // We're the conflict handler — leave the tree in conflicted state
+        // so the agent can resolve the merge markers.
+        tracing::info!(
+            "Task #{task_id}: merge failed inside conflict handler — agent will resolve"
+        );
+        return Ok(WorktreeResult::Ready(work_dir));
+    }
+
+    // Merge failed in a normal mode — abort and dispatch to conflict handler
+    let _ = git(&work_dir, &["merge", "--abort"]).await;
+
+    let Some(ref _conflict_mode) = zbobr.config().on_conflict else {
+        // No on_conflict configured — continue with conflicts in working tree (backward compat).
         tracing::warn!(
             "Task #{task_id}: upstream merge failed but no on_conflict configured"
         );
-        return Ok(false);
+        return Ok(WorktreeResult::Ready(work_dir));
     };
 
-    let pending_state = format!("{}_PENDING", stage_def.mode);
+    handle_worktree_problem(
+        zbobr,
+        task_id,
+        stage_def,
+        zbobr_api::task::WorktreeProblem::Conflict,
+    )
+    .await
+}
+
+/// Unified dispatch for worktree problems (Undefined identity or Conflict).
+async fn handle_worktree_problem(
+    zbobr: &ZbobrDispatcher,
+    task_id: u64,
+    stage_def: &StageDefinition,
+    problem: zbobr_api::task::WorktreeProblem,
+) -> anyhow::Result<WorktreeResult> {
+    let config = zbobr.config();
+    let (handler_mode, max_retries) = match problem {
+        zbobr_api::task::WorktreeProblem::Undefined => {
+            match config.on_undefined.as_deref() {
+                Some(m) => (m, config.max_retries_undefined),
+                None => {
+                    anyhow::bail!(
+                        "Task #{task_id} has no routing parameters and no on_undefined handler configured"
+                    );
+                }
+            }
+        }
+        zbobr_api::task::WorktreeProblem::Conflict => {
+            match config.on_conflict.as_deref() {
+                Some(m) => (m, config.max_retries_conflict),
+                None => {
+                    // Backward compat: no handler, warn and continue
+                    tracing::warn!(
+                        "Task #{task_id}: worktree problem {:?} but no handler configured",
+                        problem
+                    );
+                    // Can't return Ready since we don't have a work_dir in all cases
+                    anyhow::bail!(
+                        "Task #{task_id}: worktree conflict with no on_conflict handler"
+                    );
+                }
+            }
+        }
+    };
+
     let task_session = zbobr.task_session(
         Arc::clone(zbobr.task_backend()),
         Arc::clone(zbobr.repo_backend()),
         task_id,
     );
+    let pending_state = format!("{}_PENDING", stage_def.mode);
 
-    // Recursion guard: if already inside the conflict mode, pause
-    // instead of calling it again.
-    if stage_def.mode == *conflict_mode {
+    // Recursion guard: if already inside the handler mode, pause
+    if stage_def.mode == handler_mode {
         tracing::error!(
-            "Task #{task_id}: merge failed inside conflict mode '{conflict_mode}' — pausing"
+            "Task #{task_id}: worktree problem {:?} inside handler mode '{handler_mode}' — pausing",
+            problem
         );
         let hostname = get_hostname();
         let msg = format!(
-            "Merge with '{dest_branch}' failed inside conflict mode '{conflict_mode}'. \
-             Manual intervention required."
+            "Worktree problem {:?} inside handler mode '{handler_mode}'. Manual intervention required.",
+            problem
         );
-        task_session.post_comment("error", &hostname, None, None, &msg, false, true).await.ok();
-        task_session.modify_task(|mut t| { t.pause = true; t }).await?;
+        task_session
+            .post_comment("error", &hostname, None, None, &msg, false, true)
+            .await
+            .ok();
+        task_session
+            .modify_task(|mut t| {
+                t.pause = true;
+                t
+            })
+            .await?;
         task_session.set_state(&pending_state).await?;
-        return Ok(true);
+        return Ok(WorktreeResult::Paused);
     }
 
-    tracing::info!(
-        "Task #{task_id}: upstream merge failed — calling conflict mode '{conflict_mode}'"
-    );
-    task_session.push_stack(&stage_def.mode, &stage_def.name).await?;
-    task_session.set_signal(Some(&format!("call_{}", conflict_mode))).await?;
+    // Retry limit check
+    let task = task_session.get_task().await?;
+    if task.worktree_retries >= max_retries {
+        tracing::error!(
+            "Task #{task_id}: worktree problem {:?} retry limit ({max_retries}) reached — pausing",
+            problem
+        );
+        let hostname = get_hostname();
+        let msg = format!(
+            "Worktree problem {:?} retry limit ({max_retries}) reached. Manual intervention required.",
+            problem
+        );
+        task_session
+            .post_comment("error", &hostname, None, None, &msg, false, true)
+            .await
+            .ok();
+        task_session
+            .modify_task(|mut t| {
+                t.pause = true;
+                t
+            })
+            .await?;
+        task_session.set_state(&pending_state).await?;
+        return Ok(WorktreeResult::Paused);
+    }
+
+    // Increment worktree_retries
+    task_session
+        .modify_task(|mut t| {
+            t.worktree_retries += 1;
+            t
+        })
+        .await?;
+
+    // Push stack: re-run the interrupted stage upon return
+    task_session
+        .push_stack(&stage_def.mode, &format!("go_{}", stage_def.name))
+        .await?;
+    task_session
+        .set_signal(Some(&format!("call_{}", handler_mode)))
+        .await?;
     task_session.set_state(&pending_state).await?;
-    Ok(true)
+
+    tracing::info!(
+        "Task #{task_id}: worktree problem {:?} — calling handler mode '{handler_mode}'",
+        problem
+    );
+    Ok(WorktreeResult::HandlerCalled)
+}
+
+/// Reset worktree retries counter when a stage proceeds normally.
+async fn reset_worktree_retries(
+    zbobr: &ZbobrDispatcher,
+    task_id: u64,
+) -> anyhow::Result<()> {
+    let task_session = zbobr.task_session(
+        Arc::clone(zbobr.task_backend()),
+        Arc::clone(zbobr.repo_backend()),
+        task_id,
+    );
+    let task = task_session.get_task().await?;
+    if task.worktree_retries > 0 {
+        task_session
+            .modify_task(|mut t| {
+                t.worktree_retries = 0;
+                t
+            })
+            .await?;
+    }
+    Ok(())
 }
 
 async fn ensure_pr_url(
@@ -819,10 +1016,11 @@ async fn ensure_pr_url(
     }
 }
 
-/// Pre-populate task parameters from dispatcher config defaults before the
-/// preparator agent runs. Only sets a parameter if it is not already present,
-/// so a previously prepared task (e.g. re-run) keeps its values unchanged.
-async fn seed_preparator_defaults(
+/// Pre-populate task parameters from dispatcher config defaults.
+/// Only sets a parameter if it is not already present, so a previously
+/// prepared task keeps its values unchanged. Called unconditionally at
+/// the start of every stage run.
+async fn seed_defaults(
     zbobr: &ZbobrDispatcher,
     task_id: u64,
 ) -> anyhow::Result<()> {
@@ -1053,8 +1251,16 @@ async fn finalize_stage_session(
     // that signal takes priority.
     let current_task = task_backend.get_task(task_id).await?.snapshot().await?;
     if !current_task.pause && current_task.signal.is_none() {
-        let signal = compute_post_stage_signal(stage_def, last_mapped_tool);
-        task_session.set_signal(Some(&signal)).await?;
+        let raw_signal = compute_post_stage_signal(stage_def, last_mapped_tool);
+        if let Some((call_part, after_return)) = parse_compound_call(&raw_signal) {
+            // Push after-return signal onto stack, then set the call signal
+            task_session
+                .push_stack(&stage_def.mode, after_return)
+                .await?;
+            task_session.set_signal(Some(call_part)).await?;
+        } else {
+            task_session.set_signal(Some(&raw_signal)).await?;
+        }
     }
     task_session.set_state(&pending_state).await?;
 
