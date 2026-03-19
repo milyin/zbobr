@@ -86,13 +86,9 @@ pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
         .await;
     // Pre-set routing params so workspace preparation succeeds
     let work_branch = format!("zbobr_fix-{task_id}-mcp");
-    env.update_task_branches(
-        task_id,
-        &repo_path.to_string_lossy(),
-        "main",
-        &work_branch,
-    )
-    .await;
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
 
     let pipeline = build_pipeline(vec![StageDef {
         name: "alpha",
@@ -125,13 +121,9 @@ pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
         .create_task("Transfer test", "Transfer test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-transfer");
-    env.update_task_branches(
-        task_id,
-        &repo_path.to_string_lossy(),
-        "main",
-        &work_branch,
-    )
-    .await;
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
 
     let pipeline = build_pipeline(vec![
         StageDef {
@@ -178,13 +170,9 @@ pub async fn run_call_mode(env: &IntegrationTestEnv) {
         .create_task("Call mode test", "Call mode test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-callmode");
-    env.update_task_branches(
-        task_id,
-        &repo_path.to_string_lossy(),
-        "main",
-        &work_branch,
-    )
-    .await;
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
 
     let pipeline = build_pipeline(vec![
         StageDef {
@@ -230,13 +218,9 @@ pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
         .create_task("Return test", "Return test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-return");
-    env.update_task_branches(
-        task_id,
-        &repo_path.to_string_lossy(),
-        "main",
-        &work_branch,
-    )
-    .await;
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
 
     let pipeline = build_pipeline(vec![
         StageDef {
@@ -323,13 +307,9 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
     let task_id = env
         .create_task("Conflict test", "Conflict test description", "READY")
         .await;
-    env.update_task_branches(
-        task_id,
-        &repo_path.to_string_lossy(),
-        "main",
-        work_branch,
-    )
-    .await;
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", work_branch)
+        .await;
 
     let pipeline = build_pipeline(vec![
         StageDef {
@@ -377,13 +357,9 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
         .create_task("Pause test", "Pause test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-pause");
-    env.update_task_branches(
-        task_id,
-        &repo_path.to_string_lossy(),
-        "main",
-        &work_branch,
-    )
-    .await;
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
 
     let pipeline = build_pipeline(vec![StageDef {
         name: "work",
@@ -423,13 +399,9 @@ pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
         .create_task("Ready test", "Ready test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-ready");
-    env.update_task_branches(
-        task_id,
-        &repo_path.to_string_lossy(),
-        "main",
-        &work_branch,
-    )
-    .await;
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
 
     let pipeline = build_pipeline(vec![StageDef {
         name: "start",
@@ -463,13 +435,9 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
         .create_task("Signal test", "Signal test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-signals");
-    env.update_task_branches(
-        task_id,
-        &repo_path.to_string_lossy(),
-        "main",
-        &work_branch,
-    )
-    .await;
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
 
     let pipeline = build_pipeline(vec![
         StageDef {
@@ -537,13 +505,9 @@ pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
         .create_task("Ask test", "Ask test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-ask");
-    env.update_task_branches(
-        task_id,
-        &repo_path.to_string_lossy(),
-        "main",
-        &work_branch,
-    )
-    .await;
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
 
     let pipeline = build_pipeline(vec![StageDef {
         name: "work",
