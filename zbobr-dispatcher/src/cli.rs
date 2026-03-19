@@ -288,10 +288,6 @@ impl<'a> CliStageRunner<'a> {
         format!("{}_{}", self.stage_def.mode, self.stage_def.name)
     }
 
-    fn pending_state(&self) -> String {
-        format!("{}_PENDING", self.stage_def.mode)
-    }
-
     async fn prompt(&self) -> anyhow::Result<String> {
         self.zbobr
             .prompt_builder()
@@ -325,35 +321,19 @@ impl<'a> CliStageRunner<'a> {
         )
         .await?;
 
+        // TODO: The preparator/ensure_pr split should be driven by a stage-level
+        // config flag, not by role name. To be fixed separately.
         if role == "preparator" {
             seed_preparator_defaults(self.zbobr, self.task_id).await?;
         } else {
             ensure_pr_url(self.zbobr, self.task_id).await?;
         }
 
-        // If the work branch has diverged and on_conflict is configured,
-        // push current stage onto stack and signal the conflict mode.
-        if !is_uptodate && role != "merger" {
-            if let Some(ref conflict_mode) = self.zbobr.config().on_conflict {
-                tracing::info!(
-                    "Task #{} work branch diverged — calling conflict mode '{}'",
-                    self.task_id,
-                    conflict_mode
-                );
-                let task_session = self.zbobr.task_session(
-                    Arc::clone(self.zbobr.task_backend()),
-                    Arc::clone(self.zbobr.repo_backend()),
-                    self.task_id,
-                );
-                task_session
-                    .push_stack(&self.stage_def.mode, &self.stage_def.name)
-                    .await?;
-                task_session
-                    .set_signal(Some(&format!("call_{}", conflict_mode)))
-                    .await?;
-                task_session.set_state(&self.pending_state()).await?;
-                return Ok(());
-            }
+        // Always attempt to merge upstream into the work branch.
+        if !is_uptodate
+            && merge_upstream(self.zbobr, self.task_id, self.stage_def, &work_dir).await?
+        {
+            return Ok(());
         }
 
         // Clear the triggering signal before the agent session starts.
@@ -367,53 +347,6 @@ impl<'a> CliStageRunner<'a> {
                 .set_signal(None)
                 .await
                 .context("Failed to clear signal on stage entry")?;
-        }
-
-        // For Merger role: try a normal git merge first.
-        if role == "merger" {
-            let task = self
-                .zbobr
-                .task_backend()
-                .get_task(self.task_id)
-                .await?
-                .snapshot()
-                .await?;
-            let dest_branch = task
-                .destination_branch
-                .clone()
-                .unwrap_or_else(|| "main".to_string());
-            let merged_ok = git_check(&work_dir, &["merge", &dest_branch, "--no-edit"])
-                .await
-                .context("Failed to run git merge for Merger")?;
-            if merged_ok {
-                tracing::info!(
-                    "Task #{}: normal merge with '{}' succeeded — skipping agent session",
-                    self.task_id,
-                    dest_branch
-                );
-                perform_stash_and_push(
-                    self.zbobr,
-                    self.task_id,
-                    &work_dir,
-                    role,
-                ).await?;
-                // Compute post-stage signal from transitions
-                let signal = compute_post_stage_signal(self.stage_def, None);
-                let task_session = self.zbobr.task_session(
-                    Arc::clone(self.zbobr.task_backend()),
-                    Arc::clone(self.zbobr.repo_backend()),
-                    self.task_id,
-                );
-                task_session.set_signal(Some(&signal)).await?;
-                task_session.set_state(&self.pending_state()).await?;
-                return Ok(());
-            }
-            tracing::info!(
-                "Task #{}: normal merge with '{}' failed — invoking agent",
-                self.task_id,
-                dest_branch
-            );
-            let _ = git(&work_dir, &["merge", "--abort"]).await;
         }
 
         // Pre-flight check
@@ -734,15 +667,10 @@ async fn prepare_workspace(
     let task_backend = zbobr.task_backend();
     let repo_backend = zbobr.repo_backend();
     match role {
-        "preparator" => Ok((task_dir.to_path_buf(), true)),
-        "merger" => {
-            let task = task_backend.get_task(task_id).await?.snapshot().await?;
-            let dest_repo = task
-                .destination_repository
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("Task #{task_id} has no destination_repository"))?;
-            let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo);
-            Ok((task_dir.join(repo_name), true))
+        "preparator" => {
+            // TODO: preparator workspace handling should be driven by a stage-level
+            // config flag, not by role name. To be fixed separately.
+            Ok((task_dir.to_path_buf(), true))
         }
         _ => {
             let task = task_backend.get_task(task_id).await?.snapshot().await?;
@@ -773,6 +701,74 @@ async fn prepare_workspace(
             }
         }
     }
+}
+
+/// Attempt to merge upstream (origin/{dest_branch}) into the work branch.
+/// Returns `true` if the caller should return early (conflict mode triggered
+/// or task paused), `false` if execution should continue normally.
+async fn merge_upstream(
+    zbobr: &ZbobrDispatcher,
+    task_id: u64,
+    stage_def: &StageDefinition,
+    work_dir: &Path,
+) -> anyhow::Result<bool> {
+    let task = zbobr.task_backend()
+        .get_task(task_id).await?.snapshot().await?;
+    let dest_branch = task.destination_branch.clone()
+        .unwrap_or_else(|| "main".to_string());
+
+    let merged_ok = git_check(
+        work_dir,
+        &["merge", &format!("origin/{}", dest_branch), "--no-edit"],
+    ).await.context("Failed to run git merge for upstream sync")?;
+
+    if merged_ok {
+        // Continue normally, agent runs on up-to-date branch.
+        // The merge commit will be pushed in finalize_stage_session.
+        return Ok(false);
+    }
+
+    let _ = git(work_dir, &["merge", "--abort"]).await;
+
+    let Some(ref conflict_mode) = zbobr.config().on_conflict else {
+        // No on_conflict configured — continue with conflicts in working tree.
+        tracing::warn!(
+            "Task #{task_id}: upstream merge failed but no on_conflict configured"
+        );
+        return Ok(false);
+    };
+
+    let pending_state = format!("{}_PENDING", stage_def.mode);
+    let task_session = zbobr.task_session(
+        Arc::clone(zbobr.task_backend()),
+        Arc::clone(zbobr.repo_backend()),
+        task_id,
+    );
+
+    // Recursion guard: if already inside the conflict mode, pause
+    // instead of calling it again.
+    if stage_def.mode == *conflict_mode {
+        tracing::error!(
+            "Task #{task_id}: merge failed inside conflict mode '{conflict_mode}' — pausing"
+        );
+        let hostname = get_hostname();
+        let msg = format!(
+            "Merge with '{dest_branch}' failed inside conflict mode '{conflict_mode}'. \
+             Manual intervention required."
+        );
+        task_session.post_comment("error", &hostname, None, None, &msg, false, true).await.ok();
+        task_session.modify_task(|mut t| { t.pause = true; t }).await?;
+        task_session.set_state(&pending_state).await?;
+        return Ok(true);
+    }
+
+    tracing::info!(
+        "Task #{task_id}: upstream merge failed — calling conflict mode '{conflict_mode}'"
+    );
+    task_session.push_stack(&stage_def.mode, &stage_def.name).await?;
+    task_session.set_signal(Some(&format!("call_{}", conflict_mode))).await?;
+    task_session.set_state(&pending_state).await?;
+    Ok(true)
 }
 
 async fn ensure_pr_url(
@@ -987,11 +983,7 @@ async fn finalize_stage_session(
     }
 
     if outcome.execution_interrupted {
-        if (role == "worker" || role == "merger")
-            && let Err(e) =
-                perform_stash_and_push(zbobr, task_id, work_dir, role)
-                    .await
-        {
+        if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, role).await {
             tracing::warn!("Stash/push failed during interruption for task #{task_id}: {e}");
         }
         task_session.set_state(&pending_state).await?;
@@ -1000,11 +992,7 @@ async fn finalize_stage_session(
     }
 
     if let Some(e) = outcome.execution_error.as_ref() {
-        if (role == "worker" || role == "merger")
-            && let Err(e) =
-                perform_stash_and_push(zbobr, task_id, work_dir, role)
-                    .await
-        {
+        if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, role).await {
             tracing::warn!(
                 "Stash/push failed during error handling for task #{task_id}: {e}"
             );
@@ -1033,10 +1021,7 @@ async fn finalize_stage_session(
 
     tracing::info!("Session complete for task #{task_id}");
 
-    if (role == "worker" || role == "merger")
-        && let Err(e) =
-            perform_stash_and_push(zbobr, task_id, work_dir, role).await
-    {
+    if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, role).await {
         tracing::error!("Stash/push failed for task #{task_id}: {e}");
         let hostname = get_hostname();
         let msg = format!("Stash/push failed: {e}");
@@ -1061,49 +1046,6 @@ async fn finalize_stage_session(
         }
         task_session.set_state(&pending_state).await?;
         return Ok(None);
-    }
-
-    // Merger: verify the merge actually succeeded
-    if role == "merger" {
-        let dest_branch = task_backend
-            .get_task(task_id)
-            .await?
-            .snapshot()
-            .await?
-            .destination_branch
-            .clone()
-            .unwrap_or_else(|| "main".to_string());
-        let merged_ok = git_check(work_dir, &["merge", &dest_branch, "--no-edit"])
-            .await
-            .context("Failed to run git merge verification after Merger session")?;
-        if !merged_ok {
-            let _ = git(work_dir, &["merge", "--abort"]).await;
-            let msg = format!(
-                "Merger failed to resolve merge conflict with branch '{dest_branch}'. \
-                 Manual intervention required."
-            );
-            tracing::error!("task #{task_id}: {msg}");
-            let hostname = get_hostname();
-            if let Err(e) = task_session
-                .post_comment("error", &hostname, None, None, &msg, false, true)
-                .await
-            {
-                tracing::warn!(
-                    "Failed to post merger-failure comment for task #{task_id}: {e}"
-                );
-            }
-            if let Err(e) = task_session
-                .modify_task(|mut task| {
-                    task.pause = true;
-                    task
-                })
-                .await
-            {
-                tracing::warn!("Failed to pause task #{task_id} after merger failure: {e}");
-            }
-            task_session.set_state(&pending_state).await?;
-            return Ok(None);
-        }
     }
 
     // Compute post-stage signal from transitions map.
