@@ -391,7 +391,7 @@ impl<'a> CliStageRunner<'a> {
                     self.task_id,
                     dest_branch
                 );
-                perform_auto_commit_and_push(
+                perform_stash_and_push(
                     self.zbobr,
                     self.task_id,
                     &work_dir,
@@ -989,10 +989,10 @@ async fn finalize_stage_session(
     if outcome.execution_interrupted {
         if (role == "worker" || role == "merger")
             && let Err(e) =
-                perform_auto_commit_and_push(zbobr, task_id, work_dir, role)
+                perform_stash_and_push(zbobr, task_id, work_dir, role)
                     .await
         {
-            tracing::warn!("Auto-commit/push failed during interruption for task #{task_id}: {e}");
+            tracing::warn!("Stash/push failed during interruption for task #{task_id}: {e}");
         }
         task_session.set_state(&pending_state).await?;
         tracing::info!("Session interrupted for task #{task_id}, moved to {pending_state}");
@@ -1002,11 +1002,11 @@ async fn finalize_stage_session(
     if let Some(e) = outcome.execution_error.as_ref() {
         if (role == "worker" || role == "merger")
             && let Err(e) =
-                perform_auto_commit_and_push(zbobr, task_id, work_dir, role)
+                perform_stash_and_push(zbobr, task_id, work_dir, role)
                     .await
         {
             tracing::warn!(
-                "Auto-commit/push failed during error handling for task #{task_id}: {e}"
+                "Stash/push failed during error handling for task #{task_id}: {e}"
             );
         }
         let error_msg = format!("Execution failed: {e}");
@@ -1035,17 +1035,17 @@ async fn finalize_stage_session(
 
     if (role == "worker" || role == "merger")
         && let Err(e) =
-            perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await
+            perform_stash_and_push(zbobr, task_id, work_dir, role).await
     {
-        tracing::error!("Auto-commit/push failed for task #{task_id}: {e}");
+        tracing::error!("Stash/push failed for task #{task_id}: {e}");
         let hostname = get_hostname();
-        let msg = format!("Auto-commit/push failed: {e}");
+        let msg = format!("Stash/push failed: {e}");
         if let Err(post_err) = task_session
             .post_comment("error", &hostname, None, None, &msg, false, true)
             .await
         {
             tracing::error!(
-                "Failed to post auto-commit/push error for task #{task_id}: {post_err}"
+                "Failed to post stash/push error for task #{task_id}: {post_err}"
             );
         }
         if let Err(pause_err) = task_session
@@ -1056,7 +1056,7 @@ async fn finalize_stage_session(
             .await
         {
             tracing::error!(
-                "Failed to pause task #{task_id} after auto-commit/push failure: {pause_err}"
+                "Failed to pause task #{task_id} after stash/push failure: {pause_err}"
             );
         }
         task_session.set_state(&pending_state).await?;
@@ -1119,7 +1119,7 @@ async fn finalize_stage_session(
     Ok(None)
 }
 
-async fn perform_auto_commit_and_push(
+async fn perform_stash_and_push(
     zbobr: &ZbobrDispatcher,
     task_id: u64,
     work_dir: &Path,
@@ -1132,20 +1132,17 @@ async fn perform_auto_commit_and_push(
     match git_output(work_dir, &["status", "--porcelain"]).await {
         Ok(status) => {
             if !status.is_empty() {
-                tracing::info!("Found uncommitted changes, auto-committing...");
-                if let Err(e) = git(work_dir, &["add", "."]).await {
-                    tracing::warn!("Failed to stage changes for auto-commit: {e}");
-                }
-                let commit_msg = format!("Auto-commit by {} agent", role);
-                match git(work_dir, &["commit", "-m", &commit_msg]).await {
-                    Ok(_) => tracing::info!("Auto-commit successful"),
-                    Err(e) => tracing::warn!("Auto-commit failed: {e}"),
+                let stash_msg = format!("Stashed by {} agent for task #{}", role, task_id);
+                tracing::info!("Found uncommitted changes, stashing...");
+                match git(work_dir, &["stash", "push", "--include-untracked", "-m", &stash_msg]).await {
+                    Ok(_) => tracing::info!("Git stash successful"),
+                    Err(e) => tracing::warn!("Git stash failed: {e}"),
                 }
             } else {
                 tracing::info!("No uncommitted changes found");
             }
         }
-        Err(e) => tracing::warn!("Failed to check git status for auto-commit: {e}"),
+        Err(e) => tracing::warn!("Failed to check git status for stash: {e}"),
     }
 
     let task = task_backend.get_task(task_id).await?.snapshot().await?;

@@ -606,28 +606,18 @@ impl ZbobrRepoBackendGithub {
         Ok(ok)
     }
 
-    /// Auto-commit any uncommitted changes in the worktree.
-    /// Returns whether a commit was made.
-    async fn auto_commit_worktree(worktree_path: &Path) -> anyhow::Result<bool> {
+    /// Stash any uncommitted changes (including untracked files) in the worktree.
+    /// Returns whether a stash was created.
+    async fn stash_worktree_changes(worktree_path: &Path) -> anyhow::Result<bool> {
         let status = git_output(worktree_path, &["status", "--porcelain"]).await?;
         if status.trim().is_empty() {
             return Ok(false);
         }
 
-        tracing::info!("Auto-committing uncommitted changes in worktree");
-        git(worktree_path, &["add", "-A"]).await?;
-
-        // Check if anything was actually staged (e.g. submodules with dirty working
-        // trees appear in `git status --porcelain` but produce no stageable changes).
-        let nothing_staged = git_check(worktree_path, &["diff", "--cached", "--quiet"]).await?;
-        if nothing_staged {
-            tracing::debug!("Nothing staged after `git add -A`, skipping commit");
-            return Ok(false);
-        }
-
+        tracing::info!("Stashing uncommitted changes in worktree");
         git(
             worktree_path,
-            &["commit", "-m", "chore: auto-commit uncommitted changes"],
+            &["stash", "push", "--include-untracked", "-m", "auto-stash before merge"],
         )
         .await?;
         Ok(true)
@@ -1482,7 +1472,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
     ///
     /// Phase 6 – Abort any in-progress merge from a previous failed run.
     ///
-    /// Phase 7 – Auto-commit uncommitted changes in worktree.
+    /// Phase 7 – Stash uncommitted changes in worktree.
     ///
     /// Phase 8 – Merge remote work → local work (element 5 → 6):
     ///   skip if remote doesn't exist. On conflict → return Ok(false).
@@ -1600,8 +1590,8 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             let _ = git_check(workspace_path, &["merge", "--abort"]).await;
         }
 
-        // Phase 7: Auto-commit uncommitted changes
-        Self::auto_commit_worktree(workspace_path).await?;
+        // Phase 7: Stash uncommitted changes
+        Self::stash_worktree_changes(workspace_path).await?;
 
         // Phase 8: Merge remote work → local work (element 5 → 6)
         if remote_exists {
@@ -1634,8 +1624,8 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         // 1. Find the worktree and bare_dir for this branch
         let (_bare_dir, worktree_path) = self.find_worktree_for_branch(work_branch).await?;
 
-        // 2. Auto-commit any uncommitted changes
-        Self::auto_commit_worktree(&worktree_path).await?;
+        // 2. Stash any uncommitted changes
+        Self::stash_worktree_changes(&worktree_path).await?;
 
         // 3. Determine push remote and PR repo
         let repo = parse_github_repo(destination_repo)?;
