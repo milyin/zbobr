@@ -12,7 +12,7 @@ pub mod tool_executor;
 
 pub use cli::{
     ConfigFileArg, ConfigLocation, GlobalArgs, parse_cli, print_task, process_task,
-    resolve_config_location, run_manager_loop, run_role_subcommand,
+    resolve_config_location, run_manager_loop,
 };
 pub use config::{
     ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs, ZbobrExecutorToml,

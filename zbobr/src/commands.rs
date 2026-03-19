@@ -124,46 +124,6 @@ pub enum TaskSubcommand {
         /// Task ID
         id: u64,
     },
-    /// Run preparator role for a specific task (sets destination repository and branches)
-    Prepare {
-        /// Task ID
-        task: u64,
-        /// Show the prompt that would be sent to the model instead of running
-        #[arg(long)]
-        show_prompt: bool,
-    },
-    /// Run planner role for a specific task (creates implementation plan)
-    Plan {
-        /// Task ID
-        task: u64,
-        /// Show the prompt that would be sent to the model instead of running
-        #[arg(long)]
-        show_prompt: bool,
-    },
-    /// Run worker role for a specific task (implements the plan, creates PR)
-    Work {
-        /// Task ID
-        task: u64,
-        /// Show the prompt that would be sent to the model instead of running
-        #[arg(long)]
-        show_prompt: bool,
-    },
-    /// Run reviewer role for a specific task (reviews the implementation)
-    Review {
-        /// Task ID
-        task: u64,
-        /// Show the prompt that would be sent to the model instead of running
-        #[arg(long)]
-        show_prompt: bool,
-    },
-    /// Run merger role for a specific task (resolves merge conflicts)
-    Merge {
-        /// Task ID
-        task: u64,
-        /// Show the prompt that would be sent to the model instead of running
-        #[arg(long)]
-        show_prompt: bool,
-    },
     /// Process a task according to its current stage (single-step)
     Process {
         /// Task ID
@@ -352,26 +312,6 @@ async fn run_task_subcommand(
             let mutable = weak.upgrade().await?;
             mutable.close().await?;
             println!("Deleted task #{}", id);
-        }
-        TaskSubcommand::Prepare { task, show_prompt } => {
-            zbobr_dispatcher::run_role_subcommand(zbobr, task, "preparator", show_prompt, pipeline)
-                .await?;
-        }
-        TaskSubcommand::Plan { task, show_prompt } => {
-            zbobr_dispatcher::run_role_subcommand(zbobr, task, "planner", show_prompt, pipeline)
-                .await?;
-        }
-        TaskSubcommand::Work { task, show_prompt } => {
-            zbobr_dispatcher::run_role_subcommand(zbobr, task, "worker", show_prompt, pipeline)
-                .await?;
-        }
-        TaskSubcommand::Review { task, show_prompt } => {
-            zbobr_dispatcher::run_role_subcommand(zbobr, task, "reviewer", show_prompt, pipeline)
-                .await?;
-        }
-        TaskSubcommand::Merge { task, show_prompt } => {
-            zbobr_dispatcher::run_role_subcommand(zbobr, task, "merger", show_prompt, pipeline)
-                .await?;
         }
         TaskSubcommand::Process {
             task,

@@ -234,31 +234,6 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
 }
 
 // ---------------------------------------------------------------------------
-// Dispatcher API — stage execution and task processing
-// ---------------------------------------------------------------------------
-
-/// Run a specific role stage for a task (Prepare, Plan, Work, Review, Merge).
-/// Finds the stage definition by role in the pipeline and runs it.
-pub async fn run_role_subcommand(
-    zbobr: &ZbobrDispatcher,
-    task_id: u64,
-    role: &str,
-    show_prompt: bool,
-    pipeline: &PipelineConfig,
-) -> anyhow::Result<()> {
-    let stage_def = pipeline
-        .find_stage_by_role(role)
-        .ok_or_else(|| anyhow::anyhow!("No stage definition found for role '{}' in pipeline", role))?;
-    let runner = CliStageRunner::new(zbobr, task_id, stage_def, pipeline);
-    if show_prompt {
-        println!("{}", runner.prompt().await?);
-    } else {
-        runner.run().await?;
-    }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
 // CliStageRunner — stage execution
 // ---------------------------------------------------------------------------
 
