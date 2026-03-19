@@ -10,7 +10,7 @@ mod mcp_integration;
 
 use std::sync::Arc;
 
-use mcp_integration::{IntegrationTestEnv, github_config::GitHubTestConfig, test_helpers};
+use mcp_integration::{IntegrationTestEnv, abstract_test_helpers, github_config::GitHubTestConfig};
 use tokio::sync::OnceCell;
 
 static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -46,173 +46,77 @@ async fn get_env() -> Arc<IntegrationTestEnv> {
 }
 
 // ---------------------------------------------------------------------------
-// Core stage tests
+// Abstract pipeline tests (generic stage/mode names)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_preparation() {
+async fn test_github_fs_abstract_all_mcp_tools() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let env = get_env().await;
-    test_helpers::run_preparation(&env).await;
+    abstract_test_helpers::run_all_mcp_tools(&env).await;
 }
 
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_planning() {
+async fn test_github_fs_abstract_stage_transfer() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let env = get_env().await;
-    test_helpers::run_planning(&env).await;
+    abstract_test_helpers::run_stage_transfer(&env).await;
 }
 
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_working() {
+async fn test_github_fs_abstract_call_mode() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let env = get_env().await;
-    test_helpers::run_working(&env).await;
+    abstract_test_helpers::run_call_mode(&env).await;
 }
 
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_reviewing() {
+async fn test_github_fs_abstract_return_from_mode() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let env = get_env().await;
-    test_helpers::run_reviewing(&env).await;
+    abstract_test_helpers::run_return_from_mode(&env).await;
 }
 
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_merging() {
+async fn test_github_fs_abstract_auto_conflict() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let env = get_env().await;
-    test_helpers::run_merging(&env).await;
+    abstract_test_helpers::run_auto_conflict(&env).await;
 }
 
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_merging_with_real_conflict() {
+async fn test_github_fs_abstract_pause_on_error() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let env = get_env().await;
-    test_helpers::run_merging_with_real_conflict(&env).await;
+    abstract_test_helpers::run_pause_on_error(&env).await;
 }
 
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_conflict_detection() {
+async fn test_github_fs_abstract_ready_dispatch() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let env = get_env().await;
-    test_helpers::run_conflict_detection(&env).await;
+    abstract_test_helpers::run_ready_dispatch(&env).await;
 }
 
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_reviewing_approval() {
+async fn test_github_fs_abstract_signal_transitions() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let env = get_env().await;
-    test_helpers::run_reviewing_approval(&env).await;
-}
-
-// ---------------------------------------------------------------------------
-// Repo backend tests (FS backend — fork_owner() is None)
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_repo_backend_clone() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let env = get_env().await;
-    test_helpers::run_repo_backend_clone(&env).await;
+    abstract_test_helpers::run_signal_transitions(&env).await;
 }
 
 #[tokio::test]
 #[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_repo_backend_planning() {
+async fn test_github_fs_abstract_pause_on_ask_user() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let env = get_env().await;
-    test_helpers::run_repo_backend_planning(&env).await;
-}
-
-#[tokio::test]
-#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_repo_backend_working() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let env = get_env().await;
-    test_helpers::run_repo_backend_working(&env).await;
-}
-
-#[tokio::test]
-#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_repo_backend_reviewing() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let env = get_env().await;
-    test_helpers::run_repo_backend_reviewing(&env).await;
-}
-
-#[tokio::test]
-#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_repo_backend_merging() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let env = get_env().await;
-    test_helpers::run_repo_backend_merging(&env).await;
-}
-
-#[tokio::test]
-#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_repo_backend_clone_cross_org() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let env = get_env().await;
-    test_helpers::run_repo_backend_clone_cross_org(&env).await;
-}
-
-#[tokio::test]
-#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_repo_backend_planning_cross_org() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let env = get_env().await;
-    test_helpers::run_repo_backend_planning_cross_org(&env).await;
-}
-
-#[tokio::test]
-#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_repo_backend_working_cross_org() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let env = get_env().await;
-    test_helpers::run_repo_backend_working_cross_org(&env).await;
-}
-
-#[tokio::test]
-#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_repo_backend_reviewing_cross_org() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let env = get_env().await;
-    test_helpers::run_repo_backend_reviewing_cross_org(&env).await;
-}
-
-#[tokio::test]
-#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_repo_backend_merging_cross_org() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let env = get_env().await;
-    test_helpers::run_repo_backend_merging_cross_org(&env).await;
-}
-
-// ---------------------------------------------------------------------------
-// Signal and confirm flag
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_report_error_preserves_signal() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let env = get_env().await;
-    test_helpers::run_report_error_preserves_signal(&env).await;
-}
-
-#[tokio::test]
-#[ignore = "GitHub-backed test; requires zbobr_github_test.toml"]
-async fn test_github_fs_cli_confirm_flag_pauses_on_stage_change() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let env = get_env().await;
-    test_helpers::run_cli_confirm_flag(&env).await;
+    abstract_test_helpers::run_pause_on_ask_user(&env).await;
 }
