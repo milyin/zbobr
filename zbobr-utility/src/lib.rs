@@ -59,10 +59,14 @@ pub async fn git_output(dir: &Path, args: &[&str]) -> Result<String> {
 }
 
 /// Run a git command in `dir`, returning `Ok(true)` if exit code 0, `Ok(false)` otherwise.
+/// Stderr is suppressed so that expected failures (e.g. checking if a ref exists) don't
+/// produce noisy output.
 pub async fn git_check(dir: &Path, args: &[&str]) -> Result<bool> {
     let status = tokio::process::Command::new("git")
         .args(args)
         .current_dir(dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .await
         .with_context(|| format!("Failed to spawn: git {}", args.join(" ")))?;
