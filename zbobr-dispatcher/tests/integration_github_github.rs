@@ -13,7 +13,7 @@ mod mcp_integration;
 
 use std::sync::Arc;
 
-use mcp_integration::{IntegrationTestEnv, github_config::GitHubTestConfig, test_helpers};
+use mcp_integration::{IntegrationTestEnv, abstract_test_helpers, github_config::GitHubTestConfig, test_helpers};
 use serial_test::serial;
 use tokio::sync::OnceCell;
 
@@ -232,4 +232,80 @@ async fn test_github_github_report_error_preserves_signal() {
 async fn test_github_github_cli_confirm_flag_pauses_on_stage_change() {
     let env = get_env().await;
     test_helpers::run_cli_confirm_flag(&env).await;
+}
+
+// ---------------------------------------------------------------------------
+// Abstract pipeline tests (generic stage/mode names)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[serial]
+#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
+async fn test_github_github_abstract_all_mcp_tools() {
+    let env = get_env().await;
+    abstract_test_helpers::run_all_mcp_tools(&env).await;
+}
+
+#[tokio::test]
+#[serial]
+#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
+async fn test_github_github_abstract_stage_transfer() {
+    let env = get_env().await;
+    abstract_test_helpers::run_stage_transfer(&env).await;
+}
+
+#[tokio::test]
+#[serial]
+#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
+async fn test_github_github_abstract_call_mode() {
+    let env = get_env().await;
+    abstract_test_helpers::run_call_mode(&env).await;
+}
+
+#[tokio::test]
+#[serial]
+#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
+async fn test_github_github_abstract_return_from_mode() {
+    let env = get_env().await;
+    abstract_test_helpers::run_return_from_mode(&env).await;
+}
+
+#[tokio::test]
+#[serial]
+#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
+async fn test_github_github_abstract_auto_conflict() {
+    let env = get_env().await;
+    abstract_test_helpers::run_auto_conflict(&env).await;
+}
+
+#[tokio::test]
+#[serial]
+#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
+async fn test_github_github_abstract_pause_on_error() {
+    let env = get_env().await;
+    abstract_test_helpers::run_pause_on_error(&env).await;
+}
+
+#[tokio::test]
+#[serial]
+#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
+async fn test_github_github_abstract_ready_dispatch() {
+    let env = get_env().await;
+    abstract_test_helpers::run_ready_dispatch(&env).await;
+}
+
+#[tokio::test]
+#[serial]
+#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
+async fn test_github_github_abstract_signal_transitions() {
+    let env = get_env().await;
+    abstract_test_helpers::run_signal_transitions(&env).await;
+}
+
+#[tokio::test]
+#[serial]
+#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
+async fn test_github_github_abstract_pause_on_ask_user() {
+    let env = get_env().await;
+    abstract_test_helpers::run_pause_on_ask_user(&env).await;
 }
