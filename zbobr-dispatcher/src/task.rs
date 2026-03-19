@@ -847,4 +847,216 @@ mod comment_model_tests {
         let parsed_tnm: CommentTag = tag_tool_no_model.to_string().parse().unwrap();
         assert_eq!(parsed_tnm, tag_tool_no_model);
     }
+
+    // -----------------------------------------------------------------------
+    // Helper: create a UnifiedMcp with comment buffering enabled
+    // -----------------------------------------------------------------------
+
+    fn make_buffered_mcp(
+        zbobr: &crate::ZbobrDispatcher,
+        task_backend: Arc<dyn TaskBackend>,
+        task_id: u64,
+    ) -> (crate::mcp::unified::UnifiedMcp, CommentBuffer) {
+        let tracker = Arc::new(std::sync::Mutex::new(None::<String>));
+        let comment_buffer: CommentBuffer = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let session = zbobr.role_session_with_tracker(
+            task_backend,
+            task_id,
+            tracker,
+            Arc::clone(&comment_buffer),
+        );
+        let allowed_tools: std::collections::HashSet<String> = crate::mcp::unified::ALL_TOOL_NAMES
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let mcp = crate::mcp::unified::UnifiedMcp::new(
+            session,
+            allowed_tools,
+            "worker".to_string(),
+            Tool::Copilot,
+            Model::Gpt5Mini,
+            "working".to_string(),
+            std::collections::HashMap::new(),
+        );
+        (mcp, comment_buffer)
+    }
+
+    // -----------------------------------------------------------------------
+    // Buffering tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn buffered_comments_accumulate_in_buffer_not_backend() {
+        let (zbobr, task_backend, _repo) = make_test_parts();
+        let id = zbobr
+            .create_task(&*task_backend, "t", "desc", "READY", None, None)
+            .await
+            .unwrap();
+
+        let (mcp, comment_buffer) =
+            make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
+
+        // report_results is buffered
+        let _ = mcp.report_results_impl("result one").await;
+        let _ = mcp.post_plan_impl("the plan").await;
+
+        // Backend should have zero comments (all buffered)
+        let weak = task_backend.get_task(id).await.unwrap();
+        let backend_comments = weak.get_comments().await.unwrap();
+        assert_eq!(backend_comments.len(), 0, "buffered comments must not reach backend");
+
+        // Buffer should have two entries
+        let buf = comment_buffer.lock().unwrap();
+        assert_eq!(buf.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn error_comments_are_unbuffered() {
+        let (zbobr, task_backend, _repo) = make_test_parts();
+        let id = zbobr
+            .create_task(&*task_backend, "t", "desc", "READY", None, None)
+            .await
+            .unwrap();
+
+        let (mcp, comment_buffer) =
+            make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
+
+        // report_error is unbuffered — should go directly to backend
+        let _ = mcp.report_error_impl("something broke").await;
+
+        // Backend should have the error comment
+        let weak = task_backend.get_task(id).await.unwrap();
+        let backend_comments = weak.get_comments().await.unwrap();
+        assert_eq!(backend_comments.len(), 1, "error must be posted to backend immediately");
+        assert!(backend_comments[0].hidden, "error comments must be hidden");
+        assert!(
+            backend_comments[0].text.starts_with("[report_error]"),
+            "error comment must be prefixed with [report_error]"
+        );
+
+        // Buffer should be empty
+        let buf = comment_buffer.lock().unwrap();
+        assert_eq!(buf.len(), 0, "error must not be buffered");
+    }
+
+    #[tokio::test]
+    async fn ask_user_is_unbuffered() {
+        let (zbobr, task_backend, _repo) = make_test_parts();
+        let id = zbobr
+            .create_task(&*task_backend, "t", "desc", "READY", None, None)
+            .await
+            .unwrap();
+
+        let (mcp, comment_buffer) =
+            make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
+
+        let _ = mcp.ask_user_impl("need help").await;
+
+        // ask_user is unbuffered — posted directly
+        let weak = task_backend.get_task(id).await.unwrap();
+        let backend_comments = weak.get_comments().await.unwrap();
+        assert_eq!(backend_comments.len(), 1, "ask_user must be posted to backend immediately");
+        assert!(
+            backend_comments[0].text.starts_with("[ask_user]"),
+            "ask_user comment must be prefixed with [ask_user]"
+        );
+
+        let buf = comment_buffer.lock().unwrap();
+        assert_eq!(buf.len(), 0, "ask_user must not be buffered");
+    }
+
+    #[tokio::test]
+    async fn each_buffered_comment_marked_by_tool_name() {
+        let (zbobr, task_backend, _repo) = make_test_parts();
+        let id = zbobr
+            .create_task(&*task_backend, "t", "desc", "READY", None, None)
+            .await
+            .unwrap();
+
+        let (mcp, comment_buffer) =
+            make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
+
+        // Call several buffered MCP tools
+        let _ = mcp.report_results_impl("first results").await;
+        let _ = mcp.post_plan_impl("the plan text").await;
+        let _ = mcp.review_accept_impl("looks good").await;
+        let _ = mcp.review_reject_impl("needs fixes").await;
+        let _ = mcp.test_accept_impl("tests pass").await;
+        let _ = mcp.test_reject_impl("tests fail").await;
+        let _ = mcp.ask_planner_impl("question for planner").await;
+
+        let buf = comment_buffer.lock().unwrap();
+        assert_eq!(buf.len(), 7);
+
+        // Each buffered comment body starts with [tool_name]
+        assert!(buf[0].body.starts_with("[report_results]\n"), "got: {}", buf[0].body);
+        assert!(buf[1].body.starts_with("[post_plan]\n"), "got: {}", buf[1].body);
+        assert!(buf[2].body.starts_with("[review_accept]\n"), "got: {}", buf[2].body);
+        assert!(buf[3].body.starts_with("[review_reject]\n"), "got: {}", buf[3].body);
+        assert!(buf[4].body.starts_with("[test_accept]\n"), "got: {}", buf[4].body);
+        assert!(buf[5].body.starts_with("[test_reject]\n"), "got: {}", buf[5].body);
+        assert!(buf[6].body.starts_with("[ask_planner]\n"), "got: {}", buf[6].body);
+
+        // Reject tools set boundary=true
+        assert!(!buf[0].boundary, "report_results should not be boundary");
+        assert!(!buf[1].boundary, "post_plan should not be boundary");
+        assert!(!buf[2].boundary, "review_accept should not be boundary");
+        assert!(buf[3].boundary, "review_reject must be boundary");
+        assert!(!buf[4].boundary, "test_accept should not be boundary");
+        assert!(buf[5].boundary, "test_reject must be boundary");
+        assert!(!buf[6].boundary, "ask_planner should not be boundary");
+    }
+
+    #[tokio::test]
+    async fn buffered_comments_visible_in_get_history() {
+        let (zbobr, task_backend, _repo) = make_test_parts();
+        let id = zbobr
+            .create_task(&*task_backend, "t", "task description", "READY", None, None)
+            .await
+            .unwrap();
+
+        let (mcp, _comment_buffer) =
+            make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
+
+        // Post a buffered comment
+        let _ = mcp.report_results_impl("my results").await;
+
+        // get_history should include the buffered comment
+        let history = mcp.get_history_impl(None).await;
+        assert!(
+            history.contains("my results"),
+            "buffered comment must be visible in get_history response"
+        );
+    }
+
+    #[tokio::test]
+    async fn mixed_buffered_and_unbuffered_ordering() {
+        let (zbobr, task_backend, _repo) = make_test_parts();
+        let id = zbobr
+            .create_task(&*task_backend, "t", "desc", "READY", None, None)
+            .await
+            .unwrap();
+
+        let (mcp, comment_buffer) =
+            make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
+
+        // Buffered
+        let _ = mcp.report_results_impl("first").await;
+        // Unbuffered (error)
+        let _ = mcp.report_error_impl("oops").await;
+        // Buffered
+        let _ = mcp.post_plan_impl("plan").await;
+
+        // Backend should have exactly 1 comment (the error)
+        let weak = task_backend.get_task(id).await.unwrap();
+        let backend_comments = weak.get_comments().await.unwrap();
+        assert_eq!(backend_comments.len(), 1);
+        assert!(backend_comments[0].text.starts_with("[report_error]"));
+
+        // Buffer should have 2 entries
+        let buf = comment_buffer.lock().unwrap();
+        assert_eq!(buf.len(), 2);
+        assert!(buf[0].body.starts_with("[report_results]"));
+        assert!(buf[1].body.starts_with("[post_plan]"));
+    }
 }
