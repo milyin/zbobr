@@ -787,7 +787,7 @@ pub async fn run_retry_limit(env: &IntegrationTestEnv) {
         let mutable = weak.upgrade().await.unwrap();
         mutable
             .modify_task(Box::new(|mut task| {
-                task.worktree_retries = 5; // at the limit (max_retries_conflict defaults to 5)
+                task.worktree_retries = 1; // above the default limit (0)
                 task
             }))
             .await

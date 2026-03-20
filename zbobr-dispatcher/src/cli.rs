@@ -821,7 +821,7 @@ async fn handle_worktree_problem(
     let max_retries = workflow
         .pipeline(handler_pipeline)
         .map(|p| p.max_retries)
-        .unwrap_or(5);
+        .unwrap_or(0);
 
     let task_session = zbobr.task_session(
         Arc::clone(zbobr.task_backend()),

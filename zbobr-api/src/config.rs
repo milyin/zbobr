@@ -115,16 +115,12 @@ pub struct PipelineConfig {
     #[serde(default)]
     pub stages: HashMap<String, StageDefinition>,
     /// Max retries for this pipeline's worktree handler before pausing.
-    #[serde(default = "default_max_retries", skip_serializing_if = "is_default_max_retries")]
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub max_retries: u32,
 }
 
-fn default_max_retries() -> u32 {
-    5
-}
-
-fn is_default_max_retries(v: &u32) -> bool {
-    *v == default_max_retries()
+fn is_zero(v: &u32) -> bool {
+    *v == 0
 }
 
 impl PipelineConfig {
