@@ -50,6 +50,7 @@ fn build_workflow(stages: Vec<StageDef>) -> WorkflowConfig {
         );
     }
     WorkflowConfig {
+        prompts_dir: None,
         pipelines,
         roles: Default::default(),
     }

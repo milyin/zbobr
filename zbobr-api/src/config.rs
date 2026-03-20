@@ -169,6 +169,9 @@ impl PipelineConfig {
 /// is incompatible with `deny_unknown_fields`.
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct WorkflowConfig {
+    /// Base directory for prompt files; prepended to relative prompt paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompts_dir: Option<PathBuf>,
     #[serde(default)]
     pub roles: HashMap<String, RoleDefinition>,
     #[serde(default)]
@@ -178,6 +181,8 @@ pub struct WorkflowConfig {
 /// TOML representation of WorkflowConfig (all fields optional).
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct WorkflowToml {
+    #[serde(default)]
+    pub prompts_dir: Option<PathBuf>,
     #[serde(default)]
     pub roles: Option<HashMap<String, RoleDefinition>>,
     #[serde(default)]
@@ -231,6 +236,7 @@ impl WorkflowToml {
 
     pub fn try_into_config(self) -> anyhow::Result<WorkflowConfig> {
         Ok(WorkflowConfig {
+            prompts_dir: self.prompts_dir,
             roles: self.roles.unwrap_or_default(),
             pipelines: self.pipelines.unwrap_or_default(),
         })
@@ -244,6 +250,7 @@ impl Config for WorkflowConfig {
     fn build(toml: Option<Self::Toml>, _args: Self::Args, _config_dir: &std::path::Path) -> Self {
         match toml {
             Some(t) => WorkflowConfig {
+                prompts_dir: t.prompts_dir,
                 roles: t.roles.unwrap_or_default(),
                 pipelines: t.pipelines.unwrap_or_default(),
             },

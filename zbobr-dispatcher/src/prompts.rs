@@ -58,6 +58,7 @@ impl ConfiguredPromptBuilder {
 
 /// Collect prompt file paths from a StageDefinition.
 /// If no main_prompt is specified, tries the role's prompt from the workflow config.
+/// Relative paths are prefixed with `workflow.prompts_dir` when set.
 pub fn prompt_files_for_stage(stage_def: &StageDefinition, workflow: &WorkflowConfig) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if let Some(ref main) = stage_def.main_prompt {
@@ -68,6 +69,12 @@ pub fn prompt_files_for_stage(stage_def: &StageDefinition, workflow: &WorkflowCo
         }
     }
     files.extend(stage_def.additional_prompts.iter().cloned());
+    if let Some(ref prompts_dir) = workflow.prompts_dir {
+        files = files
+            .into_iter()
+            .map(|p| if p.is_relative() { prompts_dir.join(&p) } else { p })
+            .collect();
+    }
     files
 }
 

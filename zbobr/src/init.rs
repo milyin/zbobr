@@ -101,6 +101,7 @@ fn default_config_toml() -> RootConfigToml {
             mcp_tester: None,
         }),
         workflow: Some(WorkflowToml {
+            prompts_dir: workflow.prompts_dir,
             roles: Some(workflow.roles),
             pipelines: Some(workflow.pipelines),
         }),
@@ -109,7 +110,7 @@ fn default_config_toml() -> RootConfigToml {
 
 /// Build the default workflow configuration with predefined pipelines and roles.
 fn default_workflow() -> WorkflowConfig {
-    let task_prompt = vec![PathBuf::from("prompts/task.md")];
+    let task_prompt = vec![PathBuf::from("task.md")];
 
     let mut main_stages = HashMap::new();
     main_stages.insert("planning".to_string(), StageDefinition {
@@ -172,7 +173,7 @@ fn default_workflow() -> WorkflowConfig {
                 .into_iter()
                 .map(String::from)
                 .collect(),
-                prompt: Some(PathBuf::from("prompts/preparator.md")),
+                prompt: Some(PathBuf::from("preparator.md")),
             },
         ),
         (
@@ -191,7 +192,7 @@ fn default_workflow() -> WorkflowConfig {
                 .into_iter()
                 .map(String::from)
                 .collect(),
-                prompt: Some(PathBuf::from("prompts/planner.md")),
+                prompt: Some(PathBuf::from("planner.md")),
             },
         ),
         (
@@ -212,7 +213,7 @@ fn default_workflow() -> WorkflowConfig {
                 .into_iter()
                 .map(String::from)
                 .collect(),
-                prompt: Some(PathBuf::from("prompts/worker.md")),
+                prompt: Some(PathBuf::from("worker.md")),
             },
         ),
         (
@@ -229,7 +230,7 @@ fn default_workflow() -> WorkflowConfig {
                 .into_iter()
                 .map(String::from)
                 .collect(),
-                prompt: Some(PathBuf::from("prompts/reviewer.md")),
+                prompt: Some(PathBuf::from("reviewer.md")),
             },
         ),
         (
@@ -246,7 +247,7 @@ fn default_workflow() -> WorkflowConfig {
                 .into_iter()
                 .map(String::from)
                 .collect(),
-                prompt: Some(PathBuf::from("prompts/tester.md")),
+                prompt: Some(PathBuf::from("tester.md")),
             },
         ),
         (
@@ -262,12 +263,13 @@ fn default_workflow() -> WorkflowConfig {
                 .into_iter()
                 .map(String::from)
                 .collect(),
-                prompt: Some(PathBuf::from("prompts/merger.md")),
+                prompt: Some(PathBuf::from("merger.md")),
             },
         ),
     ]);
 
     WorkflowConfig {
+        prompts_dir: Some(PathBuf::from("prompts")),
         pipelines,
         roles,
     }
