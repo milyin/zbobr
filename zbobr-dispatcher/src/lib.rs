@@ -29,6 +29,7 @@ pub use zbobr_api::config::Config;
 use std::sync::Arc;
 
 use typesafe_builder::{Builder, _TypesafeBuilderEmpty, _TypesafeBuilderFilled};
+use zbobr_api::config::WorkflowConfig;
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
@@ -40,6 +41,8 @@ use crate::backend::{TaskBackend, WorktreeBackend};
 pub struct ZbobrDispatcher {
     #[builder(required)]
     config: ZbobrDispatcherConfig,
+    #[builder(required)]
+    workflow: WorkflowConfig,
     #[builder(required)]
     task_backend: Box<dyn TaskBackend>,
     #[builder(required)]
@@ -59,6 +62,10 @@ impl ZbobrDispatcher {
 
     pub fn config(&self) -> &ZbobrDispatcherConfig {
         &self.config
+    }
+
+    pub fn workflow(&self) -> &WorkflowConfig {
+        &self.workflow
     }
 
     pub fn task_backend(&self) -> &dyn TaskBackend {

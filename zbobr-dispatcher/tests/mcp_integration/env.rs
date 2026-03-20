@@ -32,7 +32,11 @@ pub struct IntegrationTestEnv {
     pub base_path: PathBuf,
     pub workspaces_dir: PathBuf,
     pub name: &'static str,
+    /// Default dispatcher (with `WorkflowConfig::default()`) for convenience
+    /// methods like `create_task`, `get_task`, `setup_repository`, etc.
     pub zbobr: Arc<ZbobrDispatcher>,
+    /// Factory to create a dispatcher with a specific workflow for `process_task`.
+    dispatcher_factory: Box<dyn Fn(WorkflowConfig) -> Arc<ZbobrDispatcher> + Send + Sync>,
     /// Optional remote repository slug (`owner/repo`) used by GitHub repo-backend tests.
     /// `None` for the filesystem repo backend.
     pub target_repo: Option<String>,
@@ -69,11 +73,12 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
         repos_dir: base_path.join("repos"),
     };
 
-    let task_backend = ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?);
-    let repo_backend = ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?;
+    let task_backend = ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config.clone()).ok()?);
+    let repo_backend = ZbobrRepoBackendFs::from_config(repo_backend_config.clone()).ok()?;
 
     let zbobr = Arc::new(ZbobrDispatcherBuilder::new()
-        .with_config(dispatcher_config)
+        .with_config(dispatcher_config.clone())
+        .with_workflow(WorkflowConfig::default())
         .with_task_backend(Box::new(task_backend) as Box<dyn TaskBackend>)
         .with_repo_backend(Box::new(repo_backend) as Box<dyn WorktreeBackend>)
         .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(WorkflowConfig::default())))
@@ -84,11 +89,29 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
         .await
         .ok()?;
 
+    let factory_config = dispatcher_config;
+    let factory_task_config = task_backend_config;
+    let factory_repo_config = repo_backend_config;
+    let dispatcher_factory = Box::new(move |workflow: WorkflowConfig| {
+        let tb = ArcTaskBackendFs::new(
+            ZbobrTaskBackendFs::from_config(factory_task_config.clone()).unwrap(),
+        );
+        let rb = ZbobrRepoBackendFs::from_config(factory_repo_config.clone()).unwrap();
+        Arc::new(ZbobrDispatcherBuilder::new()
+            .with_config(factory_config.clone())
+            .with_workflow(workflow.clone())
+            .with_task_backend(Box::new(tb) as Box<dyn TaskBackend>)
+            .with_repo_backend(Box::new(rb) as Box<dyn WorktreeBackend>)
+            .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(workflow)))
+            .build())
+    });
+
     Some(Arc::new(IntegrationTestEnv {
         base_path,
         workspaces_dir,
         name,
         zbobr,
+        dispatcher_factory,
         target_repo: None,
         fork_owner: None,
     }))
@@ -136,11 +159,12 @@ pub async fn init_github_github(
         overwrite_author: false,
     };
 
-    let task_backend = TaskBackendGithub::from_config(task_backend_config).ok()?;
-    let repo_backend = ZbobrRepoBackendGithub::from_config(repo_backend_config).ok()?;
+    let task_backend = TaskBackendGithub::from_config(task_backend_config.clone()).ok()?;
+    let repo_backend = ZbobrRepoBackendGithub::from_config(repo_backend_config.clone()).ok()?;
 
     let zbobr = Arc::new(ZbobrDispatcherBuilder::new()
-        .with_config(dispatcher_config)
+        .with_config(dispatcher_config.clone())
+        .with_workflow(WorkflowConfig::default())
         .with_task_backend(Box::new(task_backend) as Box<dyn TaskBackend>)
         .with_repo_backend(Box::new(repo_backend) as Box<dyn WorktreeBackend>)
         .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(WorkflowConfig::default())))
@@ -151,17 +175,42 @@ pub async fn init_github_github(
         .await
         .ok()?;
 
+    let factory_config = dispatcher_config;
+    let factory_task_config = task_backend_config;
+    let factory_repo_config = repo_backend_config;
+    let dispatcher_factory = Box::new(move |workflow: WorkflowConfig| {
+        let tb = TaskBackendGithub::from_config(factory_task_config.clone()).unwrap();
+        let rb = ZbobrRepoBackendGithub::from_config(factory_repo_config.clone()).unwrap();
+        Arc::new(ZbobrDispatcherBuilder::new()
+            .with_config(factory_config.clone())
+            .with_workflow(workflow.clone())
+            .with_task_backend(Box::new(tb) as Box<dyn TaskBackend>)
+            .with_repo_backend(Box::new(rb) as Box<dyn WorktreeBackend>)
+            .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(workflow)))
+            .build())
+    });
+
     Some(Arc::new(IntegrationTestEnv {
         base_path,
         workspaces_dir,
         name,
         zbobr,
+        dispatcher_factory,
         target_repo: Some(task_repo),
         fork_owner: Some(fork_owner),
     }))
 }
 
 impl IntegrationTestEnv {
+    // -----------------------------------------------------------------------
+    // Dispatcher factory
+    // -----------------------------------------------------------------------
+
+    /// Create a dispatcher with a specific workflow (for `process_task` calls).
+    pub fn make_dispatcher(&self, workflow: WorkflowConfig) -> Arc<ZbobrDispatcher> {
+        (self.dispatcher_factory)(workflow)
+    }
+
     // -----------------------------------------------------------------------
     // Identification
     // -----------------------------------------------------------------------
@@ -325,8 +374,9 @@ impl IntegrationTestEnv {
         };
 
         let task = self.get_task(task_id).await;
+        let zbobr = self.make_dispatcher(workflow.clone());
 
-        process_task(&self.zbobr, &task, workflow, Some(&mcp_tester_config))
+        process_task(&zbobr, &task, Some(&mcp_tester_config))
             .await
             .unwrap_or_else(|e| {
                 panic!(
@@ -345,6 +395,7 @@ impl IntegrationTestEnv {
         role_scenarios: &HashMap<String, String>,
         max_iterations: usize,
     ) -> usize {
+        let zbobr = self.make_dispatcher(workflow.clone());
         for i in 0..max_iterations {
             let task = self.get_task(task_id).await;
             if task.state == "DONE" || task.state == "PAUSE" {
@@ -380,7 +431,7 @@ impl IntegrationTestEnv {
 
             let task = self.get_task(task_id).await;
 
-            process_task(&self.zbobr, &task, workflow, Some(&mcp_tester_config))
+            process_task(&zbobr, &task, Some(&mcp_tester_config))
                 .await
                 .unwrap_or_else(|e| {
                     panic!(
@@ -424,8 +475,9 @@ impl IntegrationTestEnv {
         };
 
         let task = self.get_task(task_id).await;
+        let zbobr = self.make_dispatcher(workflow.clone());
 
-        process_task(&self.zbobr, &task, workflow, Some(&mcp_tester_config))
+        process_task(&zbobr, &task, Some(&mcp_tester_config))
             .await
             .unwrap_or_else(|e| {
                 panic!(

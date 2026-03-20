@@ -243,7 +243,6 @@ struct CliStageRunner<'a> {
     pipeline_name: &'a str,
     stage_name: &'a str,
     stage_def: &'a StageDefinition,
-    workflow: &'a WorkflowConfig,
     mcp_tester_override: Option<&'a ZbobrExecutorMcpTesterConfig>,
 }
 
@@ -254,7 +253,6 @@ impl<'a> CliStageRunner<'a> {
         pipeline_name: &'a str,
         stage_name: &'a str,
         stage_def: &'a StageDefinition,
-        workflow: &'a WorkflowConfig,
         mcp_tester_override: Option<&'a ZbobrExecutorMcpTesterConfig>,
     ) -> Self {
         Self {
@@ -263,7 +261,6 @@ impl<'a> CliStageRunner<'a> {
             pipeline_name,
             stage_name,
             stage_def,
-            workflow,
             mcp_tester_override,
         }
     }
@@ -304,7 +301,6 @@ impl<'a> CliStageRunner<'a> {
             self.stage_name,
             self.stage_def,
             task_dir.path(),
-            self.workflow,
         )
         .await?
         {
@@ -352,7 +348,8 @@ impl<'a> CliStageRunner<'a> {
         }
 
         let allowed_tools: std::collections::HashSet<String> = self
-            .workflow
+            .zbobr
+            .workflow()
             .role_definition(role)
             .map(|d| d.tools.iter().cloned().collect())
             .unwrap_or_else(|| {
@@ -472,7 +469,6 @@ enum WorktreeResult {
 pub async fn process_task(
     zbobr: &Arc<ZbobrDispatcher>,
     task: &Task,
-    workflow: &WorkflowConfig,
     mcp_tester_override: Option<&ZbobrExecutorMcpTesterConfig>,
 ) -> anyhow::Result<()> {
     if task.state == "DONE" {
@@ -485,10 +481,10 @@ pub async fn process_task(
     }
 
     // Use state machine to determine what to do
-    let action = crate::state_machine::resolve_next_action(task, workflow)?;
+    let action = crate::state_machine::resolve_next_action(task, zbobr.workflow())?;
     match action {
         crate::state_machine::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
-            let runner = CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, workflow, mcp_tester_override);
+            let runner = CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, mcp_tester_override);
             runner.run().await?;
         }
         crate::state_machine::StateAction::Done => {
@@ -523,7 +519,6 @@ pub async fn run_manager_loop(
     zbobr: &Arc<ZbobrDispatcher>,
     interval_secs: u64,
     cleanup_interval_secs: u64,
-    workflow: &WorkflowConfig,
 ) -> anyhow::Result<()> {
     let task_backend = zbobr.task_backend();
     let repo_backend = zbobr.repo_backend();
@@ -541,6 +536,7 @@ pub async fn run_manager_loop(
     }
 
     // Dump stage-specific settings for visibility
+    let workflow = zbobr.workflow();
     for (pipeline_name, stage_name, stage_def) in workflow.all_stages() {
         let tool = zbobr.config().tool_for_stage(stage_def);
         let model = zbobr.config().model_for_stage(stage_def);
@@ -607,7 +603,7 @@ pub async fn run_manager_loop(
                         pipeline_name,
                         stage_name,
                     );
-                    let runner = CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, workflow, None);
+                    let runner = CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, None);
                     if let Err(e) = runner.run().await {
                         tracing::error!("Stage {}/{} failed for task #{}: {e}", pipeline_name, stage_name, task.id);
                     }
@@ -693,7 +689,6 @@ async fn detect_and_handle_worktree(
     stage_name: &str,
     _stage_def: &StageDefinition,
     task_dir: &Path,
-    workflow: &WorkflowConfig,
 ) -> anyhow::Result<WorktreeResult> {
     let task_backend = zbobr.task_backend();
     let task = task_backend.get_task(task_id).await?.snapshot().await?;
@@ -713,7 +708,6 @@ async fn detect_and_handle_worktree(
                 pipeline_name,
                 stage_name,
                 zbobr_api::task::WorktreeProblem::Undefined,
-                workflow,
             )
             .await;
         }
@@ -788,7 +782,6 @@ async fn detect_and_handle_worktree(
         pipeline_name,
         stage_name,
         zbobr_api::task::WorktreeProblem::Conflict,
-        workflow,
     )
     .await
 }
@@ -800,13 +793,12 @@ async fn handle_worktree_problem(
     pipeline_name: &str,
     stage_name: &str,
     problem: zbobr_api::task::WorktreeProblem,
-    workflow: &WorkflowConfig,
 ) -> anyhow::Result<WorktreeResult> {
     let handler_pipeline = match problem {
         zbobr_api::task::WorktreeProblem::Undefined => WorkflowConfig::INIT_PIPELINE,
         zbobr_api::task::WorktreeProblem::Conflict => WorkflowConfig::MERGE_PIPELINE,
     };
-    let max_retries = workflow
+    let max_retries = zbobr.workflow()
         .pipeline(handler_pipeline)
         .map(|p| p.max_retries)
         .unwrap_or(0);

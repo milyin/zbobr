@@ -708,7 +708,8 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
             scenarios: scenario_paths,
             ..Default::default()
         };
-        zbobr_dispatcher::cli::process_task(&env.zbobr, &task, &workflow, Some(&mcp_tester_config))
+        let zbobr = env.make_dispatcher(workflow.clone());
+        zbobr_dispatcher::cli::process_task(&zbobr, &task, Some(&mcp_tester_config))
             .await
             .unwrap();
     }

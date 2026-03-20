@@ -114,6 +114,7 @@ async fn main() -> anyhow::Result<()> {
 
     let dispatcher = zbobr_dispatcher::ZbobrDispatcherBuilder::new()
         .with_config(config.dispatcher)
+        .with_workflow(workflow)
         .with_task_backend(Box::new(task_backend) as Box<dyn zbobr_dispatcher::backend::TaskBackend>)
         .with_repo_backend(Box::new(repo_backend) as Box<dyn zbobr_dispatcher::backend::WorktreeBackend>)
         .with_claude(config.executor.claude)
@@ -122,5 +123,5 @@ async fn main() -> anyhow::Result<()> {
         .with_prompt_builder(prompt_builder)
         .build();
 
-    commands::run_command(dispatcher, command, &workflow).await
+    commands::run_command(dispatcher, command).await
 }

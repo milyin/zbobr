@@ -8,7 +8,6 @@ use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 
 use zbobr_utility::{git, git_output};
 
-use zbobr_api::config::WorkflowConfig;
 use zbobr_dispatcher::{TaskDir, ZbobrDispatcher, print_task};
 
 // ---------------------------------------------------------------------------
@@ -168,7 +167,6 @@ pub enum TaskSubcommand {
 pub async fn run_command(
     zbobr: ZbobrDispatcher,
     command: Command,
-    workflow: &WorkflowConfig,
 ) -> anyhow::Result<()> {
     let zbobr = Arc::new(zbobr);
     match command {
@@ -184,14 +182,14 @@ pub async fn run_command(
                 .await?;
         }
         Command::Task { subcommand } => {
-            run_task_subcommand(&zbobr, subcommand, workflow).await?;
+            run_task_subcommand(&zbobr, subcommand).await?;
         }
         Command::Loop {
             interval,
             cleanup_interval,
             ..
         } => {
-            zbobr_dispatcher::run_manager_loop(&zbobr, interval, cleanup_interval, workflow)
+            zbobr_dispatcher::run_manager_loop(&zbobr, interval, cleanup_interval)
                 .await?;
         }
     }
@@ -201,7 +199,6 @@ pub async fn run_command(
 async fn run_task_subcommand(
     zbobr: &Arc<ZbobrDispatcher>,
     subcommand: TaskSubcommand,
-    workflow: &WorkflowConfig,
 ) -> anyhow::Result<()> {
     let task_backend = zbobr.task_backend();
     match subcommand {
@@ -341,7 +338,7 @@ async fn run_task_subcommand(
             } else {
                 None
             };
-            zbobr_dispatcher::process_task(zbobr, &task_obj, workflow, mcp_tester_config_override.as_ref()).await?;
+            zbobr_dispatcher::process_task(zbobr, &task_obj, mcp_tester_config_override.as_ref()).await?;
         }
         TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
             overwrite_author(zbobr, id, force, dry_run).await?;
