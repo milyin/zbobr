@@ -1,13 +1,10 @@
-use crate::{TaskDir, ZbobrDispatcher, backend::TaskBackend};
+use crate::{TaskDir, ZbobrDispatcher};
 
 impl ZbobrDispatcher {
     /// Clean up workspaces directories for closed tasks.
     /// If dry_run is true, only logs what would happen.
-    pub async fn cleanup_closed_tasks(
-        &self,
-        task_backend: &dyn TaskBackend,
-        dry_run: bool,
-    ) -> anyhow::Result<()> {
+    pub async fn cleanup_closed_tasks(&self, dry_run: bool) -> anyhow::Result<()> {
+        let task_backend = self.task_backend();
         let workspaces = &self.config().workspaces;
 
         if !workspaces.exists() {

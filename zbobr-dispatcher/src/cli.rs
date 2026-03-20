@@ -559,7 +559,7 @@ pub async fn run_manager_loop(
 
         if last_cleanup.elapsed().as_secs() >= cleanup_interval_secs {
             tracing::info!("Running workspaces cleanup...");
-            if let Err(e) = zbobr.cleanup_closed_tasks(zbobr.task_backend(), false).await {
+            if let Err(e) = zbobr.cleanup_closed_tasks(false).await {
                 tracing::warn!("Cleanup failed: {e}");
             }
             last_cleanup = std::time::Instant::now();

@@ -178,7 +178,7 @@ pub async fn run_command(
         }
         Command::Cleanup { dry_run } => {
             zbobr
-                .cleanup_closed_tasks(zbobr.task_backend(), dry_run)
+                .cleanup_closed_tasks(dry_run)
                 .await?;
         }
         Command::Task { subcommand } => {
