@@ -156,7 +156,7 @@ impl PipelineConfig {
 pub struct WorkflowConfig {
     #[serde(default)]
     pub roles: HashMap<String, RoleDefinition>,
-    #[serde(flatten)]
+    #[serde(default)]
     pub pipelines: HashMap<String, PipelineConfig>,
 }
 
@@ -165,7 +165,7 @@ pub struct WorkflowConfig {
 pub struct WorkflowToml {
     #[serde(default)]
     pub roles: Option<HashMap<String, RoleDefinition>>,
-    #[serde(flatten)]
+    #[serde(default)]
     pub pipelines: Option<HashMap<String, PipelineConfig>>,
 }
 
