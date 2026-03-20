@@ -95,12 +95,9 @@ pub trait CommonMcpImpl: Send + Sync {
     /// Returns the name of the current stage, used to compute the retry signal
     fn stage_name(&self) -> &str;
 
-    /// Returns the transitions map from the stage definition.
-    fn transitions(&self) -> &std::collections::HashMap<String, String>;
-
     /// Record a tool call for transition mapping.
     fn record_tool(&self, tool_name: &str) {
-        self.session().record_tool_call(tool_name, self.transitions());
+        self.session().record_tool_call(tool_name);
     }
 
     // -- History tools --

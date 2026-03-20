@@ -20,7 +20,8 @@ struct StageDef {
     role: &'static str,
     mode: &'static str,
     is_start: bool,
-    transitions: Vec<(&'static str, &'static str)>,
+    on_success: Option<&'static str>,
+    on_failure: Option<&'static str>,
 }
 
 fn build_pipeline(stages: Vec<StageDef>) -> PipelineConfig {
@@ -34,11 +35,8 @@ fn build_pipeline(stages: Vec<StageDef>) -> PipelineConfig {
                 tool: Some(Tool::McpTester),
                 main_prompt: None,
                 additional_prompts: vec![],
-                transitions: s
-                    .transitions
-                    .into_iter()
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect(),
+                on_success: s.on_success.map(|v| v.to_string()),
+                on_failure: s.on_failure.map(|v| v.to_string()),
                 is_start: s.is_start,
                 mode: s.mode.to_string(),
             })
@@ -95,7 +93,8 @@ pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
         role: "alpha",
         mode: "main",
         is_start: true,
-        transitions: vec![("default", "return")],
+        on_success: None,
+        on_failure: None,
     }]);
 
     let scenarios = scenarios_map(vec![(
@@ -131,14 +130,16 @@ pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
             role: "role_a",
             mode: "main",
             is_start: true,
-            transitions: vec![("default", "go_second")],
+            on_success: Some("go_second"),
+            on_failure: None,
         },
         StageDef {
             name: "second",
             role: "role_b",
             mode: "main",
             is_start: false,
-            transitions: vec![("default", "return")],
+            on_success: None,
+            on_failure: None,
         },
     ]);
 
@@ -180,14 +181,16 @@ pub async fn run_call_mode(env: &IntegrationTestEnv) {
             role: "role_main",
             mode: "main",
             is_start: true,
-            transitions: vec![("default", "call_sub")],
+            on_success: Some("call_sub"),
+            on_failure: None,
         },
         StageDef {
             name: "handler",
             role: "role_sub",
             mode: "sub",
             is_start: true,
-            transitions: vec![("default", "return")],
+            on_success: None,
+            on_failure: None,
         },
     ]);
 
@@ -231,28 +234,32 @@ pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
             role: "role_one",
             mode: "main",
             is_start: true,
-            transitions: vec![("default", "go_step_two")],
+            on_success: Some("go_step_two"),
+            on_failure: None,
         },
         StageDef {
             name: "step_two",
             role: "role_two",
             mode: "main",
             is_start: false,
-            transitions: vec![("default", "call_aux,go_done_step")],
+            on_success: Some("call_aux,go_done_step"),
+            on_failure: None,
         },
         StageDef {
             name: "done_step",
             role: "role_done",
             mode: "main",
             is_start: false,
-            transitions: vec![("default", "return")],
+            on_success: None,
+            on_failure: None,
         },
         StageDef {
             name: "aux_step",
             role: "role_aux",
             mode: "aux",
             is_start: true,
-            transitions: vec![("default", "return")],
+            on_success: None,
+            on_failure: None,
         },
     ]);
 
@@ -346,14 +353,16 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
             role: "role_work",
             mode: "main",
             is_start: true,
-            transitions: vec![("default", "return")],
+            on_success: None,
+            on_failure: None,
         },
         StageDef {
             name: "resolve",
             role: "role_resolve",
             mode: "merging",
             is_start: true,
-            transitions: vec![("default", "return")],
+            on_success: None,
+            on_failure: None,
         },
     ]);
 
@@ -421,7 +430,8 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
         role: "role_err",
         mode: "main",
         is_start: true,
-        transitions: vec![("default", "return")],
+        on_success: None,
+        on_failure: None,
     }]);
 
     let scenarios = scenarios_map(vec![(
@@ -463,7 +473,8 @@ pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
         role: "role_start",
         mode: "main",
         is_start: true,
-        transitions: vec![("default", "return")],
+        on_success: None,
+        on_failure: None,
     }]);
 
     let scenarios = scenarios_map(vec![(
@@ -500,18 +511,16 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
             role: "role_check",
             mode: "main",
             is_start: true,
-            transitions: vec![
-                ("report_success", "go_finish"),
-                ("report_failure", "go_check"),
-                ("default", "return"),
-            ],
+            on_success: Some("go_finish"),
+            on_failure: Some("go_check"),
         },
         StageDef {
             name: "finish",
             role: "role_finish",
             mode: "main",
             is_start: false,
-            transitions: vec![("default", "return")],
+            on_success: None,
+            on_failure: None,
         },
     ]);
 
@@ -569,7 +578,8 @@ pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
         role: "role_ask",
         mode: "main",
         is_start: true,
-        transitions: vec![("default", "return")],
+        on_success: None,
+        on_failure: None,
     }]);
 
     let scenarios = scenarios_map(vec![(
@@ -642,14 +652,16 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
             role: "role_work",
             mode: "main",
             is_start: true,
-            transitions: vec![("default", "return")],
+            on_success: None,
+            on_failure: None,
         },
         StageDef {
             name: "preparing",
             role: "role_prep",
             mode: "preparing",
             is_start: true,
-            transitions: vec![("default", "return")],
+            on_success: None,
+            on_failure: None,
         },
     ]);
 
@@ -784,14 +796,16 @@ pub async fn run_retry_limit(env: &IntegrationTestEnv) {
             role: "role_work",
             mode: "main",
             is_start: true,
-            transitions: vec![("default", "return")],
+            on_success: None,
+            on_failure: None,
         },
         StageDef {
             name: "resolve",
             role: "role_resolve",
             mode: "merging",
             is_start: true,
-            transitions: vec![("default", "return")],
+            on_success: None,
+            on_failure: None,
         },
     ]);
 

@@ -313,7 +313,8 @@ mod tests {
             model: Some(Model::ClaudeOpus4_5),
             main_prompt: None,
             additional_prompts: vec![],
-            transitions: std::collections::HashMap::new(),
+            on_success: None,
+            on_failure: None,
             is_start: false,
             mode: "main".to_string(),
         };
@@ -325,7 +326,8 @@ mod tests {
             model: None,
             main_prompt: None,
             additional_prompts: vec![],
-            transitions: std::collections::HashMap::new(),
+            on_success: None,
+            on_failure: None,
             is_start: false,
             mode: "main".to_string(),
         };

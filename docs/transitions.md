@@ -34,3 +34,12 @@ Eligible tasks are processed at regular time intervals. An eligible task is a ta
 Depending on the signal and flags, the dispatcher decides which agent role session to start for the task.
 
 Each session has its own possible outcomes which are determined by the MCP operation available to the role and by the session’s post-processing logic. This document only lists these outcomes without going into specific rules.
+
+## Stage transition fields
+
+Each `StageDefinition` has two optional transition fields:
+
+* **`on_success`** — signal emitted when the agent calls `report_success`. If `None`, defaults to `"return"`.
+* **`on_failure`** — signal emitted when the agent calls `report_failure`. If `None`, defaults to `"return"`.
+
+Signal values follow the same format as before: `go_<stage>` to transfer within the current mode, `call_<mode>` to invoke a sub-mode, or `return` to finish the current mode.

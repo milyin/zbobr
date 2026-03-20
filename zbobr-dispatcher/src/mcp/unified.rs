@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
@@ -31,7 +31,6 @@ pub struct UnifiedMcp {
     tool: Tool,
     model: Model,
     stage_name: String,
-    transitions: HashMap<String, String>,
 }
 
 impl CommonMcpImpl for UnifiedMcp {
@@ -53,10 +52,6 @@ impl CommonMcpImpl for UnifiedMcp {
 
     fn stage_name(&self) -> &str {
         &self.stage_name
-    }
-
-    fn transitions(&self) -> &HashMap<String, String> {
-        &self.transitions
     }
 }
 
@@ -84,7 +79,6 @@ impl UnifiedMcp {
         tool: Tool,
         model: Model,
         stage_name: String,
-        transitions: HashMap<String, String>,
     ) -> Self {
         Self {
             session,
@@ -94,7 +88,6 @@ impl UnifiedMcp {
             tool,
             model,
             stage_name,
-            transitions,
         }
     }
 

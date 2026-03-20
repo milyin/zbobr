@@ -368,7 +368,6 @@ impl<'a> CliStageRunner<'a> {
             cli_tool,
             model.clone(),
             self.stage_def.name.clone(),
-            self.stage_def.transitions.clone(),
             allowed_tools,
             Arc::clone(&tool_tracker),
             Arc::clone(&comment_buffer),
@@ -425,22 +424,18 @@ impl<'a> CliStageRunner<'a> {
     }
 }
 
-/// Compute the post-execution signal from the stage's transitions map.
-/// `last_mapped_tool` is the last MCP tool call that matched a transition key.
-/// Falls back to "default" transition, then to "return" if nothing matches.
+/// Compute the post-execution signal from the stage's `on_success` / `on_failure` fields.
+/// `last_mapped_tool` is the last MCP tool that was `report_success` or `report_failure`.
+/// Falls back to `"return"` when no matching field is set.
 fn compute_post_stage_signal(
     stage_def: &StageDefinition,
     last_mapped_tool: Option<&str>,
 ) -> String {
-    if let Some(tool_name) = last_mapped_tool {
-        if let Some(signal) = stage_def.transitions.get(tool_name) {
-            return signal.clone();
-        }
+    match last_mapped_tool {
+        Some("report_success") => stage_def.on_success.clone().unwrap_or_else(|| "return".into()),
+        Some("report_failure") => stage_def.on_failure.clone().unwrap_or_else(|| "return".into()),
+        _ => "return".into(),
     }
-    if let Some(signal) = stage_def.transitions.get("default") {
-        return signal.clone();
-    }
-    "return".to_string()
 }
 
 /// Parse a compound call signal like "call_aux,go_step_three".
@@ -1029,7 +1024,6 @@ async fn start_mcp_server(
     tool: Tool,
     model: Model,
     stage_name: String,
-    transitions: std::collections::HashMap<String, String>,
     allowed_tools: std::collections::HashSet<String>,
     tool_tracker: Arc<std::sync::Mutex<Option<String>>>,
     comment_buffer: crate::task::CommentBuffer,
@@ -1038,7 +1032,7 @@ async fn start_mcp_server(
     let task_backend = Arc::clone(zbobr.task_backend());
     let role_name = role_name.to_string();
     let server_handle = tokio::spawn(async move {
-        match crate::mcp::run_role_mcp_server(zbobr, task_backend, &role_name, task_id, tool, model, stage_name, transitions, allowed_tools, tool_tracker, comment_buffer).await
+        match crate::mcp::run_role_mcp_server(zbobr, task_backend, &role_name, task_id, tool, model, stage_name, allowed_tools, tool_tracker, comment_buffer).await
         {
             Ok(assigned_port) => {
                 let _ = port_tx.send(assigned_port);

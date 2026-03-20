@@ -116,37 +116,29 @@ fn default_pipeline() -> PipelineConfig {
             role: "planner".into(),
             mode: "main".into(),
             is_start: true,
-            transitions: HashMap::from([
-                ("default".into(), "go_working".into()),
-            ]),
+            on_success: Some("go_working".into()),
             ..stage_defaults()
         },
         StageDefinition {
             name: "working".into(),
             role: "worker".into(),
             mode: "main".into(),
-            transitions: HashMap::from([
-                ("default".into(), "go_reviewing".into()),
-                ("report_failure".into(), "go_planning".into()),
-            ]),
+            on_success: Some("go_reviewing".into()),
+            on_failure: Some("go_planning".into()),
             ..stage_defaults()
         },
         StageDefinition {
             name: "reviewing".into(),
             role: "reviewer".into(),
             mode: "main".into(),
-            transitions: HashMap::from([
-                ("report_success".into(), "go_merging".into()),
-                ("report_failure".into(), "go_working".into()),
-                ("default".into(), "go_merging".into()),
-            ]),
+            on_success: Some("go_merging".into()),
+            on_failure: Some("go_working".into()),
             ..stage_defaults()
         },
         StageDefinition {
             name: "merging".into(),
             role: "merger".into(),
             mode: "main".into(),
-            transitions: HashMap::from([("default".into(), "return".into())]),
             ..stage_defaults()
         },
         // Preparing mode: auto-called when identity is undefined
@@ -155,7 +147,6 @@ fn default_pipeline() -> PipelineConfig {
             role: "preparator".into(),
             mode: "preparing".into(),
             is_start: true,
-            transitions: HashMap::from([("default".into(), "return".into())]),
             ..stage_defaults()
         },
         // Conflict mode: invoked when work branch diverges
@@ -164,7 +155,6 @@ fn default_pipeline() -> PipelineConfig {
             role: "merger".into(),
             mode: "conflict".into(),
             is_start: true,
-            transitions: HashMap::from([("default".into(), "return".into())]),
             ..stage_defaults()
         },
     ];
@@ -294,7 +284,8 @@ fn stage_defaults() -> StageDefinition {
         tool: None,
         main_prompt: None,
         additional_prompts: vec![],
-        transitions: HashMap::new(),
+        on_success: None,
+        on_failure: None,
         is_start: false,
     }
 }

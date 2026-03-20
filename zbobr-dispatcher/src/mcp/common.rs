@@ -127,7 +127,6 @@ pub async fn run_role_mcp_server(
     tool: Tool,
     model: Model,
     stage_name: String,
-    transitions: std::collections::HashMap<String, String>,
     allowed_tools: HashSet<String>,
     tool_tracker: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     comment_buffer: crate::task::CommentBuffer,
@@ -154,7 +153,6 @@ pub async fn run_role_mcp_server(
                 tool,
                 model.clone(),
                 stage_name.clone(),
-                transitions.clone(),
             ))
         },
         std::sync::Arc::new(LocalSessionManager::default()),

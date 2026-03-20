@@ -283,13 +283,9 @@ impl RoleSession {
     }
 
     /// Record a tool call for transition mapping.
-    /// If `tool_name` is a key in `transitions`, it becomes the last mapped tool.
-    pub fn record_tool_call(
-        &self,
-        tool_name: &str,
-        transitions: &std::collections::HashMap<String, String>,
-    ) {
-        if transitions.contains_key(tool_name) {
+    /// Only `report_success` and `report_failure` are meaningful transition triggers.
+    pub fn record_tool_call(&self, tool_name: &str) {
+        if tool_name == "report_success" || tool_name == "report_failure" {
             *self.last_mapped_tool.lock().unwrap() = Some(tool_name.to_string());
         }
     }
@@ -768,7 +764,6 @@ mod comment_model_tests {
             Tool::Copilot,
             Model::Gpt5Mini,
             "planning".to_string(),
-            std::collections::HashMap::new(),
         );
 
         // stop_with_error is unbuffered — goes straight to backend
@@ -868,7 +863,6 @@ mod comment_model_tests {
             Tool::Copilot,
             Model::Gpt5Mini,
             "working".to_string(),
-            std::collections::HashMap::new(),
         );
         (mcp, comment_buffer)
     }
