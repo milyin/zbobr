@@ -73,7 +73,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
     let repo_backend = ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?;
 
     let zbobr = Arc::new(ZbobrDispatcherBuilder::new()
-        .with_config(Arc::new(dispatcher_config))
+        .with_config(dispatcher_config)
         .with_task_backend(Box::new(task_backend) as Box<dyn TaskBackend>)
         .with_repo_backend(Box::new(repo_backend) as Box<dyn WorktreeBackend>)
         .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(WorkflowConfig::default())))
@@ -140,7 +140,7 @@ pub async fn init_github_github(
     let repo_backend = ZbobrRepoBackendGithub::from_config(repo_backend_config).ok()?;
 
     let zbobr = Arc::new(ZbobrDispatcherBuilder::new()
-        .with_config(Arc::new(dispatcher_config))
+        .with_config(dispatcher_config)
         .with_task_backend(Box::new(task_backend) as Box<dyn TaskBackend>)
         .with_repo_backend(Box::new(repo_backend) as Box<dyn WorktreeBackend>)
         .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(WorkflowConfig::default())))

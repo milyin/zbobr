@@ -724,7 +724,7 @@ mod comment_model_tests {
             }),
         };
         let zbobr = Arc::new(crate::ZbobrDispatcherBuilder::new()
-            .with_config(Arc::new(ZbobrDispatcherConfig::default()))
+            .with_config(ZbobrDispatcherConfig::default())
             .with_task_backend(Box::new(backend.clone()) as Box<dyn TaskBackend>)
             .with_repo_backend(Box::new(DummyRepo) as Box<dyn crate::backend::WorktreeBackend>)
             .build());

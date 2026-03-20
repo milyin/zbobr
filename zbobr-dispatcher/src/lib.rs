@@ -39,17 +39,17 @@ use crate::backend::{TaskBackend, WorktreeBackend};
 #[derive(Builder)]
 pub struct ZbobrDispatcher {
     #[builder(required)]
-    config: Arc<ZbobrDispatcherConfig>,
+    config: ZbobrDispatcherConfig,
     #[builder(required)]
     task_backend: Box<dyn TaskBackend>,
     #[builder(required)]
     repo_backend: Box<dyn WorktreeBackend>,
-    #[builder(default = "Arc::new(ZbobrExecutorClaudeConfig::default())")]
-    claude: Arc<ZbobrExecutorClaudeConfig>,
-    #[builder(default = "Arc::new(ZbobrExecutorCopilotConfig::default())")]
-    copilot: Arc<ZbobrExecutorCopilotConfig>,
-    #[builder(default = "Arc::new(ZbobrExecutorMcpTesterConfig::default())")]
-    mcp_tester: Arc<ZbobrExecutorMcpTesterConfig>,
+    #[builder(default = "ZbobrExecutorClaudeConfig::default()")]
+    claude: ZbobrExecutorClaudeConfig,
+    #[builder(default = "ZbobrExecutorCopilotConfig::default()")]
+    copilot: ZbobrExecutorCopilotConfig,
+    #[builder(default = "ZbobrExecutorMcpTesterConfig::default()")]
+    mcp_tester: ZbobrExecutorMcpTesterConfig,
     #[builder(optional)]
     prompt_builder: Option<ConfiguredPromptBuilder>,
 }
@@ -80,17 +80,17 @@ impl ZbobrDispatcher {
     pub fn build_executor(&self, tool: Tool, model: Model, mcp_tester_override: Option<&ZbobrExecutorMcpTesterConfig>) -> Box<dyn ToolExecutor> {
         match tool {
             Tool::Copilot => {
-                let mut config = self.copilot.as_ref().clone();
+                let mut config = self.copilot.clone();
                 config.default_model = model;
                 Box::new(CopilotExecutor { config })
             }
             Tool::Claude => {
-                let mut config = self.claude.as_ref().clone();
+                let mut config = self.claude.clone();
                 config.default_model = model;
                 Box::new(ClaudeExecutor { config })
             }
             Tool::McpTester => Box::new(McpTesterExecutor {
-                config: mcp_tester_override.cloned().unwrap_or_else(|| self.mcp_tester.as_ref().clone()),
+                config: mcp_tester_override.cloned().unwrap_or_else(|| self.mcp_tester.clone()),
             }),
         }
     }

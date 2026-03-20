@@ -113,12 +113,12 @@ async fn main() -> anyhow::Result<()> {
     let prompt_builder = ConfiguredPromptBuilder::new(Some(location.config_dir.clone()), Arc::new(workflow.clone()));
 
     let dispatcher = Arc::new(zbobr_dispatcher::ZbobrDispatcherBuilder::new()
-        .with_config(Arc::new(config.dispatcher))
+        .with_config(config.dispatcher)
         .with_task_backend(Box::new(task_backend) as Box<dyn zbobr_dispatcher::backend::TaskBackend>)
         .with_repo_backend(Box::new(repo_backend) as Box<dyn zbobr_dispatcher::backend::WorktreeBackend>)
-        .with_claude(Arc::new(config.executor.claude))
-        .with_copilot(Arc::new(config.executor.copilot))
-        .with_mcp_tester(Arc::new(config.executor.mcp_tester))
+        .with_claude(config.executor.claude)
+        .with_copilot(config.executor.copilot)
+        .with_mcp_tester(config.executor.mcp_tester)
         .with_prompt_builder(prompt_builder)
         .build());
 
