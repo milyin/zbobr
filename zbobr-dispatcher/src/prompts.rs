@@ -6,6 +6,7 @@ use std::sync::Arc;
 use simpleinterpolation::Interpolation;
 
 use crate::backend::TaskBackend;
+use crate::mcp::unified::ALL_TOOL_NAMES;
 
 use zbobr_api::{Comment, HistoryRecordType, Task, classify_comment};
 use zbobr_api::config::{StageDefinition, WorkflowConfig};
@@ -49,6 +50,7 @@ impl ConfiguredPromptBuilder {
             &stage_def.role,
             task_id,
             task_backend,
+            &self.workflow,
         )
         .await
     }
@@ -183,26 +185,50 @@ pub fn build_template_variables<'a>(
     vars
 }
 
+/// Insert `mcp_{name}` → `name` for each tool in the allowed set.
+pub fn add_mcp_tool_variables<'a>(
+    vars: &mut HashMap<Cow<'static, str>, Cow<'a, str>>,
+    allowed_tools: &'a [String],
+) {
+    for tool_name in allowed_tools {
+        let key = format!("mcp_{tool_name}");
+        vars.insert(Cow::Owned(key), Cow::Borrowed(tool_name.as_str()));
+    }
+}
+
 /// Build full prompt by loading task data, building template variables,
 /// and rendering the template from prompt files.
 pub async fn build_full_prompt(
     user_context: &str,
-    _role_name: &str,
+    role_name: &str,
     task_id: u64,
     task_backend: &dyn TaskBackend,
+    workflow: &WorkflowConfig,
 ) -> anyhow::Result<String> {
     let weak = task_backend.get_task(task_id).await?;
     let task = weak.snapshot().await?;
     let comments = weak.get_comments().await?;
-    let vars = build_template_variables(&task, &comments);
-    // Convert to owned HashMap for Interpolation::render
+    let mut vars = build_template_variables(&task, &comments);
+
+    // Look up allowed tools for this role; fall back to all tools.
+    let allowed_tools: Vec<String> = workflow
+        .role_definition(role_name)
+        .map(|d| d.tools.clone())
+        .unwrap_or_else(|| {
+            ALL_TOOL_NAMES.iter().map(|s| s.to_string()).collect()
+        });
+    add_mcp_tool_variables(&mut vars, &allowed_tools);
+
+    // Convert to owned HashMap for Interpolation
     let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
         .into_iter()
         .map(|(k, v)| (k, Cow::Owned(v.into_owned())))
         .collect();
     let template = Interpolation::new(user_context)
         .map_err(|e| anyhow::anyhow!("Failed to parse prompt template: {e}"))?;
-    Ok(template.render(&owned_vars))
+    template
+        .try_render(&owned_vars)
+        .map_err(|e| anyhow::anyhow!("Failed to render prompt template: {e}"))
 }
 
 /// Validate that all prompt files referenced by stage definitions exist.
@@ -551,5 +577,61 @@ mod tests {
             .collect();
         let result = template.render(&owned_vars);
         assert!(result.contains("review PR-42 carefully"));
+    }
+
+    // --- MCP tool variables ---
+
+    #[test]
+    fn mcp_tool_variables_added() {
+        let allowed = vec!["report_success".to_string(), "stop_with_error".to_string()];
+        let mut vars: HashMap<Cow<'static, str>, Cow<str>> = HashMap::new();
+        add_mcp_tool_variables(&mut vars, &allowed);
+        assert_eq!(vars[&Cow::Borrowed("mcp_report_success") as &Cow<str>].as_ref(), "report_success");
+        assert_eq!(vars[&Cow::Borrowed("mcp_stop_with_error") as &Cow<str>].as_ref(), "stop_with_error");
+        assert!(!vars.contains_key(&Cow::Borrowed("mcp_configure_worktree") as &Cow<str>));
+    }
+
+    #[test]
+    fn undefined_mcp_tool_errors() {
+        let template_str = "Use {mcp_nonexistent} tool";
+        let template = Interpolation::new(template_str).unwrap();
+        let vars: HashMap<Cow<str>, Cow<str>> = HashMap::new();
+        let result = template.try_render(&vars);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("mcp_nonexistent"), "error should name the undefined variable: {err}");
+    }
+
+    #[test]
+    fn mcp_tool_renders_correctly() {
+        let template_str = "Call `{mcp_report_success}` when done";
+        let allowed = vec!["report_success".to_string()];
+        let mut vars: HashMap<Cow<'static, str>, Cow<str>> = HashMap::new();
+        add_mcp_tool_variables(&mut vars, &allowed);
+        let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
+            .into_iter()
+            .map(|(k, v)| (k, Cow::Owned(v.into_owned())))
+            .collect();
+        let template = Interpolation::new(template_str).unwrap();
+        let result = template.try_render(&owned_vars).unwrap();
+        assert_eq!(result, "Call `report_success` when done");
+    }
+
+    #[test]
+    fn unavailable_tool_for_role_errors() {
+        // A role that only has report_success should fail if prompt uses configure_worktree
+        let template_str = "Use {mcp_configure_worktree} to set up";
+        let allowed = vec!["report_success".to_string()];
+        let mut vars: HashMap<Cow<'static, str>, Cow<str>> = HashMap::new();
+        add_mcp_tool_variables(&mut vars, &allowed);
+        let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
+            .into_iter()
+            .map(|(k, v)| (k, Cow::Owned(v.into_owned())))
+            .collect();
+        let template = Interpolation::new(template_str).unwrap();
+        let result = template.try_render(&owned_vars);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("mcp_configure_worktree"), "error should name the unavailable tool: {err}");
     }
 }
