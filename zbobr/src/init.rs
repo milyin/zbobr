@@ -289,11 +289,11 @@ fn inline_stage_tables(doc: &mut toml_edit::DocumentMut) {
                 let inline = table.clone().into_inline_table();
                 *stage_item = toml_edit::Item::Value(toml_edit::Value::InlineTable(inline));
             }
-            // Reset key formatting so it gets a space before `=`
             if let Some(mut k) = stages.key_mut(key) {
                 k.fmt();
             }
         }
+        stages.set_dotted(true);
     }
 }
 
