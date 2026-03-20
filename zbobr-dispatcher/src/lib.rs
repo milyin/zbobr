@@ -43,9 +43,9 @@ pub struct ZbobrDispatcher {
     config: ZbobrDispatcherConfig,
     #[builder(required)]
     workflow: WorkflowConfig,
-    #[builder(required)]
+    #[builder(required, into)]
     task_backend: Box<dyn TaskBackend>,
-    #[builder(required)]
+    #[builder(required, into)]
     repo_backend: Box<dyn WorktreeBackend>,
     #[builder(default = "ZbobrExecutorClaudeConfig::default()")]
     claude: ZbobrExecutorClaudeConfig,

@@ -189,6 +189,12 @@ pub trait TaskBackendExt: TaskBackend {
 
 impl<T: TaskBackend + ?Sized> TaskBackendExt for T {}
 
+impl<T: TaskBackend + 'static> From<T> for Box<dyn TaskBackend> {
+    fn from(backend: T) -> Self {
+        Box::new(backend)
+    }
+}
+
 #[async_trait]
 pub trait WorktreeBackend: Send + Sync {
     /// Prepare worktree for the task. Returns Ok(true) if up-to-date,
@@ -221,4 +227,10 @@ pub trait WorktreeBackend: Send + Sync {
 
     /// Return a debug string of the backend state.
     fn debug_state(&self) -> String;
+}
+
+impl<T: WorktreeBackend + 'static> From<T> for Box<dyn WorktreeBackend> {
+    fn from(backend: T) -> Self {
+        Box::new(backend)
+    }
 }

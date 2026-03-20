@@ -79,8 +79,8 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
     let zbobr = Arc::new(ZbobrDispatcherBuilder::new()
         .with_config(dispatcher_config.clone())
         .with_workflow(WorkflowConfig::default())
-        .with_task_backend(Box::new(task_backend) as Box<dyn TaskBackend>)
-        .with_repo_backend(Box::new(repo_backend) as Box<dyn WorktreeBackend>)
+        .with_task_backend(task_backend)
+        .with_repo_backend(repo_backend)
         .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(WorkflowConfig::default())))
         .build());
 
@@ -100,8 +100,8 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
         Arc::new(ZbobrDispatcherBuilder::new()
             .with_config(factory_config.clone())
             .with_workflow(workflow.clone())
-            .with_task_backend(Box::new(tb) as Box<dyn TaskBackend>)
-            .with_repo_backend(Box::new(rb) as Box<dyn WorktreeBackend>)
+            .with_task_backend(tb)
+            .with_repo_backend(rb)
             .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(workflow)))
             .build())
     });
@@ -165,8 +165,8 @@ pub async fn init_github_github(
     let zbobr = Arc::new(ZbobrDispatcherBuilder::new()
         .with_config(dispatcher_config.clone())
         .with_workflow(WorkflowConfig::default())
-        .with_task_backend(Box::new(task_backend) as Box<dyn TaskBackend>)
-        .with_repo_backend(Box::new(repo_backend) as Box<dyn WorktreeBackend>)
+        .with_task_backend(task_backend)
+        .with_repo_backend(repo_backend)
         .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(WorkflowConfig::default())))
         .build());
 
@@ -184,8 +184,8 @@ pub async fn init_github_github(
         Arc::new(ZbobrDispatcherBuilder::new()
             .with_config(factory_config.clone())
             .with_workflow(workflow.clone())
-            .with_task_backend(Box::new(tb) as Box<dyn TaskBackend>)
-            .with_repo_backend(Box::new(rb) as Box<dyn WorktreeBackend>)
+            .with_task_backend(tb)
+            .with_repo_backend(rb)
             .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(workflow)))
             .build())
     });
