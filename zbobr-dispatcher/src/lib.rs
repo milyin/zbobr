@@ -36,14 +36,14 @@ use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig}
 use crate::backend::{TaskBackend, WorktreeBackend};
 
 /// Central struct holding dispatcher configuration, backends, and executor settings.
-#[derive(Clone, Builder)]
+#[derive(Builder)]
 pub struct ZbobrDispatcher {
     #[builder(required)]
     config: Arc<ZbobrDispatcherConfig>,
     #[builder(required)]
-    task_backend: Arc<dyn TaskBackend>,
+    task_backend: Box<dyn TaskBackend>,
     #[builder(required)]
-    repo_backend: Arc<dyn WorktreeBackend>,
+    repo_backend: Box<dyn WorktreeBackend>,
     #[builder(default = "Arc::new(ZbobrExecutorClaudeConfig::default())")]
     claude: Arc<ZbobrExecutorClaudeConfig>,
     #[builder(default = "Arc::new(ZbobrExecutorCopilotConfig::default())")]
@@ -55,41 +55,29 @@ pub struct ZbobrDispatcher {
 }
 
 impl ZbobrDispatcher {
-    /// Clone dispatcher with an overridden MCP tester executor config.
-    ///
-    /// This is used for one-off scenario overrides (for example from CLI flags)
-    /// while keeping all other executor settings unchanged.
-    pub fn with_mcp_tester_config(&self, mcp_tester: ZbobrExecutorMcpTesterConfig) -> Self {
-        Self {
-            config: Arc::clone(&self.config),
-            claude: Arc::clone(&self.claude),
-            copilot: Arc::clone(&self.copilot),
-            mcp_tester: Arc::new(mcp_tester),
-            task_backend: self.task_backend.clone(),
-            repo_backend: self.repo_backend.clone(),
-            prompt_builder: self.prompt_builder.clone(),
-        }
-    }
-
     // -- Getters --
 
     pub fn config(&self) -> &ZbobrDispatcherConfig {
         &self.config
     }
 
-    pub fn task_backend(&self) -> &Arc<dyn TaskBackend> {
-        &self.task_backend
+    pub fn task_backend(&self) -> &dyn TaskBackend {
+        &*self.task_backend
     }
 
-    pub fn repo_backend(&self) -> &Arc<dyn WorktreeBackend> {
-        &self.repo_backend
+    pub fn repo_backend(&self) -> &dyn WorktreeBackend {
+        &*self.repo_backend
     }
 
     pub fn prompt_builder(&self) -> &ConfiguredPromptBuilder {
         self.prompt_builder.as_ref().expect("prompt_builder not set on ZbobrDispatcher")
     }
 
-    pub fn build_executor(&self, tool: Tool, model: Model) -> Box<dyn ToolExecutor> {
+    pub fn mcp_tester_config(&self) -> &ZbobrExecutorMcpTesterConfig {
+        &self.mcp_tester
+    }
+
+    pub fn build_executor(&self, tool: Tool, model: Model, mcp_tester_override: Option<&ZbobrExecutorMcpTesterConfig>) -> Box<dyn ToolExecutor> {
         match tool {
             Tool::Copilot => {
                 let mut config = self.copilot.as_ref().clone();
@@ -102,7 +90,7 @@ impl ZbobrDispatcher {
                 Box::new(ClaudeExecutor { config })
             }
             Tool::McpTester => Box::new(McpTesterExecutor {
-                config: self.mcp_tester.as_ref().clone(),
+                config: mcp_tester_override.cloned().unwrap_or_else(|| self.mcp_tester.as_ref().clone()),
             }),
         }
     }
@@ -114,7 +102,6 @@ impl ZbobrDispatcher {
     #[allow(clippy::too_many_arguments)]
     pub async fn create_task(
         &self,
-        task_backend: &dyn TaskBackend,
         title: &str,
         description: &str,
         state: &str,
@@ -122,7 +109,6 @@ impl ZbobrDispatcher {
         destination_branch: Option<String>,
     ) -> anyhow::Result<u64> {
         self.create_task_with_confirm(
-            task_backend,
             title,
             description,
             state,
@@ -138,7 +124,6 @@ impl ZbobrDispatcher {
     #[allow(clippy::too_many_arguments)]
     pub async fn create_task_with_confirm(
         &self,
-        task_backend: &dyn TaskBackend,
         title: &str,
         description: &str,
         state: &str,
@@ -146,9 +131,9 @@ impl ZbobrDispatcher {
         destination_branch: Option<String>,
         confirm: bool,
     ) -> anyhow::Result<u64> {
-        let id = task_backend.create_task(title, description, state).await?;
+        let id = self.task_backend.create_task(title, description, state).await?;
         // Set promoted fields + confirm flag via modify
-        let weak = task_backend.get_task(id).await?;
+        let weak = self.task_backend.get_task(id).await?;
         let mutable = weak.upgrade().await?;
         mutable
             .modify_task(Box::new(move |mut task| {
@@ -165,7 +150,6 @@ impl ZbobrDispatcher {
 
     pub async fn setup_repository(
         &self,
-        task_backend: &dyn TaskBackend,
         force: bool,
     ) -> anyhow::Result<()> {
         tokio::fs::create_dir_all(&self.config.workspaces)
@@ -181,7 +165,7 @@ impl ZbobrDispatcher {
             "Workspaces directory ready: {}",
             self.config.workspaces.display()
         );
-        task_backend.setup(force).await
+        self.task_backend.setup(force).await
     }
 
     /// Extract repo name from a remote repo path (last path component).
@@ -193,44 +177,39 @@ impl ZbobrDispatcher {
     /// `TaskDir::new(workspaces, task_id)/repo_name` and delegates to the backend.
     pub async fn update_worktree(
         &self,
-        repo_backend: &dyn WorktreeBackend,
         identity: &zbobr_api::TaskIdentity,
     ) -> anyhow::Result<bool> {
         let repo_name = Self::extract_repo_name(&identity.destination_repository);
         let task_dir = TaskDir::new(&self.config.workspaces, identity.task_id);
         let workspace_path = task_dir.path().join(repo_name);
-        repo_backend
+        self.repo_backend
             .update_worktree(identity, &workspace_path)
             .await
     }
 
     /// Create a TaskSession bound to a specific task (full dispatcher access).
     pub fn task_session(
-        &self,
-        task_backend: Arc<dyn TaskBackend>,
-        repo_backend: Arc<dyn WorktreeBackend>,
+        self: &Arc<Self>,
         task_id: u64,
     ) -> TaskSession {
-        TaskSession::new(self.clone(), task_backend, repo_backend, task_id)
+        TaskSession::new(Arc::clone(self), task_id)
     }
 
     /// Create a RoleSession bound to a specific task (restricted MCP tool access).
     pub fn role_session(
-        &self,
-        task_backend: Arc<dyn TaskBackend>,
+        self: &Arc<Self>,
         task_id: u64,
     ) -> RoleSession {
-        RoleSession::new(self.clone(), task_backend, task_id)
+        RoleSession::new(Arc::clone(self), task_id)
     }
 
     /// Create a RoleSession with a shared tool call tracker and comment buffer.
     pub fn role_session_with_tracker(
-        &self,
-        task_backend: Arc<dyn TaskBackend>,
+        self: &Arc<Self>,
         task_id: u64,
         tracker: Arc<std::sync::Mutex<Option<String>>>,
         comment_buffer: task::CommentBuffer,
     ) -> RoleSession {
-        RoleSession::with_shared_tracker(self.clone(), task_backend, task_id, tracker, comment_buffer)
+        RoleSession::with_shared_tracker(Arc::clone(self), task_id, tracker, comment_buffer)
     }
 }

@@ -2,7 +2,6 @@ use std::collections::HashSet;
 
 use crate::{
     ZbobrDispatcher,
-    backend::TaskBackend,
     task::{Model, RoleSession, Tool},
 };
 
@@ -120,8 +119,7 @@ pub(crate) async fn serve_mcp(
 /// Run the MCP HTTP server scoped to a role and task.
 /// Returns the actual port that was assigned (spawns server in background).
 pub async fn run_role_mcp_server(
-    zbobr: ZbobrDispatcher,
-    task_backend: std::sync::Arc<dyn TaskBackend>,
+    zbobr: std::sync::Arc<ZbobrDispatcher>,
     role_name: &str,
     task_id: u64,
     tool: Tool,
@@ -139,7 +137,7 @@ pub async fn run_role_mcp_server(
     let path = format!("/{}/{}", role_name, task_id);
 
     let session: RoleSession =
-        zbobr.role_session_with_tracker(task_backend.clone(), task_id, tool_tracker, comment_buffer);
+        zbobr.role_session_with_tracker(task_id, tool_tracker, comment_buffer);
 
     let role_name_owned = role_name.to_string();
     tracing::info!("Creating UnifiedMcp service for task {task_id} role '{role_name}' at path {path}");

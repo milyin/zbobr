@@ -32,9 +32,7 @@ pub struct IntegrationTestEnv {
     pub base_path: PathBuf,
     pub workspaces_dir: PathBuf,
     pub name: &'static str,
-    pub zbobr: ZbobrDispatcher,
-    pub task_backend: Arc<dyn TaskBackend>,
-    pub repo_backend: Arc<dyn WorktreeBackend>,
+    pub zbobr: Arc<ZbobrDispatcher>,
     /// Optional remote repository slug (`owner/repo`) used by GitHub repo-backend tests.
     /// `None` for the filesystem repo backend.
     pub target_repo: Option<String>,
@@ -71,21 +69,18 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
         repos_dir: base_path.join("repos"),
     };
 
-    let task_backend: Arc<dyn TaskBackend> = Arc::new(
-        ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?),
-    );
-    let repo_backend: Arc<dyn WorktreeBackend> =
-        Arc::new(ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?);
+    let task_backend = ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config).ok()?);
+    let repo_backend = ZbobrRepoBackendFs::from_config(repo_backend_config).ok()?;
 
-    let zbobr = ZbobrDispatcherBuilder::new()
+    let zbobr = Arc::new(ZbobrDispatcherBuilder::new()
         .with_config(Arc::new(dispatcher_config))
-        .with_task_backend(Arc::clone(&task_backend))
-        .with_repo_backend(Arc::clone(&repo_backend))
+        .with_task_backend(Box::new(task_backend) as Box<dyn TaskBackend>)
+        .with_repo_backend(Box::new(repo_backend) as Box<dyn WorktreeBackend>)
         .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(WorkflowConfig::default())))
-        .build();
+        .build());
 
     zbobr
-        .setup_repository(&*task_backend, false)
+        .setup_repository(false)
         .await
         .ok()?;
 
@@ -94,8 +89,6 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
         workspaces_dir,
         name,
         zbobr,
-        task_backend,
-        repo_backend,
         target_repo: None,
         fork_owner: None,
     }))
@@ -143,20 +136,18 @@ pub async fn init_github_github(
         overwrite_author: false,
     };
 
-    let task_backend: Arc<dyn TaskBackend> =
-        Arc::new(TaskBackendGithub::from_config(task_backend_config).ok()?);
-    let repo_backend: Arc<dyn WorktreeBackend> =
-        Arc::new(ZbobrRepoBackendGithub::from_config(repo_backend_config).ok()?);
+    let task_backend = TaskBackendGithub::from_config(task_backend_config).ok()?;
+    let repo_backend = ZbobrRepoBackendGithub::from_config(repo_backend_config).ok()?;
 
-    let zbobr = ZbobrDispatcherBuilder::new()
+    let zbobr = Arc::new(ZbobrDispatcherBuilder::new()
         .with_config(Arc::new(dispatcher_config))
-        .with_task_backend(Arc::clone(&task_backend))
-        .with_repo_backend(Arc::clone(&repo_backend))
+        .with_task_backend(Box::new(task_backend) as Box<dyn TaskBackend>)
+        .with_repo_backend(Box::new(repo_backend) as Box<dyn WorktreeBackend>)
         .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(WorkflowConfig::default())))
-        .build();
+        .build());
 
     zbobr
-        .setup_repository(&*task_backend, false)
+        .setup_repository(false)
         .await
         .ok()?;
 
@@ -165,8 +156,6 @@ pub async fn init_github_github(
         workspaces_dir,
         name,
         zbobr,
-        task_backend,
-        repo_backend,
         target_repo: Some(task_repo),
         fork_owner: Some(fork_owner),
     }))
@@ -197,13 +186,13 @@ impl IntegrationTestEnv {
 
     pub async fn create_task(&self, title: &str, description: &str, state: &str) -> u64 {
         self.zbobr
-            .create_task(&*self.task_backend, title, description, state, None, None)
+            .create_task(title, description, state, None, None)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to create task: {e}", self.name))
     }
 
     pub async fn get_task(&self, task_id: u64) -> Task {
-        self.task_backend
+        self.zbobr.task_backend()
             .get_task(task_id)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name))
@@ -213,7 +202,7 @@ impl IntegrationTestEnv {
     }
 
     pub async fn get_comments(&self, task_id: u64) -> Vec<Comment> {
-        self.task_backend
+        self.zbobr.task_backend()
             .get_task(task_id)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name))
@@ -237,8 +226,7 @@ impl IntegrationTestEnv {
         let dest_repo = dest_repo.to_string();
         let dest_branch = dest_branch.to_string();
         let work_branch = work_branch.to_string();
-        let weak = self
-            .task_backend
+        let weak = self.zbobr.task_backend()
             .get_task(task_id)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name));
@@ -307,11 +295,11 @@ impl IntegrationTestEnv {
         workflow: &WorkflowConfig,
         role_scenarios: &HashMap<String, String>,
     ) {
-        self.task_backend
+        self.zbobr.task_backend()
             .set_task_state(task_id, "READY")
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to set task state: {e}", self.name));
-        self.task_backend
+        self.zbobr.task_backend()
             .set_task_stack(task_id, vec![])
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to clear task stack: {e}", self.name));
@@ -336,11 +324,9 @@ impl IntegrationTestEnv {
             ..Default::default()
         };
 
-        let stage_dispatcher = self.zbobr.with_mcp_tester_config(mcp_tester_config);
-
         let task = self.get_task(task_id).await;
 
-        process_task(&stage_dispatcher, &task, workflow)
+        process_task(&self.zbobr, &task, workflow, Some(&mcp_tester_config))
             .await
             .unwrap_or_else(|e| {
                 panic!(
@@ -392,10 +378,9 @@ impl IntegrationTestEnv {
                 ..Default::default()
             };
 
-            let stage_dispatcher = self.zbobr.with_mcp_tester_config(mcp_tester_config);
             let task = self.get_task(task_id).await;
 
-            process_task(&stage_dispatcher, &task, workflow)
+            process_task(&self.zbobr, &task, workflow, Some(&mcp_tester_config))
                 .await
                 .unwrap_or_else(|e| {
                     panic!(
@@ -438,11 +423,9 @@ impl IntegrationTestEnv {
             ..Default::default()
         };
 
-        let stage_dispatcher = self.zbobr.with_mcp_tester_config(mcp_tester_config);
-
         let task = self.get_task(task_id).await;
 
-        process_task(&stage_dispatcher, &task, workflow)
+        process_task(&self.zbobr, &task, workflow, Some(&mcp_tester_config))
             .await
             .unwrap_or_else(|e| {
                 panic!(

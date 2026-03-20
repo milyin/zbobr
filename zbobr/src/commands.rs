@@ -166,7 +166,7 @@ pub enum TaskSubcommand {
 
 /// Run the given command against the dispatcher.
 pub async fn run_command(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &Arc<ZbobrDispatcher>,
     command: Command,
     workflow: &WorkflowConfig,
 ) -> anyhow::Result<()> {
@@ -175,11 +175,11 @@ pub async fn run_command(
             unreachable!("Init is handled before dispatcher setup in main()")
         }
         Command::Setup { force } => {
-            zbobr.setup(&**zbobr.task_backend(), force).await?;
+            zbobr.setup(force).await?;
         }
         Command::Cleanup { dry_run } => {
             zbobr
-                .cleanup_closed_tasks(&**zbobr.task_backend(), dry_run)
+                .cleanup_closed_tasks(zbobr.task_backend(), dry_run)
                 .await?;
         }
         Command::Task { subcommand } => {
@@ -198,12 +198,11 @@ pub async fn run_command(
 }
 
 async fn run_task_subcommand(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &Arc<ZbobrDispatcher>,
     subcommand: TaskSubcommand,
     workflow: &WorkflowConfig,
 ) -> anyhow::Result<()> {
     let task_backend = zbobr.task_backend();
-    let repo_backend = zbobr.repo_backend();
     match subcommand {
         TaskSubcommand::Create {
             title,
@@ -215,7 +214,6 @@ async fn run_task_subcommand(
         } => {
             let id = zbobr
                 .create_task(
-                    &**task_backend,
                     &title,
                     &description,
                     &state,
@@ -225,7 +223,7 @@ async fn run_task_subcommand(
                 .await?;
             if confirm {
                 zbobr
-                    .task_session(Arc::clone(task_backend), Arc::clone(repo_backend), id)
+                    .task_session(id)
                     .set_confirm(true)
                     .await?;
             }
@@ -342,11 +340,7 @@ async fn run_task_subcommand(
             } else {
                 None
             };
-            let effective_dispatcher = match mcp_tester_config_override {
-                Some(mcp_tester) => zbobr.with_mcp_tester_config(mcp_tester),
-                None => zbobr.clone(),
-            };
-            zbobr_dispatcher::process_task(&effective_dispatcher, &task_obj, workflow).await?;
+            zbobr_dispatcher::process_task(zbobr, &task_obj, workflow, mcp_tester_config_override.as_ref()).await?;
         }
         TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
             overwrite_author(zbobr, id, force, dry_run).await?;
@@ -356,7 +350,7 @@ async fn run_task_subcommand(
 }
 
 async fn overwrite_author(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &Arc<ZbobrDispatcher>,
     id: u64,
     force: bool,
     dry_run: bool,

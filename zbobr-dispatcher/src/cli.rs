@@ -16,6 +16,7 @@ use crate::{
 };
 use zbobr_api::config::{StageDefinition, WorkflowConfig};
 use zbobr_api::CommentTag;
+use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 
 // ---------------------------------------------------------------------------
 // CLI types
@@ -237,22 +238,24 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
 // ---------------------------------------------------------------------------
 
 struct CliStageRunner<'a> {
-    zbobr: &'a ZbobrDispatcher,
+    zbobr: &'a Arc<ZbobrDispatcher>,
     task_id: u64,
     pipeline_name: &'a str,
     stage_name: &'a str,
     stage_def: &'a StageDefinition,
     workflow: &'a WorkflowConfig,
+    mcp_tester_override: Option<&'a ZbobrExecutorMcpTesterConfig>,
 }
 
 impl<'a> CliStageRunner<'a> {
     fn new(
-        zbobr: &'a ZbobrDispatcher,
+        zbobr: &'a Arc<ZbobrDispatcher>,
         task_id: u64,
         pipeline_name: &'a str,
         stage_name: &'a str,
         stage_def: &'a StageDefinition,
         workflow: &'a WorkflowConfig,
+        mcp_tester_override: Option<&'a ZbobrExecutorMcpTesterConfig>,
     ) -> Self {
         Self {
             zbobr,
@@ -261,6 +264,7 @@ impl<'a> CliStageRunner<'a> {
             stage_name,
             stage_def,
             workflow,
+            mcp_tester_override,
         }
     }
 
@@ -271,7 +275,7 @@ impl<'a> CliStageRunner<'a> {
     async fn prompt(&self) -> anyhow::Result<String> {
         self.zbobr
             .prompt_builder()
-            .build_for_stage(self.stage_def, self.task_id, &**self.zbobr.task_backend())
+            .build_for_stage(self.stage_def, self.task_id, self.zbobr.task_backend())
             .await
     }
 
@@ -282,11 +286,7 @@ impl<'a> CliStageRunner<'a> {
 
         // Set state to running
         self.zbobr
-            .task_session(
-                Arc::clone(self.zbobr.task_backend()),
-                Arc::clone(self.zbobr.repo_backend()),
-                self.task_id,
-            )
+            .task_session(self.task_id)
             .set_state(&self.running_state())
             .await?;
 
@@ -325,11 +325,7 @@ impl<'a> CliStageRunner<'a> {
 
         // Clear the triggering signal before the agent session starts.
         {
-            let task_session = self.zbobr.task_session(
-                Arc::clone(self.zbobr.task_backend()),
-                Arc::clone(self.zbobr.repo_backend()),
-                self.task_id,
-            );
+            let task_session = self.zbobr.task_session(self.task_id);
             task_session
                 .set_signal(None)
                 .await
@@ -371,7 +367,7 @@ impl<'a> CliStageRunner<'a> {
         let comment_buffer: crate::task::CommentBuffer =
             Arc::new(std::sync::Mutex::new(Vec::new()));
         let (assigned_port, server_handle) = start_mcp_server(
-            self.zbobr.clone(),
+            Arc::clone(self.zbobr),
             role,
             self.task_id,
             cli_tool,
@@ -389,7 +385,7 @@ impl<'a> CliStageRunner<'a> {
         );
 
         let prompt_text = self.prompt().await?;
-        let executor = self.zbobr.build_executor(cli_tool, model.clone());
+        let executor = self.zbobr.build_executor(cli_tool, model.clone(), self.mcp_tester_override);
         let copilot_token = match cli_tool {
             Tool::Copilot => self.zbobr.copilot_github_token(),
             _ => "",
@@ -474,9 +470,10 @@ enum WorktreeResult {
 
 /// Process a task according to its current state and signal (single-step).
 pub async fn process_task(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &Arc<ZbobrDispatcher>,
     task: &Task,
     workflow: &WorkflowConfig,
+    mcp_tester_override: Option<&ZbobrExecutorMcpTesterConfig>,
 ) -> anyhow::Result<()> {
     if task.state == "DONE" {
         println!("Task #{} is DONE — nothing to process", task.id);
@@ -491,15 +488,11 @@ pub async fn process_task(
     let action = crate::state_machine::resolve_next_action(task, workflow)?;
     match action {
         crate::state_machine::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
-            let runner = CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, workflow);
+            let runner = CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, workflow, mcp_tester_override);
             runner.run().await?;
         }
         crate::state_machine::StateAction::Done => {
-            let task_session = zbobr.task_session(
-                Arc::clone(zbobr.task_backend()),
-                Arc::clone(zbobr.repo_backend()),
-                task.id,
-            );
+            let task_session = zbobr.task_session(task.id);
             if let Some(entry) = task_session.pop_stack().await? {
                 // Return from sub-pipeline — fire the stored after-return signal
                 task_session.set_signal(Some(&entry.signal)).await?;
@@ -527,7 +520,7 @@ pub async fn process_task(
 
 /// Main manager loop: polls for tasks and dispatches role sessions.
 pub async fn run_manager_loop(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &Arc<ZbobrDispatcher>,
     interval_secs: u64,
     cleanup_interval_secs: u64,
     workflow: &WorkflowConfig,
@@ -569,7 +562,7 @@ pub async fn run_manager_loop(
 
         if last_cleanup.elapsed().as_secs() >= cleanup_interval_secs {
             tracing::info!("Running workspaces cleanup...");
-            if let Err(e) = zbobr.cleanup_closed_tasks(&**task_backend, false).await {
+            if let Err(e) = zbobr.cleanup_closed_tasks(zbobr.task_backend(), false).await {
                 tracing::warn!("Cleanup failed: {e}");
             }
             last_cleanup = std::time::Instant::now();
@@ -614,7 +607,7 @@ pub async fn run_manager_loop(
                         pipeline_name,
                         stage_name,
                     );
-                    let runner = CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, workflow);
+                    let runner = CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, workflow, None);
                     if let Err(e) = runner.run().await {
                         tracing::error!("Stage {}/{} failed for task #{}: {e}", pipeline_name, stage_name, task.id);
                     }
@@ -622,11 +615,7 @@ pub async fn run_manager_loop(
                     break;
                 }
                 crate::state_machine::StateAction::Done => {
-                    let task_session = zbobr.task_session(
-                        Arc::clone(task_backend),
-                        Arc::clone(repo_backend),
-                        task.id,
-                    );
+                    let task_session = zbobr.task_session(task.id);
                     match task_session.pop_stack().await {
                         Ok(Some(entry)) => {
                             // Return from sub-pipeline — fire stored after-return signal
@@ -698,7 +687,7 @@ pub async fn run_manager_loop(
 /// worktree, and attempts to merge upstream. If a problem is detected (undefined
 /// identity or merge conflict), dispatches to the configured handler mode.
 async fn detect_and_handle_worktree(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
     pipeline_name: &str,
     stage_name: &str,
@@ -707,7 +696,6 @@ async fn detect_and_handle_worktree(
     workflow: &WorkflowConfig,
 ) -> anyhow::Result<WorktreeResult> {
     let task_backend = zbobr.task_backend();
-    let repo_backend = zbobr.repo_backend();
     let task = task_backend.get_task(task_id).await?.snapshot().await?;
 
     // 1. Check if identity is defined
@@ -732,14 +720,14 @@ async fn detect_and_handle_worktree(
     };
 
     // 2. Update worktree
-    let is_uptodate = match zbobr.update_worktree(&**repo_backend, &identity).await {
+    let is_uptodate = match zbobr.update_worktree(&identity).await {
         Ok(up) => up,
         Err(e) => {
             let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
             tracing::error!("{msg}");
             let hostname = get_hostname();
             if let Err(post_err) = zbobr
-                .task_session(Arc::clone(task_backend), Arc::clone(repo_backend), task_id)
+                .task_session(task_id)
                 .post_comment("error", &hostname, None, None, &msg, true)
                 .await
             {
@@ -807,7 +795,7 @@ async fn detect_and_handle_worktree(
 
 /// Unified dispatch for worktree problems (Undefined identity or Conflict).
 async fn handle_worktree_problem(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
     pipeline_name: &str,
     stage_name: &str,
@@ -823,11 +811,7 @@ async fn handle_worktree_problem(
         .map(|p| p.max_retries)
         .unwrap_or(0);
 
-    let task_session = zbobr.task_session(
-        Arc::clone(zbobr.task_backend()),
-        Arc::clone(zbobr.repo_backend()),
-        task_id,
-    );
+    let task_session = zbobr.task_session(task_id);
     let pending_state = format!("{}_PENDING", pipeline_name);
 
     // Recursion guard: if already inside the handler pipeline, pause
@@ -907,14 +891,10 @@ async fn handle_worktree_problem(
 
 /// Reset worktree retries counter when a stage proceeds normally.
 async fn reset_worktree_retries(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
 ) -> anyhow::Result<()> {
-    let task_session = zbobr.task_session(
-        Arc::clone(zbobr.task_backend()),
-        Arc::clone(zbobr.repo_backend()),
-        task_id,
-    );
+    let task_session = zbobr.task_session(task_id);
     let task = task_session.get_task().await?;
     if task.worktree_retries > 0 {
         task_session
@@ -928,12 +908,10 @@ async fn reset_worktree_retries(
 }
 
 async fn ensure_pr_url(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
 ) -> anyhow::Result<()> {
-    let task_backend = zbobr.task_backend();
-    let repo_backend = zbobr.repo_backend();
-    let role_session = zbobr.role_session(Arc::clone(task_backend), task_id);
+    let role_session = zbobr.role_session(task_id);
     let task = role_session.get_task().await?;
     if task.pr_url.is_some() {
         return Ok(());
@@ -948,7 +926,7 @@ async fn ensure_pr_url(
             return Err(anyhow::anyhow!(msg));
         }
     };
-    match repo_backend.update_pr(&identity).await {
+    match zbobr.repo_backend().update_pr(&identity).await {
         Ok(pr_url) => {
             role_session
                 .modify_task(move |mut task| {
@@ -962,8 +940,7 @@ async fn ensure_pr_url(
             let msg = format!("Could not ensure PR URL for task #{task_id}: {e}");
             tracing::error!("{msg}");
             let hostname = get_hostname();
-            let task_session =
-                zbobr.task_session(Arc::clone(task_backend), Arc::clone(repo_backend), task_id);
+            let task_session = zbobr.task_session(task_id);
             if let Err(post_err) = task_session
                 .post_comment("error", &hostname, None, None, &msg, true)
                 .await
@@ -980,13 +957,12 @@ async fn ensure_pr_url(
 /// prepared task keeps its values unchanged. Called unconditionally at
 /// the start of every stage run.
 async fn seed_defaults(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
 ) -> anyhow::Result<()> {
-    let task_backend = zbobr.task_backend();
     let config = zbobr.config();
-    let task = task_backend.get_task(task_id).await?.snapshot().await?;
-    let role_session = zbobr.role_session(Arc::clone(task_backend), task_id);
+    let task = zbobr.task_backend().get_task(task_id).await?.snapshot().await?;
+    let role_session = zbobr.role_session(task_id);
 
     if let Some(default_repo) = &config.default_destination_repository
         && task.destination_repository.is_none()
@@ -1008,7 +984,7 @@ async fn seed_defaults(
 }
 
 async fn start_mcp_server(
-    zbobr: ZbobrDispatcher,
+    zbobr: Arc<ZbobrDispatcher>,
     role_name: &str,
     task_id: u64,
     tool: Tool,
@@ -1019,10 +995,9 @@ async fn start_mcp_server(
     comment_buffer: crate::task::CommentBuffer,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
-    let task_backend = Arc::clone(zbobr.task_backend());
     let role_name = role_name.to_string();
     let server_handle = tokio::spawn(async move {
-        match crate::mcp::run_role_mcp_server(zbobr, task_backend, &role_name, task_id, tool, model, stage_name, allowed_tools, tool_tracker, comment_buffer).await
+        match crate::mcp::run_role_mcp_server(zbobr, &role_name, task_id, tool, model, stage_name, allowed_tools, tool_tracker, comment_buffer).await
         {
             Ok(assigned_port) => {
                 let _ = port_tx.send(assigned_port);
@@ -1088,7 +1063,7 @@ async fn execute_tool(
 }
 
 async fn finalize_stage_session(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
     pipeline_name: &str,
     stage_name: &str,
@@ -1099,9 +1074,7 @@ async fn finalize_stage_session(
     comment_buffer: crate::task::CommentBuffer,
 ) -> anyhow::Result<Option<anyhow::Error>> {
     let role = stage_def.role.as_str();
-    let task_backend = zbobr.task_backend();
-    let repo_backend = zbobr.repo_backend();
-    let task_session = zbobr.task_session(Arc::clone(task_backend), Arc::clone(repo_backend), task_id);
+    let task_session = zbobr.task_session(task_id);
     let pending_state = format!("{}_PENDING", pipeline_name);
 
     // Flush buffered MCP comments as a single combined comment signed by stage name.
@@ -1206,7 +1179,7 @@ async fn finalize_stage_session(
     // Compute post-stage signal from transitions map.
     // If the agent already set a signal during the session (e.g. reject),
     // that signal takes priority.
-    let current_task = task_backend.get_task(task_id).await?.snapshot().await?;
+    let current_task = zbobr.task_backend().get_task(task_id).await?.snapshot().await?;
     if !current_task.pause && current_task.signal.is_none() {
         let raw_signal = compute_post_stage_signal(stage_def, last_mapped_tool);
         if let Some((call_part, after_return)) = parse_compound_call(&raw_signal) {
@@ -1225,7 +1198,7 @@ async fn finalize_stage_session(
 }
 
 async fn perform_stash_and_push(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
     work_dir: &Path,
     role: &str,

@@ -685,21 +685,6 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
         ),
     ]);
 
-    let config = zbobr_dispatcher::ZbobrDispatcherConfig {
-        workspaces: env.workspaces_dir.clone(),
-        tool: Tool::McpTester,
-        ..zbobr_dispatcher::ZbobrDispatcherConfig::default()
-    };
-    let zbobr_with_undefined = zbobr_dispatcher::ZbobrDispatcherBuilder::new()
-        .with_config(std::sync::Arc::new(config))
-        .with_task_backend(std::sync::Arc::clone(&env.task_backend))
-        .with_repo_backend(std::sync::Arc::clone(&env.repo_backend))
-        .with_prompt_builder(zbobr_dispatcher::prompts::ConfiguredPromptBuilder::new(
-            None,
-            std::sync::Arc::new(WorkflowConfig::default()),
-        ))
-        .build();
-
     // First call: should detect undefined identity, dispatch to preparing pipeline
     {
         let task = env.get_task(task_id).await;
@@ -723,8 +708,7 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
             scenarios: scenario_paths,
             ..Default::default()
         };
-        let dispatcher = zbobr_with_undefined.with_mcp_tester_config(mcp_tester_config);
-        zbobr_dispatcher::cli::process_task(&dispatcher, &task, &workflow)
+        zbobr_dispatcher::cli::process_task(&env.zbobr, &task, &workflow, Some(&mcp_tester_config))
             .await
             .unwrap();
     }
@@ -784,7 +768,7 @@ pub async fn run_retry_limit(env: &IntegrationTestEnv) {
 
     // Set worktree_retries to the max already (simulating prior retries)
     {
-        let weak = env.task_backend.get_task(task_id).await.unwrap();
+        let weak = env.zbobr.task_backend().get_task(task_id).await.unwrap();
         let mutable = weak.upgrade().await.unwrap();
         mutable
             .modify_task(Box::new(|mut task| {

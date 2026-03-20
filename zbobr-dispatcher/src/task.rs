@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use crate::{
     TaskDir, ZbobrDispatcher,
-    backend::{TaskBackend, WorktreeBackend},
 };
 
 // ---------------------------------------------------------------------------
@@ -33,8 +32,7 @@ pub type CommentBuffer = Arc<std::sync::Mutex<Vec<BufferedComment>>>;
 /// State and stack are protected — only the dispatcher may change them.
 #[derive(Clone)]
 pub struct RoleSession {
-    zbobr: ZbobrDispatcher,
-    task_backend: Arc<dyn TaskBackend>,
+    zbobr: Arc<ZbobrDispatcher>,
     task_id: u64,
     /// Tracks the last MCP tool call that matched a transition key.
     last_mapped_tool: Arc<std::sync::Mutex<Option<String>>>,
@@ -44,10 +42,9 @@ pub struct RoleSession {
 }
 
 impl RoleSession {
-    pub(crate) fn new(zbobr: ZbobrDispatcher, task_backend: Arc<dyn TaskBackend>, task_id: u64) -> Self {
+    pub(crate) fn new(zbobr: Arc<ZbobrDispatcher>, task_id: u64) -> Self {
         Self {
             zbobr,
-            task_backend,
             task_id,
             last_mapped_tool: Arc::new(std::sync::Mutex::new(None)),
             comment_buffer: None,
@@ -55,15 +52,13 @@ impl RoleSession {
     }
 
     pub(crate) fn with_shared_tracker(
-        zbobr: ZbobrDispatcher,
-        task_backend: Arc<dyn TaskBackend>,
+        zbobr: Arc<ZbobrDispatcher>,
         task_id: u64,
         tracker: Arc<std::sync::Mutex<Option<String>>>,
         comment_buffer: CommentBuffer,
     ) -> Self {
         Self {
             zbobr,
-            task_backend,
             task_id,
             last_mapped_tool: tracker,
             comment_buffer: Some(comment_buffer),
@@ -96,7 +91,7 @@ impl RoleSession {
 
     /// Read the full task state.
     pub async fn get_task(&self) -> anyhow::Result<Task> {
-        let weak = self.task_backend.get_task(self.task_id).await?;
+        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         weak.snapshot().await
     }
 
@@ -107,7 +102,7 @@ impl RoleSession {
 
     /// Build the full comment list including buffered comments.
     async fn comments_with_buffer(&self) -> anyhow::Result<(Vec<Comment>, String)> {
-        let weak = self.task_backend.get_task(self.task_id).await?;
+        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mut comments = weak.get_comments().await?;
         let task = weak.snapshot().await?;
         if let Some(ref buffer) = self.comment_buffer {
@@ -155,7 +150,7 @@ impl RoleSession {
     where
         F: FnOnce(Task) -> Task + Send + 'static,
     {
-        let weak = self.task_backend.get_task(self.task_id).await?;
+        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
             .modify_task(Box::new(move |mut task| {
@@ -171,7 +166,7 @@ impl RoleSession {
 
     /// Get all comments as structured `Comment` objects.
     pub async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
-        let weak = self.task_backend.get_task(self.task_id).await?;
+        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         weak.get_comments().await
     }
 
@@ -196,7 +191,7 @@ impl RoleSession {
                 return Ok(());
             }
         }
-        let weak = self.task_backend.get_task(self.task_id).await?;
+        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
             .post_comment(stage, hostname, tool, model, body, hidden)
@@ -306,23 +301,17 @@ impl RoleSession {
 /// Can change stage, conflict flag, and all other fields.
 #[derive(Clone)]
 pub struct TaskSession {
-    zbobr: ZbobrDispatcher,
-    task_backend: Arc<dyn TaskBackend>,
-    repo_backend: Arc<dyn WorktreeBackend>,
+    zbobr: Arc<ZbobrDispatcher>,
     task_id: u64,
 }
 
 impl TaskSession {
     pub(crate) fn new(
-        zbobr: ZbobrDispatcher,
-        task_backend: Arc<dyn TaskBackend>,
-        repo_backend: Arc<dyn WorktreeBackend>,
+        zbobr: Arc<ZbobrDispatcher>,
         task_id: u64,
     ) -> Self {
         Self {
             zbobr,
-            task_backend,
-            repo_backend,
             task_id,
         }
     }
@@ -333,12 +322,12 @@ impl TaskSession {
 
     /// Get a restricted RoleSession view for MCP tool operations.
     pub fn role_session(&self) -> RoleSession {
-        RoleSession::new(self.zbobr.clone(), Arc::clone(&self.task_backend), self.task_id)
+        RoleSession::new(Arc::clone(&self.zbobr), self.task_id)
     }
 
     /// Read the full task state.
     pub async fn get_task(&self) -> anyhow::Result<Task> {
-        let weak = self.task_backend.get_task(self.task_id).await?;
+        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         weak.snapshot().await
     }
 
@@ -352,7 +341,7 @@ impl TaskSession {
     where
         F: FnOnce(Task) -> Task + Send + 'static,
     {
-        let weak = self.task_backend.get_task(self.task_id).await?;
+        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
             .modify_task(Box::new(move |mut task| {
@@ -439,7 +428,7 @@ impl TaskSession {
             if let Err(e) = zbobr_utility::delete_placeholder_commit(&work_dir, work_branch).await {
                 tracing::warn!("Failed to delete placeholder commit for task #{task_id}: {e}");
             } else if let Some(identity) = task.identity() {
-                if let Err(e) = self.repo_backend.update_pr(&identity).await {
+                if let Err(e) = self.zbobr.repo_backend().update_pr(&identity).await {
                     tracing::warn!(
                         "Failed to push branch after placeholder deletion for task #{task_id}: {e}"
                     );
@@ -474,7 +463,7 @@ impl TaskSession {
         body: &str,
         hidden: bool,
     ) -> anyhow::Result<()> {
-        let weak = self.task_backend.get_task(self.task_id).await?;
+        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
             .post_comment(stage, hostname, tool, model, body, hidden)
@@ -725,33 +714,32 @@ mod comment_model_tests {
         }
     }
 
-    fn make_test_parts() -> (crate::ZbobrDispatcher, Arc<ArcTrackingBackend>, Arc<DummyRepo>) {
-        let backend = Arc::new(ArcTrackingBackend {
+    fn make_test_parts() -> (Arc<crate::ZbobrDispatcher>, ArcTrackingBackend) {
+        let backend = ArcTrackingBackend {
             inner: Arc::new(TrackingBackend {
                 tasks: Mutex::new(HashMap::new()),
                 comments: Mutex::new(HashMap::new()),
                 next_id: AtomicU64::new(0),
                 locks: Mutex::new(HashMap::new()),
             }),
-        });
-        let repo = Arc::new(DummyRepo);
-        let zbobr = crate::ZbobrDispatcherBuilder::new()
+        };
+        let zbobr = Arc::new(crate::ZbobrDispatcherBuilder::new()
             .with_config(Arc::new(ZbobrDispatcherConfig::default()))
-            .with_task_backend(backend.clone() as Arc<dyn TaskBackend>)
-            .with_repo_backend(repo.clone() as Arc<dyn WorktreeBackend>)
-            .build();
-        (zbobr, backend, repo)
+            .with_task_backend(Box::new(backend.clone()) as Box<dyn TaskBackend>)
+            .with_repo_backend(Box::new(DummyRepo) as Box<dyn crate::backend::WorktreeBackend>)
+            .build());
+        (zbobr, backend)
     }
 
     #[tokio::test]
     async fn mcp_helper_includes_explicit_model() {
-        let (zbobr, task_backend, _repo_backend) = make_test_parts();
+        let (zbobr, task_backend) = make_test_parts();
         let id = zbobr
-            .create_task(&*task_backend, "t", "", "READY", None, None)
+            .create_task("t", "", "READY", None, None)
             .await
             .unwrap();
 
-        let session = zbobr.role_session(task_backend.clone() as Arc<dyn TaskBackend>, id);
+        let session = zbobr.role_session(id);
         let allowed_tools: std::collections::HashSet<String> =
             ["get_history_index", "stop_with_error", "report_success"]
                 .iter()
@@ -780,14 +768,14 @@ mod comment_model_tests {
 
     #[tokio::test]
     async fn dispatcher_posts_have_no_model() {
-        let (zbobr, task_backend, repo_backend) = make_test_parts();
+        let (zbobr, task_backend) = make_test_parts();
         let id = zbobr
-            .create_task(&*task_backend, "t", "", "READY", None, None)
+            .create_task("t", "", "READY", None, None)
             .await
             .unwrap();
 
         zbobr
-            .task_session(task_backend.clone() as Arc<dyn TaskBackend>, repo_backend.clone() as Arc<dyn WorktreeBackend>, id)
+            .task_session(id)
             .post_comment("error", "host", None, None, "dispatcher error", true)
             .await
             .unwrap();
@@ -840,14 +828,12 @@ mod comment_model_tests {
     // -----------------------------------------------------------------------
 
     fn make_buffered_mcp(
-        zbobr: &crate::ZbobrDispatcher,
-        task_backend: Arc<dyn TaskBackend>,
+        zbobr: &Arc<crate::ZbobrDispatcher>,
         task_id: u64,
     ) -> (crate::mcp::unified::UnifiedMcp, CommentBuffer) {
         let tracker = Arc::new(std::sync::Mutex::new(None::<String>));
         let comment_buffer: CommentBuffer = Arc::new(std::sync::Mutex::new(Vec::new()));
         let session = zbobr.role_session_with_tracker(
-            task_backend,
             task_id,
             tracker,
             Arc::clone(&comment_buffer),
@@ -873,14 +859,14 @@ mod comment_model_tests {
 
     #[tokio::test]
     async fn buffered_comments_accumulate_in_buffer_not_backend() {
-        let (zbobr, task_backend, _repo) = make_test_parts();
+        let (zbobr, task_backend) = make_test_parts();
         let id = zbobr
-            .create_task(&*task_backend, "t", "desc", "READY", None, None)
+            .create_task("t", "desc", "READY", None, None)
             .await
             .unwrap();
 
         let (mcp, comment_buffer) =
-            make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
+            make_buffered_mcp(&zbobr, id);
 
         // report_success is buffered
         let _ = mcp.report_success_impl("result one").await;
@@ -898,14 +884,14 @@ mod comment_model_tests {
 
     #[tokio::test]
     async fn error_comments_are_unbuffered() {
-        let (zbobr, task_backend, _repo) = make_test_parts();
+        let (zbobr, task_backend) = make_test_parts();
         let id = zbobr
-            .create_task(&*task_backend, "t", "desc", "READY", None, None)
+            .create_task("t", "desc", "READY", None, None)
             .await
             .unwrap();
 
         let (mcp, comment_buffer) =
-            make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
+            make_buffered_mcp(&zbobr, id);
 
         // stop_with_error is unbuffered — should go directly to backend
         let _ = mcp.stop_with_error_impl("something broke").await;
@@ -927,14 +913,14 @@ mod comment_model_tests {
 
     #[tokio::test]
     async fn stop_with_question_is_unbuffered() {
-        let (zbobr, task_backend, _repo) = make_test_parts();
+        let (zbobr, task_backend) = make_test_parts();
         let id = zbobr
-            .create_task(&*task_backend, "t", "desc", "READY", None, None)
+            .create_task("t", "desc", "READY", None, None)
             .await
             .unwrap();
 
         let (mcp, comment_buffer) =
-            make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
+            make_buffered_mcp(&zbobr, id);
 
         let _ = mcp.stop_with_question_impl("need help").await;
 
@@ -953,14 +939,14 @@ mod comment_model_tests {
 
     #[tokio::test]
     async fn each_buffered_comment_marked_by_tool_name() {
-        let (zbobr, task_backend, _repo) = make_test_parts();
+        let (zbobr, _task_backend) = make_test_parts();
         let id = zbobr
-            .create_task(&*task_backend, "t", "desc", "READY", None, None)
+            .create_task("t", "desc", "READY", None, None)
             .await
             .unwrap();
 
         let (mcp, comment_buffer) =
-            make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
+            make_buffered_mcp(&zbobr, id);
 
         // Call the two buffered MCP tools
         let _ = mcp.report_success_impl("first results").await;
@@ -976,14 +962,14 @@ mod comment_model_tests {
 
     #[tokio::test]
     async fn buffered_comments_visible_in_get_history_index() {
-        let (zbobr, task_backend, _repo) = make_test_parts();
+        let (zbobr, _task_backend) = make_test_parts();
         let id = zbobr
-            .create_task(&*task_backend, "t", "task description", "READY", None, None)
+            .create_task("t", "task description", "READY", None, None)
             .await
             .unwrap();
 
         let (mcp, _comment_buffer) =
-            make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
+            make_buffered_mcp(&zbobr, id);
 
         // Post a buffered comment
         let _ = mcp.report_success_impl("my results").await;
@@ -998,14 +984,14 @@ mod comment_model_tests {
 
     #[tokio::test]
     async fn mixed_buffered_and_unbuffered_ordering() {
-        let (zbobr, task_backend, _repo) = make_test_parts();
+        let (zbobr, task_backend) = make_test_parts();
         let id = zbobr
-            .create_task(&*task_backend, "t", "desc", "READY", None, None)
+            .create_task("t", "desc", "READY", None, None)
             .await
             .unwrap();
 
         let (mcp, comment_buffer) =
-            make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
+            make_buffered_mcp(&zbobr, id);
 
         // Buffered
         let _ = mcp.report_success_impl("first").await;
