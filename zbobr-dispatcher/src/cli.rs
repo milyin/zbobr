@@ -857,7 +857,7 @@ async fn handle_worktree_problem(
 
     // Retry limit check
     let task = task_session.get_task().await?;
-    if task.worktree_retries >= max_retries {
+    if task.worktree_retries > max_retries {
         tracing::error!(
             "Task #{task_id}: worktree problem {:?} retry limit ({max_retries}) reached — pausing",
             problem
