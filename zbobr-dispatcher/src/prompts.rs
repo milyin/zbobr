@@ -10,6 +10,16 @@ use crate::backend::TaskBackend;
 use zbobr_api::{Comment, HistoryRecordType, Task, classify_comment};
 use zbobr_api::config::{StageDefinition, WorkflowConfig};
 
+// Template placeholder names used in prompt .md files.
+pub const VAR_TITLE: &str = "title";
+pub const VAR_DESCRIPTION: &str = "description";
+pub const VAR_DESTINATION_REPOSITORY: &str = "destination_repository";
+pub const VAR_DESTINATION_BRANCH: &str = "destination_branch";
+pub const VAR_WORK_BRANCH: &str = "work_branch";
+pub const VAR_CHECKLIST: &str = "checklist";
+pub const VAR_LAST_REPORT: &str = "last_report";
+pub const VAR_LAST_REQUEST: &str = "last_request";
+
 #[derive(Clone)]
 pub struct ConfiguredPromptBuilder {
     base_path: Option<PathBuf>,
@@ -117,25 +127,25 @@ pub fn build_template_variables<'a>(
     let mut vars: HashMap<Cow<'static, str>, Cow<'a, str>> = HashMap::new();
 
     // Task fields
-    vars.insert(Cow::Borrowed("title"), Cow::Borrowed(&task.title));
-    vars.insert(Cow::Borrowed("description"), Cow::Borrowed(&task.description));
+    vars.insert(Cow::Borrowed(VAR_TITLE), Cow::Borrowed(&task.title));
+    vars.insert(Cow::Borrowed(VAR_DESCRIPTION), Cow::Borrowed(&task.description));
     vars.insert(
-        Cow::Borrowed("destination_repository"),
+        Cow::Borrowed(VAR_DESTINATION_REPOSITORY),
         Cow::Borrowed(task.destination_repository.as_deref().unwrap_or("")),
     );
     vars.insert(
-        Cow::Borrowed("destination_branch"),
+        Cow::Borrowed(VAR_DESTINATION_BRANCH),
         Cow::Borrowed(task.destination_branch.as_deref().unwrap_or("")),
     );
     vars.insert(
-        Cow::Borrowed("work_branch"),
+        Cow::Borrowed(VAR_WORK_BRANCH),
         Cow::Borrowed(task.work_branch.as_deref().unwrap_or("")),
     );
 
     // Checklist: unchecked items
     let unchecked: Vec<_> = task.checklist.iter().filter(|item| !item.checked).collect();
     if unchecked.is_empty() {
-        vars.insert(Cow::Borrowed("checklist"), Cow::Borrowed(""));
+        vars.insert(Cow::Borrowed(VAR_CHECKLIST), Cow::Borrowed(""));
     } else {
         let mut checklist_text = String::new();
         for item in &unchecked {
@@ -144,7 +154,7 @@ pub fn build_template_variables<'a>(
             }
             checklist_text.push_str(&format!("- [ ] [id: {}] {}", item.id, item.text));
         }
-        vars.insert(Cow::Borrowed("checklist"), Cow::Owned(checklist_text));
+        vars.insert(Cow::Borrowed(VAR_CHECKLIST), Cow::Owned(checklist_text));
     }
 
     // last_report: last Success or Failure comment (stripped tool prefix)
@@ -158,7 +168,7 @@ pub fn build_template_variables<'a>(
         })
         .map(|c| strip_tool_prefix(&c.text))
         .unwrap_or("");
-    vars.insert(Cow::Borrowed("last_report"), Cow::Borrowed(last_report));
+    vars.insert(Cow::Borrowed(VAR_LAST_REPORT), Cow::Borrowed(last_report));
 
     // last_request: last user comment (Other type), fallback to task.description
     let last_request = comments
@@ -168,7 +178,7 @@ pub fn build_template_variables<'a>(
         .find(|c| classify_comment(&c.text) == HistoryRecordType::Other)
         .map(|c| c.text.as_str())
         .unwrap_or(&task.description);
-    vars.insert(Cow::Borrowed("last_request"), Cow::Borrowed(last_request));
+    vars.insert(Cow::Borrowed(VAR_LAST_REQUEST), Cow::Borrowed(last_request));
 
     vars
 }
@@ -378,8 +388,8 @@ mod tests {
         let vars = build_template_variables(&task, &[]);
         let keys: Vec<&str> = vars.keys().map(|k| k.as_ref()).collect();
         for expected in &[
-            "title", "description", "destination_repository", "destination_branch",
-            "work_branch", "checklist", "last_report", "last_request",
+            VAR_TITLE, VAR_DESCRIPTION, VAR_DESTINATION_REPOSITORY, VAR_DESTINATION_BRANCH,
+            VAR_WORK_BRANCH, VAR_CHECKLIST, VAR_LAST_REPORT, VAR_LAST_REQUEST,
         ] {
             assert!(keys.contains(expected), "missing key: {expected}");
         }
@@ -394,11 +404,11 @@ mod tests {
         task.work_branch = Some("feature-x".to_string());
 
         let vars = build_template_variables(&task, &[]);
-        assert_eq!(vars[&Cow::Borrowed("title") as &Cow<str>].as_ref(), "My Task");
-        assert_eq!(vars[&Cow::Borrowed("description") as &Cow<str>].as_ref(), "Task desc");
-        assert_eq!(vars[&Cow::Borrowed("destination_repository") as &Cow<str>].as_ref(), "owner/repo");
-        assert_eq!(vars[&Cow::Borrowed("destination_branch") as &Cow<str>].as_ref(), "main");
-        assert_eq!(vars[&Cow::Borrowed("work_branch") as &Cow<str>].as_ref(), "feature-x");
+        assert_eq!(vars[&Cow::Borrowed(VAR_TITLE) as &Cow<str>].as_ref(), "My Task");
+        assert_eq!(vars[&Cow::Borrowed(VAR_DESCRIPTION) as &Cow<str>].as_ref(), "Task desc");
+        assert_eq!(vars[&Cow::Borrowed(VAR_DESTINATION_REPOSITORY) as &Cow<str>].as_ref(), "owner/repo");
+        assert_eq!(vars[&Cow::Borrowed(VAR_DESTINATION_BRANCH) as &Cow<str>].as_ref(), "main");
+        assert_eq!(vars[&Cow::Borrowed(VAR_WORK_BRANCH) as &Cow<str>].as_ref(), "feature-x");
     }
 
     #[test]
@@ -410,7 +420,7 @@ mod tests {
             ChecklistItem { id: "3".to_string(), checked: false, text: "Another".to_string() },
         ];
         let vars = build_template_variables(&task, &[]);
-        let checklist = vars[&Cow::Borrowed("checklist") as &Cow<str>].as_ref();
+        let checklist = vars[&Cow::Borrowed(VAR_CHECKLIST) as &Cow<str>].as_ref();
         assert!(checklist.contains("- [ ] [id: 2] Todo item"));
         assert!(checklist.contains("- [ ] [id: 3] Another"));
         assert!(!checklist.contains("Done item"));
@@ -425,7 +435,7 @@ mod tests {
             dummy_comment("another user msg"),
         ];
         let vars = build_template_variables(&task, &comments);
-        assert_eq!(vars[&Cow::Borrowed("last_report") as &Cow<str>].as_ref(), "All tests passed");
+        assert_eq!(vars[&Cow::Borrowed(VAR_LAST_REPORT) as &Cow<str>].as_ref(), "All tests passed");
     }
 
     #[test]
@@ -435,7 +445,7 @@ mod tests {
             dummy_comment("[report_failure]\nBuild failed"),
         ];
         let vars = build_template_variables(&task, &comments);
-        assert_eq!(vars[&Cow::Borrowed("last_report") as &Cow<str>].as_ref(), "Build failed");
+        assert_eq!(vars[&Cow::Borrowed(VAR_LAST_REPORT) as &Cow<str>].as_ref(), "Build failed");
     }
 
     #[test]
@@ -446,7 +456,7 @@ mod tests {
             dummy_comment("[report_success]\nDone"),
         ];
         let vars = build_template_variables(&task, &comments);
-        assert_eq!(vars[&Cow::Borrowed("last_request") as &Cow<str>].as_ref(), "Please fix the bug");
+        assert_eq!(vars[&Cow::Borrowed(VAR_LAST_REQUEST) as &Cow<str>].as_ref(), "Please fix the bug");
     }
 
     #[test]
@@ -457,7 +467,7 @@ mod tests {
             dummy_comment("[report_success]\nDone"),
         ];
         let vars = build_template_variables(&task, &comments);
-        assert_eq!(vars[&Cow::Borrowed("last_request") as &Cow<str>].as_ref(), "Implement feature X");
+        assert_eq!(vars[&Cow::Borrowed(VAR_LAST_REQUEST) as &Cow<str>].as_ref(), "Implement feature X");
     }
 
     // --- template rendering ---

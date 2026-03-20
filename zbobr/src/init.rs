@@ -37,8 +37,8 @@ pub async fn init_workspace(dest: &Path) -> anyhow::Result<()> {
     tokio::fs::create_dir_all(&repos_dir).await?;
 
     // Write prompt files
-    for (role, content) in ROLE_PROMPTS {
-        let path = prompts_dir.join(format!("{role}.md"));
+    for (name, content) in PROMPT_FILES {
+        let path = prompts_dir.join(format!("{name}.md"));
         tokio::fs::write(&path, content).await?;
         println!("  wrote {}", path.display());
     }
@@ -109,38 +109,46 @@ fn default_config_toml() -> RootConfigToml {
 
 /// Build the default workflow configuration with predefined pipelines and roles.
 fn default_workflow() -> WorkflowConfig {
+    let task_prompt = vec![PathBuf::from("prompts/task.md")];
+
     let mut main_stages = HashMap::new();
     main_stages.insert("planning".to_string(), StageDefinition {
         role: "planner".into(),
         on_success: Some("go_working".into()),
+        additional_prompts: task_prompt.clone(),
         ..Default::default()
     });
     main_stages.insert("working".to_string(), StageDefinition {
         role: "worker".into(),
         on_success: Some("go_reviewing".into()),
         on_failure: Some("go_planning".into()),
+        additional_prompts: task_prompt.clone(),
         ..Default::default()
     });
     main_stages.insert("reviewing".to_string(), StageDefinition {
         role: "reviewer".into(),
         on_success: Some("go_merging".into()),
         on_failure: Some("go_working".into()),
+        additional_prompts: task_prompt.clone(),
         ..Default::default()
     });
     main_stages.insert("merging".to_string(), StageDefinition {
         role: "merger".into(),
+        additional_prompts: task_prompt.clone(),
         ..Default::default()
     });
 
     let mut init_stages = HashMap::new();
     init_stages.insert("preparing".to_string(), StageDefinition {
         role: "preparator".into(),
+        additional_prompts: task_prompt.clone(),
         ..Default::default()
     });
 
     let mut merge_stages = HashMap::new();
     merge_stages.insert("merging".to_string(), StageDefinition {
         role: "merger".into(),
+        additional_prompts: task_prompt,
         ..Default::default()
     });
 
@@ -298,17 +306,43 @@ fn inline_stage_tables(doc: &mut toml_edit::DocumentMut) {
 }
 
 // ---------------------------------------------------------------------------
-// Default role prompts
+// Default prompt files
 // ---------------------------------------------------------------------------
 
-const ROLE_PROMPTS: &[(&str, &str)] = &[
+const PROMPT_FILES: &[(&str, &str)] = &[
     ("preparator", PREPARATOR_PROMPT),
     ("planner", PLANNER_PROMPT),
     ("worker", WORKER_PROMPT),
     ("reviewer", REVIEWER_PROMPT),
     ("tester", TESTER_PROMPT),
     ("merger", MERGER_PROMPT),
+    ("task", TASK_TEMPLATE),
 ];
+
+const TASK_TEMPLATE: &str = r#"---
+
+# Current task: {title}
+
+# Task description
+
+{description}
+
+# Destination branch: {destination_branch}
+
+# Work branch: {work_branch}
+
+# Last report
+
+{last_report}
+
+# Last request
+
+{last_request}
+
+# Unchecked checklist items
+
+{checklist}
+"#;
 
 const PREPARATOR_PROMPT: &str = r#"# Preparator Agent
 
@@ -328,8 +362,7 @@ Read the task description below and set the required parameters for the implemen
 2. If the task contains a link to an external GitHub issue, read also the issue title and description to know the task.
 3. Set task parameters using `configure_worktree`:
     - Call `configure_worktree` with `destination_repository` (in owner/repo format from the task description), `destination_branch` (from the task description or "main"), and `work_branch_postfix` (short but meaningful name related to the task).
-4. Call `report_success` to provide a brief and concise report of the parameters you set.
-"#;
+4. Call `report_success` to provide a brief and concise report of the parameters you set."#;
 
 const PLANNER_PROMPT: &str = r#"# Planner Agent
 
@@ -364,8 +397,7 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
    - Use `add_checklist_item` to add implementation steps for the worker
    - Use `delete_checklist_item` to remove unnecessary unchecked items
    - The checklist items ARE the plan — they should fully describe what the worker needs to do
-8. **Finish by calling `report_success`** with a brief rationale (why this approach was chosen, key design decisions, important constraints). Mention the chosen analog and why it's the right one to follow. Do NOT repeat the checklist items — the plan details are already captured there. This call finishes the session.
-"#;
+8. **Finish by calling `report_success`** with a brief rationale (why this approach was chosen, key design decisions, important constraints). Mention the chosen analog and why it's the right one to follow. Do NOT repeat the checklist items — the plan details are already captured there. This call finishes the session."#;
 
 const WORKER_PROMPT: &str = r#"# Worker Agent
 
@@ -430,8 +462,7 @@ Review the implementation changes and ensure they meet coding standards and task
 4. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. **Do not run any tests yourself; testing is handled in a separate Testing stage.**
 5. Verify that all changes are related to the task and are necessary for the implementation. Flag any extraneous changes that do not directly contribute to the task requirements or plan.
 6. Prepare a detailed review report describing any issues found, suggested fixes, and overall assessment. Include your assessment of analog consistency.
-7. Call `report_success` if the implementation is correct and complete, or `report_failure` if issues were found. Pass the review report as a parameter to these tools.
-"#;
+7. Call `report_success` if the implementation is correct and complete, or `report_failure` if issues were found. Pass the review report as a parameter to these tools."#;
 
 const TESTER_PROMPT: &str = r#"# Tester Agent
 
@@ -474,8 +505,7 @@ You have read-only access to the task plan and the repository for testing:
 - **Do not modify files**: You are inspecting and testing only. Do not create commits or change code.
 - **Comprehensive testing**: Run all test commands discovered from the CI unless they require complex environment configuration. Mention skipped tests in the report.
 - **Concise but exhaustive reporting**: Include to the report exact command line of each test executed. In case of error append the extract of test log with the error message.
-- **Early termination if necessary**: If some test run shows massive failures indicating a fundamental issue with the implementation, you may stop further testing and make `report_failure` report immediately. Otherwise execute full test suite.
-"#;
+- **Early termination if necessary**: If some test run shows massive failures indicating a fundamental issue with the implementation, you may stop further testing and make `report_failure` report immediately. Otherwise execute full test suite."#;
 
 const MERGER_PROMPT: &str = r#"# Merger Agent
 
@@ -522,5 +552,4 @@ You have read access to the task and repository:
 - Combine non-overlapping changes from both branches (destination and work) when possible
 - For conflicting edits to the same code, ask the user which version is preferred
 - Preserve the intent of both branches' changes if both changes are valid
-- Do NOT delete either branch's work without explicit user guidance
-"#;
+- Do NOT delete either branch's work without explicit user guidance"#;
