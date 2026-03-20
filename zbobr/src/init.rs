@@ -73,8 +73,6 @@ fn default_config_toml() -> RootConfigToml {
             work_branch_prefix: Some("zbobr_fix".into()),
             default_destination_repository: None,
             default_destination_branch: None,
-            on_conflict: Some("conflict".into()),
-            on_undefined: Some("preparing".into()),
             max_retries_undefined: Some(1),
             max_retries_conflict: Some(5),
         }),
@@ -133,24 +131,24 @@ fn default_workflow() -> WorkflowConfig {
         ..Default::default()
     });
 
-    let mut preparing_stages = HashMap::new();
-    preparing_stages.insert("preparing".to_string(), StageDefinition {
+    let mut init_stages = HashMap::new();
+    init_stages.insert("preparing".to_string(), StageDefinition {
         role: "preparator".into(),
         is_start: true,
         ..Default::default()
     });
 
-    let mut conflict_stages = HashMap::new();
-    conflict_stages.insert("merging".to_string(), StageDefinition {
+    let mut merge_stages = HashMap::new();
+    merge_stages.insert("merging".to_string(), StageDefinition {
         role: "merger".into(),
         is_start: true,
         ..Default::default()
     });
 
     let mut pipelines = HashMap::new();
-    pipelines.insert("main".to_string(), PipelineConfig { stages: main_stages });
-    pipelines.insert("preparing".to_string(), PipelineConfig { stages: preparing_stages });
-    pipelines.insert("conflict".to_string(), PipelineConfig { stages: conflict_stages });
+    pipelines.insert(WorkflowConfig::MAIN_PIPELINE.to_string(), PipelineConfig { stages: main_stages });
+    pipelines.insert(WorkflowConfig::INIT_PIPELINE.to_string(), PipelineConfig { stages: init_stages });
+    pipelines.insert(WorkflowConfig::MERGE_PIPELINE.to_string(), PipelineConfig { stages: merge_stages });
 
     let roles = HashMap::from([
         (

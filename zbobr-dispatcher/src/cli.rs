@@ -713,7 +713,7 @@ async fn detect_and_handle_worktree(
         Some(id) => id,
         None => {
             // If we ARE the undefined handler pipeline, proceed with task_dir
-            if zbobr.config().on_undefined.as_deref() == Some(pipeline_name) {
+            if pipeline_name == WorkflowConfig::INIT_PIPELINE {
                 return Ok(WorktreeResult::Ready(task_dir.to_path_buf()));
             }
             // Otherwise, dispatch to undefined handler
@@ -766,7 +766,7 @@ async fn detect_and_handle_worktree(
 
     // If we ARE the conflict handler, start the merge but don't abort on failure —
     // the agent needs to see conflict markers in the working tree.
-    let is_conflict_handler = zbobr.config().on_conflict.as_deref() == Some(pipeline_name);
+    let is_conflict_handler = pipeline_name == WorkflowConfig::MERGE_PIPELINE;
 
     let merged_ok = git_check(
         &work_dir,
@@ -791,14 +791,6 @@ async fn detect_and_handle_worktree(
     // Merge failed in a normal mode — abort and dispatch to conflict handler
     let _ = git(&work_dir, &["merge", "--abort"]).await;
 
-    let Some(ref _conflict_mode) = zbobr.config().on_conflict else {
-        // No on_conflict configured — continue with conflicts in working tree (backward compat).
-        tracing::warn!(
-            "Task #{task_id}: upstream merge failed but no on_conflict configured"
-        );
-        return Ok(WorktreeResult::Ready(work_dir));
-    };
-
     handle_worktree_problem(
         zbobr,
         task_id,
@@ -820,30 +812,10 @@ async fn handle_worktree_problem(
     let config = zbobr.config();
     let (handler_pipeline, max_retries) = match problem {
         zbobr_api::task::WorktreeProblem::Undefined => {
-            match config.on_undefined.as_deref() {
-                Some(m) => (m, config.max_retries_undefined),
-                None => {
-                    anyhow::bail!(
-                        "Task #{task_id} has no routing parameters and no on_undefined handler configured"
-                    );
-                }
-            }
+            (WorkflowConfig::INIT_PIPELINE, config.max_retries_undefined)
         }
         zbobr_api::task::WorktreeProblem::Conflict => {
-            match config.on_conflict.as_deref() {
-                Some(m) => (m, config.max_retries_conflict),
-                None => {
-                    // Backward compat: no handler, warn and continue
-                    tracing::warn!(
-                        "Task #{task_id}: worktree problem {:?} but no handler configured",
-                        problem
-                    );
-                    // Can't return Ready since we don't have a work_dir in all cases
-                    anyhow::bail!(
-                        "Task #{task_id}: worktree conflict with no on_conflict handler"
-                    );
-                }
-            }
+            (WorkflowConfig::MERGE_PIPELINE, config.max_retries_conflict)
         }
     };
 

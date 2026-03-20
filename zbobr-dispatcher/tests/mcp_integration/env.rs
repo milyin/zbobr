@@ -61,7 +61,6 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
     let dispatcher_config = ZbobrDispatcherConfig {
         workspaces: workspaces_dir.clone(),
         tool: Tool::McpTester,
-        on_conflict: Some("merging".to_string()),
         ..ZbobrDispatcherConfig::default()
     };
 

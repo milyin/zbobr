@@ -366,7 +366,7 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
         StageDef {
             name: "resolve",
             role: "role_resolve",
-            pipeline: "merging",
+            pipeline: "merge",
             is_start: true,
             on_success: None,
             on_failure: None,
@@ -665,7 +665,7 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
         StageDef {
             name: "preparing",
             role: "role_prep",
-            pipeline: "preparing",
+            pipeline: "init",
             is_start: true,
             on_success: None,
             on_failure: None,
@@ -681,12 +681,9 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
         ),
     ]);
 
-    // Override the dispatcher config to set on_undefined
     let config = zbobr_dispatcher::ZbobrDispatcherConfig {
         workspaces: env.workspaces_dir.clone(),
         tool: Tool::McpTester,
-        on_conflict: Some("merging".to_string()),
-        on_undefined: Some("preparing".to_string()),
         ..zbobr_dispatcher::ZbobrDispatcherConfig::default()
     };
     let zbobr_with_undefined = zbobr_dispatcher::ZbobrDispatcherBuilder::new()
@@ -806,7 +803,7 @@ pub async fn run_retry_limit(env: &IntegrationTestEnv) {
         StageDef {
             name: "resolve",
             role: "role_resolve",
-            pipeline: "merging",
+            pipeline: "merge",
             is_start: true,
             on_success: None,
             on_failure: None,

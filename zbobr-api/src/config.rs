@@ -238,6 +238,13 @@ impl Config for WorkflowConfig {
 }
 
 impl WorkflowConfig {
+    /// Required pipeline: main task processing.
+    pub const MAIN_PIPELINE: &'static str = "main";
+    /// Required pipeline: initialization when worktree identity is undefined.
+    pub const INIT_PIPELINE: &'static str = "init";
+    /// Required pipeline: merge conflict resolution.
+    pub const MERGE_PIPELINE: &'static str = "merge";
+
     /// Look up a pipeline by name.
     pub fn pipeline(&self, name: &str) -> Option<&PipelineConfig> {
         self.pipelines.get(name)
@@ -255,7 +262,7 @@ impl WorkflowConfig {
 
     /// The default pipeline name.
     pub fn default_pipeline(&self) -> &str {
-        "main"
+        Self::MAIN_PIPELINE
     }
 
     /// All pipeline names.
@@ -299,6 +306,16 @@ impl WorkflowConfig {
 
     /// Validate the entire workflow configuration.
     pub fn validate(&self) -> anyhow::Result<()> {
+        // Required pipelines must exist
+        for required in [Self::MAIN_PIPELINE, Self::INIT_PIPELINE, Self::MERGE_PIPELINE] {
+            if !self.pipelines.contains_key(required) {
+                anyhow::bail!(
+                    "Required pipeline '{}' is missing from [workflow.pipelines]",
+                    required
+                );
+            }
+        }
+
         let pipeline_names = self.pipeline_names();
 
         // Each pipeline must have exactly one is_start stage
@@ -368,10 +385,6 @@ pub struct ZbobrDispatcherConfig {
     /// Default destination branch pre-populated into task parameters before the
     /// preparator agent runs (e.g. "main"). The preparator may still override this.
     pub default_destination_branch: Option<String>,
-    /// Pipeline to call when a merge conflict is detected.
-    pub on_conflict: Option<String>,
-    /// Pipeline to call when the worktree identity is undefined (no routing params).
-    pub on_undefined: Option<String>,
     /// Max retries for undefined worktree handler before pausing.
     #[arg(default_value = "1")]
     pub max_retries_undefined: u32,
@@ -391,8 +404,6 @@ impl Default for ZbobrDispatcherConfig {
             work_branch_prefix: "zbobr_fix".to_string(),
             default_destination_repository: None,
             default_destination_branch: None,
-            on_conflict: None,
-            on_undefined: None,
             max_retries_undefined: 1,
             max_retries_conflict: 5,
         }
