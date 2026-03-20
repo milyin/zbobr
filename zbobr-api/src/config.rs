@@ -90,8 +90,6 @@ pub struct StageDefinition {
     /// Signal to emit when the agent calls `report_failure`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_failure: Option<String>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub is_start: bool,
 }
 
 impl Default for StageDefinition {
@@ -104,18 +102,16 @@ impl Default for StageDefinition {
             additional_prompts: vec![],
             on_success: None,
             on_failure: None,
-            is_start: false,
         }
     }
-}
-
-fn is_false(v: &bool) -> bool {
-    !*v
 }
 
 /// Per-pipeline configuration: a named directed graph of stages.
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct PipelineConfig {
+    /// Name of the start stage. Can be omitted when the pipeline has exactly one stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<String>,
     #[serde(default)]
     pub stages: HashMap<String, StageDefinition>,
     /// Max retries for this pipeline's worktree handler before pausing.
@@ -138,21 +134,33 @@ impl PipelineConfig {
     }
 
     /// Get the start stage for this pipeline.
+    ///
+    /// Uses the explicit `start` field if set, otherwise falls back to the
+    /// single stage when the pipeline contains exactly one.
     pub fn start_stage(&self) -> Option<(&str, &StageDefinition)> {
-        self.stages
-            .iter()
-            .find(|(_, s)| s.is_start)
-            .map(|(name, s)| (name.as_str(), s))
+        if let Some(ref start) = self.start {
+            self.stages.get(start.as_str()).map(|s| (start.as_str(), s))
+        } else if self.stages.len() == 1 {
+            self.stages.iter().next().map(|(n, s)| (n.as_str(), s))
+        } else {
+            None
+        }
     }
 
     /// Validate pipeline configuration.
     pub fn validate(&self, pipeline_name: &str) -> anyhow::Result<()> {
-        let start_count = self.stages.values().filter(|s| s.is_start).count();
-        if start_count == 0 {
-            anyhow::bail!("Pipeline '{}' has no start stage (is_start = true)", pipeline_name);
-        }
-        if start_count > 1 {
-            anyhow::bail!("Pipeline '{}' has {} start stages, expected 1", pipeline_name, start_count);
+        if let Some(ref start) = self.start {
+            if !self.stages.contains_key(start) {
+                anyhow::bail!(
+                    "Pipeline '{}' start = '{}' references unknown stage",
+                    pipeline_name, start
+                );
+            }
+        } else if self.stages.len() != 1 {
+            anyhow::bail!(
+                "Pipeline '{}' has {} stages but no 'start' field (required when stages > 1)",
+                pipeline_name, self.stages.len()
+            );
         }
         Ok(())
     }
@@ -329,7 +337,7 @@ impl WorkflowConfig {
 
         let pipeline_names = self.pipeline_names();
 
-        // Each pipeline must have exactly one is_start stage
+        // Each pipeline must have a valid start stage
         for &pname in &pipeline_names {
             let pipeline = self.pipelines.get(pname).unwrap();
             pipeline.validate(pname)?;

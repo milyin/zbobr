@@ -33,6 +33,9 @@ fn build_workflow(stages: Vec<StageDef>) -> WorkflowConfig {
                 stages: HashMap::new(),
                 ..Default::default()
             });
+        if s.is_start {
+            pipeline.start = Some(s.name.to_string());
+        }
         pipeline.stages.insert(
             s.name.to_string(),
             StageDefinition {
@@ -43,7 +46,6 @@ fn build_workflow(stages: Vec<StageDef>) -> WorkflowConfig {
                 additional_prompts: vec![],
                 on_success: s.on_success.map(|v| v.to_string()),
                 on_failure: s.on_failure.map(|v| v.to_string()),
-                is_start: s.is_start,
             },
         );
     }
@@ -384,8 +386,8 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some("call_merging".to_string()),
-        "Diverged work branch should trigger call_merging"
+        Some("call_merge".to_string()),
+        "Diverged work branch should trigger call_merge"
     );
     assert_eq!(
         task.stack.len(),
@@ -402,7 +404,7 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
     env.continue_pipeline(task_id, &workflow, &scenarios).await;
     let task = env.get_task(task_id).await;
     assert_eq!(task.signal, Some("return".to_string()));
-    assert_eq!(task.state, "merging_PENDING");
+    assert_eq!(task.state, "merge_PENDING");
 
     // Step 3: process return → stack pop → go_work in main pipeline
     env.continue_pipeline(task_id, &workflow, &scenarios).await;
@@ -729,8 +731,8 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some("call_preparing".to_string()),
-        "Undefined identity should trigger call_preparing"
+        Some("call_init".to_string()),
+        "Undefined identity should trigger call_init"
     );
     assert_eq!(task.stack.len(), 1, "Stack should have go_working");
     assert_eq!(task.stack[0].pipeline, "main");

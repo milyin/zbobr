@@ -108,7 +108,6 @@ fn default_workflow() -> WorkflowConfig {
     let mut main_stages = HashMap::new();
     main_stages.insert("planning".to_string(), StageDefinition {
         role: "planner".into(),
-        is_start: true,
         on_success: Some("go_working".into()),
         ..Default::default()
     });
@@ -132,20 +131,18 @@ fn default_workflow() -> WorkflowConfig {
     let mut init_stages = HashMap::new();
     init_stages.insert("preparing".to_string(), StageDefinition {
         role: "preparator".into(),
-        is_start: true,
         ..Default::default()
     });
 
     let mut merge_stages = HashMap::new();
     merge_stages.insert("merging".to_string(), StageDefinition {
         role: "merger".into(),
-        is_start: true,
         ..Default::default()
     });
 
     let mut pipelines = HashMap::new();
-    pipelines.insert(WorkflowConfig::MAIN_PIPELINE.to_string(), PipelineConfig { stages: main_stages, ..Default::default() });
-    pipelines.insert(WorkflowConfig::INIT_PIPELINE.to_string(), PipelineConfig { stages: init_stages, max_retries: 1 });
+    pipelines.insert(WorkflowConfig::MAIN_PIPELINE.to_string(), PipelineConfig { start: Some("planning".into()), stages: main_stages, ..Default::default() });
+    pipelines.insert(WorkflowConfig::INIT_PIPELINE.to_string(), PipelineConfig { stages: init_stages, max_retries: 1, ..Default::default() });
     pipelines.insert(WorkflowConfig::MERGE_PIPELINE.to_string(), PipelineConfig { stages: merge_stages, ..Default::default() });
 
     let roles = HashMap::from([
