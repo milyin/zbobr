@@ -7,47 +7,48 @@ use crate::task::{Model, Tool};
 
 /// Validate a single signal string: must be `go_X`, `call_X[,go_Y|return]`, or `return`.
 fn validate_signal(
-    stage: &StageDefinition,
+    pipeline_name: &str,
+    stage_name: &str,
     field_name: &str,
     signal: &str,
-    modes: &[&str],
+    pipelines: &[&str],
     pipeline: &PipelineConfig,
 ) -> anyhow::Result<()> {
     if let Some(target) = signal.strip_prefix("go_") {
-        if pipeline.stage_by_name(&stage.mode, target).is_none() {
+        if pipeline.stage(target).is_none() {
             anyhow::bail!(
-                "Stage '{}/{}' {} 'go_{}' references unknown stage '{}' in mode '{}'",
-                stage.mode, stage.name, field_name, target, target, stage.mode
+                "Stage '{}/{}' {} 'go_{}' references unknown stage '{}' in pipeline '{}'",
+                pipeline_name, stage_name, field_name, target, target, pipeline_name
             );
         }
     } else if signal.starts_with("call_") {
         let call_part = signal.split(',').next().unwrap();
-        let target_mode = call_part.strip_prefix("call_").unwrap();
-        if !modes.contains(&target_mode) {
+        let target_pipeline = call_part.strip_prefix("call_").unwrap();
+        if !pipelines.contains(&target_pipeline) {
             anyhow::bail!(
-                "Stage '{}/{}' {} '{}' references unknown mode '{}'",
-                stage.mode, stage.name, field_name, signal, target_mode
+                "Stage '{}/{}' {} '{}' references unknown pipeline '{}'",
+                pipeline_name, stage_name, field_name, signal, target_pipeline
             );
         }
         if let Some(after_return) = signal.split_once(',').map(|(_, s)| s.trim()) {
             if let Some(target_stage) = after_return.strip_prefix("go_") {
-                if pipeline.stage_by_name(&stage.mode, target_stage).is_none() {
+                if pipeline.stage(target_stage).is_none() {
                     anyhow::bail!(
-                        "Stage '{}/{}' {} '{}' after-return references unknown stage '{}' in mode '{}'",
-                        stage.mode, stage.name, field_name, signal, target_stage, stage.mode
+                        "Stage '{}/{}' {} '{}' after-return references unknown stage '{}' in pipeline '{}'",
+                        pipeline_name, stage_name, field_name, signal, target_stage, pipeline_name
                     );
                 }
             } else if after_return != "return" {
                 anyhow::bail!(
                     "Stage '{}/{}' {} '{}' after-return signal '{}' is invalid (expected go_X or return)",
-                    stage.mode, stage.name, field_name, signal, after_return
+                    pipeline_name, stage_name, field_name, signal, after_return
                 );
             }
         }
     } else if signal != "return" {
         anyhow::bail!(
             "Stage '{}/{}' {} '{}' is invalid (expected go_X, call_X, or return)",
-            stage.mode, stage.name, field_name, signal
+            pipeline_name, stage_name, field_name, signal
         );
     }
     Ok(())
@@ -70,10 +71,10 @@ pub struct RoleDefinition {
 
 /// A single stage in the configurable pipeline.
 ///
-/// Parsed from `[[stages]]` TOML array. NOT a `#[config_struct]` — no CLI override.
+/// The stage's name and pipeline are derived from its structural position
+/// (key in the stages HashMap and key in the pipelines HashMap).
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct StageDefinition {
-    pub name: String,
     pub role: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<Model>,
@@ -91,66 +92,193 @@ pub struct StageDefinition {
     pub on_failure: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub is_start: bool,
-    pub mode: String,
+}
+
+impl Default for StageDefinition {
+    fn default() -> Self {
+        Self {
+            role: String::new(),
+            model: None,
+            tool: None,
+            main_prompt: None,
+            additional_prompts: vec![],
+            on_success: None,
+            on_failure: None,
+            is_start: false,
+        }
+    }
 }
 
 fn is_false(v: &bool) -> bool {
     !*v
 }
 
-/// Pipeline configuration: the set of all stage definitions plus role definitions.
+/// Per-pipeline configuration: a named directed graph of stages.
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
-#[config_struct]
 pub struct PipelineConfig {
-    #[config(skip_args)]
-    pub stages: Vec<StageDefinition>,
-    #[config(skip_args)]
-    #[serde(default)]
-    pub roles: HashMap<String, RoleDefinition>,
+    #[serde(flatten)]
+    pub stages: HashMap<String, StageDefinition>,
 }
 
 impl PipelineConfig {
-    /// Look up a stage by name within a mode.
-    pub fn stage_by_name(&self, mode: &str, name: &str) -> Option<&StageDefinition> {
+    /// Look up a stage by name.
+    pub fn stage(&self, name: &str) -> Option<&StageDefinition> {
+        self.stages.get(name)
+    }
+
+    /// Get the start stage for this pipeline.
+    pub fn start_stage(&self) -> Option<(&str, &StageDefinition)> {
         self.stages
             .iter()
-            .find(|s| s.mode == mode && s.name == name)
+            .find(|(_, s)| s.is_start)
+            .map(|(name, s)| (name.as_str(), s))
     }
 
-    /// Get the start stage for a mode.
-    pub fn start_stage_for_mode(&self, mode: &str) -> Option<&StageDefinition> {
-        self.stages
-            .iter()
-            .find(|s| s.mode == mode && s.is_start)
+    /// Validate pipeline configuration.
+    pub fn validate(&self, pipeline_name: &str) -> anyhow::Result<()> {
+        let start_count = self.stages.values().filter(|s| s.is_start).count();
+        if start_count == 0 {
+            anyhow::bail!("Pipeline '{}' has no start stage (is_start = true)", pipeline_name);
+        }
+        if start_count > 1 {
+            anyhow::bail!("Pipeline '{}' has {} start stages, expected 1", pipeline_name, start_count);
+        }
+        Ok(())
+    }
+}
+
+/// Top-level workflow configuration: a container of named pipelines and shared roles.
+///
+/// Replaces the old `PipelineConfig` at the top level. Defined manually
+/// (not via `#[config_struct]`) because `#[serde(flatten)]` on pipelines
+/// is incompatible with `deny_unknown_fields`.
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+pub struct WorkflowConfig {
+    #[serde(default)]
+    pub roles: HashMap<String, RoleDefinition>,
+    #[serde(flatten)]
+    pub pipelines: HashMap<String, PipelineConfig>,
+}
+
+/// TOML representation of WorkflowConfig (all fields optional).
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+pub struct WorkflowToml {
+    #[serde(default)]
+    pub roles: Option<HashMap<String, RoleDefinition>>,
+    #[serde(flatten)]
+    pub pipelines: Option<HashMap<String, PipelineConfig>>,
+}
+
+/// CLI arguments for WorkflowConfig (empty — no CLI-overridable fields).
+#[derive(Clone, Debug, Default)]
+pub struct WorkflowArgs;
+
+impl clap::Args for WorkflowArgs {
+    fn augment_args(cmd: clap::Command) -> clap::Command {
+        cmd
+    }
+    fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
+        cmd
+    }
+}
+
+impl clap::FromArgMatches for WorkflowArgs {
+    fn from_arg_matches(_matches: &clap::ArgMatches) -> Result<Self, clap::Error> {
+        Ok(WorkflowArgs)
+    }
+    fn update_from_arg_matches(&mut self, _matches: &clap::ArgMatches) -> Result<(), clap::Error> {
+        Ok(())
+    }
+}
+
+impl zbobr_utility::PrefixedArgs for WorkflowArgs {
+    fn augment_args_prefixed(cmd: clap::Command, _prefix: &str) -> clap::Command {
+        cmd
+    }
+    fn from_matches_prefixed(
+        _matches: &clap::ArgMatches,
+        _prefix: &str,
+    ) -> Result<Self, clap::Error> {
+        Ok(WorkflowArgs)
+    }
+}
+
+impl WorkflowArgs {
+    pub fn has_overrides(&self) -> bool {
+        false
+    }
+}
+
+impl WorkflowToml {
+    pub fn merge_with_args(self, _args: WorkflowArgs) -> Self {
+        self
     }
 
-    /// Get all stages for a mode.
-    pub fn stages_for_mode(&self, mode: &str) -> Vec<&StageDefinition> {
-        self.stages.iter().filter(|s| s.mode == mode).collect()
+    pub fn try_into_config(self) -> anyhow::Result<WorkflowConfig> {
+        Ok(WorkflowConfig {
+            roles: self.roles.unwrap_or_default(),
+            pipelines: self.pipelines.unwrap_or_default(),
+        })
+    }
+}
+
+impl Config for WorkflowConfig {
+    type Toml = WorkflowToml;
+    type Args = WorkflowArgs;
+
+    fn build(toml: Option<Self::Toml>, _args: Self::Args, _config_dir: &std::path::Path) -> Self {
+        match toml {
+            Some(t) => WorkflowConfig {
+                roles: t.roles.unwrap_or_default(),
+                pipelines: t.pipelines.unwrap_or_default(),
+            },
+            None => WorkflowConfig::default(),
+        }
+    }
+}
+
+impl WorkflowConfig {
+    /// Look up a pipeline by name.
+    pub fn pipeline(&self, name: &str) -> Option<&PipelineConfig> {
+        self.pipelines.get(name)
     }
 
-    /// The default mode is the one whose start stage has `is_start == true`
-    /// and whose mode name appears first.
-    pub fn default_mode(&self) -> Option<&str> {
-        self.stages
-            .iter()
-            .find(|s| s.is_start)
-            .map(|s| s.mode.as_str())
+    /// Look up a stage in a specific pipeline.
+    pub fn stage(&self, pipeline: &str, stage: &str) -> Option<&StageDefinition> {
+        self.pipelines.get(pipeline)?.stage(stage)
     }
 
-    /// Find the first stage with a given role (across all modes, preferring default mode).
-    pub fn find_stage_by_role(&self, role: &str) -> Option<&StageDefinition> {
-        // Prefer stages in the default mode
-        if let Some(default_mode) = self.default_mode() {
-            if let Some(s) = self
-                .stages
-                .iter()
-                .find(|s| s.mode == default_mode && s.role == role)
-            {
-                return Some(s);
+    /// Get the start stage for a pipeline.
+    pub fn start_stage_for_pipeline(&self, pipeline: &str) -> Option<(&str, &StageDefinition)> {
+        self.pipelines.get(pipeline)?.start_stage()
+    }
+
+    /// The default pipeline name.
+    pub fn default_pipeline(&self) -> &str {
+        "main"
+    }
+
+    /// All pipeline names.
+    pub fn pipeline_names(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = self.pipelines.keys().map(|s| s.as_str()).collect();
+        names.sort();
+        names
+    }
+
+    /// Find the first stage with a given role (across all pipelines, preferring default pipeline).
+    pub fn find_stage_by_role(&self, role: &str) -> Option<(&str, &str, &StageDefinition)> {
+        let default = self.default_pipeline();
+        if let Some(pipeline) = self.pipelines.get(default) {
+            if let Some((name, stage)) = pipeline.stages.iter().find(|(_, s)| s.role == role) {
+                return Some((default, name.as_str(), stage));
             }
         }
-        self.stages.iter().find(|s| s.role == role)
+        for (pname, pipeline) in &self.pipelines {
+            if let Some((sname, stage)) = pipeline.stages.iter().find(|(_, s)| s.role == role) {
+                return Some((pname.as_str(), sname.as_str(), stage));
+            }
+        }
+        None
     }
 
     /// Look up a role definition by name.
@@ -158,66 +286,50 @@ impl PipelineConfig {
         self.roles.get(role)
     }
 
-    /// All distinct mode names.
-    pub fn modes(&self) -> Vec<&str> {
-        let mut modes: Vec<&str> = self.stages.iter().map(|s| s.mode.as_str()).collect();
-        modes.sort();
-        modes.dedup();
-        modes
+    /// Iterate over all stages as `(pipeline_name, stage_name, &StageDefinition)` tuples.
+    pub fn all_stages(&self) -> Vec<(&str, &str, &StageDefinition)> {
+        let mut result = Vec::new();
+        for (pname, pipeline) in &self.pipelines {
+            for (sname, stage) in &pipeline.stages {
+                result.push((pname.as_str(), sname.as_str(), stage));
+            }
+        }
+        result
     }
 
-    /// Validate pipeline configuration.
+    /// Validate the entire workflow configuration.
     pub fn validate(&self) -> anyhow::Result<()> {
-        let modes = self.modes();
+        let pipeline_names = self.pipeline_names();
 
-        // Each mode must have exactly one is_start stage
-        for mode in &modes {
-            let start_count = self
-                .stages
-                .iter()
-                .filter(|s| s.mode == *mode && s.is_start)
-                .count();
-            if start_count == 0 {
-                anyhow::bail!("Mode '{}' has no start stage (is_start = true)", mode);
-            }
-            if start_count > 1 {
-                anyhow::bail!("Mode '{}' has {} start stages, expected 1", mode, start_count);
-            }
+        // Each pipeline must have exactly one is_start stage
+        for &pname in &pipeline_names {
+            let pipeline = self.pipelines.get(pname).unwrap();
+            pipeline.validate(pname)?;
         }
 
         // Validate on_success / on_failure signal targets
-        for stage in &self.stages {
-            if let Some(ref signal) = stage.on_success {
-                validate_signal(stage, "on_success", signal, &modes, self)?;
-            }
-            if let Some(ref signal) = stage.on_failure {
-                validate_signal(stage, "on_failure", signal, &modes, self)?;
+        for &pname in &pipeline_names {
+            let pipeline = self.pipelines.get(pname).unwrap();
+            for (sname, stage) in &pipeline.stages {
+                if let Some(ref signal) = stage.on_success {
+                    validate_signal(pname, sname, "on_success", signal, &pipeline_names, pipeline)?;
+                }
+                if let Some(ref signal) = stage.on_failure {
+                    validate_signal(pname, sname, "on_failure", signal, &pipeline_names, pipeline)?;
+                }
             }
         }
 
         // Every stage's role must exist in the roles map (if roles are configured)
         if !self.roles.is_empty() {
-            for stage in &self.stages {
-                if !self.roles.contains_key(&stage.role) {
-                    anyhow::bail!(
-                        "Stage '{}/{}' references unknown role '{}' (not in [pipeline.roles])",
-                        stage.mode, stage.name, stage.role
-                    );
-                }
-            }
-        }
-
-        // No duplicate stage names within a mode
-        for mode in &modes {
-            let mode_stages = self.stages_for_mode(mode);
-            let mut names: Vec<&str> = mode_stages.iter().map(|s| s.name.as_str()).collect();
-            names.sort();
-            for window in names.windows(2) {
-                if window[0] == window[1] {
-                    anyhow::bail!(
-                        "Duplicate stage name '{}' in mode '{}'",
-                        window[0], mode
-                    );
+            for (pname, pipeline) in &self.pipelines {
+                for (sname, stage) in &pipeline.stages {
+                    if !self.roles.contains_key(&stage.role) {
+                        anyhow::bail!(
+                            "Stage '{}/{}' references unknown role '{}' (not in [workflow.roles])",
+                            pname, sname, stage.role
+                        );
+                    }
                 }
             }
         }
@@ -256,9 +368,9 @@ pub struct ZbobrDispatcherConfig {
     /// Default destination branch pre-populated into task parameters before the
     /// preparator agent runs (e.g. "main"). The preparator may still override this.
     pub default_destination_branch: Option<String>,
-    /// Mode to call when a merge conflict is detected.
+    /// Pipeline to call when a merge conflict is detected.
     pub on_conflict: Option<String>,
-    /// Mode to call when the worktree identity is undefined (no routing params).
+    /// Pipeline to call when the worktree identity is undefined (no routing params).
     pub on_undefined: Option<String>,
     /// Max retries for undefined worktree handler before pausing.
     #[arg(default_value = "1")]

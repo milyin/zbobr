@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use zbobr_api::config::{PipelineConfig, StageDefinition};
+use zbobr_api::config::{PipelineConfig, StageDefinition, WorkflowConfig};
 use zbobr_dispatcher::task::Tool;
 
 use super::{abstract_scenarios, env::IntegrationTestEnv};
@@ -18,18 +18,23 @@ use super::{abstract_scenarios, env::IntegrationTestEnv};
 struct StageDef {
     name: &'static str,
     role: &'static str,
-    mode: &'static str,
+    pipeline: &'static str,
     is_start: bool,
     on_success: Option<&'static str>,
     on_failure: Option<&'static str>,
 }
 
-fn build_pipeline(stages: Vec<StageDef>) -> PipelineConfig {
-    PipelineConfig {
-        stages: stages
-            .into_iter()
-            .map(|s| StageDefinition {
-                name: s.name.to_string(),
+fn build_workflow(stages: Vec<StageDef>) -> WorkflowConfig {
+    let mut pipelines: HashMap<String, PipelineConfig> = HashMap::new();
+    for s in stages {
+        let pipeline = pipelines
+            .entry(s.pipeline.to_string())
+            .or_insert_with(|| PipelineConfig {
+                stages: HashMap::new(),
+            });
+        pipeline.stages.insert(
+            s.name.to_string(),
+            StageDefinition {
                 role: s.role.to_string(),
                 model: None,
                 tool: Some(Tool::McpTester),
@@ -38,9 +43,11 @@ fn build_pipeline(stages: Vec<StageDef>) -> PipelineConfig {
                 on_success: s.on_success.map(|v| v.to_string()),
                 on_failure: s.on_failure.map(|v| v.to_string()),
                 is_start: s.is_start,
-                mode: s.mode.to_string(),
-            })
-            .collect(),
+            },
+        );
+    }
+    WorkflowConfig {
+        pipelines,
         roles: Default::default(),
     }
 }
@@ -88,10 +95,10 @@ pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let pipeline = build_pipeline(vec![StageDef {
+    let workflow = build_workflow(vec![StageDef {
         name: "alpha",
         role: "alpha",
-        mode: "main",
+        pipeline: "main",
         is_start: true,
         on_success: None,
         on_failure: None,
@@ -102,8 +109,8 @@ pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
         abstract_scenarios::all_mcp_tools_scenario(&repo_path.to_string_lossy()),
     )]);
 
-    env.run_pipeline(task_id, &pipeline, &scenarios).await;
-    env.run_to_completion(task_id, &pipeline, &scenarios, 5)
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
+    env.run_to_completion(task_id, &workflow, &scenarios, 5)
         .await;
 
     let task = env.get_task(task_id).await;
@@ -111,7 +118,7 @@ pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
 }
 
 // ===========================================================================
-// Test 2: Transfer between stages within a mode (go_X)
+// Test 2: Transfer between stages within a pipeline (go_X)
 // ===========================================================================
 
 pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
@@ -124,11 +131,11 @@ pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let pipeline = build_pipeline(vec![
+    let workflow = build_workflow(vec![
         StageDef {
             name: "first",
             role: "role_a",
-            mode: "main",
+            pipeline: "main",
             is_start: true,
             on_success: Some("go_second"),
             on_failure: None,
@@ -136,7 +143,7 @@ pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
         StageDef {
             name: "second",
             role: "role_b",
-            mode: "main",
+            pipeline: "main",
             is_start: false,
             on_success: None,
             on_failure: None,
@@ -149,20 +156,20 @@ pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
     ]);
 
     // First call runs "first" stage → go_second
-    env.run_pipeline(task_id, &pipeline, &scenarios).await;
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
     let task = env.get_task(task_id).await;
     assert_eq!(task.signal, Some("go_second".to_string()));
     assert_eq!(task.state, "main_PENDING");
 
     // Run to completion: second stage + return resolution
-    env.run_to_completion(task_id, &pipeline, &scenarios, 5)
+    env.run_to_completion(task_id, &workflow, &scenarios, 5)
         .await;
     let task = env.get_task(task_id).await;
     assert_eq!(task.state, "DONE", "Should complete after both stages");
 }
 
 // ===========================================================================
-// Test 3: Calling a sub-mode (call_X)
+// Test 3: Calling a sub-pipeline (call_X)
 // ===========================================================================
 
 pub async fn run_call_mode(env: &IntegrationTestEnv) {
@@ -175,11 +182,11 @@ pub async fn run_call_mode(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let pipeline = build_pipeline(vec![
+    let workflow = build_workflow(vec![
         StageDef {
             name: "entry",
             role: "role_main",
-            mode: "main",
+            pipeline: "main",
             is_start: true,
             on_success: Some("call_sub"),
             on_failure: None,
@@ -187,7 +194,7 @@ pub async fn run_call_mode(env: &IntegrationTestEnv) {
         StageDef {
             name: "handler",
             role: "role_sub",
-            mode: "sub",
+            pipeline: "sub",
             is_start: true,
             on_success: None,
             on_failure: None,
@@ -200,19 +207,19 @@ pub async fn run_call_mode(env: &IntegrationTestEnv) {
     ]);
 
     // Step 1: runs "entry" → call_sub
-    env.run_pipeline(task_id, &pipeline, &scenarios).await;
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
     let task = env.get_task(task_id).await;
     assert_eq!(task.signal, Some("call_sub".to_string()));
 
     // Run to completion: sub/handler + return
-    env.run_to_completion(task_id, &pipeline, &scenarios, 5)
+    env.run_to_completion(task_id, &workflow, &scenarios, 5)
         .await;
     let task = env.get_task(task_id).await;
-    assert_eq!(task.state, "DONE", "Return from sub-mode should complete");
+    assert_eq!(task.state, "DONE", "Return from sub-pipeline should complete");
 }
 
 // ===========================================================================
-// Test 4: Return from mode back to caller (multi-step)
+// Test 4: Return from pipeline back to caller (multi-step)
 // ===========================================================================
 
 pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
@@ -227,12 +234,12 @@ pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
 
     // Use compound call signal: "call_aux,go_done_step"
     // After returning from aux, the stack-aware Done handler pops go_done_step
-    // and fires it in the main mode.
-    let pipeline = build_pipeline(vec![
+    // and fires it in the main pipeline.
+    let workflow = build_workflow(vec![
         StageDef {
             name: "step_one",
             role: "role_one",
-            mode: "main",
+            pipeline: "main",
             is_start: true,
             on_success: Some("go_step_two"),
             on_failure: None,
@@ -240,7 +247,7 @@ pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
         StageDef {
             name: "step_two",
             role: "role_two",
-            mode: "main",
+            pipeline: "main",
             is_start: false,
             on_success: Some("call_aux,go_done_step"),
             on_failure: None,
@@ -248,7 +255,7 @@ pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
         StageDef {
             name: "done_step",
             role: "role_done",
-            mode: "main",
+            pipeline: "main",
             is_start: false,
             on_success: None,
             on_failure: None,
@@ -256,7 +263,7 @@ pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
         StageDef {
             name: "aux_step",
             role: "role_aux",
-            mode: "aux",
+            pipeline: "aux",
             is_start: true,
             on_success: None,
             on_failure: None,
@@ -271,12 +278,12 @@ pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
     ]);
 
     // Step 1: main/step_one → go_step_two
-    env.run_pipeline(task_id, &pipeline, &scenarios).await;
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
     let task = env.get_task(task_id).await;
     assert_eq!(task.signal, Some("go_step_two".to_string()));
 
     // Step 2: main/step_two → call_aux (compound signal parsed)
-    env.continue_pipeline(task_id, &pipeline, &scenarios).await;
+    env.continue_pipeline(task_id, &workflow, &scenarios).await;
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
@@ -288,14 +295,14 @@ pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
         1,
         "compound call should push after-return onto stack"
     );
-    assert_eq!(task.stack[0].mode, "main");
+    assert_eq!(task.stack[0].pipeline, "main");
     assert_eq!(task.stack[0].signal, "go_done_step");
 
     // Step 3: aux/aux_step → return → stack pop → go_done_step
-    env.continue_pipeline(task_id, &pipeline, &scenarios).await;
+    env.continue_pipeline(task_id, &workflow, &scenarios).await;
     // After return, state machine resolves Done, stack pops go_done_step
     // run_to_completion will handle the remaining transitions
-    env.run_to_completion(task_id, &pipeline, &scenarios, 5)
+    env.run_to_completion(task_id, &workflow, &scenarios, 5)
         .await;
     let task = env.get_task(task_id).await;
     assert_eq!(
@@ -306,7 +313,7 @@ pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
 }
 
 // ===========================================================================
-// Test 5: Automatic conflict mode activation
+// Test 5: Automatic conflict pipeline activation
 // ===========================================================================
 
 pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
@@ -347,11 +354,11 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", work_branch)
         .await;
 
-    let pipeline = build_pipeline(vec![
+    let workflow = build_workflow(vec![
         StageDef {
             name: "work",
             role: "role_work",
-            mode: "main",
+            pipeline: "main",
             is_start: true,
             on_success: None,
             on_failure: None,
@@ -359,7 +366,7 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
         StageDef {
             name: "resolve",
             role: "role_resolve",
-            mode: "merging",
+            pipeline: "merging",
             is_start: true,
             on_success: None,
             on_failure: None,
@@ -371,7 +378,7 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
         ("role_resolve", abstract_scenarios::report_and_finish_scenario()),
     ]);
 
-    env.run_pipeline(task_id, &pipeline, &scenarios).await;
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
 
     let task = env.get_task(task_id).await;
     assert_eq!(
@@ -384,20 +391,20 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
         1,
         "Stack should have the caller stage pushed"
     );
-    assert_eq!(task.stack[0].mode, "main");
+    assert_eq!(task.stack[0].pipeline, "main");
     assert_eq!(
         task.stack[0].signal, "go_work",
         "Stack entry should have signal go_work (re-run interrupted stage)"
     );
 
     // Step 2: run the conflict handler (merging/resolve) → return
-    env.continue_pipeline(task_id, &pipeline, &scenarios).await;
+    env.continue_pipeline(task_id, &workflow, &scenarios).await;
     let task = env.get_task(task_id).await;
     assert_eq!(task.signal, Some("return".to_string()));
     assert_eq!(task.state, "merging_PENDING");
 
-    // Step 3: process return → stack pop → go_work in main mode
-    env.continue_pipeline(task_id, &pipeline, &scenarios).await;
+    // Step 3: process return → stack pop → go_work in main pipeline
+    env.continue_pipeline(task_id, &workflow, &scenarios).await;
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
@@ -425,10 +432,10 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let pipeline = build_pipeline(vec![StageDef {
+    let workflow = build_workflow(vec![StageDef {
         name: "work",
         role: "role_err",
-        mode: "main",
+        pipeline: "main",
         is_start: true,
         on_success: None,
         on_failure: None,
@@ -439,7 +446,7 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
         abstract_scenarios::stop_with_error_scenario(),
     )]);
 
-    env.run_pipeline(task_id, &pipeline, &scenarios).await;
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
 
     let task = env.get_task(task_id).await;
     assert!(task.pause, "stop_with_error should set pause flag");
@@ -468,10 +475,10 @@ pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let pipeline = build_pipeline(vec![StageDef {
+    let workflow = build_workflow(vec![StageDef {
         name: "start",
         role: "role_start",
-        mode: "main",
+        pipeline: "main",
         is_start: true,
         on_success: None,
         on_failure: None,
@@ -483,8 +490,8 @@ pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
     )]);
 
     // Start from READY, run stage, then resolve return → DONE
-    env.run_pipeline(task_id, &pipeline, &scenarios).await;
-    env.run_to_completion(task_id, &pipeline, &scenarios, 5)
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
+    env.run_to_completion(task_id, &workflow, &scenarios, 5)
         .await;
 
     let task = env.get_task(task_id).await;
@@ -505,11 +512,11 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let pipeline = build_pipeline(vec![
+    let workflow = build_workflow(vec![
         StageDef {
             name: "check",
             role: "role_check",
-            mode: "main",
+            pipeline: "main",
             is_start: true,
             on_success: Some("go_finish"),
             on_failure: Some("go_check"),
@@ -517,7 +524,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
         StageDef {
             name: "finish",
             role: "role_finish",
-            mode: "main",
+            pipeline: "main",
             is_start: false,
             on_success: None,
             on_failure: None,
@@ -529,7 +536,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
         ("role_check", abstract_scenarios::report_failure_scenario()),
         ("role_finish", abstract_scenarios::report_and_finish_scenario()),
     ]);
-    env.run_pipeline(task_id, &pipeline, &scenarios_reject)
+    env.run_pipeline(task_id, &workflow, &scenarios_reject)
         .await;
     let task = env.get_task(task_id).await;
     assert_eq!(
@@ -543,7 +550,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
         ("role_check", abstract_scenarios::report_success_scenario()),
         ("role_finish", abstract_scenarios::report_and_finish_scenario()),
     ]);
-    env.continue_pipeline(task_id, &pipeline, &scenarios_accept)
+    env.continue_pipeline(task_id, &workflow, &scenarios_accept)
         .await;
     let task = env.get_task(task_id).await;
     assert_eq!(
@@ -553,7 +560,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     );
 
     // Run to completion: finish → return → DONE
-    env.run_to_completion(task_id, &pipeline, &scenarios_accept, 5)
+    env.run_to_completion(task_id, &workflow, &scenarios_accept, 5)
         .await;
     let task = env.get_task(task_id).await;
     assert_eq!(task.state, "DONE", "Pipeline should complete after finish");
@@ -573,10 +580,10 @@ pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let pipeline = build_pipeline(vec![StageDef {
+    let workflow = build_workflow(vec![StageDef {
         name: "work",
         role: "role_ask",
-        mode: "main",
+        pipeline: "main",
         is_start: true,
         on_success: None,
         on_failure: None,
@@ -587,7 +594,7 @@ pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
         abstract_scenarios::stop_with_question_scenario(),
     )]);
 
-    env.run_pipeline(task_id, &pipeline, &scenarios).await;
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
 
     let task = env.get_task(task_id).await;
     assert!(task.pause, "stop_with_question should set pause flag");
@@ -646,11 +653,11 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
         .await;
     // DO NOT set branches — this triggers the "undefined" worktree problem
 
-    let pipeline = build_pipeline(vec![
+    let workflow = build_workflow(vec![
         StageDef {
             name: "working",
             role: "role_work",
-            mode: "main",
+            pipeline: "main",
             is_start: true,
             on_success: None,
             on_failure: None,
@@ -658,7 +665,7 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
         StageDef {
             name: "preparing",
             role: "role_prep",
-            mode: "preparing",
+            pipeline: "preparing",
             is_start: true,
             on_success: None,
             on_failure: None,
@@ -688,14 +695,11 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
         .with_repo_backend(std::sync::Arc::clone(&env.repo_backend))
         .with_prompt_builder(zbobr_dispatcher::prompts::ConfiguredPromptBuilder::new(
             None,
-            std::sync::Arc::new(PipelineConfig {
-                stages: vec![],
-                roles: Default::default(),
-            }),
+            std::sync::Arc::new(WorkflowConfig::default()),
         ))
         .build();
 
-    // First call: should detect undefined identity, dispatch to preparing mode
+    // First call: should detect undefined identity, dispatch to preparing pipeline
     {
         let task = env.get_task(task_id).await;
         let idx = std::sync::atomic::AtomicU64::new(0);
@@ -719,7 +723,7 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
             ..Default::default()
         };
         let dispatcher = zbobr_with_undefined.with_mcp_tester_config(mcp_tester_config);
-        zbobr_dispatcher::cli::process_task(&dispatcher, &task, &pipeline)
+        zbobr_dispatcher::cli::process_task(&dispatcher, &task, &workflow)
             .await
             .unwrap();
     }
@@ -731,7 +735,7 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
         "Undefined identity should trigger call_preparing"
     );
     assert_eq!(task.stack.len(), 1, "Stack should have go_working");
-    assert_eq!(task.stack[0].mode, "main");
+    assert_eq!(task.stack[0].pipeline, "main");
     assert_eq!(task.stack[0].signal, "go_working");
     assert_eq!(task.worktree_retries, 1, "worktree_retries should be incremented");
 }
@@ -790,11 +794,11 @@ pub async fn run_retry_limit(env: &IntegrationTestEnv) {
             .unwrap();
     }
 
-    let pipeline = build_pipeline(vec![
+    let workflow = build_workflow(vec![
         StageDef {
             name: "work",
             role: "role_work",
-            mode: "main",
+            pipeline: "main",
             is_start: true,
             on_success: None,
             on_failure: None,
@@ -802,7 +806,7 @@ pub async fn run_retry_limit(env: &IntegrationTestEnv) {
         StageDef {
             name: "resolve",
             role: "role_resolve",
-            mode: "merging",
+            pipeline: "merging",
             is_start: true,
             on_success: None,
             on_failure: None,
@@ -814,7 +818,7 @@ pub async fn run_retry_limit(env: &IntegrationTestEnv) {
         ("role_resolve", abstract_scenarios::report_and_finish_scenario()),
     ]);
 
-    env.run_pipeline(task_id, &pipeline, &scenarios).await;
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
 
     let task = env.get_task(task_id).await;
     assert!(

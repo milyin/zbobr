@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use zbobr_api::config::{PipelineConfig, PipelineToml, RoleDefinition, StageDefinition};
+use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig, WorkflowToml};
 use zbobr_api::task::{Model, Tool};
 use zbobr_dispatcher::config::{ZbobrDispatcherToml, ZbobrExecutorToml};
 use zbobr_executor_claude::ZbobrExecutorClaudeToml;
@@ -61,7 +61,7 @@ pub async fn init_workspace(dest: &Path) -> anyhow::Result<()> {
 
 /// Build a default `RootConfigToml` with sensible example values.
 fn default_config_toml() -> RootConfigToml {
-    let pipeline = default_pipeline();
+    let workflow = default_workflow();
 
     RootConfigToml {
         dispatcher: Some(ZbobrDispatcherToml {
@@ -100,64 +100,57 @@ fn default_config_toml() -> RootConfigToml {
             }),
             mcp_tester: None,
         }),
-        pipeline: Some(PipelineToml {
-            stages: Some(pipeline.stages),
-            roles: Some(pipeline.roles),
+        workflow: Some(WorkflowToml {
+            roles: Some(workflow.roles),
+            pipelines: Some(workflow.pipelines),
         }),
     }
 }
 
-/// Build the default pipeline configuration with predefined stages and roles.
-fn default_pipeline() -> PipelineConfig {
-    let stages = vec![
-        // Main mode: starts at planning (preparing is now its own mode)
-        StageDefinition {
-            name: "planning".into(),
-            role: "planner".into(),
-            mode: "main".into(),
-            is_start: true,
-            on_success: Some("go_working".into()),
-            ..stage_defaults()
-        },
-        StageDefinition {
-            name: "working".into(),
-            role: "worker".into(),
-            mode: "main".into(),
-            on_success: Some("go_reviewing".into()),
-            on_failure: Some("go_planning".into()),
-            ..stage_defaults()
-        },
-        StageDefinition {
-            name: "reviewing".into(),
-            role: "reviewer".into(),
-            mode: "main".into(),
-            on_success: Some("go_merging".into()),
-            on_failure: Some("go_working".into()),
-            ..stage_defaults()
-        },
-        StageDefinition {
-            name: "merging".into(),
-            role: "merger".into(),
-            mode: "main".into(),
-            ..stage_defaults()
-        },
-        // Preparing mode: auto-called when identity is undefined
-        StageDefinition {
-            name: "preparing".into(),
-            role: "preparator".into(),
-            mode: "preparing".into(),
-            is_start: true,
-            ..stage_defaults()
-        },
-        // Conflict mode: invoked when work branch diverges
-        StageDefinition {
-            name: "merging".into(),
-            role: "merger".into(),
-            mode: "conflict".into(),
-            is_start: true,
-            ..stage_defaults()
-        },
-    ];
+/// Build the default workflow configuration with predefined pipelines and roles.
+fn default_workflow() -> WorkflowConfig {
+    let mut main_stages = HashMap::new();
+    main_stages.insert("planning".to_string(), StageDefinition {
+        role: "planner".into(),
+        is_start: true,
+        on_success: Some("go_working".into()),
+        ..Default::default()
+    });
+    main_stages.insert("working".to_string(), StageDefinition {
+        role: "worker".into(),
+        on_success: Some("go_reviewing".into()),
+        on_failure: Some("go_planning".into()),
+        ..Default::default()
+    });
+    main_stages.insert("reviewing".to_string(), StageDefinition {
+        role: "reviewer".into(),
+        on_success: Some("go_merging".into()),
+        on_failure: Some("go_working".into()),
+        ..Default::default()
+    });
+    main_stages.insert("merging".to_string(), StageDefinition {
+        role: "merger".into(),
+        ..Default::default()
+    });
+
+    let mut preparing_stages = HashMap::new();
+    preparing_stages.insert("preparing".to_string(), StageDefinition {
+        role: "preparator".into(),
+        is_start: true,
+        ..Default::default()
+    });
+
+    let mut conflict_stages = HashMap::new();
+    conflict_stages.insert("merging".to_string(), StageDefinition {
+        role: "merger".into(),
+        is_start: true,
+        ..Default::default()
+    });
+
+    let mut pipelines = HashMap::new();
+    pipelines.insert("main".to_string(), PipelineConfig { stages: main_stages });
+    pipelines.insert("preparing".to_string(), PipelineConfig { stages: preparing_stages });
+    pipelines.insert("conflict".to_string(), PipelineConfig { stages: conflict_stages });
 
     let roles = HashMap::from([
         (
@@ -269,24 +262,9 @@ fn default_pipeline() -> PipelineConfig {
         ),
     ]);
 
-    PipelineConfig {
-        stages,
+    WorkflowConfig {
+        pipelines,
         roles,
-    }
-}
-
-fn stage_defaults() -> StageDefinition {
-    StageDefinition {
-        name: String::new(),
-        role: String::new(),
-        mode: String::new(),
-        model: None,
-        tool: None,
-        main_prompt: None,
-        additional_prompts: vec![],
-        on_success: None,
-        on_failure: None,
-        is_start: false,
     }
 }
 

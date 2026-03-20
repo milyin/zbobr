@@ -18,9 +18,7 @@ pub use config::{
     ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs, ZbobrExecutorToml,
 };
 pub use mcp::UnifiedMcp;
-pub use prompts::{
-    ConfiguredPromptBuilder, build_full_prompt, load_prompts, validate_stage_prompts,
-};
+pub use prompts::{ConfiguredPromptBuilder, build_full_prompt, load_prompts, validate_stage_prompts};
 pub use task::{
     ChecklistItem, Comment, Model, RoleSession, StackEntry, Task, TaskSession, Tool,
 };

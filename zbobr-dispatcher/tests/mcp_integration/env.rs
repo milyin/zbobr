@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use zbobr_api::config::PipelineConfig;
+use zbobr_api::config::WorkflowConfig;
 use zbobr_dispatcher::{
     Comment, Task, ZbobrDispatcher,
     ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
@@ -82,7 +82,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
         .with_config(Arc::new(dispatcher_config))
         .with_task_backend(Arc::clone(&task_backend))
         .with_repo_backend(Arc::clone(&repo_backend))
-        .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(PipelineConfig { stages: vec![], roles: Default::default() })))
+        .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(WorkflowConfig::default())))
         .build();
 
     zbobr
@@ -153,7 +153,7 @@ pub async fn init_github_github(
         .with_config(Arc::new(dispatcher_config))
         .with_task_backend(Arc::clone(&task_backend))
         .with_repo_backend(Arc::clone(&repo_backend))
-        .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(PipelineConfig { stages: vec![], roles: Default::default() })))
+        .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(WorkflowConfig::default())))
         .build();
 
     zbobr
@@ -298,15 +298,14 @@ impl IntegrationTestEnv {
     // Pipeline runner
     // -----------------------------------------------------------------------
 
-    /// Run the dispatcher with a full pipeline config and per-role scenario map.
+    /// Run the dispatcher with a full workflow config and per-role scenario map.
     ///
-    /// Unlike `run_stage`, this accepts an arbitrary `PipelineConfig` with any
-    /// stage/role/mode names. Scenarios are mapped via the generic `scenarios`
-    /// HashMap in the mcp-tester config.
+    /// Accepts an arbitrary `WorkflowConfig` with any pipeline/stage/role names.
+    /// Scenarios are mapped via the generic `scenarios` HashMap in the mcp-tester config.
     pub async fn run_pipeline(
         &self,
         task_id: u64,
-        pipeline: &PipelineConfig,
+        workflow: &WorkflowConfig,
         role_scenarios: &HashMap<String, String>,
     ) {
         self.task_backend
@@ -342,7 +341,7 @@ impl IntegrationTestEnv {
 
         let task = self.get_task(task_id).await;
 
-        process_task(&stage_dispatcher, &task, pipeline)
+        process_task(&stage_dispatcher, &task, workflow)
             .await
             .unwrap_or_else(|e| {
                 panic!(
@@ -357,7 +356,7 @@ impl IntegrationTestEnv {
     pub async fn run_to_completion(
         &self,
         task_id: u64,
-        pipeline: &PipelineConfig,
+        workflow: &WorkflowConfig,
         role_scenarios: &HashMap<String, String>,
         max_iterations: usize,
     ) -> usize {
@@ -397,7 +396,7 @@ impl IntegrationTestEnv {
             let stage_dispatcher = self.zbobr.with_mcp_tester_config(mcp_tester_config);
             let task = self.get_task(task_id).await;
 
-            process_task(&stage_dispatcher, &task, pipeline)
+            process_task(&stage_dispatcher, &task, workflow)
                 .await
                 .unwrap_or_else(|e| {
                     panic!(
@@ -417,7 +416,7 @@ impl IntegrationTestEnv {
     pub async fn continue_pipeline(
         &self,
         task_id: u64,
-        pipeline: &PipelineConfig,
+        workflow: &WorkflowConfig,
         role_scenarios: &HashMap<String, String>,
     ) {
         let idx = SCENARIO_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -444,7 +443,7 @@ impl IntegrationTestEnv {
 
         let task = self.get_task(task_id).await;
 
-        process_task(&stage_dispatcher, &task, pipeline)
+        process_task(&stage_dispatcher, &task, workflow)
             .await
             .unwrap_or_else(|e| {
                 panic!(

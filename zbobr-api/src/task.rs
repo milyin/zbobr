@@ -190,14 +190,14 @@ pub fn get_history_record_by_index(
     }
 }
 
-/// An entry on the task's call stack, recording which mode to return to
+/// An entry on the task's call stack, recording which pipeline to return to
 /// and which signal to emit upon return (e.g. "go_working").
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct StackEntry {
-    pub mode: String,
-    /// Signal to emit when returning to this mode (e.g. "go_working").
+    pub pipeline: String,
+    /// Signal to emit when returning to this pipeline (e.g. "go_working").
     #[serde(alias = "stage")]
     pub signal: String,
 }
@@ -539,16 +539,16 @@ pub struct Task {
     pub id: u64,
     pub title: String,
     pub description: String,
-    /// Task state: empty | "DONE" | "PAUSE" | "READY" | "{MODE}_PENDING" | "{MODE}_{STAGE}"
+    /// Task state: empty | "DONE" | "PAUSE" | "READY" | "{PIPELINE}_PENDING" | "{PIPELINE}_{STAGE}"
     pub state: String,
     pub destination_repository: Option<String>,
     pub destination_branch: Option<String>,
     pub work_branch: Option<String>,
     pub pr_url: Option<String>,
     pub checklist: Vec<ChecklistItem>,
-    /// Signal for flow control: go_{stage}, call_{mode}, return
+    /// Signal for flow control: go_{stage}, call_{pipeline}, return
     pub signal: Option<String>,
-    /// Call stack for mode call/return semantics.
+    /// Call stack for pipeline call/return semantics.
     #[serde(default)]
     pub stack: Vec<StackEntry>,
     pub pause: bool,

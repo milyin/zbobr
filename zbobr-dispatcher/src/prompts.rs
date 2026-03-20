@@ -4,17 +4,17 @@ use std::sync::Arc;
 use crate::backend::TaskBackend;
 
 use zbobr_api::Task;
-use zbobr_api::config::{PipelineConfig, StageDefinition};
+use zbobr_api::config::{StageDefinition, WorkflowConfig};
 
 #[derive(Clone)]
 pub struct ConfiguredPromptBuilder {
     base_path: Option<PathBuf>,
-    pipeline: Arc<PipelineConfig>,
+    workflow: Arc<WorkflowConfig>,
 }
 
 impl ConfiguredPromptBuilder {
-    pub fn new(base_path: Option<PathBuf>, pipeline: Arc<PipelineConfig>) -> Self {
-        Self { base_path, pipeline }
+    pub fn new(base_path: Option<PathBuf>, workflow: Arc<WorkflowConfig>) -> Self {
+        Self { base_path, workflow }
     }
 
     pub fn base_path(&self) -> Option<&PathBuf> {
@@ -28,7 +28,7 @@ impl ConfiguredPromptBuilder {
         task_id: u64,
         task_backend: &dyn TaskBackend,
     ) -> anyhow::Result<String> {
-        let prompt_files = prompt_files_for_stage(stage_def, &self.pipeline);
+        let prompt_files = prompt_files_for_stage(stage_def, &self.workflow);
         let base_prompt = load_prompts(&prompt_files, self.base_path.as_ref())?;
         build_full_prompt(
             &base_prompt,
@@ -41,12 +41,12 @@ impl ConfiguredPromptBuilder {
 }
 
 /// Collect prompt file paths from a StageDefinition.
-/// If no main_prompt is specified, tries the role's prompt from the pipeline config.
-pub fn prompt_files_for_stage(stage_def: &StageDefinition, pipeline: &PipelineConfig) -> Vec<PathBuf> {
+/// If no main_prompt is specified, tries the role's prompt from the workflow config.
+pub fn prompt_files_for_stage(stage_def: &StageDefinition, workflow: &WorkflowConfig) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if let Some(ref main) = stage_def.main_prompt {
         files.push(main.clone());
-    } else if let Some(role_def) = pipeline.role_definition(&stage_def.role) {
+    } else if let Some(role_def) = workflow.role_definition(&stage_def.role) {
         if let Some(ref prompt_path) = role_def.prompt {
             files.push(prompt_path.clone());
         }
@@ -159,14 +159,13 @@ fn assemble_prompt(
 
 /// Validate that all prompt files referenced by stage definitions exist.
 pub fn validate_stage_prompts(
-    stages: &[StageDefinition],
-    pipeline: &PipelineConfig,
+    workflow: &WorkflowConfig,
     base_path: Option<&PathBuf>,
 ) -> anyhow::Result<()> {
     let mut missing_files = Vec::new();
 
-    for stage in stages {
-        for path in prompt_files_for_stage(stage, pipeline) {
+    for (_, _, stage) in workflow.all_stages() {
+        for path in prompt_files_for_stage(stage, workflow) {
             if !file_exists(&path, base_path) {
                 missing_files.push(path);
             }

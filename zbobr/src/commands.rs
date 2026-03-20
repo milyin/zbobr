@@ -8,7 +8,7 @@ use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 
 use zbobr_utility::{git, git_output};
 
-use zbobr_api::config::PipelineConfig;
+use zbobr_api::config::WorkflowConfig;
 use zbobr_dispatcher::{TaskDir, ZbobrDispatcher, print_task};
 
 // ---------------------------------------------------------------------------
@@ -168,7 +168,7 @@ pub enum TaskSubcommand {
 pub async fn run_command(
     zbobr: &ZbobrDispatcher,
     command: Command,
-    pipeline: &PipelineConfig,
+    workflow: &WorkflowConfig,
 ) -> anyhow::Result<()> {
     match command {
         Command::Init { .. } => {
@@ -183,14 +183,14 @@ pub async fn run_command(
                 .await?;
         }
         Command::Task { subcommand } => {
-            run_task_subcommand(zbobr, subcommand, pipeline).await?;
+            run_task_subcommand(zbobr, subcommand, workflow).await?;
         }
         Command::Loop {
             interval,
             cleanup_interval,
             ..
         } => {
-            zbobr_dispatcher::run_manager_loop(zbobr, interval, cleanup_interval, pipeline)
+            zbobr_dispatcher::run_manager_loop(zbobr, interval, cleanup_interval, workflow)
                 .await?;
         }
     }
@@ -200,7 +200,7 @@ pub async fn run_command(
 async fn run_task_subcommand(
     zbobr: &ZbobrDispatcher,
     subcommand: TaskSubcommand,
-    pipeline: &PipelineConfig,
+    workflow: &WorkflowConfig,
 ) -> anyhow::Result<()> {
     let task_backend = zbobr.task_backend();
     let repo_backend = zbobr.repo_backend();
@@ -346,7 +346,7 @@ async fn run_task_subcommand(
                 Some(mcp_tester) => zbobr.with_mcp_tester_config(mcp_tester),
                 None => zbobr.clone(),
             };
-            zbobr_dispatcher::process_task(&effective_dispatcher, &task_obj, pipeline).await?;
+            zbobr_dispatcher::process_task(&effective_dispatcher, &task_obj, workflow).await?;
         }
         TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
             overwrite_author(zbobr, id, force, dry_run).await?;

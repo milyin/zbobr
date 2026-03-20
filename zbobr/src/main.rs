@@ -13,7 +13,7 @@ use zbobr_dispatcher::config::{
     ZbobrExecutorArgs, ZbobrExecutorConfig, ZbobrExecutorToml,
 };
 use zbobr_dispatcher::{ConfigFileArg, ConfiguredPromptBuilder};
-use zbobr_api::config::{PipelineConfig, PipelineArgs, PipelineToml};
+use zbobr_api::config::{WorkflowConfig, WorkflowArgs, WorkflowToml};
 use zbobr_utility::config_struct;
 
 use zbobr_repo_backend_github::{
@@ -39,7 +39,7 @@ struct RootConfig {
     #[config(nested)]
     executor: ZbobrExecutorConfig,
     #[config(nested)]
-    pipeline: PipelineConfig,
+    workflow: WorkflowConfig,
 }
 
 #[derive(Parser)]
@@ -100,17 +100,17 @@ async fn main() -> anyhow::Result<()> {
         .validate()
         .with_context(|| format!("Config file: {}", location.config_path.display()))?;
 
-    config.pipeline.validate()?;
+    config.workflow.validate()?;
 
     let command = cli.command;
-    let pipeline = config.pipeline;
+    let workflow = config.workflow;
 
     let task_backend = TaskBackendGithub::from_config(config.tasks)?;
     let repo_backend = ZbobrRepoBackendGithub::from_config(config.repo)?;
     task_backend.validate_connectivity().await?;
     repo_backend.validate_connectivity().await?;
 
-    let prompt_builder = ConfiguredPromptBuilder::new(Some(location.config_dir.clone()), Arc::new(pipeline.clone()));
+    let prompt_builder = ConfiguredPromptBuilder::new(Some(location.config_dir.clone()), Arc::new(workflow.clone()));
 
     let dispatcher = zbobr_dispatcher::ZbobrDispatcherBuilder::new()
         .with_config(Arc::new(config.dispatcher))
@@ -122,5 +122,5 @@ async fn main() -> anyhow::Result<()> {
         .with_prompt_builder(prompt_builder)
         .build();
 
-    commands::run_command(&dispatcher, command, &pipeline).await
+    commands::run_command(&dispatcher, command, &workflow).await
 }

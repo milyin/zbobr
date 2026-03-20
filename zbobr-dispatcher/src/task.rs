@@ -395,9 +395,9 @@ impl TaskSession {
     }
 
     /// Push an entry onto the task's call stack.
-    pub async fn push_stack(&self, mode: &str, signal: &str) -> anyhow::Result<()> {
+    pub async fn push_stack(&self, pipeline: &str, signal: &str) -> anyhow::Result<()> {
         let entry = crate::task::StackEntry {
-            mode: mode.to_string(),
+            pipeline: pipeline.to_string(),
             signal: signal.to_string(),
         };
         self.modify_task(move |mut task| {
