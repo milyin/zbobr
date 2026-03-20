@@ -43,11 +43,15 @@ pub async fn init_workspace(dest: &Path) -> anyhow::Result<()> {
         println!("  wrote {}", path.display());
     }
 
-    // Build full config from RootConfigToml structure
+    // Serialize with toml pretty-printer, then post-process with toml_edit
+    // to convert stage definitions into inline tables.
     let config = default_config_toml();
+    let pretty = toml::to_string_pretty(&config)?;
+    let mut doc: toml_edit::DocumentMut = pretty.parse()?;
+    inline_stage_tables(&mut doc);
     let config_content = format!(
         "# zbobr configuration\n# See documentation for all available options.\n\n{}",
-        toml::to_string_pretty(&config)?
+        doc
     );
     tokio::fs::write(&config_path, &config_content).await?;
     println!("  wrote {}", config_path.display());
@@ -258,6 +262,38 @@ fn default_workflow() -> WorkflowConfig {
     WorkflowConfig {
         pipelines,
         roles,
+    }
+}
+
+/// Convert `workflow.pipelines.*.stages.*` entries from standard tables to inline tables.
+fn inline_stage_tables(doc: &mut toml_edit::DocumentMut) {
+    let Some(toml_edit::Item::Table(workflow)) = doc.get_mut("workflow") else {
+        return;
+    };
+    let Some(toml_edit::Item::Table(pipelines)) = workflow.get_mut("pipelines") else {
+        return;
+    };
+    for (_pname, pipeline_item) in pipelines.iter_mut() {
+        let Some(pipeline) = pipeline_item.as_table_mut() else {
+            continue;
+        };
+        let Some(toml_edit::Item::Table(stages)) = pipeline.get_mut("stages") else {
+            continue;
+        };
+        let keys: Vec<String> = stages.iter().map(|(k, _)| k.to_string()).collect();
+        for key in &keys {
+            let Some(stage_item) = stages.get_mut(key) else {
+                continue;
+            };
+            if let Some(table) = stage_item.as_table_mut() {
+                let inline = table.clone().into_inline_table();
+                *stage_item = toml_edit::Item::Value(toml_edit::Value::InlineTable(inline));
+            }
+            // Reset key formatting so it gets a space before `=`
+            if let Some(mut k) = stages.key_mut(key) {
+                k.fmt();
+            }
+        }
     }
 }
 
