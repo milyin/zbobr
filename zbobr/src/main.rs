@@ -13,6 +13,9 @@ use zbobr_dispatcher::config::{
     ZbobrExecutorArgs, ZbobrExecutorConfig, ZbobrExecutorToml,
 };
 use zbobr_dispatcher::{ConfigFileArg, ConfiguredPromptBuilder};
+use zbobr_executor_claude::ClaudeExecutor;
+use zbobr_executor_copilot::CopilotExecutor;
+use zbobr_executor_mcp_tester::McpTesterExecutor;
 use zbobr_api::config::{WorkflowConfig, WorkflowArgs, WorkflowToml};
 use zbobr_utility::config_struct;
 
@@ -112,14 +115,18 @@ async fn main() -> anyhow::Result<()> {
 
     let prompt_builder = ConfiguredPromptBuilder::new(Some(location.config_dir.clone()), Arc::new(workflow.clone()));
 
+    let claude = ClaudeExecutor::new(config.executor.claude);
+    let copilot = CopilotExecutor::new(config.executor.copilot);
+    let mcp_tester = McpTesterExecutor::new(config.executor.mcp_tester);
+
     let dispatcher = zbobr_dispatcher::ZbobrDispatcherBuilder::new()
         .with_config(config.dispatcher)
         .with_workflow(workflow)
         .with_task_backend(task_backend)
         .with_repo_backend(repo_backend)
-        .with_claude(config.executor.claude)
-        .with_copilot(config.executor.copilot)
-        .with_mcp_tester(config.executor.mcp_tester)
+        .with_claude(claude)
+        .with_copilot(copilot)
+        .with_mcp_tester(mcp_tester)
         .with_prompt_builder(prompt_builder)
         .build();
 

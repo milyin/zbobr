@@ -50,12 +50,12 @@ pub struct ZbobrDispatcher {
     task_backend: Box<dyn TaskBackend>,
     #[builder(required, into)]
     repo_backend: Box<dyn WorktreeBackend>,
-    #[builder(default = "ZbobrExecutorClaudeConfig::default()")]
-    claude: ZbobrExecutorClaudeConfig,
-    #[builder(default = "ZbobrExecutorCopilotConfig::default()")]
-    copilot: ZbobrExecutorCopilotConfig,
-    #[builder(default = "ZbobrExecutorMcpTesterConfig::default()")]
-    mcp_tester: ZbobrExecutorMcpTesterConfig,
+    #[builder(default = "ClaudeExecutor::new(ZbobrExecutorClaudeConfig::default())")]
+    claude: ClaudeExecutor,
+    #[builder(default = "CopilotExecutor::new(ZbobrExecutorCopilotConfig::default())")]
+    copilot: CopilotExecutor,
+    #[builder(default = "McpTesterExecutor::new(ZbobrExecutorMcpTesterConfig::default())")]
+    mcp_tester: McpTesterExecutor,
     #[builder(optional)]
     prompt_builder: Option<ConfiguredPromptBuilder>,
 }
@@ -84,29 +84,29 @@ impl ZbobrDispatcher {
     }
 
     pub fn mcp_tester_config(&self) -> &ZbobrExecutorMcpTesterConfig {
-        &self.mcp_tester
+        &self.mcp_tester.config
     }
 
     pub fn build_executor(&self, tool: Tool, model: Model, mcp_tester_override: Option<&ZbobrExecutorMcpTesterConfig>) -> Box<dyn ToolExecutor> {
         match tool {
             Tool::Copilot => {
-                let mut config = self.copilot.clone();
+                let mut config = self.copilot.config.clone();
                 config.default_model = model;
                 Box::new(CopilotExecutor { config })
             }
             Tool::Claude => {
-                let mut config = self.claude.clone();
+                let mut config = self.claude.config.clone();
                 config.default_model = model;
                 Box::new(ClaudeExecutor { config })
             }
             Tool::McpTester => Box::new(McpTesterExecutor {
-                config: mcp_tester_override.cloned().unwrap_or_else(|| self.mcp_tester.clone()),
+                config: mcp_tester_override.cloned().unwrap_or_else(|| self.mcp_tester.config.clone()),
             }),
         }
     }
 
     pub fn copilot_github_token(&self) -> &str {
-        &self.copilot.copilot_github_token
+        &self.copilot.config.copilot_github_token
     }
 
     #[allow(clippy::too_many_arguments)]

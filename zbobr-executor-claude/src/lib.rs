@@ -15,6 +15,12 @@ pub struct ClaudeExecutor {
     pub config: ZbobrExecutorClaudeConfig,
 }
 
+impl ClaudeExecutor {
+    pub fn new(config: ZbobrExecutorClaudeConfig) -> Self {
+        Self { config }
+    }
+}
+
 #[async_trait]
 impl ToolExecutor for ClaudeExecutor {
     async fn execute(

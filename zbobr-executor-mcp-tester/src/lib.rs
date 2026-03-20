@@ -14,6 +14,12 @@ pub struct McpTesterExecutor {
     pub config: ZbobrExecutorMcpTesterConfig,
 }
 
+impl McpTesterExecutor {
+    pub fn new(config: ZbobrExecutorMcpTesterConfig) -> Self {
+        Self { config }
+    }
+}
+
 #[async_trait]
 impl ToolExecutor for McpTesterExecutor {
     async fn execute(

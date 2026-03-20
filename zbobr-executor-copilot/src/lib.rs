@@ -15,6 +15,12 @@ pub struct CopilotExecutor {
     pub config: ZbobrExecutorCopilotConfig,
 }
 
+impl CopilotExecutor {
+    pub fn new(config: ZbobrExecutorCopilotConfig) -> Self {
+        Self { config }
+    }
+}
+
 #[async_trait]
 impl ToolExecutor for CopilotExecutor {
     async fn execute(
