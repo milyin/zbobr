@@ -166,10 +166,11 @@ pub enum TaskSubcommand {
 
 /// Run the given command against the dispatcher.
 pub async fn run_command(
-    zbobr: &Arc<ZbobrDispatcher>,
+    zbobr: ZbobrDispatcher,
     command: Command,
     workflow: &WorkflowConfig,
 ) -> anyhow::Result<()> {
+    let zbobr = Arc::new(zbobr);
     match command {
         Command::Init { .. } => {
             unreachable!("Init is handled before dispatcher setup in main()")
@@ -183,14 +184,14 @@ pub async fn run_command(
                 .await?;
         }
         Command::Task { subcommand } => {
-            run_task_subcommand(zbobr, subcommand, workflow).await?;
+            run_task_subcommand(&zbobr, subcommand, workflow).await?;
         }
         Command::Loop {
             interval,
             cleanup_interval,
             ..
         } => {
-            zbobr_dispatcher::run_manager_loop(zbobr, interval, cleanup_interval, workflow)
+            zbobr_dispatcher::run_manager_loop(&zbobr, interval, cleanup_interval, workflow)
                 .await?;
         }
     }
