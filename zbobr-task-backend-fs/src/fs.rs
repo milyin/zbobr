@@ -371,7 +371,6 @@ impl TaskMut for FsTaskMut {
         tool: Option<Tool>,
         model: Option<Model>,
         body: &str,
-        boundary: bool,
         hidden: bool,
     ) -> anyhow::Result<()> {
         let mut comments = self.backend.read_comments_structured(self.id).await?;
@@ -383,7 +382,6 @@ impl TaskMut for FsTaskMut {
             tool,
             model,
             text: body.to_string(),
-            boundary,
             hidden,
         };
 
@@ -587,17 +585,6 @@ mod parse_tests {
         let tag: CommentTag = input.parse().unwrap();
         assert_eq!(tag.stage, "planning");
         assert_eq!(tag.hostname, "localhost");
-        assert!(!tag.boundary);
-        assert!(!tag.hidden);
-    }
-
-    #[test]
-    fn test_parse_comment_tag_boundary() {
-        let input = "// reviewing:skynet:boundary";
-        let tag: CommentTag = input.parse().unwrap();
-        assert_eq!(tag.stage, "reviewing");
-        assert_eq!(tag.hostname, "skynet");
-        assert!(tag.boundary);
         assert!(!tag.hidden);
     }
 
@@ -607,30 +594,29 @@ mod parse_tests {
         let tag: CommentTag = input.parse().unwrap();
         assert_eq!(tag.stage, "working");
         assert_eq!(tag.hostname, "host");
-        assert!(!tag.boundary);
         assert!(tag.hidden);
     }
 
     #[test]
-    fn test_parse_comment_tag_boundary_hidden() {
+    fn test_parse_legacy_boundary_ignored() {
+        // Legacy "boundary" flag in stored comments is silently ignored
         let input = "// done:host:boundary:hidden";
         let tag: CommentTag = input.parse().unwrap();
         assert_eq!(tag.stage, "done");
-        assert!(tag.boundary);
         assert!(tag.hidden);
     }
 
     #[test]
     fn test_comment_tag_roundtrip() {
-        let tag = CommentTag::new("planning".into(), "localhost".into(), None, None, false, false);
+        let tag = CommentTag::new("planning".into(), "localhost".into(), None, None, false);
         let s = tag.to_string();
         assert_eq!(s, "// planning:localhost");
         let parsed: CommentTag = s.parse().unwrap();
         assert_eq!(parsed, tag);
 
-        let tag2 = CommentTag::new("reviewing".into(), "host".into(), None, None, true, true);
+        let tag2 = CommentTag::new("reviewing".into(), "host".into(), None, None, true);
         let s2 = tag2.to_string();
-        assert_eq!(s2, "// reviewing:host:boundary:hidden");
+        assert_eq!(s2, "// reviewing:host:hidden");
         let parsed2: CommentTag = s2.parse().unwrap();
         assert_eq!(parsed2, tag2);
     }

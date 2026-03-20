@@ -121,7 +121,6 @@ pub trait TaskMut: Send + Sync {
         tool: Option<Tool>,
         model: Option<Model>,
         body: &str,
-        boundary: bool,
         hidden: bool,
     ) -> anyhow::Result<()>;
 

@@ -118,7 +118,6 @@ fn default_pipeline() -> PipelineConfig {
             is_start: true,
             transitions: HashMap::from([
                 ("default".into(), "go_working".into()),
-                ("ask_user".into(), "go_planning".into()),
             ]),
             ..stage_defaults()
         },
@@ -128,8 +127,7 @@ fn default_pipeline() -> PipelineConfig {
             mode: "main".into(),
             transitions: HashMap::from([
                 ("default".into(), "go_reviewing".into()),
-                ("ask_user".into(), "go_working".into()),
-                ("ask_planner".into(), "go_planning".into()),
+                ("report_failure".into(), "go_planning".into()),
             ]),
             ..stage_defaults()
         },
@@ -138,8 +136,8 @@ fn default_pipeline() -> PipelineConfig {
             role: "reviewer".into(),
             mode: "main".into(),
             transitions: HashMap::from([
-                ("review_accept".into(), "go_merging".into()),
-                ("review_reject".into(), "go_working".into()),
+                ("report_success".into(), "go_merging".into()),
+                ("report_failure".into(), "go_working".into()),
                 ("default".into(), "go_merging".into()),
             ]),
             ..stage_defaults()
@@ -176,16 +174,12 @@ fn default_pipeline() -> PipelineConfig {
             "preparator".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history",
-                    "report_error",
-                    "report_results",
-                    "ask_user",
-                    "get_param_destination_repository",
-                    "set_param_destination_repository",
-                    "get_param_destination_branch",
-                    "set_param_destination_branch",
-                    "set_param_work_branch_postfix",
-                    "get_param_work_branch",
+                    "get_history_index",
+                    "get_history_record",
+                    "stop_with_error",
+                    "report_success",
+                    "stop_with_question",
+                    "configure_worktree",
                 ]
                 .into_iter()
                 .map(String::from)
@@ -197,16 +191,14 @@ fn default_pipeline() -> PipelineConfig {
             "planner".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history",
-                    "report_error",
-                    "ask_user",
-                    "post_plan",
+                    "get_history_index",
+                    "get_history_record",
+                    "stop_with_error",
+                    "stop_with_question",
+                    "report_success",
                     "get_checklist",
-                    "insert_checklist_item",
-                    "update_checklist_item",
+                    "add_checklist_item",
                     "delete_checklist_item",
-                    "get_param_destination_branch",
-                    "get_param_work_branch",
                 ]
                 .into_iter()
                 .map(String::from)
@@ -218,18 +210,16 @@ fn default_pipeline() -> PipelineConfig {
             "worker".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history",
-                    "report_error",
-                    "report_results",
-                    "ask_user",
-                    "ask_planner",
+                    "get_history_index",
+                    "get_history_record",
+                    "stop_with_error",
+                    "report_success",
+                    "report_failure",
+                    "stop_with_question",
                     "get_checklist",
-                    "insert_checklist_item",
-                    "update_checklist_item",
+                    "add_checklist_item",
                     "check_checklist_item",
                     "delete_checklist_item",
-                    "get_param_destination_branch",
-                    "get_param_work_branch",
                 ]
                 .into_iter()
                 .map(String::from)
@@ -241,13 +231,12 @@ fn default_pipeline() -> PipelineConfig {
             "reviewer".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history",
-                    "report_error",
-                    "review_accept",
-                    "review_reject",
-                    "ask_user",
-                    "get_param_destination_branch",
-                    "get_param_work_branch",
+                    "get_history_index",
+                    "get_history_record",
+                    "stop_with_error",
+                    "report_success",
+                    "report_failure",
+                    "stop_with_question",
                 ]
                 .into_iter()
                 .map(String::from)
@@ -259,13 +248,12 @@ fn default_pipeline() -> PipelineConfig {
             "tester".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history",
-                    "report_error",
-                    "test_accept",
-                    "test_reject",
-                    "ask_user",
-                    "get_param_destination_branch",
-                    "get_param_work_branch",
+                    "get_history_index",
+                    "get_history_record",
+                    "stop_with_error",
+                    "report_success",
+                    "report_failure",
+                    "stop_with_question",
                 ]
                 .into_iter()
                 .map(String::from)
@@ -277,12 +265,11 @@ fn default_pipeline() -> PipelineConfig {
             "merger".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history",
-                    "report_error",
-                    "report_results",
-                    "ask_user",
-                    "get_param_destination_branch",
-                    "get_param_work_branch",
+                    "get_history_index",
+                    "get_history_record",
+                    "stop_with_error",
+                    "report_success",
+                    "stop_with_question",
                 ]
                 .into_iter()
                 .map(String::from)
@@ -332,58 +319,54 @@ Read the task description below and set the required parameters for the implemen
 ## Access Model
 
     You can access the internet and run local commands. Your restrictions:
-    - Use MCP `report_error` only to report technical errors
-    - Use `ask_user` to request the user's explanations related to the task
+    - Use MCP `stop_with_error` only to report technical errors
+    - Use `stop_with_question` to request the user's explanations related to the task
     - For reading GitHub data: use `git` and `gh` CLI only when no MCP tool provides the needed information
     - NEVER use git/gh for writing, pushing, or sending data to GitHub
 
 ## Workflow
 
-1. Read the task description provided below in this prompt.
+1. Read the task description provided below in this prompt. Use `get_history_index` to see the full history overview, and `get_history_record` to read specific records.
 2. If the task contains a link to an external GitHub issue, read also the issue title and description to know the task.
-3. Set task parameters accordingly to the task description:
-    - Call `get_param_destination_repository`. If it's empty call `set_param_destination_repository` in owner/repo format accordingly to the external repository URL in the task description
-    - Call `get_param_destination_branch`. If it's empty call `set_param_destination_branch` with the value from the task description (if task explicitly specifies it) or a default like "main"
-    - Call `set_param_work_branch_postfix` with the work branch postfix. Choose short but meaningful related to the task
-    - Call `get_param_work_branch` to get the resulting work branch name for report
-4. Call `report_results` to provide a brief and concise report of the parameters you set.
+3. Set task parameters using `configure_worktree`:
+    - Call `configure_worktree` with `destination_repository` (in owner/repo format from the task description), `destination_branch` (from the task description or "main"), and `work_branch_postfix` (short but meaningful name related to the task).
+4. Call `report_success` to provide a brief and concise report of the parameters you set.
 "#;
 
 const PLANNER_PROMPT: &str = r#"# Planner Agent
 
 Read the task description and comments provided below in this prompt. Design an implementation plan for the task. Prepare checklist items for the worker. See more detailed workflow instructions below.
 
-Work autonomously, try to solve problems independently. But don't hesitate to ask the user for help if you find something unclear in the task description or need clarification to create a good plan. Use `ask_user` for this purpose.
+Work autonomously, try to solve problems independently. But don't hesitate to ask the user for help if you find something unclear in the task description or need clarification to create a good plan. Use `stop_with_question` for this purpose.
 
 ## Access Model
 
     You can access the internet and run local commands. Your restrictions:
-    - Use MCP `post_plan` to finalize the plan and finish your session
-    - Use MCP `ask_user` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
-    - Use MCP `report_error` only to report technical errors
+    - Use MCP `report_success` to finalize the plan and finish your session
+    - Use MCP `stop_with_question` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
+    - Use MCP `stop_with_error` only to report technical errors
     - NEVER use git/gh for writing, pushing, or sending data to GitHub
 
 ## Workspace isolation
 
-    Workspace branch isolation. Your working directory is already the repository with the work branch checked out. Use ONLY the destination and work branches with names provided by the MCP tools `get_param_destination_branch`, `get_param_work_branch`. Do not make changes in the destination branch: this is for reference only. Do NOT fetch or use any other branches. Do NOT look at branches other than the work and destination branches. If you need temporary or experimental branches, prefix their names with the work branch name to avoid interfering with other agents.
+    Workspace branch isolation. Your working directory is already the repository with the work branch checked out. Do not make changes in the destination branch: this is for reference only. Do NOT fetch or use any other branches. If you need temporary or experimental branches, prefix their names with the work branch name to avoid interfering with other agents.
 
 ## Workflow
 
-1. Read the task description, comments, and checklist provided below in this prompt. Use `get_history` with earlier chunk offsets to read previous plans and discussion if needed for more context.
-2. If need to compare the work already done with the initial codebase, use `get_param_destination_branch` to get the name of original branch, `get_param_work_branch` to get the work branch name, and then use git diff or equivalent to compare the branches.
+1. Read the task description, comments, and checklist provided below in this prompt. Use `get_history_index` to see the full history overview, and `get_history_record` to read specific records for more context.
+2. If need to compare the work already done with the initial codebase, use git diff or equivalent to compare the work branch with the destination branch.
 3. **Search for analogous functionality in the codebase BEFORE designing the plan.** Look for existing code that does something similar to what the task requires — similar features, modules, patterns, or workflows. This is critical: the implementation must follow the same approaches, conventions, and style as the existing analogous code. Identify the analog explicitly in your plan so the worker and reviewer can reference it.
 4. Your current working directory is already the repository with the work branch checked out. Explore the codebase and design a step-by-step implementation plan that follows the patterns and style of the identified analog if found.
-5. If some instrument is required and you can't istall it yourself, ask the user to install it with `ask_user`.
+5. If some instrument is required and you can't install it yourself, ask the user to install it with `stop_with_question`.
 6. **Determine if the plan is clear and ready**:
-   - If something is unclear or you have doubts, use `ask_user` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet. Finish the session after asking.
+   - If something is unclear or you have doubts, use `stop_with_question` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet. Finish the session after asking.
    - Only if the plan is clear and no questions were posted, proceed to step 7.
 7. **Prepare checklist items for the worker** (only when plan is clear):
-   - Review the unchecked checklist items provided below (if any). Use `get_checklist` to see the full checklist state including checked items if necessary.
-   - Use `insert_checklist_item` to add implementation steps for the worker
-   - Use `update_checklist_item` to refine existing items if re-planning
+   - Review the unchecked checklist items provided below (if any). Use `get_checklist` to see the full checklist state if necessary.
+   - Use `add_checklist_item` to add implementation steps for the worker
    - Use `delete_checklist_item` to remove unnecessary unchecked items
    - The checklist items ARE the plan — they should fully describe what the worker needs to do
-8. **Finish by calling `post_plan`** with a brief rationale (why this approach was chosen, key design decisions, important constraints). Mention the chosen analog and why it's the right one to follow. Do NOT repeat the checklist items — the plan details are already captured there. This call finishes the session.
+8. **Finish by calling `report_success`** with a brief rationale (why this approach was chosen, key design decisions, important constraints). Mention the chosen analog and why it's the right one to follow. Do NOT repeat the checklist items — the plan details are already captured there. This call finishes the session.
 "#;
 
 const WORKER_PROMPT: &str = r#"# Worker Agent
@@ -398,8 +381,7 @@ The checklist is your persistent memory for this task. It survives across sessio
 - The current unchecked checklist items are provided below in this prompt. Use `get_checklist` to refresh the checklist state during work.
 - Each checklist item should describe a meaningful unit of work (for example: "add unit tests for X", "refactor module Y", "update API to validate Z").
 - Use `check_checklist_item` to mark items as checked when you complete them to record progress.
-- Use `insert_checklist_item` to add new items during work if you discover additional steps needed.
-- Use `update_checklist_item` to edit item text to refine understanding as you work.
+- Use `add_checklist_item` to add new items during work if you discover additional steps needed.
 - Use `delete_checklist_item` to remove items only if they become unnecessary (keep most items for history). **Note:** You cannot delete checked items—this prevents accidental loss of completed work history.
 
 ## Access Model
@@ -413,23 +395,23 @@ The checklist is your persistent memory for this task. It survives across sessio
 
 ## Workspace isolation
 
-    Workspace branch isolation. Your working directory is already the repository with the work branch checked out. Use ONLY the destination and work branches with names provided by the MCP tools `get_param_destination_branch`, `get_param_work_branch`. Do not make changes in the destination branch: this is for reference only. Do NOT fetch or use any other branches. Do NOT look at branches other than the work and destination branches. If you need temporary or experimental branches, prefix their names with the work branch name to avoid interfering with other agents.
+    Workspace branch isolation. Your working directory is already the repository with the work branch checked out. Do not make changes in the destination branch: this is for reference only. Do NOT fetch or use any other branches. If you need temporary or experimental branches, prefix their names with the work branch name to avoid interfering with other agents.
 
 Work autonomously. Do not ask the user for anything unless the task genuinely requires human input.
 
 ## Workflow
 
-1. Read the task description, work plan, comments, and checklist provided below in this prompt. Use `get_history` with earlier chunk offsets to read previous plans if needed for more context.
+1. Read the task description, work plan, comments, and checklist provided below in this prompt. Use `get_history_index` to see the full history overview, and `get_history_record` to read specific records for more context.
 2. **Identify the analog referenced in the plan.** Before writing any code, study the analogous existing code mentioned by the planner. Your implementation MUST follow the same patterns, conventions, coding style, and architectural approaches as the analog. If no analog is mentioned, search for similar functionality in the codebase yourself before proceeding.
 3. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
-4. Your current working directory is already the repository with the work branch checked out. Consult `get_param_destination_branch` and `get_param_work_branch` for branch names if needed.
+4. Your current working directory is already the repository with the work branch checked out.
 5. Implement the plan in your working directory. **Follow the same patterns and style as the identified analog.** Do not invent new approaches when existing code already establishes a convention for the same kind of functionality.
 6. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality.
 7. Commit all your changes locally to the work branch with clear messages (describe what the change does, why, and reference relevant checklist item). ALWAYS ensure that you have no uncommitted changes before marking your checklist items as done.
-8. When implementation for an item is complete, mark the item done with `check_checklist_item`, and update or insert follow-up items as needed
-9. If you need human clarification or intervention, call `ask_user`. If it was found that the plan proposed is unclear or requires adjustment, call `ask_planner`. In case of technical errors use `report_error`.
-10. If some instrument is required and you can't istall it yourself, ask the user to install it with `ask_user`.
-11. Call `report_results` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact."#;
+8. When implementation for an item is complete, mark the item done with `check_checklist_item`, and add follow-up items as needed.
+9. If you need human clarification or intervention, call `stop_with_question`. If the plan is unclear or requires adjustment, call `report_failure`. In case of technical errors use `stop_with_error`.
+10. If some instrument is required and you can't install it yourself, ask the user to install it with `stop_with_question`.
+11. Call `report_success` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact."#;
 
 const REVIEWER_PROMPT: &str = r#"# Reviewer Agent
 
@@ -438,20 +420,19 @@ Review the implementation changes and ensure they meet coding standards and task
 ## Access Model
 
     You have read-only access to the task plan and access to the repository for inspection:
-    - The task description, work plan, worker's report, comments, and checklist are provided below in this prompt. Use `get_history` with earlier chunk offsets to read previous plans and discussions if needed for more context.
+    - The task description, work plan, worker's report, comments, and checklist are provided below in this prompt. Use `get_history_index` and `get_history_record` to read previous plans and discussions if needed for more context.
     - Your current working directory is already the repository with the work branch checked out — examine changes directly
-    - Use `get_param_destination_branch` and `get_param_work_branch` to get branch names
-    - Use `report_error` only to report technical errors
+    - Use `stop_with_error` only to report technical errors
 
 ## Workflow
 
 1. Read the task description, work plan, worker's report, comments, and checklist provided below in this prompt. Note if the analog solution in the existing code is referenced in the plan.
-2. **Inspect all changes made in this task**: Call `get_param_destination_branch` to get the base branch name. Then use `git diff <destination_branch>...HEAD` (three dots) to see ALL changes introduced by this task relative to the base branch. Do NOT checkout the base branch (it may conflict with worktree setup) — use only `git diff` with the remote ref (e.g. `origin/<destination_branch>...HEAD`). You can also use `git log origin/<destination_branch>..HEAD` to see all commits in this branch.
+2. **Inspect all changes made in this task**: Use `git diff origin/<destination_branch>...HEAD` (three dots) to see ALL changes introduced by this task relative to the base branch. Do NOT checkout the base branch (it may conflict with worktree setup). You can also use `git log origin/<destination_branch>..HEAD` to see all commits in this branch.
 3. **Verify the analog choice and pattern consistency**: Check that the planner chose an appropriate analog for the new functionality. Then verify that the implementation consistently follows the same patterns, conventions, coding style, and architectural approaches as the analog. Flag any deviations — new code should look like it was written by the same author as the existing analogous code. If the analog was poorly chosen, note this as a review finding.
 4. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. **Do not run any tests yourself; testing is handled in a separate Testing stage.**
 5. Verify that all changes are related to the task and are necessary for the implementation. Flag any extraneous changes that do not directly contribute to the task requirements or plan.
 6. Prepare a detailed review report describing any issues found, suggested fixes, and overall assessment. Include your assessment of analog consistency.
-7. Call `review_accept` if the implementation is correct and complete, or `review_reject` if issues were found. Pass the review report as a parameter to these tools.
+7. Call `report_success` if the implementation is correct and complete, or `report_failure` if issues were found. Pass the review report as a parameter to these tools.
 "#;
 
 const TESTER_PROMPT: &str = r#"# Tester Agent
@@ -461,9 +442,9 @@ Run comprehensive tests to verify the implementation meets all testing requireme
 ## Access Model
 
 You have read-only access to the task plan and the repository for testing:
-- The task description, work plan, worker's report, comments, and checklist are provided below in this prompt. Use `get_history` with earlier chunk offsets to read previous plans and discussions if needed for more context.
+- The task description, work plan, worker's report, comments, and checklist are provided below in this prompt. Use `get_history_index` and `get_history_record` to read previous plans and discussions if needed for more context.
 - Your current working directory is the repository with the work branch checked out
-- Use `report_error` only to report technical errors
+- Use `stop_with_error` only to report technical errors
 
 ## Workflow
 
@@ -480,7 +461,7 @@ You have read-only access to the task plan and the repository for testing:
    - Measure code coverage if available
    - Run formatting/linting checks to ensure code quality
    - Verify all CI requirements are met
-4. In case of test failures run the failed tests on the original branch (get its name by mcp `get_param_destination_branch`) to determine if the failure is due to new changes or existing issues in the codebase. The mcp `get_param_work_branch` returns the name of the work branch.
+4. In case of test failures run the failed tests on the original branch to determine if the failure is due to new changes or existing issues in the codebase.
 5. **Document all testing performed:**
    - Test frameworks and versions used
    - All commands executed with full output
@@ -488,14 +469,14 @@ You have read-only access to the task plan and the repository for testing:
    - Any failures found
    - Code coverage metrics
    - Formatting/linting issues
-6. Call `test_accept` if all tests pass and all requirements are met, or `test_reject` if any tests fail or requirements are not met. Pass your comprehensive test report as a parameter.
+6. Call `report_success` if all tests pass and all requirements are met, or `report_failure` if any tests fail or requirements are not met. Pass your comprehensive test report as a parameter.
 
 ## Important Notes
 
 - **Do not modify files**: You are inspecting and testing only. Do not create commits or change code.
 - **Comprehensive testing**: Run all test commands discovered from the CI unless they require complex environment configuration. Mention skipped tests in the report.
 - **Concise but exhaustive reporting**: Include to the report exact command line of each test executed. In case of error append the extract of test log with the error message.
-- **Early termination if necessary**: If some test run shows massive failures indicating a fundamental issue with the implementation, you may stop further testing and make `test_reject` report immediately. Otherwise execute full test suite.
+- **Early termination if necessary**: If some test run shows massive failures indicating a fundamental issue with the implementation, you may stop further testing and make `report_failure` report immediately. Otherwise execute full test suite.
 "#;
 
 const MERGER_PROMPT: &str = r#"# Merger Agent
@@ -512,16 +493,16 @@ The framework attempted to merge changes into the work branch and encountered co
 You have read access to the task and repository:
 - The task description, work plan, reports, comments, and checklist are provided below in this prompt.
 - Your current working directory is already the repository with the work branch checked out and the merge in progress (conflict markers present)
-- Use `ask_user` to ask the user for clarification on conflict resolution
-- Use `report_error` to report when conflicts cannot be resolved
+- Use `stop_with_question` to ask the user for clarification on conflict resolution
+- Use `stop_with_error` to report when conflicts cannot be resolved
 
 ## Workspace isolation
 
-    Workspace branch isolation. Your working directory is already the repository with the work branch checked out. Use ONLY the destination and work branches with names provided by the MCP tools `get_param_destination_branch`, `get_param_work_branch`. Do not make changes in the destination branch: this is for reference only. Do NOT fetch or use any other branches. Do NOT look at branches other than the work and destination branches. If you need temporary or experimental branches, prefix their names with the work branch name to avoid interfering with other agents.
+    Workspace branch isolation. Your working directory is already the repository with the work branch checked out. Do not make changes in the destination branch: this is for reference only. Do NOT fetch or use any other branches. If you need temporary or experimental branches, prefix their names with the work branch name to avoid interfering with other agents.
 
 ## Workflow
 
-1. Read the task description, work plan, reports, comments, and checklist provided below in this prompt.
+1. Read the task description, work plan, reports, comments, and checklist provided below in this prompt. Use `get_history_index` to see the full history overview, and `get_history_record` to read specific records for more context.
 2. Your current working directory is the repository in a mid-merge conflict state. Examine the conflicts:
    - `git status` to see which files have conflicts
    - `git diff` to examine conflict markers and understand what changed in each branch
@@ -532,11 +513,11 @@ You have read access to the task and repository:
    - Use `git add <file>` for each resolved file, then `git commit -m "chore: merge conflicts resolved"` to complete the merge commit
    - Do NOT run `git merge` again — just resolve the markers and commit
 4. **If automatic resolution is not possible:**
-   - Use `ask_user` to describe the conflicts and ask which version should be preferred, or ask for guidance
+   - Use `stop_with_question` to describe the conflicts and ask which version should be preferred, or ask for guidance
    - Wait for user input before proceeding
 5. **After successful resolution:**
    - Ensure all your changes are explicitly committed using `git commit` to the local work branch
-6. Call `report_results` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact.
+6. Call `report_success` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact.
 
 ## Conflict Resolution Principles
 

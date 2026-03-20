@@ -6,32 +6,6 @@ use crate::{
     task::{Model, RoleSession, Tool},
 };
 
-// Custom deserializer for boolean that accepts both bool and string values
-// This handles cases where HTTP clients stringify all parameters
-fn deserialize_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de::{self, Deserialize};
-
-    #[derive(serde::Deserialize)]
-    #[serde(untagged)]
-    enum BoolOrString {
-        Bool(bool),
-        String(String),
-    }
-
-    match BoolOrString::deserialize(deserializer)? {
-        BoolOrString::Bool(b) => Ok(b),
-        BoolOrString::String(s) => match s.to_lowercase().as_str() {
-            "true" | "1" | "yes" => Ok(true),
-            "false" | "0" | "no" => Ok(false),
-            _ => Err(de::Error::custom(format!("invalid bool value: {}", s))),
-        },
-    }
-}
-
-
 /// Get the current hostname, or "unknown" if it cannot be determined.
 pub fn get_hostname() -> String {
     hostname::get()
@@ -43,98 +17,49 @@ pub fn get_hostname() -> String {
 // -- Parameter types --
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct DescriptionParam {
-    #[schemars(description = "The task description/plan text")]
-    pub description: String,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct MessageParam {
     #[schemars(description = "The message to post")]
     pub message: String,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct RepoParam {
-    #[schemars(description = "Target repository (full git URL, local path, or owner/repo)")]
-    pub repo: String,
+pub struct GetHistoryRecordParam {
+    #[schemars(description = "Position index of the record to retrieve (0 = task description)")]
+    pub index: usize,
 }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct PathParam {
-    #[schemars(description = "Local filesystem path to repository")]
-    pub path: String,
-}
+// -- Worktree configuration --
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct ShortNameParam {
-    #[schemars(description = "Short name for the branch (e.g. 'implementation', 'fix-typo')")]
-    pub short_name: String,
+pub struct ConfigureWorktreeParam {
+    #[schemars(description = "Destination repository (full git URL, local path, or owner/repo format)")]
+    pub destination_repository: Option<String>,
+    #[schemars(description = "Destination branch name (e.g. 'main')")]
+    pub destination_branch: Option<String>,
+    #[schemars(description = "Work branch postfix (e.g. 'implement-feature'). Combined with prefix and task ID to form the full branch name.")]
+    pub work_branch_postfix: Option<String>,
 }
 
 // -- Checklist parameter types --
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct InsertChecklistItemParam {
+pub struct AddChecklistItemParam {
     #[schemars(description = "Unique identifier for the new checklist item")]
     pub id: String,
     #[schemars(description = "Checklist item text")]
-    pub text: String,
-    #[schemars(description = "Optional ID of the item to insert after (if omitted, adds to end)")]
-    pub after_id: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct UpdateChecklistItemParam {
-    #[schemars(description = "ID of the checklist item to update")]
-    pub id: String,
-    #[schemars(description = "New text for the checklist item")]
     pub text: String,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct CheckChecklistItemParam {
-    #[schemars(description = "ID of the checklist item to check/uncheck")]
+    #[schemars(description = "ID of the checklist item to mark as checked")]
     pub id: String,
-    #[schemars(description = "New checkbox state (true = checked, false = unchecked)")]
-    #[serde(deserialize_with = "deserialize_bool")]
-    pub checked: bool,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct DeleteChecklistItemParam {
     #[schemars(description = "ID of the checklist item to delete")]
     pub id: String,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct SetDestinationRepositoryParam {
-    #[schemars(
-        description = "Destination repository (full git URL, local path, or owner/repo format) (or null to unset)"
-    )]
-    pub value: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct SetDestinationBranchParam {
-    #[schemars(
-        description = "Work branch postfix (the final segment after prefix/task_id) (or null to unset)"
-    )]
-    pub value: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct SetWorkBranchParam {
-    #[schemars(description = "Work branch name (or null to unset)")]
-    pub value: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct GetHistoryParam {
-    #[schemars(
-        description = "History chunk index (0 = oldest, omitted = latest). Response includes current_chunk and last_chunk for navigation."
-    )]
-    pub offset: Option<usize>,
 }
 
 

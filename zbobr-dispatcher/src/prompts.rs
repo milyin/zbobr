@@ -97,7 +97,7 @@ pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::R
 /// 1. Role description (from built-in default or prompt file)
 /// 2. Custom prompts (user context from prompt files)
 /// 3. Task title
-/// 4. Recent task history (latest chunk from get_history)
+/// 4. Recent task history (non-hidden comments)
 /// 5. Unchecked checklist items with ids
 pub async fn build_full_prompt(
     user_context: &str,
@@ -105,9 +105,11 @@ pub async fn build_full_prompt(
     task_id: u64,
     task_backend: &dyn TaskBackend,
 ) -> anyhow::Result<String> {
-    let task = task_backend.get_task(task_id).await?.snapshot().await?;
-    let history = crate::get_history(task_backend, task_id, None).await?;
-    let history_json = serde_json::to_string_pretty(&history.comments).unwrap_or_default();
+    let weak = task_backend.get_task(task_id).await?;
+    let task = weak.snapshot().await?;
+    let comments = weak.get_comments().await?;
+    let visible_comments: Vec<_> = comments.iter().filter(|c| !c.hidden).collect();
+    let history_json = serde_json::to_string_pretty(&visible_comments).unwrap_or_default();
     Ok(assemble_prompt(
         user_context,
         role_name,

@@ -50,11 +50,10 @@ pub struct ChecklistItem {
 ///
 /// The `stage` field identifies which stage posted the comment (e.g. "planning",
 /// "working"). The body text may contain `[tool_name]` section headers added by
-/// MCP tools (e.g. `[report_results]`, `[post_plan]`).
+/// MCP tools (e.g. `[report_success]`, `[report_failure]`).
 ///
-/// `boundary` marks history-chunk boundaries (reject, done).
-/// `hidden` marks comments that are excluded from `get_history` results (errors,
-/// done markers).
+/// `hidden` marks comments that are excluded from regular history display (errors,
+/// done markers) but still visible in the history index.
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
@@ -73,114 +72,122 @@ pub struct Comment {
     pub model: Option<Model>,
     #[schemars(description = "Comment text (may contain [tool] section headers)")]
     pub text: String,
-    #[schemars(description = "True if this comment is a history-chunk boundary")]
-    #[serde(default)]
-    pub boundary: bool,
     #[schemars(description = "True if this comment is hidden from get_history")]
     #[serde(default)]
     pub hidden: bool,
 }
 
-/// Result of extracting a history chunk, including navigation metadata.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub struct HistoryChunk {
-    /// Index of the returned chunk (0-based, 0 = oldest).
-    pub current_chunk: usize,
-    /// Index of the last available chunk.
-    pub last_chunk: usize,
-    /// Comments in this chunk
-    pub comments: Vec<Comment>,
+// -- History index types --
+
+/// Type of a history record, derived from `[tool_name]` prefix in comment text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryRecordType {
+    Task,
+    Success,
+    Failure,
+    Question,
+    Error,
+    Other,
 }
 
-/// Prepend a task description as a synthetic comment, then extract the chunk
-/// at `offset` from the comment history.
-///
-/// Chunks are delimited by boundary comments.
-/// Chunks are numbered 0 to N where 0 is the oldest and N is the newest.
-/// When `offset` is `None`, the last (newest) chunk is returned.
-///
-/// Hidden comments are filtered out.
-/// Returns an empty `comments` vec when the chunk has no visible messages.
-/// Returns `Err` only for hard failures (offset out of range).
-pub fn extract_history_chunk(
-    mut comments: Vec<Comment>,
-    description: &str,
-    offset: Option<usize>,
-) -> anyhow::Result<HistoryChunk> {
-    // Prepend description as synthetic first comment.
-    if !description.is_empty() {
-        comments.insert(
-            0,
-            Comment {
-                timestamp: String::new(),
-                stage: String::new(),
-                hostname: String::new(),
-                tool: None,
-                model: None,
-                text: description.to_owned(),
-                boundary: false,
-                hidden: false,
-            },
-        );
-    }
+/// A single entry in the history index.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct HistoryIndexEntry {
+    pub position: usize,
+    pub author: String,
+    pub record_type: HistoryRecordType,
+    pub hidden: bool,
+    pub summary: String,
+}
 
-    if comments.is_empty() {
-        return Ok(HistoryChunk {
-            current_chunk: 0,
-            last_chunk: 0,
-            comments: Vec::new(),
+/// Full history index returned by `get_history_index`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct HistoryIndex {
+    pub entries: Vec<HistoryIndexEntry>,
+}
+
+/// Determine the record type from a comment's `[tool_name]` prefix.
+fn classify_comment(text: &str) -> HistoryRecordType {
+    let prefix = text.split('\n').next().unwrap_or("");
+    match prefix {
+        "[report_results]" | "[report_success]" | "[post_plan]"
+        | "[review_accept]" | "[test_accept]" => HistoryRecordType::Success,
+        "[report_failure]" | "[ask_planner]"
+        | "[review_reject]" | "[test_reject]" => HistoryRecordType::Failure,
+        "[ask_user]" | "[stop_with_question]" => HistoryRecordType::Question,
+        "[report_error]" | "[stop_with_error]" => HistoryRecordType::Error,
+        _ => HistoryRecordType::Other,
+    }
+}
+
+/// Extract a one-line summary from comment text (first non-prefix line, truncated).
+fn extract_summary(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    // Skip the [tool_name] prefix line if present
+    let content_line = if lines.first().map_or(false, |l| l.starts_with('[') && l.ends_with(']')) {
+        lines.get(1).copied().unwrap_or("")
+    } else {
+        lines.first().copied().unwrap_or("")
+    };
+    let trimmed = content_line.trim();
+    if trimmed.len() > 120 {
+        format!("{}...", &trimmed[..120])
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Build a history index from comments and task description.
+///
+/// Position 0 is a synthetic entry for the task description.
+/// Subsequent positions map to comments (including hidden ones).
+pub fn build_history_index(comments: &[Comment], description: &str) -> HistoryIndex {
+    let mut entries = Vec::with_capacity(comments.len() + 1);
+
+    // Position 0: synthetic task description entry
+    entries.push(HistoryIndexEntry {
+        position: 0,
+        author: "user".to_string(),
+        record_type: HistoryRecordType::Task,
+        hidden: false,
+        summary: extract_summary(description),
+    });
+
+    for (i, comment) in comments.iter().enumerate() {
+        entries.push(HistoryIndexEntry {
+            position: i + 1,
+            author: comment.stage.clone(),
+            record_type: classify_comment(&comment.text),
+            hidden: comment.hidden,
+            summary: extract_summary(&comment.text),
         });
     }
 
-    // Find boundary indices.
-    let cut_indices: Vec<usize> = comments
-        .iter()
-        .enumerate()
-        .filter(|(_, c)| c.boundary)
-        .map(|(i, _)| i)
-        .collect();
+    HistoryIndex { entries }
+}
 
-    let num_chunks = cut_indices.len() + 1;
-    let last_chunk = num_chunks - 1;
-
-    // Resolve target chunk: None or out-of-range defaults to last.
-    let target_chunk = match offset {
-        None => last_chunk,
-        Some(idx) => {
-            anyhow::ensure!(
-                idx < num_chunks,
-                "offset {} out of range: only {} chunk(s) available (0..{})",
-                idx,
-                num_chunks,
-                last_chunk
-            );
-            idx
-        }
-    };
-
-    // Extract chunk boundaries.
-    let (start_idx, end_idx) = if cut_indices.is_empty() {
-        (0, comments.len())
-    } else if target_chunk == 0 {
-        (0, cut_indices[0])
-    } else if target_chunk == last_chunk {
-        (cut_indices[target_chunk - 1], comments.len())
+/// Get the text of a history record by position index.
+///
+/// Position 0 returns the task description. Positions 1..=N map to comments.
+pub fn get_history_record_by_index(
+    comments: &[Comment],
+    description: &str,
+    index: usize,
+) -> anyhow::Result<String> {
+    if index == 0 {
+        return Ok(description.to_string());
+    }
+    let comment_idx = index - 1;
+    if comment_idx < comments.len() {
+        Ok(comments[comment_idx].text.clone())
     } else {
-        (cut_indices[target_chunk - 1], cut_indices[target_chunk])
-    };
-
-    // Filter out hidden comments.
-    let chunk_comments = comments[start_idx..end_idx]
-        .iter()
-        .filter(|c| !c.hidden)
-        .cloned()
-        .collect();
-
-    Ok(HistoryChunk {
-        current_chunk: target_chunk,
-        last_chunk,
-        comments: chunk_comments,
-    })
+        anyhow::bail!(
+            "offset {} out of range: only {} record(s) available",
+            index,
+            comments.len() + 1
+        )
+    }
 }
 
 /// An entry on the task's call stack, recording which mode to return to
@@ -437,14 +444,13 @@ impl std::str::FromStr for Model {
 
 /// Tag for comment formatting. Contains stage name, hostname, and optional tool/model.
 ///
-/// Format: `// {stage}:{hostname}[:{tool}[:{model}]]` with optional `:boundary` or `:hidden` flags.
+/// Format: `// {stage}:{hostname}[:{tool}[:{model}]]` with optional `:hidden` flag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommentTag {
     pub stage: String,
     pub hostname: String,
     pub tool: Option<Tool>,
     pub model: Option<Model>,
-    pub boundary: bool,
     pub hidden: bool,
 }
 
@@ -454,7 +460,6 @@ impl CommentTag {
         hostname: String,
         tool: Option<Tool>,
         model: Option<Model>,
-        boundary: bool,
         hidden: bool,
     ) -> Self {
         Self {
@@ -462,7 +467,6 @@ impl CommentTag {
             hostname,
             tool,
             model,
-            boundary,
             hidden,
         }
     }
@@ -476,9 +480,6 @@ impl std::fmt::Display for CommentTag {
             if let Some(ref model) = self.model {
                 write!(f, ":{model}")?;
             }
-        }
-        if self.boundary {
-            write!(f, ":boundary")?;
         }
         if self.hidden {
             write!(f, ":hidden")?;
@@ -500,23 +501,17 @@ impl std::str::FromStr for CommentTag {
         let stage = parts[0].to_string();
         let hostname = parts[1].to_string();
 
-        // Remaining parts are optional tool, model, and flags (boundary/hidden).
+        // Remaining parts are optional tool, model, and flags (hidden).
         let rest = &parts[2..];
-        let flags = ["boundary", "hidden"];
         let mut tool: Option<Tool> = None;
         let mut model: Option<Model> = None;
-        let mut boundary = false;
         let mut hidden = false;
 
-        let mut i = 0;
-        while i < rest.len() {
-            let part = rest[i];
-            if flags.contains(&part) {
-                if part == "boundary" {
-                    boundary = true;
-                } else {
-                    hidden = true;
-                }
+        for part in rest {
+            if *part == "hidden" {
+                hidden = true;
+            } else if *part == "boundary" {
+                // Ignore legacy boundary flag in stored comments
             } else if tool.is_none() {
                 if let Ok(t) = part.parse::<Tool>() {
                     tool = Some(t);
@@ -526,7 +521,6 @@ impl std::str::FromStr for CommentTag {
                     model = Some(m);
                 }
             }
-            i += 1;
         }
 
         Ok(CommentTag {
@@ -534,7 +528,6 @@ impl std::str::FromStr for CommentTag {
             hostname,
             tool,
             model,
-            boundary,
             hidden,
         })
     }

@@ -702,7 +702,7 @@ impl ZbobrTaskBackendGithubImpl {
                         (t, body_text)
                     }
                     Err(_) => (
-                        CommentTag::new(String::new(), String::new(), None, None, false, false),
+                        CommentTag::new(String::new(), String::new(), None, None, false),
                         body.clone(),
                     ),
                 };
@@ -714,7 +714,6 @@ impl ZbobrTaskBackendGithubImpl {
                     tool: tag.tool,
                     model: tag.model,
                     text,
-                    boundary: tag.boundary,
                     hidden: tag.hidden,
                 }
             })
@@ -730,12 +729,11 @@ impl ZbobrTaskBackendGithubImpl {
         tool: Option<Tool>,
         model: Option<Model>,
         body: &str,
-        boundary: bool,
         hidden: bool,
     ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        let tag = CommentTag::new(stage.to_string(), hostname.to_string(), tool, model, boundary, hidden);
+        let tag = CommentTag::new(stage.to_string(), hostname.to_string(), tool, model, hidden);
         let formatted_body = format!("{}\n\n{}", tag, body);
 
         retry_github("create issue comment", || async {
@@ -822,11 +820,10 @@ impl TaskMut for GithubTaskMut {
         tool: Option<Tool>,
         model: Option<Model>,
         body: &str,
-        boundary: bool,
         hidden: bool,
     ) -> anyhow::Result<()> {
         self.backend
-            .post_task_comment_internal(self.id, stage, hostname, tool, model, body, boundary, hidden)
+            .post_task_comment_internal(self.id, stage, hostname, tool, model, body, hidden)
             .await
     }
 
@@ -1015,7 +1012,7 @@ mod parse_tests {
                 (tag, body)
             }
             Err(_) => (
-                CommentTag::new(String::new(), String::new(), None, None, false, false),
+                CommentTag::new(String::new(), String::new(), None, None, false),
                 input.to_string(),
             ),
         }
@@ -1027,19 +1024,17 @@ mod parse_tests {
         let (tag, body) = split_tag_body(input);
         assert_eq!(tag.stage, "planning");
         assert_eq!(tag.hostname, "localhost");
-        assert!(!tag.boundary);
         assert!(!tag.hidden);
         assert_eq!(body, "This is the body");
     }
 
     #[test]
-    fn test_parse_comment_tag_boundary() {
-        let input = "// reviewing:skynet:boundary\n\nRejected.";
+    fn test_parse_comment_tag_hidden() {
+        let input = "// reviewing:skynet:hidden\n\nRejected.";
         let (tag, body) = split_tag_body(input);
         assert_eq!(tag.stage, "reviewing");
         assert_eq!(tag.hostname, "skynet");
-        assert!(tag.boundary);
-        assert!(!tag.hidden);
+        assert!(tag.hidden);
         assert_eq!(body, "Rejected.");
     }
 
@@ -1054,7 +1049,7 @@ mod parse_tests {
 
     #[test]
     fn test_comment_tag_roundtrip() {
-        let tag = CommentTag::new("working".into(), "host".into(), None, None, true, true);
+        let tag = CommentTag::new("working".into(), "host".into(), None, None, true);
         let s = tag.to_string();
         let parsed: CommentTag = s.parse().unwrap();
         assert_eq!(parsed, tag);

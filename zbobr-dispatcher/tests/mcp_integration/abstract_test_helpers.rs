@@ -403,7 +403,7 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
 }
 
 // ===========================================================================
-// Test 6: Going to PAUSE via report_error
+// Test 6: Going to PAUSE via stop_with_error
 // ===========================================================================
 
 pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
@@ -426,13 +426,13 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
 
     let scenarios = scenarios_map(vec![(
         "role_err",
-        abstract_scenarios::report_error_scenario(),
+        abstract_scenarios::stop_with_error_scenario(),
     )]);
 
     env.run_pipeline(task_id, &pipeline, &scenarios).await;
 
     let task = env.get_task(task_id).await;
-    assert!(task.pause, "report_error should set pause flag");
+    assert!(task.pause, "stop_with_error should set pause flag");
     assert_eq!(task.state, "main_PENDING", "Should be pending, not DONE");
 
     let comments = env.get_comments(task_id).await;
@@ -481,7 +481,7 @@ pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
 }
 
 // ===========================================================================
-// Test 8: Signal-based transitions (review_accept / review_reject)
+// Test 8: Signal-based transitions (report_success / report_failure)
 // ===========================================================================
 
 pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
@@ -501,8 +501,8 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
             mode: "main",
             is_start: true,
             transitions: vec![
-                ("review_accept", "go_finish"),
-                ("review_reject", "go_check"),
+                ("report_success", "go_finish"),
+                ("report_failure", "go_check"),
                 ("default", "return"),
             ],
         },
@@ -515,9 +515,9 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
         },
     ]);
 
-    // First run: reject → go_check (loop back)
+    // First run: failure → go_check (loop back)
     let scenarios_reject = scenarios_map(vec![
-        ("role_check", abstract_scenarios::signal_reject_scenario()),
+        ("role_check", abstract_scenarios::report_failure_scenario()),
         ("role_finish", abstract_scenarios::report_and_finish_scenario()),
     ]);
     env.run_pipeline(task_id, &pipeline, &scenarios_reject)
@@ -526,12 +526,12 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     assert_eq!(
         task.signal,
         Some("go_check".to_string()),
-        "review_reject should route to go_check"
+        "report_failure should route to go_check"
     );
 
-    // Second run: accept → go_finish
+    // Second run: success → go_finish
     let scenarios_accept = scenarios_map(vec![
-        ("role_check", abstract_scenarios::signal_accept_scenario()),
+        ("role_check", abstract_scenarios::report_success_scenario()),
         ("role_finish", abstract_scenarios::report_and_finish_scenario()),
     ]);
     env.continue_pipeline(task_id, &pipeline, &scenarios_accept)
@@ -540,7 +540,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     assert_eq!(
         task.signal,
         Some("go_finish".to_string()),
-        "review_accept should route to go_finish"
+        "report_success should route to go_finish"
     );
 
     // Run to completion: finish → return → DONE
@@ -551,7 +551,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
 }
 
 // ===========================================================================
-// Test 9: PAUSE via ask_user
+// Test 9: PAUSE via stop_with_question
 // ===========================================================================
 
 pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
@@ -574,13 +574,13 @@ pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
 
     let scenarios = scenarios_map(vec![(
         "role_ask",
-        abstract_scenarios::ask_user_scenario(),
+        abstract_scenarios::stop_with_question_scenario(),
     )]);
 
     env.run_pipeline(task_id, &pipeline, &scenarios).await;
 
     let task = env.get_task(task_id).await;
-    assert!(task.pause, "ask_user should set pause flag");
+    assert!(task.pause, "stop_with_question should set pause flag");
 }
 
 // ===========================================================================
@@ -591,42 +591,26 @@ pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
 fn preparator_scenario(repo_path: &str) -> String {
     format!(
         r#"name: Preparator Scenario
-description: Set routing params and report results
+description: Set routing params and report success
 timeout: 60
 stop_on_failure: true
 
 steps:
-- name: Set destination repository
+- name: Configure worktree
   operation:
     type: tool_call
-    tool: set_param_destination_repository
+    tool: configure_worktree
     arguments:
-      value: "{repo_path}"
+      destination_repository: "{repo_path}"
+      destination_branch: "main"
+      work_branch_postfix: "test"
   assertions:
     - type: success
 
-- name: Set destination branch
+- name: Report success
   operation:
     type: tool_call
-    tool: set_param_destination_branch
-    arguments:
-      value: "main"
-  assertions:
-    - type: success
-
-- name: Set work branch postfix
-  operation:
-    type: tool_call
-    tool: set_param_work_branch_postfix
-    arguments:
-      value: "test"
-  assertions:
-    - type: success
-
-- name: Report results
-  operation:
-    type: tool_call
-    tool: report_results
+    tool: report_success
     arguments:
       message: "Params set"
   assertions:

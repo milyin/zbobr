@@ -17,7 +17,6 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct BufferedComment {
     pub body: String,
-    pub boundary: bool,
 }
 
 /// Shared comment buffer used to group per-stage MCP comments.
@@ -106,21 +105,12 @@ impl RoleSession {
         Ok(self.get_task().await?.description)
     }
 
-    /// Get a history chunk at the given offset.
-    /// `offset` is 0-based (0 = oldest chunk); `None` returns the last chunk.
-    ///
-    /// When a comment buffer is active, buffered (not-yet-flushed) comments are
-    /// appended to the backend comments so that the agent can see its own
-    /// output during the session.
-    pub async fn get_history(
-        &self,
-        offset: Option<usize>,
-    ) -> anyhow::Result<zbobr_api::HistoryChunk> {
+    /// Build the full comment list including buffered comments.
+    async fn comments_with_buffer(&self) -> anyhow::Result<(Vec<Comment>, String)> {
+        let weak = self.task_backend.get_task(self.task_id).await?;
+        let mut comments = weak.get_comments().await?;
+        let task = weak.snapshot().await?;
         if let Some(ref buffer) = self.comment_buffer {
-            let weak = self.task_backend.get_task(self.task_id).await?;
-            let mut comments = weak.get_comments().await?;
-            let task = weak.snapshot().await?;
-            // Append buffered comments so the agent can see its own posts.
             let buffered = buffer.lock().unwrap();
             for bc in buffered.iter() {
                 comments.push(Comment {
@@ -130,14 +120,23 @@ impl RoleSession {
                     tool: None,
                     model: None,
                     text: bc.body.clone(),
-                    boundary: bc.boundary,
                     hidden: false,
                 });
             }
-            zbobr_api::extract_history_chunk(comments, &task.description, offset)
-        } else {
-            crate::get_history(&*self.task_backend, self.task_id, offset).await
         }
+        Ok((comments, task.description))
+    }
+
+    /// Get the history index (all records with position, author, type, summary).
+    pub async fn get_history_index(&self) -> anyhow::Result<zbobr_api::HistoryIndex> {
+        let (comments, description) = self.comments_with_buffer().await?;
+        Ok(zbobr_api::build_history_index(&comments, &description))
+    }
+
+    /// Get a single history record by position index.
+    pub async fn get_history_record(&self, index: usize) -> anyhow::Result<String> {
+        let (comments, description) = self.comments_with_buffer().await?;
+        zbobr_api::get_history_record_by_index(&comments, &description, index)
     }
 
     /// Get the current task checklist.
@@ -187,14 +186,12 @@ impl RoleSession {
         tool: Option<Tool>,
         model: Option<Model>,
         buffered: bool,
-        boundary: bool,
         hidden: bool,
     ) -> anyhow::Result<()> {
         if buffered {
             if let Some(ref buffer) = self.comment_buffer {
                 buffer.lock().unwrap().push(BufferedComment {
                     body: body.to_string(),
-                    boundary,
                 });
                 return Ok(());
             }
@@ -202,7 +199,7 @@ impl RoleSession {
         let weak = self.task_backend.get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
-            .post_comment(stage, hostname, tool, model, body, boundary, hidden)
+            .post_comment(stage, hostname, tool, model, body, hidden)
             .await
     }
 
@@ -454,10 +451,10 @@ impl TaskSession {
             }
         }
 
-        // Post DONE boundary comment (hidden + boundary).
+        // Post DONE marker comment (hidden).
         let hostname = crate::mcp::common::get_hostname();
         if let Err(e) = self
-            .post_comment("done", &hostname, None, None, "", true, true)
+            .post_comment("done", &hostname, None, None, "", true)
             .await
         {
             tracing::warn!("Failed to post DONE boundary for task #{task_id}: {e}");
@@ -479,13 +476,12 @@ impl TaskSession {
         tool: Option<Tool>,
         model: Option<Model>,
         body: &str,
-        boundary: bool,
         hidden: bool,
     ) -> anyhow::Result<()> {
         let weak = self.task_backend.get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
-            .post_comment(stage, hostname, tool, model, body, boundary, hidden)
+            .post_comment(stage, hostname, tool, model, body, hidden)
             .await
     }
 }
@@ -611,7 +607,6 @@ mod comment_model_tests {
             tool: Option<Tool>,
             model: Option<Model>,
             body: &str,
-            boundary: bool,
             hidden: bool,
         ) -> anyhow::Result<()> {
             let mut comments = self.backend.comments.lock().await;
@@ -622,7 +617,6 @@ mod comment_model_tests {
                 tool,
                 model,
                 text: body.to_string(),
-                boundary,
                 hidden,
             });
             Ok(())
@@ -763,7 +757,7 @@ mod comment_model_tests {
 
         let session = zbobr.role_session(task_backend.clone() as Arc<dyn TaskBackend>, id);
         let allowed_tools: std::collections::HashSet<String> =
-            ["get_history", "report_error", "post_plan"]
+            ["get_history_index", "stop_with_error", "report_success"]
                 .iter()
                 .map(|s| s.to_string())
                 .collect();
@@ -777,8 +771,8 @@ mod comment_model_tests {
             std::collections::HashMap::new(),
         );
 
-        // report_error is unbuffered — goes straight to backend
-        let _ = planner.report_error_impl("oops").await;
+        // stop_with_error is unbuffered — goes straight to backend
+        let _ = planner.stop_with_error_impl("oops").await;
 
         let weak = task_backend.get_task(id).await.unwrap();
         let comments = weak.get_comments().await.unwrap();
@@ -786,7 +780,7 @@ mod comment_model_tests {
         assert_eq!(comments[0].model, Some(Model::Gpt5Mini));
         assert_eq!(comments[0].tool, Some(Tool::Copilot));
         assert!(comments[0].hidden);
-        assert!(comments[0].text.starts_with("[report_error]"));
+        assert!(comments[0].text.starts_with("[stop_with_error]"));
     }
 
     #[tokio::test]
@@ -799,7 +793,7 @@ mod comment_model_tests {
 
         zbobr
             .task_session(task_backend.clone() as Arc<dyn TaskBackend>, repo_backend.clone() as Arc<dyn WorktreeBackend>, id)
-            .post_comment("error", "host", None, None, "dispatcher error", false, true)
+            .post_comment("error", "host", None, None, "dispatcher error", true)
             .await
             .unwrap();
 
@@ -818,7 +812,6 @@ mod comment_model_tests {
             Some(Tool::Copilot),
             Some(Model::Gpt5Mini),
             false,
-            false,
         );
         assert_eq!(tag.to_string(), "// planning:host:copilot:gpt-5-mini");
         let parsed: CommentTag = tag.to_string().parse().unwrap();
@@ -830,9 +823,8 @@ mod comment_model_tests {
             None,
             None,
             true,
-            true,
         );
-        assert_eq!(tag_no_tool.to_string(), "// done:web:boundary:hidden");
+        assert_eq!(tag_no_tool.to_string(), "// done:web:hidden");
         let parsed_no_tool: CommentTag = tag_no_tool.to_string().parse().unwrap();
         assert_eq!(parsed_no_tool, tag_no_tool);
 
@@ -841,7 +833,6 @@ mod comment_model_tests {
             "host".to_string(),
             Some(Tool::Claude),
             None,
-            false,
             false,
         );
         assert_eq!(tag_tool_no_model.to_string(), "// working:host:claude");
@@ -897,9 +888,9 @@ mod comment_model_tests {
         let (mcp, comment_buffer) =
             make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
 
-        // report_results is buffered
-        let _ = mcp.report_results_impl("result one").await;
-        let _ = mcp.post_plan_impl("the plan").await;
+        // report_success is buffered
+        let _ = mcp.report_success_impl("result one").await;
+        let _ = mcp.report_failure_impl("needs work").await;
 
         // Backend should have zero comments (all buffered)
         let weak = task_backend.get_task(id).await.unwrap();
@@ -922,8 +913,8 @@ mod comment_model_tests {
         let (mcp, comment_buffer) =
             make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
 
-        // report_error is unbuffered — should go directly to backend
-        let _ = mcp.report_error_impl("something broke").await;
+        // stop_with_error is unbuffered — should go directly to backend
+        let _ = mcp.stop_with_error_impl("something broke").await;
 
         // Backend should have the error comment
         let weak = task_backend.get_task(id).await.unwrap();
@@ -931,8 +922,8 @@ mod comment_model_tests {
         assert_eq!(backend_comments.len(), 1, "error must be posted to backend immediately");
         assert!(backend_comments[0].hidden, "error comments must be hidden");
         assert!(
-            backend_comments[0].text.starts_with("[report_error]"),
-            "error comment must be prefixed with [report_error]"
+            backend_comments[0].text.starts_with("[stop_with_error]"),
+            "error comment must be prefixed with [stop_with_error]"
         );
 
         // Buffer should be empty
@@ -941,7 +932,7 @@ mod comment_model_tests {
     }
 
     #[tokio::test]
-    async fn ask_user_is_unbuffered() {
+    async fn stop_with_question_is_unbuffered() {
         let (zbobr, task_backend, _repo) = make_test_parts();
         let id = zbobr
             .create_task(&*task_backend, "t", "desc", "READY", None, None)
@@ -951,19 +942,19 @@ mod comment_model_tests {
         let (mcp, comment_buffer) =
             make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
 
-        let _ = mcp.ask_user_impl("need help").await;
+        let _ = mcp.stop_with_question_impl("need help").await;
 
-        // ask_user is unbuffered — posted directly
+        // stop_with_question is unbuffered — posted directly
         let weak = task_backend.get_task(id).await.unwrap();
         let backend_comments = weak.get_comments().await.unwrap();
-        assert_eq!(backend_comments.len(), 1, "ask_user must be posted to backend immediately");
+        assert_eq!(backend_comments.len(), 1, "stop_with_question must be posted to backend immediately");
         assert!(
-            backend_comments[0].text.starts_with("[ask_user]"),
-            "ask_user comment must be prefixed with [ask_user]"
+            backend_comments[0].text.starts_with("[stop_with_question]"),
+            "stop_with_question comment must be prefixed with [stop_with_question]"
         );
 
         let buf = comment_buffer.lock().unwrap();
-        assert_eq!(buf.len(), 0, "ask_user must not be buffered");
+        assert_eq!(buf.len(), 0, "stop_with_question must not be buffered");
     }
 
     #[tokio::test]
@@ -977,39 +968,20 @@ mod comment_model_tests {
         let (mcp, comment_buffer) =
             make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
 
-        // Call several buffered MCP tools
-        let _ = mcp.report_results_impl("first results").await;
-        let _ = mcp.post_plan_impl("the plan text").await;
-        let _ = mcp.review_accept_impl("looks good").await;
-        let _ = mcp.review_reject_impl("needs fixes").await;
-        let _ = mcp.test_accept_impl("tests pass").await;
-        let _ = mcp.test_reject_impl("tests fail").await;
-        let _ = mcp.ask_planner_impl("question for planner").await;
+        // Call the two buffered MCP tools
+        let _ = mcp.report_success_impl("first results").await;
+        let _ = mcp.report_failure_impl("needs fixes").await;
 
         let buf = comment_buffer.lock().unwrap();
-        assert_eq!(buf.len(), 7);
+        assert_eq!(buf.len(), 2);
 
         // Each buffered comment body starts with [tool_name]
-        assert!(buf[0].body.starts_with("[report_results]\n"), "got: {}", buf[0].body);
-        assert!(buf[1].body.starts_with("[post_plan]\n"), "got: {}", buf[1].body);
-        assert!(buf[2].body.starts_with("[review_accept]\n"), "got: {}", buf[2].body);
-        assert!(buf[3].body.starts_with("[review_reject]\n"), "got: {}", buf[3].body);
-        assert!(buf[4].body.starts_with("[test_accept]\n"), "got: {}", buf[4].body);
-        assert!(buf[5].body.starts_with("[test_reject]\n"), "got: {}", buf[5].body);
-        assert!(buf[6].body.starts_with("[ask_planner]\n"), "got: {}", buf[6].body);
-
-        // Reject tools set boundary=true
-        assert!(!buf[0].boundary, "report_results should not be boundary");
-        assert!(!buf[1].boundary, "post_plan should not be boundary");
-        assert!(!buf[2].boundary, "review_accept should not be boundary");
-        assert!(buf[3].boundary, "review_reject must be boundary");
-        assert!(!buf[4].boundary, "test_accept should not be boundary");
-        assert!(buf[5].boundary, "test_reject must be boundary");
-        assert!(!buf[6].boundary, "ask_planner should not be boundary");
+        assert!(buf[0].body.starts_with("[report_success]\n"), "got: {}", buf[0].body);
+        assert!(buf[1].body.starts_with("[report_failure]\n"), "got: {}", buf[1].body);
     }
 
     #[tokio::test]
-    async fn buffered_comments_visible_in_get_history() {
+    async fn buffered_comments_visible_in_get_history_index() {
         let (zbobr, task_backend, _repo) = make_test_parts();
         let id = zbobr
             .create_task(&*task_backend, "t", "task description", "READY", None, None)
@@ -1020,13 +992,13 @@ mod comment_model_tests {
             make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
 
         // Post a buffered comment
-        let _ = mcp.report_results_impl("my results").await;
+        let _ = mcp.report_success_impl("my results").await;
 
-        // get_history should include the buffered comment
-        let history = mcp.get_history_impl(None).await;
+        // get_history_index should include the buffered comment
+        let index = mcp.get_history_index_impl().await;
         assert!(
-            history.contains("my results"),
-            "buffered comment must be visible in get_history response"
+            index.contains("report_success") || index.contains("success"),
+            "buffered comment must be visible in get_history_index response"
         );
     }
 
@@ -1042,22 +1014,22 @@ mod comment_model_tests {
             make_buffered_mcp(&zbobr, task_backend.clone() as Arc<dyn TaskBackend>, id);
 
         // Buffered
-        let _ = mcp.report_results_impl("first").await;
+        let _ = mcp.report_success_impl("first").await;
         // Unbuffered (error)
-        let _ = mcp.report_error_impl("oops").await;
+        let _ = mcp.stop_with_error_impl("oops").await;
         // Buffered
-        let _ = mcp.post_plan_impl("plan").await;
+        let _ = mcp.report_failure_impl("plan").await;
 
         // Backend should have exactly 1 comment (the error)
         let weak = task_backend.get_task(id).await.unwrap();
         let backend_comments = weak.get_comments().await.unwrap();
         assert_eq!(backend_comments.len(), 1);
-        assert!(backend_comments[0].text.starts_with("[report_error]"));
+        assert!(backend_comments[0].text.starts_with("[stop_with_error]"));
 
         // Buffer should have 2 entries
         let buf = comment_buffer.lock().unwrap();
         assert_eq!(buf.len(), 2);
-        assert!(buf[0].body.starts_with("[report_results]"));
-        assert!(buf[1].body.starts_with("[post_plan]"));
+        assert!(buf[0].body.starts_with("[report_success]"));
+        assert!(buf[1].body.starts_with("[report_failure]"));
     }
 }

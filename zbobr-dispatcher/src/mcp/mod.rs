@@ -3,8 +3,7 @@ pub mod traits;
 pub mod unified;
 
 pub use common::{
-    CheckChecklistItemParam, DeleteChecklistItemParam, DescriptionParam, InsertChecklistItemParam,
-    MessageParam, SetDestinationBranchParam, SetDestinationRepositoryParam, SetWorkBranchParam,
-    UpdateChecklistItemParam, run_role_mcp_server,
+    AddChecklistItemParam, CheckChecklistItemParam, ConfigureWorktreeParam,
+    DeleteChecklistItemParam, GetHistoryRecordParam, MessageParam, run_role_mcp_server,
 };
 pub use unified::UnifiedMcp;

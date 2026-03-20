@@ -3,122 +3,8 @@ use crate::{
     task::{ChecklistItem, Model, RoleSession, Tool},
 };
 
-// Helper functions for logging MCP responses
-
-/// Log a comments response (typically from get_history). Parses JSON and logs each comment.
-fn log_mcp_comments_response(role_name: &str, task_id: u64, response: &str) {
-    // Log exact JSON in debug level
-    tracing::debug!("[{}#{}] response: {}", role_name, task_id, response);
-
-    // Log info level with parsed comments
-    if response.starts_with('{') {
-        if let Ok(chunk) = serde_json::from_str::<zbobr_api::HistoryChunk>(response) {
-            tracing::info!(
-                "[{}#{}] history chunk {}/{} ({} comment(s))",
-                role_name,
-                task_id,
-                chunk.current_chunk,
-                chunk.last_chunk,
-                chunk.comments.len()
-            );
-            for comment in chunk.comments {
-                let stripped_text = comment.text.lines().next().unwrap_or("").trim();
-                let display_text = if stripped_text.len() > 80 {
-                    format!("{}...", &stripped_text[..80])
-                } else {
-                    stripped_text.to_string()
-                };
-                tracing::info!(
-                    "[{}#{}] comment stage={} text={}",
-                    role_name,
-                    task_id,
-                    comment.stage,
-                    display_text
-                );
-            }
-        } else {
-            tracing::info!(
-                "[{}#{}] get_history response (failed to parse): {}",
-                role_name,
-                task_id,
-                response
-            );
-        }
-    } else if response.starts_with("Error") {
-        tracing::info!(
-            "[{}#{}] get_history error: {}",
-            role_name,
-            task_id,
-            response
-        );
-    } else {
-        tracing::info!(
-            "[{}#{}] get_history response: {}",
-            role_name,
-            task_id,
-            response
-        );
-    }
-}
-
-/// Log a JSON response (e.g., checklist items).
-fn log_mcp_json_response(role_name: &str, task_id: u64, tool_name: &str, response: &str) {
-    // Log exact JSON in debug level
-    tracing::debug!(
-        "[{}#{}] {} response: {}",
-        role_name,
-        task_id,
-        tool_name,
-        response
-    );
-
-    // Log info level with summary
-    if response.starts_with('[') {
-        if let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(response) {
-            tracing::info!(
-                "[{}#{}] {} returned {} item(s)",
-                role_name,
-                task_id,
-                tool_name,
-                items.len()
-            );
-        } else {
-            tracing::info!(
-                "[{}#{}] {} response (failed to parse): {}",
-                role_name,
-                task_id,
-                tool_name,
-                response
-            );
-        }
-    } else if response.starts_with('{') {
-        if serde_json::from_str::<serde_json::Value>(response).is_ok() {
-            tracing::info!("[{}#{}] {} succeeded", role_name, task_id, tool_name);
-        } else {
-            tracing::info!(
-                "[{}#{}] {} response (failed to parse): {}",
-                role_name,
-                task_id,
-                tool_name,
-                response
-            );
-        }
-    } else if response.starts_with("Error") {
-        tracing::info!(
-            "[{}#{}] {} error: {}",
-            role_name,
-            task_id,
-            tool_name,
-            response
-        );
-    } else {
-        tracing::info!("[{}#{}] {}: {}", role_name, task_id, tool_name, response);
-    }
-}
-
 /// Log a string response from MCP methods.
 fn log_mcp_string_response(role_name: &str, task_id: u64, tool_name: &str, response: &str) {
-    // Log exact response in debug level
     tracing::debug!(
         "[{}#{}] {} response: {}",
         role_name,
@@ -127,7 +13,6 @@ fn log_mcp_string_response(role_name: &str, task_id: u64, tool_name: &str, respo
         response
     );
 
-    // Log info level with key information
     if response.starts_with("Error") {
         tracing::info!(
             "[{}#{}] {} error: {}",
@@ -152,6 +37,47 @@ fn log_mcp_string_response(role_name: &str, task_id: u64, tool_name: &str, respo
     }
 }
 
+/// Log a JSON response (e.g., checklist items).
+fn log_mcp_json_response(role_name: &str, task_id: u64, tool_name: &str, response: &str) {
+    tracing::debug!(
+        "[{}#{}] {} response: {}",
+        role_name,
+        task_id,
+        tool_name,
+        response
+    );
+
+    if response.starts_with('[') {
+        if let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(response) {
+            tracing::info!(
+                "[{}#{}] {} returned {} item(s)",
+                role_name,
+                task_id,
+                tool_name,
+                items.len()
+            );
+        } else {
+            tracing::info!(
+                "[{}#{}] {} response (failed to parse): {}",
+                role_name,
+                task_id,
+                tool_name,
+                response
+            );
+        }
+    } else if response.starts_with("Error") {
+        tracing::info!(
+            "[{}#{}] {} error: {}",
+            role_name,
+            task_id,
+            tool_name,
+            response
+        );
+    } else {
+        tracing::info!("[{}#{}] {}: {}", role_name, task_id, tool_name, response);
+    }
+}
+
 /// Common trait for all MCP services — unified across all roles.
 /// Per-role traits have been removed; all tool implementations live here.
 #[allow(async_fn_in_trait)]
@@ -167,7 +93,6 @@ pub trait CommonMcpImpl: Send + Sync {
     fn mcp_model(&self) -> Model;
 
     /// Returns the name of the current stage, used to compute the retry signal
-    /// (e.g. after `report_error` or `ask_user` pauses the task).
     fn stage_name(&self) -> &str;
 
     /// Returns the transitions map from the stage definition.
@@ -178,47 +103,34 @@ pub trait CommonMcpImpl: Send + Sync {
         self.session().record_tool_call(tool_name, self.transitions());
     }
 
-    async fn get_history_impl(&self, offset: Option<usize>) -> String {
+    // -- History tools --
+
+    async fn get_history_index_impl(&self) -> String {
         tracing::info!(
-            "[{}#{}] get_history offset={:?}",
+            "[{}#{}] get_history_index",
             self.role_name(),
             self.session().task_id(),
-            offset
         );
 
-        match self.session().get_history(offset).await {
-            Ok(chunk) => {
-                if chunk.comments.is_empty() {
-                    tracing::warn!(
-                        "[{}#{}] get_history returned 0 comment(s) for offset={:?}",
-                        self.role_name(),
-                        self.session().task_id(),
-                        offset
-                    );
-                } else {
-                    tracing::info!(
-                        "[{}#{}] get_history returned {} comment(s) for offset={:?} (chunk {}/{})",
-                        self.role_name(),
-                        self.session().task_id(),
-                        chunk.comments.len(),
-                        offset,
-                        chunk.current_chunk,
-                        chunk.last_chunk
-                    );
-                }
-                let response = match serde_json::to_string_pretty(&chunk) {
+        match self.session().get_history_index().await {
+            Ok(index) => {
+                tracing::info!(
+                    "[{}#{}] get_history_index returned {} entries",
+                    self.role_name(),
+                    self.session().task_id(),
+                    index.entries.len()
+                );
+                match serde_json::to_string_pretty(&index) {
                     Ok(json) => json,
                     Err(e) => format!("Error serializing: {e}"),
-                };
-                log_mcp_comments_response(self.role_name(), self.session().task_id(), &response);
-                response
+                }
             }
             Err(e) => {
                 let response = format!("Error: {e}");
                 log_mcp_string_response(
                     self.role_name(),
                     self.session().task_id(),
-                    "get_history",
+                    "get_history_index",
                     &response,
                 );
                 response
@@ -226,18 +138,131 @@ pub trait CommonMcpImpl: Send + Sync {
         }
     }
 
-    async fn report_error_impl(&self, message: &str) -> String {
+    async fn get_history_record_impl(&self, index: usize) -> String {
         tracing::info!(
-            "[{}#{}] report_error",
+            "[{}#{}] get_history_record index={}",
+            self.role_name(),
+            self.session().task_id(),
+            index
+        );
+
+        match self.session().get_history_record(index).await {
+            Ok(text) => {
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    "get_history_record",
+                    &text,
+                );
+                text
+            }
+            Err(e) => {
+                let response = format!("{e}");
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    "get_history_record",
+                    &response,
+                );
+                response
+            }
+        }
+    }
+
+    // -- Report tools --
+
+    async fn report_success_impl(&self, message: &str) -> String {
+        tracing::info!(
+            "[{}#{}] report_success",
             self.role_name(),
             self.session().task_id()
         );
         let hostname = get_hostname();
-        let body = format!("[report_error]\n{message}");
+        let body = format!("[report_success]\n{message}");
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), false, false, true)
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, false)
+            .await
+        {
+            tracing::error!(
+                "Failed to post success message for task {}: {e}",
+                self.session().task_id()
+            );
+            let response = format!("Error posting success message: {e}");
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                "report_success",
+                &response,
+            );
+            return response;
+        }
+
+        self.record_tool("report_success");
+
+        let response = "Results reported successfully".to_string();
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "report_success",
+            &response,
+        );
+        response
+    }
+
+    async fn report_failure_impl(&self, message: &str) -> String {
+        tracing::info!(
+            "[{}#{}] report_failure",
+            self.role_name(),
+            self.session().task_id()
+        );
+        let hostname = get_hostname();
+        let body = format!("[report_failure]\n{message}");
+
+        if let Err(e) = self
+            .session()
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, false)
+            .await
+        {
+            tracing::error!(
+                "Failed to post failure message for task {}: {e}",
+                self.session().task_id()
+            );
+            let response = format!("Error posting failure message: {e}");
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                "report_failure",
+                &response,
+            );
+            return response;
+        }
+
+        self.record_tool("report_failure");
+
+        let response = "Failure reported".to_string();
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "report_failure",
+            &response,
+        );
+        response
+    }
+
+    async fn stop_with_error_impl(&self, message: &str) -> String {
+        tracing::info!(
+            "[{}#{}] stop_with_error",
+            self.role_name(),
+            self.session().task_id()
+        );
+        let hostname = get_hostname();
+        let body = format!("[stop_with_error]\n{message}");
+
+        if let Err(e) = self
+            .session()
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), false, true)
             .await
         {
             tracing::error!(
@@ -248,7 +273,7 @@ pub trait CommonMcpImpl: Send + Sync {
             log_mcp_string_response(
                 self.role_name(),
                 self.session().task_id(),
-                "report_error",
+                "stop_with_error",
                 &response,
             );
             return response;
@@ -264,7 +289,7 @@ pub trait CommonMcpImpl: Send + Sync {
             log_mcp_string_response(
                 self.role_name(),
                 self.session().task_id(),
-                "report_error",
+                "stop_with_error",
                 &response,
             );
             return response;
@@ -283,73 +308,35 @@ pub trait CommonMcpImpl: Send + Sync {
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "report_error",
+            "stop_with_error",
             &response,
         );
         response
     }
 
-    async fn report_results_impl(&self, message: &str) -> String {
+    async fn stop_with_question_impl(&self, message: &str) -> String {
         tracing::info!(
-            "[{}#{}] report_results",
+            "[{}#{}] stop_with_question",
             self.role_name(),
             self.session().task_id()
         );
         let hostname = get_hostname();
-        let body = format!("[report_results]\n{message}");
+        let body = format!("[stop_with_question]\n{message}");
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, false, false)
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), false, false)
             .await
         {
             tracing::error!(
-                "Failed to post results message for task {}: {e}",
+                "Failed to post question for task {}: {e}",
                 self.session().task_id()
             );
-            let response = format!("Error posting results message: {e}");
+            let response = format!("Error posting question: {e}");
             log_mcp_string_response(
                 self.role_name(),
                 self.session().task_id(),
-                "report_results",
-                &response,
-            );
-            return response;
-        }
-
-        let response = "Results reported successfully".to_string();
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "report_results",
-            &response,
-        );
-        response
-    }
-
-    async fn ask_user_impl(&self, message: &str) -> String {
-        tracing::info!(
-            "[{}#{}] ask_user",
-            self.role_name(),
-            self.session().task_id()
-        );
-        let hostname = get_hostname();
-        let body = format!("[ask_user]\n{message}");
-
-        if let Err(e) = self
-            .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), false, false, false)
-            .await
-        {
-            tracing::error!(
-                "Failed to post ask_user message for task {}: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Error posting ask_user message: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                "ask_user",
+                "stop_with_question",
                 &response,
             );
             return response;
@@ -365,7 +352,7 @@ pub trait CommonMcpImpl: Send + Sync {
             log_mcp_string_response(
                 self.role_name(),
                 self.session().task_id(),
-                "ask_user",
+                "stop_with_question",
                 &response,
             );
             return response;
@@ -380,86 +367,67 @@ pub trait CommonMcpImpl: Send + Sync {
             );
         }
 
-        let response = "User asked for guidance".to_string();
+        let response = "Question posted - task paused pending user response".to_string();
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "ask_user",
+            "stop_with_question",
             &response,
         );
         response
     }
 
-    // -- Planner-specific tools (now in CommonMcpImpl) --
+    // -- Worktree configuration --
 
-    async fn post_plan_impl(&self, plan: &str) -> String {
-        tracing::info!("[{}#{}] post_plan", self.role_name(), self.session().task_id());
-        let hostname = get_hostname();
-        let body = format!("[post_plan]\n{plan}");
-
-        if let Err(e) = self
-            .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, false, false)
-            .await
-        {
-            tracing::error!(
-                "Failed to post plan comment for task {}: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Error posting plan: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                "post_plan",
-                &response,
-            );
-            return response;
-        }
-
-        let response = "Plan posted and task ready for worker implementation".to_string();
-        log_mcp_string_response(
+    async fn configure_worktree_impl(
+        &self,
+        destination_repository: Option<String>,
+        destination_branch: Option<String>,
+        work_branch_postfix: Option<String>,
+    ) -> String {
+        tracing::info!(
+            "[{}#{}] configure_worktree repo={:?} branch={:?} postfix={:?}",
             self.role_name(),
             self.session().task_id(),
-            "post_plan",
-            &response,
+            destination_repository,
+            destination_branch,
+            work_branch_postfix,
         );
-        response
-    }
 
-    // -- Worker-specific: ask_planner --
-
-    async fn ask_planner_impl(&self, message: &str) -> String {
-        tracing::info!("[{}#{}] ask_planner", self.role_name(), self.session().task_id());
-        let hostname = get_hostname();
-        let body = format!("[ask_planner]\n{message}");
-
-        if let Err(e) = self
-            .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, false, false)
-            .await
-        {
-            tracing::error!(
-                "Failed to post ask_planner message for task {}: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Error posting message: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                "ask_planner",
-                &response,
-            );
-            return response;
+        // Validate work_branch_postfix: if provided, work_branch must not already be set
+        if work_branch_postfix.is_some() {
+            match self.session().get_work_branch().await {
+                Ok(Some(_)) => return "Error: work_branch is already set".to_string(),
+                Err(e) => return format!("Error: {e}"),
+                Ok(None) => {}
+            }
         }
 
-        // Record the tool call; the signal is computed from transitions by finalize_stage_session.
-        self.record_tool("ask_planner");
+        let session = self.session();
+        let work_branch = work_branch_postfix.map(|v| session.create_branch_name(&v));
 
-        let response = "Message posted to planner - task returned for clarification".to_string();
+        let response = match session
+            .modify_task(move |mut task| {
+                if let Some(repo) = destination_repository {
+                    task.destination_repository = Some(repo);
+                }
+                if let Some(branch) = destination_branch {
+                    task.destination_branch = Some(branch);
+                }
+                if let Some(wb) = work_branch {
+                    task.work_branch = Some(wb);
+                }
+                task
+            })
+            .await
+        {
+            Ok(()) => "Worktree configured".to_string(),
+            Err(e) => format!("Error: {e}"),
+        };
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "ask_planner",
+            "configure_worktree",
             &response,
         );
         response
@@ -474,10 +442,14 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
         let response = match self.session().get_checklist().await {
-            Ok(items) => match serde_json::to_string_pretty(&items) {
-                Ok(json) => json,
-                Err(e) => format!("Error serializing checklist: {e}"),
-            },
+            Ok(items) => {
+                // Filter to unchecked items only
+                let unchecked: Vec<_> = items.into_iter().filter(|i| !i.checked).collect();
+                match serde_json::to_string_pretty(&unchecked) {
+                    Ok(json) => json,
+                    Err(e) => format!("Error serializing checklist: {e}"),
+                }
+            }
             Err(e) => format!("Error: {e}"),
         };
         log_mcp_json_response(
@@ -489,60 +461,17 @@ pub trait CommonMcpImpl: Send + Sync {
         response
     }
 
-    async fn check_checklist_item_impl(&self, id: &str, checked: bool) -> String {
+    async fn add_checklist_item_impl(&self, id: &str, text: &str) -> String {
         tracing::info!(
-            "[{}#{}] check_checklist_item id={} checked={}",
+            "[{}#{}] add_checklist_item id={}",
             self.role_name(),
             self.session().task_id(),
-            id,
-            checked
-        );
-        let item_id = id.to_string();
-        let response = match self
-            .session()
-            .modify_task(move |mut task| {
-                if let Some(item) = task.checklist.iter_mut().find(|item| item.id == item_id) {
-                    item.checked = checked;
-                }
-                task
-            })
-            .await
-        {
-            Ok(()) => {
-                format!(
-                    "Checklist item '{}' checked state updated to {}",
-                    id, checked
-                )
-            }
-            Err(e) => format!("Error: {e}"),
-        };
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "check_checklist_item",
-            &response,
-        );
-        response
-    }
-
-    async fn insert_checklist_item_impl(
-        &self,
-        id: &str,
-        after_id: Option<String>,
-        text: &str,
-    ) -> String {
-        tracing::info!(
-            "[{}#{}] insert_checklist_item id={} after_id={:?}",
-            self.role_name(),
-            self.session().task_id(),
-            id,
-            after_id
+            id
         );
         let item_id = id.to_string();
         let item_text = text.to_string();
-        let after = after_id.clone();
 
-        // Validate first by reading the task
+        // Validate: id must be unique
         match self.session().get_checklist().await {
             Ok(items) => {
                 if items.iter().any(|item| item.id == item_id) {
@@ -550,19 +479,7 @@ pub trait CommonMcpImpl: Send + Sync {
                     log_mcp_string_response(
                         self.role_name(),
                         self.session().task_id(),
-                        "insert_checklist_item",
-                        &response,
-                    );
-                    return response;
-                }
-                if let Some(ref aid) = after
-                    && !items.iter().any(|item| item.id == *aid)
-                {
-                    let response = format!("Error: Checklist item with id '{}' not found", aid);
-                    log_mcp_string_response(
-                        self.role_name(),
-                        self.session().task_id(),
-                        "insert_checklist_item",
+                        "add_checklist_item",
                         &response,
                     );
                     return response;
@@ -573,7 +490,7 @@ pub trait CommonMcpImpl: Send + Sync {
                 log_mcp_string_response(
                     self.role_name(),
                     self.session().task_id(),
-                    "insert_checklist_item",
+                    "add_checklist_item",
                     &response,
                 );
                 return response;
@@ -583,63 +500,52 @@ pub trait CommonMcpImpl: Send + Sync {
         let response = match self
             .session()
             .modify_task(move |mut task| {
-                let new_item = ChecklistItem {
+                task.checklist.push(ChecklistItem {
                     id: item_id,
                     checked: false,
                     text: item_text,
-                };
-
-                if let Some(ref after_id) = after {
-                    if let Some(pos) = task.checklist.iter().position(|item| item.id == *after_id) {
-                        task.checklist.insert(pos + 1, new_item);
-                    } else {
-                        task.checklist.push(new_item);
-                    }
-                } else {
-                    task.checklist.push(new_item);
-                }
+                });
                 task
             })
             .await
         {
-            Ok(()) => format!("Checklist item '{}' inserted", id),
+            Ok(()) => format!("Checklist item '{}' added", id),
             Err(e) => format!("Error updating task: {e}"),
         };
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "insert_checklist_item",
+            "add_checklist_item",
             &response,
         );
         response
     }
 
-    async fn update_checklist_item_impl(&self, id: &str, text: &str) -> String {
+    async fn check_checklist_item_impl(&self, id: &str) -> String {
         tracing::info!(
-            "[{}#{}] update_checklist_item id={}",
+            "[{}#{}] check_checklist_item id={}",
             self.role_name(),
             self.session().task_id(),
-            id
+            id,
         );
         let item_id = id.to_string();
-        let item_text = text.to_string();
         let response = match self
             .session()
             .modify_task(move |mut task| {
                 if let Some(item) = task.checklist.iter_mut().find(|item| item.id == item_id) {
-                    item.text = item_text;
+                    item.checked = true;
                 }
                 task
             })
             .await
         {
-            Ok(()) => format!("Checklist item '{}' updated", id),
-            Err(e) => format!("Error updating task: {e}"),
+            Ok(()) => format!("Checklist item '{}' checked", id),
+            Err(e) => format!("Error: {e}"),
         };
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "update_checklist_item",
+            "check_checklist_item",
             &response,
         );
         response
@@ -709,258 +615,6 @@ pub trait CommonMcpImpl: Send + Sync {
             self.role_name(),
             self.session().task_id(),
             "delete_checklist_item",
-            &response,
-        );
-        response
-    }
-
-    // -- Parameter getters/setters --
-
-    async fn get_destination_repository_impl(&self) -> String {
-        tracing::info!(
-            "[{}#{}] get_param_destination_repository",
-            self.role_name(),
-            self.session().task_id(),
-        );
-        let response = match self.session().get_destination_repository().await {
-            Ok(Some(value)) => value,
-            Ok(None) => "destination_repository is not set".to_string(),
-            Err(e) => format!("Error: {e}"),
-        };
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "get_param_destination_repository",
-            &response,
-        );
-        response
-    }
-
-    async fn set_destination_repository_impl(&self, value: Option<String>) -> String {
-        tracing::info!(
-            "[{}#{}] set_param_destination_repository value={:?}",
-            self.role_name(),
-            self.session().task_id(),
-            value
-        );
-        let response = match self.session().set_destination_repository(value).await {
-            Ok(()) => "destination_repository updated".to_string(),
-            Err(e) => format!("Error: {e}"),
-        };
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "set_param_destination_repository",
-            &response,
-        );
-        response
-    }
-
-    async fn get_destination_branch_impl(&self) -> String {
-        tracing::info!(
-            "[{}#{}] get_param_destination_branch",
-            self.role_name(),
-            self.session().task_id(),
-        );
-        let response = match self.session().get_destination_branch().await {
-            Ok(Some(value)) => value,
-            Ok(None) => "destination_branch is not set".to_string(),
-            Err(e) => format!("Error: {e}"),
-        };
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "get_param_destination_branch",
-            &response,
-        );
-        response
-    }
-
-    async fn set_destination_branch_impl(&self, value: Option<String>) -> String {
-        tracing::info!(
-            "[{}#{}] set_param_destination_branch value={:?}",
-            self.role_name(),
-            self.session().task_id(),
-            value
-        );
-        let response = match self.session().set_destination_branch(value).await {
-            Ok(()) => "destination_branch updated".to_string(),
-            Err(e) => format!("Error: {e}"),
-        };
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "set_param_destination_branch",
-            &response,
-        );
-        response
-    }
-
-    async fn get_work_branch_impl(&self) -> String {
-        tracing::info!(
-            "[{}#{}] get_param_work_branch",
-            self.role_name(),
-            self.session().task_id(),
-        );
-        let response = match self.session().get_work_branch().await {
-            Ok(Some(value)) => value,
-            Ok(None) => "work_branch is not set".to_string(),
-            Err(e) => format!("Error: {e}"),
-        };
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "get_param_work_branch",
-            &response,
-        );
-        response
-    }
-
-    async fn set_work_branch_postfix_impl(&self, value: Option<String>) -> String {
-        match self.session().get_work_branch().await {
-            Ok(Some(_)) => return "Error: work_branch is already set".to_string(),
-            Err(e) => return format!("Error: {e}"),
-            Ok(None) => {}
-        }
-        let branch = value.map(|v| self.session().create_branch_name(&v));
-        tracing::info!(
-            "[{}#{}] set_param_work_branch value={:?}",
-            self.role_name(),
-            self.session().task_id(),
-            branch
-        );
-        let response = match self.session().set_work_branch(branch).await {
-            Ok(()) => "work_branch updated".to_string(),
-            Err(e) => format!("Error: {e}"),
-        };
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "set_param_work_branch",
-            &response,
-        );
-        response
-    }
-
-    // -- Reviewer-specific tools --
-
-    async fn review_accept_impl(&self, message: &str) -> String {
-        tracing::info!(
-            "[{}#{}] review_accept",
-            self.role_name(),
-            self.session().task_id()
-        );
-        let hostname = get_hostname();
-        let body = format!("[review_accept]\n{message}");
-        let response = if let Err(e) = self
-            .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, false, false)
-            .await
-        {
-            format!("Error posting review acceptance: {e}")
-        } else {
-            self.record_tool("review_accept");
-            "Review accepted".to_string()
-        };
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "review_accept",
-            &response,
-        );
-        response
-    }
-
-    async fn review_reject_impl(&self, message: &str) -> String {
-        tracing::info!(
-            "[{}#{}] review_reject",
-            self.role_name(),
-            self.session().task_id()
-        );
-        let hostname = get_hostname();
-        let body = format!("[review_reject]\n{message}");
-        if let Err(e) = self
-            .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, true, false)
-            .await
-        {
-            let response = format!("Error posting review rejection: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                "review_reject",
-                &response,
-            );
-            return response;
-        }
-        self.record_tool("review_reject");
-        let response = "Review rejected".to_string();
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "review_reject",
-            &response,
-        );
-        response
-    }
-
-    // -- Tester-specific tools --
-
-    async fn test_accept_impl(&self, message: &str) -> String {
-        tracing::info!(
-            "[{}#{}] test_accept",
-            self.role_name(),
-            self.session().task_id()
-        );
-        let hostname = get_hostname();
-        let body = format!("[test_accept]\n{message}");
-        let response = if let Err(e) = self
-            .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, false, false)
-            .await
-        {
-            format!("Error posting test acceptance: {e}")
-        } else {
-            self.record_tool("test_accept");
-            "Testing accepted".to_string()
-        };
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "test_accept",
-            &response,
-        );
-        response
-    }
-
-    async fn test_reject_impl(&self, message: &str) -> String {
-        tracing::info!(
-            "[{}#{}] test_reject",
-            self.role_name(),
-            self.session().task_id()
-        );
-        let hostname = get_hostname();
-        let body = format!("[test_reject]\n{message}");
-        if let Err(e) = self
-            .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, true, false)
-            .await
-        {
-            let response = format!("Error posting test rejection: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                "test_reject",
-                &response,
-            );
-            return response;
-        }
-        self.record_tool("test_reject");
-        let response = "Testing rejected".to_string();
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "test_reject",
             &response,
         );
         response

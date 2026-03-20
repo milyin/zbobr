@@ -12,84 +12,42 @@ timeout: 60
 stop_on_failure: true
 
 steps:
-- name: get_history (no plan yet)
+- name: get_history_index
   operation:
     type: tool_call
-    tool: get_history
+    tool: get_history_index
+  assertions:
+    - type: success
+    - type: contains
+      path: result
+      value: "task"
+
+- name: get_history_record (position 0)
+  operation:
+    type: tool_call
+    tool: get_history_record
+    arguments:
+      index: 0
   assertions:
     - type: success
     - type: contains
       path: result
       value: "Test task"
 
-- name: post_plan
+- name: configure_worktree
   operation:
     type: tool_call
-    tool: post_plan
+    tool: configure_worktree
     arguments:
-      description: "Plan: step A, step B"
+      destination_repository: "{repo_path}"
+      destination_branch: "main"
   assertions:
     - type: success
 
-- name: get_history (verify plan)
+- name: add_checklist_item
   operation:
     type: tool_call
-    tool: get_history
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "step A"
-
-- name: set_param_destination_repository
-  operation:
-    type: tool_call
-    tool: set_param_destination_repository
-    arguments:
-      value: "{repo_path}"
-  assertions:
-    - type: success
-
-- name: get_param_destination_repository
-  operation:
-    type: tool_call
-    tool: get_param_destination_repository
-  assertions:
-    - type: success
-    - type: equals
-      path: result
-      value: "{repo_path}"
-
-- name: set_param_destination_branch
-  operation:
-    type: tool_call
-    tool: set_param_destination_branch
-    arguments:
-      value: "main"
-  assertions:
-    - type: success
-
-- name: get_param_destination_branch
-  operation:
-    type: tool_call
-    tool: get_param_destination_branch
-  assertions:
-    - type: success
-    - type: equals
-      path: result
-      value: "main"
-
-- name: get_param_work_branch
-  operation:
-    type: tool_call
-    tool: get_param_work_branch
-  assertions:
-    - type: success
-
-- name: insert_checklist_item
-  operation:
-    type: tool_call
-    tool: insert_checklist_item
+    tool: add_checklist_item
     arguments:
       id: "c1"
       text: "First item"
@@ -106,30 +64,19 @@ steps:
       path: result
       value: "First item"
 
-- name: update_checklist_item
-  operation:
-    type: tool_call
-    tool: update_checklist_item
-    arguments:
-      id: "c1"
-      text: "Updated item"
-  assertions:
-    - type: success
-
 - name: check_checklist_item
   operation:
     type: tool_call
     tool: check_checklist_item
     arguments:
       id: "c1"
-      checked: true
   assertions:
     - type: success
 
-- name: insert then delete
+- name: add then delete
   operation:
     type: tool_call
-    tool: insert_checklist_item
+    tool: add_checklist_item
     arguments:
       id: "c2"
       text: "Temp item"
@@ -148,10 +95,10 @@ steps:
       path: result
       value: "deleted"
 
-- name: report_results
+- name: report_success
   operation:
     type: tool_call
-    tool: report_results
+    tool: report_success
     arguments:
       message: "All tools exercised."
   assertions:
@@ -161,18 +108,18 @@ steps:
     )
 }
 
-/// Minimal scenario that just reports results (used for default-transition stages).
+/// Minimal scenario that just reports success (used for default-transition stages).
 pub fn report_and_finish_scenario() -> String {
     r#"name: Report And Finish
-description: Minimal scenario that reports results
+description: Minimal scenario that reports success
 timeout: 60
 stop_on_failure: true
 
 steps:
-- name: Report results
+- name: Report success
   operation:
     type: tool_call
-    tool: report_results
+    tool: report_success
     arguments:
       message: "Stage complete."
   assertions:
@@ -181,18 +128,18 @@ steps:
     .to_string()
 }
 
-/// Scenario that calls report_error (triggers PAUSE).
-pub fn report_error_scenario() -> String {
-    r#"name: Report Error
+/// Scenario that calls stop_with_error (triggers PAUSE).
+pub fn stop_with_error_scenario() -> String {
+    r#"name: Stop With Error
 description: Report an error to trigger pause
 timeout: 60
 stop_on_failure: true
 
 steps:
-- name: Report error
+- name: Stop with error
   operation:
     type: tool_call
-    tool: report_error
+    tool: stop_with_error
     arguments:
       message: "Something went wrong"
   assertions:
@@ -201,18 +148,18 @@ steps:
     .to_string()
 }
 
-/// Scenario that calls review_reject (maps to a transition signal).
-pub fn signal_reject_scenario() -> String {
-    r#"name: Signal Reject
-description: Call review_reject to trigger reject transition
+/// Scenario that calls report_failure (maps to a transition signal).
+pub fn report_failure_scenario() -> String {
+    r#"name: Report Failure
+description: Call report_failure to trigger failure transition
 timeout: 60
 stop_on_failure: true
 
 steps:
-- name: Reject
+- name: Failure
   operation:
     type: tool_call
-    tool: review_reject
+    tool: report_failure
     arguments:
       message: "Rejected."
   assertions:
@@ -221,18 +168,18 @@ steps:
     .to_string()
 }
 
-/// Scenario that calls review_accept (maps to accept transition).
-pub fn signal_accept_scenario() -> String {
-    r#"name: Signal Accept
-description: Call review_accept to trigger accept transition
+/// Scenario that calls report_success (maps to success transition).
+pub fn report_success_scenario() -> String {
+    r#"name: Report Success
+description: Call report_success to trigger success transition
 timeout: 60
 stop_on_failure: true
 
 steps:
-- name: Accept
+- name: Success
   operation:
     type: tool_call
-    tool: review_accept
+    tool: report_success
     arguments:
       message: "Accepted."
   assertions:
@@ -241,10 +188,10 @@ steps:
     .to_string()
 }
 
-/// Scenario that calls ask_user (triggers PAUSE).
-pub fn ask_user_scenario() -> String {
-    r#"name: Ask User
-description: Call ask_user to trigger pause
+/// Scenario that calls stop_with_question (triggers PAUSE).
+pub fn stop_with_question_scenario() -> String {
+    r#"name: Stop With Question
+description: Call stop_with_question to trigger pause
 timeout: 60
 stop_on_failure: true
 
@@ -252,7 +199,7 @@ steps:
 - name: Ask user
   operation:
     type: tool_call
-    tool: ask_user
+    tool: stop_with_question
     arguments:
       message: "Need input"
   assertions:

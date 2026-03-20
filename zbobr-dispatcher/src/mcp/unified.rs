@@ -13,9 +13,8 @@ use rmcp::service::RequestContext;
 
 use crate::{
     mcp::common::{
-        CheckChecklistItemParam, DeleteChecklistItemParam, DescriptionParam, GetHistoryParam,
-        InsertChecklistItemParam, MessageParam, SetDestinationBranchParam,
-        SetDestinationRepositoryParam, UpdateChecklistItemParam,
+        AddChecklistItemParam, CheckChecklistItemParam, ConfigureWorktreeParam,
+        DeleteChecklistItemParam, GetHistoryRecordParam, MessageParam,
     },
     mcp::traits::CommonMcpImpl,
     task::{Model, RoleSession, Tool},
@@ -63,27 +62,17 @@ impl CommonMcpImpl for UnifiedMcp {
 
 /// All possible tool names across all roles.
 pub const ALL_TOOL_NAMES: &[&str] = &[
-    "get_history",
-    "report_error",
-    "report_results",
-    "ask_user",
-    "ask_planner",
-    "post_plan",
+    "get_history_index",
+    "get_history_record",
+    "report_success",
+    "report_failure",
+    "stop_with_error",
+    "stop_with_question",
+    "configure_worktree",
     "get_checklist",
-    "insert_checklist_item",
-    "update_checklist_item",
+    "add_checklist_item",
     "check_checklist_item",
     "delete_checklist_item",
-    "get_param_destination_repository",
-    "set_param_destination_repository",
-    "get_param_destination_branch",
-    "set_param_destination_branch",
-    "set_param_work_branch_postfix",
-    "get_param_work_branch",
-    "review_accept",
-    "review_reject",
-    "test_accept",
-    "test_reject",
 ];
 
 #[tool_router]
@@ -112,73 +101,80 @@ impl UnifiedMcp {
     // -- All tools defined here. Filtering happens in ServerHandler impl. --
 
     #[tool(
-        description = "Get task history chunk. Optional offset: chunk index (0 = oldest, omitted = latest). Response includes current_chunk and last_chunk for navigation."
+        description = "Get the full history index: position, author (stage or 'user'), record type (task/success/failure/question/error/other), hidden flag, and summary for each record."
     )]
-    async fn get_history(&self, Parameters(params): Parameters<GetHistoryParam>) -> String {
-        self.get_history_impl(params.offset).await
+    async fn get_history_index(&self) -> String {
+        self.get_history_index_impl().await
     }
 
-    #[tool(description = "Report an error to the user and pause task processing")]
-    async fn report_error(&self, Parameters(params): Parameters<MessageParam>) -> String {
-        self.report_error_impl(&params.message).await
+    #[tool(description = "Get a single history record by position index. Position 0 is the task description.")]
+    async fn get_history_record(
+        &self,
+        Parameters(params): Parameters<GetHistoryRecordParam>,
+    ) -> String {
+        self.get_history_record_impl(params.index).await
     }
 
     #[tool(
         description = "Provide a brief and concise report of your results and finish your work. These reports add up to discussion and shorten the context for further agent calls, so they MUST be compact."
     )]
-    async fn report_results(&self, Parameters(params): Parameters<MessageParam>) -> String {
-        self.report_results_impl(&params.message).await
+    async fn report_success(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.report_success_impl(&params.message).await
     }
 
     #[tool(
-        description = "Post a message to the user and pause task processing until user responds"
+        description = "Report a failure or rejection, returning the task for re-work or re-planning. Provide a concise description of the problems found."
     )]
-    async fn ask_user(&self, Parameters(params): Parameters<MessageParam>) -> String {
-        self.ask_user_impl(&params.message).await
+    async fn report_failure(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.report_failure_impl(&params.message).await
+    }
+
+    #[tool(description = "Report an error to the user and pause task processing")]
+    async fn stop_with_error(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.stop_with_error_impl(&params.message).await
     }
 
     #[tool(
-        description = "Post a message to the planner and pass the task back for clarification or re-planning"
+        description = "Post a question to the user and pause task processing until user responds"
     )]
-    async fn ask_planner(&self, Parameters(params): Parameters<MessageParam>) -> String {
-        self.ask_planner_impl(&params.message).await
+    async fn stop_with_question(&self, Parameters(params): Parameters<MessageParam>) -> String {
+        self.stop_with_question_impl(&params.message).await
     }
 
-    #[tool(description = "Post the implementation plan for this task and finish your session")]
-    async fn post_plan(&self, Parameters(params): Parameters<DescriptionParam>) -> String {
-        self.post_plan_impl(&params.description).await
+    #[tool(
+        description = "Configure worktree parameters: destination repository, destination branch, and/or work branch postfix. All three are optional; only provided values are updated."
+    )]
+    async fn configure_worktree(
+        &self,
+        Parameters(params): Parameters<ConfigureWorktreeParam>,
+    ) -> String {
+        self.configure_worktree_impl(
+            params.destination_repository,
+            params.destination_branch,
+            params.work_branch_postfix,
+        )
+        .await
     }
 
-    #[tool(description = "Get the task checklist as a list of checkbox items")]
+    #[tool(description = "Get the task checklist (unchecked items only)")]
     async fn get_checklist(&self) -> String {
         self.get_checklist_impl().await
     }
 
-    #[tool(description = "Insert a new checklist item (always created in unchecked state)")]
-    async fn insert_checklist_item(
+    #[tool(description = "Add a new checklist item (always appended, always unchecked)")]
+    async fn add_checklist_item(
         &self,
-        Parameters(params): Parameters<InsertChecklistItemParam>,
+        Parameters(params): Parameters<AddChecklistItemParam>,
     ) -> String {
-        self.insert_checklist_item_impl(&params.id, params.after_id.clone(), &params.text)
-            .await
+        self.add_checklist_item_impl(&params.id, &params.text).await
     }
 
-    #[tool(description = "Update a checklist item's text")]
-    async fn update_checklist_item(
-        &self,
-        Parameters(params): Parameters<UpdateChecklistItemParam>,
-    ) -> String {
-        self.update_checklist_item_impl(&params.id, &params.text)
-            .await
-    }
-
-    #[tool(description = "Check or uncheck a checklist item")]
+    #[tool(description = "Mark a checklist item as checked")]
     async fn check_checklist_item(
         &self,
         Parameters(params): Parameters<CheckChecklistItemParam>,
     ) -> String {
-        self.check_checklist_item_impl(&params.id, params.checked)
-            .await
+        self.check_checklist_item_impl(&params.id).await
     }
 
     #[tool(
@@ -189,77 +185,6 @@ impl UnifiedMcp {
         Parameters(params): Parameters<DeleteChecklistItemParam>,
     ) -> String {
         self.delete_checklist_item_impl(&params.id).await
-    }
-
-    #[tool(description = "Get the destination repository URL for this task (read-only)")]
-    async fn get_param_destination_repository(&self) -> String {
-        self.get_destination_repository_impl().await
-    }
-
-    #[tool(
-        description = "Set the destination repository for this task (full git URL, local path, or 'owner/repo')"
-    )]
-    async fn set_param_destination_repository(
-        &self,
-        Parameters(params): Parameters<SetDestinationRepositoryParam>,
-    ) -> String {
-        self.set_destination_repository_impl(params.value).await
-    }
-
-    #[tool(description = "Get the destination branch name for this task (read-only)")]
-    async fn get_param_destination_branch(&self) -> String {
-        self.get_destination_branch_impl().await
-    }
-
-    #[tool(description = "Set the destination branch name for this task (e.g. 'main')")]
-    async fn set_param_destination_branch(
-        &self,
-        Parameters(params): Parameters<SetDestinationBranchParam>,
-    ) -> String {
-        self.set_destination_branch_impl(params.value).await
-    }
-
-    #[tool(
-        description = "Set the work branch postfix for this task (the postfix segment, e.g. 'implement-feature')"
-    )]
-    async fn set_param_work_branch_postfix(
-        &self,
-        Parameters(params): Parameters<SetDestinationBranchParam>,
-    ) -> String {
-        self.set_work_branch_postfix_impl(params.value).await
-    }
-
-    #[tool(description = "Get the work branch name for this task (read-only)")]
-    async fn get_param_work_branch(&self) -> String {
-        self.get_work_branch_impl().await
-    }
-
-    #[tool(
-        description = "Accept the review: the implementation is correct and the task is done. Provide a concise summary of what was reviewed and confirmed."
-    )]
-    async fn review_accept(&self, Parameters(params): Parameters<MessageParam>) -> String {
-        self.review_accept_impl(&params.message).await
-    }
-
-    #[tool(
-        description = "Reject the review: the implementation has issues that need to be addressed. Provide a concise description of the problems found."
-    )]
-    async fn review_reject(&self, Parameters(params): Parameters<MessageParam>) -> String {
-        self.review_reject_impl(&params.message).await
-    }
-
-    #[tool(
-        description = "Accept the testing: all tests pass and requirements are met. Provide a concise summary of all testing performed and results."
-    )]
-    async fn test_accept(&self, Parameters(params): Parameters<MessageParam>) -> String {
-        self.test_accept_impl(&params.message).await
-    }
-
-    #[tool(
-        description = "Reject the testing: tests failed or requirements not met. Provide a concise description of all test failures and what needs to be fixed."
-    )]
-    async fn test_reject(&self, Parameters(params): Parameters<MessageParam>) -> String {
-        self.test_reject_impl(&params.message).await
     }
 }
 
@@ -355,7 +280,7 @@ mod tests {
     #[test]
     fn filtering_works() {
         let router = UnifiedMcp::tool_router();
-        let allowed: HashSet<String> = ["get_history", "report_error"].iter().map(|s| s.to_string()).collect();
+        let allowed: HashSet<String> = ["get_history_index", "stop_with_error"].iter().map(|s| s.to_string()).collect();
         let all_tools = router.list_all();
         let filtered: Vec<_> = all_tools
             .iter()

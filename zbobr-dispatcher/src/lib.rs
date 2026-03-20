@@ -37,19 +37,6 @@ use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig}
 
 use crate::backend::{TaskBackend, WorktreeBackend};
 
-/// Fetch comments and description for a task, then extract the history chunk
-/// at the given `offset` using [`zbobr_api::extract_history_chunk`].
-pub async fn get_history(
-    task_backend: &dyn TaskBackend,
-    id: u64,
-    offset: Option<usize>,
-) -> anyhow::Result<zbobr_api::HistoryChunk> {
-    let weak = task_backend.get_task(id).await?;
-    let comments = weak.get_comments().await?;
-    let task = weak.snapshot().await?;
-    zbobr_api::extract_history_chunk(comments, &task.description, offset)
-}
-
 /// Central struct holding dispatcher configuration, backends, and executor settings.
 #[derive(Clone, Builder)]
 pub struct ZbobrDispatcher {

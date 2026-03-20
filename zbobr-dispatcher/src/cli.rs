@@ -201,12 +201,12 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     if !task.description.is_empty() {
         println!("Description:\n{}", task.description);
     }
-    // show latest plan comment if present (look for [post_plan] section marker)
+    // show latest plan comment if present (look for [report_success] or legacy [post_plan] marker)
     if !discussion.is_empty()
         && let Some(plan_comment) = discussion
             .iter()
             .rev()
-            .find(|c| c.text.starts_with("[post_plan]"))
+            .find(|c| c.text.starts_with("[report_success]") || c.text.starts_with("[post_plan]"))
     {
         println!("Plan (from comment):\n{}", plan_comment.text);
     }
@@ -225,7 +225,6 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
                 c.hostname.clone(),
                 c.tool,
                 c.model.clone(),
-                c.boundary,
                 c.hidden,
             );
             println!("  [{}] {}\n{}", i + 1, tag, c.text);
@@ -330,16 +329,16 @@ impl<'a> CliStageRunner<'a> {
 
         // Pre-flight check
         {
-            let history =
-                crate::get_history(&**self.zbobr.task_backend(), self.task_id, None)
-                    .await
-                    .context("Pre-flight get_history check failed")?;
+            let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
+            let comments = weak.get_comments().await?;
+            let task_snap = weak.snapshot().await?;
+            let index = zbobr_api::build_history_index(&comments, &task_snap.description);
             tracing::info!(
-                "Task #{} pre-flight: get_history returned {} comment(s)",
+                "Task #{} pre-flight: history index has {} record(s)",
                 self.task_id,
-                history.comments.len()
+                index.entries.len()
             );
-            if history.comments.is_empty() {
+            if index.entries.is_empty() {
                 anyhow::bail!(
                     "Task #{} has no actionable messages — nothing for the agent to do",
                     self.task_id
@@ -731,7 +730,7 @@ async fn detect_and_handle_worktree(
             let hostname = get_hostname();
             if let Err(post_err) = zbobr
                 .task_session(Arc::clone(task_backend), Arc::clone(repo_backend), task_id)
-                .post_comment("error", &hostname, None, None, &msg, false, true)
+                .post_comment("error", &hostname, None, None, &msg, true)
                 .await
             {
                 tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -858,7 +857,7 @@ async fn handle_worktree_problem(
             problem
         );
         task_session
-            .post_comment("error", &hostname, None, None, &msg, false, true)
+            .post_comment("error", &hostname, None, None, &msg, true)
             .await
             .ok();
         task_session
@@ -884,7 +883,7 @@ async fn handle_worktree_problem(
             problem
         );
         task_session
-            .post_comment("error", &hostname, None, None, &msg, false, true)
+            .post_comment("error", &hostname, None, None, &msg, true)
             .await
             .ok();
         task_session
@@ -981,7 +980,7 @@ async fn ensure_pr_url(
             let task_session =
                 zbobr.task_session(Arc::clone(task_backend), Arc::clone(repo_backend), task_id);
             if let Err(post_err) = task_session
-                .post_comment("error", &hostname, None, None, &msg, false, true)
+                .post_comment("error", &hostname, None, None, &msg, true)
                 .await
             {
                 tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -1127,7 +1126,6 @@ async fn finalize_stage_session(
             std::mem::take(&mut *buf)
         };
         if !buffered.is_empty() {
-            let boundary = buffered.iter().any(|c| c.boundary);
             let hostname = get_hostname();
             let combined_text = buffered
                 .iter()
@@ -1143,7 +1141,6 @@ async fn finalize_stage_session(
                     Some(cli_tool),
                     Some(model),
                     &combined_text,
-                    boundary,
                     false,
                 )
                 .await
@@ -1173,7 +1170,7 @@ async fn finalize_stage_session(
         let error_msg = format!("Execution failed: {e}");
         let hostname = get_hostname();
         if let Err(post_err) = task_session
-            .post_comment("error", &hostname, None, None, &error_msg, false, true)
+            .post_comment("error", &hostname, None, None, &error_msg, true)
             .await
         {
             tracing::error!("Failed to post error to task #{task_id}: {post_err}");
@@ -1199,7 +1196,7 @@ async fn finalize_stage_session(
         let hostname = get_hostname();
         let msg = format!("Stash/push failed: {e}");
         if let Err(post_err) = task_session
-            .post_comment("error", &hostname, None, None, &msg, false, true)
+            .post_comment("error", &hostname, None, None, &msg, true)
             .await
         {
             tracing::error!(
