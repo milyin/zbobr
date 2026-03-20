@@ -108,7 +108,7 @@ pub struct HistoryIndex {
 }
 
 /// Determine the record type from a comment's `[tool_name]` prefix.
-fn classify_comment(text: &str) -> HistoryRecordType {
+pub fn classify_comment(text: &str) -> HistoryRecordType {
     let prefix = text.split('\n').next().unwrap_or("");
     match prefix {
         "[report_results]" | "[report_success]" | "[post_plan]"

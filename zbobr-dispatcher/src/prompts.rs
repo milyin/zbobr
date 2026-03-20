@@ -1,9 +1,13 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use simpleinterpolation::Interpolation;
+
 use crate::backend::TaskBackend;
 
-use zbobr_api::Task;
+use zbobr_api::{Comment, HistoryRecordType, Task, classify_comment};
 use zbobr_api::config::{StageDefinition, WorkflowConfig};
 
 #[derive(Clone)]
@@ -93,68 +97,102 @@ pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::R
     Ok(combined)
 }
 
-/// Build full prompt with sections in order:
-/// 1. Role description (from built-in default or prompt file)
-/// 2. Custom prompts (user context from prompt files)
-/// 3. Task title
-/// 4. Recent task history (non-hidden comments)
-/// 5. Unchecked checklist items with ids
+/// Strip `[tool_name]\n` prefix line from comment text if present.
+pub fn strip_tool_prefix(text: &str) -> &str {
+    let first_line = text.lines().next().unwrap_or("");
+    if first_line.starts_with('[') && first_line.ends_with(']') {
+        // Skip the prefix line and the following newline
+        let rest = &text[first_line.len()..];
+        rest.strip_prefix('\n').unwrap_or(rest)
+    } else {
+        text
+    }
+}
+
+/// Build template variables from task and comments.
+pub fn build_template_variables<'a>(
+    task: &'a Task,
+    comments: &'a [Comment],
+) -> HashMap<Cow<'static, str>, Cow<'a, str>> {
+    let mut vars: HashMap<Cow<'static, str>, Cow<'a, str>> = HashMap::new();
+
+    // Task fields
+    vars.insert(Cow::Borrowed("title"), Cow::Borrowed(&task.title));
+    vars.insert(Cow::Borrowed("description"), Cow::Borrowed(&task.description));
+    vars.insert(
+        Cow::Borrowed("destination_repository"),
+        Cow::Borrowed(task.destination_repository.as_deref().unwrap_or("")),
+    );
+    vars.insert(
+        Cow::Borrowed("destination_branch"),
+        Cow::Borrowed(task.destination_branch.as_deref().unwrap_or("")),
+    );
+    vars.insert(
+        Cow::Borrowed("work_branch"),
+        Cow::Borrowed(task.work_branch.as_deref().unwrap_or("")),
+    );
+
+    // Checklist: unchecked items
+    let unchecked: Vec<_> = task.checklist.iter().filter(|item| !item.checked).collect();
+    if unchecked.is_empty() {
+        vars.insert(Cow::Borrowed("checklist"), Cow::Borrowed(""));
+    } else {
+        let mut checklist_text = String::new();
+        for item in &unchecked {
+            if !checklist_text.is_empty() {
+                checklist_text.push('\n');
+            }
+            checklist_text.push_str(&format!("- [ ] [id: {}] {}", item.id, item.text));
+        }
+        vars.insert(Cow::Borrowed("checklist"), Cow::Owned(checklist_text));
+    }
+
+    // last_report: last Success or Failure comment (stripped tool prefix)
+    let last_report = comments
+        .iter()
+        .rev()
+        .filter(|c| !c.hidden)
+        .find(|c| {
+            let t = classify_comment(&c.text);
+            t == HistoryRecordType::Success || t == HistoryRecordType::Failure
+        })
+        .map(|c| strip_tool_prefix(&c.text))
+        .unwrap_or("");
+    vars.insert(Cow::Borrowed("last_report"), Cow::Borrowed(last_report));
+
+    // last_request: last user comment (Other type), fallback to task.description
+    let last_request = comments
+        .iter()
+        .rev()
+        .filter(|c| !c.hidden)
+        .find(|c| classify_comment(&c.text) == HistoryRecordType::Other)
+        .map(|c| c.text.as_str())
+        .unwrap_or(&task.description);
+    vars.insert(Cow::Borrowed("last_request"), Cow::Borrowed(last_request));
+
+    vars
+}
+
+/// Build full prompt by loading task data, building template variables,
+/// and rendering the template from prompt files.
 pub async fn build_full_prompt(
     user_context: &str,
-    role_name: &str,
+    _role_name: &str,
     task_id: u64,
     task_backend: &dyn TaskBackend,
 ) -> anyhow::Result<String> {
     let weak = task_backend.get_task(task_id).await?;
     let task = weak.snapshot().await?;
     let comments = weak.get_comments().await?;
-    let visible_comments: Vec<_> = comments.iter().filter(|c| !c.hidden).collect();
-    let history_json = serde_json::to_string_pretty(&visible_comments).unwrap_or_default();
-    Ok(assemble_prompt(
-        user_context,
-        role_name,
-        &task,
-        &history_json,
-    ))
-}
-
-/// Pure synchronous prompt assembly (used by tests and `build_full_prompt`).
-fn assemble_prompt(
-    user_context: &str,
-    _role_name: &str,
-    task: &Task,
-    history_json: &str,
-) -> String {
-    let task_title = &task.title;
-
-    let mut sections = Vec::new();
-
-    // Prompts from configured prompt files
-    if !user_context.is_empty() {
-        sections.push(user_context.to_owned());
-    }
-
-    // Task title
-    if !task_title.is_empty() {
-        sections.push(format!("# Current task: {task_title}"));
-    }
-
-    // Recent task history
-    if !history_json.is_empty() {
-        sections.push(format!("# Recent task history\n\n{history_json}"));
-    }
-
-    // Unchecked checklist items with ids
-    let unchecked: Vec<_> = task.checklist.iter().filter(|item| !item.checked).collect();
-    if !unchecked.is_empty() {
-        let mut checklist_text = String::from("# Unchecked checklist items\n");
-        for item in &unchecked {
-            checklist_text.push_str(&format!("\n- [ ] [id: {}] {}", item.id, item.text));
-        }
-        sections.push(checklist_text);
-    }
-
-    sections.join("\n\n---\n\n")
+    let vars = build_template_variables(&task, &comments);
+    // Convert to owned HashMap for Interpolation::render
+    let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
+        .into_iter()
+        .map(|(k, v)| (k, Cow::Owned(v.into_owned())))
+        .collect();
+    let template = Interpolation::new(user_context)
+        .map_err(|e| anyhow::anyhow!("Failed to parse prompt template: {e}"))?;
+    Ok(template.render(&owned_vars))
 }
 
 /// Validate that all prompt files referenced by stage definitions exist.
@@ -214,6 +252,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use zbobr_api::ChecklistItem;
 
     fn dummy_task(title: &str) -> Task {
         Task {
@@ -232,6 +271,18 @@ mod tests {
             confirm: false,
             worktree_retries: 0,
             etag: None,
+        }
+    }
+
+    fn dummy_comment(text: &str) -> Comment {
+        Comment {
+            timestamp: "2025-01-01T00:00:00Z".to_string(),
+            stage: "working".to_string(),
+            hostname: "test".to_string(),
+            tool: None,
+            model: None,
+            text: text.to_string(),
+            hidden: false,
         }
     }
 
@@ -297,57 +348,198 @@ mod tests {
         assert_eq!(result, "absolute content");
     }
 
-    // --- assemble_prompt ---
+    // --- strip_tool_prefix ---
 
     #[test]
-    fn assemble_prompt_includes_user_context() {
-        let prompt = assemble_prompt(
-            "my custom instructions",
-            "worker",
-            &dummy_task(""),
-            "",
-        );
-        assert!(prompt.contains("my custom instructions"));
+    fn strip_tool_prefix_removes_prefix() {
+        assert_eq!(strip_tool_prefix("[report_success]\nAll good"), "All good");
     }
 
     #[test]
-    fn assemble_prompt_empty_context_omits_user_section() {
-        let prompt_empty = assemble_prompt("", "worker", &dummy_task(""), "");
-        let prompt_with = assemble_prompt("UNIQUE_MARKER", "worker", &dummy_task(""), "");
-        assert!(!prompt_empty.contains("UNIQUE_MARKER"));
-        // With context is longer (has the extra context section)
-        assert!(prompt_with.len() > prompt_empty.len());
+    fn strip_tool_prefix_no_prefix() {
+        assert_eq!(strip_tool_prefix("Just text"), "Just text");
     }
 
-    // --- load_prompts + assemble_prompt integration ---
+    #[test]
+    fn strip_tool_prefix_empty() {
+        assert_eq!(strip_tool_prefix(""), "");
+    }
 
     #[test]
-    fn load_prompts_content_appears_in_assembled_prompt() {
+    fn strip_tool_prefix_prefix_only() {
+        assert_eq!(strip_tool_prefix("[report_success]"), "");
+    }
+
+    // --- build_template_variables ---
+
+    #[test]
+    fn build_template_variables_has_all_keys() {
+        let task = dummy_task("Test");
+        let vars = build_template_variables(&task, &[]);
+        let keys: Vec<&str> = vars.keys().map(|k| k.as_ref()).collect();
+        for expected in &[
+            "title", "description", "destination_repository", "destination_branch",
+            "work_branch", "checklist", "last_report", "last_request",
+        ] {
+            assert!(keys.contains(expected), "missing key: {expected}");
+        }
+    }
+
+    #[test]
+    fn build_template_variables_task_fields() {
+        let mut task = dummy_task("My Task");
+        task.description = "Task desc".to_string();
+        task.destination_repository = Some("owner/repo".to_string());
+        task.destination_branch = Some("main".to_string());
+        task.work_branch = Some("feature-x".to_string());
+
+        let vars = build_template_variables(&task, &[]);
+        assert_eq!(vars[&Cow::Borrowed("title") as &Cow<str>].as_ref(), "My Task");
+        assert_eq!(vars[&Cow::Borrowed("description") as &Cow<str>].as_ref(), "Task desc");
+        assert_eq!(vars[&Cow::Borrowed("destination_repository") as &Cow<str>].as_ref(), "owner/repo");
+        assert_eq!(vars[&Cow::Borrowed("destination_branch") as &Cow<str>].as_ref(), "main");
+        assert_eq!(vars[&Cow::Borrowed("work_branch") as &Cow<str>].as_ref(), "feature-x");
+    }
+
+    #[test]
+    fn build_template_variables_checklist() {
+        let mut task = dummy_task("T");
+        task.checklist = vec![
+            ChecklistItem { id: "1".to_string(), checked: true, text: "Done item".to_string() },
+            ChecklistItem { id: "2".to_string(), checked: false, text: "Todo item".to_string() },
+            ChecklistItem { id: "3".to_string(), checked: false, text: "Another".to_string() },
+        ];
+        let vars = build_template_variables(&task, &[]);
+        let checklist = vars[&Cow::Borrowed("checklist") as &Cow<str>].as_ref();
+        assert!(checklist.contains("- [ ] [id: 2] Todo item"));
+        assert!(checklist.contains("- [ ] [id: 3] Another"));
+        assert!(!checklist.contains("Done item"));
+    }
+
+    #[test]
+    fn build_template_variables_last_report() {
+        let task = dummy_task("T");
+        let comments = vec![
+            dummy_comment("user request"),
+            dummy_comment("[report_success]\nAll tests passed"),
+            dummy_comment("another user msg"),
+        ];
+        let vars = build_template_variables(&task, &comments);
+        assert_eq!(vars[&Cow::Borrowed("last_report") as &Cow<str>].as_ref(), "All tests passed");
+    }
+
+    #[test]
+    fn build_template_variables_last_report_failure() {
+        let task = dummy_task("T");
+        let comments = vec![
+            dummy_comment("[report_failure]\nBuild failed"),
+        ];
+        let vars = build_template_variables(&task, &comments);
+        assert_eq!(vars[&Cow::Borrowed("last_report") as &Cow<str>].as_ref(), "Build failed");
+    }
+
+    #[test]
+    fn build_template_variables_last_request_from_comments() {
+        let task = dummy_task("T");
+        let comments = vec![
+            dummy_comment("Please fix the bug"),
+            dummy_comment("[report_success]\nDone"),
+        ];
+        let vars = build_template_variables(&task, &comments);
+        assert_eq!(vars[&Cow::Borrowed("last_request") as &Cow<str>].as_ref(), "Please fix the bug");
+    }
+
+    #[test]
+    fn build_template_variables_last_request_fallback_to_description() {
+        let mut task = dummy_task("T");
+        task.description = "Implement feature X".to_string();
+        let comments = vec![
+            dummy_comment("[report_success]\nDone"),
+        ];
+        let vars = build_template_variables(&task, &comments);
+        assert_eq!(vars[&Cow::Borrowed("last_request") as &Cow<str>].as_ref(), "Implement feature X");
+    }
+
+    // --- template rendering ---
+
+    #[test]
+    fn template_with_placeholder_renders() {
+        let template_str = "Task: {title}\nDesc: {description}";
+        let task = dummy_task("My Task");
+        let vars = build_template_variables(&task, &[]);
+        let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
+            .into_iter()
+            .map(|(k, v)| (k, Cow::Owned(v.into_owned())))
+            .collect();
+        let template = Interpolation::new(template_str).unwrap();
+        let result = template.render(&owned_vars);
+        assert_eq!(result, "Task: My Task\nDesc: ");
+    }
+
+    #[test]
+    fn template_no_placeholders_passthrough() {
+        let template_str = "No placeholders here";
+        let task = dummy_task("T");
+        let vars = build_template_variables(&task, &[]);
+        let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
+            .into_iter()
+            .map(|(k, v)| (k, Cow::Owned(v.into_owned())))
+            .collect();
+        let template = Interpolation::new(template_str).unwrap();
+        let result = template.render(&owned_vars);
+        assert_eq!(result, "No placeholders here");
+    }
+
+    // --- load_prompts + template integration ---
+
+    #[test]
+    fn load_prompts_content_renders_with_template() {
         let dir = TempDir::new().unwrap();
-        let path = write_file(&dir, "worker.md", "do the work carefully");
+        let path = write_file(&dir, "worker.md", "do the work on {title}");
         let loaded = load_prompts(&[path], None).unwrap();
-        let result = assemble_prompt(&loaded, "worker", &dummy_task(""), "");
-        assert!(result.contains("do the work carefully"));
+        let mut task = dummy_task("Feature X");
+        task.description = "Build it".to_string();
+        let vars = build_template_variables(&task, &[]);
+        let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
+            .into_iter()
+            .map(|(k, v)| (k, Cow::Owned(v.into_owned())))
+            .collect();
+        let template = Interpolation::new(&loaded).unwrap();
+        let result = template.render(&owned_vars);
+        assert!(result.contains("do the work on Feature X"));
     }
 
     #[test]
-    fn no_prompt_files_gives_empty_context() {
+    fn no_prompt_files_gives_empty_template() {
         let loaded = load_prompts(&[] as &[PathBuf], None).unwrap();
-        let result = assemble_prompt(&loaded, "worker", &dummy_task(""), "");
-        let expected = assemble_prompt("", "worker", &dummy_task(""), "");
-        assert_eq!(result, expected);
+        let task = dummy_task("T");
+        let vars = build_template_variables(&task, &[]);
+        let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
+            .into_iter()
+            .map(|(k, v)| (k, Cow::Owned(v.into_owned())))
+            .collect();
+        let template = Interpolation::new(&loaded).unwrap();
+        let result = template.render(&owned_vars);
+        assert_eq!(result, "");
     }
 
     #[test]
     fn load_prompts_with_base_path_resolves_relative_files() {
         let dir = TempDir::new().unwrap();
-        write_file(&dir, "reviewer.md", "review carefully");
+        write_file(&dir, "reviewer.md", "review {title} carefully");
         let loaded = load_prompts(
             &[PathBuf::from("reviewer.md")],
             Some(&dir.path().to_path_buf()),
         )
         .unwrap();
-        let result = assemble_prompt(&loaded, "reviewer", &dummy_task(""), "");
-        assert!(result.contains("review carefully"));
+        let template = Interpolation::new(&loaded).unwrap();
+        let task = dummy_task("PR-42");
+        let vars = build_template_variables(&task, &[]);
+        let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
+            .into_iter()
+            .map(|(k, v)| (k, Cow::Owned(v.into_owned())))
+            .collect();
+        let result = template.render(&owned_vars);
+        assert!(result.contains("review PR-42 carefully"));
     }
 }

@@ -13,7 +13,7 @@ pub use config::{
 };
 pub use task::{
     ChecklistItem, Comment, CommentTag, HistoryIndex, HistoryIndexEntry, HistoryRecordType, Model,
-    Role, StackEntry, Task, TaskIdentity, Tool, build_history_index, extract_repo_name,
-    get_history_record_by_index,
+    Role, StackEntry, Task, TaskIdentity, Tool, build_history_index, classify_comment,
+    extract_repo_name, get_history_record_by_index,
 };
 pub use tool_executor::{ToolExecutor, format_command_for_log};
