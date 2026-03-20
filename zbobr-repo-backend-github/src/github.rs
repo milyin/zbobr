@@ -8,6 +8,8 @@ use async_trait::async_trait;
 use tokio::fs;
 use zbobr_utility::{git, git_check, git_output};
 
+use zbobr_api::backend::WorktreeBackend;
+
 use crate::config::ZbobrRepoBackendGithubConfig;
 
 /// Convert an octocrab error into an anyhow::Error with detailed information.
@@ -151,6 +153,13 @@ impl ZbobrRepoBackendGithub {
             backend_config,
             octocrab,
         })
+    }
+
+    /// Create from config and validate connectivity to GitHub.
+    pub async fn new(backend_config: ZbobrRepoBackendGithubConfig) -> anyhow::Result<Self> {
+        let backend = Self::from_config(backend_config)?;
+        backend.validate_connectivity().await?;
+        Ok(backend)
     }
 
     async fn ensure_fork(

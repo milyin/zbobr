@@ -851,6 +851,13 @@ impl TaskBackendGithub {
             inner: Arc::new(ZbobrTaskBackendGithubImpl::from_config(config)?),
         })
     }
+
+    /// Create from config and validate connectivity to GitHub.
+    pub async fn new(config: ZbobrTaskBackendGithubConfig) -> anyhow::Result<Self> {
+        let backend = Self::from_config(config)?;
+        backend.validate_connectivity().await?;
+        Ok(backend)
+    }
 }
 
 #[async_trait]

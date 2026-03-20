@@ -8,7 +8,7 @@ pub mod config;
 pub mod mcp;
 pub mod prompts;
 pub mod setup;
-pub mod state_machine;
+pub mod workflow;
 pub mod task;
 pub mod task_dir;
 pub mod tool_executor;
@@ -22,6 +22,7 @@ pub use config::{
 };
 pub use mcp::UnifiedMcp;
 pub use prompts::{ConfiguredPromptBuilder, add_mcp_tool_variables, build_full_prompt, load_prompts, validate_stage_prompts};
+pub use workflow::{Workflow, StateAction};
 pub use task::{
     ChecklistItem, Comment, Model, RoleSession, StackEntry, Task, TaskSession, Tool,
 };
@@ -32,7 +33,6 @@ pub use zbobr_api::config::Config;
 use std::sync::Arc;
 
 use typesafe_builder::{Builder, _TypesafeBuilderEmpty, _TypesafeBuilderFilled};
-use zbobr_api::config::WorkflowConfig;
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
@@ -45,7 +45,7 @@ pub struct ZbobrDispatcher {
     #[builder(required)]
     config: ZbobrDispatcherConfig,
     #[builder(required)]
-    workflow: WorkflowConfig,
+    workflow: Workflow,
     #[builder(required, into)]
     task_backend: Box<dyn TaskBackend>,
     #[builder(required, into)]
@@ -61,13 +61,20 @@ pub struct ZbobrDispatcher {
 }
 
 impl ZbobrDispatcher {
+    /// Validate the dispatcher's own configuration.
+    /// Chain after `build()` to ensure the config is consistent.
+    pub fn validated(self) -> anyhow::Result<Self> {
+        self.config.validate()?;
+        Ok(self)
+    }
+
     // -- Getters --
 
     pub fn config(&self) -> &ZbobrDispatcherConfig {
         &self.config
     }
 
-    pub fn workflow(&self) -> &WorkflowConfig {
+    pub fn workflow(&self) -> &Workflow {
         &self.workflow
     }
 

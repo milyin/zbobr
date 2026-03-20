@@ -10,6 +10,7 @@ use crate::mcp::unified::ALL_TOOL_NAMES;
 
 use zbobr_api::{Comment, HistoryRecordType, Task, classify_comment};
 use zbobr_api::config::{StageDefinition, WorkflowConfig};
+use crate::workflow::Workflow;
 
 // Template placeholder names used in prompt .md files.
 pub const VAR_TITLE: &str = "title";
@@ -24,11 +25,11 @@ pub const VAR_LAST_REQUEST: &str = "last_request";
 #[derive(Clone)]
 pub struct ConfiguredPromptBuilder {
     base_path: Option<PathBuf>,
-    workflow: Arc<WorkflowConfig>,
+    workflow: Arc<Workflow>,
 }
 
 impl ConfiguredPromptBuilder {
-    pub fn new(base_path: Option<PathBuf>, workflow: Arc<WorkflowConfig>) -> Self {
+    pub fn new(base_path: Option<PathBuf>, workflow: Arc<Workflow>) -> Self {
         Self { base_path, workflow }
     }
 
@@ -43,14 +44,14 @@ impl ConfiguredPromptBuilder {
         task_id: u64,
         task_backend: &dyn TaskBackend,
     ) -> anyhow::Result<String> {
-        let prompt_files = prompt_files_for_stage(stage_def, &self.workflow);
+        let prompt_files = prompt_files_for_stage(stage_def, self.workflow.config());
         let base_prompt = load_prompts(&prompt_files, self.base_path.as_ref())?;
         build_full_prompt(
             &base_prompt,
             &stage_def.role,
             task_id,
             task_backend,
-            &self.workflow,
+            self.workflow.config(),
         )
         .await
     }

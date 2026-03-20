@@ -11,7 +11,7 @@ use std::{
 
 use zbobr_api::config::WorkflowConfig;
 use zbobr_dispatcher::{
-    Comment, Task, ZbobrDispatcher,
+    Comment, Task, Workflow, ZbobrDispatcher,
     ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
     backend::{TaskBackend, TaskBackendExt, WorktreeBackend},
     cli::process_task,
@@ -32,11 +32,11 @@ pub struct IntegrationTestEnv {
     pub base_path: PathBuf,
     pub workspaces_dir: PathBuf,
     pub name: &'static str,
-    /// Default dispatcher (with `WorkflowConfig::default()`) for convenience
+    /// Default dispatcher (with default workflow) for convenience
     /// methods like `create_task`, `get_task`, `setup_repository`, etc.
     pub zbobr: Arc<ZbobrDispatcher>,
     /// Factory to create a dispatcher with a specific workflow for `process_task`.
-    dispatcher_factory: Box<dyn Fn(WorkflowConfig) -> Arc<ZbobrDispatcher> + Send + Sync>,
+    dispatcher_factory: Box<dyn Fn(Workflow) -> Arc<ZbobrDispatcher> + Send + Sync>,
     /// Optional remote repository slug (`owner/repo`) used by GitHub repo-backend tests.
     /// `None` for the filesystem repo backend.
     pub target_repo: Option<String>,
@@ -76,12 +76,13 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
     let task_backend = ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config.clone()).ok()?);
     let repo_backend = ZbobrRepoBackendFs::from_config(repo_backend_config.clone()).ok()?;
 
+    let default_workflow = Workflow::default();
     let zbobr = Arc::new(ZbobrDispatcherBuilder::new()
         .with_config(dispatcher_config.clone())
-        .with_workflow(WorkflowConfig::default())
+        .with_workflow(default_workflow.clone())
         .with_task_backend(task_backend)
         .with_repo_backend(repo_backend)
-        .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(WorkflowConfig::default())))
+        .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(default_workflow)))
         .build());
 
     zbobr
@@ -92,7 +93,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
     let factory_config = dispatcher_config;
     let factory_task_config = task_backend_config;
     let factory_repo_config = repo_backend_config;
-    let dispatcher_factory = Box::new(move |workflow: WorkflowConfig| {
+    let dispatcher_factory = Box::new(move |workflow: Workflow| {
         let tb = ArcTaskBackendFs::new(
             ZbobrTaskBackendFs::from_config(factory_task_config.clone()).unwrap(),
         );
@@ -162,12 +163,13 @@ pub async fn init_github_github(
     let task_backend = TaskBackendGithub::from_config(task_backend_config.clone()).ok()?;
     let repo_backend = ZbobrRepoBackendGithub::from_config(repo_backend_config.clone()).ok()?;
 
+    let default_workflow = Workflow::default();
     let zbobr = Arc::new(ZbobrDispatcherBuilder::new()
         .with_config(dispatcher_config.clone())
-        .with_workflow(WorkflowConfig::default())
+        .with_workflow(default_workflow.clone())
         .with_task_backend(task_backend)
         .with_repo_backend(repo_backend)
-        .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(WorkflowConfig::default())))
+        .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(default_workflow)))
         .build());
 
     zbobr
@@ -178,7 +180,7 @@ pub async fn init_github_github(
     let factory_config = dispatcher_config;
     let factory_task_config = task_backend_config;
     let factory_repo_config = repo_backend_config;
-    let dispatcher_factory = Box::new(move |workflow: WorkflowConfig| {
+    let dispatcher_factory = Box::new(move |workflow: Workflow| {
         let tb = TaskBackendGithub::from_config(factory_task_config.clone()).unwrap();
         let rb = ZbobrRepoBackendGithub::from_config(factory_repo_config.clone()).unwrap();
         Arc::new(ZbobrDispatcherBuilder::new()
@@ -208,7 +210,7 @@ impl IntegrationTestEnv {
 
     /// Create a dispatcher with a specific workflow (for `process_task` calls).
     pub fn make_dispatcher(&self, workflow: WorkflowConfig) -> Arc<ZbobrDispatcher> {
-        (self.dispatcher_factory)(workflow)
+        (self.dispatcher_factory)(Workflow::from_config(workflow))
     }
 
     // -----------------------------------------------------------------------

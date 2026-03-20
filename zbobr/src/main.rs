@@ -7,12 +7,11 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
-use zbobr_dispatcher::backend::{TaskBackend as _, WorktreeBackend as _};
 use zbobr_dispatcher::config::{
     Config as _, ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
     ZbobrExecutorArgs, ZbobrExecutorConfig, ZbobrExecutorToml,
 };
-use zbobr_dispatcher::{ConfigFileArg, ConfiguredPromptBuilder};
+use zbobr_dispatcher::{ConfigFileArg, ConfiguredPromptBuilder, Workflow};
 use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::McpTesterExecutor;
@@ -98,20 +97,11 @@ async fn main() -> anyhow::Result<()> {
 
     let config = RootConfig::build(root_toml, cli.settings, &location.config_dir);
 
-    config
-        .dispatcher
-        .validate()
-        .with_context(|| format!("Config file: {}", location.config_path.display()))?;
-
-    config.workflow.validate()?;
-
     let command = cli.command;
-    let workflow = config.workflow;
+    let workflow = Workflow::new(config.workflow)?;
 
-    let task_backend = TaskBackendGithub::from_config(config.tasks)?;
-    let repo_backend = ZbobrRepoBackendGithub::from_config(config.repo)?;
-    task_backend.validate_connectivity().await?;
-    repo_backend.validate_connectivity().await?;
+    let task_backend = TaskBackendGithub::new(config.tasks).await?;
+    let repo_backend = ZbobrRepoBackendGithub::new(config.repo).await?;
 
     let prompt_builder = ConfiguredPromptBuilder::new(Some(location.config_dir.clone()), Arc::new(workflow.clone()));
 
@@ -128,7 +118,8 @@ async fn main() -> anyhow::Result<()> {
         .with_copilot(copilot)
         .with_mcp_tester(mcp_tester)
         .with_prompt_builder(prompt_builder)
-        .build();
+        .build()
+        .validated()?;
 
     commands::run_command(dispatcher, command).await
 }

@@ -14,7 +14,8 @@ use crate::{
     mcp::common::get_hostname,
     task::{Model, Tool},
 };
-use zbobr_api::config::{StageDefinition, WorkflowConfig};
+use zbobr_api::config::StageDefinition;
+use crate::workflow::{INIT_PIPELINE, MERGE_PIPELINE};
 use zbobr_api::CommentTag;
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 
@@ -481,13 +482,13 @@ pub async fn process_task(
     }
 
     // Use state machine to determine what to do
-    let action = crate::state_machine::resolve_next_action(task, zbobr.workflow())?;
+    let action = zbobr.workflow().resolve_next_action(task)?;
     match action {
-        crate::state_machine::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
+        crate::workflow::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
             let runner = CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, mcp_tester_override);
             runner.run().await?;
         }
-        crate::state_machine::StateAction::Done => {
+        crate::workflow::StateAction::Done => {
             let task_session = zbobr.task_session(task.id);
             if let Some(entry) = task_session.pop_stack().await? {
                 // Return from sub-pipeline — fire the stored after-return signal
@@ -504,10 +505,10 @@ pub async fn process_task(
                 println!("Task #{} completed", task.id);
             }
         }
-        crate::state_machine::StateAction::Paused => {
+        crate::workflow::StateAction::Paused => {
             println!("Task #{} is paused — skipped", task.id);
         }
-        crate::state_machine::StateAction::Idle => {
+        crate::workflow::StateAction::Idle => {
             println!("Task #{} is idle (state={}, signal={:?}) — skipped", task.id, task.state, task.signal);
         }
     }
@@ -585,7 +586,7 @@ pub async fn run_manager_loop(
                 continue;
             }
 
-            let action = match crate::state_machine::resolve_next_action(task, workflow) {
+            let action = match workflow.resolve_next_action(task) {
                 Ok(a) => a,
                 Err(e) => {
                     tracing::warn!("State machine error for task #{}: {e}", task.id);
@@ -594,7 +595,7 @@ pub async fn run_manager_loop(
             };
 
             match action {
-                crate::state_machine::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
+                crate::workflow::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
                     tracing::info!(
                         "Processing task #{} (state={}, signal={:?}) — running stage {}/{}",
                         task.id,
@@ -610,7 +611,7 @@ pub async fn run_manager_loop(
                     session_run = true;
                     break;
                 }
-                crate::state_machine::StateAction::Done => {
+                crate::workflow::StateAction::Done => {
                     let task_session = zbobr.task_session(task.id);
                     match task_session.pop_stack().await {
                         Ok(Some(entry)) => {
@@ -635,7 +636,7 @@ pub async fn run_manager_loop(
                         }
                     }
                 }
-                crate::state_machine::StateAction::Paused | crate::state_machine::StateAction::Idle => {}
+                crate::workflow::StateAction::Paused | crate::workflow::StateAction::Idle => {}
             }
         }
 
@@ -698,7 +699,7 @@ async fn detect_and_handle_worktree(
         Some(id) => id,
         None => {
             // If we ARE the undefined handler pipeline, proceed with task_dir
-            if pipeline_name == WorkflowConfig::INIT_PIPELINE {
+            if pipeline_name == INIT_PIPELINE {
                 return Ok(WorktreeResult::Ready(task_dir.to_path_buf()));
             }
             // Otherwise, dispatch to undefined handler
@@ -751,7 +752,7 @@ async fn detect_and_handle_worktree(
 
     // If we ARE the conflict handler, start the merge but don't abort on failure —
     // the agent needs to see conflict markers in the working tree.
-    let is_conflict_handler = pipeline_name == WorkflowConfig::MERGE_PIPELINE;
+    let is_conflict_handler = pipeline_name == MERGE_PIPELINE;
 
     let merged_ok = git_check(
         &work_dir,
@@ -795,8 +796,8 @@ async fn handle_worktree_problem(
     problem: zbobr_api::task::WorktreeProblem,
 ) -> anyhow::Result<WorktreeResult> {
     let handler_pipeline = match problem {
-        zbobr_api::task::WorktreeProblem::Undefined => WorkflowConfig::INIT_PIPELINE,
-        zbobr_api::task::WorktreeProblem::Conflict => WorkflowConfig::MERGE_PIPELINE,
+        zbobr_api::task::WorktreeProblem::Undefined => INIT_PIPELINE,
+        zbobr_api::task::WorktreeProblem::Conflict => MERGE_PIPELINE,
     };
     let max_retries = zbobr.workflow()
         .pipeline(handler_pipeline)

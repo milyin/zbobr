@@ -725,7 +725,7 @@ mod comment_model_tests {
         };
         let zbobr = Arc::new(crate::ZbobrDispatcherBuilder::new()
             .with_config(ZbobrDispatcherConfig::default())
-            .with_workflow(zbobr_api::config::WorkflowConfig::default())
+            .with_workflow(crate::workflow::Workflow::default())
             .with_task_backend(backend.clone())
             .with_repo_backend(DummyRepo)
             .build());
