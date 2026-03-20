@@ -73,8 +73,6 @@ fn default_config_toml() -> RootConfigToml {
             work_branch_prefix: Some("zbobr_fix".into()),
             default_destination_repository: None,
             default_destination_branch: None,
-            max_retries_undefined: Some(1),
-            max_retries_conflict: Some(5),
         }),
         tasks: Some(ZbobrTaskBackendGithubToml {
             github_repo: Some("owner/repo".into()),
@@ -146,9 +144,9 @@ fn default_workflow() -> WorkflowConfig {
     });
 
     let mut pipelines = HashMap::new();
-    pipelines.insert(WorkflowConfig::MAIN_PIPELINE.to_string(), PipelineConfig { stages: main_stages });
-    pipelines.insert(WorkflowConfig::INIT_PIPELINE.to_string(), PipelineConfig { stages: init_stages });
-    pipelines.insert(WorkflowConfig::MERGE_PIPELINE.to_string(), PipelineConfig { stages: merge_stages });
+    pipelines.insert(WorkflowConfig::MAIN_PIPELINE.to_string(), PipelineConfig { stages: main_stages, ..Default::default() });
+    pipelines.insert(WorkflowConfig::INIT_PIPELINE.to_string(), PipelineConfig { stages: init_stages, max_retries: 1 });
+    pipelines.insert(WorkflowConfig::MERGE_PIPELINE.to_string(), PipelineConfig { stages: merge_stages, ..Default::default() });
 
     let roles = HashMap::from([
         (

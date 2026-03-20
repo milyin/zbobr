@@ -31,6 +31,7 @@ fn build_workflow(stages: Vec<StageDef>) -> WorkflowConfig {
             .entry(s.pipeline.to_string())
             .or_insert_with(|| PipelineConfig {
                 stages: HashMap::new(),
+                ..Default::default()
             });
         pipeline.stages.insert(
             s.name.to_string(),

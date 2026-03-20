@@ -116,8 +116,19 @@ fn is_false(v: &bool) -> bool {
 /// Per-pipeline configuration: a named directed graph of stages.
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct PipelineConfig {
-    #[serde(flatten)]
+    #[serde(default)]
     pub stages: HashMap<String, StageDefinition>,
+    /// Max retries for this pipeline's worktree handler before pausing.
+    #[serde(default = "default_max_retries", skip_serializing_if = "is_default_max_retries")]
+    pub max_retries: u32,
+}
+
+fn default_max_retries() -> u32 {
+    5
+}
+
+fn is_default_max_retries(v: &u32) -> bool {
+    *v == default_max_retries()
 }
 
 impl PipelineConfig {
@@ -385,12 +396,6 @@ pub struct ZbobrDispatcherConfig {
     /// Default destination branch pre-populated into task parameters before the
     /// preparator agent runs (e.g. "main"). The preparator may still override this.
     pub default_destination_branch: Option<String>,
-    /// Max retries for undefined worktree handler before pausing.
-    #[arg(default_value = "1")]
-    pub max_retries_undefined: u32,
-    /// Max retries for conflict worktree handler before pausing.
-    #[arg(default_value = "5")]
-    pub max_retries_conflict: u32,
 }
 
 impl Default for ZbobrDispatcherConfig {
@@ -404,8 +409,6 @@ impl Default for ZbobrDispatcherConfig {
             work_branch_prefix: "zbobr_fix".to_string(),
             default_destination_repository: None,
             default_destination_branch: None,
-            max_retries_undefined: 1,
-            max_retries_conflict: 5,
         }
     }
 }

@@ -304,6 +304,7 @@ impl<'a> CliStageRunner<'a> {
             self.stage_name,
             self.stage_def,
             task_dir.path(),
+            self.workflow,
         )
         .await?
         {
@@ -703,6 +704,7 @@ async fn detect_and_handle_worktree(
     stage_name: &str,
     _stage_def: &StageDefinition,
     task_dir: &Path,
+    workflow: &WorkflowConfig,
 ) -> anyhow::Result<WorktreeResult> {
     let task_backend = zbobr.task_backend();
     let repo_backend = zbobr.repo_backend();
@@ -723,6 +725,7 @@ async fn detect_and_handle_worktree(
                 pipeline_name,
                 stage_name,
                 zbobr_api::task::WorktreeProblem::Undefined,
+                workflow,
             )
             .await;
         }
@@ -797,6 +800,7 @@ async fn detect_and_handle_worktree(
         pipeline_name,
         stage_name,
         zbobr_api::task::WorktreeProblem::Conflict,
+        workflow,
     )
     .await
 }
@@ -808,16 +812,16 @@ async fn handle_worktree_problem(
     pipeline_name: &str,
     stage_name: &str,
     problem: zbobr_api::task::WorktreeProblem,
+    workflow: &WorkflowConfig,
 ) -> anyhow::Result<WorktreeResult> {
-    let config = zbobr.config();
-    let (handler_pipeline, max_retries) = match problem {
-        zbobr_api::task::WorktreeProblem::Undefined => {
-            (WorkflowConfig::INIT_PIPELINE, config.max_retries_undefined)
-        }
-        zbobr_api::task::WorktreeProblem::Conflict => {
-            (WorkflowConfig::MERGE_PIPELINE, config.max_retries_conflict)
-        }
+    let handler_pipeline = match problem {
+        zbobr_api::task::WorktreeProblem::Undefined => WorkflowConfig::INIT_PIPELINE,
+        zbobr_api::task::WorktreeProblem::Conflict => WorkflowConfig::MERGE_PIPELINE,
     };
+    let max_retries = workflow
+        .pipeline(handler_pipeline)
+        .map(|p| p.max_retries)
+        .unwrap_or(5);
 
     let task_session = zbobr.task_session(
         Arc::clone(zbobr.task_backend()),
