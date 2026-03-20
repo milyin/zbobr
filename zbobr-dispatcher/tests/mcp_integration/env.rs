@@ -13,7 +13,7 @@ use zbobr_api::config::WorkflowConfig;
 use zbobr_dispatcher::{
     Comment, Task, Workflow, ZbobrDispatcher,
     ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
-    backend::{TaskBackend, TaskBackendExt, WorktreeBackend},
+    backend::TaskBackendExt,
     cli::process_task,
     prompts::ConfiguredPromptBuilder,
     task::Tool,

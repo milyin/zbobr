@@ -1002,11 +1002,7 @@ mod tests {
 
 #[cfg(test)]
 mod parse_tests {
-    use std::str::FromStr;
-
     use zbobr_api::task::CommentTag;
-
-    use super::*;
 
     fn split_tag_body(input: &str) -> (CommentTag, String) {
         let mut parts = input.splitn(2, '\n');
