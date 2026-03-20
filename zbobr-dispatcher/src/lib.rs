@@ -1,3 +1,6 @@
+// Builder derive macro generates type params like ValueTask_backend from underscore field names
+#![allow(non_camel_case_types)]
+
 pub mod backend;
 pub mod cleanup;
 pub mod cli;
