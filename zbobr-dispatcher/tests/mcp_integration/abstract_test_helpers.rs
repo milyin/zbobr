@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig};
+use zbobr_executor_mcp_tester;
 use zbobr_dispatcher::task::Tool;
 
 use super::{abstract_scenarios, env::IntegrationTestEnv};
@@ -672,4 +673,135 @@ pub async fn run_retry_limit(env: &IntegrationTestEnv) {
         task.state, "main_PENDING",
         "Task should be in PENDING state"
     );
+}
+
+// ===========================================================================
+// Test 12: Call stage invokes a sub-pipeline and advances on return
+// ===========================================================================
+
+pub async fn run_call_stage(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_call_stage").await;
+    let task_id = env
+        .create_task("Call stage test", "Call stage test description", "READY")
+        .await;
+    let work_branch = format!("zbobr_fix-{task_id}-call");
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
+
+    // Build workflow:
+    //   main:  call_sub → finish
+    //   sub:   work (reports success)
+    //   init:  preparing (required)
+    //   merge: merging   (required)
+    let mut pipelines: HashMap<String, PipelineConfig> = HashMap::new();
+    pipelines.insert(
+        "main".to_string(),
+        PipelineConfig {
+            order: vec!["call_sub".into(), "finish".into()],
+            stages: [
+                (
+                    "call_sub".into(),
+                    StageDefinition {
+                        call: Some("sub".into()),
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "finish".into(),
+                    StageDefinition {
+                        role: Some("role_finish".into()),
+                        tool: Some(Tool::McpTester),
+                        ..Default::default()
+                    },
+                ),
+            ]
+            .into(),
+            ..Default::default()
+        },
+    );
+    pipelines.insert(
+        "sub".to_string(),
+        PipelineConfig {
+            order: vec!["work".into()],
+            stages: [(
+                "work".into(),
+                StageDefinition {
+                    role: Some("role_work".into()),
+                    tool: Some(Tool::McpTester),
+                    ..Default::default()
+                },
+            )]
+            .into(),
+            ..Default::default()
+        },
+    );
+    pipelines.insert(
+        "init".to_string(),
+        PipelineConfig {
+            order: vec!["preparing".into()],
+            stages: [(
+                "preparing".into(),
+                StageDefinition {
+                    role: Some("role_init".into()),
+                    tool: Some(Tool::McpTester),
+                    ..Default::default()
+                },
+            )]
+            .into(),
+            ..Default::default()
+        },
+    );
+    pipelines.insert(
+        "merge".to_string(),
+        PipelineConfig {
+            order: vec!["merging".into()],
+            stages: [(
+                "merging".into(),
+                StageDefinition {
+                    role: Some("role_merge".into()),
+                    tool: Some(Tool::McpTester),
+                    ..Default::default()
+                },
+            )]
+            .into(),
+            ..Default::default()
+        },
+    );
+    let workflow = WorkflowConfig {
+        prompts_dir: None,
+        pipelines,
+        roles: Default::default(),
+    };
+
+    let scenarios = scenarios_map(vec![
+        ("role_work", abstract_scenarios::report_and_finish_scenario()),
+        ("role_finish", abstract_scenarios::report_and_finish_scenario()),
+    ]);
+
+    // Step 1: process_task from READY — hits call stage, pushes stack, emits call_sub
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.signal,
+        Some("call_sub".to_string()),
+        "Call stage should emit call_sub signal"
+    );
+    assert_eq!(task.state, "main_PENDING");
+    assert_eq!(task.stack.len(), 1, "Stack should have one entry");
+    assert_eq!(task.stack[0].pipeline, "main");
+    assert_eq!(
+        task.stack[0].signal, "go_finish",
+        "Return signal should advance to next stage"
+    );
+
+    // Step 2..N: run to completion through sub-pipeline → return → finish → DONE
+    env.run_to_completion(task_id, &workflow, &scenarios, 10)
+        .await;
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.state, "DONE",
+        "Task should complete after call stage returns and finish stage runs"
+    );
+    assert!(task.stack.is_empty(), "Stack should be empty after completion");
 }
