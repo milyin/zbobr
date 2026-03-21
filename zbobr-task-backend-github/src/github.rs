@@ -144,14 +144,14 @@ impl ZbobrTaskBackendGithubImpl {
         })
     }
 
-    /// Convert a signal string to its GitHub label representation.
-    fn signal_to_label(signal: &str) -> String {
-        format!("signal:{}", signal)
+    /// Convert a Signal to its GitHub label representation.
+    fn signal_to_label(signal: &zbobr_api::Signal) -> String {
+        format!("signal:{signal}")
     }
 
-    /// Parse a GitHub label string back to a signal string.
-    fn label_to_signal(label: &str) -> Option<&str> {
-        label.strip_prefix("signal:")
+    /// Parse a GitHub label string back to a Signal.
+    fn label_to_signal(label: &str) -> Option<zbobr_api::Signal> {
+        label.strip_prefix("signal:")?.parse().ok()
     }
 
     /// Convert a state string to its GitHub label representation.
@@ -230,7 +230,7 @@ impl ZbobrTaskBackendGithubImpl {
     }
 
     /// Apply a signal change on a GitHub issue (remove old signal labels, add new one).
-    async fn apply_signal_change(&self, id: u64, signal: Option<&str>) -> anyhow::Result<()> {
+    async fn apply_signal_change(&self, id: u64, signal: Option<&zbobr_api::Signal>) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
         // Fetch current labels and remove all existing signal: labels
@@ -464,8 +464,7 @@ impl ZbobrTaskBackendGithubImpl {
         let signal = issue
             .labels
             .iter()
-            .find_map(|l| Self::label_to_signal(&l.name))
-            .map(|s| s.to_string());
+            .find_map(|l| Self::label_to_signal(&l.name));
 
         let pause = issue
             .labels
@@ -663,7 +662,7 @@ impl ZbobrTaskBackendGithubImpl {
             self.apply_state_change(id, &task.state).await?;
         }
         if task.signal != original_signal {
-            self.apply_signal_change(id, task.signal.as_deref()).await?;
+            self.apply_signal_change(id, task.signal.as_ref()).await?;
         }
         if task.pause != original_pause || task.confirm != original_confirm {
             self.apply_flag_change(id, task.pause, task.confirm).await?;

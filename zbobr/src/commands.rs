@@ -267,6 +267,7 @@ async fn run_task_subcommand(
             signal,
             confirm,
         } => {
+            let parsed_signal = signal.map(|s| s.parse::<zbobr_api::Signal>()).transpose()?;
             let weak = task_backend.get_task(id).await?;
             let mutable = weak.upgrade().await?;
             mutable
@@ -286,7 +287,7 @@ async fn run_task_subcommand(
                         }
                         task.state = s;
                     }
-                    if let Some(s) = signal {
+                    if let Some(s) = parsed_signal {
                         task.signal = Some(s);
                     }
                     if let Some(repo) = dest_repo {

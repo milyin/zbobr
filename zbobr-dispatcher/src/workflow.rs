@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use zbobr_api::config::{
     PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig,
 };
-use zbobr_api::Task;
+use zbobr_api::{Signal, Task};
 
 // Re-export constants for convenience.
 pub const MAIN_PIPELINE: &str = WorkflowConfig::MAIN_PIPELINE;
@@ -186,7 +186,7 @@ impl Workflow {
         // State is "{pipeline}_PENDING" — dispatch based on signal
         if let Some(pipeline) = state.strip_suffix("_PENDING") {
             if let Some(ref signal) = task.signal {
-                return self.resolve_signal_in_pipeline(task, signal, pipeline);
+                return self.resolve_signal_in_pipeline(signal, pipeline);
             }
             return Ok(StateAction::Idle);
         }
@@ -195,79 +195,60 @@ impl Workflow {
         Ok(StateAction::Idle)
     }
 
-    fn resolve_signal(&self, task: &Task, signal: &str) -> anyhow::Result<StateAction<'_>> {
-        if signal.strip_prefix("go_").is_some()
-            || signal.starts_with("call_")
-            || signal == "return"
-            || signal == "return_failure"
-        {
-            let pipeline = pipeline_from_state(&task.state)
-                .unwrap_or_else(|| self.config.default_pipeline().to_string());
-            return self.resolve_signal_in_pipeline(task, signal, &pipeline);
-        }
-        Ok(StateAction::Idle)
+    fn resolve_signal(&self, task: &Task, signal: &Signal) -> anyhow::Result<StateAction<'_>> {
+        let pipeline = pipeline_from_state(&task.state)
+            .unwrap_or_else(|| self.config.default_pipeline().to_string());
+        self.resolve_signal_in_pipeline(signal, &pipeline)
     }
 
     fn resolve_signal_in_pipeline(
         &self,
-        _task: &Task,
-        signal: &str,
+        signal: &Signal,
         pipeline: &str,
     ) -> anyhow::Result<StateAction<'_>> {
-        if let Some(target_stage) = signal.strip_prefix("go_") {
-            let (pipeline_key, pipeline_config) =
-                self.config.pipelines.get_key_value(pipeline).ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Signal '{}' references unknown pipeline '{}'",
-                        signal,
-                        pipeline
-                    )
+        match signal {
+            Signal::Go(target_stage) => {
+                let (pipeline_key, pipeline_config) =
+                    self.config.pipelines.get_key_value(pipeline).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Signal '{signal}' references unknown pipeline '{pipeline}'"
+                        )
+                    })?;
+                let (stage_key, stage_def) = pipeline_config
+                    .stages
+                    .get_key_value(target_stage.as_str())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Signal '{signal}' references unknown stage '{target_stage}' in pipeline '{pipeline}'"
+                        )
+                    })?;
+                Ok(StateAction::RunStage(
+                    pipeline_key.as_str(),
+                    stage_key.as_str(),
+                    stage_def,
+                ))
+            }
+            Signal::Call(target_pipeline) => {
+                let (pipeline_key, pipeline_config) = self
+                    .config
+                    .pipelines
+                    .get_key_value(target_pipeline.as_str())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Signal '{signal}' references unknown pipeline '{target_pipeline}' (no start stage)"
+                        )
+                    })?;
+                let (stage_key, start) = pipeline_config.start_stage().ok_or_else(|| {
+                    anyhow::anyhow!("Pipeline '{target_pipeline}' has no start stage")
                 })?;
-            let (stage_key, stage_def) = pipeline_config
-                .stages
-                .get_key_value(target_stage)
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Signal '{}' references unknown stage '{}' in pipeline '{}'",
-                        signal,
-                        target_stage,
-                        pipeline
-                    )
-                })?;
-            return Ok(StateAction::RunStage(
-                pipeline_key.as_str(),
-                stage_key.as_str(),
-                stage_def,
-            ));
+                Ok(StateAction::RunStage(
+                    pipeline_key.as_str(),
+                    stage_key,
+                    start,
+                ))
+            }
+            Signal::Return | Signal::ReturnFailure => Ok(StateAction::Done),
         }
-
-        if let Some(target_pipeline) = signal.strip_prefix("call_") {
-            let (pipeline_key, pipeline_config) = self
-                .config
-                .pipelines
-                .get_key_value(target_pipeline)
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Signal '{}' references unknown pipeline '{}' (no start stage)",
-                        signal,
-                        target_pipeline
-                    )
-                })?;
-            let (stage_key, start) = pipeline_config.start_stage().ok_or_else(|| {
-                anyhow::anyhow!("Pipeline '{}' has no start stage", target_pipeline)
-            })?;
-            return Ok(StateAction::RunStage(
-                pipeline_key.as_str(),
-                stage_key,
-                start,
-            ));
-        }
-
-        if signal == "return" || signal == "return_failure" {
-            return Ok(StateAction::Done);
-        }
-
-        Ok(StateAction::Idle)
     }
 }
 

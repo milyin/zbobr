@@ -16,7 +16,7 @@ use crate::{
 };
 use zbobr_api::config::StageDefinition;
 use crate::workflow::{INIT_PIPELINE, MERGE_PIPELINE};
-use zbobr_api::CommentTag;
+use zbobr_api::{CommentTag, Signal};
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 
 // ---------------------------------------------------------------------------
@@ -181,6 +181,8 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     println!(
         "Signal:      {}",
         task.signal
+            .as_ref()
+            .map(|s| s.to_string())
             .as_deref()
             .unwrap_or("(none)")
     );
@@ -505,17 +507,18 @@ async fn handle_call_stage(
         .pipeline(pipeline_name)
         .and_then(|p| p.next_stage(stage_name))
     {
-        Some((next, _)) => format!("go_{next}"),
-        None => "return".to_string(),
+        Some((next, _)) => Signal::go(next),
+        None => Signal::Return,
     };
 
     // Push stack so we return to the right place.
     task_session
-        .push_stack(pipeline_name, &return_signal)
+        .push_stack(pipeline_name, return_signal.clone())
         .await?;
     task_session.allocate_pipeline_run_id().await?;
+    let call_signal = Signal::call(call_pipeline);
     task_session
-        .set_signal(Some(&format!("call_{call_pipeline}")))
+        .set_signal(Some(call_signal.clone()))
         .await?;
     task_session
         .set_state(&format!("{pipeline_name}_PENDING"))
@@ -556,11 +559,11 @@ pub async fn process_task(
         }
         crate::workflow::StateAction::Done => {
             let task_session = zbobr.task_session(task.id);
-            let is_failure = task.signal.as_deref() == Some("return_failure");
+            let is_failure = task.signal.as_ref() == Some(&Signal::ReturnFailure);
             if is_failure {
                 // Pipeline failed — return to caller or pause at root
                 if let Some(entry) = task_session.pop_stack().await? {
-                    task_session.set_signal(Some("return_failure")).await?;
+                    task_session.set_signal(Some(Signal::ReturnFailure)).await?;
                     task_session
                         .set_state(&format!("{}_PENDING", entry.pipeline))
                         .await?;
@@ -576,7 +579,7 @@ pub async fn process_task(
                 }
             } else if let Some(entry) = task_session.pop_stack().await? {
                 // Success return from sub-pipeline — re-run calling stage
-                task_session.set_signal(Some(&entry.signal)).await?;
+                task_session.set_signal(Some(entry.signal.clone())).await?;
                 task_session
                     .set_state(&format!("{}_PENDING", entry.pipeline))
                     .await?;
@@ -713,12 +716,12 @@ pub async fn run_manager_loop(
                 }
                 crate::workflow::StateAction::Done => {
                     let task_session = zbobr.task_session(task.id);
-                    let is_failure = task.signal.as_deref() == Some("return_failure");
+                    let is_failure = task.signal.as_ref() == Some(&Signal::ReturnFailure);
                     if is_failure {
                         // Pipeline failed — return to caller or pause at root
                         match task_session.pop_stack().await {
                             Ok(Some(entry)) => {
-                                if let Err(e) = task_session.set_signal(Some("return_failure")).await {
+                                if let Err(e) = task_session.set_signal(Some(Signal::ReturnFailure)).await {
                                     tracing::error!("Failed to set return_failure signal for task #{}: {e}", task.id);
                                 }
                                 if let Err(e) = task_session
@@ -739,7 +742,7 @@ pub async fn run_manager_loop(
                         match task_session.pop_stack().await {
                             Ok(Some(entry)) => {
                                 // Success return from sub-pipeline — re-run calling stage
-                                if let Err(e) = task_session.set_signal(Some(&entry.signal)).await {
+                                if let Err(e) = task_session.set_signal(Some(entry.signal.clone())).await {
                                     tracing::error!("Failed to set return signal for task #{}: {e}", task.id);
                                 }
                                 if let Err(e) = task_session
@@ -954,11 +957,11 @@ async fn handle_worktree_problem(
 
     // Push stack: re-run the interrupted stage upon return
     task_session
-        .push_stack(pipeline_name, &format!("go_{}", stage_name))
+        .push_stack(pipeline_name, Signal::go(stage_name))
         .await?;
     task_session.allocate_pipeline_run_id().await?;
     task_session
-        .set_signal(Some(&format!("call_{}", handler_pipeline)))
+        .set_signal(Some(Signal::call(handler_pipeline)))
         .await?;
     task_session.set_state(&pending_state).await?;
 
@@ -1273,17 +1276,17 @@ async fn finalize_stage_session(
                     caller_pipeline = Some(caller.pipeline.clone());
                     caller_pipeline_run_id = Some(caller.pipeline_run_id);
                 }
-                task_session.set_signal(Some("return_failure")).await?;
+                task_session.set_signal(Some(Signal::ReturnFailure)).await?;
             }
             SequentialSignal::Advance(next) => {
-                task_session.set_signal(Some(&format!("go_{next}"))).await?;
+                task_session.set_signal(Some(Signal::go(next))).await?;
             }
             SequentialSignal::Return => {
                 if let Some(caller) = current_task.stack.last() {
                     caller_pipeline = Some(caller.pipeline.clone());
                     caller_pipeline_run_id = Some(caller.pipeline_run_id);
                 }
-                task_session.set_signal(Some("return")).await?;
+                task_session.set_signal(Some(Signal::Return)).await?;
             }
             SequentialSignal::Pause => {
                 task_session

@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use zbobr_api::Signal;
 use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig};
 use zbobr_executor_mcp_tester;
 use zbobr_dispatcher::task::Tool;
@@ -176,7 +177,7 @@ pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some("go_second".to_string()),
+        Some(Signal::go("second")),
         "Success in first stage should advance to go_second"
     );
     assert_eq!(task.state, "main_PENDING");
@@ -253,7 +254,7 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some("call_merge".to_string()),
+        Some(Signal::call("merge")),
         "Diverged work branch should trigger call_merge"
     );
     assert_eq!(
@@ -263,14 +264,14 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
     );
     assert_eq!(task.stack[0].pipeline, "main");
     assert_eq!(
-        task.stack[0].signal, "go_work",
+        task.stack[0].signal, Signal::go("work"),
         "Stack entry should have signal go_work (re-run interrupted stage)"
     );
 
     // Step 2: run the conflict handler (merging/resolve) → return
     env.continue_pipeline(task_id, &workflow, &scenarios).await;
     let task = env.get_task(task_id).await;
-    assert_eq!(task.signal, Some("return".to_string()));
+    assert_eq!(task.signal, Some(Signal::Return));
     assert_eq!(task.state, "merge_PENDING");
 
     // Step 3: process return → stack pop → go_work in main pipeline
@@ -278,7 +279,7 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some("go_work".to_string()),
+        Some(Signal::go("work")),
         "After return from conflict, signal should be go_work (popped from stack)"
     );
     assert_eq!(task.state, "main_PENDING");
@@ -419,7 +420,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some("return_failure".to_string()),
+        Some(Signal::ReturnFailure),
         "report_failure should produce return_failure signal"
     );
 
@@ -569,12 +570,12 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some("call_init".to_string()),
+        Some(Signal::call("init")),
         "Undefined identity should trigger call_init"
     );
     assert_eq!(task.stack.len(), 1, "Stack should have go_working");
     assert_eq!(task.stack[0].pipeline, "main");
-    assert_eq!(task.stack[0].signal, "go_working");
+    assert_eq!(task.stack[0].signal, Signal::go("working"));
 }
 
 
@@ -687,14 +688,14 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some("call_sub".to_string()),
+        Some(Signal::call("sub")),
         "Call stage should emit call_sub signal"
     );
     assert_eq!(task.state, "main_PENDING");
     assert_eq!(task.stack.len(), 1, "Stack should have one entry");
     assert_eq!(task.stack[0].pipeline, "main");
     assert_eq!(
-        task.stack[0].signal, "go_finish",
+        task.stack[0].signal, Signal::go("finish"),
         "Return signal should advance to next stage"
     );
 

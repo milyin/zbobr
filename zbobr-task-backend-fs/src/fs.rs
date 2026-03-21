@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use zbobr_api::{
-    ChecklistItem, Comment, Model, StackEntry, Task, Tool,
+    ChecklistItem, Comment, Model, Signal, StackEntry, Task, Tool,
     backend::{TaskBackend, TaskMut, TaskWeak},
 };
 
@@ -39,7 +39,7 @@ struct TaskFile {
     #[serde(default)]
     confirm: bool,
     checklist: Vec<ChecklistItem>,
-    signal: Option<String>,
+    signal: Option<Signal>,
     #[serde(default)]
     stack: Vec<StackEntry>,
     #[serde(default)]

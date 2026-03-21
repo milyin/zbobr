@@ -338,16 +338,15 @@ impl RoleSession {
     }
 
     /// Get the current signal on the task.
-    pub async fn get_signal(&self) -> anyhow::Result<Option<String>> {
+    pub async fn get_signal(&self) -> anyhow::Result<Option<Signal>> {
         let task = self.get_task().await?;
         Ok(task.signal)
     }
 
     /// Set signal on the task.
-    pub async fn set_signal(&self, new_signal: &str) -> anyhow::Result<()> {
-        let signal = new_signal.to_string();
+    pub async fn set_signal(&self, new_signal: Signal) -> anyhow::Result<()> {
         self.modify_task(move |mut task| {
-            task.signal = Some(signal);
+            task.signal = Some(new_signal);
             task
         })
         .await
@@ -514,8 +513,7 @@ impl TaskSession {
     }
 
     /// Set signal on the task (dispatcher only).
-    pub async fn set_signal(&self, signal: Option<&str>) -> anyhow::Result<()> {
-        let signal = signal.map(|s| s.to_string());
+    pub async fn set_signal(&self, signal: Option<Signal>) -> anyhow::Result<()> {
         self.modify_task(move |mut task| {
             task.signal = signal;
             task
@@ -536,11 +534,11 @@ impl TaskSession {
     }
 
     /// Push an entry onto the task's call stack, saving the current pipeline_run_id.
-    pub async fn push_stack(&self, pipeline: &str, signal: &str) -> anyhow::Result<()> {
+    pub async fn push_stack(&self, pipeline: &str, signal: Signal) -> anyhow::Result<()> {
         let task = self.get_task().await?;
         let entry = crate::task::StackEntry {
             pipeline: pipeline.to_string(),
-            signal: signal.to_string(),
+            signal,
             pipeline_run_id: task.pipeline_run_id,
         };
         self.modify_task(move |mut task| {

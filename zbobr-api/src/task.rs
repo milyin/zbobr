@@ -128,16 +128,103 @@ pub fn extract_summary(text: &str) -> String {
     }
 }
 
+/// Flow-control signal for the task state machine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Signal {
+    /// Navigate to a specific stage within the current pipeline (e.g. `go_working`).
+    Go(String),
+    /// Call a sub-pipeline (e.g. `call_review`).
+    Call(String),
+    /// Return successfully from a sub-pipeline.
+    Return,
+    /// Return with failure from a sub-pipeline.
+    ReturnFailure,
+}
+
+impl Signal {
+    pub fn go(stage: impl Into<String>) -> Self {
+        Signal::Go(stage.into())
+    }
+
+    pub fn call(pipeline: impl Into<String>) -> Self {
+        Signal::Call(pipeline.into())
+    }
+
+    pub fn go_target(&self) -> Option<&str> {
+        match self {
+            Signal::Go(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn call_target(&self) -> Option<&str> {
+        match self {
+            Signal::Call(s) => Some(s),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for Signal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Signal::Go(stage) => write!(f, "go_{stage}"),
+            Signal::Call(pipeline) => write!(f, "call_{pipeline}"),
+            Signal::Return => f.write_str("return"),
+            Signal::ReturnFailure => f.write_str("return_failure"),
+        }
+    }
+}
+
+impl std::str::FromStr for Signal {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(stage) = s.strip_prefix("go_") {
+            Ok(Signal::Go(stage.to_string()))
+        } else if let Some(pipeline) = s.strip_prefix("call_") {
+            Ok(Signal::Call(pipeline.to_string()))
+        } else if s == "return" {
+            Ok(Signal::Return)
+        } else if s == "return_failure" {
+            Ok(Signal::ReturnFailure)
+        } else {
+            Err(anyhow::anyhow!("Unknown signal: {}", s))
+        }
+    }
+}
+
+impl serde::Serialize for Signal {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Signal {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl schemars::JsonSchema for Signal {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Signal".into()
+    }
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "string" })
+    }
+}
+
 /// An entry on the task's call stack, recording which pipeline to return to
-/// and which signal to emit upon return (e.g. "go_working").
+/// and which signal to emit upon return (e.g. `Signal::Go("working")`).
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct StackEntry {
     pub pipeline: String,
-    /// Signal to emit when returning to this pipeline (e.g. "go_working").
+    /// Signal to emit when returning to this pipeline.
     #[serde(alias = "stage")]
-    pub signal: String,
+    pub signal: Signal,
     /// Caller's pipeline_run_id to restore on return.
     #[serde(default)]
     pub pipeline_run_id: u64,
@@ -541,7 +628,7 @@ pub struct Task {
     pub pr_url: Option<String>,
     pub checklist: Vec<ChecklistItem>,
     /// Signal for flow control: go_{stage}, call_{pipeline}, return
-    pub signal: Option<String>,
+    pub signal: Option<Signal>,
     /// Call stack for pipeline call/return semantics.
     #[serde(default)]
     pub stack: Vec<StackEntry>,

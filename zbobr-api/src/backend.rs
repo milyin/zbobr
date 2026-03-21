@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::task::{ChecklistItem, Comment, Model, StackEntry, Task, TaskIdentity, Tool};
+use crate::task::{ChecklistItem, Comment, Model, Signal, StackEntry, Task, TaskIdentity, Tool};
 
 /// Read-only handle to a task. Returned by `TaskBackend::get_task()` and `TaskBackend::list_tasks()`.
 #[async_trait]
@@ -41,7 +41,7 @@ pub trait TaskMut: Send + Sync {
         .await
     }
 
-    async fn set_signal(&self, signal: Option<String>) -> anyhow::Result<()> {
+    async fn set_signal(&self, signal: Option<Signal>) -> anyhow::Result<()> {
         self.modify_task(Box::new(move |mut task| {
             task.signal = signal;
             task
@@ -175,8 +175,7 @@ pub trait TaskBackendExt: TaskBackend {
     }
 
     /// Set the signal on a task.
-    async fn set_task_signal(&self, id: u64, signal: Option<&str>) -> anyhow::Result<()> {
-        let signal = signal.map(|s| s.to_string());
+    async fn set_task_signal(&self, id: u64, signal: Option<Signal>) -> anyhow::Result<()> {
         let weak = self.get_task(id).await?;
         let mutable = weak.upgrade().await?;
         mutable.set_signal(signal).await
