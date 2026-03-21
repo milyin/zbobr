@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig};
+use zbobr_api::filter_comments_for_run;
 use zbobr_dispatcher::task::Tool;
 
 use super::{abstract_scenarios, env::IntegrationTestEnv};
@@ -1093,4 +1094,126 @@ pub async fn run_sub_pipeline_failure_pause(env: &IntegrationTestEnv) {
         task.pause,
         "Sub-pipeline should be paused when retries exhausted"
     );
+}
+
+// ===========================================================================
+// Test 14: Pipeline comment separation — comments are tagged with run IDs
+//          and filter_comments_for_run isolates each pipeline's comments
+// ===========================================================================
+
+pub async fn run_pipeline_comment_separation(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_comment_sep").await;
+    let task_id = env
+        .create_task(
+            "Comment separation test",
+            "Verify pipeline run ID tagging",
+            "READY",
+        )
+        .await;
+    let work_branch = format!("zbobr_fix-{task_id}-comsep");
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
+
+    // main/entry calls sub-pipeline; sub/handler reports success; then entry re-runs
+    let mut roles = HashMap::new();
+    roles.insert(
+        "role_main".to_string(),
+        RoleDefinition {
+            tools: vec![
+                "report_success".to_string(),
+                "call_sub".to_string(),
+            ],
+            prompt: None,
+        },
+    );
+
+    let workflow = build_workflow_with_roles(
+        vec![
+            StageDef {
+                name: "entry",
+                role: "role_main",
+                pipeline: "main",
+            },
+            StageDef {
+                name: "handler",
+                role: "role_sub",
+                pipeline: "sub",
+            },
+        ],
+        roles,
+    );
+
+    // Step 1: entry calls sub-pipeline
+    let scenarios_call = scenarios_map(vec![
+        (
+            "role_main",
+            abstract_scenarios::call_pipeline_then_succeed_scenario("sub"),
+        ),
+        ("role_sub", abstract_scenarios::report_and_finish_scenario()),
+    ]);
+    env.run_pipeline(task_id, &workflow, &scenarios_call).await;
+
+    let task = env.get_task(task_id).await;
+    assert_eq!(task.signal, Some("call_sub".to_string()));
+    // At this point: main pipeline ran with run_id=1, sub-pipeline will get run_id=2
+
+    // Run to completion: sub/handler → return → re-run entry (with simple success)
+    let scenarios_rerun = scenarios_map(vec![
+        ("role_main", abstract_scenarios::report_and_finish_scenario()),
+        ("role_sub", abstract_scenarios::report_and_finish_scenario()),
+    ]);
+    env.run_to_completion(task_id, &workflow, &scenarios_rerun, 10)
+        .await;
+
+    let task = env.get_task(task_id).await;
+    assert_eq!(task.state, "DONE");
+
+    // Now verify comment separation
+    let comments = env.get_comments(task_id).await;
+
+    // There should be comments with at least 2 distinct non-zero pipeline_run_ids
+    let run_ids: std::collections::HashSet<u64> = comments
+        .iter()
+        .filter(|c| c.pipeline_run_id > 0)
+        .map(|c| c.pipeline_run_id)
+        .collect();
+    assert!(
+        run_ids.len() >= 2,
+        "Expected at least 2 distinct pipeline run IDs, got {:?}",
+        run_ids
+    );
+
+    // Pick the first two run IDs
+    let mut sorted_ids: Vec<u64> = run_ids.into_iter().collect();
+    sorted_ids.sort();
+    let main_run_id = sorted_ids[0];
+    let sub_run_id = sorted_ids[1];
+
+    // filter_comments_for_run should separate them
+    let main_comments = filter_comments_for_run(&comments, main_run_id);
+    let sub_comments = filter_comments_for_run(&comments, sub_run_id);
+
+    assert!(
+        !main_comments.is_empty(),
+        "Main pipeline run should have comments"
+    );
+    assert!(
+        !sub_comments.is_empty(),
+        "Sub pipeline run should have comments"
+    );
+
+    // Main comments should not contain sub-pipeline text and vice versa
+    for c in &main_comments {
+        assert_ne!(
+            c.pipeline_run_id, sub_run_id,
+            "Main-filtered comment should not have sub run_id"
+        );
+    }
+    for c in &sub_comments {
+        assert_ne!(
+            c.pipeline_run_id, main_run_id,
+            "Sub-filtered comment should not have main run_id"
+        );
+    }
 }

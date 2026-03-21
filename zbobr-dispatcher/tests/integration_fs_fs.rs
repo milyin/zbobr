@@ -141,3 +141,12 @@ async fn test_fs_fs_abstract_sub_pipeline_failure_pause() {
     };
     abstract_test_helpers::run_sub_pipeline_failure_pause(&env).await;
 }
+
+#[tokio::test]
+async fn test_fs_fs_abstract_pipeline_comment_separation() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(env) = get_env().await else {
+        return;
+    };
+    abstract_test_helpers::run_pipeline_comment_separation(&env).await;
+}

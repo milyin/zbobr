@@ -577,3 +577,77 @@ impl Task {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_comment(text: &str, pipeline: &str, run_id: u64) -> Comment {
+        Comment {
+            timestamp: String::new(),
+            stage: "s".into(),
+            hostname: "h".into(),
+            tool: None,
+            model: None,
+            text: text.into(),
+            pipeline: pipeline.into(),
+            pipeline_run_id: run_id,
+        }
+    }
+
+    #[test]
+    fn filter_separates_pipeline_runs() {
+        let comments = vec![
+            make_comment("main work", "main", 1),
+            make_comment("sub work", "sub", 2),
+            make_comment("more sub", "sub", 2),
+            make_comment("back to main", "main", 1),
+        ];
+        let run1: Vec<_> = filter_comments_for_run(&comments, 1)
+            .iter()
+            .map(|c| c.text.as_str())
+            .collect();
+        let run2: Vec<_> = filter_comments_for_run(&comments, 2)
+            .iter()
+            .map(|c| c.text.as_str())
+            .collect();
+        assert_eq!(run1, vec!["main work", "back to main"]);
+        assert_eq!(run2, vec!["sub work", "more sub"]);
+    }
+
+    #[test]
+    fn filter_user_comments_inherit_run_id() {
+        let comments = vec![
+            make_comment("agent start", "main", 1),
+            make_comment("user reply", "", 0),   // user comment
+            make_comment("agent in sub", "sub", 2),
+            make_comment("user in sub", "", 0),   // user comment
+            make_comment("agent back", "main", 1),
+        ];
+        let run1: Vec<_> = filter_comments_for_run(&comments, 1)
+            .iter()
+            .map(|c| c.text.as_str())
+            .collect();
+        let run2: Vec<_> = filter_comments_for_run(&comments, 2)
+            .iter()
+            .map(|c| c.text.as_str())
+            .collect();
+        assert_eq!(run1, vec!["agent start", "user reply", "agent back"]);
+        assert_eq!(run2, vec!["agent in sub", "user in sub"]);
+    }
+
+    #[test]
+    fn filter_empty_comments() {
+        let comments: Vec<Comment> = vec![];
+        assert!(filter_comments_for_run(&comments, 1).is_empty());
+    }
+
+    #[test]
+    fn filter_no_matching_run() {
+        let comments = vec![
+            make_comment("a", "main", 1),
+            make_comment("b", "main", 1),
+        ];
+        assert!(filter_comments_for_run(&comments, 99).is_empty());
+    }
+}
