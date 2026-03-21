@@ -732,6 +732,8 @@ impl ZbobrTaskBackendGithubImpl {
                     text,
                     pipeline: tag.pipeline,
                     pipeline_run_id: tag.pipeline_run_id,
+                    caller_pipeline: tag.caller_pipeline,
+                    caller_pipeline_run_id: tag.caller_pipeline_run_id,
                 }
             })
             .collect())
@@ -748,10 +750,22 @@ impl ZbobrTaskBackendGithubImpl {
         body: &str,
         pipeline: &str,
         pipeline_run_id: u64,
+        caller_pipeline: Option<&str>,
+        caller_pipeline_run_id: Option<u64>,
     ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        let tag = CommentTag::new(pipeline.to_string(), pipeline_run_id, stage.to_string(), hostname.to_string(), tool, model);
+        let mut tag = CommentTag::new(
+            pipeline.to_string(),
+            pipeline_run_id,
+            stage.to_string(),
+            hostname.to_string(),
+            tool,
+            model,
+        );
+        if let (Some(cp), Some(cr)) = (caller_pipeline, caller_pipeline_run_id) {
+            tag = tag.with_caller(cp.to_string(), cr);
+        }
         let formatted_body = format!("{}\n\n{}", tag, body);
 
         retry_github("create issue comment", || async {
@@ -840,9 +854,22 @@ impl TaskMut for GithubTaskMut {
         body: &str,
         pipeline: &str,
         pipeline_run_id: u64,
+        caller_pipeline: Option<&str>,
+        caller_pipeline_run_id: Option<u64>,
     ) -> anyhow::Result<()> {
         self.backend
-            .post_task_comment_internal(self.id, stage, hostname, tool, model, body, pipeline, pipeline_run_id)
+            .post_task_comment_internal(
+                self.id,
+                stage,
+                hostname,
+                tool,
+                model,
+                body,
+                pipeline,
+                pipeline_run_id,
+                caller_pipeline,
+                caller_pipeline_run_id,
+            )
             .await
     }
 
@@ -1042,9 +1069,10 @@ mod parse_tests {
 
     #[test]
     fn test_parse_comment_tag_simple() {
-        // Legacy format: "// stage:hostname" → parsed via fallback
-        let input = "// planning:localhost\n\nThis is the body";
+        let input = "// main:1:planning by localhost\n\nThis is the body";
         let (tag, body) = split_tag_body(input);
+        assert_eq!(tag.pipeline, "main");
+        assert_eq!(tag.pipeline_run_id, 1);
         assert_eq!(tag.stage, "planning");
         assert_eq!(tag.hostname, "localhost");
         assert_eq!(body, "This is the body");
@@ -1076,5 +1104,12 @@ mod parse_tests {
         let s = tag.to_string();
         let parsed: CommentTag = s.parse().unwrap();
         assert_eq!(parsed, tag);
+
+        let linked = CommentTag::new("sub".into(), 2, "done".into(), "host".into(), None, None)
+            .with_caller("main".into(), 1);
+        let linked_s = linked.to_string();
+        assert_eq!(linked_s, "// sub:2:done by host for main:1");
+        let linked_parsed: CommentTag = linked_s.parse().unwrap();
+        assert_eq!(linked_parsed, linked);
     }
 }

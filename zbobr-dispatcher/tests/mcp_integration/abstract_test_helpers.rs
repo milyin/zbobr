@@ -1203,12 +1203,24 @@ pub async fn run_pipeline_comment_separation(env: &IntegrationTestEnv) {
         "Sub pipeline run should have comments"
     );
 
-    // Main comments should not contain sub-pipeline text and vice versa
+    // Main comments may include the sub final report when it is linked to caller run.
+    let caller_linked_sub_report_present = main_comments.iter().any(|c| {
+        c.pipeline_run_id == sub_run_id && c.caller_pipeline_run_id == Some(main_run_id)
+    });
+    assert!(
+        caller_linked_sub_report_present,
+        "Expected caller-linked sub final report in main run comments"
+    );
+
+    // Main comments should not contain unlinked sub-run comments.
     for c in &main_comments {
-        assert_ne!(
-            c.pipeline_run_id, sub_run_id,
-            "Main-filtered comment should not have sub run_id"
-        );
+        if c.pipeline_run_id == sub_run_id {
+            assert_eq!(
+                c.caller_pipeline_run_id,
+                Some(main_run_id),
+                "Sub-run comment in main-filtered view must be caller-linked"
+            );
+        }
     }
     for c in &sub_comments {
         assert_ne!(

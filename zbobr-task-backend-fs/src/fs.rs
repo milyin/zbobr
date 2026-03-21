@@ -381,6 +381,8 @@ impl TaskMut for FsTaskMut {
         body: &str,
         pipeline: &str,
         pipeline_run_id: u64,
+        caller_pipeline: Option<&str>,
+        caller_pipeline_run_id: Option<u64>,
     ) -> anyhow::Result<()> {
         let mut comments = self.backend.read_comments_structured(self.id).await?;
 
@@ -393,6 +395,8 @@ impl TaskMut for FsTaskMut {
             text: body.to_string(),
             pipeline: pipeline.to_string(),
             pipeline_run_id,
+            caller_pipeline: caller_pipeline.map(str::to_string),
+            caller_pipeline_run_id,
         };
 
         comments.push(new_comment);
@@ -602,23 +606,15 @@ mod parse_tests {
     }
 
     #[test]
-    fn test_parse_comment_tag_legacy() {
-        // Legacy format: "stage:hostname"
-        let input = "// working:host";
+    fn test_parse_comment_tag_with_for_suffix() {
+        let input = "// sub:2:done by host:copilot:gpt-5-mini for main:1";
         let tag: CommentTag = input.parse().unwrap();
-        assert_eq!(tag.stage, "working");
-        assert_eq!(tag.hostname, "host");
-        assert_eq!(tag.pipeline, "");
-        assert_eq!(tag.pipeline_run_id, 0);
-    }
-
-    #[test]
-    fn test_parse_legacy_boundary_ignored() {
-        // Legacy "boundary" and "hidden" flags in stored comments are silently ignored
-        let input = "// done:host:boundary:hidden";
-        let tag: CommentTag = input.parse().unwrap();
+        assert_eq!(tag.pipeline, "sub");
+        assert_eq!(tag.pipeline_run_id, 2);
         assert_eq!(tag.stage, "done");
         assert_eq!(tag.hostname, "host");
+        assert_eq!(tag.caller_pipeline.as_deref(), Some("main"));
+        assert_eq!(tag.caller_pipeline_run_id, Some(1));
     }
 
     #[test]
@@ -634,5 +630,12 @@ mod parse_tests {
         assert_eq!(s2, "// init:2:reviewing by host");
         let parsed2: CommentTag = s2.parse().unwrap();
         assert_eq!(parsed2, tag2);
+
+        let tag3 = CommentTag::new("sub".into(), 3, "done".into(), "worker".into(), None, None)
+            .with_caller("main".into(), 1);
+        let s3 = tag3.to_string();
+        assert_eq!(s3, "// sub:3:done by worker for main:1");
+        let parsed3: CommentTag = s3.parse().unwrap();
+        assert_eq!(parsed3, tag3);
     }
 }

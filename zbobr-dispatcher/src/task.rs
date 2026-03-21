@@ -132,6 +132,8 @@ impl RoleSession {
                     text: bc.body.clone(),
                     pipeline: self.pipeline_name.clone(),
                     pipeline_run_id: self.pipeline_run_id,
+                    caller_pipeline: None,
+                    caller_pipeline_run_id: None,
                 });
             }
         }
@@ -218,7 +220,17 @@ impl RoleSession {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
-            .post_comment(stage, hostname, tool, model, body, &self.pipeline_name, self.pipeline_run_id)
+            .post_comment(
+                stage,
+                hostname,
+                tool,
+                model,
+                body,
+                &self.pipeline_name,
+                self.pipeline_run_id,
+                None,
+                None,
+            )
             .await
     }
 
@@ -485,7 +497,17 @@ impl TaskSession {
         let hostname = crate::mcp::common::get_hostname();
         let task = self.get_task().await?;
         if let Err(e) = self
-            .post_comment("done", &hostname, None, None, "", "", task.pipeline_run_id)
+            .post_comment(
+                "done",
+                &hostname,
+                None,
+                None,
+                "",
+                "",
+                task.pipeline_run_id,
+                None,
+                None,
+            )
             .await
         {
             tracing::warn!("Failed to post DONE boundary for task #{task_id}: {e}");
@@ -509,11 +531,23 @@ impl TaskSession {
         body: &str,
         pipeline: &str,
         pipeline_run_id: u64,
+        caller_pipeline: Option<&str>,
+        caller_pipeline_run_id: Option<u64>,
     ) -> anyhow::Result<()> {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
-            .post_comment(stage, hostname, tool, model, body, pipeline, pipeline_run_id)
+            .post_comment(
+                stage,
+                hostname,
+                tool,
+                model,
+                body,
+                pipeline,
+                pipeline_run_id,
+                caller_pipeline,
+                caller_pipeline_run_id,
+            )
             .await
     }
 }
@@ -641,6 +675,8 @@ mod comment_model_tests {
             body: &str,
             pipeline: &str,
             pipeline_run_id: u64,
+            caller_pipeline: Option<&str>,
+            caller_pipeline_run_id: Option<u64>,
         ) -> anyhow::Result<()> {
             let mut comments = self.backend.comments.lock().await;
             comments.entry(self.id).or_default().push(Comment {
@@ -652,6 +688,8 @@ mod comment_model_tests {
                 text: body.to_string(),
                 pipeline: pipeline.to_string(),
                 pipeline_run_id,
+                caller_pipeline: caller_pipeline.map(str::to_string),
+                caller_pipeline_run_id,
             });
             Ok(())
         }
@@ -833,7 +871,17 @@ mod comment_model_tests {
 
         zbobr
             .task_session(id)
-            .post_comment("error", "host", None, None, "dispatcher error", "", 0)
+            .post_comment(
+                "error",
+                "host",
+                None,
+                None,
+                "dispatcher error",
+                "",
+                0,
+                None,
+                None,
+            )
             .await
             .unwrap();
 

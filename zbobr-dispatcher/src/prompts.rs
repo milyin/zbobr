@@ -326,6 +326,8 @@ mod tests {
             text: text.to_string(),
             pipeline: String::new(),
             pipeline_run_id: 0,
+            caller_pipeline: None,
+            caller_pipeline_run_id: None,
         }
     }
 

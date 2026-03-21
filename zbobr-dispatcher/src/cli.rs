@@ -222,7 +222,7 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     if !discussion.is_empty() {
         println!("Discussion ({} comment(s)):", discussion.len());
         for (i, c) in discussion.iter().enumerate() {
-            let tag = CommentTag::new(
+            let mut tag = CommentTag::new(
                 c.pipeline.clone(),
                 c.pipeline_run_id,
                 c.stage.clone(),
@@ -230,6 +230,11 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
                 c.tool,
                 c.model.clone(),
             );
+            if let (Some(caller_pipeline), Some(caller_run_id)) =
+                (c.caller_pipeline.clone(), c.caller_pipeline_run_id)
+            {
+                tag = tag.with_caller(caller_pipeline, caller_run_id);
+            }
             println!("  [{}] {}\n{}", i + 1, tag, c.text);
         }
     }
@@ -838,7 +843,7 @@ async fn detect_and_handle_worktree(
             let hostname = get_hostname();
             if let Err(post_err) = zbobr
                 .task_session(task_id)
-                .post_comment("error", &hostname, None, None, &msg, "", 0)
+                .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
                 .await
             {
                 tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -934,7 +939,7 @@ async fn handle_worktree_problem(
             problem
         );
         task_session
-            .post_comment("error", &hostname, None, None, &msg, "", 0)
+            .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
             .await
             .ok();
         task_session
@@ -960,7 +965,7 @@ async fn handle_worktree_problem(
             problem
         );
         task_session
-            .post_comment("error", &hostname, None, None, &msg, "", 0)
+            .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
             .await
             .ok();
         task_session
@@ -1051,7 +1056,7 @@ async fn ensure_pr_url(
             let hostname = get_hostname();
             let task_session = zbobr.task_session(task_id);
             if let Err(post_err) = task_session
-                .post_comment("error", &hostname, None, None, &msg, "", 0)
+                .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
                 .await
             {
                 tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -1191,46 +1196,26 @@ async fn finalize_stage_session(
 
     // Look up stage definition for tool/model info during comment flushing.
     let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
-
-    // Flush buffered MCP comments as a single combined comment signed by stage name.
-    {
-        let buffered: Vec<crate::task::BufferedComment> = {
-            let mut buf = comment_buffer.lock().unwrap();
-            std::mem::take(&mut *buf)
-        };
-        if !buffered.is_empty() {
-            let hostname = get_hostname();
-            let combined_text = buffered
-                .iter()
-                .map(|c| c.body.as_str())
-                .collect::<Vec<_>>()
-                .join("\n\n");
-            let (cli_tool, model) = if let Some(sd) = stage_def {
-                (Some(zbobr.config().tool_for_stage(sd)), Some(zbobr.config().model_for_stage(sd)))
-            } else {
-                (None, None)
-            };
-            let task_snap = zbobr.task_backend().get_task(task_id).await?.snapshot().await?;
-            if let Err(e) = task_session
-                .post_comment(
-                    stage_name,
-                    &hostname,
-                    cli_tool,
-                    model,
-                    &combined_text,
-                    pipeline_name,
-                    task_snap.pipeline_run_id,
-                )
-                .await
-            {
-                tracing::error!(
-                    "Failed to flush buffered comments for task #{task_id}: {e}"
-                );
-            }
-        }
-    }
+    let buffered: Vec<crate::task::BufferedComment> = {
+        let mut buf = comment_buffer.lock().unwrap();
+        std::mem::take(&mut *buf)
+    };
 
     if outcome.execution_interrupted {
+        let task_snap = zbobr.task_backend().get_task(task_id).await?.snapshot().await?;
+        flush_buffered_comments(
+            &task_session,
+            &buffered,
+            stage_def,
+            stage_name,
+            pipeline_name,
+            task_snap.pipeline_run_id,
+            None,
+            None,
+            task_id,
+            zbobr,
+        )
+        .await;
         if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name).await {
             tracing::warn!("Stash/push failed during interruption for task #{task_id}: {e}");
         }
@@ -1240,6 +1225,20 @@ async fn finalize_stage_session(
     }
 
     if let Some(e) = outcome.execution_error.as_ref() {
+        let task_snap = zbobr.task_backend().get_task(task_id).await?.snapshot().await?;
+        flush_buffered_comments(
+            &task_session,
+            &buffered,
+            stage_def,
+            stage_name,
+            pipeline_name,
+            task_snap.pipeline_run_id,
+            None,
+            None,
+            task_id,
+            zbobr,
+        )
+        .await;
         if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name).await {
             tracing::warn!(
                 "Stash/push failed during error handling for task #{task_id}: {e}"
@@ -1248,7 +1247,7 @@ async fn finalize_stage_session(
         let error_msg = format!("Execution failed: {e}");
         let hostname = get_hostname();
         if let Err(post_err) = task_session
-            .post_comment("error", &hostname, None, None, &error_msg, "", 0)
+            .post_comment("error", &hostname, None, None, &error_msg, "", 0, None, None)
             .await
         {
             tracing::error!("Failed to post error to task #{task_id}: {post_err}");
@@ -1270,11 +1269,25 @@ async fn finalize_stage_session(
     tracing::info!("Session complete for task #{task_id}");
 
     if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name).await {
+        let task_snap = zbobr.task_backend().get_task(task_id).await?.snapshot().await?;
+        flush_buffered_comments(
+            &task_session,
+            &buffered,
+            stage_def,
+            stage_name,
+            pipeline_name,
+            task_snap.pipeline_run_id,
+            None,
+            None,
+            task_id,
+            zbobr,
+        )
+        .await;
         tracing::error!("Stash/push failed for task #{task_id}: {e}");
         let hostname = get_hostname();
         let msg = format!("Stash/push failed: {e}");
         if let Err(post_err) = task_session
-            .post_comment("error", &hostname, None, None, &msg, "", 0)
+            .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
             .await
         {
             tracing::error!(
@@ -1300,6 +1313,8 @@ async fn finalize_stage_session(
     // If the agent already set a signal during the session (e.g. stop_with_error),
     // that signal takes priority.
     let current_task = zbobr.task_backend().get_task(task_id).await?.snapshot().await?;
+    let mut caller_pipeline: Option<String> = None;
+    let mut caller_pipeline_run_id: Option<u64> = None;
     if !current_task.pause && current_task.signal.is_none() {
         let seq_signal = compute_sequential_signal(
             pipeline_name,
@@ -1310,6 +1325,10 @@ async fn finalize_stage_session(
         );
         match seq_signal {
             SequentialSignal::ReturnFailure => {
+                if let Some(caller) = current_task.stack.last() {
+                    caller_pipeline = Some(caller.pipeline.clone());
+                    caller_pipeline_run_id = Some(caller.pipeline_run_id);
+                }
                 task_session.set_signal(Some("return_failure")).await?;
             }
             SequentialSignal::Call { pipeline, return_stage } => {
@@ -1350,6 +1369,10 @@ async fn finalize_stage_session(
                 task_session.set_signal(Some(&format!("go_{next}"))).await?;
             }
             SequentialSignal::Return => {
+                if let Some(caller) = current_task.stack.last() {
+                    caller_pipeline = Some(caller.pipeline.clone());
+                    caller_pipeline_run_id = Some(caller.pipeline_run_id);
+                }
                 task_session.set_signal(Some("return")).await?;
             }
             SequentialSignal::RetryOrPause => {
@@ -1359,9 +1382,69 @@ async fn finalize_stage_session(
             }
         }
     }
+    flush_buffered_comments(
+        &task_session,
+        &buffered,
+        stage_def,
+        stage_name,
+        pipeline_name,
+        current_task.pipeline_run_id,
+        caller_pipeline.as_deref(),
+        caller_pipeline_run_id,
+        task_id,
+        zbobr,
+    )
+    .await;
     task_session.set_state(&pending_state).await?;
 
     Ok(None)
+}
+
+async fn flush_buffered_comments(
+    task_session: &crate::task::TaskSession,
+    buffered: &[crate::task::BufferedComment],
+    stage_def: Option<&StageDefinition>,
+    stage_name: &str,
+    pipeline_name: &str,
+    pipeline_run_id: u64,
+    caller_pipeline: Option<&str>,
+    caller_pipeline_run_id: Option<u64>,
+    task_id: u64,
+    zbobr: &Arc<ZbobrDispatcher>,
+) {
+    if buffered.is_empty() {
+        return;
+    }
+    let hostname = get_hostname();
+    let combined_text = buffered
+        .iter()
+        .map(|c| c.body.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let (cli_tool, model) = if let Some(sd) = stage_def {
+        (
+            Some(zbobr.config().tool_for_stage(sd)),
+            Some(zbobr.config().model_for_stage(sd)),
+        )
+    } else {
+        (None, None)
+    };
+    if let Err(e) = task_session
+        .post_comment(
+            stage_name,
+            &hostname,
+            cli_tool,
+            model,
+            &combined_text,
+            pipeline_name,
+            pipeline_run_id,
+            caller_pipeline,
+            caller_pipeline_run_id,
+        )
+        .await
+    {
+        tracing::error!("Failed to flush buffered comments for task #{task_id}: {e}");
+    }
 }
 
 async fn perform_stash_and_push(

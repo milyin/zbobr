@@ -75,6 +75,12 @@ pub struct Comment {
     #[schemars(description = "Monotonic run counter within the pipeline")]
     #[serde(default)]
     pub pipeline_run_id: u64,
+    #[schemars(description = "Optional caller pipeline for linked final pipeline reports")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_pipeline: Option<String>,
+    #[schemars(description = "Optional caller pipeline run id for linked final pipeline reports")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_pipeline_run_id: Option<u64>,
 }
 
 // -- History helper types --
@@ -390,6 +396,8 @@ pub struct CommentTag {
     pub hostname: String,
     pub tool: Option<Tool>,
     pub model: Option<Model>,
+    pub caller_pipeline: Option<String>,
+    pub caller_pipeline_run_id: Option<u64>,
 }
 
 impl CommentTag {
@@ -408,18 +416,33 @@ impl CommentTag {
             hostname,
             tool,
             model,
+            caller_pipeline: None,
+            caller_pipeline_run_id: None,
         }
+    }
+
+    pub fn with_caller(mut self, caller_pipeline: String, caller_pipeline_run_id: u64) -> Self {
+        self.caller_pipeline = Some(caller_pipeline);
+        self.caller_pipeline_run_id = Some(caller_pipeline_run_id);
+        self
     }
 }
 
 impl std::fmt::Display for CommentTag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const FOR_SEPARATOR: &str = " for ";
+
         write!(f, "// {}:{}:{} by {}", self.pipeline, self.pipeline_run_id, self.stage, self.hostname)?;
         if let Some(ref tool) = self.tool {
             write!(f, ":{tool}")?;
             if let Some(ref model) = self.model {
                 write!(f, ":{model}")?;
             }
+        }
+        if let (Some(caller_pipeline), Some(caller_run_id)) =
+            (&self.caller_pipeline, self.caller_pipeline_run_id)
+        {
+            write!(f, "{FOR_SEPARATOR}{caller_pipeline}:{caller_run_id}")?;
         }
         Ok(())
     }
@@ -429,61 +452,44 @@ impl std::str::FromStr for CommentTag {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        const BY_SEPARATOR: &str = " by ";
+        const FOR_SEPARATOR: &str = " for ";
+
         let s = s.trim_start_matches("//").trim_start();
 
-        // New format: "pipeline:run_id:stage by hostname[:tool[:model]]"
-        if let Some((prefix, suffix)) = s.split_once(" by ") {
-            let prefix_parts: Vec<&str> = prefix.split(':').collect();
-            if prefix_parts.len() >= 3 {
-                let pipeline = prefix_parts[0].to_string();
-                let pipeline_run_id = prefix_parts[1].parse::<u64>().unwrap_or(0);
-                let stage = prefix_parts[2].to_string();
+        let (prefix, suffix) = s
+            .split_once(BY_SEPARATOR)
+            .ok_or_else(|| anyhow::anyhow!("Invalid tag format: {}", s))?;
 
-                let suffix_parts: Vec<&str> = suffix.split(':').collect();
-                let hostname = suffix_parts[0].to_string();
+        let prefix_parts: Vec<&str> = prefix.split(':').collect();
+        if prefix_parts.len() < 3 {
+            return Err(anyhow::anyhow!("Invalid tag prefix: {}", prefix));
+        }
+        let pipeline = prefix_parts[0].to_string();
+        let pipeline_run_id = prefix_parts[1].parse::<u64>()
+            .map_err(|_| anyhow::anyhow!("Invalid run id in tag prefix: {}", prefix_parts[1]))?;
+        let stage = prefix_parts[2].to_string();
 
-                let mut tool: Option<Tool> = None;
-                let mut model: Option<Model> = None;
-                for part in &suffix_parts[1..] {
-                    if tool.is_none() {
-                        if let Ok(t) = part.parse::<Tool>() {
-                            tool = Some(t);
-                        }
-                    } else if model.is_none() {
-                        if let Ok(m) = part.parse::<Model>() {
-                            model = Some(m);
-                        }
-                    }
-                }
+        let (host_part, caller_part) = if let Some((lhs, rhs)) = suffix.split_once(FOR_SEPARATOR) {
+            (lhs, Some(rhs))
+        } else {
+            (suffix, None)
+        };
 
-                return Ok(CommentTag {
-                    pipeline,
-                    pipeline_run_id,
-                    stage,
-                    hostname,
-                    tool,
-                    model,
-                });
-            }
+        let suffix_parts: Vec<&str> = host_part.split(':').collect();
+        let hostname = suffix_parts
+            .first()
+            .copied()
+            .unwrap_or_default()
+            .to_string();
+        if hostname.is_empty() {
+            return Err(anyhow::anyhow!("Invalid hostname in tag: {}", s));
         }
 
-        // Legacy format: "stage:hostname[:tool[:model]][:hidden][:boundary]"
-        let parts: Vec<&str> = s.split(':').collect();
-        if parts.len() < 2 {
-            return Err(anyhow::anyhow!("Invalid tag format: {}", s));
-        }
-
-        let stage = parts[0].to_string();
-        let hostname = parts[1].to_string();
-
-        let rest = &parts[2..];
         let mut tool: Option<Tool> = None;
         let mut model: Option<Model> = None;
-
-        for part in rest {
-            if *part == "hidden" || *part == "boundary" {
-                // Ignore legacy flags
-            } else if tool.is_none() {
+        for part in &suffix_parts[1..] {
+            if tool.is_none() {
                 if let Ok(t) = part.parse::<Tool>() {
                     tool = Some(t);
                 }
@@ -494,13 +500,29 @@ impl std::str::FromStr for CommentTag {
             }
         }
 
+        let (caller_pipeline, caller_pipeline_run_id) = if let Some(caller) = caller_part {
+            let caller_parts: Vec<&str> = caller.split(':').collect();
+            if caller_parts.len() != 2 {
+                return Err(anyhow::anyhow!("Invalid caller suffix: {}", caller));
+            }
+            let caller_pipeline = caller_parts[0].to_string();
+            let caller_pipeline_run_id = caller_parts[1]
+                .parse::<u64>()
+                .map_err(|_| anyhow::anyhow!("Invalid caller run id: {}", caller_parts[1]))?;
+            (Some(caller_pipeline), Some(caller_pipeline_run_id))
+        } else {
+            (None, None)
+        };
+
         Ok(CommentTag {
-            pipeline: String::new(),
-            pipeline_run_id: 0,
+            pipeline,
+            pipeline_run_id,
             stage,
             hostname,
             tool,
             model,
+            caller_pipeline,
+            caller_pipeline_run_id,
         })
     }
 }
@@ -559,7 +581,8 @@ pub fn filter_comments_for_run(comments: &[Comment], target_run_id: u64) -> Vec<
         } else {
             current_run_id // user comment inherits previous
         };
-        if effective == target_run_id {
+        let caller_match = comment.caller_pipeline_run_id == Some(target_run_id);
+        if effective == target_run_id || caller_match {
             result.push(comment);
         }
     }
@@ -592,6 +615,23 @@ mod tests {
             text: text.into(),
             pipeline: pipeline.into(),
             pipeline_run_id: run_id,
+            caller_pipeline: None,
+            caller_pipeline_run_id: None,
+        }
+    }
+
+    fn make_comment_for(text: &str, pipeline: &str, run_id: u64, caller_run_id: u64) -> Comment {
+        Comment {
+            timestamp: String::new(),
+            stage: "s".into(),
+            hostname: "h".into(),
+            tool: None,
+            model: None,
+            text: text.into(),
+            pipeline: pipeline.into(),
+            pipeline_run_id: run_id,
+            caller_pipeline: Some("main".into()),
+            caller_pipeline_run_id: Some(caller_run_id),
         }
     }
 
@@ -649,5 +689,19 @@ mod tests {
             make_comment("b", "main", 1),
         ];
         assert!(filter_comments_for_run(&comments, 99).is_empty());
+    }
+
+    #[test]
+    fn filter_matches_caller_linked_comments() {
+        let comments = vec![
+            make_comment("main work", "main", 1),
+            make_comment_for("sub final report", "sub", 2, 1),
+            make_comment("next main", "main", 1),
+        ];
+        let run1: Vec<_> = filter_comments_for_run(&comments, 1)
+            .iter()
+            .map(|c| c.text.as_str())
+            .collect();
+        assert_eq!(run1, vec!["main work", "sub final report", "next main"]);
     }
 }
