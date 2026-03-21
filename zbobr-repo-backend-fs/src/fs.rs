@@ -125,6 +125,8 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
         &self,
         identity: &TaskIdentity,
         workspace_path: &Path,
+        _git_user_name: &str,
+        _git_user_email: &str,
     ) -> anyhow::Result<bool> {
         let remote_repo = &identity.destination_repository;
         let base_branch = &identity.destination_branch;

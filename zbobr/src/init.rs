@@ -89,9 +89,6 @@ fn default_config_toml() -> RootConfigToml {
             fork_owner: Some(String::new()),
             github_token: Some(String::new()),
             repos_dir: Some(PathBuf::from("./repos")),
-            git_user_name: Some("zbobr".into()),
-            git_user_email: Some("zbobr@example.com".into()),
-            overwrite_author: Some(false),
         }),
         executor: Some(ZbobrExecutorToml {
             claude: Some(ZbobrExecutorClaudeToml {

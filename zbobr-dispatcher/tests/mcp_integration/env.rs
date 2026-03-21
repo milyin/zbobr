@@ -63,6 +63,9 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
     let dispatcher_config = ZbobrDispatcherConfig {
         workspaces: workspaces_dir.clone(),
         tool: Tool::McpTester,
+        git_user_name: "test-bot".to_string(),
+        git_user_email: "test@example.com".to_string(),
+        overwrite_author: false,
         ..ZbobrDispatcherConfig::default()
     };
 
@@ -155,9 +158,6 @@ pub async fn init_github_github(
         fork_owner: fork_owner.clone(),
         github_token: repo_token,
         repos_dir: base_path.join("repos"),
-        git_user_name: "test-bot".to_string(),
-        git_user_email: "test@example.com".to_string(),
-        overwrite_author: false,
     };
 
     let task_backend = TaskBackendGithub::from_config(task_backend_config.clone()).ok()?;

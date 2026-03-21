@@ -203,6 +203,8 @@ pub trait WorktreeBackend: Send + Sync {
         &self,
         identity: &TaskIdentity,
         workspace_path: &std::path::Path,
+        git_user_name: &str,
+        git_user_email: &str,
     ) -> anyhow::Result<bool>;
 
     /// Push work branch and ensure PR exists. Returns PR URL.

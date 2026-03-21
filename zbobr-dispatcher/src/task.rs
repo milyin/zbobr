@@ -698,6 +698,8 @@ mod comment_model_tests {
             &self,
             _identity: &zbobr_api::TaskIdentity,
             _workspace_path: &std::path::Path,
+            _git_user_name: &str,
+            _git_user_email: &str,
         ) -> anyhow::Result<bool> {
             Ok(true)
         }

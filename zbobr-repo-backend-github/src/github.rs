@@ -368,6 +368,8 @@ impl ZbobrRepoBackendGithub {
         base_branch: &str,
         work_branch: &str,
         workspace_path: &Path,
+        git_user_name: &str,
+        git_user_email: &str,
     ) -> anyhow::Result<()> {
         if workspace_path.exists() {
             // Verify the worktree is linked to the expected bare clone
@@ -448,8 +450,8 @@ impl ZbobrRepoBackendGithub {
 
         zbobr_utility::configure_git_user(
             workspace_path,
-            &self.backend_config.git_user_name,
-            &self.backend_config.git_user_email,
+            git_user_name,
+            git_user_email,
         )
         .await?;
 
@@ -809,6 +811,8 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         &self,
         identity: &zbobr_api::task::TaskIdentity,
         workspace_path: &Path,
+        git_user_name: &str,
+        git_user_email: &str,
     ) -> anyhow::Result<bool> {
         let remote_repo = &identity.destination_repository;
         let base_branch = &identity.destination_branch;
@@ -850,7 +854,14 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             Self::fetch_remote_work_branch(&bare_dir, &push_remote, work_branch).await?;
 
         // Phase 4: Create worktree
-        self.ensure_worktree_github(&bare_dir, base_branch, work_branch, workspace_path)
+        self.ensure_worktree_github(
+            &bare_dir,
+            base_branch,
+            work_branch,
+            workspace_path,
+            git_user_name,
+            git_user_email,
+        )
             .await?;
 
         // Phase 5: Ensure PR exists

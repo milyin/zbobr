@@ -200,7 +200,12 @@ impl ZbobrDispatcher {
         let task_dir = TaskDir::new(&self.config.workspaces, identity.task_id);
         let workspace_path = task_dir.path().join(repo_name);
         self.repo_backend
-            .update_worktree(identity, &workspace_path)
+            .update_worktree(
+                identity,
+                &workspace_path,
+                &self.config.git_user_name,
+                &self.config.git_user_email,
+            )
             .await
     }
 
