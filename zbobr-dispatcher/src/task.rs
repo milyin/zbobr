@@ -534,10 +534,10 @@ impl TaskSession {
     }
 
     /// Push an entry onto the task's call stack, saving the current pipeline_run_id.
-    pub async fn push_stack(&self, pipeline: &str, signal: Signal) -> anyhow::Result<()> {
+    pub async fn push_stack(&self, pipeline: impl Into<crate::task::Pipeline>, signal: Signal) -> anyhow::Result<()> {
         let task = self.get_task().await?;
         let entry = crate::task::StackEntry {
-            pipeline: pipeline.to_string(),
+            pipeline: pipeline.into(),
             signal,
             pipeline_run_id: task.pipeline_run_id,
         };

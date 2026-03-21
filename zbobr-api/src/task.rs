@@ -128,13 +128,149 @@ pub fn extract_summary(text: &str) -> String {
     }
 }
 
+/// A stage name within a pipeline (user-defined, dynamically configured).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Stage(pub String);
+
+impl Stage {
+    pub fn new(s: impl Into<String>) -> Self {
+        Stage(s.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for Stage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::ops::Deref for Stage {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for Stage {
+    fn from(s: &str) -> Self {
+        Stage(s.to_string())
+    }
+}
+
+impl From<String> for Stage {
+    fn from(s: String) -> Self {
+        Stage(s)
+    }
+}
+
+impl serde::Serialize for Stage {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Stage {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Stage(String::deserialize(deserializer)?))
+    }
+}
+
+impl schemars::JsonSchema for Stage {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Stage".into()
+    }
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "string" })
+    }
+}
+
+/// A pipeline identifier: one of the three built-in pipelines or a custom one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Pipeline {
+    /// The primary workflow pipeline (name: `"main"`).
+    Main,
+    /// The merge/conflict-resolution pipeline (name: `"merge"`).
+    Merge,
+    /// The initialisation pipeline (name: `"init"`).
+    Init,
+    /// Any other user-defined pipeline.
+    Custom(String),
+}
+
+impl Pipeline {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Pipeline::Main => "main",
+            Pipeline::Merge => "merge",
+            Pipeline::Init => "init",
+            Pipeline::Custom(s) => s.as_str(),
+        }
+    }
+}
+
+impl std::fmt::Display for Pipeline {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for Pipeline {
+    type Err = std::convert::Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "main" => Pipeline::Main,
+            "merge" => Pipeline::Merge,
+            "init" => Pipeline::Init,
+            other => Pipeline::Custom(other.to_string()),
+        })
+    }
+}
+
+impl From<&str> for Pipeline {
+    fn from(s: &str) -> Self {
+        s.parse().unwrap()
+    }
+}
+
+impl From<String> for Pipeline {
+    fn from(s: String) -> Self {
+        s.parse().unwrap()
+    }
+}
+
+impl serde::Serialize for Pipeline {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Pipeline {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(s.parse().unwrap())
+    }
+}
+
+impl schemars::JsonSchema for Pipeline {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Pipeline".into()
+    }
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "string" })
+    }
+}
+
 /// Flow-control signal for the task state machine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Signal {
-    /// Navigate to a specific stage within the current pipeline (e.g. `go_working`).
-    Go(String),
-    /// Call a sub-pipeline (e.g. `call_review`).
-    Call(String),
+    /// Navigate to a specific stage within the current pipeline.
+    Go(Stage),
+    /// Call a sub-pipeline.
+    Call(Pipeline),
     /// Return successfully from a sub-pipeline.
     Return,
     /// Return with failure from a sub-pipeline.
@@ -142,24 +278,24 @@ pub enum Signal {
 }
 
 impl Signal {
-    pub fn go(stage: impl Into<String>) -> Self {
+    pub fn go(stage: impl Into<Stage>) -> Self {
         Signal::Go(stage.into())
     }
 
-    pub fn call(pipeline: impl Into<String>) -> Self {
+    pub fn call(pipeline: impl Into<Pipeline>) -> Self {
         Signal::Call(pipeline.into())
     }
 
-    pub fn go_target(&self) -> Option<&str> {
+    pub fn go_target(&self) -> Option<&Stage> {
         match self {
             Signal::Go(s) => Some(s),
             _ => None,
         }
     }
 
-    pub fn call_target(&self) -> Option<&str> {
+    pub fn call_target(&self) -> Option<&Pipeline> {
         match self {
-            Signal::Call(s) => Some(s),
+            Signal::Call(p) => Some(p),
             _ => None,
         }
     }
@@ -180,9 +316,9 @@ impl std::str::FromStr for Signal {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(stage) = s.strip_prefix("go_") {
-            Ok(Signal::Go(stage.to_string()))
+            Ok(Signal::Go(Stage::new(stage)))
         } else if let Some(pipeline) = s.strip_prefix("call_") {
-            Ok(Signal::Call(pipeline.to_string()))
+            Ok(Signal::Call(Pipeline::from(pipeline)))
         } else if s == "return" {
             Ok(Signal::Return)
         } else if s == "return_failure" {
@@ -221,7 +357,7 @@ impl schemars::JsonSchema for Signal {
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct StackEntry {
-    pub pipeline: String,
+    pub pipeline: Pipeline,
     /// Signal to emit when returning to this pipeline.
     #[serde(alias = "stage")]
     pub signal: Signal,

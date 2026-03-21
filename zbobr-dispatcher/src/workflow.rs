@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use zbobr_api::config::{
     PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig,
 };
-use zbobr_api::{Signal, Task};
+use zbobr_api::{Pipeline, Signal, Task};
 
 // Re-export constants for convenience.
 pub const MAIN_PIPELINE: &str = WorkflowConfig::MAIN_PIPELINE;
@@ -184,9 +184,10 @@ impl Workflow {
         }
 
         // State is "{pipeline}_PENDING" — dispatch based on signal
-        if let Some(pipeline) = state.strip_suffix("_PENDING") {
+        if let Some(pipeline_str) = state.strip_suffix("_PENDING") {
             if let Some(ref signal) = task.signal {
-                return self.resolve_signal_in_pipeline(signal, pipeline);
+                let pipeline = Pipeline::from(pipeline_str);
+                return self.resolve_signal_in_pipeline(signal, &pipeline);
             }
             return Ok(StateAction::Idle);
         }
@@ -197,19 +198,19 @@ impl Workflow {
 
     fn resolve_signal(&self, task: &Task, signal: &Signal) -> anyhow::Result<StateAction<'_>> {
         let pipeline = pipeline_from_state(&task.state)
-            .unwrap_or_else(|| self.config.default_pipeline().to_string());
+            .unwrap_or_else(|| Pipeline::from(self.config.default_pipeline()));
         self.resolve_signal_in_pipeline(signal, &pipeline)
     }
 
     fn resolve_signal_in_pipeline(
         &self,
         signal: &Signal,
-        pipeline: &str,
+        pipeline: &Pipeline,
     ) -> anyhow::Result<StateAction<'_>> {
         match signal {
             Signal::Go(target_stage) => {
                 let (pipeline_key, pipeline_config) =
-                    self.config.pipelines.get_key_value(pipeline).ok_or_else(|| {
+                    self.config.pipelines.get_key_value(pipeline.as_str()).ok_or_else(|| {
                         anyhow::anyhow!(
                             "Signal '{signal}' references unknown pipeline '{pipeline}'"
                         )
@@ -253,12 +254,12 @@ impl Workflow {
 }
 
 /// Extract pipeline name from a state string like "main_PENDING" or "main_working".
-pub fn pipeline_from_state(state: &str) -> Option<String> {
+pub fn pipeline_from_state(state: &str) -> Option<Pipeline> {
     if state.is_empty() || state == "READY" || state == "DONE" || state == "PAUSE" {
         return None;
     }
     // "{pipeline}_PENDING" or "{pipeline}_{stage}"
-    state.find('_').map(|pos| state[..pos].to_string())
+    state.find('_').map(|pos| Pipeline::from(&state[..pos]))
 }
 
 #[cfg(test)]

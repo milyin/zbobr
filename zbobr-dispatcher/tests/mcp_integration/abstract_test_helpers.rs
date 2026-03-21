@@ -262,7 +262,7 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
         1,
         "Stack should have the caller stage pushed"
     );
-    assert_eq!(task.stack[0].pipeline, "main");
+    assert_eq!(task.stack[0].pipeline, zbobr_api::Pipeline::Main);
     assert_eq!(
         task.stack[0].signal, Signal::go("work"),
         "Stack entry should have signal go_work (re-run interrupted stage)"
@@ -574,7 +574,7 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
         "Undefined identity should trigger call_init"
     );
     assert_eq!(task.stack.len(), 1, "Stack should have go_working");
-    assert_eq!(task.stack[0].pipeline, "main");
+    assert_eq!(task.stack[0].pipeline, zbobr_api::Pipeline::Main);
     assert_eq!(task.stack[0].signal, Signal::go("working"));
 }
 
@@ -693,7 +693,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
     );
     assert_eq!(task.state, "main_PENDING");
     assert_eq!(task.stack.len(), 1, "Stack should have one entry");
-    assert_eq!(task.stack[0].pipeline, "main");
+    assert_eq!(task.stack[0].pipeline, zbobr_api::Pipeline::Main);
     assert_eq!(
         task.stack[0].signal, Signal::go("finish"),
         "Return signal should advance to next stage"

@@ -1273,7 +1273,7 @@ async fn finalize_stage_session(
         match seq_signal {
             SequentialSignal::ReturnFailure => {
                 if let Some(caller) = current_task.stack.last() {
-                    caller_pipeline = Some(caller.pipeline.clone());
+                    caller_pipeline = Some(caller.pipeline.to_string());
                     caller_pipeline_run_id = Some(caller.pipeline_run_id);
                 }
                 task_session.set_signal(Some(Signal::ReturnFailure)).await?;
@@ -1283,7 +1283,7 @@ async fn finalize_stage_session(
             }
             SequentialSignal::Return => {
                 if let Some(caller) = current_task.stack.last() {
-                    caller_pipeline = Some(caller.pipeline.clone());
+                    caller_pipeline = Some(caller.pipeline.to_string());
                     caller_pipeline_run_id = Some(caller.pipeline_run_id);
                 }
                 task_session.set_signal(Some(Signal::Return)).await?;
