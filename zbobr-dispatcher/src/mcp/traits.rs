@@ -151,7 +151,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true)
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()))
             .await
         {
             tracing::error!(
@@ -191,7 +191,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true)
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()))
             .await
         {
             tracing::error!(
@@ -231,7 +231,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), false)
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()))
             .await
         {
             tracing::error!(
@@ -285,7 +285,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), false)
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()))
             .await
         {
             tracing::error!(

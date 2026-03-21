@@ -7,21 +7,6 @@ use crate::{
 };
 
 // ---------------------------------------------------------------------------
-// Comment buffering
-// ---------------------------------------------------------------------------
-
-/// A comment buffered during an MCP stage, to be flushed as a single combined
-/// comment at the end of the stage. Each entry's `body` is already prefixed
-/// with `[tool_name]\n` by the MCP tool that posted it.
-#[derive(Debug, Clone)]
-pub struct BufferedComment {
-    pub body: String,
-}
-
-/// Shared comment buffer used to group per-stage MCP comments.
-pub type CommentBuffer = Arc<std::sync::Mutex<Vec<BufferedComment>>>;
-
-// ---------------------------------------------------------------------------
 // RoleSession — restricted access for MCP tools during agent sessions.
 //
 // Cannot modify: stage, conflict, confirm (those are dispatcher-only transitions).
@@ -36,9 +21,6 @@ pub struct RoleSession {
     task_id: u64,
     /// Tracks the last MCP tool call that matched a transition key.
     last_mapped_tool: Arc<std::sync::Mutex<Option<String>>>,
-    /// When present, `post_comment` appends to this buffer instead of posting
-    /// directly. The buffer is flushed as a single combined comment at stage end.
-    comment_buffer: Option<CommentBuffer>,
     /// Pipeline name for this session's comments.
     pipeline_name: String,
     /// Pipeline run ID for this session's comments.
@@ -53,7 +35,6 @@ impl RoleSession {
             zbobr,
             task_id,
             last_mapped_tool: Arc::new(std::sync::Mutex::new(None)),
-            comment_buffer: None,
             pipeline_name: String::new(),
             pipeline_run_id: 0,
         }
@@ -63,7 +44,6 @@ impl RoleSession {
         zbobr: Arc<ZbobrDispatcher>,
         task_id: u64,
         tracker: Arc<std::sync::Mutex<Option<String>>>,
-        comment_buffer: CommentBuffer,
         pipeline_name: String,
         pipeline_run_id: u64,
     ) -> Self {
@@ -71,7 +51,6 @@ impl RoleSession {
             zbobr,
             task_id,
             last_mapped_tool: tracker,
-            comment_buffer: Some(comment_buffer),
             pipeline_name,
             pipeline_run_id,
         }
@@ -112,36 +91,13 @@ impl RoleSession {
         Ok(self.get_task().await?.description)
     }
 
-    /// Build the full comment list including buffered comments.
-    async fn comments_with_buffer(&self) -> anyhow::Result<(Vec<Comment>, String)> {
-        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
-        let mut comments = weak.get_comments().await?;
-        let task = weak.snapshot().await?;
-        if let Some(ref buffer) = self.comment_buffer {
-            let buffered = buffer.lock().unwrap();
-            for bc in buffered.iter() {
-                comments.push(Comment {
-                    timestamp: String::new(),
-                    stage: String::new(),
-                    hostname: String::new(),
-                    tool: None,
-                    model: None,
-                    text: bc.body.clone(),
-                    pipeline: self.pipeline_name.clone(),
-                    pipeline_run_id: self.pipeline_run_id,
-                    caller_pipeline: None,
-                    caller_pipeline_run_id: None,
-                });
-            }
-        }
-        Ok((comments, task.description))
-    }
-
     /// Get the full discussion history for the current pipeline run.
     pub async fn get_history_for_run(&self, target_run_id: u64) -> anyhow::Result<String> {
-        let (comments, description) = self.comments_with_buffer().await?;
+        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
+        let comments = weak.get_comments().await?;
+        let task = weak.snapshot().await?;
         let filtered = zbobr_api::filter_comments_for_run(&comments, target_run_id);
-        let mut parts = vec![format!("[task]\n{}", description)];
+        let mut parts = vec![format!("[task]\n{}", task.description)];
         for comment in filtered {
             parts.push(format!("[{}]\n{}", comment.stage, comment.text));
         }
@@ -300,9 +256,7 @@ impl RoleSession {
         weak.get_comments().await
     }
 
-    /// Post a comment. When `buffered` is true and a comment buffer is active,
-    /// the comment is accumulated and will be flushed at stage end. When false
-    /// (or no buffer), the comment is posted immediately to the backend.
+    /// Post a comment immediately to the backend.
     pub async fn post_comment(
         &self,
         body: &str,
@@ -310,16 +264,7 @@ impl RoleSession {
         hostname: &str,
         tool: Option<Tool>,
         model: Option<Model>,
-        buffered: bool,
     ) -> anyhow::Result<()> {
-        if buffered {
-            if let Some(ref buffer) = self.comment_buffer {
-                buffer.lock().unwrap().push(BufferedComment {
-                    body: body.to_string(),
-                });
-                return Ok(());
-            }
-        }
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
@@ -1025,19 +970,17 @@ mod comment_model_tests {
     }
 
     // -----------------------------------------------------------------------
-    // Helper: create a UnifiedMcp with comment buffering enabled
+    // Helper: create a UnifiedMcp for tests
     // -----------------------------------------------------------------------
 
-    fn make_buffered_mcp(
+    fn make_test_mcp(
         zbobr: &Arc<crate::ZbobrDispatcher>,
         task_id: u64,
-    ) -> (crate::mcp::unified::UnifiedMcp, CommentBuffer) {
+    ) -> crate::mcp::unified::UnifiedMcp {
         let tracker = Arc::new(std::sync::Mutex::new(None::<String>));
-        let comment_buffer: CommentBuffer = Arc::new(std::sync::Mutex::new(Vec::new()));
         let session = zbobr.role_session_with_tracker(
             task_id,
             tracker,
-            Arc::clone(&comment_buffer),
             "main".to_string(),
             1,
         );
@@ -1045,7 +988,7 @@ mod comment_model_tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let mcp = crate::mcp::unified::UnifiedMcp::new(
+        crate::mcp::unified::UnifiedMcp::new(
             session,
             allowed_tools,
             "worker".to_string(),
@@ -1054,167 +997,27 @@ mod comment_model_tests {
             "working".to_string(),
             "main".to_string(),
             1,
-        );
-        (mcp, comment_buffer)
+        )
     }
 
-    // -----------------------------------------------------------------------
-    // Buffering tests
-    // -----------------------------------------------------------------------
-
     #[tokio::test]
-    async fn buffered_comments_accumulate_in_buffer_not_backend() {
+    async fn report_success_posts_comment_to_backend() {
         let (zbobr, task_backend) = make_test_parts();
         let id = zbobr
             .create_task("t", "desc", "READY", None, None)
             .await
             .unwrap();
 
-        let (mcp, comment_buffer) =
-            make_buffered_mcp(&zbobr, id);
+        let mcp = make_test_mcp(&zbobr, id);
 
-        // report_success is buffered
         let _ = mcp.report_success_impl("result one").await;
         let _ = mcp.report_failure_impl("needs work").await;
 
-        // Backend should have zero comments (all buffered)
         let weak = task_backend.get_task(id).await.unwrap();
         let backend_comments = weak.get_comments().await.unwrap();
-        assert_eq!(backend_comments.len(), 0, "buffered comments must not reach backend");
-
-        // Buffer should have two entries
-        let buf = comment_buffer.lock().unwrap();
-        assert_eq!(buf.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn error_comments_are_unbuffered() {
-        let (zbobr, task_backend) = make_test_parts();
-        let id = zbobr
-            .create_task("t", "desc", "READY", None, None)
-            .await
-            .unwrap();
-
-        let (mcp, comment_buffer) =
-            make_buffered_mcp(&zbobr, id);
-
-        // stop_with_error is unbuffered — should go directly to backend
-        let _ = mcp.stop_with_error_impl("something broke").await;
-
-        // Backend should have the error comment
-        let weak = task_backend.get_task(id).await.unwrap();
-        let backend_comments = weak.get_comments().await.unwrap();
-        assert_eq!(backend_comments.len(), 1, "error must be posted to backend immediately");
-        assert!(
-            backend_comments[0].text.starts_with("[stop_with_error]"),
-            "error comment must be prefixed with [stop_with_error]"
-        );
-
-        // Buffer should be empty
-        let buf = comment_buffer.lock().unwrap();
-        assert_eq!(buf.len(), 0, "error must not be buffered");
-    }
-
-    #[tokio::test]
-    async fn stop_with_question_is_unbuffered() {
-        let (zbobr, task_backend) = make_test_parts();
-        let id = zbobr
-            .create_task("t", "desc", "READY", None, None)
-            .await
-            .unwrap();
-
-        let (mcp, comment_buffer) =
-            make_buffered_mcp(&zbobr, id);
-
-        let _ = mcp.stop_with_question_impl("need help").await;
-
-        // stop_with_question is unbuffered — posted directly
-        let weak = task_backend.get_task(id).await.unwrap();
-        let backend_comments = weak.get_comments().await.unwrap();
-        assert_eq!(backend_comments.len(), 1, "stop_with_question must be posted to backend immediately");
-        assert!(
-            backend_comments[0].text.starts_with("[stop_with_question]"),
-            "stop_with_question comment must be prefixed with [stop_with_question]"
-        );
-
-        let buf = comment_buffer.lock().unwrap();
-        assert_eq!(buf.len(), 0, "stop_with_question must not be buffered");
-    }
-
-    #[tokio::test]
-    async fn each_buffered_comment_marked_by_tool_name() {
-        let (zbobr, _task_backend) = make_test_parts();
-        let id = zbobr
-            .create_task("t", "desc", "READY", None, None)
-            .await
-            .unwrap();
-
-        let (mcp, comment_buffer) =
-            make_buffered_mcp(&zbobr, id);
-
-        // Call the two buffered MCP tools
-        let _ = mcp.report_success_impl("first results").await;
-        let _ = mcp.report_failure_impl("needs fixes").await;
-
-        let buf = comment_buffer.lock().unwrap();
-        assert_eq!(buf.len(), 2);
-
-        // Each buffered comment body starts with [tool_name]
-        assert!(buf[0].body.starts_with("[report_success]\n"), "got: {}", buf[0].body);
-        assert!(buf[1].body.starts_with("[report_failure]\n"), "got: {}", buf[1].body);
-    }
-
-    #[tokio::test]
-    async fn buffered_comments_visible_in_get_history() {
-        let (zbobr, _task_backend) = make_test_parts();
-        let id = zbobr
-            .create_task("t", "task description", "READY", None, None)
-            .await
-            .unwrap();
-
-        let (mcp, _comment_buffer) =
-            make_buffered_mcp(&zbobr, id);
-
-        // Post a buffered comment
-        let _ = mcp.report_success_impl("my results").await;
-
-        // get_history should include the buffered comment
-        let history = mcp.get_history_impl().await;
-        assert!(
-            history.contains("report_success") || history.contains("my results"),
-            "buffered comment must be visible in get_history response"
-        );
-    }
-
-    #[tokio::test]
-    async fn mixed_buffered_and_unbuffered_ordering() {
-        let (zbobr, task_backend) = make_test_parts();
-        let id = zbobr
-            .create_task("t", "desc", "READY", None, None)
-            .await
-            .unwrap();
-
-        let (mcp, comment_buffer) =
-            make_buffered_mcp(&zbobr, id);
-
-        // Buffered
-        let _ = mcp.report_success_impl("first").await;
-        // Unbuffered (error)
-        let _ = mcp.stop_with_error_impl("oops").await;
-        // Buffered
-        let _ = mcp.report_failure_impl("plan").await;
-
-        // Backend should have exactly 1 comment (the error)
-        let weak = task_backend.get_task(id).await.unwrap();
-        let backend_comments = weak.get_comments().await.unwrap();
-        assert_eq!(backend_comments.len(), 1);
-        assert!(backend_comments[0].text.starts_with("[stop_with_error]"));
-
-        // Buffer should have 2 entries
-        let buf = comment_buffer.lock().unwrap();
-        assert_eq!(buf.len(), 2);
-        assert!(buf[0].body.starts_with("[report_success]"));
-        assert!(buf[1].body.starts_with("[report_failure]"));
+        assert_eq!(backend_comments.len(), 2, "each comment must be posted separately");
+        assert!(backend_comments[0].text.starts_with("[report_success]"));
+        assert!(backend_comments[1].text.starts_with("[report_failure]"));
     }
 
     #[tokio::test]
@@ -1226,21 +1029,17 @@ mod comment_model_tests {
             .unwrap();
 
         let tracker_a = Arc::new(std::sync::Mutex::new(None::<String>));
-        let buffer_a: CommentBuffer = Arc::new(std::sync::Mutex::new(Vec::new()));
         let session_a = zbobr.role_session_with_tracker(
             id,
             tracker_a,
-            buffer_a,
             "main".to_string(),
             1,
         );
 
         let tracker_b = Arc::new(std::sync::Mutex::new(None::<String>));
-        let buffer_b: CommentBuffer = Arc::new(std::sync::Mutex::new(Vec::new()));
         let session_b = zbobr.role_session_with_tracker(
             id,
             tracker_b,
-            buffer_b,
             "main".to_string(),
             2,
         );

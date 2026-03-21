@@ -225,15 +225,14 @@ impl ZbobrDispatcher {
         RoleSession::new(Arc::clone(self), task_id)
     }
 
-    /// Create a RoleSession with a shared tool call tracker and comment buffer.
+    /// Create a RoleSession with a shared tool call tracker.
     pub fn role_session_with_tracker(
         self: &Arc<Self>,
         task_id: u64,
         tracker: Arc<std::sync::Mutex<Option<String>>>,
-        comment_buffer: task::CommentBuffer,
         pipeline_name: String,
         pipeline_run_id: u64,
     ) -> RoleSession {
-        RoleSession::with_shared_tracker(Arc::clone(self), task_id, tracker, comment_buffer, pipeline_name, pipeline_run_id)
+        RoleSession::with_shared_tracker(Arc::clone(self), task_id, tracker, pipeline_name, pipeline_run_id)
     }
 }
