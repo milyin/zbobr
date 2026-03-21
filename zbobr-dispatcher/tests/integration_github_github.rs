@@ -77,22 +77,6 @@ async fn test_github_github_abstract_stage_transfer() {
 #[tokio::test]
 #[serial]
 #[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
-async fn test_github_github_abstract_call_mode() {
-    let env = get_env().await;
-    abstract_test_helpers::run_call_mode(&env).await;
-}
-
-#[tokio::test]
-#[serial]
-#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
-async fn test_github_github_abstract_return_from_mode() {
-    let env = get_env().await;
-    abstract_test_helpers::run_return_from_mode(&env).await;
-}
-
-#[tokio::test]
-#[serial]
-#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
 async fn test_github_github_abstract_auto_conflict() {
     let env = get_env().await;
     abstract_test_helpers::run_auto_conflict(&env).await;

@@ -289,26 +289,10 @@ impl WorkflowConfig {
         result
     }
 
-    /// All pipeline names except "main" — these can be called via `call_*` MCP tools.
-    pub fn callable_pipeline_names(&self) -> Vec<&str> {
-        let mut names: Vec<&str> = self
-            .pipelines
-            .keys()
-            .filter(|n| n.as_str() != Self::MAIN_PIPELINE)
-            .map(|s| s.as_str())
-            .collect();
-        names.sort();
-        names
-    }
-
-    /// All static tool names plus dynamic `call_{pipeline}` for each callable pipeline.
-    pub fn all_tool_names_with_calls(&self) -> Vec<String> {
+    /// All static tool names.
+    pub fn all_tool_names(&self) -> Vec<String> {
         use crate::config_tools::ALL_TOOL_NAMES;
-        let mut names: Vec<String> = ALL_TOOL_NAMES.iter().map(|s| s.to_string()).collect();
-        for p in self.callable_pipeline_names() {
-            names.push(format!("call_{p}"));
-        }
-        names
+        ALL_TOOL_NAMES.iter().map(|s| s.to_string()).collect()
     }
 
     /// Validate the entire workflow configuration.
@@ -329,16 +313,6 @@ impl WorkflowConfig {
         for &pname in &pipeline_names {
             let pipeline = self.pipelines.get(pname).unwrap();
             pipeline.validate(pname)?;
-        }
-
-        // Validate that no role's tool list contains `call_main`
-        for (role_name, role_def) in &self.roles {
-            if role_def.tools.contains(&"call_main".to_string()) {
-                anyhow::bail!(
-                    "Role '{}' contains 'call_main' which is not allowed",
-                    role_name
-                );
-            }
         }
 
         // Every stage's role must exist in the roles map (if roles are configured)

@@ -366,26 +366,16 @@ impl<'a> CliStageRunner<'a> {
                 self.zbobr
                     .workflow()
                     .config()
-                    .all_tool_names_with_calls()
+                    .all_tool_names()
                     .into_iter()
                     .collect()
             });
-
-        let callable_pipelines: Vec<String> = self
-            .zbobr
-            .workflow()
-            .config()
-            .callable_pipeline_names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
 
         // Read current pipeline_run_id for this session.
         let task_snap = self.zbobr.task_backend().get_task(self.task_id).await?.snapshot().await?;
         let pipeline_run_id = task_snap.pipeline_run_id;
 
         let tool_tracker = Arc::new(std::sync::Mutex::new(None::<String>));
-        let call_tracker = Arc::new(std::sync::Mutex::new(None::<String>));
         let comment_buffer: crate::task::CommentBuffer =
             Arc::new(std::sync::Mutex::new(Vec::new()));
         let (assigned_port, server_handle) = start_mcp_server(
@@ -397,9 +387,7 @@ impl<'a> CliStageRunner<'a> {
             self.stage_name.to_string(),
             allowed_tools,
             Arc::clone(&tool_tracker),
-            Arc::clone(&call_tracker),
             Arc::clone(&comment_buffer),
-            callable_pipelines,
             self.pipeline_name.to_string(),
             pipeline_run_id,
         )
@@ -430,9 +418,8 @@ impl<'a> CliStageRunner<'a> {
         )
         .await;
 
-        // Read the last mapped tool and pending call from the shared trackers
+        // Read the last mapped tool from the shared tracker.
         let last_mapped_tool = tool_tracker.lock().unwrap().clone();
-        let pending_call = call_tracker.lock().unwrap().clone();
 
         if let Some(e) = finalize_stage_session(
             self.zbobr,
@@ -442,7 +429,6 @@ impl<'a> CliStageRunner<'a> {
             &work_dir,
             outcome,
             last_mapped_tool.as_deref(),
-            pending_call.as_deref(),
             comment_buffer,
         )
         .await?
@@ -461,11 +447,6 @@ impl<'a> CliStageRunner<'a> {
 enum SequentialSignal {
     /// `report_failure` → immediate return from pipeline.
     ReturnFailure,
-    /// `report_success` with a pending `call_*` → push stack, enter sub-pipeline.
-    Call {
-        pipeline: String,
-        return_stage: String,
-    },
     /// `report_success` with a next stage → advance to it.
     Advance(String),
     /// `report_success` at the last stage → pipeline done, return.
@@ -480,26 +461,16 @@ fn compute_sequential_signal(
     stage_name: &str,
     workflow: &crate::workflow::Workflow,
     last_mapped_tool: Option<&str>,
-    pending_call: Option<&str>,
 ) -> SequentialSignal {
     match last_mapped_tool {
         Some("report_failure") => SequentialSignal::ReturnFailure,
-        Some("report_success") => {
-            if let Some(call_target) = pending_call {
-                SequentialSignal::Call {
-                    pipeline: call_target.to_string(),
-                    return_stage: stage_name.to_string(),
-                }
-            } else {
-                match workflow
-                    .pipeline(pipeline_name)
-                    .and_then(|p| p.next_stage(stage_name))
-                {
-                    Some((next, _)) => SequentialSignal::Advance(next.to_string()),
-                    None => SequentialSignal::Return,
-                }
-            }
-        }
+        Some("report_success") => match workflow
+            .pipeline(pipeline_name)
+            .and_then(|p| p.next_stage(stage_name))
+        {
+            Some((next, _)) => SequentialSignal::Advance(next.to_string()),
+            None => SequentialSignal::Return,
+        },
         _ => SequentialSignal::RetryOrPause,
     }
 }
@@ -1106,16 +1077,14 @@ async fn start_mcp_server(
     stage_name: String,
     allowed_tools: std::collections::HashSet<String>,
     tool_tracker: Arc<std::sync::Mutex<Option<String>>>,
-    call_tracker: Arc<std::sync::Mutex<Option<String>>>,
     comment_buffer: crate::task::CommentBuffer,
-    callable_pipelines: Vec<String>,
     pipeline_name: String,
     pipeline_run_id: u64,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
     let role_name = role_name.to_string();
     let server_handle = tokio::spawn(async move {
-        match crate::mcp::run_role_mcp_server(zbobr, &role_name, task_id, tool, model, stage_name, allowed_tools, tool_tracker, call_tracker, comment_buffer, callable_pipelines, pipeline_name, pipeline_run_id).await
+        match crate::mcp::run_role_mcp_server(zbobr, &role_name, task_id, tool, model, stage_name, allowed_tools, tool_tracker, comment_buffer, pipeline_name, pipeline_run_id).await
         {
             Ok(assigned_port) => {
                 let _ = port_tx.send(assigned_port);
@@ -1188,7 +1157,6 @@ async fn finalize_stage_session(
     work_dir: &Path,
     outcome: SessionOutcome,
     last_mapped_tool: Option<&str>,
-    pending_call: Option<&str>,
     comment_buffer: crate::task::CommentBuffer,
 ) -> anyhow::Result<Option<anyhow::Error>> {
     let task_session = zbobr.task_session(task_id);
@@ -1321,7 +1289,6 @@ async fn finalize_stage_session(
             stage_name,
             zbobr.workflow(),
             last_mapped_tool,
-            pending_call,
         );
         match seq_signal {
             SequentialSignal::ReturnFailure => {
@@ -1330,32 +1297,6 @@ async fn finalize_stage_session(
                     caller_pipeline_run_id = Some(caller.pipeline_run_id);
                 }
                 task_session.set_signal(Some("return_failure")).await?;
-            }
-            SequentialSignal::Call { pipeline, return_stage } => {
-                // Check pipeline_retries vs max_retries
-                let retries = current_task.pipeline_retries.get(&pipeline).copied().unwrap_or(0);
-                let max_retries = zbobr.workflow().pipeline(&pipeline)
-                    .map(|p| p.max_retries).unwrap_or(0);
-                if retries > max_retries {
-                    // Exceeded retries — pause
-                    task_session
-                        .modify_task(|mut t| { t.pause = true; t })
-                        .await?;
-                } else {
-                    // Increment retries, push stack, allocate new run ID, set call signal
-                    let pipeline_clone = pipeline.clone();
-                    task_session
-                        .modify_task(move |mut t| {
-                            *t.pipeline_retries.entry(pipeline_clone).or_default() += 1;
-                            t
-                        })
-                        .await?;
-                    task_session
-                        .push_stack(pipeline_name, &format!("go_{return_stage}"))
-                        .await?;
-                    task_session.allocate_pipeline_run_id().await?;
-                    task_session.set_signal(Some(&format!("call_{pipeline}"))).await?;
-                }
             }
             SequentialSignal::Advance(next) => {
                 // Reset sub-pipeline retries when the caller pipeline advances

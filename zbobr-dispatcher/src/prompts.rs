@@ -214,12 +214,12 @@ pub async fn build_full_prompt(
     let comments = weak.get_comments().await?;
     let mut vars = build_template_variables(&task, &comments);
 
-    // Look up allowed tools for this role; fall back to all tools (including call_*).
+    // Look up allowed tools for this role; fall back to all static tools.
     let allowed_tools: Vec<String> = workflow
         .role_definition(role_name)
         .map(|d| d.tools.clone())
         .unwrap_or_else(|| {
-            workflow.all_tool_names_with_calls()
+            workflow.all_tool_names()
         });
     add_mcp_tool_variables(&mut vars, &allowed_tools);
 

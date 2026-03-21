@@ -44,24 +44,6 @@ async fn test_fs_fs_abstract_stage_transfer() {
 }
 
 #[tokio::test]
-async fn test_fs_fs_abstract_call_mode() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(env) = get_env().await else {
-        return;
-    };
-    abstract_test_helpers::run_call_mode(&env).await;
-}
-
-#[tokio::test]
-async fn test_fs_fs_abstract_return_from_mode() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(env) = get_env().await else {
-        return;
-    };
-    abstract_test_helpers::run_return_from_mode(&env).await;
-}
-
-#[tokio::test]
 async fn test_fs_fs_abstract_auto_conflict() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
@@ -124,29 +106,3 @@ async fn test_fs_fs_abstract_retry_limit() {
     abstract_test_helpers::run_retry_limit(&env).await;
 }
 
-#[tokio::test]
-async fn test_fs_fs_abstract_sub_pipeline_failure_retry() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(env) = get_env().await else {
-        return;
-    };
-    abstract_test_helpers::run_sub_pipeline_failure_retry(&env).await;
-}
-
-#[tokio::test]
-async fn test_fs_fs_abstract_sub_pipeline_failure_pause() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(env) = get_env().await else {
-        return;
-    };
-    abstract_test_helpers::run_sub_pipeline_failure_pause(&env).await;
-}
-
-#[tokio::test]
-async fn test_fs_fs_abstract_pipeline_comment_separation() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(env) = get_env().await else {
-        return;
-    };
-    abstract_test_helpers::run_pipeline_comment_separation(&env).await;
-}

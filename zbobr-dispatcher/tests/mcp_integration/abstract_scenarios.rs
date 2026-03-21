@@ -176,35 +176,6 @@ steps:
     .to_string()
 }
 
-/// Scenario that calls a call_* MCP tool to invoke a sub-pipeline, then reports success.
-pub fn call_pipeline_then_succeed_scenario(pipeline: &str) -> String {
-    format!(
-        r#"name: Call Pipeline Then Succeed
-description: Call a sub-pipeline via MCP tool, then report success
-timeout: 60
-stop_on_failure: true
-
-steps:
-- name: Call sub-pipeline
-  operation:
-    type: tool_call
-    tool: call_{pipeline}
-  assertions:
-    - type: success
-
-- name: Report success
-  operation:
-    type: tool_call
-    tool: report_success
-    arguments:
-      message: "Called {pipeline} and done."
-  assertions:
-    - type: success
-"#,
-        pipeline = pipeline,
-    )
-}
-
 /// Scenario that calls stop_with_question (triggers PAUSE).
 pub fn stop_with_question_scenario() -> String {
     r#"name: Stop With Question
