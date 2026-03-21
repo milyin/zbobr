@@ -48,6 +48,8 @@ pub struct RoleSession {
 }
 
 impl RoleSession {
+    const CHECKLIST_SCOPE_DELIMITER: &str = "__";
+
     pub(crate) fn new(zbobr: Arc<ZbobrDispatcher>, task_id: u64) -> Self {
         Self {
             zbobr,
@@ -163,7 +165,113 @@ impl RoleSession {
 
     /// Get the current task checklist.
     pub async fn get_checklist(&self) -> anyhow::Result<Vec<ChecklistItem>> {
-        Ok(self.get_task().await?.checklist)
+        let task = self.get_task().await?;
+        let Some(prefix) = self.checklist_scope_prefix() else {
+            return Ok(task.checklist);
+        };
+
+        let scoped = task
+            .checklist
+            .into_iter()
+            .filter_map(|item| Self::strip_checklist_scope(item, &prefix))
+            .collect();
+        Ok(scoped)
+    }
+
+    /// Add a checklist item scoped to the current pipeline run.
+    pub async fn add_checklist_item(&self, id: &str, text: &str) -> anyhow::Result<()> {
+        let item_id = id.to_string();
+        let item_text = text.to_string();
+        let scope_prefix = self.checklist_scope_prefix();
+
+        self.modify_task(move |mut task| {
+            let scoped_id = if let Some(ref prefix) = scope_prefix {
+                format!("{prefix}{item_id}")
+            } else {
+                item_id
+            };
+            task.checklist.push(ChecklistItem {
+                id: scoped_id,
+                checked: false,
+                text: item_text,
+            });
+            task
+        })
+        .await
+    }
+
+    /// Mark a scoped checklist item as checked.
+    /// Returns true when an item was found and updated.
+    pub async fn check_checklist_item(&self, id: &str) -> anyhow::Result<bool> {
+        let item_id = id.to_string();
+        let scope_prefix = self.checklist_scope_prefix();
+
+        let found = Arc::new(std::sync::Mutex::new(false));
+        let found_ref = Arc::clone(&found);
+
+        self.modify_task(move |mut task| {
+            let target_id = if let Some(ref prefix) = scope_prefix {
+                format!("{prefix}{item_id}")
+            } else {
+                item_id
+            };
+
+            if let Some(item) = task.checklist.iter_mut().find(|item| item.id == target_id) {
+                item.checked = true;
+                *found_ref.lock().unwrap() = true;
+            }
+            task
+        })
+        .await?;
+
+        Ok(*found.lock().unwrap())
+    }
+
+    /// Delete a scoped checklist item.
+    /// Returns true when an item was removed.
+    pub async fn delete_checklist_item(&self, id: &str) -> anyhow::Result<bool> {
+        let item_id = id.to_string();
+        let scope_prefix = self.checklist_scope_prefix();
+
+        let removed = Arc::new(std::sync::Mutex::new(false));
+        let removed_ref = Arc::clone(&removed);
+
+        self.modify_task(move |mut task| {
+            let target_id = if let Some(ref prefix) = scope_prefix {
+                format!("{prefix}{item_id}")
+            } else {
+                item_id
+            };
+
+            let before = task.checklist.len();
+            task.checklist.retain(|item| item.id != target_id);
+            *removed_ref.lock().unwrap() = task.checklist.len() != before;
+            task
+        })
+        .await?;
+
+        Ok(*removed.lock().unwrap())
+    }
+
+    fn checklist_scope_prefix(&self) -> Option<String> {
+        if self.pipeline_name.is_empty() || self.pipeline_run_id == 0 {
+            return None;
+        }
+        Some(format!(
+            "{}{}{}{}",
+            self.pipeline_name,
+            Self::CHECKLIST_SCOPE_DELIMITER,
+            self.pipeline_run_id,
+            Self::CHECKLIST_SCOPE_DELIMITER
+        ))
+    }
+
+    fn strip_checklist_scope(item: ChecklistItem, scope_prefix: &str) -> Option<ChecklistItem> {
+        item.id.strip_prefix(scope_prefix).map(|id| ChecklistItem {
+            id: id.to_string(),
+            checked: item.checked,
+            text: item.text,
+        })
     }
 
     /// Atomically read-modify-write the task body via transient upgrade.
@@ -1126,5 +1234,88 @@ mod comment_model_tests {
         assert_eq!(buf.len(), 2);
         assert!(buf[0].body.starts_with("[report_success]"));
         assert!(buf[1].body.starts_with("[report_failure]"));
+    }
+
+    #[tokio::test]
+    async fn checklist_is_scoped_by_pipeline_run_id() {
+        let (zbobr, task_backend) = make_test_parts();
+        let id = zbobr
+            .create_task("t", "desc", "READY", None, None)
+            .await
+            .unwrap();
+
+        let tracker_a = Arc::new(std::sync::Mutex::new(None::<String>));
+        let call_tracker_a = Arc::new(std::sync::Mutex::new(None::<String>));
+        let buffer_a: CommentBuffer = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let session_a = zbobr.role_session_with_tracker(
+            id,
+            tracker_a,
+            call_tracker_a,
+            buffer_a,
+            "main".to_string(),
+            1,
+        );
+
+        let tracker_b = Arc::new(std::sync::Mutex::new(None::<String>));
+        let call_tracker_b = Arc::new(std::sync::Mutex::new(None::<String>));
+        let buffer_b: CommentBuffer = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let session_b = zbobr.role_session_with_tracker(
+            id,
+            tracker_b,
+            call_tracker_b,
+            buffer_b,
+            "main".to_string(),
+            2,
+        );
+
+        session_a.add_checklist_item("same-id", "run-1 item").await.unwrap();
+        session_b.add_checklist_item("same-id", "run-2 item").await.unwrap();
+
+        let run1_items = session_a.get_checklist().await.unwrap();
+        assert_eq!(run1_items.len(), 1);
+        assert_eq!(run1_items[0].id, "same-id");
+        assert_eq!(run1_items[0].text, "run-1 item");
+        assert!(!run1_items[0].checked);
+
+        let run2_items = session_b.get_checklist().await.unwrap();
+        assert_eq!(run2_items.len(), 1);
+        assert_eq!(run2_items[0].id, "same-id");
+        assert_eq!(run2_items[0].text, "run-2 item");
+        assert!(!run2_items[0].checked);
+
+        session_a.check_checklist_item("same-id").await.unwrap();
+
+        let run1_after_check = session_a.get_checklist().await.unwrap();
+        let run2_after_check = session_b.get_checklist().await.unwrap();
+        assert!(run1_after_check[0].checked);
+        assert!(!run2_after_check[0].checked);
+
+        let weak = task_backend.get_task(id).await.unwrap();
+        let task = weak.snapshot().await.unwrap();
+        assert_eq!(task.checklist.len(), 2);
+        assert!(task.checklist.iter().any(|i| i.id == "main__1__same-id"));
+        assert!(task.checklist.iter().any(|i| i.id == "main__2__same-id"));
+    }
+
+    #[tokio::test]
+    async fn checklist_without_pipeline_context_remains_unscoped() {
+        let (zbobr, task_backend) = make_test_parts();
+        let id = zbobr
+            .create_task("t", "desc", "READY", None, None)
+            .await
+            .unwrap();
+
+        let session = zbobr.role_session(id);
+        session.add_checklist_item("plain", "legacy item").await.unwrap();
+
+        let items = session.get_checklist().await.unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "plain");
+        assert_eq!(items[0].text, "legacy item");
+
+        let weak = task_backend.get_task(id).await.unwrap();
+        let task = weak.snapshot().await.unwrap();
+        assert_eq!(task.checklist.len(), 1);
+        assert_eq!(task.checklist[0].id, "plain");
     }
 }

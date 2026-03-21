@@ -1,6 +1,6 @@
 use crate::{
     mcp::common::get_hostname,
-    task::{ChecklistItem, Model, RoleSession, Tool},
+    task::{Model, RoleSession, Tool},
 };
 
 /// Log a string response from MCP methods.
@@ -437,13 +437,10 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id(),
             id
         );
-        let item_id = id.to_string();
-        let item_text = text.to_string();
-
         // Validate: id must be unique
         match self.session().get_checklist().await {
             Ok(items) => {
-                if items.iter().any(|item| item.id == item_id) {
+                if items.iter().any(|item| item.id == id) {
                     let response = format!("Error: Checklist item with id '{}' already exists", id);
                     log_mcp_string_response(
                         self.role_name(),
@@ -466,18 +463,7 @@ pub trait CommonMcpImpl: Send + Sync {
             }
         }
 
-        let response = match self
-            .session()
-            .modify_task(move |mut task| {
-                task.checklist.push(ChecklistItem {
-                    id: item_id,
-                    checked: false,
-                    text: item_text,
-                });
-                task
-            })
-            .await
-        {
+        let response = match self.session().add_checklist_item(id, text).await {
             Ok(()) => format!("Checklist item '{}' added", id),
             Err(e) => format!("Error updating task: {e}"),
         };
@@ -497,18 +483,9 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id(),
             id,
         );
-        let item_id = id.to_string();
-        let response = match self
-            .session()
-            .modify_task(move |mut task| {
-                if let Some(item) = task.checklist.iter_mut().find(|item| item.id == item_id) {
-                    item.checked = true;
-                }
-                task
-            })
-            .await
-        {
-            Ok(()) => format!("Checklist item '{}' checked", id),
+        let response = match self.session().check_checklist_item(id).await {
+            Ok(true) => format!("Checklist item '{}' checked", id),
+            Ok(false) => format!("Error: Checklist item with id '{}' not found", id),
             Err(e) => format!("Error: {e}"),
         };
         log_mcp_string_response(
@@ -527,12 +504,10 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id(),
             id
         );
-        let item_id = id.to_string();
-
         // Pre-validate: check the item exists and is not checked
         match self.session().get_checklist().await {
             Ok(items) => {
-                if let Some(item) = items.iter().find(|i| i.id == item_id) {
+                if let Some(item) = items.iter().find(|i| i.id == id) {
                     if item.checked {
                         let response = format!(
                             "Error: Cannot delete checked checklist item '{}'. Checked items are preserved as work history.",
@@ -569,15 +544,9 @@ pub trait CommonMcpImpl: Send + Sync {
             }
         }
 
-        let response = match self
-            .session()
-            .modify_task(move |mut task| {
-                task.checklist.retain(|item| item.id != item_id);
-                task
-            })
-            .await
-        {
-            Ok(()) => format!("Checklist item '{}' deleted", id),
+        let response = match self.session().delete_checklist_item(id).await {
+            Ok(true) => format!("Checklist item '{}' deleted", id),
+            Ok(false) => format!("Error: Checklist item with id '{}' not found", id),
             Err(e) => format!("Error updating task: {e}"),
         };
         log_mcp_string_response(
