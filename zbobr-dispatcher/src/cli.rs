@@ -284,7 +284,7 @@ impl<'a> CliStageRunner<'a> {
     }
 
     async fn run(&self) -> anyhow::Result<()> {
-        let role = &self.stage_def.role;
+        let role = self.stage_def.role_name().expect("role stage must have role");
         let cli_tool = self.zbobr.config().tool_for_stage(self.stage_def);
         let model = self.zbobr.config().model_for_stage(self.stage_def);
 
@@ -489,6 +489,48 @@ enum WorktreeResult {
 // Stage processing helpers
 // ---------------------------------------------------------------------------
 
+/// Handle a stage that calls another pipeline instead of running an agent.
+///
+/// Pushes the current pipeline onto the stack with the appropriate return signal
+/// (advance to next stage or return), then emits a `call_<pipeline>` signal.
+async fn handle_call_stage(
+    zbobr: &Arc<ZbobrDispatcher>,
+    task_id: u64,
+    pipeline_name: &str,
+    stage_name: &str,
+    call_pipeline: &str,
+) -> anyhow::Result<()> {
+    let task_session = zbobr.task_session(task_id);
+
+    // Determine what signal to emit when the called pipeline returns.
+    let return_signal = match zbobr
+        .workflow()
+        .pipeline(pipeline_name)
+        .and_then(|p| p.next_stage(stage_name))
+    {
+        Some((next, _)) => format!("go_{next}"),
+        None => "return".to_string(),
+    };
+
+    // Push stack so we return to the right place.
+    task_session
+        .push_stack(pipeline_name, &return_signal)
+        .await?;
+    task_session.allocate_pipeline_run_id().await?;
+    task_session
+        .set_signal(Some(&format!("call_{call_pipeline}")))
+        .await?;
+    task_session
+        .set_state(&format!("{pipeline_name}_PENDING"))
+        .await?;
+
+    tracing::info!(
+        "Task #{task_id}: stage {pipeline_name}/{stage_name} calling pipeline '{call_pipeline}' (return → {return_signal})"
+    );
+
+    Ok(())
+}
+
 /// Process a task according to its current state and signal (single-step).
 pub async fn process_task(
     zbobr: &Arc<ZbobrDispatcher>,
@@ -508,8 +550,12 @@ pub async fn process_task(
     let action = zbobr.workflow().resolve_next_action(task)?;
     match action {
         crate::workflow::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
-            let runner = CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, mcp_tester_override);
-            runner.run().await?;
+            if let Some(call_target) = stage_def.call_pipeline() {
+                handle_call_stage(zbobr, task.id, pipeline_name, stage_name, call_target).await?;
+            } else {
+                let runner = CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, mcp_tester_override);
+                runner.run().await?;
+            }
         }
         crate::workflow::StateAction::Done => {
             let task_session = zbobr.task_session(task.id);
@@ -595,17 +641,26 @@ pub async fn run_manager_loop(
     // Dump stage-specific settings for visibility
     let workflow = zbobr.workflow();
     for (pipeline_name, stage_name, stage_def) in workflow.all_stages() {
-        let tool = zbobr.config().tool_for_stage(stage_def);
-        let model = zbobr.config().model_for_stage(stage_def);
-        tracing::info!(
-            "Stage {}/{}: role={:?}, tool={:?}, model={:?}, prompts={:?}",
-            pipeline_name,
-            stage_name,
-            stage_def.role,
-            tool,
-            model,
-            stage_def.main_prompt
-        );
+        if let Some(target) = stage_def.call_pipeline() {
+            tracing::info!(
+                "Stage {}/{}: call={}",
+                pipeline_name,
+                stage_name,
+                target,
+            );
+        } else {
+            let tool = zbobr.config().tool_for_stage(stage_def);
+            let model = zbobr.config().model_for_stage(stage_def);
+            tracing::info!(
+                "Stage {}/{}: role={:?}, tool={:?}, model={:?}, prompts={:?}",
+                pipeline_name,
+                stage_name,
+                stage_def.role_name().unwrap_or("<none>"),
+                tool,
+                model,
+                stage_def.main_prompt
+            );
+        }
     }
 
     let mut last_cleanup = std::time::Instant::now();
@@ -660,6 +715,13 @@ pub async fn run_manager_loop(
                         pipeline_name,
                         stage_name,
                     );
+                    if let Some(call_target) = stage_def.call_pipeline() {
+                        if let Err(e) = handle_call_stage(zbobr, task.id, pipeline_name, stage_name, call_target).await {
+                            tracing::error!("Call stage {}/{} failed for task #{}: {e}", pipeline_name, stage_name, task.id);
+                        }
+                        // Don't break — call stages are instant, continue processing
+                        continue;
+                    }
                     let runner = CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, None);
                     if let Err(e) = runner.run().await {
                         tracing::error!("Stage {}/{} failed for task #{}: {e}", pipeline_name, stage_name, task.id);

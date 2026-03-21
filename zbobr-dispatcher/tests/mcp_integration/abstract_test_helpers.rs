@@ -45,11 +45,9 @@ fn build_workflow_with_roles(
             .insert(
                 s.name.to_string(),
                 StageDefinition {
-                    role: s.role.to_string(),
-                    model: None,
+                    role: Some(s.role.to_string()),
                     tool: Some(Tool::McpTester),
-                    main_prompt: None,
-                    additional_prompts: vec![],
+                    ..Default::default()
                 },
             );
     }
@@ -387,21 +385,17 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
                 m.insert(
                     "check".to_string(),
                     StageDefinition {
-                        role: "role_check".to_string(),
-                        model: None,
+                        role: Some("role_check".to_string()),
                         tool: Some(Tool::McpTester),
-                        main_prompt: None,
-                        additional_prompts: vec![],
+                        ..Default::default()
                     },
                 );
                 m.insert(
                     "finish".to_string(),
                     StageDefinition {
-                        role: "role_finish".to_string(),
-                        model: None,
+                        role: Some("role_finish".to_string()),
                         tool: Some(Tool::McpTester),
-                        main_prompt: None,
-                        additional_prompts: vec![],
+                        ..Default::default()
                     },
                 );
                 m

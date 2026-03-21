@@ -114,36 +114,36 @@ fn default_workflow() -> WorkflowConfig {
 
     let mut main_stages = HashMap::new();
     main_stages.insert("planning".to_string(), StageDefinition {
-        role: "planner".into(),
+        role: Some("planner".into()),
         additional_prompts: task_prompt.clone(),
         ..Default::default()
     });
     main_stages.insert("working".to_string(), StageDefinition {
-        role: "worker".into(),
+        role: Some("worker".into()),
         additional_prompts: task_prompt.clone(),
         ..Default::default()
     });
     main_stages.insert("reviewing".to_string(), StageDefinition {
-        role: "reviewer".into(),
+        role: Some("reviewer".into()),
         additional_prompts: task_prompt.clone(),
         ..Default::default()
     });
     main_stages.insert("merging".to_string(), StageDefinition {
-        role: "merger".into(),
+        role: Some("merger".into()),
         additional_prompts: task_prompt.clone(),
         ..Default::default()
     });
 
     let mut init_stages = HashMap::new();
     init_stages.insert("preparing".to_string(), StageDefinition {
-        role: "preparator".into(),
+        role: Some("preparator".into()),
         additional_prompts: task_prompt.clone(),
         ..Default::default()
     });
 
     let mut merge_stages = HashMap::new();
     merge_stages.insert("merging".to_string(), StageDefinition {
-        role: "merger".into(),
+        role: Some("merger".into()),
         additional_prompts: task_prompt,
         ..Default::default()
     });

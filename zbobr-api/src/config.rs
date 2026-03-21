@@ -24,9 +24,15 @@ pub struct RoleDefinition {
 ///
 /// The stage's name and pipeline are derived from its structural position
 /// (key in the stages HashMap and key in the pipelines HashMap).
+///
+/// A stage must have exactly one of `role` (run an agent session) or
+/// `call` (call another pipeline). They are mutually exclusive.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct StageDefinition {
-    pub role: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<Model>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -37,10 +43,25 @@ pub struct StageDefinition {
     pub additional_prompts: Vec<PathBuf>,
 }
 
+impl StageDefinition {
+    pub fn role_name(&self) -> Option<&str> {
+        self.role.as_deref()
+    }
+
+    pub fn call_pipeline(&self) -> Option<&str> {
+        self.call.as_deref()
+    }
+
+    pub fn is_call(&self) -> bool {
+        self.call.is_some()
+    }
+}
+
 impl Default for StageDefinition {
     fn default() -> Self {
         Self {
-            role: String::new(),
+            role: None,
+            call: None,
             model: None,
             tool: None,
             main_prompt: None,
@@ -119,6 +140,20 @@ impl PipelineConfig {
                     "Pipeline '{}' stage '{}' is not in the order list",
                     pipeline_name, name
                 );
+            }
+        }
+        // Each stage must have exactly one of role or call
+        for (sname, stage) in &self.stages {
+            match (&stage.role, &stage.call) {
+                (Some(_), Some(_)) => anyhow::bail!(
+                    "Pipeline '{}' stage '{}' has both 'role' and 'call' — only one is allowed",
+                    pipeline_name, sname
+                ),
+                (None, None) => anyhow::bail!(
+                    "Pipeline '{}' stage '{}' has neither 'role' nor 'call' — one is required",
+                    pipeline_name, sname
+                ),
+                _ => {}
             }
         }
         Ok(())
@@ -261,12 +296,12 @@ impl WorkflowConfig {
     pub fn find_stage_by_role(&self, role: &str) -> Option<(&str, &str, &StageDefinition)> {
         let default = self.default_pipeline();
         if let Some(pipeline) = self.pipelines.get(default) {
-            if let Some((name, stage)) = pipeline.stages.iter().find(|(_, s)| s.role == role) {
+            if let Some((name, stage)) = pipeline.stages.iter().find(|(_, s)| s.role_name() == Some(role)) {
                 return Some((default, name.as_str(), stage));
             }
         }
         for (pname, pipeline) in &self.pipelines {
-            if let Some((sname, stage)) = pipeline.stages.iter().find(|(_, s)| s.role == role) {
+            if let Some((sname, stage)) = pipeline.stages.iter().find(|(_, s)| s.role_name() == Some(role)) {
                 return Some((pname.as_str(), sname.as_str(), stage));
             }
         }
@@ -315,14 +350,30 @@ impl WorkflowConfig {
             pipeline.validate(pname)?;
         }
 
-        // Every stage's role must exist in the roles map (if roles are configured)
+        // Every role-stage's role must exist in the roles map (if roles are configured)
         if !self.roles.is_empty() {
             for (pname, pipeline) in &self.pipelines {
                 for (sname, stage) in &pipeline.stages {
-                    if !self.roles.contains_key(&stage.role) {
+                    if let Some(role) = &stage.role {
+                        if !self.roles.contains_key(role) {
+                            anyhow::bail!(
+                                "Stage '{}/{}' references unknown role '{}' (not in [workflow.roles])",
+                                pname, sname, role
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Every call-stage's target pipeline must exist
+        for (pname, pipeline) in &self.pipelines {
+            for (sname, stage) in &pipeline.stages {
+                if let Some(target) = &stage.call {
+                    if !self.pipelines.contains_key(target) {
                         anyhow::bail!(
-                            "Stage '{}/{}' references unknown role '{}' (not in [workflow.roles])",
-                            pname, sname, stage.role
+                            "Stage '{}/{}' calls unknown pipeline '{}'",
+                            pname, sname, target
                         );
                     }
                 }

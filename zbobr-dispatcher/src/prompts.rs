@@ -46,7 +46,7 @@ impl ConfiguredPromptBuilder {
         let base_prompt = load_prompts(&prompt_files, self.base_path.as_ref())?;
         build_full_prompt(
             &base_prompt,
-            &stage_def.role,
+            stage_def.role_name().unwrap_or(""),
             task_id,
             task_backend,
             self.workflow.config(),
@@ -62,7 +62,7 @@ pub fn prompt_files_for_stage(stage_def: &StageDefinition, workflow: &WorkflowCo
     let mut files = Vec::new();
     if let Some(ref main) = stage_def.main_prompt {
         files.push(main.clone());
-    } else if let Some(role_def) = workflow.role_definition(&stage_def.role) {
+    } else if let Some(role_def) = stage_def.role_name().and_then(|r| workflow.role_definition(r)) {
         if let Some(ref prompt_path) = role_def.prompt {
             files.push(prompt_path.clone());
         }

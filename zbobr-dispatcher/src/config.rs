@@ -307,23 +307,15 @@ mod tests {
 
         // Stage with overrides → uses stage-level settings
         let prep_stage = StageDefinition {
-            role: "preparator".to_string(),
+            role: Some("preparator".to_string()),
             tool: Some(Tool::Claude),
             model: Some(Model::ClaudeOpus4_5),
-            main_prompt: None,
-            additional_prompts: vec![],
-            on_success: None,
-            on_failure: None,
+            ..Default::default()
         };
         // Stage without overrides → falls back to global config
         let plan_stage = StageDefinition {
-            role: "planner".to_string(),
-            tool: None,
-            model: None,
-            main_prompt: None,
-            additional_prompts: vec![],
-            on_success: None,
-            on_failure: None,
+            role: Some("planner".to_string()),
+            ..Default::default()
         };
         assert_eq!(cfg.tool_for_stage(&prep_stage), Tool::Claude);
         assert_eq!(cfg.tool_for_stage(&plan_stage), Tool::Copilot);
