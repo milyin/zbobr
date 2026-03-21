@@ -41,6 +41,10 @@ pub struct RoleSession {
     /// When present, `post_comment` appends to this buffer instead of posting
     /// directly. The buffer is flushed as a single combined comment at stage end.
     comment_buffer: Option<CommentBuffer>,
+    /// Pipeline name for this session's comments.
+    pipeline_name: String,
+    /// Pipeline run ID for this session's comments.
+    pipeline_run_id: u64,
 }
 
 impl RoleSession {
@@ -51,6 +55,8 @@ impl RoleSession {
             last_mapped_tool: Arc::new(std::sync::Mutex::new(None)),
             call_tracker: Arc::new(std::sync::Mutex::new(None)),
             comment_buffer: None,
+            pipeline_name: String::new(),
+            pipeline_run_id: 0,
         }
     }
 
@@ -60,6 +66,8 @@ impl RoleSession {
         tracker: Arc<std::sync::Mutex<Option<String>>>,
         call_tracker: Arc<std::sync::Mutex<Option<String>>>,
         comment_buffer: CommentBuffer,
+        pipeline_name: String,
+        pipeline_run_id: u64,
     ) -> Self {
         Self {
             zbobr,
@@ -67,6 +75,8 @@ impl RoleSession {
             last_mapped_tool: tracker,
             call_tracker,
             comment_buffer: Some(comment_buffer),
+            pipeline_name,
+            pipeline_run_id,
         }
     }
 
@@ -120,23 +130,33 @@ impl RoleSession {
                     tool: None,
                     model: None,
                     text: bc.body.clone(),
-                    hidden: false,
+                    pipeline: self.pipeline_name.clone(),
+                    pipeline_run_id: self.pipeline_run_id,
                 });
             }
         }
         Ok((comments, task.description))
     }
 
-    /// Get the history index (all records with position, author, type, summary).
-    pub async fn get_history_index(&self) -> anyhow::Result<zbobr_api::HistoryIndex> {
+    /// Get the full discussion history for the current pipeline run.
+    pub async fn get_history_for_run(&self, target_run_id: u64) -> anyhow::Result<String> {
         let (comments, description) = self.comments_with_buffer().await?;
-        Ok(zbobr_api::build_history_index(&comments, &description))
+        let filtered = zbobr_api::filter_comments_for_run(&comments, target_run_id);
+        let mut parts = vec![format!("[task]\n{}", description)];
+        for comment in filtered {
+            parts.push(format!("[{}]\n{}", comment.stage, comment.text));
+        }
+        Ok(parts.join("\n\n---\n\n"))
     }
 
-    /// Get a single history record by position index.
-    pub async fn get_history_record(&self, index: usize) -> anyhow::Result<String> {
-        let (comments, description) = self.comments_with_buffer().await?;
-        zbobr_api::get_history_record_by_index(&comments, &description, index)
+    /// Get pipeline name for this session.
+    pub fn pipeline_name(&self) -> &str {
+        &self.pipeline_name
+    }
+
+    /// Get pipeline run ID for this session.
+    pub fn pipeline_run_id(&self) -> u64 {
+        self.pipeline_run_id
     }
 
     /// Get the current task checklist.
@@ -186,7 +206,6 @@ impl RoleSession {
         tool: Option<Tool>,
         model: Option<Model>,
         buffered: bool,
-        hidden: bool,
     ) -> anyhow::Result<()> {
         if buffered {
             if let Some(ref buffer) = self.comment_buffer {
@@ -199,7 +218,7 @@ impl RoleSession {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
-            .post_comment(stage, hostname, tool, model, body, hidden)
+            .post_comment(stage, hostname, tool, model, body, &self.pipeline_name, self.pipeline_run_id)
             .await
     }
 
@@ -393,11 +412,25 @@ impl TaskSession {
         .await
     }
 
-    /// Push an entry onto the task's call stack.
+    /// Allocate a new pipeline run ID (monotonically incrementing).
+    pub async fn allocate_pipeline_run_id(&self) -> anyhow::Result<u64> {
+        let task = self.get_task().await?;
+        let new_id = task.pipeline_run_id + 1;
+        self.modify_task(move |mut t| {
+            t.pipeline_run_id = new_id;
+            t
+        })
+        .await?;
+        Ok(new_id)
+    }
+
+    /// Push an entry onto the task's call stack, saving the current pipeline_run_id.
     pub async fn push_stack(&self, pipeline: &str, signal: &str) -> anyhow::Result<()> {
+        let task = self.get_task().await?;
         let entry = crate::task::StackEntry {
             pipeline: pipeline.to_string(),
             signal: signal.to_string(),
+            pipeline_run_id: task.pipeline_run_id,
         };
         self.modify_task(move |mut task| {
             task.stack.push(entry);
@@ -406,13 +439,15 @@ impl TaskSession {
         .await
     }
 
-    /// Pop the top entry from the task's call stack.
+    /// Pop the top entry from the task's call stack. Restores pipeline_run_id.
     pub async fn pop_stack(&self) -> anyhow::Result<Option<crate::task::StackEntry>> {
         let task = self.get_task().await?;
         let popped = task.stack.last().cloned();
-        if popped.is_some() {
+        if let Some(ref entry) = popped {
+            let restored_run_id = entry.pipeline_run_id;
             self.modify_task(move |mut task| {
                 task.stack.pop();
+                task.pipeline_run_id = restored_run_id;
                 task
             })
             .await?;
@@ -446,10 +481,11 @@ impl TaskSession {
             }
         }
 
-        // Post DONE marker comment (hidden).
+        // Post DONE marker comment.
         let hostname = crate::mcp::common::get_hostname();
+        let task = self.get_task().await?;
         if let Err(e) = self
-            .post_comment("done", &hostname, None, None, "", true)
+            .post_comment("done", &hostname, None, None, "", "", task.pipeline_run_id)
             .await
         {
             tracing::warn!("Failed to post DONE boundary for task #{task_id}: {e}");
@@ -471,12 +507,13 @@ impl TaskSession {
         tool: Option<Tool>,
         model: Option<Model>,
         body: &str,
-        hidden: bool,
+        pipeline: &str,
+        pipeline_run_id: u64,
     ) -> anyhow::Result<()> {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
-            .post_comment(stage, hostname, tool, model, body, hidden)
+            .post_comment(stage, hostname, tool, model, body, pipeline, pipeline_run_id)
             .await
     }
 }
@@ -602,7 +639,8 @@ mod comment_model_tests {
             tool: Option<Tool>,
             model: Option<Model>,
             body: &str,
-            hidden: bool,
+            pipeline: &str,
+            pipeline_run_id: u64,
         ) -> anyhow::Result<()> {
             let mut comments = self.backend.comments.lock().await;
             comments.entry(self.id).or_default().push(Comment {
@@ -612,7 +650,8 @@ mod comment_model_tests {
                 tool,
                 model,
                 text: body.to_string(),
-                hidden,
+                pipeline: pipeline.to_string(),
+                pipeline_run_id,
             });
             Ok(())
         }
@@ -677,6 +716,7 @@ mod comment_model_tests {
                 confirm: false,
                 worktree_retries: 0,
                 pipeline_retries: Default::default(),
+                pipeline_run_id: 0,
                 etag: None,
             };
             self.inner.tasks.lock().await.insert(
@@ -755,7 +795,7 @@ mod comment_model_tests {
 
         let session = zbobr.role_session(id);
         let allowed_tools: std::collections::HashSet<String> =
-            ["get_history_index", "stop_with_error", "report_success"]
+            ["get_history", "stop_with_error", "report_success"]
                 .iter()
                 .map(|s| s.to_string())
                 .collect();
@@ -768,6 +808,8 @@ mod comment_model_tests {
             "planning".to_string(),
             vec![],
             std::sync::Arc::new(std::sync::Mutex::new(None)),
+            "main".to_string(),
+            1,
         );
 
         // stop_with_error is unbuffered — goes straight to backend
@@ -778,7 +820,6 @@ mod comment_model_tests {
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].model, Some(Model::Gpt5Mini));
         assert_eq!(comments[0].tool, Some(Tool::Copilot));
-        assert!(comments[0].hidden);
         assert!(comments[0].text.starts_with("[stop_with_error]"));
     }
 
@@ -792,7 +833,7 @@ mod comment_model_tests {
 
         zbobr
             .task_session(id)
-            .post_comment("error", "host", None, None, "dispatcher error", true)
+            .post_comment("error", "host", None, None, "dispatcher error", "", 0)
             .await
             .unwrap();
 
@@ -806,35 +847,38 @@ mod comment_model_tests {
     #[test]
     fn comment_tag_roundtrip() {
         let tag = CommentTag::new(
+            "main".to_string(),
+            3,
             "planning".to_string(),
             "host".to_string(),
             Some(Tool::Copilot),
             Some(Model::Gpt5Mini),
-            false,
         );
-        assert_eq!(tag.to_string(), "// planning:host:copilot:gpt-5-mini");
+        assert_eq!(tag.to_string(), "// main:3:planning by host:copilot:gpt-5-mini");
         let parsed: CommentTag = tag.to_string().parse().unwrap();
         assert_eq!(parsed, tag);
 
         let tag_no_tool = CommentTag::new(
+            "main".to_string(),
+            1,
             "done".to_string(),
             "web".to_string(),
             None,
             None,
-            true,
         );
-        assert_eq!(tag_no_tool.to_string(), "// done:web:hidden");
+        assert_eq!(tag_no_tool.to_string(), "// main:1:done by web");
         let parsed_no_tool: CommentTag = tag_no_tool.to_string().parse().unwrap();
         assert_eq!(parsed_no_tool, tag_no_tool);
 
         let tag_tool_no_model = CommentTag::new(
+            "init".to_string(),
+            2,
             "working".to_string(),
             "host".to_string(),
             Some(Tool::Claude),
             None,
-            false,
         );
-        assert_eq!(tag_tool_no_model.to_string(), "// working:host:claude");
+        assert_eq!(tag_tool_no_model.to_string(), "// init:2:working by host:claude");
         let parsed_tnm: CommentTag = tag_tool_no_model.to_string().parse().unwrap();
         assert_eq!(parsed_tnm, tag_tool_no_model);
     }
@@ -855,6 +899,8 @@ mod comment_model_tests {
             tracker,
             call_tracker.clone(),
             Arc::clone(&comment_buffer),
+            "main".to_string(),
+            1,
         );
         let allowed_tools: std::collections::HashSet<String> = crate::mcp::unified::ALL_TOOL_NAMES
             .iter()
@@ -869,6 +915,8 @@ mod comment_model_tests {
             "working".to_string(),
             vec![],
             call_tracker,
+            "main".to_string(),
+            1,
         );
         (mcp, comment_buffer)
     }
@@ -920,7 +968,6 @@ mod comment_model_tests {
         let weak = task_backend.get_task(id).await.unwrap();
         let backend_comments = weak.get_comments().await.unwrap();
         assert_eq!(backend_comments.len(), 1, "error must be posted to backend immediately");
-        assert!(backend_comments[0].hidden, "error comments must be hidden");
         assert!(
             backend_comments[0].text.starts_with("[stop_with_error]"),
             "error comment must be prefixed with [stop_with_error]"
@@ -981,7 +1028,7 @@ mod comment_model_tests {
     }
 
     #[tokio::test]
-    async fn buffered_comments_visible_in_get_history_index() {
+    async fn buffered_comments_visible_in_get_history() {
         let (zbobr, _task_backend) = make_test_parts();
         let id = zbobr
             .create_task("t", "task description", "READY", None, None)
@@ -994,11 +1041,11 @@ mod comment_model_tests {
         // Post a buffered comment
         let _ = mcp.report_success_impl("my results").await;
 
-        // get_history_index should include the buffered comment
-        let index = mcp.get_history_index_impl().await;
+        // get_history should include the buffered comment
+        let history = mcp.get_history_impl().await;
         assert!(
-            index.contains("report_success") || index.contains("success"),
-            "buffered comment must be visible in get_history_index response"
+            history.contains("report_success") || history.contains("my results"),
+            "buffered comment must be visible in get_history response"
         );
     }
 

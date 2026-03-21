@@ -501,6 +501,10 @@ impl ZbobrTaskBackendGithubImpl {
                 .get("pipeline_retries")
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or_default(),
+            pipeline_run_id: params_map
+                .get("pipeline_run_id")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
             etag: Some(body),
         }
     }
@@ -532,6 +536,9 @@ impl ZbobrTaskBackendGithubImpl {
             if let Ok(json) = serde_json::to_string(&task.pipeline_retries) {
                 params.insert("pipeline_retries".to_string(), json);
             }
+        }
+        if task.pipeline_run_id > 0 {
+            params.insert("pipeline_run_id".to_string(), task.pipeline_run_id.to_string());
         }
         params
     }
@@ -711,7 +718,7 @@ impl ZbobrTaskBackendGithubImpl {
                         (t, body_text)
                     }
                     Err(_) => (
-                        CommentTag::new(String::new(), String::new(), None, None, false),
+                        CommentTag::new(String::new(), 0, String::new(), String::new(), None, None),
                         body.clone(),
                     ),
                 };
@@ -723,7 +730,8 @@ impl ZbobrTaskBackendGithubImpl {
                     tool: tag.tool,
                     model: tag.model,
                     text,
-                    hidden: tag.hidden,
+                    pipeline: tag.pipeline,
+                    pipeline_run_id: tag.pipeline_run_id,
                 }
             })
             .collect())
@@ -738,11 +746,12 @@ impl ZbobrTaskBackendGithubImpl {
         tool: Option<Tool>,
         model: Option<Model>,
         body: &str,
-        hidden: bool,
+        pipeline: &str,
+        pipeline_run_id: u64,
     ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        let tag = CommentTag::new(stage.to_string(), hostname.to_string(), tool, model, hidden);
+        let tag = CommentTag::new(pipeline.to_string(), pipeline_run_id, stage.to_string(), hostname.to_string(), tool, model);
         let formatted_body = format!("{}\n\n{}", tag, body);
 
         retry_github("create issue comment", || async {
@@ -829,10 +838,11 @@ impl TaskMut for GithubTaskMut {
         tool: Option<Tool>,
         model: Option<Model>,
         body: &str,
-        hidden: bool,
+        pipeline: &str,
+        pipeline_run_id: u64,
     ) -> anyhow::Result<()> {
         self.backend
-            .post_task_comment_internal(self.id, stage, hostname, tool, model, body, hidden)
+            .post_task_comment_internal(self.id, stage, hostname, tool, model, body, pipeline, pipeline_run_id)
             .await
     }
 
@@ -1024,7 +1034,7 @@ mod parse_tests {
                 (tag, body)
             }
             Err(_) => (
-                CommentTag::new(String::new(), String::new(), None, None, false),
+                CommentTag::new(String::new(), 0, String::new(), String::new(), None, None),
                 input.to_string(),
             ),
         }
@@ -1032,21 +1042,22 @@ mod parse_tests {
 
     #[test]
     fn test_parse_comment_tag_simple() {
+        // Legacy format: "// stage:hostname" → parsed via fallback
         let input = "// planning:localhost\n\nThis is the body";
         let (tag, body) = split_tag_body(input);
         assert_eq!(tag.stage, "planning");
         assert_eq!(tag.hostname, "localhost");
-        assert!(!tag.hidden);
         assert_eq!(body, "This is the body");
     }
 
     #[test]
-    fn test_parse_comment_tag_hidden() {
-        let input = "// reviewing:skynet:hidden\n\nRejected.";
+    fn test_parse_comment_tag_new_format() {
+        let input = "// main:3:reviewing by skynet\n\nRejected.";
         let (tag, body) = split_tag_body(input);
+        assert_eq!(tag.pipeline, "main");
+        assert_eq!(tag.pipeline_run_id, 3);
         assert_eq!(tag.stage, "reviewing");
         assert_eq!(tag.hostname, "skynet");
-        assert!(tag.hidden);
         assert_eq!(body, "Rejected.");
     }
 
@@ -1061,7 +1072,7 @@ mod parse_tests {
 
     #[test]
     fn test_comment_tag_roundtrip() {
-        let tag = CommentTag::new("working".into(), "host".into(), None, None, true);
+        let tag = CommentTag::new("main".into(), 5, "working".into(), "host".into(), None, None);
         let s = tag.to_string();
         let parsed: CommentTag = s.parse().unwrap();
         assert_eq!(parsed, tag);

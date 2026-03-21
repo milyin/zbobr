@@ -46,6 +46,8 @@ struct TaskFile {
     worktree_retries: u32,
     #[serde(default)]
     pipeline_retries: HashMap<String, u32>,
+    #[serde(default)]
+    pipeline_run_id: u64,
     closed: bool,
 }
 
@@ -80,6 +82,7 @@ impl TaskFile {
             confirm: self.confirm,
             worktree_retries: self.worktree_retries,
             pipeline_retries: self.pipeline_retries.clone(),
+            pipeline_run_id: self.pipeline_run_id,
             etag: None,
         })
     }
@@ -108,6 +111,7 @@ impl TaskFile {
             stack: task.stack.clone(),
             worktree_retries: task.worktree_retries,
             pipeline_retries: task.pipeline_retries.clone(),
+            pipeline_run_id: task.pipeline_run_id,
             closed,
         }
     }
@@ -375,7 +379,8 @@ impl TaskMut for FsTaskMut {
         tool: Option<Tool>,
         model: Option<Model>,
         body: &str,
-        hidden: bool,
+        pipeline: &str,
+        pipeline_run_id: u64,
     ) -> anyhow::Result<()> {
         let mut comments = self.backend.read_comments_structured(self.id).await?;
 
@@ -386,7 +391,8 @@ impl TaskMut for FsTaskMut {
             tool,
             model,
             text: body.to_string(),
-            hidden,
+            pipeline: pipeline.to_string(),
+            pipeline_run_id,
         };
 
         comments.push(new_comment);
@@ -445,6 +451,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             confirm: false,
             worktree_retries: 0,
             pipeline_retries: Default::default(),
+            pipeline_run_id: 0,
             etag: None,
         };
 
@@ -585,43 +592,46 @@ mod parse_tests {
     use zbobr_api::task::CommentTag;
 
     #[test]
-    fn test_parse_comment_tag_simple() {
-        let input = "// planning:localhost";
+    fn test_parse_comment_tag_new_format() {
+        let input = "// main:3:planning by localhost";
         let tag: CommentTag = input.parse().unwrap();
+        assert_eq!(tag.pipeline, "main");
+        assert_eq!(tag.pipeline_run_id, 3);
         assert_eq!(tag.stage, "planning");
         assert_eq!(tag.hostname, "localhost");
-        assert!(!tag.hidden);
     }
 
     #[test]
-    fn test_parse_comment_tag_hidden() {
-        let input = "// working:host:hidden";
+    fn test_parse_comment_tag_legacy() {
+        // Legacy format: "stage:hostname"
+        let input = "// working:host";
         let tag: CommentTag = input.parse().unwrap();
         assert_eq!(tag.stage, "working");
         assert_eq!(tag.hostname, "host");
-        assert!(tag.hidden);
+        assert_eq!(tag.pipeline, "");
+        assert_eq!(tag.pipeline_run_id, 0);
     }
 
     #[test]
     fn test_parse_legacy_boundary_ignored() {
-        // Legacy "boundary" flag in stored comments is silently ignored
+        // Legacy "boundary" and "hidden" flags in stored comments are silently ignored
         let input = "// done:host:boundary:hidden";
         let tag: CommentTag = input.parse().unwrap();
         assert_eq!(tag.stage, "done");
-        assert!(tag.hidden);
+        assert_eq!(tag.hostname, "host");
     }
 
     #[test]
     fn test_comment_tag_roundtrip() {
-        let tag = CommentTag::new("planning".into(), "localhost".into(), None, None, false);
+        let tag = CommentTag::new("main".into(), 1, "planning".into(), "localhost".into(), None, None);
         let s = tag.to_string();
-        assert_eq!(s, "// planning:localhost");
+        assert_eq!(s, "// main:1:planning by localhost");
         let parsed: CommentTag = s.parse().unwrap();
         assert_eq!(parsed, tag);
 
-        let tag2 = CommentTag::new("reviewing".into(), "host".into(), None, None, true);
+        let tag2 = CommentTag::new("init".into(), 2, "reviewing".into(), "host".into(), None, None);
         let s2 = tag2.to_string();
-        assert_eq!(s2, "// reviewing:host:hidden");
+        assert_eq!(s2, "// init:2:reviewing by host");
         let parsed2: CommentTag = s2.parse().unwrap();
         assert_eq!(parsed2, tag2);
     }

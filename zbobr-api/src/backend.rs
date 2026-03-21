@@ -121,7 +121,8 @@ pub trait TaskMut: Send + Sync {
         tool: Option<Tool>,
         model: Option<Model>,
         body: &str,
-        hidden: bool,
+        pipeline: &str,
+        pipeline_run_id: u64,
     ) -> anyhow::Result<()>;
 
     /// Release exclusive access, return read-only handle.

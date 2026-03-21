@@ -232,7 +232,9 @@ impl ZbobrDispatcher {
         tracker: Arc<std::sync::Mutex<Option<String>>>,
         call_tracker: Arc<std::sync::Mutex<Option<String>>>,
         comment_buffer: task::CommentBuffer,
+        pipeline_name: String,
+        pipeline_run_id: u64,
     ) -> RoleSession {
-        RoleSession::with_shared_tracker(Arc::clone(self), task_id, tracker, call_tracker, comment_buffer)
+        RoleSession::with_shared_tracker(Arc::clone(self), task_id, tracker, call_tracker, comment_buffer, pipeline_name, pipeline_run_id)
     }
 }

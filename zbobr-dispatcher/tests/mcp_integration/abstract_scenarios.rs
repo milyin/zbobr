@@ -12,27 +12,15 @@ timeout: 60
 stop_on_failure: true
 
 steps:
-- name: get_history_index
+- name: get_history
   operation:
     type: tool_call
-    tool: get_history_index
+    tool: get_history
   assertions:
     - type: success
     - type: contains
       path: result
       value: "task"
-
-- name: get_history_record (position 0)
-  operation:
-    type: tool_call
-    tool: get_history_record
-    arguments:
-      index: 0
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "Test task"
 
 - name: configure_worktree
   operation:

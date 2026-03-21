@@ -1,8 +1,7 @@
 /// All possible static MCP tool names across all roles.
 /// Dynamic `call_*` tools are not included here.
 pub const ALL_TOOL_NAMES: &[&str] = &[
-    "get_history_index",
-    "get_history_record",
+    "get_history",
     "report_success",
     "report_failure",
     "stop_with_error",

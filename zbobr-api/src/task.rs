@@ -51,9 +51,6 @@ pub struct ChecklistItem {
 /// The `stage` field identifies which stage posted the comment (e.g. "planning",
 /// "working"). The body text may contain `[tool_name]` section headers added by
 /// MCP tools (e.g. `[report_success]`, `[report_failure]`).
-///
-/// `hidden` marks comments that are excluded from regular history display (errors,
-/// done markers) but still visible in the history index.
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
@@ -72,12 +69,15 @@ pub struct Comment {
     pub model: Option<Model>,
     #[schemars(description = "Comment text (may contain [tool] section headers)")]
     pub text: String,
-    #[schemars(description = "True if this comment is hidden from get_history")]
+    #[schemars(description = "Pipeline name that produced this comment")]
     #[serde(default)]
-    pub hidden: bool,
+    pub pipeline: String,
+    #[schemars(description = "Monotonic run counter within the pipeline")]
+    #[serde(default)]
+    pub pipeline_run_id: u64,
 }
 
-// -- History index types --
+// -- History helper types --
 
 /// Type of a history record, derived from `[tool_name]` prefix in comment text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -89,22 +89,6 @@ pub enum HistoryRecordType {
     Question,
     Error,
     Other,
-}
-
-/// A single entry in the history index.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub struct HistoryIndexEntry {
-    pub position: usize,
-    pub author: String,
-    pub record_type: HistoryRecordType,
-    pub hidden: bool,
-    pub summary: String,
-}
-
-/// Full history index returned by `get_history_index`.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub struct HistoryIndex {
-    pub entries: Vec<HistoryIndexEntry>,
 }
 
 /// Determine the record type from a comment's `[tool_name]` prefix.
@@ -122,7 +106,7 @@ pub fn classify_comment(text: &str) -> HistoryRecordType {
 }
 
 /// Extract a one-line summary from comment text (first non-prefix line, truncated).
-fn extract_summary(text: &str) -> String {
+pub fn extract_summary(text: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
     // Skip the [tool_name] prefix line if present
     let content_line = if lines.first().map_or(false, |l| l.starts_with('[') && l.ends_with(']')) {
@@ -138,58 +122,6 @@ fn extract_summary(text: &str) -> String {
     }
 }
 
-/// Build a history index from comments and task description.
-///
-/// Position 0 is a synthetic entry for the task description.
-/// Subsequent positions map to comments (including hidden ones).
-pub fn build_history_index(comments: &[Comment], description: &str) -> HistoryIndex {
-    let mut entries = Vec::with_capacity(comments.len() + 1);
-
-    // Position 0: synthetic task description entry
-    entries.push(HistoryIndexEntry {
-        position: 0,
-        author: "user".to_string(),
-        record_type: HistoryRecordType::Task,
-        hidden: false,
-        summary: extract_summary(description),
-    });
-
-    for (i, comment) in comments.iter().enumerate() {
-        entries.push(HistoryIndexEntry {
-            position: i + 1,
-            author: comment.stage.clone(),
-            record_type: classify_comment(&comment.text),
-            hidden: comment.hidden,
-            summary: extract_summary(&comment.text),
-        });
-    }
-
-    HistoryIndex { entries }
-}
-
-/// Get the text of a history record by position index.
-///
-/// Position 0 returns the task description. Positions 1..=N map to comments.
-pub fn get_history_record_by_index(
-    comments: &[Comment],
-    description: &str,
-    index: usize,
-) -> anyhow::Result<String> {
-    if index == 0 {
-        return Ok(description.to_string());
-    }
-    let comment_idx = index - 1;
-    if comment_idx < comments.len() {
-        Ok(comments[comment_idx].text.clone())
-    } else {
-        anyhow::bail!(
-            "offset {} out of range: only {} record(s) available",
-            index,
-            comments.len() + 1
-        )
-    }
-}
-
 /// An entry on the task's call stack, recording which pipeline to return to
 /// and which signal to emit upon return (e.g. "go_working").
 #[derive(
@@ -200,6 +132,9 @@ pub struct StackEntry {
     /// Signal to emit when returning to this pipeline (e.g. "go_working").
     #[serde(alias = "stage")]
     pub signal: String,
+    /// Caller's pipeline_run_id to restore on return.
+    #[serde(default)]
+    pub pipeline_run_id: u64,
 }
 
 /// A worktree problem detected before stage execution.
@@ -442,47 +377,49 @@ impl std::str::FromStr for Model {
     }
 }
 
-/// Tag for comment formatting. Contains stage name, hostname, and optional tool/model.
+/// Tag for comment formatting. Contains pipeline info, stage name, hostname, and optional tool/model.
 ///
-/// Format: `// {stage}:{hostname}[:{tool}[:{model}]]` with optional `:hidden` flag.
+/// Format: `// {pipeline}:{run_id}:{stage} by {hostname}[:{tool}[:{model}]]`
+/// Example: `// main:3:working by myhost:copilot:gpt-5-mini`
+/// Example (no tool): `// main:3:working by myhost`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommentTag {
+    pub pipeline: String,
+    pub pipeline_run_id: u64,
     pub stage: String,
     pub hostname: String,
     pub tool: Option<Tool>,
     pub model: Option<Model>,
-    pub hidden: bool,
 }
 
 impl CommentTag {
     pub fn new(
+        pipeline: String,
+        pipeline_run_id: u64,
         stage: String,
         hostname: String,
         tool: Option<Tool>,
         model: Option<Model>,
-        hidden: bool,
     ) -> Self {
         Self {
+            pipeline,
+            pipeline_run_id,
             stage,
             hostname,
             tool,
             model,
-            hidden,
         }
     }
 }
 
 impl std::fmt::Display for CommentTag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "// {}:{}", self.stage, self.hostname)?;
+        write!(f, "// {}:{}:{} by {}", self.pipeline, self.pipeline_run_id, self.stage, self.hostname)?;
         if let Some(ref tool) = self.tool {
             write!(f, ":{tool}")?;
             if let Some(ref model) = self.model {
                 write!(f, ":{model}")?;
             }
-        }
-        if self.hidden {
-            write!(f, ":hidden")?;
         }
         Ok(())
     }
@@ -493,6 +430,44 @@ impl std::str::FromStr for CommentTag {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.trim_start_matches("//").trim_start();
+
+        // New format: "pipeline:run_id:stage by hostname[:tool[:model]]"
+        if let Some((prefix, suffix)) = s.split_once(" by ") {
+            let prefix_parts: Vec<&str> = prefix.split(':').collect();
+            if prefix_parts.len() >= 3 {
+                let pipeline = prefix_parts[0].to_string();
+                let pipeline_run_id = prefix_parts[1].parse::<u64>().unwrap_or(0);
+                let stage = prefix_parts[2].to_string();
+
+                let suffix_parts: Vec<&str> = suffix.split(':').collect();
+                let hostname = suffix_parts[0].to_string();
+
+                let mut tool: Option<Tool> = None;
+                let mut model: Option<Model> = None;
+                for part in &suffix_parts[1..] {
+                    if tool.is_none() {
+                        if let Ok(t) = part.parse::<Tool>() {
+                            tool = Some(t);
+                        }
+                    } else if model.is_none() {
+                        if let Ok(m) = part.parse::<Model>() {
+                            model = Some(m);
+                        }
+                    }
+                }
+
+                return Ok(CommentTag {
+                    pipeline,
+                    pipeline_run_id,
+                    stage,
+                    hostname,
+                    tool,
+                    model,
+                });
+            }
+        }
+
+        // Legacy format: "stage:hostname[:tool[:model]][:hidden][:boundary]"
         let parts: Vec<&str> = s.split(':').collect();
         if parts.len() < 2 {
             return Err(anyhow::anyhow!("Invalid tag format: {}", s));
@@ -501,17 +476,13 @@ impl std::str::FromStr for CommentTag {
         let stage = parts[0].to_string();
         let hostname = parts[1].to_string();
 
-        // Remaining parts are optional tool, model, and flags (hidden).
         let rest = &parts[2..];
         let mut tool: Option<Tool> = None;
         let mut model: Option<Model> = None;
-        let mut hidden = false;
 
         for part in rest {
-            if *part == "hidden" {
-                hidden = true;
-            } else if *part == "boundary" {
-                // Ignore legacy boundary flag in stored comments
+            if *part == "hidden" || *part == "boundary" {
+                // Ignore legacy flags
             } else if tool.is_none() {
                 if let Ok(t) = part.parse::<Tool>() {
                     tool = Some(t);
@@ -524,11 +495,12 @@ impl std::str::FromStr for CommentTag {
         }
 
         Ok(CommentTag {
+            pipeline: String::new(),
+            pipeline_run_id: 0,
             stage,
             hostname,
             tool,
             model,
-            hidden,
         })
     }
 }
@@ -564,10 +536,34 @@ pub struct Task {
     /// Checked against the pipeline's max_retries before starting.
     #[serde(default)]
     pub pipeline_retries: std::collections::HashMap<String, u32>,
+    /// Current/latest pipeline run counter. Incremented on each new pipeline call.
+    #[serde(default)]
+    pub pipeline_run_id: u64,
     /// ETag for optimistic locking to prevent concurrent update conflicts.
     /// Used to detect if the task has been modified between read and write operations.
     #[serde(skip)]
     pub etag: Option<String>,
+}
+
+/// Filter comments for a specific pipeline run.
+///
+/// Comments with `pipeline_run_id == 0` (user comments) inherit the run ID
+/// of the previous comment at retrieval time.
+pub fn filter_comments_for_run(comments: &[Comment], target_run_id: u64) -> Vec<&Comment> {
+    let mut result = Vec::new();
+    let mut current_run_id: u64 = 0;
+    for comment in comments {
+        let effective = if comment.pipeline_run_id > 0 {
+            current_run_id = comment.pipeline_run_id;
+            comment.pipeline_run_id
+        } else {
+            current_run_id // user comment inherits previous
+        };
+        if effective == target_run_id {
+            result.push(comment);
+        }
+    }
+    result
 }
 
 impl Task {

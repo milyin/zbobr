@@ -95,6 +95,12 @@ pub trait CommonMcpImpl: Send + Sync {
     /// Returns the name of the current stage, used to compute the retry signal
     fn stage_name(&self) -> &str;
 
+    /// Returns the pipeline name for this session.
+    fn pipeline_name(&self) -> &str;
+
+    /// Returns the pipeline run ID for this session.
+    fn pipeline_run_id(&self) -> u64;
+
     /// Record a tool call for transition mapping.
     fn record_tool(&self, tool_name: &str) {
         self.session().record_tool_call(tool_name);
@@ -102,63 +108,29 @@ pub trait CommonMcpImpl: Send + Sync {
 
     // -- History tools --
 
-    async fn get_history_index_impl(&self) -> String {
+    async fn get_history_impl(&self) -> String {
         tracing::info!(
-            "[{}#{}] get_history_index",
+            "[{}#{}] get_history",
             self.role_name(),
             self.session().task_id(),
         );
 
-        match self.session().get_history_index().await {
-            Ok(index) => {
-                tracing::info!(
-                    "[{}#{}] get_history_index returned {} entries",
+        match self.session().get_history_for_run(self.pipeline_run_id()).await {
+            Ok(text) => {
+                log_mcp_string_response(
                     self.role_name(),
                     self.session().task_id(),
-                    index.entries.len()
+                    "get_history",
+                    &text,
                 );
-                match serde_json::to_string_pretty(&index) {
-                    Ok(json) => json,
-                    Err(e) => format!("Error serializing: {e}"),
-                }
+                text
             }
             Err(e) => {
                 let response = format!("Error: {e}");
                 log_mcp_string_response(
                     self.role_name(),
                     self.session().task_id(),
-                    "get_history_index",
-                    &response,
-                );
-                response
-            }
-        }
-    }
-
-    async fn get_history_record_impl(&self, index: usize) -> String {
-        tracing::info!(
-            "[{}#{}] get_history_record index={}",
-            self.role_name(),
-            self.session().task_id(),
-            index
-        );
-
-        match self.session().get_history_record(index).await {
-            Ok(text) => {
-                log_mcp_string_response(
-                    self.role_name(),
-                    self.session().task_id(),
-                    "get_history_record",
-                    &text,
-                );
-                text
-            }
-            Err(e) => {
-                let response = format!("{e}");
-                log_mcp_string_response(
-                    self.role_name(),
-                    self.session().task_id(),
-                    "get_history_record",
+                    "get_history",
                     &response,
                 );
                 response
@@ -179,7 +151,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, false)
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true)
             .await
         {
             tracing::error!(
@@ -219,7 +191,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true, false)
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), true)
             .await
         {
             tracing::error!(
@@ -259,7 +231,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), false, true)
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), false)
             .await
         {
             tracing::error!(
@@ -322,7 +294,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), false, false)
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), false)
             .await
         {
             tracing::error!(

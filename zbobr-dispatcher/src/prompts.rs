@@ -169,7 +169,6 @@ pub fn build_template_variables<'a>(
     let last_report = comments
         .iter()
         .rev()
-        .filter(|c| !c.hidden)
         .find(|c| {
             let t = classify_comment(&c.text);
             t == HistoryRecordType::Success || t == HistoryRecordType::Failure
@@ -182,7 +181,6 @@ pub fn build_template_variables<'a>(
     let last_request = comments
         .iter()
         .rev()
-        .filter(|c| !c.hidden)
         .find(|c| classify_comment(&c.text) == HistoryRecordType::Other)
         .map(|c| c.text.as_str())
         .unwrap_or(&task.description);
@@ -313,6 +311,7 @@ mod tests {
             confirm: false,
             worktree_retries: 0,
             pipeline_retries: Default::default(),
+            pipeline_run_id: 0,
             etag: None,
         }
     }
@@ -325,7 +324,8 @@ mod tests {
             tool: None,
             model: None,
             text: text.to_string(),
-            hidden: false,
+            pipeline: String::new(),
+            pipeline_run_id: 0,
         }
     }
 

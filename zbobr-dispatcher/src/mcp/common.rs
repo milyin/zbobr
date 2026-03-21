@@ -21,12 +21,6 @@ pub struct MessageParam {
     pub message: String,
 }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct GetHistoryRecordParam {
-    #[schemars(description = "Position index of the record to retrieve (0 = task description)")]
-    pub index: usize,
-}
-
 // -- Worktree configuration --
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -130,6 +124,8 @@ pub async fn run_role_mcp_server(
     call_tracker: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     comment_buffer: crate::task::CommentBuffer,
     callable_pipelines: Vec<String>,
+    pipeline_name: String,
+    pipeline_run_id: u64,
 ) -> anyhow::Result<u16> {
     let base_port = zbobr.config().base_port;
     use rmcp::transport::streamable_http_server::{
@@ -139,7 +135,7 @@ pub async fn run_role_mcp_server(
     let path = format!("/{}/{}", role_name, task_id);
 
     let session: RoleSession =
-        zbobr.role_session_with_tracker(task_id, tool_tracker, call_tracker.clone(), comment_buffer);
+        zbobr.role_session_with_tracker(task_id, tool_tracker, call_tracker.clone(), comment_buffer, pipeline_name.clone(), pipeline_run_id);
 
     let role_name_owned = role_name.to_string();
     tracing::info!("Creating UnifiedMcp service for task {task_id} role '{role_name}' at path {path}");
@@ -155,6 +151,8 @@ pub async fn run_role_mcp_server(
                 stage_name.clone(),
                 callable_pipelines.clone(),
                 call_tracker.clone(),
+                pipeline_name.clone(),
+                pipeline_run_id,
             ))
         },
         std::sync::Arc::new(LocalSessionManager::default()),

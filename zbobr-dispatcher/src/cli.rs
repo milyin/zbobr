@@ -223,11 +223,12 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
         println!("Discussion ({} comment(s)):", discussion.len());
         for (i, c) in discussion.iter().enumerate() {
             let tag = CommentTag::new(
+                c.pipeline.clone(),
+                c.pipeline_run_id,
                 c.stage.clone(),
                 c.hostname.clone(),
                 c.tool,
                 c.model.clone(),
-                c.hidden,
             );
             println!("  [{}] {}\n{}", i + 1, tag, c.text);
         }
@@ -320,6 +321,15 @@ impl<'a> CliStageRunner<'a> {
         // Reset worktree retries on successful worktree setup
         reset_worktree_retries(self.zbobr, self.task_id).await?;
 
+        // Allocate pipeline run ID if this is a fresh task (run_id == 0).
+        {
+            let task_session = self.zbobr.task_session(self.task_id);
+            let task = task_session.get_task().await?;
+            if task.pipeline_run_id == 0 {
+                task_session.allocate_pipeline_run_id().await?;
+            }
+        }
+
         // Clear the triggering signal before the agent session starts.
         {
             let task_session = self.zbobr.task_session(self.task_id);
@@ -332,17 +342,10 @@ impl<'a> CliStageRunner<'a> {
         // Pre-flight check
         {
             let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
-            let comments = weak.get_comments().await?;
             let task_snap = weak.snapshot().await?;
-            let index = zbobr_api::build_history_index(&comments, &task_snap.description);
-            tracing::info!(
-                "Task #{} pre-flight: history index has {} record(s)",
-                self.task_id,
-                index.entries.len()
-            );
-            if index.entries.is_empty() {
+            if task_snap.description.is_empty() {
                 anyhow::bail!(
-                    "Task #{} has no actionable messages — nothing for the agent to do",
+                    "Task #{} has no description — nothing for the agent to do",
                     self.task_id
                 );
             }
@@ -372,6 +375,10 @@ impl<'a> CliStageRunner<'a> {
             .map(|s| s.to_string())
             .collect();
 
+        // Read current pipeline_run_id for this session.
+        let task_snap = self.zbobr.task_backend().get_task(self.task_id).await?.snapshot().await?;
+        let pipeline_run_id = task_snap.pipeline_run_id;
+
         let tool_tracker = Arc::new(std::sync::Mutex::new(None::<String>));
         let call_tracker = Arc::new(std::sync::Mutex::new(None::<String>));
         let comment_buffer: crate::task::CommentBuffer =
@@ -388,6 +395,8 @@ impl<'a> CliStageRunner<'a> {
             Arc::clone(&call_tracker),
             Arc::clone(&comment_buffer),
             callable_pipelines,
+            self.pipeline_name.to_string(),
+            pipeline_run_id,
         )
         .await?;
 
@@ -829,7 +838,7 @@ async fn detect_and_handle_worktree(
             let hostname = get_hostname();
             if let Err(post_err) = zbobr
                 .task_session(task_id)
-                .post_comment("error", &hostname, None, None, &msg, true)
+                .post_comment("error", &hostname, None, None, &msg, "", 0)
                 .await
             {
                 tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -925,7 +934,7 @@ async fn handle_worktree_problem(
             problem
         );
         task_session
-            .post_comment("error", &hostname, None, None, &msg, true)
+            .post_comment("error", &hostname, None, None, &msg, "", 0)
             .await
             .ok();
         task_session
@@ -951,7 +960,7 @@ async fn handle_worktree_problem(
             problem
         );
         task_session
-            .post_comment("error", &hostname, None, None, &msg, true)
+            .post_comment("error", &hostname, None, None, &msg, "", 0)
             .await
             .ok();
         task_session
@@ -976,6 +985,7 @@ async fn handle_worktree_problem(
     task_session
         .push_stack(pipeline_name, &format!("go_{}", stage_name))
         .await?;
+    task_session.allocate_pipeline_run_id().await?;
     task_session
         .set_signal(Some(&format!("call_{}", handler_pipeline)))
         .await?;
@@ -1041,7 +1051,7 @@ async fn ensure_pr_url(
             let hostname = get_hostname();
             let task_session = zbobr.task_session(task_id);
             if let Err(post_err) = task_session
-                .post_comment("error", &hostname, None, None, &msg, true)
+                .post_comment("error", &hostname, None, None, &msg, "", 0)
                 .await
             {
                 tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -1094,11 +1104,13 @@ async fn start_mcp_server(
     call_tracker: Arc<std::sync::Mutex<Option<String>>>,
     comment_buffer: crate::task::CommentBuffer,
     callable_pipelines: Vec<String>,
+    pipeline_name: String,
+    pipeline_run_id: u64,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
     let role_name = role_name.to_string();
     let server_handle = tokio::spawn(async move {
-        match crate::mcp::run_role_mcp_server(zbobr, &role_name, task_id, tool, model, stage_name, allowed_tools, tool_tracker, call_tracker, comment_buffer, callable_pipelines).await
+        match crate::mcp::run_role_mcp_server(zbobr, &role_name, task_id, tool, model, stage_name, allowed_tools, tool_tracker, call_tracker, comment_buffer, callable_pipelines, pipeline_name, pipeline_run_id).await
         {
             Ok(assigned_port) => {
                 let _ = port_tx.send(assigned_port);
@@ -1198,6 +1210,7 @@ async fn finalize_stage_session(
             } else {
                 (None, None)
             };
+            let task_snap = zbobr.task_backend().get_task(task_id).await?.snapshot().await?;
             if let Err(e) = task_session
                 .post_comment(
                     stage_name,
@@ -1205,7 +1218,8 @@ async fn finalize_stage_session(
                     cli_tool,
                     model,
                     &combined_text,
-                    false,
+                    pipeline_name,
+                    task_snap.pipeline_run_id,
                 )
                 .await
             {
@@ -1234,7 +1248,7 @@ async fn finalize_stage_session(
         let error_msg = format!("Execution failed: {e}");
         let hostname = get_hostname();
         if let Err(post_err) = task_session
-            .post_comment("error", &hostname, None, None, &error_msg, true)
+            .post_comment("error", &hostname, None, None, &error_msg, "", 0)
             .await
         {
             tracing::error!("Failed to post error to task #{task_id}: {post_err}");
@@ -1260,7 +1274,7 @@ async fn finalize_stage_session(
         let hostname = get_hostname();
         let msg = format!("Stash/push failed: {e}");
         if let Err(post_err) = task_session
-            .post_comment("error", &hostname, None, None, &msg, true)
+            .post_comment("error", &hostname, None, None, &msg, "", 0)
             .await
         {
             tracing::error!(
@@ -1309,7 +1323,7 @@ async fn finalize_stage_session(
                         .modify_task(|mut t| { t.pause = true; t })
                         .await?;
                 } else {
-                    // Increment retries, push stack, set call signal
+                    // Increment retries, push stack, allocate new run ID, set call signal
                     let pipeline_clone = pipeline.clone();
                     task_session
                         .modify_task(move |mut t| {
@@ -1320,6 +1334,7 @@ async fn finalize_stage_session(
                     task_session
                         .push_stack(pipeline_name, &format!("go_{return_stage}"))
                         .await?;
+                    task_session.allocate_pipeline_run_id().await?;
                     task_session.set_signal(Some(&format!("call_{pipeline}"))).await?;
                 }
             }

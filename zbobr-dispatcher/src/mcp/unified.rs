@@ -14,7 +14,7 @@ use rmcp::service::RequestContext;
 use crate::{
     mcp::common::{
         AddChecklistItemParam, CheckChecklistItemParam, ConfigureWorktreeParam,
-        DeleteChecklistItemParam, GetHistoryRecordParam, MessageParam,
+        DeleteChecklistItemParam, MessageParam,
     },
     mcp::traits::CommonMcpImpl,
     task::{Model, RoleSession, Tool},
@@ -35,6 +35,10 @@ pub struct UnifiedMcp {
     callable_pipelines: Vec<String>,
     /// Tracks a pending `call_*` pipeline invocation.
     call_tracker: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    /// Pipeline name for this session.
+    pipeline_name: String,
+    /// Pipeline run ID for this session.
+    pipeline_run_id: u64,
 }
 
 impl CommonMcpImpl for UnifiedMcp {
@@ -57,6 +61,14 @@ impl CommonMcpImpl for UnifiedMcp {
     fn stage_name(&self) -> &str {
         &self.stage_name
     }
+
+    fn pipeline_name(&self) -> &str {
+        &self.pipeline_name
+    }
+
+    fn pipeline_run_id(&self) -> u64 {
+        self.pipeline_run_id
+    }
 }
 
 /// All possible static tool names across all roles (excludes dynamic `call_*` tools).
@@ -73,6 +85,8 @@ impl UnifiedMcp {
         stage_name: String,
         callable_pipelines: Vec<String>,
         call_tracker: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+        pipeline_name: String,
+        pipeline_run_id: u64,
     ) -> Self {
         Self {
             session,
@@ -84,24 +98,16 @@ impl UnifiedMcp {
             stage_name,
             callable_pipelines,
             call_tracker,
+            pipeline_name,
+            pipeline_run_id,
         }
     }
 
     // -- All tools defined here. Filtering happens in ServerHandler impl. --
 
-    #[tool(
-        description = "Get the full history index: position, author (stage or 'user'), record type (task/success/failure/question/error/other), hidden flag, and summary for each record."
-    )]
-    async fn get_history_index(&self) -> String {
-        self.get_history_index_impl().await
-    }
-
-    #[tool(description = "Get a single history record by position index. Position 0 is the task description.")]
-    async fn get_history_record(
-        &self,
-        Parameters(params): Parameters<GetHistoryRecordParam>,
-    ) -> String {
-        self.get_history_record_impl(params.index).await
+    #[tool(description = "Get the full discussion history for the current pipeline run.")]
+    async fn get_history(&self) -> String {
+        self.get_history_impl().await
     }
 
     #[tool(
@@ -326,7 +332,7 @@ mod tests {
     #[test]
     fn filtering_works() {
         let router = UnifiedMcp::tool_router();
-        let allowed: HashSet<String> = ["get_history_index", "stop_with_error"].iter().map(|s| s.to_string()).collect();
+        let allowed: HashSet<String> = ["get_history", "stop_with_error"].iter().map(|s| s.to_string()).collect();
         let all_tools = router.list_all();
         let filtered: Vec<_> = all_tools
             .iter()

@@ -158,8 +158,8 @@ fn default_workflow() -> WorkflowConfig {
             "preparator".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history_index",
-                    "get_history_record",
+                    "get_history",
+
                     "stop_with_error",
                     "report_success",
                     "stop_with_question",
@@ -175,8 +175,8 @@ fn default_workflow() -> WorkflowConfig {
             "planner".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history_index",
-                    "get_history_record",
+                    "get_history",
+
                     "stop_with_error",
                     "stop_with_question",
                     "report_success",
@@ -194,8 +194,8 @@ fn default_workflow() -> WorkflowConfig {
             "worker".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history_index",
-                    "get_history_record",
+                    "get_history",
+
                     "stop_with_error",
                     "report_success",
                     "report_failure",
@@ -215,8 +215,8 @@ fn default_workflow() -> WorkflowConfig {
             "reviewer".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history_index",
-                    "get_history_record",
+                    "get_history",
+
                     "stop_with_error",
                     "report_success",
                     "report_failure",
@@ -232,8 +232,8 @@ fn default_workflow() -> WorkflowConfig {
             "tester".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history_index",
-                    "get_history_record",
+                    "get_history",
+
                     "stop_with_error",
                     "report_success",
                     "report_failure",
@@ -249,8 +249,8 @@ fn default_workflow() -> WorkflowConfig {
             "merger".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history_index",
-                    "get_history_record",
+                    "get_history",
+
                     "stop_with_error",
                     "report_success",
                     "stop_with_question",
@@ -355,7 +355,7 @@ Read the task description below and set the required parameters for the implemen
 
 ## Workflow
 
-1. Read the task description provided below in this prompt. Use `{mcp_get_history_index}` to see the full history overview, and `{mcp_get_history_record}` to read specific records.
+1. Read the task description provided below in this prompt. Use `{mcp_get_history}` to see the full discussion history.
 2. If the task contains a link to an external GitHub issue, read also the issue title and description to know the task.
 3. Set task parameters using `{mcp_configure_worktree}`:
     - Call `{mcp_configure_worktree}` with `destination_repository` (in owner/repo format from the task description), `destination_branch` (from the task description or "main"), and `work_branch_postfix` (short but meaningful name related to the task).
@@ -381,7 +381,7 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 
 ## Workflow
 
-1. Read the task description, comments, and checklist provided below in this prompt. Use `{mcp_get_history_index}` to see the full history overview, and `{mcp_get_history_record}` to read specific records for more context.
+1. Read the task description, comments, and checklist provided below in this prompt. Use `{mcp_get_history}` to see the full discussion history for more context.
 2. If need to compare the work already done with the initial codebase, use git diff or equivalent to compare the work branch with the destination branch.
 3. **Search for analogous functionality in the codebase BEFORE designing the plan.** Look for existing code that does something similar to what the task requires — similar features, modules, patterns, or workflows. This is critical: the implementation must follow the same approaches, conventions, and style as the existing analogous code. Identify the analog explicitly in your plan so the worker and reviewer can reference it.
 4. Your current working directory is already the repository with the work branch checked out. Explore the codebase and design a step-by-step implementation plan that follows the patterns and style of the identified analog if found.
@@ -428,7 +428,7 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 
 ## Workflow
 
-1. Read the task description, work plan, comments, and checklist provided below in this prompt. Use `{mcp_get_history_index}` to see the full history overview, and `{mcp_get_history_record}` to read specific records for more context.
+1. Read the task description, work plan, comments, and checklist provided below in this prompt. Use `{mcp_get_history}` to see the full discussion history for more context.
 2. **Identify the analog referenced in the plan.** Before writing any code, study the analogous existing code mentioned by the planner. Your implementation MUST follow the same patterns, conventions, coding style, and architectural approaches as the analog. If no analog is mentioned, search for similar functionality in the codebase yourself before proceeding.
 3. **Focus on one unchecked checklist item during this session**. Assume checked items were completed in previous sessions. In exceptional cases where multiple items logically depend on the same setup and can be done together, you may do more than one, but this should be rare.
 4. Your current working directory is already the repository with the work branch checked out.
@@ -447,7 +447,7 @@ Review the implementation changes and ensure they meet coding standards and task
 ## Access Model
 
     You have read-only access to the task plan and access to the repository for inspection:
-    - The task description, work plan, worker's report, comments, and checklist are provided below in this prompt. Use `{mcp_get_history_index}` and `{mcp_get_history_record}` to read previous plans and discussions if needed for more context.
+    - The task description, work plan, worker's report, comments, and checklist are provided below in this prompt. Use `{mcp_get_history}` to read the full discussion history if needed for more context.
     - Your current working directory is already the repository with the work branch checked out — examine changes directly
     - Use `{mcp_stop_with_error}` only to report technical errors
 
@@ -468,7 +468,7 @@ Run comprehensive tests to verify the implementation meets all testing requireme
 ## Access Model
 
 You have read-only access to the task plan and the repository for testing:
-- The task description, work plan, worker's report, comments, and checklist are provided below in this prompt. Use `{mcp_get_history_index}` and `{mcp_get_history_record}` to read previous plans and discussions if needed for more context.
+- The task description, work plan, worker's report, comments, and checklist are provided below in this prompt. Use `{mcp_get_history}` to read the full discussion history if needed for more context.
 - Your current working directory is the repository with the work branch checked out
 - Use `{mcp_stop_with_error}` only to report technical errors
 
@@ -527,7 +527,7 @@ You have read access to the task and repository:
 
 ## Workflow
 
-1. Read the task description, work plan, reports, comments, and checklist provided below in this prompt. Use `{mcp_get_history_index}` to see the full history overview, and `{mcp_get_history_record}` to read specific records for more context.
+1. Read the task description, work plan, reports, comments, and checklist provided below in this prompt. Use `{mcp_get_history}` to see the full discussion history for more context.
 2. Your current working directory is the repository in a mid-merge conflict state. Examine the conflicts:
    - `git status` to see which files have conflicts
    - `git diff` to examine conflict markers and understand what changed in each branch
