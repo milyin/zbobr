@@ -851,8 +851,6 @@ mod comment_model_tests {
                 stack: vec![],
                 pause: false,
                 confirm: false,
-                worktree_retries: 0,
-                pipeline_retries: Default::default(),
                 pipeline_run_id: 0,
                 etag: None,
             };

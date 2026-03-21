@@ -78,13 +78,6 @@ pub struct PipelineConfig {
     pub order: Vec<String>,
     #[serde(default)]
     pub stages: HashMap<String, StageDefinition>,
-    /// Max retries for this pipeline before pausing.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub max_retries: u32,
-}
-
-fn is_zero(v: &u32) -> bool {
-    *v == 0
 }
 
 impl PipelineConfig {

@@ -151,7 +151,7 @@ fn default_workflow() -> WorkflowConfig {
     let mut pipelines = HashMap::new();
     pipelines.insert(WorkflowConfig::MAIN_PIPELINE.to_string(), PipelineConfig { order: vec!["planning".into(), "working".into(), "reviewing".into(), "merging".into()], stages: main_stages, ..Default::default() });
     pipelines.insert(WorkflowConfig::INIT_PIPELINE.to_string(), PipelineConfig { order: vec!["preparing".into()], stages: init_stages, ..Default::default() });
-    pipelines.insert(WorkflowConfig::MERGE_PIPELINE.to_string(), PipelineConfig { order: vec!["merging".into()], stages: merge_stages, max_retries: 4, ..Default::default() });
+    pipelines.insert(WorkflowConfig::MERGE_PIPELINE.to_string(), PipelineConfig { order: vec!["merging".into()], stages: merge_stages, ..Default::default() });
 
     let roles = HashMap::from([
         (

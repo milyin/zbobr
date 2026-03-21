@@ -401,7 +401,6 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
                 );
                 m
             },
-            max_retries: 3,
         },
     );
     let workflow = WorkflowConfig {
@@ -410,7 +409,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
         roles: Default::default(),
     };
 
-    // First run: failure → return_failure → root pipeline restarts from first stage
+    // First run: failure → return_failure → root pipeline pauses
     let scenarios_reject = scenarios_map(vec![
         ("role_check", abstract_scenarios::report_failure_scenario()),
         ("role_finish", abstract_scenarios::report_and_finish_scenario()),
@@ -424,23 +423,12 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
         "report_failure should produce return_failure signal"
     );
 
-    // Process the return_failure: root pipeline failed → restart from first stage (check)
+    // Process the return_failure: root pipeline failed → paused (no caller to return to)
     env.continue_pipeline(task_id, &workflow, &scenarios_reject)
         .await;
     let task = env.get_task(task_id).await;
-    // After return_failure at root: should restart from first stage
     assert_eq!(task.state, "main_PENDING");
-    assert!(!task.pause, "Should not be paused (retries not exhausted)");
-
-    // Now run with success → should advance check → finish → DONE
-    let scenarios_accept = scenarios_map(vec![
-        ("role_check", abstract_scenarios::report_success_scenario()),
-        ("role_finish", abstract_scenarios::report_and_finish_scenario()),
-    ]);
-    env.run_to_completion(task_id, &workflow, &scenarios_accept, 10)
-        .await;
-    let task = env.get_task(task_id).await;
-    assert_eq!(task.state, "DONE", "Pipeline should complete after success");
+    assert!(task.pause, "Should be paused at root on failure");
 }
 
 // ===========================================================================
@@ -587,93 +575,8 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
     assert_eq!(task.stack.len(), 1, "Stack should have go_working");
     assert_eq!(task.stack[0].pipeline, "main");
     assert_eq!(task.stack[0].signal, "go_working");
-    assert_eq!(task.worktree_retries, 1, "worktree_retries should be incremented");
 }
 
-// ===========================================================================
-// Test 11: Worktree retry limit
-// ===========================================================================
-
-pub async fn run_retry_limit(env: &IntegrationTestEnv) {
-    if env.target_repo.is_some() {
-        eprintln!(
-            "[{}] Skipping run_retry_limit: requires local repo",
-            env.name()
-        );
-        return;
-    }
-
-    let repo_path = env.create_git_repo("repo_retry_limit").await;
-    let work_branch = "zbobr_conflict-retry-limit";
-
-    // Create diverging branches
-    git_in(&repo_path, &["checkout", "-b", work_branch]).await;
-    write_and_commit(
-        &repo_path,
-        "conflict_file.txt",
-        "work version\n",
-        "Work change",
-    )
-    .await;
-    git_in(&repo_path, &["checkout", "main"]).await;
-    write_and_commit(
-        &repo_path,
-        "conflict_file.txt",
-        "main version\n",
-        "Main change",
-    )
-    .await;
-
-    let task_id = env
-        .create_task("Retry limit test", "Retry limit test description", "READY")
-        .await;
-    let dest_repo = env.dest_repo(&repo_path);
-    env.update_task_branches(task_id, &dest_repo, "main", work_branch)
-        .await;
-
-    // Set worktree_retries to the max already (simulating prior retries)
-    {
-        let weak = env.zbobr.task_backend().get_task(task_id).await.unwrap();
-        let mutable = weak.upgrade().await.unwrap();
-        mutable
-            .modify_task(Box::new(|mut task| {
-                task.worktree_retries = 1; // above the default limit (0)
-                task
-            }))
-            .await
-            .unwrap();
-    }
-
-    let workflow = build_workflow(vec![
-        StageDef {
-            name: "work",
-            role: "role_work",
-            pipeline: "main",
-        },
-        StageDef {
-            name: "resolve",
-            role: "role_resolve",
-            pipeline: "merge",
-        },
-    ]);
-
-    let scenarios = scenarios_map(vec![
-        ("role_work", abstract_scenarios::report_and_finish_scenario()),
-        ("role_resolve", abstract_scenarios::report_and_finish_scenario()),
-    ]);
-
-    env.run_pipeline(task_id, &workflow, &scenarios).await;
-
-    let task = env.get_task(task_id).await;
-    assert!(
-        task.pause,
-        "Task should be paused when retry limit is reached"
-    );
-    assert_eq!(
-        task.state, "main_PENDING",
-        "Task should be in PENDING state"
-    );
-}
 
 // ===========================================================================
 // Test 12: Call stage invokes a sub-pipeline and advances on return

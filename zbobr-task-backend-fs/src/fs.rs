@@ -43,10 +43,6 @@ struct TaskFile {
     #[serde(default)]
     stack: Vec<StackEntry>,
     #[serde(default)]
-    worktree_retries: u32,
-    #[serde(default)]
-    pipeline_retries: HashMap<String, u32>,
-    #[serde(default)]
     pipeline_run_id: u64,
     closed: bool,
 }
@@ -80,8 +76,6 @@ impl TaskFile {
             stack: self.stack.clone(),
             pause: self.pause,
             confirm: self.confirm,
-            worktree_retries: self.worktree_retries,
-            pipeline_retries: self.pipeline_retries.clone(),
             pipeline_run_id: self.pipeline_run_id,
             etag: None,
         })
@@ -109,8 +103,6 @@ impl TaskFile {
             checklist: task.checklist.clone(),
             signal: task.signal.clone(),
             stack: task.stack.clone(),
-            worktree_retries: task.worktree_retries,
-            pipeline_retries: task.pipeline_retries.clone(),
             pipeline_run_id: task.pipeline_run_id,
             closed,
         }
@@ -453,8 +445,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
             stack: vec![],
             pause: false,
             confirm: false,
-            worktree_retries: 0,
-            pipeline_retries: Default::default(),
             pipeline_run_id: 0,
             etag: None,
         };

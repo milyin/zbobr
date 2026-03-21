@@ -92,7 +92,7 @@ pub trait CommonMcpImpl: Send + Sync {
     /// Returns the concrete model currently in use by the agent tool
     fn mcp_model(&self) -> Model;
 
-    /// Returns the name of the current stage, used to compute the retry signal
+    /// Returns the name of the current stage.
     fn stage_name(&self) -> &str;
 
     /// Returns the pipeline name for this session.
@@ -264,15 +264,6 @@ pub trait CommonMcpImpl: Send + Sync {
             return response;
         }
 
-        // Set the retry signal so the task returns to this stage after the user intervenes.
-        let retry = "retry_current".to_string();
-        if let Err(e) = self.session().set_signal(&retry).await {
-            tracing::warn!(
-                "Failed to set retry signal for task {} after reporting error: {e}",
-                self.session().task_id()
-            );
-        }
-
         let response = "Error reported to user - task paused pending response".to_string();
         log_mcp_string_response(
             self.role_name(),
@@ -325,15 +316,6 @@ pub trait CommonMcpImpl: Send + Sync {
                 &response,
             );
             return response;
-        }
-
-        // Set the retry signal so the task returns to this stage after the user responds.
-        let retry = "retry_current".to_string();
-        if let Err(e) = self.session().set_signal(&retry).await {
-            tracing::warn!(
-                "Failed to set retry signal for task {} after asking user: {e}",
-                self.session().task_id()
-            );
         }
 
         let response = "Question posted - task paused pending user response".to_string();

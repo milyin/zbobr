@@ -1732,15 +1732,12 @@ pub async fn run_planner_sets_go_work_on_exit(
     );
 }
 
-/// Rule 2: if the agent already set a signal, the exit logic must not override it.
+/// Rule 2: if the agent already set pause, the exit logic must not override
+/// it with a sequential signal.
 ///
-/// Uses the Preparator with `ask_planner` (which sets GoPlan signal via the
-/// retry mechanism) to verify that, even though Preparator's default exit
-/// signal is also GoPlan, the pre-set signal is respected and preserved.
-///
-/// A more direct test: pre-set a higher-priority signal (GoPrepare) on a
-/// Planning task.  If Rule 2 works, GoPrepare is preserved; if the exit logic
-/// erroneously overrides it, GoWork appears instead.
+/// Uses `report_error` which sets `pause = true`.  The exit logic checks
+/// `!pause && signal.is_none()` before computing a sequential signal, so
+/// the pause flag should be preserved and no signal should be set.
 pub async fn run_exit_preserves_agent_set_signal(
     env: &IntegrationTestEnv,
 ) {
@@ -1761,15 +1758,8 @@ pub async fn run_exit_preserves_agent_set_signal(
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    // Use planning_scenario which calls report_results — it does NOT set a
-    // signal.  We manually pre-set GoPrepare AFTER the stage entry so it
-    // simulates the agent having set it mid-session.
-    //
-    // To keep this test self-contained (and avoid the need for a custom
-    // scenario that calls a signal-setting MCP tool), we instead rely on the
-    // fact that report_error sets the retry signal.  Run the planning stage
-    // with a report_error scenario and check that GoPlan (the Planner's retry
-    // signal) is set, NOT GoWork (the normal Planner exit signal).
+    // report_error sets pause = true.  The exit logic should not override
+    // that with a sequential signal.
     env.run_stage(
         task_id,
         "planner",
@@ -1778,15 +1768,14 @@ pub async fn run_exit_preserves_agent_set_signal(
     .await;
 
     let task = env.get_task(task_id).await;
-    assert_eq!(
-        task.signal,
-        Some("go_planning".to_string()),
-        "[{}] Agent-set signal (GoPlan via report_error retry) must not be overridden by exit logic",
-        env.name()
-    );
     assert!(
         task.pause,
-        "[{}] report_error must still set the pause flag",
+        "[{}] report_error must set the pause flag",
+        env.name()
+    );
+    assert_eq!(
+        task.signal, None,
+        "[{}] No signal should be set when pause is active",
         env.name()
     );
 }

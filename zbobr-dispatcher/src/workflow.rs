@@ -200,7 +200,6 @@ impl Workflow {
             || signal.starts_with("call_")
             || signal == "return"
             || signal == "return_failure"
-            || signal == "retry_current"
         {
             let pipeline = pipeline_from_state(&task.state)
                 .unwrap_or_else(|| self.config.default_pipeline().to_string());
@@ -211,7 +210,7 @@ impl Workflow {
 
     fn resolve_signal_in_pipeline(
         &self,
-        task: &Task,
+        _task: &Task,
         signal: &str,
         pipeline: &str,
     ) -> anyhow::Result<StateAction<'_>> {
@@ -266,32 +265,6 @@ impl Workflow {
 
         if signal == "return" || signal == "return_failure" {
             return Ok(StateAction::Done);
-        }
-
-        if signal == "retry_current" {
-            // Parse stage name from state "{pipeline}_{stage}" or "{pipeline}_PENDING"
-            let state = &task.state;
-            if let Some(suffix) = state.strip_prefix(&format!("{pipeline}_")) {
-                if suffix != "PENDING" {
-                    // State is "{pipeline}_{stage}" — re-run that stage
-                    let (pipeline_key, pipeline_config) =
-                        self.config.pipelines.get_key_value(pipeline).ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "retry_current: unknown pipeline '{}'",
-                                pipeline
-                            )
-                        })?;
-                    if let Some((stage_key, stage_def)) = pipeline_config.stages.get_key_value(suffix) {
-                        return Ok(StateAction::RunStage(
-                            pipeline_key.as_str(),
-                            stage_key.as_str(),
-                            stage_def,
-                        ));
-                    }
-                }
-            }
-            // Fallback: idle (can't determine which stage to retry)
-            return Ok(StateAction::Idle);
         }
 
         Ok(StateAction::Idle)
@@ -496,8 +469,6 @@ role = "merger"
             stack: vec![],
             pause: false,
             confirm: false,
-            worktree_retries: 0,
-            pipeline_retries: HashMap::new(),
             pipeline_run_id: 0,
             etag: None,
         };

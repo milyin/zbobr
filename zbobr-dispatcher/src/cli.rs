@@ -15,7 +15,7 @@ use crate::{
     task::{Model, Tool},
 };
 use zbobr_api::config::StageDefinition;
-use crate::workflow::{INIT_PIPELINE, MERGE_PIPELINE, pipeline_from_state};
+use crate::workflow::{INIT_PIPELINE, MERGE_PIPELINE};
 use zbobr_api::CommentTag;
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 
@@ -323,9 +323,6 @@ impl<'a> CliStageRunner<'a> {
             }
         }
 
-        // Reset worktree retries on successful worktree setup
-        reset_worktree_retries(self.zbobr, self.task_id).await?;
-
         // Allocate pipeline run ID if this is a fresh task (run_id == 0).
         {
             let task_session = self.zbobr.task_session(self.task_id);
@@ -452,7 +449,7 @@ enum SequentialSignal {
     /// `report_success` at the last stage → pipeline done, return.
     Return,
     /// No report tool called (crash/timeout/stop_with_error) → pause.
-    RetryOrPause,
+    Pause,
 }
 
 /// Compute the post-execution signal for the sequential pipeline model.
@@ -471,7 +468,7 @@ fn compute_sequential_signal(
             Some((next, _)) => SequentialSignal::Advance(next.to_string()),
             None => SequentialSignal::Return,
         },
-        _ => SequentialSignal::RetryOrPause,
+        _ => SequentialSignal::Pause,
     }
 }
 
@@ -561,36 +558,21 @@ pub async fn process_task(
             let task_session = zbobr.task_session(task.id);
             let is_failure = task.signal.as_deref() == Some("return_failure");
             if is_failure {
-                // Pipeline failed — retry from first stage (same for main and sub-pipelines)
-                let pipeline_name = pipeline_from_state(&task.state)
-                    .unwrap_or_else(|| "main".to_string());
-                let current_task = task_session.get_task().await?;
-                let retries = current_task.pipeline_retries.get(&pipeline_name).copied().unwrap_or(0);
-                let max_retries = zbobr.workflow().pipeline(&pipeline_name)
-                    .map(|p| p.max_retries).unwrap_or(0);
-                if retries > max_retries {
+                // Pipeline failed — return to caller or pause at root
+                if let Some(entry) = task_session.pop_stack().await? {
+                    task_session.set_signal(Some("return_failure")).await?;
+                    task_session
+                        .set_state(&format!("{}_PENDING", entry.pipeline))
+                        .await?;
+                    println!(
+                        "Task #{} pipeline failed — returning failure to pipeline '{}'",
+                        task.id, entry.pipeline
+                    );
+                } else {
                     task_session
                         .modify_task(|mut t| { t.pause = true; t })
                         .await?;
-                    println!("Task #{} pipeline '{}' retries exceeded — paused", task.id, pipeline_name);
-                } else {
-                    let first = zbobr.workflow().pipeline(&pipeline_name)
-                        .and_then(|p| p.first_stage())
-                        .map(|(name, _)| format!("go_{name}"));
-                    let pn = pipeline_name.clone();
-                    task_session
-                        .modify_task(move |mut t| {
-                            *t.pipeline_retries.entry(pn).or_default() += 1;
-                            t
-                        })
-                        .await?;
-                    if let Some(signal) = first {
-                        task_session.set_signal(Some(&signal)).await?;
-                        task_session
-                            .set_state(&format!("{pipeline_name}_PENDING"))
-                            .await?;
-                    }
-                    println!("Task #{} pipeline '{}' failed — restarting from first stage", task.id, pipeline_name);
+                    println!("Task #{} pipeline failed at root — paused", task.id);
                 }
             } else if let Some(entry) = task_session.pop_stack().await? {
                 // Success return from sub-pipeline — re-run calling stage
@@ -733,36 +715,25 @@ pub async fn run_manager_loop(
                     let task_session = zbobr.task_session(task.id);
                     let is_failure = task.signal.as_deref() == Some("return_failure");
                     if is_failure {
-                        // Pipeline failed — retry from first stage (same for main and sub-pipelines)
-                        let pipeline_name = pipeline_from_state(&task.state)
-                            .unwrap_or_else(|| "main".to_string());
-                        match task_session.get_task().await {
-                            Ok(current_task) => {
-                                let retries = current_task.pipeline_retries.get(&pipeline_name).copied().unwrap_or(0);
-                                let max_retries = zbobr.workflow().pipeline(&pipeline_name)
-                                    .map(|p| p.max_retries).unwrap_or(0);
-                                if retries > max_retries {
-                                    if let Err(e) = task_session.modify_task(|mut t| { t.pause = true; t }).await {
-                                        tracing::error!("Failed to pause task #{}: {e}", task.id);
-                                    }
-                                } else {
-                                    let first = zbobr.workflow().pipeline(&pipeline_name)
-                                        .and_then(|p| p.first_stage())
-                                        .map(|(name, _)| format!("go_{name}"));
-                                    let pn = pipeline_name.clone();
-                                    if let Err(e) = task_session.modify_task(move |mut t| {
-                                        *t.pipeline_retries.entry(pn).or_default() += 1;
-                                        t
-                                    }).await {
-                                        tracing::error!("Failed to increment retries for task #{}: {e}", task.id);
-                                    }
-                                    if let Some(signal) = first {
-                                        let _ = task_session.set_signal(Some(&signal)).await;
-                                        let _ = task_session.set_state(&format!("{pipeline_name}_PENDING")).await;
-                                    }
+                        // Pipeline failed — return to caller or pause at root
+                        match task_session.pop_stack().await {
+                            Ok(Some(entry)) => {
+                                if let Err(e) = task_session.set_signal(Some("return_failure")).await {
+                                    tracing::error!("Failed to set return_failure signal for task #{}: {e}", task.id);
+                                }
+                                if let Err(e) = task_session
+                                    .set_state(&format!("{}_PENDING", entry.pipeline))
+                                    .await
+                                {
+                                    tracing::error!("Failed to set return state for task #{}: {e}", task.id);
                                 }
                             }
-                            Err(e) => tracing::error!("Failed to get task #{}: {e}", task.id),
+                            Ok(None) => {
+                                if let Err(e) = task_session.modify_task(|mut t| { t.pause = true; t }).await {
+                                    tracing::error!("Failed to pause task #{}: {e}", task.id);
+                                }
+                            }
+                            Err(e) => tracing::error!("Failed to pop stack for task #{}: {e}", task.id),
                         }
                     } else {
                         match task_session.pop_stack().await {
@@ -952,10 +923,6 @@ async fn handle_worktree_problem(
         zbobr_api::task::WorktreeProblem::Undefined => INIT_PIPELINE,
         zbobr_api::task::WorktreeProblem::Conflict => MERGE_PIPELINE,
     };
-    let max_retries = zbobr.workflow()
-        .pipeline(handler_pipeline)
-        .map(|p| p.max_retries)
-        .unwrap_or(0);
 
     let task_session = zbobr.task_session(task_id);
     let pending_state = format!("{}_PENDING", pipeline_name);
@@ -985,40 +952,6 @@ async fn handle_worktree_problem(
         return Ok(WorktreeResult::Paused);
     }
 
-    // Retry limit check
-    let task = task_session.get_task().await?;
-    if task.worktree_retries > max_retries {
-        tracing::error!(
-            "Task #{task_id}: worktree problem {:?} retry limit ({max_retries}) reached — pausing",
-            problem
-        );
-        let hostname = get_hostname();
-        let msg = format!(
-            "Worktree problem {:?} retry limit ({max_retries}) reached. Manual intervention required.",
-            problem
-        );
-        task_session
-            .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
-            .await
-            .ok();
-        task_session
-            .modify_task(|mut t| {
-                t.pause = true;
-                t
-            })
-            .await?;
-        task_session.set_state(&pending_state).await?;
-        return Ok(WorktreeResult::Paused);
-    }
-
-    // Increment worktree_retries
-    task_session
-        .modify_task(|mut t| {
-            t.worktree_retries += 1;
-            t
-        })
-        .await?;
-
     // Push stack: re-run the interrupted stage upon return
     task_session
         .push_stack(pipeline_name, &format!("go_{}", stage_name))
@@ -1034,24 +967,6 @@ async fn handle_worktree_problem(
         problem
     );
     Ok(WorktreeResult::HandlerCalled)
-}
-
-/// Reset worktree retries counter when a stage proceeds normally.
-async fn reset_worktree_retries(
-    zbobr: &Arc<ZbobrDispatcher>,
-    task_id: u64,
-) -> anyhow::Result<()> {
-    let task_session = zbobr.task_session(task_id);
-    let task = task_session.get_task().await?;
-    if task.worktree_retries > 0 {
-        task_session
-            .modify_task(|mut t| {
-                t.worktree_retries = 0;
-                t
-            })
-            .await?;
-    }
-    Ok(())
 }
 
 async fn ensure_pr_url(
@@ -1361,14 +1276,6 @@ async fn finalize_stage_session(
                 task_session.set_signal(Some("return_failure")).await?;
             }
             SequentialSignal::Advance(next) => {
-                // Reset sub-pipeline retries when the caller pipeline advances
-                let pn = pipeline_name.to_string();
-                task_session
-                    .modify_task(move |mut t| {
-                        t.pipeline_retries.retain(|k, _| k == &pn);
-                        t
-                    })
-                    .await?;
                 task_session.set_signal(Some(&format!("go_{next}"))).await?;
             }
             SequentialSignal::Return => {
@@ -1378,7 +1285,7 @@ async fn finalize_stage_session(
                 }
                 task_session.set_signal(Some("return")).await?;
             }
-            SequentialSignal::RetryOrPause => {
+            SequentialSignal::Pause => {
                 task_session
                     .modify_task(|mut t| { t.pause = true; t })
                     .await?;

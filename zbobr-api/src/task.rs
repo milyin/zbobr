@@ -550,14 +550,6 @@ pub struct Task {
     /// the task's state is changed.  This gives human operators an opportunity to
     /// review a transition before the next processing step occurs.
     pub confirm: bool,
-    /// Number of consecutive worktree-problem retries for this task.
-    /// Reset to 0 when a stage proceeds normally past worktree detection.
-    #[serde(default)]
-    pub worktree_retries: u32,
-    /// Per-pipeline retry counters. Incremented each time a pipeline is called.
-    /// Checked against the pipeline's max_retries before starting.
-    #[serde(default)]
-    pub pipeline_retries: std::collections::HashMap<String, u32>,
     /// Current/latest pipeline run counter. Incremented on each new pipeline call.
     #[serde(default)]
     pub pipeline_run_id: u64,

@@ -98,15 +98,6 @@ async fn test_fs_fs_abstract_auto_undefined() {
 }
 
 #[tokio::test]
-async fn test_fs_fs_abstract_retry_limit() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(env) = get_env().await else {
-        return;
-    };
-    abstract_test_helpers::run_retry_limit(&env).await;
-}
-
-#[tokio::test]
 async fn test_fs_fs_abstract_call_stage() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {
