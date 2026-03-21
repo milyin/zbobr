@@ -306,3 +306,233 @@ pub fn pipeline_from_state(state: &str) -> Option<String> {
     // "{pipeline}_PENDING" or "{pipeline}_{stage}"
     state.find('_').map(|pos| state[..pos].to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zbobr_api::config::{PipelineConfig, StageDefinition, WorkflowConfig};
+
+    /// Helper: build a minimal valid WorkflowConfig with main/init/merge pipelines.
+    fn base_workflow() -> WorkflowConfig {
+        let role_stage = |role: &str| StageDefinition {
+            role: Some(role.to_string()),
+            ..Default::default()
+        };
+        let single_pipeline = |stage_name: &str, role: &str| PipelineConfig {
+            order: vec![stage_name.to_string()],
+            stages: [(stage_name.to_string(), role_stage(role))].into(),
+            ..Default::default()
+        };
+        WorkflowConfig {
+            pipelines: [
+                ("main".into(), single_pipeline("working", "worker")),
+                ("init".into(), single_pipeline("preparing", "preparator")),
+                ("merge".into(), single_pipeline("merging", "merger")),
+            ]
+            .into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn call_stage_valid() {
+        let mut wf = base_workflow();
+        // Add a "review" pipeline and a call stage in main that calls it
+        wf.pipelines.insert(
+            "review".into(),
+            PipelineConfig {
+                order: vec!["checking".into()],
+                stages: [(
+                    "checking".into(),
+                    StageDefinition {
+                        role: Some("reviewer".into()),
+                        ..Default::default()
+                    },
+                )]
+                .into(),
+                ..Default::default()
+            },
+        );
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.order = vec!["working".into(), "call_review".into()];
+        main.stages.insert(
+            "call_review".into(),
+            StageDefinition {
+                call: Some("review".into()),
+                ..Default::default()
+            },
+        );
+        assert!(wf.validate().is_ok());
+    }
+
+    #[test]
+    fn call_stage_unknown_target() {
+        let mut wf = base_workflow();
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.order.push("do_call".into());
+        main.stages.insert(
+            "do_call".into(),
+            StageDefinition {
+                call: Some("nonexistent".into()),
+                ..Default::default()
+            },
+        );
+        let err = wf.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("calls unknown pipeline"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn stage_both_role_and_call() {
+        let mut wf = base_workflow();
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.order.push("bad".into());
+        main.stages.insert(
+            "bad".into(),
+            StageDefinition {
+                role: Some("worker".into()),
+                call: Some("init".into()),
+                ..Default::default()
+            },
+        );
+        let err = wf.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("both 'role' and 'call'"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn stage_neither_role_nor_call() {
+        let mut wf = base_workflow();
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.order.push("empty".into());
+        main.stages.insert("empty".into(), StageDefinition::default());
+        let err = wf.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("neither 'role' nor 'call'"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn call_stage_toml_round_trip() {
+        let toml_str = r#"
+[pipelines.main]
+order = ["setup", "working"]
+[pipelines.main.stages.setup]
+call = "init"
+[pipelines.main.stages.working]
+role = "worker"
+
+[pipelines.init]
+order = ["preparing"]
+[pipelines.init.stages.preparing]
+role = "preparator"
+
+[pipelines.merge]
+order = ["merging"]
+[pipelines.merge.stages.merging]
+role = "merger"
+"#;
+        let wf: WorkflowConfig = toml::from_str(toml_str).unwrap();
+        assert!(wf.validate().is_ok());
+
+        let setup = wf.stage("main", "setup").unwrap();
+        assert_eq!(setup.call_pipeline(), Some("init"));
+        assert_eq!(setup.role_name(), None);
+        assert!(setup.is_call());
+
+        let working = wf.stage("main", "working").unwrap();
+        assert_eq!(working.role_name(), Some("worker"));
+        assert_eq!(working.call_pipeline(), None);
+        assert!(!working.is_call());
+    }
+
+    #[test]
+    fn resolve_next_action_call_stage_returns_run_stage() {
+        let mut wf = base_workflow();
+        wf.pipelines.insert(
+            "sub".into(),
+            PipelineConfig {
+                order: vec!["s1".into()],
+                stages: [(
+                    "s1".into(),
+                    StageDefinition {
+                        role: Some("worker".into()),
+                        ..Default::default()
+                    },
+                )]
+                .into(),
+                ..Default::default()
+            },
+        );
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.order = vec!["call_sub".into()];
+        main.stages.clear();
+        main.stages.insert(
+            "call_sub".into(),
+            StageDefinition {
+                call: Some("sub".into()),
+                ..Default::default()
+            },
+        );
+        let workflow = Workflow::from_config(wf);
+
+        // Fresh task → state machine should resolve to RunStage for the call stage
+        let task = Task {
+            id: 1,
+            title: String::new(),
+            description: String::new(),
+            state: String::new(),
+            destination_repository: None,
+            destination_branch: None,
+            work_branch: None,
+            pr_url: None,
+            checklist: vec![],
+            signal: None,
+            stack: vec![],
+            pause: false,
+            confirm: false,
+            worktree_retries: 0,
+            pipeline_retries: HashMap::new(),
+            pipeline_run_id: 0,
+            etag: None,
+        };
+        let action = workflow.resolve_next_action(&task).unwrap();
+        match action {
+            StateAction::RunStage(pipeline, stage, def) => {
+                assert_eq!(pipeline, "main");
+                assert_eq!(stage, "call_sub");
+                assert!(def.is_call());
+                assert_eq!(def.call_pipeline(), Some("sub"));
+            }
+            other => panic!("expected RunStage, got {:?}", match other {
+                StateAction::Done => "Done",
+                StateAction::Paused => "Paused",
+                StateAction::Idle => "Idle",
+                _ => "RunStage",
+            }),
+        }
+    }
+
+    #[test]
+    fn find_stage_by_role_skips_call_stages() {
+        let mut wf = base_workflow();
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.order = vec!["call_init".into(), "working".into()];
+        main.stages.insert(
+            "call_init".into(),
+            StageDefinition {
+                call: Some("init".into()),
+                ..Default::default()
+            },
+        );
+        // "worker" role should still be found on the "working" stage
+        assert!(wf.find_stage_by_role("worker").is_some());
+        // No stage has role matching call target name
+        assert!(wf.find_stage_by_role("init").is_none());
+    }
+}
