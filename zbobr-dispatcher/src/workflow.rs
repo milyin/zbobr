@@ -40,7 +40,7 @@ impl Default for Workflow {
             pipelines.insert(
                 name.to_string(),
                 PipelineConfig {
-                    start: Some("default".to_string()),
+                    order: vec!["default".to_string()],
                     stages: [(
                         "default".to_string(),
                         dummy_stage.clone(),
@@ -196,13 +196,12 @@ impl Workflow {
     }
 
     fn resolve_signal(&self, task: &Task, signal: &str) -> anyhow::Result<StateAction<'_>> {
-        if signal.strip_prefix("go_").is_some() {
-            // Find the stage in any pipeline — look at what pipeline we're in from state
-            let pipeline = pipeline_from_state(&task.state)
-                .unwrap_or_else(|| self.config.default_pipeline().to_string());
-            return self.resolve_signal_in_pipeline(task, signal, &pipeline);
-        }
-        if signal.starts_with("call_") || signal == "return" {
+        if signal.strip_prefix("go_").is_some()
+            || signal.starts_with("call_")
+            || signal == "return"
+            || signal == "return_failure"
+            || signal == "retry_current"
+        {
             let pipeline = pipeline_from_state(&task.state)
                 .unwrap_or_else(|| self.config.default_pipeline().to_string());
             return self.resolve_signal_in_pipeline(task, signal, &pipeline);
@@ -212,7 +211,7 @@ impl Workflow {
 
     fn resolve_signal_in_pipeline(
         &self,
-        _task: &Task,
+        task: &Task,
         signal: &str,
         pipeline: &str,
     ) -> anyhow::Result<StateAction<'_>> {
@@ -244,7 +243,6 @@ impl Workflow {
         }
 
         if let Some(target_pipeline) = signal.strip_prefix("call_") {
-            // Get pipeline key from workflow's HashMap for lifetime correctness
             let (pipeline_key, pipeline_config) = self
                 .config
                 .pipelines
@@ -266,10 +264,34 @@ impl Workflow {
             ));
         }
 
-        if signal == "return" {
-            // Return with empty stack → Done
-            // Return with stack → caller handles pop + re-dispatch
+        if signal == "return" || signal == "return_failure" {
             return Ok(StateAction::Done);
+        }
+
+        if signal == "retry_current" {
+            // Parse stage name from state "{pipeline}_{stage}" or "{pipeline}_PENDING"
+            let state = &task.state;
+            if let Some(suffix) = state.strip_prefix(&format!("{pipeline}_")) {
+                if suffix != "PENDING" {
+                    // State is "{pipeline}_{stage}" — re-run that stage
+                    let (pipeline_key, pipeline_config) =
+                        self.config.pipelines.get_key_value(pipeline).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "retry_current: unknown pipeline '{}'",
+                                pipeline
+                            )
+                        })?;
+                    if let Some((stage_key, stage_def)) = pipeline_config.stages.get_key_value(suffix) {
+                        return Ok(StateAction::RunStage(
+                            pipeline_key.as_str(),
+                            stage_key.as_str(),
+                            stage_def,
+                        ));
+                    }
+                }
+            }
+            // Fallback: idle (can't determine which stage to retry)
+            return Ok(StateAction::Idle);
         }
 
         Ok(StateAction::Idle)
@@ -277,7 +299,7 @@ impl Workflow {
 }
 
 /// Extract pipeline name from a state string like "main_PENDING" or "main_working".
-fn pipeline_from_state(state: &str) -> Option<String> {
+pub fn pipeline_from_state(state: &str) -> Option<String> {
     if state.is_empty() || state == "READY" || state == "DONE" || state == "PAUSE" {
         return None;
     }

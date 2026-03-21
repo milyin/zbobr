@@ -115,21 +115,16 @@ fn default_workflow() -> WorkflowConfig {
     let mut main_stages = HashMap::new();
     main_stages.insert("planning".to_string(), StageDefinition {
         role: "planner".into(),
-        on_success: Some("go_working".into()),
         additional_prompts: task_prompt.clone(),
         ..Default::default()
     });
     main_stages.insert("working".to_string(), StageDefinition {
         role: "worker".into(),
-        on_success: Some("go_reviewing".into()),
-        on_failure: Some("go_planning".into()),
         additional_prompts: task_prompt.clone(),
         ..Default::default()
     });
     main_stages.insert("reviewing".to_string(), StageDefinition {
         role: "reviewer".into(),
-        on_success: Some("go_merging".into()),
-        on_failure: Some("go_working".into()),
         additional_prompts: task_prompt.clone(),
         ..Default::default()
     });
@@ -154,9 +149,9 @@ fn default_workflow() -> WorkflowConfig {
     });
 
     let mut pipelines = HashMap::new();
-    pipelines.insert(WorkflowConfig::MAIN_PIPELINE.to_string(), PipelineConfig { start: Some("planning".into()), stages: main_stages, ..Default::default() });
-    pipelines.insert(WorkflowConfig::INIT_PIPELINE.to_string(), PipelineConfig { stages: init_stages, ..Default::default() });
-    pipelines.insert(WorkflowConfig::MERGE_PIPELINE.to_string(), PipelineConfig { stages: merge_stages, max_retries: 4, ..Default::default() });
+    pipelines.insert(WorkflowConfig::MAIN_PIPELINE.to_string(), PipelineConfig { order: vec!["planning".into(), "working".into(), "reviewing".into(), "merging".into()], stages: main_stages, ..Default::default() });
+    pipelines.insert(WorkflowConfig::INIT_PIPELINE.to_string(), PipelineConfig { order: vec!["preparing".into()], stages: init_stages, ..Default::default() });
+    pipelines.insert(WorkflowConfig::MERGE_PIPELINE.to_string(), PipelineConfig { order: vec!["merging".into()], stages: merge_stages, max_retries: 4, ..Default::default() });
 
     let roles = HashMap::from([
         (

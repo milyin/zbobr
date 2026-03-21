@@ -497,6 +497,10 @@ impl ZbobrTaskBackendGithubImpl {
             pause,
             confirm,
             worktree_retries,
+            pipeline_retries: params_map
+                .get("pipeline_retries")
+                .and_then(|s| serde_json::from_str(s).ok())
+                .unwrap_or_default(),
             etag: Some(body),
         }
     }
@@ -523,6 +527,11 @@ impl ZbobrTaskBackendGithubImpl {
         }
         if task.worktree_retries > 0 {
             params.insert("worktree_retries".to_string(), task.worktree_retries.to_string());
+        }
+        if !task.pipeline_retries.is_empty() {
+            if let Ok(json) = serde_json::to_string(&task.pipeline_retries) {
+                params.insert("pipeline_retries".to_string(), json);
+            }
         }
         params
     }

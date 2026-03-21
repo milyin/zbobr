@@ -560,6 +560,10 @@ pub struct Task {
     /// Reset to 0 when a stage proceeds normally past worktree detection.
     #[serde(default)]
     pub worktree_retries: u32,
+    /// Per-pipeline retry counters. Incremented each time a pipeline is called.
+    /// Checked against the pipeline's max_retries before starting.
+    #[serde(default)]
+    pub pipeline_retries: std::collections::HashMap<String, u32>,
     /// ETag for optimistic locking to prevent concurrent update conflicts.
     /// Used to detect if the task has been modified between read and write operations.
     #[serde(skip)]

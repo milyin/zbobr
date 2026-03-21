@@ -36,6 +36,8 @@ pub struct RoleSession {
     task_id: u64,
     /// Tracks the last MCP tool call that matched a transition key.
     last_mapped_tool: Arc<std::sync::Mutex<Option<String>>>,
+    /// Tracks a pending `call_*` pipeline invocation from an MCP tool.
+    call_tracker: Arc<std::sync::Mutex<Option<String>>>,
     /// When present, `post_comment` appends to this buffer instead of posting
     /// directly. The buffer is flushed as a single combined comment at stage end.
     comment_buffer: Option<CommentBuffer>,
@@ -47,6 +49,7 @@ impl RoleSession {
             zbobr,
             task_id,
             last_mapped_tool: Arc::new(std::sync::Mutex::new(None)),
+            call_tracker: Arc::new(std::sync::Mutex::new(None)),
             comment_buffer: None,
         }
     }
@@ -55,12 +58,14 @@ impl RoleSession {
         zbobr: Arc<ZbobrDispatcher>,
         task_id: u64,
         tracker: Arc<std::sync::Mutex<Option<String>>>,
+        call_tracker: Arc<std::sync::Mutex<Option<String>>>,
         comment_buffer: CommentBuffer,
     ) -> Self {
         Self {
             zbobr,
             task_id,
             last_mapped_tool: tracker,
+            call_tracker,
             comment_buffer: Some(comment_buffer),
         }
     }
@@ -288,6 +293,11 @@ impl RoleSession {
     /// Get the last MCP tool call that matched a transition key.
     pub fn last_mapped_tool(&self) -> Option<String> {
         self.last_mapped_tool.lock().unwrap().clone()
+    }
+
+    /// Get the pending call target (pipeline name from a `call_*` MCP tool).
+    pub fn pending_call(&self) -> Option<String> {
+        self.call_tracker.lock().unwrap().clone()
     }
 }
 
@@ -666,6 +676,7 @@ mod comment_model_tests {
                 pause: false,
                 confirm: false,
                 worktree_retries: 0,
+                pipeline_retries: Default::default(),
                 etag: None,
             };
             self.inner.tasks.lock().await.insert(
@@ -755,6 +766,8 @@ mod comment_model_tests {
             Tool::Copilot,
             Model::Gpt5Mini,
             "planning".to_string(),
+            vec![],
+            std::sync::Arc::new(std::sync::Mutex::new(None)),
         );
 
         // stop_with_error is unbuffered — goes straight to backend
@@ -835,10 +848,12 @@ mod comment_model_tests {
         task_id: u64,
     ) -> (crate::mcp::unified::UnifiedMcp, CommentBuffer) {
         let tracker = Arc::new(std::sync::Mutex::new(None::<String>));
+        let call_tracker = Arc::new(std::sync::Mutex::new(None::<String>));
         let comment_buffer: CommentBuffer = Arc::new(std::sync::Mutex::new(Vec::new()));
         let session = zbobr.role_session_with_tracker(
             task_id,
             tracker,
+            call_tracker.clone(),
             Arc::clone(&comment_buffer),
         );
         let allowed_tools: std::collections::HashSet<String> = crate::mcp::unified::ALL_TOOL_NAMES
@@ -852,6 +867,8 @@ mod comment_model_tests {
             Tool::Copilot,
             Model::Gpt5Mini,
             "working".to_string(),
+            vec![],
+            call_tracker,
         );
         (mcp, comment_buffer)
     }

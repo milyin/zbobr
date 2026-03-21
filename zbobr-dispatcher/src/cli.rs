@@ -15,7 +15,7 @@ use crate::{
     task::{Model, Tool},
 };
 use zbobr_api::config::StageDefinition;
-use crate::workflow::{INIT_PIPELINE, MERGE_PIPELINE};
+use crate::workflow::{INIT_PIPELINE, MERGE_PIPELINE, pipeline_from_state};
 use zbobr_api::CommentTag;
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 
@@ -355,13 +355,25 @@ impl<'a> CliStageRunner<'a> {
             .map(|d| d.tools.iter().cloned().collect())
             .unwrap_or_else(|| {
                 // No explicit role definition — allow all tools for backward compatibility.
-                crate::mcp::unified::ALL_TOOL_NAMES
-                    .iter()
-                    .map(|s| s.to_string())
+                self.zbobr
+                    .workflow()
+                    .config()
+                    .all_tool_names_with_calls()
+                    .into_iter()
                     .collect()
             });
 
+        let callable_pipelines: Vec<String> = self
+            .zbobr
+            .workflow()
+            .config()
+            .callable_pipeline_names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
         let tool_tracker = Arc::new(std::sync::Mutex::new(None::<String>));
+        let call_tracker = Arc::new(std::sync::Mutex::new(None::<String>));
         let comment_buffer: crate::task::CommentBuffer =
             Arc::new(std::sync::Mutex::new(Vec::new()));
         let (assigned_port, server_handle) = start_mcp_server(
@@ -373,7 +385,9 @@ impl<'a> CliStageRunner<'a> {
             self.stage_name.to_string(),
             allowed_tools,
             Arc::clone(&tool_tracker),
+            Arc::clone(&call_tracker),
             Arc::clone(&comment_buffer),
+            callable_pipelines,
         )
         .await?;
 
@@ -402,18 +416,19 @@ impl<'a> CliStageRunner<'a> {
         )
         .await;
 
-        // Read the last mapped tool from the shared tracker
+        // Read the last mapped tool and pending call from the shared trackers
         let last_mapped_tool = tool_tracker.lock().unwrap().clone();
+        let pending_call = call_tracker.lock().unwrap().clone();
 
         if let Some(e) = finalize_stage_session(
             self.zbobr,
             self.task_id,
             self.pipeline_name,
             self.stage_name,
-            self.stage_def,
             &work_dir,
             outcome,
             last_mapped_tool.as_deref(),
+            pending_call.as_deref(),
             comment_buffer,
         )
         .await?
@@ -428,28 +443,51 @@ impl<'a> CliStageRunner<'a> {
     }
 }
 
-/// Compute the post-execution signal from the stage's `on_success` / `on_failure` fields.
-/// `last_mapped_tool` is the last MCP tool that was `report_success` or `report_failure`.
-/// Falls back to `"return"` when no matching field is set.
-fn compute_post_stage_signal(
-    stage_def: &StageDefinition,
-    last_mapped_tool: Option<&str>,
-) -> String {
-    match last_mapped_tool {
-        Some("report_success") => stage_def.on_success.clone().unwrap_or_else(|| "return".into()),
-        Some("report_failure") => stage_def.on_failure.clone().unwrap_or_else(|| "return".into()),
-        _ => "return".into(),
-    }
+/// Result of computing the post-stage signal in the sequential pipeline model.
+enum SequentialSignal {
+    /// `report_failure` → immediate return from pipeline.
+    ReturnFailure,
+    /// `report_success` with a pending `call_*` → push stack, enter sub-pipeline.
+    Call {
+        pipeline: String,
+        return_stage: String,
+    },
+    /// `report_success` with a next stage → advance to it.
+    Advance(String),
+    /// `report_success` at the last stage → pipeline done, return.
+    Return,
+    /// No report tool called (crash/timeout/stop_with_error) → pause.
+    RetryOrPause,
 }
 
-/// Parse a compound call signal like "call_aux,go_step_three".
-/// Returns `Some((call_part, after_return))` if compound, `None` otherwise.
-fn parse_compound_call(signal: &str) -> Option<(&str, &str)> {
-    if !signal.starts_with("call_") {
-        return None;
+/// Compute the post-execution signal for the sequential pipeline model.
+fn compute_sequential_signal(
+    pipeline_name: &str,
+    stage_name: &str,
+    workflow: &crate::workflow::Workflow,
+    last_mapped_tool: Option<&str>,
+    pending_call: Option<&str>,
+) -> SequentialSignal {
+    match last_mapped_tool {
+        Some("report_failure") => SequentialSignal::ReturnFailure,
+        Some("report_success") => {
+            if let Some(call_target) = pending_call {
+                SequentialSignal::Call {
+                    pipeline: call_target.to_string(),
+                    return_stage: stage_name.to_string(),
+                }
+            } else {
+                match workflow
+                    .pipeline(pipeline_name)
+                    .and_then(|p| p.next_stage(stage_name))
+                {
+                    Some((next, _)) => SequentialSignal::Advance(next.to_string()),
+                    None => SequentialSignal::Return,
+                }
+            }
+        }
+        _ => SequentialSignal::RetryOrPause,
     }
-    let (call_part, after) = signal.split_once(',')?;
-    Some((call_part, after.trim()))
 }
 
 /// Result of worktree detection before a stage runs.
@@ -490,8 +528,9 @@ pub async fn process_task(
         }
         crate::workflow::StateAction::Done => {
             let task_session = zbobr.task_session(task.id);
+            let is_failure = task.signal.as_deref() == Some("return_failure");
             if let Some(entry) = task_session.pop_stack().await? {
-                // Return from sub-pipeline — fire the stored after-return signal
+                // Return from sub-pipeline (success or failure) — re-run calling stage
                 task_session.set_signal(Some(&entry.signal)).await?;
                 task_session
                     .set_state(&format!("{}_PENDING", entry.pipeline))
@@ -500,6 +539,38 @@ pub async fn process_task(
                     "Task #{} returning to pipeline '{}' with signal '{}'",
                     task.id, entry.pipeline, entry.signal
                 );
+            } else if is_failure {
+                // Root pipeline failed — restart from first stage
+                let pipeline_name = pipeline_from_state(&task.state)
+                    .unwrap_or_else(|| "main".to_string());
+                let current_task = task_session.get_task().await?;
+                let retries = current_task.pipeline_retries.get(&pipeline_name).copied().unwrap_or(0);
+                let max_retries = zbobr.workflow().pipeline(&pipeline_name)
+                    .map(|p| p.max_retries).unwrap_or(0);
+                if retries > max_retries {
+                    task_session
+                        .modify_task(|mut t| { t.pause = true; t })
+                        .await?;
+                    println!("Task #{} root pipeline failed, retries exceeded — paused", task.id);
+                } else {
+                    let first = zbobr.workflow().pipeline(&pipeline_name)
+                        .and_then(|p| p.first_stage())
+                        .map(|(name, _)| format!("go_{name}"));
+                    let pn = pipeline_name.clone();
+                    task_session
+                        .modify_task(move |mut t| {
+                            *t.pipeline_retries.entry(pn).or_default() += 1;
+                            t
+                        })
+                        .await?;
+                    if let Some(signal) = first {
+                        task_session.set_signal(Some(&signal)).await?;
+                        task_session
+                            .set_state(&format!("{pipeline_name}_PENDING"))
+                            .await?;
+                    }
+                    println!("Task #{} root pipeline failed — restarting from first stage", task.id);
+                }
             } else {
                 task_session.finish().await?;
                 println!("Task #{} completed", task.id);
@@ -613,9 +684,10 @@ pub async fn run_manager_loop(
                 }
                 crate::workflow::StateAction::Done => {
                     let task_session = zbobr.task_session(task.id);
+                    let is_failure = task.signal.as_deref() == Some("return_failure");
                     match task_session.pop_stack().await {
                         Ok(Some(entry)) => {
-                            // Return from sub-pipeline — fire stored after-return signal
+                            // Return from sub-pipeline — re-run calling stage
                             if let Err(e) = task_session.set_signal(Some(&entry.signal)).await {
                                 tracing::error!("Failed to set return signal for task #{}: {e}", task.id);
                             }
@@ -624,6 +696,39 @@ pub async fn run_manager_loop(
                                 .await
                             {
                                 tracing::error!("Failed to set return state for task #{}: {e}", task.id);
+                            }
+                        }
+                        Ok(None) if is_failure => {
+                            // Root pipeline failed — restart from first stage
+                            let pipeline_name = pipeline_from_state(&task.state)
+                                .unwrap_or_else(|| "main".to_string());
+                            match task_session.get_task().await {
+                                Ok(current_task) => {
+                                    let retries = current_task.pipeline_retries.get(&pipeline_name).copied().unwrap_or(0);
+                                    let max_retries = zbobr.workflow().pipeline(&pipeline_name)
+                                        .map(|p| p.max_retries).unwrap_or(0);
+                                    if retries > max_retries {
+                                        if let Err(e) = task_session.modify_task(|mut t| { t.pause = true; t }).await {
+                                            tracing::error!("Failed to pause task #{}: {e}", task.id);
+                                        }
+                                    } else {
+                                        let first = zbobr.workflow().pipeline(&pipeline_name)
+                                            .and_then(|p| p.first_stage())
+                                            .map(|(name, _)| format!("go_{name}"));
+                                        let pn = pipeline_name.clone();
+                                        if let Err(e) = task_session.modify_task(move |mut t| {
+                                            *t.pipeline_retries.entry(pn).or_default() += 1;
+                                            t
+                                        }).await {
+                                            tracing::error!("Failed to increment retries for task #{}: {e}", task.id);
+                                        }
+                                        if let Some(signal) = first {
+                                            let _ = task_session.set_signal(Some(&signal)).await;
+                                            let _ = task_session.set_state(&format!("{pipeline_name}_PENDING")).await;
+                                        }
+                                    }
+                                }
+                                Err(e) => tracing::error!("Failed to get task #{}: {e}", task.id),
                             }
                         }
                         Ok(None) => {
@@ -985,12 +1090,14 @@ async fn start_mcp_server(
     stage_name: String,
     allowed_tools: std::collections::HashSet<String>,
     tool_tracker: Arc<std::sync::Mutex<Option<String>>>,
+    call_tracker: Arc<std::sync::Mutex<Option<String>>>,
     comment_buffer: crate::task::CommentBuffer,
+    callable_pipelines: Vec<String>,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
     let role_name = role_name.to_string();
     let server_handle = tokio::spawn(async move {
-        match crate::mcp::run_role_mcp_server(zbobr, &role_name, task_id, tool, model, stage_name, allowed_tools, tool_tracker, comment_buffer).await
+        match crate::mcp::run_role_mcp_server(zbobr, &role_name, task_id, tool, model, stage_name, allowed_tools, tool_tracker, call_tracker, comment_buffer, callable_pipelines).await
         {
             Ok(assigned_port) => {
                 let _ = port_tx.send(assigned_port);
@@ -1060,15 +1167,17 @@ async fn finalize_stage_session(
     task_id: u64,
     pipeline_name: &str,
     stage_name: &str,
-    stage_def: &StageDefinition,
     work_dir: &Path,
     outcome: SessionOutcome,
     last_mapped_tool: Option<&str>,
+    pending_call: Option<&str>,
     comment_buffer: crate::task::CommentBuffer,
 ) -> anyhow::Result<Option<anyhow::Error>> {
-    let role = stage_def.role.as_str();
     let task_session = zbobr.task_session(task_id);
     let pending_state = format!("{}_PENDING", pipeline_name);
+
+    // Look up stage definition for tool/model info during comment flushing.
+    let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
 
     // Flush buffered MCP comments as a single combined comment signed by stage name.
     {
@@ -1083,14 +1192,17 @@ async fn finalize_stage_session(
                 .map(|c| c.body.as_str())
                 .collect::<Vec<_>>()
                 .join("\n\n");
-            let cli_tool = zbobr.config().tool_for_stage(stage_def);
-            let model = zbobr.config().model_for_stage(stage_def);
+            let (cli_tool, model) = if let Some(sd) = stage_def {
+                (Some(zbobr.config().tool_for_stage(sd)), Some(zbobr.config().model_for_stage(sd)))
+            } else {
+                (None, None)
+            };
             if let Err(e) = task_session
                 .post_comment(
                     stage_name,
                     &hostname,
-                    Some(cli_tool),
-                    Some(model),
+                    cli_tool,
+                    model,
                     &combined_text,
                     false,
                 )
@@ -1104,7 +1216,7 @@ async fn finalize_stage_session(
     }
 
     if outcome.execution_interrupted {
-        if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, role).await {
+        if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name).await {
             tracing::warn!("Stash/push failed during interruption for task #{task_id}: {e}");
         }
         task_session.set_state(&pending_state).await?;
@@ -1113,7 +1225,7 @@ async fn finalize_stage_session(
     }
 
     if let Some(e) = outcome.execution_error.as_ref() {
-        if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, role).await {
+        if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name).await {
             tracing::warn!(
                 "Stash/push failed during error handling for task #{task_id}: {e}"
             );
@@ -1142,7 +1254,7 @@ async fn finalize_stage_session(
 
     tracing::info!("Session complete for task #{task_id}");
 
-    if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, role).await {
+    if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name).await {
         tracing::error!("Stash/push failed for task #{task_id}: {e}");
         let hostname = get_hostname();
         let msg = format!("Stash/push failed: {e}");
@@ -1169,20 +1281,66 @@ async fn finalize_stage_session(
         return Ok(None);
     }
 
-    // Compute post-stage signal from transitions map.
-    // If the agent already set a signal during the session (e.g. reject),
+    // Compute post-stage signal using the sequential pipeline model.
+    // If the agent already set a signal during the session (e.g. stop_with_error),
     // that signal takes priority.
     let current_task = zbobr.task_backend().get_task(task_id).await?.snapshot().await?;
     if !current_task.pause && current_task.signal.is_none() {
-        let raw_signal = compute_post_stage_signal(stage_def, last_mapped_tool);
-        if let Some((call_part, after_return)) = parse_compound_call(&raw_signal) {
-            // Push after-return signal onto stack, then set the call signal
-            task_session
-                .push_stack(pipeline_name, after_return)
-                .await?;
-            task_session.set_signal(Some(call_part)).await?;
-        } else {
-            task_session.set_signal(Some(&raw_signal)).await?;
+        let seq_signal = compute_sequential_signal(
+            pipeline_name,
+            stage_name,
+            zbobr.workflow(),
+            last_mapped_tool,
+            pending_call,
+        );
+        match seq_signal {
+            SequentialSignal::ReturnFailure => {
+                task_session.set_signal(Some("return_failure")).await?;
+            }
+            SequentialSignal::Call { pipeline, return_stage } => {
+                // Check pipeline_retries vs max_retries
+                let retries = current_task.pipeline_retries.get(&pipeline).copied().unwrap_or(0);
+                let max_retries = zbobr.workflow().pipeline(&pipeline)
+                    .map(|p| p.max_retries).unwrap_or(0);
+                if retries > max_retries {
+                    // Exceeded retries — pause
+                    task_session
+                        .modify_task(|mut t| { t.pause = true; t })
+                        .await?;
+                } else {
+                    // Increment retries, push stack, set call signal
+                    let pipeline_clone = pipeline.clone();
+                    task_session
+                        .modify_task(move |mut t| {
+                            *t.pipeline_retries.entry(pipeline_clone).or_default() += 1;
+                            t
+                        })
+                        .await?;
+                    task_session
+                        .push_stack(pipeline_name, &format!("go_{return_stage}"))
+                        .await?;
+                    task_session.set_signal(Some(&format!("call_{pipeline}"))).await?;
+                }
+            }
+            SequentialSignal::Advance(next) => {
+                // Reset sub-pipeline retries when the caller pipeline advances
+                let pn = pipeline_name.to_string();
+                task_session
+                    .modify_task(move |mut t| {
+                        t.pipeline_retries.retain(|k, _| k == &pn);
+                        t
+                    })
+                    .await?;
+                task_session.set_signal(Some(&format!("go_{next}"))).await?;
+            }
+            SequentialSignal::Return => {
+                task_session.set_signal(Some("return")).await?;
+            }
+            SequentialSignal::RetryOrPause => {
+                task_session
+                    .modify_task(|mut t| { t.pause = true; t })
+                    .await?;
+            }
         }
     }
     task_session.set_state(&pending_state).await?;

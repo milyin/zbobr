@@ -31,6 +31,10 @@ pub struct UnifiedMcp {
     tool: Tool,
     model: Model,
     stage_name: String,
+    /// Non-main pipeline names that can be called via dynamic `call_*` tools.
+    callable_pipelines: Vec<String>,
+    /// Tracks a pending `call_*` pipeline invocation.
+    call_tracker: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl CommonMcpImpl for UnifiedMcp {
@@ -55,20 +59,8 @@ impl CommonMcpImpl for UnifiedMcp {
     }
 }
 
-/// All possible tool names across all roles.
-pub const ALL_TOOL_NAMES: &[&str] = &[
-    "get_history_index",
-    "get_history_record",
-    "report_success",
-    "report_failure",
-    "stop_with_error",
-    "stop_with_question",
-    "configure_worktree",
-    "get_checklist",
-    "add_checklist_item",
-    "check_checklist_item",
-    "delete_checklist_item",
-];
+/// All possible static tool names across all roles (excludes dynamic `call_*` tools).
+pub const ALL_TOOL_NAMES: &[&str] = zbobr_api::config_tools::ALL_TOOL_NAMES;
 
 #[tool_router]
 impl UnifiedMcp {
@@ -79,6 +71,8 @@ impl UnifiedMcp {
         tool: Tool,
         model: Model,
         stage_name: String,
+        callable_pipelines: Vec<String>,
+        call_tracker: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     ) -> Self {
         Self {
             session,
@@ -88,6 +82,8 @@ impl UnifiedMcp {
             tool,
             model,
             stage_name,
+            callable_pipelines,
+            call_tracker,
         }
     }
 
@@ -200,10 +196,39 @@ impl ServerHandler for UnifiedMcp {
         _context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::ListToolsResult, McpError> {
         let all_tools = self.tool_router.list_all();
-        let filtered: Vec<McpToolDef> = all_tools
+        let mut filtered: Vec<McpToolDef> = all_tools
             .into_iter()
             .filter(|t| self.allowed_tools.contains(t.name.as_ref()))
             .collect();
+
+        // Append dynamic call_* tools for callable pipelines
+        for pipeline in &self.callable_pipelines {
+            let tool_name = format!("call_{pipeline}");
+            if self.allowed_tools.contains(&tool_name) {
+                filtered.push(McpToolDef {
+                    name: tool_name.into(),
+                    title: None,
+                    description: Some(format!(
+                        "Call the '{pipeline}' sub-pipeline. The current stage will be re-run after the sub-pipeline completes."
+                    ).into()),
+                    input_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": false
+                    })
+                    .as_object()
+                    .cloned()
+                    .unwrap()
+                    .into(),
+                    output_schema: None,
+                    annotations: None,
+                    execution: None,
+                    icons: None,
+                    meta: None,
+                });
+            }
+        }
+
         Ok(rmcp::model::ListToolsResult {
             meta: None,
             tools: filtered,
@@ -228,6 +253,22 @@ impl ServerHandler for UnifiedMcp {
                 meta: None,
             });
         }
+
+        // Handle dynamic call_* tools
+        if let Some(pipeline) = tool_name.strip_prefix("call_") {
+            if self.callable_pipelines.iter().any(|p| p == pipeline) {
+                *self.call_tracker.lock().unwrap() = Some(pipeline.to_string());
+                return Ok(CallToolResult {
+                    content: vec![Content::text(format!(
+                        "Scheduled call to pipeline '{pipeline}'"
+                    ))],
+                    structured_content: None,
+                    is_error: None,
+                    meta: None,
+                });
+            }
+        }
+
         let tcc = ToolCallContext::new(self, request, context);
         self.tool_router.call(tcc).await.map_err(McpError::from)
     }
@@ -235,7 +276,7 @@ impl ServerHandler for UnifiedMcp {
 
 impl UnifiedMcp {
     /// Generate API documentation for the tools available to this role.
-    pub fn generate_api_docs(allowed_tools: &HashSet<String>) -> String {
+    pub fn generate_api_docs(allowed_tools: &HashSet<String>, callable_pipelines: &[String]) -> String {
         let router = Self::tool_router();
         let all_tools = router.list_all();
         let filtered: Vec<_> = all_tools
@@ -251,6 +292,18 @@ impl UnifiedMcp {
                 tool.description.as_deref().unwrap_or("No description")
             ));
             doc.push_str("---\n\n");
+        }
+
+        // Document dynamic call_* tools
+        for pipeline in callable_pipelines {
+            let tool_name = format!("call_{pipeline}");
+            if allowed_tools.contains(&tool_name) {
+                doc.push_str(&format!("### `{tool_name}`\n\n"));
+                doc.push_str(&format!(
+                    "Call the '{pipeline}' sub-pipeline. The current stage will be re-run after the sub-pipeline completes.\n\n"
+                ));
+                doc.push_str("---\n\n");
+            }
         }
         doc
     }

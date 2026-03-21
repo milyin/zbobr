@@ -293,7 +293,7 @@ pub trait CommonMcpImpl: Send + Sync {
         }
 
         // Set the retry signal so the task returns to this stage after the user intervenes.
-        let retry = format!("go_{}", self.stage_name());
+        let retry = "retry_current".to_string();
         if let Err(e) = self.session().set_signal(&retry).await {
             tracing::warn!(
                 "Failed to set retry signal for task {} after reporting error: {e}",
@@ -356,7 +356,7 @@ pub trait CommonMcpImpl: Send + Sync {
         }
 
         // Set the retry signal so the task returns to this stage after the user responds.
-        let retry = format!("go_{}", self.stage_name());
+        let retry = "retry_current".to_string();
         if let Err(e) = self.session().set_signal(&retry).await {
             tracing::warn!(
                 "Failed to set retry signal for task {} after asking user: {e}",

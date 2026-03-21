@@ -6,8 +6,6 @@ use std::sync::Arc;
 use simpleinterpolation::Interpolation;
 
 use crate::backend::TaskBackend;
-use crate::mcp::unified::ALL_TOOL_NAMES;
-
 use zbobr_api::{Comment, HistoryRecordType, Task, classify_comment};
 use zbobr_api::config::{StageDefinition, WorkflowConfig};
 use crate::workflow::Workflow;
@@ -218,12 +216,12 @@ pub async fn build_full_prompt(
     let comments = weak.get_comments().await?;
     let mut vars = build_template_variables(&task, &comments);
 
-    // Look up allowed tools for this role; fall back to all tools.
+    // Look up allowed tools for this role; fall back to all tools (including call_*).
     let allowed_tools: Vec<String> = workflow
         .role_definition(role_name)
         .map(|d| d.tools.clone())
         .unwrap_or_else(|| {
-            ALL_TOOL_NAMES.iter().map(|s| s.to_string()).collect()
+            workflow.all_tool_names_with_calls()
         });
     add_mcp_tool_variables(&mut vars, &allowed_tools);
 
@@ -314,6 +312,7 @@ mod tests {
             pause: false,
             confirm: false,
             worktree_retries: 0,
+            pipeline_retries: Default::default(),
             etag: None,
         }
     }

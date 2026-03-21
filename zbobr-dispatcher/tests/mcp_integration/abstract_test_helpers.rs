@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use zbobr_api::config::{PipelineConfig, StageDefinition, WorkflowConfig};
+use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig};
 use zbobr_dispatcher::task::Tool;
 
 use super::{abstract_scenarios, env::IntegrationTestEnv};
@@ -19,41 +19,63 @@ struct StageDef {
     name: &'static str,
     role: &'static str,
     pipeline: &'static str,
-    is_start: bool,
-    on_success: Option<&'static str>,
-    on_failure: Option<&'static str>,
 }
 
-fn build_workflow(stages: Vec<StageDef>) -> WorkflowConfig {
-    let mut pipelines: HashMap<String, PipelineConfig> = HashMap::new();
+/// Build a WorkflowConfig from a list of stage definitions.
+///
+/// Stages are added to their respective pipelines in the order they appear.
+/// The `order` field is derived from insertion order within each pipeline.
+/// Optional `roles` map allows specifying tool lists for roles (needed for call_* tools).
+fn build_workflow_with_roles(
+    stages: Vec<StageDef>,
+    roles: HashMap<String, RoleDefinition>,
+) -> WorkflowConfig {
+    // Collect stages per pipeline, preserving insertion order
+    let mut pipeline_order: HashMap<String, Vec<String>> = HashMap::new();
+    let mut pipeline_stages: HashMap<String, HashMap<String, StageDefinition>> = HashMap::new();
+
     for s in stages {
-        let pipeline = pipelines
+        pipeline_order
             .entry(s.pipeline.to_string())
-            .or_insert_with(|| PipelineConfig {
-                stages: HashMap::new(),
+            .or_default()
+            .push(s.name.to_string());
+        pipeline_stages
+            .entry(s.pipeline.to_string())
+            .or_default()
+            .insert(
+                s.name.to_string(),
+                StageDefinition {
+                    role: s.role.to_string(),
+                    model: None,
+                    tool: Some(Tool::McpTester),
+                    main_prompt: None,
+                    additional_prompts: vec![],
+                },
+            );
+    }
+
+    let mut pipelines: HashMap<String, PipelineConfig> = HashMap::new();
+    for (pipeline_name, order) in pipeline_order {
+        let stages = pipeline_stages.remove(&pipeline_name).unwrap_or_default();
+        pipelines.insert(
+            pipeline_name,
+            PipelineConfig {
+                order,
+                stages,
                 ..Default::default()
-            });
-        if s.is_start {
-            pipeline.start = Some(s.name.to_string());
-        }
-        pipeline.stages.insert(
-            s.name.to_string(),
-            StageDefinition {
-                role: s.role.to_string(),
-                model: None,
-                tool: Some(Tool::McpTester),
-                main_prompt: None,
-                additional_prompts: vec![],
-                on_success: s.on_success.map(|v| v.to_string()),
-                on_failure: s.on_failure.map(|v| v.to_string()),
             },
         );
     }
+
     WorkflowConfig {
         prompts_dir: None,
         pipelines,
-        roles: Default::default(),
+        roles,
     }
+}
+
+fn build_workflow(stages: Vec<StageDef>) -> WorkflowConfig {
+    build_workflow_with_roles(stages, Default::default())
 }
 
 fn scenarios_map(entries: Vec<(&str, String)>) -> HashMap<String, String> {
@@ -103,9 +125,6 @@ pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
         name: "alpha",
         role: "alpha",
         pipeline: "main",
-        is_start: true,
-        on_success: None,
-        on_failure: None,
     }]);
 
     let scenarios = scenarios_map(vec![(
@@ -122,7 +141,7 @@ pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
 }
 
 // ===========================================================================
-// Test 2: Transfer between stages within a pipeline (go_X)
+// Test 2: Sequential stage advancement within a pipeline
 // ===========================================================================
 
 pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
@@ -140,17 +159,11 @@ pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
             name: "first",
             role: "role_a",
             pipeline: "main",
-            is_start: true,
-            on_success: Some("go_second"),
-            on_failure: None,
         },
         StageDef {
             name: "second",
             role: "role_b",
             pipeline: "main",
-            is_start: false,
-            on_success: None,
-            on_failure: None,
         },
     ]);
 
@@ -159,10 +172,14 @@ pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
         ("role_b", abstract_scenarios::report_and_finish_scenario()),
     ]);
 
-    // First call runs "first" stage → go_second
+    // First call runs "first" stage → report_success → auto-advance to second
     env.run_pipeline(task_id, &workflow, &scenarios).await;
     let task = env.get_task(task_id).await;
-    assert_eq!(task.signal, Some("go_second".to_string()));
+    assert_eq!(
+        task.signal,
+        Some("go_second".to_string()),
+        "Success in first stage should advance to go_second"
+    );
     assert_eq!(task.state, "main_PENDING");
 
     // Run to completion: second stage + return resolution
@@ -173,7 +190,7 @@ pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
 }
 
 // ===========================================================================
-// Test 3: Calling a sub-pipeline (call_X)
+// Test 3: Calling a sub-pipeline via call_* MCP tool
 // ===========================================================================
 
 pub async fn run_call_mode(env: &IntegrationTestEnv) {
@@ -186,44 +203,72 @@ pub async fn run_call_mode(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let workflow = build_workflow(vec![
-        StageDef {
-            name: "entry",
-            role: "role_main",
-            pipeline: "main",
-            is_start: true,
-            on_success: Some("call_sub"),
-            on_failure: None,
+    // Role for entry stage needs call_sub in its tool list
+    let mut roles = HashMap::new();
+    roles.insert(
+        "role_main".to_string(),
+        RoleDefinition {
+            tools: vec![
+                "report_success".to_string(),
+                "call_sub".to_string(),
+            ],
+            prompt: None,
         },
-        StageDef {
-            name: "handler",
-            role: "role_sub",
-            pipeline: "sub",
-            is_start: true,
-            on_success: None,
-            on_failure: None,
-        },
-    ]);
+    );
+
+    let workflow = build_workflow_with_roles(
+        vec![
+            StageDef {
+                name: "entry",
+                role: "role_main",
+                pipeline: "main",
+            },
+            StageDef {
+                name: "handler",
+                role: "role_sub",
+                pipeline: "sub",
+            },
+        ],
+        roles,
+    );
 
     let scenarios = scenarios_map(vec![
-        ("role_main", abstract_scenarios::report_and_finish_scenario()),
+        (
+            "role_main",
+            abstract_scenarios::call_pipeline_then_succeed_scenario("sub"),
+        ),
         ("role_sub", abstract_scenarios::report_and_finish_scenario()),
     ]);
 
-    // Step 1: runs "entry" → call_sub
+    // Step 1: runs "entry" → calls call_sub MCP tool, then report_success → call_sub signal
     env.run_pipeline(task_id, &workflow, &scenarios).await;
     let task = env.get_task(task_id).await;
     assert_eq!(task.signal, Some("call_sub".to_string()));
+    assert_eq!(
+        task.stack.len(),
+        1,
+        "Stack should have the return-to-entry entry"
+    );
+    assert_eq!(task.stack[0].pipeline, "main");
+    assert_eq!(
+        task.stack[0].signal, "go_entry",
+        "Should return to same stage (entry) after sub-pipeline"
+    );
 
-    // Run to completion: sub/handler + return
-    env.run_to_completion(task_id, &workflow, &scenarios, 5)
+    // Run to completion: sub/handler + return → re-run entry (without call this time)
+    // We need different scenarios for the re-run: just report_success without calling sub
+    let scenarios_rerun = scenarios_map(vec![
+        ("role_main", abstract_scenarios::report_and_finish_scenario()),
+        ("role_sub", abstract_scenarios::report_and_finish_scenario()),
+    ]);
+    env.run_to_completion(task_id, &workflow, &scenarios_rerun, 10)
         .await;
     let task = env.get_task(task_id).await;
     assert_eq!(task.state, "DONE", "Return from sub-pipeline should complete");
 }
 
 // ===========================================================================
-// Test 4: Return from pipeline back to caller (multi-step)
+// Test 4: Multi-stage pipeline with sub-pipeline call and continuation
 // ===========================================================================
 
 pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
@@ -236,82 +281,93 @@ pub async fn run_return_from_mode(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    // Use compound call signal: "call_aux,go_done_step"
-    // After returning from aux, the stack-aware Done handler pops go_done_step
-    // and fires it in the main pipeline.
-    let workflow = build_workflow(vec![
-        StageDef {
-            name: "step_one",
-            role: "role_one",
-            pipeline: "main",
-            is_start: true,
-            on_success: Some("go_step_two"),
-            on_failure: None,
+    // step_one → step_two (calls aux via MCP tool) → step_three
+    // After aux returns, step_two re-runs, succeeds without call → advances to step_three
+    let mut roles = HashMap::new();
+    roles.insert(
+        "role_two".to_string(),
+        RoleDefinition {
+            tools: vec![
+                "report_success".to_string(),
+                "call_aux".to_string(),
+            ],
+            prompt: None,
         },
-        StageDef {
-            name: "step_two",
-            role: "role_two",
-            pipeline: "main",
-            is_start: false,
-            on_success: Some("call_aux,go_done_step"),
-            on_failure: None,
-        },
-        StageDef {
-            name: "done_step",
-            role: "role_done",
-            pipeline: "main",
-            is_start: false,
-            on_success: None,
-            on_failure: None,
-        },
-        StageDef {
-            name: "aux_step",
-            role: "role_aux",
-            pipeline: "aux",
-            is_start: true,
-            on_success: None,
-            on_failure: None,
-        },
-    ]);
+    );
 
-    let scenarios = scenarios_map(vec![
+    let workflow = build_workflow_with_roles(
+        vec![
+            StageDef {
+                name: "step_one",
+                role: "role_one",
+                pipeline: "main",
+            },
+            StageDef {
+                name: "step_two",
+                role: "role_two",
+                pipeline: "main",
+            },
+            StageDef {
+                name: "step_three",
+                role: "role_three",
+                pipeline: "main",
+            },
+            StageDef {
+                name: "aux_step",
+                role: "role_aux",
+                pipeline: "aux",
+            },
+        ],
+        roles,
+    );
+
+    // First pass: role_two calls call_aux then report_success
+    let scenarios_with_call = scenarios_map(vec![
         ("role_one", abstract_scenarios::report_and_finish_scenario()),
-        ("role_two", abstract_scenarios::report_and_finish_scenario()),
-        ("role_done", abstract_scenarios::report_and_finish_scenario()),
+        (
+            "role_two",
+            abstract_scenarios::call_pipeline_then_succeed_scenario("aux"),
+        ),
+        ("role_three", abstract_scenarios::report_and_finish_scenario()),
         ("role_aux", abstract_scenarios::report_and_finish_scenario()),
     ]);
 
     // Step 1: main/step_one → go_step_two
-    env.run_pipeline(task_id, &workflow, &scenarios).await;
+    env.run_pipeline(task_id, &workflow, &scenarios_with_call)
+        .await;
     let task = env.get_task(task_id).await;
     assert_eq!(task.signal, Some("go_step_two".to_string()));
 
-    // Step 2: main/step_two → call_aux (compound signal parsed)
-    env.continue_pipeline(task_id, &workflow, &scenarios).await;
+    // Step 2: main/step_two → call_aux (via MCP tool + report_success)
+    env.continue_pipeline(task_id, &workflow, &scenarios_with_call)
+        .await;
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
         Some("call_aux".to_string()),
-        "compound call should be split, signal is call_aux"
+        "call_aux MCP tool + report_success should produce call_aux signal"
     );
-    assert_eq!(
-        task.stack.len(),
-        1,
-        "compound call should push after-return onto stack"
-    );
+    assert_eq!(task.stack.len(), 1, "Stack should have return entry");
     assert_eq!(task.stack[0].pipeline, "main");
-    assert_eq!(task.stack[0].signal, "go_done_step");
+    assert_eq!(
+        task.stack[0].signal, "go_step_two",
+        "Should return to step_two after aux"
+    );
 
-    // Step 3: aux/aux_step → return → stack pop → go_done_step
-    env.continue_pipeline(task_id, &workflow, &scenarios).await;
-    // After return, state machine resolves Done, stack pops go_done_step
-    // run_to_completion will handle the remaining transitions
-    env.run_to_completion(task_id, &workflow, &scenarios, 5)
+    // Step 3+: aux/aux_step → return → re-run step_two (without call) → step_three → DONE
+    // After return from aux, step_two re-runs. This time no call_aux, just report_success → advance
+    let scenarios_no_call = scenarios_map(vec![
+        ("role_one", abstract_scenarios::report_and_finish_scenario()),
+        ("role_two", abstract_scenarios::report_and_finish_scenario()),
+        ("role_three", abstract_scenarios::report_and_finish_scenario()),
+        ("role_aux", abstract_scenarios::report_and_finish_scenario()),
+    ]);
+    env.run_to_completion(task_id, &workflow, &scenarios_no_call, 10)
         .await;
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.state, "DONE",
-        "Return from aux should fire go_done_step, then done_step returns → DONE"
+        "After aux return, step_two re-runs, advances to step_three, then DONE"
     );
     assert!(task.stack.is_empty(), "Stack should be empty after completion");
 }
@@ -363,17 +419,11 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
             name: "work",
             role: "role_work",
             pipeline: "main",
-            is_start: true,
-            on_success: None,
-            on_failure: None,
         },
         StageDef {
             name: "resolve",
             role: "role_resolve",
             pipeline: "merge",
-            is_start: true,
-            on_success: None,
-            on_failure: None,
         },
     ]);
 
@@ -440,9 +490,6 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
         name: "work",
         role: "role_err",
         pipeline: "main",
-        is_start: true,
-        on_success: None,
-        on_failure: None,
     }]);
 
     let scenarios = scenarios_map(vec![(
@@ -483,9 +530,6 @@ pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
         name: "start",
         role: "role_start",
         pipeline: "main",
-        is_start: true,
-        on_success: None,
-        on_failure: None,
     }]);
 
     let scenarios = scenarios_map(vec![(
@@ -503,7 +547,7 @@ pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
 }
 
 // ===========================================================================
-// Test 8: Signal-based transitions (report_success / report_failure)
+// Test 8: Failure causes return_failure (sequential model)
 // ===========================================================================
 
 pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
@@ -516,26 +560,45 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let workflow = build_workflow(vec![
-        StageDef {
-            name: "check",
-            role: "role_check",
-            pipeline: "main",
-            is_start: true,
-            on_success: Some("go_finish"),
-            on_failure: Some("go_check"),
+    let mut pipelines = HashMap::new();
+    pipelines.insert(
+        "main".to_string(),
+        PipelineConfig {
+            order: vec!["check".to_string(), "finish".to_string()],
+            stages: {
+                let mut m = HashMap::new();
+                m.insert(
+                    "check".to_string(),
+                    StageDefinition {
+                        role: "role_check".to_string(),
+                        model: None,
+                        tool: Some(Tool::McpTester),
+                        main_prompt: None,
+                        additional_prompts: vec![],
+                    },
+                );
+                m.insert(
+                    "finish".to_string(),
+                    StageDefinition {
+                        role: "role_finish".to_string(),
+                        model: None,
+                        tool: Some(Tool::McpTester),
+                        main_prompt: None,
+                        additional_prompts: vec![],
+                    },
+                );
+                m
+            },
+            max_retries: 3,
         },
-        StageDef {
-            name: "finish",
-            role: "role_finish",
-            pipeline: "main",
-            is_start: false,
-            on_success: None,
-            on_failure: None,
-        },
-    ]);
+    );
+    let workflow = WorkflowConfig {
+        prompts_dir: None,
+        pipelines,
+        roles: Default::default(),
+    };
 
-    // First run: failure → go_check (loop back)
+    // First run: failure → return_failure → root pipeline restarts from first stage
     let scenarios_reject = scenarios_map(vec![
         ("role_check", abstract_scenarios::report_failure_scenario()),
         ("role_finish", abstract_scenarios::report_and_finish_scenario()),
@@ -545,29 +608,27 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some("go_check".to_string()),
-        "report_failure should route to go_check"
+        Some("return_failure".to_string()),
+        "report_failure should produce return_failure signal"
     );
 
-    // Second run: success → go_finish
+    // Process the return_failure: root pipeline failed → restart from first stage (check)
+    env.continue_pipeline(task_id, &workflow, &scenarios_reject)
+        .await;
+    let task = env.get_task(task_id).await;
+    // After return_failure at root: should restart from first stage
+    assert_eq!(task.state, "main_PENDING");
+    assert!(!task.pause, "Should not be paused (retries not exhausted)");
+
+    // Now run with success → should advance check → finish → DONE
     let scenarios_accept = scenarios_map(vec![
         ("role_check", abstract_scenarios::report_success_scenario()),
         ("role_finish", abstract_scenarios::report_and_finish_scenario()),
     ]);
-    env.continue_pipeline(task_id, &workflow, &scenarios_accept)
+    env.run_to_completion(task_id, &workflow, &scenarios_accept, 10)
         .await;
     let task = env.get_task(task_id).await;
-    assert_eq!(
-        task.signal,
-        Some("go_finish".to_string()),
-        "report_success should route to go_finish"
-    );
-
-    // Run to completion: finish → return → DONE
-    env.run_to_completion(task_id, &workflow, &scenarios_accept, 5)
-        .await;
-    let task = env.get_task(task_id).await;
-    assert_eq!(task.state, "DONE", "Pipeline should complete after finish");
+    assert_eq!(task.state, "DONE", "Pipeline should complete after success");
 }
 
 // ===========================================================================
@@ -588,9 +649,6 @@ pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
         name: "work",
         role: "role_ask",
         pipeline: "main",
-        is_start: true,
-        on_success: None,
-        on_failure: None,
     }]);
 
     let scenarios = scenarios_map(vec![(
@@ -662,17 +720,11 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
             name: "working",
             role: "role_work",
             pipeline: "main",
-            is_start: true,
-            on_success: None,
-            on_failure: None,
         },
         StageDef {
             name: "preparing",
             role: "role_prep",
             pipeline: "init",
-            is_start: true,
-            on_success: None,
-            on_failure: None,
         },
     ]);
 
@@ -785,17 +837,11 @@ pub async fn run_retry_limit(env: &IntegrationTestEnv) {
             name: "work",
             role: "role_work",
             pipeline: "main",
-            is_start: true,
-            on_success: None,
-            on_failure: None,
         },
         StageDef {
             name: "resolve",
             role: "role_resolve",
             pipeline: "merge",
-            is_start: true,
-            on_success: None,
-            on_failure: None,
         },
     ]);
 

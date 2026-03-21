@@ -127,7 +127,9 @@ pub async fn run_role_mcp_server(
     stage_name: String,
     allowed_tools: HashSet<String>,
     tool_tracker: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    call_tracker: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     comment_buffer: crate::task::CommentBuffer,
+    callable_pipelines: Vec<String>,
 ) -> anyhow::Result<u16> {
     let base_port = zbobr.config().base_port;
     use rmcp::transport::streamable_http_server::{
@@ -137,7 +139,7 @@ pub async fn run_role_mcp_server(
     let path = format!("/{}/{}", role_name, task_id);
 
     let session: RoleSession =
-        zbobr.role_session_with_tracker(task_id, tool_tracker, comment_buffer);
+        zbobr.role_session_with_tracker(task_id, tool_tracker, call_tracker.clone(), comment_buffer);
 
     let role_name_owned = role_name.to_string();
     tracing::info!("Creating UnifiedMcp service for task {task_id} role '{role_name}' at path {path}");
@@ -151,6 +153,8 @@ pub async fn run_role_mcp_server(
                 tool,
                 model.clone(),
                 stage_name.clone(),
+                callable_pipelines.clone(),
+                call_tracker.clone(),
             ))
         },
         std::sync::Arc::new(LocalSessionManager::default()),
