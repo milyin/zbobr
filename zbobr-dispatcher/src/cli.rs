@@ -529,18 +529,8 @@ pub async fn process_task(
         crate::workflow::StateAction::Done => {
             let task_session = zbobr.task_session(task.id);
             let is_failure = task.signal.as_deref() == Some("return_failure");
-            if let Some(entry) = task_session.pop_stack().await? {
-                // Return from sub-pipeline (success or failure) — re-run calling stage
-                task_session.set_signal(Some(&entry.signal)).await?;
-                task_session
-                    .set_state(&format!("{}_PENDING", entry.pipeline))
-                    .await?;
-                println!(
-                    "Task #{} returning to pipeline '{}' with signal '{}'",
-                    task.id, entry.pipeline, entry.signal
-                );
-            } else if is_failure {
-                // Root pipeline failed — restart from first stage
+            if is_failure {
+                // Pipeline failed — retry from first stage (same for main and sub-pipelines)
                 let pipeline_name = pipeline_from_state(&task.state)
                     .unwrap_or_else(|| "main".to_string());
                 let current_task = task_session.get_task().await?;
@@ -551,7 +541,7 @@ pub async fn process_task(
                     task_session
                         .modify_task(|mut t| { t.pause = true; t })
                         .await?;
-                    println!("Task #{} root pipeline failed, retries exceeded — paused", task.id);
+                    println!("Task #{} pipeline '{}' retries exceeded — paused", task.id, pipeline_name);
                 } else {
                     let first = zbobr.workflow().pipeline(&pipeline_name)
                         .and_then(|p| p.first_stage())
@@ -569,8 +559,18 @@ pub async fn process_task(
                             .set_state(&format!("{pipeline_name}_PENDING"))
                             .await?;
                     }
-                    println!("Task #{} root pipeline failed — restarting from first stage", task.id);
+                    println!("Task #{} pipeline '{}' failed — restarting from first stage", task.id, pipeline_name);
                 }
+            } else if let Some(entry) = task_session.pop_stack().await? {
+                // Success return from sub-pipeline — re-run calling stage
+                task_session.set_signal(Some(&entry.signal)).await?;
+                task_session
+                    .set_state(&format!("{}_PENDING", entry.pipeline))
+                    .await?;
+                println!(
+                    "Task #{} returning to pipeline '{}' with signal '{}'",
+                    task.id, entry.pipeline, entry.signal
+                );
             } else {
                 task_session.finish().await?;
                 println!("Task #{} completed", task.id);
@@ -685,59 +685,60 @@ pub async fn run_manager_loop(
                 crate::workflow::StateAction::Done => {
                     let task_session = zbobr.task_session(task.id);
                     let is_failure = task.signal.as_deref() == Some("return_failure");
-                    match task_session.pop_stack().await {
-                        Ok(Some(entry)) => {
-                            // Return from sub-pipeline — re-run calling stage
-                            if let Err(e) = task_session.set_signal(Some(&entry.signal)).await {
-                                tracing::error!("Failed to set return signal for task #{}: {e}", task.id);
-                            }
-                            if let Err(e) = task_session
-                                .set_state(&format!("{}_PENDING", entry.pipeline))
-                                .await
-                            {
-                                tracing::error!("Failed to set return state for task #{}: {e}", task.id);
-                            }
-                        }
-                        Ok(None) if is_failure => {
-                            // Root pipeline failed — restart from first stage
-                            let pipeline_name = pipeline_from_state(&task.state)
-                                .unwrap_or_else(|| "main".to_string());
-                            match task_session.get_task().await {
-                                Ok(current_task) => {
-                                    let retries = current_task.pipeline_retries.get(&pipeline_name).copied().unwrap_or(0);
-                                    let max_retries = zbobr.workflow().pipeline(&pipeline_name)
-                                        .map(|p| p.max_retries).unwrap_or(0);
-                                    if retries > max_retries {
-                                        if let Err(e) = task_session.modify_task(|mut t| { t.pause = true; t }).await {
-                                            tracing::error!("Failed to pause task #{}: {e}", task.id);
-                                        }
-                                    } else {
-                                        let first = zbobr.workflow().pipeline(&pipeline_name)
-                                            .and_then(|p| p.first_stage())
-                                            .map(|(name, _)| format!("go_{name}"));
-                                        let pn = pipeline_name.clone();
-                                        if let Err(e) = task_session.modify_task(move |mut t| {
-                                            *t.pipeline_retries.entry(pn).or_default() += 1;
-                                            t
-                                        }).await {
-                                            tracing::error!("Failed to increment retries for task #{}: {e}", task.id);
-                                        }
-                                        if let Some(signal) = first {
-                                            let _ = task_session.set_signal(Some(&signal)).await;
-                                            let _ = task_session.set_state(&format!("{pipeline_name}_PENDING")).await;
-                                        }
+                    if is_failure {
+                        // Pipeline failed — retry from first stage (same for main and sub-pipelines)
+                        let pipeline_name = pipeline_from_state(&task.state)
+                            .unwrap_or_else(|| "main".to_string());
+                        match task_session.get_task().await {
+                            Ok(current_task) => {
+                                let retries = current_task.pipeline_retries.get(&pipeline_name).copied().unwrap_or(0);
+                                let max_retries = zbobr.workflow().pipeline(&pipeline_name)
+                                    .map(|p| p.max_retries).unwrap_or(0);
+                                if retries > max_retries {
+                                    if let Err(e) = task_session.modify_task(|mut t| { t.pause = true; t }).await {
+                                        tracing::error!("Failed to pause task #{}: {e}", task.id);
+                                    }
+                                } else {
+                                    let first = zbobr.workflow().pipeline(&pipeline_name)
+                                        .and_then(|p| p.first_stage())
+                                        .map(|(name, _)| format!("go_{name}"));
+                                    let pn = pipeline_name.clone();
+                                    if let Err(e) = task_session.modify_task(move |mut t| {
+                                        *t.pipeline_retries.entry(pn).or_default() += 1;
+                                        t
+                                    }).await {
+                                        tracing::error!("Failed to increment retries for task #{}: {e}", task.id);
+                                    }
+                                    if let Some(signal) = first {
+                                        let _ = task_session.set_signal(Some(&signal)).await;
+                                        let _ = task_session.set_state(&format!("{pipeline_name}_PENDING")).await;
                                     }
                                 }
-                                Err(e) => tracing::error!("Failed to get task #{}: {e}", task.id),
                             }
+                            Err(e) => tracing::error!("Failed to get task #{}: {e}", task.id),
                         }
-                        Ok(None) => {
-                            if let Err(e) = task_session.finish().await {
-                                tracing::error!("Failed to finish task #{}: {e}", task.id);
+                    } else {
+                        match task_session.pop_stack().await {
+                            Ok(Some(entry)) => {
+                                // Success return from sub-pipeline — re-run calling stage
+                                if let Err(e) = task_session.set_signal(Some(&entry.signal)).await {
+                                    tracing::error!("Failed to set return signal for task #{}: {e}", task.id);
+                                }
+                                if let Err(e) = task_session
+                                    .set_state(&format!("{}_PENDING", entry.pipeline))
+                                    .await
+                                {
+                                    tracing::error!("Failed to set return state for task #{}: {e}", task.id);
+                                }
                             }
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to pop stack for task #{}: {e}", task.id);
+                            Ok(None) => {
+                                if let Err(e) = task_session.finish().await {
+                                    tracing::error!("Failed to finish task #{}: {e}", task.id);
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to pop stack for task #{}: {e}", task.id);
+                            }
                         }
                     }
                 }
