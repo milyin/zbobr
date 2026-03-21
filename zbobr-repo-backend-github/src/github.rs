@@ -1044,35 +1044,6 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         Ok(())
     }
 
-    async fn rewrite_commit_authors(
-        &self,
-        identity: &zbobr_api::task::TaskIdentity,
-        work_dir: &std::path::Path,
-        dest_branch: &str,
-    ) -> anyhow::Result<()> {
-        if !self.backend_config.overwrite_author {
-            return Ok(());
-        }
-
-        zbobr_utility::rewrite_authors_on_worktree(
-            work_dir,
-            dest_branch,
-            &self.backend_config.git_user_name,
-            &self.backend_config.git_user_email,
-        )
-        .await?;
-
-        // Push rewritten commits
-        if let Err(e) = self.update_pr(identity).await {
-            tracing::warn!(
-                "Could not push rewritten commits for task #{}: {e}",
-                identity.task_id
-            );
-        }
-
-        Ok(())
-    }
-
     fn debug_state(&self) -> String {
         format!(
             "GitHubRepoBackend(fork_owner={}, repos_dir={})",

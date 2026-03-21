@@ -407,6 +407,12 @@ pub struct ZbobrDispatcherConfig {
     /// Default destination branch pre-populated into task parameters before the
     /// preparator agent runs (e.g. "main"). The preparator may still override this.
     pub default_destination_branch: Option<String>,
+    /// Git user name for commits made by the tool.
+    pub git_user_name: String,
+    /// Git user email for commits made by the tool.
+    pub git_user_email: String,
+    /// Rewrite commit authors after each stage completes to match configured git user.
+    pub overwrite_author: bool,
 }
 
 impl Default for ZbobrDispatcherConfig {
@@ -420,6 +426,9 @@ impl Default for ZbobrDispatcherConfig {
             work_branch_prefix: "zbobr_fix".to_string(),
             default_destination_repository: None,
             default_destination_branch: None,
+            git_user_name: String::new(),
+            git_user_email: String::new(),
+            overwrite_author: false,
         }
     }
 }

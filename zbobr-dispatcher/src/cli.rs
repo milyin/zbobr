@@ -1221,10 +1221,21 @@ async fn perform_stash_and_push(
         if let Err(e) = repo_backend.update_pr(&identity).await {
             tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
         }
-        let dest_branch = identity.destination_branch.clone();
-        repo_backend
-            .rewrite_commit_authors(&identity, work_dir, &dest_branch)
+        let config = zbobr.config();
+        if config.overwrite_author {
+            let dest_branch = identity.destination_branch.clone();
+            zbobr_utility::rewrite_authors_on_worktree(
+                work_dir,
+                &dest_branch,
+                &config.git_user_name,
+                &config.git_user_email,
+            )
             .await?;
+            // Push rewritten commits
+            if let Err(e) = repo_backend.update_pr(&identity).await {
+                tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
+            }
+        }
     } else {
         tracing::warn!("Task #{task_id} missing routing parameters — skipping push");
     }

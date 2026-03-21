@@ -77,6 +77,9 @@ fn default_config_toml() -> RootConfigToml {
             work_branch_prefix: Some("zbobr_fix".into()),
             default_destination_repository: None,
             default_destination_branch: None,
+            git_user_name: Some("zbobr".into()),
+            git_user_email: Some("zbobr@example.com".into()),
+            overwrite_author: Some(false),
         }),
         tasks: Some(ZbobrTaskBackendGithubToml {
             github_repo: Some("owner/repo".into()),

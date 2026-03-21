@@ -208,20 +208,6 @@ pub trait WorktreeBackend: Send + Sync {
     /// Push work branch and ensure PR exists. Returns PR URL.
     async fn update_pr(&self, identity: &TaskIdentity) -> anyhow::Result<String>;
 
-    /// Rewrite commit authors on the work branch to match configured git user.
-    ///
-    /// Implementations that support author rewriting (e.g. GitHub backend) should
-    /// check their own `overwrite_author` config flag and act accordingly.
-    /// Backends that do not support this (e.g. filesystem) return `Ok(())`.
-    async fn rewrite_commit_authors(
-        &self,
-        _identity: &TaskIdentity,
-        _work_dir: &std::path::Path,
-        _dest_branch: &str,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-
     /// Validate connectivity to the repo hosting service.
     async fn validate_connectivity(&self) -> anyhow::Result<()>;
 

@@ -400,9 +400,18 @@ async fn overwrite_author(
     git(&repo_dir, &["fetch", "origin", dest_branch]).await?;
 
     if !dry_run {
-        repo_backend
-            .rewrite_commit_authors(&identity, &repo_dir, dest_branch)
-            .await?;
+        let config = zbobr.config();
+        zbobr_utility::rewrite_authors_on_worktree(
+            &repo_dir,
+            dest_branch,
+            &config.git_user_name,
+            &config.git_user_email,
+        )
+        .await?;
+        // Push rewritten commits
+        if let Err(e) = repo_backend.update_pr(&identity).await {
+            tracing::warn!("Could not push rewritten commits for task #{}: {e}", id);
+        }
         println!("Successfully rewrote commit authors and pushed");
     } else {
         if let Ok(log) = git_output(
