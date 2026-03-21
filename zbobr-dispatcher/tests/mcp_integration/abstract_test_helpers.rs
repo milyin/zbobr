@@ -862,3 +862,235 @@ pub async fn run_retry_limit(env: &IntegrationTestEnv) {
         "Task should be in PENDING state"
     );
 }
+
+// ===========================================================================
+// Test 12: Sub-pipeline self-retry on failure
+// ===========================================================================
+
+pub async fn run_sub_pipeline_failure_retry(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_sub_fail").await;
+    let task_id = env
+        .create_task("Sub-fail test", "Sub-pipeline failure retry test", "READY")
+        .await;
+    let work_branch = format!("zbobr_fix-{task_id}-subfail");
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
+
+    // main/entry calls sub-pipeline; sub/handler fails via report_failure
+    // sub pipeline has max_retries: 1 so it can retry once
+    let mut roles = HashMap::new();
+    roles.insert(
+        "role_main".to_string(),
+        RoleDefinition {
+            tools: vec![
+                "report_success".to_string(),
+                "call_sub".to_string(),
+            ],
+            prompt: None,
+        },
+    );
+
+    let mut pipelines = HashMap::new();
+    pipelines.insert(
+        "main".to_string(),
+        PipelineConfig {
+            order: vec!["entry".to_string()],
+            stages: {
+                let mut m = HashMap::new();
+                m.insert(
+                    "entry".to_string(),
+                    StageDefinition {
+                        role: "role_main".to_string(),
+                        model: None,
+                        tool: Some(Tool::McpTester),
+                        main_prompt: None,
+                        additional_prompts: vec![],
+                    },
+                );
+                m
+            },
+            ..Default::default()
+        },
+    );
+    pipelines.insert(
+        "sub".to_string(),
+        PipelineConfig {
+            order: vec!["handler".to_string()],
+            stages: {
+                let mut m = HashMap::new();
+                m.insert(
+                    "handler".to_string(),
+                    StageDefinition {
+                        role: "role_sub".to_string(),
+                        model: None,
+                        tool: Some(Tool::McpTester),
+                        main_prompt: None,
+                        additional_prompts: vec![],
+                    },
+                );
+                m
+            },
+            max_retries: 1,
+        },
+    );
+    let workflow = WorkflowConfig {
+        prompts_dir: None,
+        pipelines,
+        roles,
+    };
+
+    // Step 1: run entry → calls call_sub
+    let scenarios_call = scenarios_map(vec![
+        (
+            "role_main",
+            abstract_scenarios::call_pipeline_then_succeed_scenario("sub"),
+        ),
+        ("role_sub", abstract_scenarios::report_failure_scenario()),
+    ]);
+    env.run_pipeline(task_id, &workflow, &scenarios_call).await;
+    let task = env.get_task(task_id).await;
+    assert_eq!(task.signal, Some("call_sub".to_string()));
+    assert_eq!(task.stack.len(), 1, "Stack should have return entry");
+
+    // Step 2: run sub/handler → report_failure → return_failure signal
+    env.continue_pipeline(task_id, &workflow, &scenarios_call)
+        .await;
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.signal,
+        Some("return_failure".to_string()),
+        "sub/handler report_failure should produce return_failure"
+    );
+
+    // Step 3: process return_failure → sub-pipeline retries itself (not return to caller)
+    env.continue_pipeline(task_id, &workflow, &scenarios_call)
+        .await;
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.state, "sub_PENDING",
+        "Failed sub-pipeline should retry itself, not return to caller"
+    );
+    assert_eq!(
+        task.stack.len(),
+        1,
+        "Stack should be preserved during sub-pipeline retry"
+    );
+    assert!(!task.pause, "Should not be paused yet (retries not exhausted)");
+
+    // Step 4: retry sub/handler, this time with success → should return to caller
+    let scenarios_success = scenarios_map(vec![
+        ("role_main", abstract_scenarios::report_and_finish_scenario()),
+        ("role_sub", abstract_scenarios::report_and_finish_scenario()),
+    ]);
+    env.run_to_completion(task_id, &workflow, &scenarios_success, 10)
+        .await;
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.state, "DONE",
+        "After sub-pipeline retry succeeds, should return to caller and complete"
+    );
+    assert!(task.stack.is_empty(), "Stack should be empty after completion");
+}
+
+// ===========================================================================
+// Test 13: Sub-pipeline failure pauses when retries exhausted
+// ===========================================================================
+
+pub async fn run_sub_pipeline_failure_pause(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_sub_pause").await;
+    let task_id = env
+        .create_task("Sub-pause test", "Sub-pipeline failure pause test", "READY")
+        .await;
+    let work_branch = format!("zbobr_fix-{task_id}-subpause");
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
+
+    // sub pipeline with max_retries: 0 → first failure should pause immediately
+    let mut roles = HashMap::new();
+    roles.insert(
+        "role_main".to_string(),
+        RoleDefinition {
+            tools: vec![
+                "report_success".to_string(),
+                "call_sub".to_string(),
+            ],
+            prompt: None,
+        },
+    );
+
+    let mut pipelines = HashMap::new();
+    pipelines.insert(
+        "main".to_string(),
+        PipelineConfig {
+            order: vec!["entry".to_string()],
+            stages: {
+                let mut m = HashMap::new();
+                m.insert(
+                    "entry".to_string(),
+                    StageDefinition {
+                        role: "role_main".to_string(),
+                        model: None,
+                        tool: Some(Tool::McpTester),
+                        main_prompt: None,
+                        additional_prompts: vec![],
+                    },
+                );
+                m
+            },
+            ..Default::default()
+        },
+    );
+    pipelines.insert(
+        "sub".to_string(),
+        PipelineConfig {
+            order: vec!["handler".to_string()],
+            stages: {
+                let mut m = HashMap::new();
+                m.insert(
+                    "handler".to_string(),
+                    StageDefinition {
+                        role: "role_sub".to_string(),
+                        model: None,
+                        tool: Some(Tool::McpTester),
+                        main_prompt: None,
+                        additional_prompts: vec![],
+                    },
+                );
+                m
+            },
+            max_retries: 0, // no retries allowed
+        },
+    );
+    let workflow = WorkflowConfig {
+        prompts_dir: None,
+        pipelines,
+        roles,
+    };
+
+    // Step 1: run entry → calls call_sub
+    let scenarios = scenarios_map(vec![
+        (
+            "role_main",
+            abstract_scenarios::call_pipeline_then_succeed_scenario("sub"),
+        ),
+        ("role_sub", abstract_scenarios::report_failure_scenario()),
+    ]);
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
+    let task = env.get_task(task_id).await;
+    assert_eq!(task.signal, Some("call_sub".to_string()));
+
+    // Step 2: run sub/handler → report_failure
+    env.continue_pipeline(task_id, &workflow, &scenarios).await;
+    let task = env.get_task(task_id).await;
+    assert_eq!(task.signal, Some("return_failure".to_string()));
+
+    // Step 3: process return_failure → retries(1) > max_retries(0) → pause
+    env.continue_pipeline(task_id, &workflow, &scenarios).await;
+    let task = env.get_task(task_id).await;
+    assert!(
+        task.pause,
+        "Sub-pipeline should be paused when retries exhausted"
+    );
+}
