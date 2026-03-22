@@ -709,18 +709,18 @@ pub async fn process_task(
     mcp_tester_override: Option<&ZbobrExecutorMcpTesterConfig>,
 ) -> anyhow::Result<()> {
     if task.state.is_done() {
-        println!("Task #{} is DONE — nothing to process", task.id);
+        tracing::info!("Task #{} is DONE — nothing to process", task.id);
         return Ok(());
     }
 
     // Centralized pause handler: convert pause flag → PAUSE state + stack push
     if apply_pause_to_state(zbobr, task).await? {
-        println!("Task #{} paused — state set to PAUSE", task.id);
+        tracing::info!("Task #{} paused — state set to PAUSE", task.id);
         return Ok(());
     }
 
     if task.state.is_pause() {
-        println!("Task #{} is paused — skipped", task.id);
+        tracing::info!("Task #{} is paused — skipped", task.id);
         return Ok(());
     }
 
@@ -741,8 +741,22 @@ pub async fn process_task(
     match action {
         crate::workflow::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
             if let Some(call_target) = stage_def.call_pipeline() {
+                tracing::info!(
+                    "Task #{}: entering call stage {}/{} → pipeline '{}'",
+                    task.id,
+                    pipeline_name,
+                    stage_name,
+                    call_target
+                );
                 handle_call_stage(zbobr, task.id, pipeline_name, stage_name, call_target).await?;
             } else {
+                tracing::info!(
+                    "Task #{}: running stage {}/{} (role={:?})",
+                    task.id,
+                    pipeline_name,
+                    stage_name,
+                    stage_def.role_name()
+                );
                 let runner = CliStageRunner::new(
                     zbobr,
                     task.id,
@@ -764,9 +778,10 @@ pub async fn process_task(
                     task_session
                         .set_state(State::pending(entry.pipeline.clone()))
                         .await?;
-                    println!(
-                        "Task #{} pipeline failed — returning failure to pipeline '{}'",
-                        task.id, entry.pipeline
+                    tracing::info!(
+                        "Task #{}: pipeline failed — returning failure to pipeline '{}'",
+                        task.id,
+                        entry.pipeline
                     );
                 } else {
                     let pipeline = task
@@ -786,7 +801,10 @@ pub async fn process_task(
                             t
                         })
                         .await?;
-                    println!("Task #{} pipeline failed at root — paused", task.id);
+                    tracing::info!(
+                        "Task #{}: pipeline failed at root — paused",
+                        task.id
+                    );
                 }
             } else if let Some(entry) = task_session.pop_stack().await? {
                 // Success return from sub-pipeline — re-run calling stage
@@ -794,22 +812,26 @@ pub async fn process_task(
                 task_session
                     .set_state(State::pending(entry.pipeline.clone()))
                     .await?;
-                println!(
-                    "Task #{} returning to pipeline '{}' with signal '{}'",
-                    task.id, entry.pipeline, entry.signal
+                tracing::info!(
+                    "Task #{}: returning to pipeline '{}' with signal '{}'",
+                    task.id,
+                    entry.pipeline,
+                    entry.signal
                 );
             } else {
                 task_session.finish().await?;
-                println!("Task #{} completed", task.id);
+                tracing::info!("Task #{}: completed", task.id);
             }
         }
         crate::workflow::StateAction::Paused => {
-            println!("Task #{} is paused — skipped", task.id);
+            tracing::info!("Task #{}: paused — skipped", task.id);
         }
         crate::workflow::StateAction::Idle => {
-            println!(
-                "Task #{} is idle (state={}, signal={:?}) — skipped",
-                task.id, task.state, task.signal
+            tracing::info!(
+                "Task #{}: idle (state={}, signal={:?}) — skipped",
+                task.id,
+                task.state,
+                task.signal
             );
         }
     }
@@ -992,6 +1014,11 @@ pub async fn run_manager_loop(
                         // Pipeline failed — return to caller or pause at root
                         match task_session.pop_stack().await {
                             Ok(Some(entry)) => {
+                                tracing::info!(
+                                    "Task #{}: pipeline failed — returning failure to pipeline '{}'",
+                                    task.id,
+                                    entry.pipeline
+                                );
                                 if let Err(e) =
                                     task_session.set_signal(Some(Signal::ReturnFailure)).await
                                 {
@@ -1011,6 +1038,10 @@ pub async fn run_manager_loop(
                                 }
                             }
                             Ok(None) => {
+                                tracing::info!(
+                                    "Task #{}: pipeline failed at root — paused",
+                                    task.id
+                                );
                                 let pipeline = task
                                     .state
                                     .pipeline()
@@ -1040,6 +1071,12 @@ pub async fn run_manager_loop(
                         match task_session.pop_stack().await {
                             Ok(Some(entry)) => {
                                 // Success return from sub-pipeline — re-run calling stage
+                                tracing::info!(
+                                    "Task #{}: returning to pipeline '{}' with signal '{}'",
+                                    task.id,
+                                    entry.pipeline,
+                                    entry.signal
+                                );
                                 if let Err(e) =
                                     task_session.set_signal(Some(entry.signal.clone())).await
                                 {
@@ -1059,6 +1096,7 @@ pub async fn run_manager_loop(
                                 }
                             }
                             Ok(None) => {
+                                tracing::info!("Task #{}: completed", task.id);
                                 if let Err(e) = task_session.finish().await {
                                     tracing::error!("Failed to finish task #{}: {e}", task.id);
                                 }

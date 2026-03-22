@@ -125,7 +125,39 @@ impl Workflow {
     /// Given a task's current state/signal/stack and the workflow configuration,
     /// determine the next action to take.
     pub fn resolve_next_action(&self, task: &Task) -> anyhow::Result<StateAction<'_>> {
-        self.resolve_inner(task, 0)
+        tracing::info!(
+            "Task #{}: resolving next action (state={}, signal={:?}, stack_depth={})",
+            task.id,
+            task.state,
+            task.signal,
+            task.stack.len()
+        );
+        let action = self.resolve_inner(task, 0)?;
+        match &action {
+            StateAction::RunStage(pipeline, stage, def) => {
+                if let Some(call_target) = def.call_pipeline() {
+                    tracing::info!(
+                        "Task #{}: resolved → RunStage {}/{} (call → {})",
+                        task.id,
+                        pipeline,
+                        stage,
+                        call_target
+                    );
+                } else {
+                    tracing::info!(
+                        "Task #{}: resolved → RunStage {}/{} (role={:?})",
+                        task.id,
+                        pipeline,
+                        stage,
+                        def.role_name()
+                    );
+                }
+            }
+            StateAction::Done => tracing::info!("Task #{}: resolved → Done", task.id),
+            StateAction::Paused => tracing::info!("Task #{}: resolved → Paused", task.id),
+            StateAction::Idle => tracing::info!("Task #{}: resolved → Idle", task.id),
+        }
+        Ok(action)
     }
 
     fn resolve_inner(&self, task: &Task, depth: usize) -> anyhow::Result<StateAction<'_>> {
@@ -143,6 +175,11 @@ impl Workflow {
                 if task.stack.is_empty() {
                     // Push default pipeline's start stage
                     let default_pipeline = self.config.default_pipeline();
+                    tracing::info!(
+                        "Task #{}: READY with empty stack → starting default pipeline '{}'",
+                        task.id,
+                        default_pipeline
+                    );
                     let (pipeline_key, pipeline_config) = self
                         .config
                         .pipelines
@@ -162,8 +199,18 @@ impl Workflow {
                         })?;
                     Ok(StateAction::RunStage(pipeline_key, stage_name, stage_def))
                 } else if let Some(ref signal) = task.signal {
+                    tracing::info!(
+                        "Task #{}: READY with stack (depth={}) and signal '{}' → resolving signal",
+                        task.id,
+                        task.stack.len(),
+                        signal
+                    );
                     self.resolve_signal(task, signal)
                 } else {
+                    tracing::info!(
+                        "Task #{}: READY with stack but no signal → Idle",
+                        task.id
+                    );
                     Ok(StateAction::Idle)
                 }
             }
@@ -171,8 +218,19 @@ impl Workflow {
             State::Pause => Ok(StateAction::Paused),
             State::Pending(pipeline) => {
                 if let Some(ref signal) = task.signal {
+                    tracing::info!(
+                        "Task #{}: PENDING in pipeline '{}' with signal '{}' → resolving",
+                        task.id,
+                        pipeline,
+                        signal
+                    );
                     self.resolve_signal_in_pipeline(signal, pipeline)
                 } else {
+                    tracing::info!(
+                        "Task #{}: PENDING in pipeline '{}' but no signal → Idle",
+                        task.id,
+                        pipeline
+                    );
                     Ok(StateAction::Idle)
                 }
             }
@@ -183,6 +241,12 @@ impl Workflow {
     fn resolve_signal(&self, task: &Task, signal: &Signal) -> anyhow::Result<StateAction<'_>> {
         let pipeline =
             pipeline_from_state(&task.state).unwrap_or_else(|| self.config.default_pipeline());
+        tracing::info!(
+            "Task #{}: resolve_signal '{}' in pipeline '{}'",
+            task.id,
+            signal,
+            pipeline
+        );
         self.resolve_signal_in_pipeline(signal, &pipeline)
     }
 
@@ -193,6 +257,11 @@ impl Workflow {
     ) -> anyhow::Result<StateAction<'_>> {
         match signal {
             Signal::Go(target_stage) => {
+                tracing::info!(
+                    "Signal Go('{}') → looking up stage in pipeline '{}'",
+                    target_stage,
+                    pipeline
+                );
                 let (pipeline_key, pipeline_config) = self
                     .config
                     .pipelines
@@ -217,6 +286,11 @@ impl Workflow {
                 ))
             }
             Signal::Call(target_pipeline) => {
+                tracing::info!(
+                    "Signal Call('{}') → entering sub-pipeline from '{}'",
+                    target_pipeline,
+                    pipeline
+                );
                 let (pipeline_key, pipeline_config) = self
                     .config
                     .pipelines
@@ -231,7 +305,14 @@ impl Workflow {
                 })?;
                 Ok(StateAction::RunStage(pipeline_key, stage_key, start))
             }
-            Signal::Return | Signal::ReturnFailure => Ok(StateAction::Done),
+            Signal::Return | Signal::ReturnFailure => {
+                tracing::info!(
+                    "Signal '{}' → Done (returning from pipeline '{}')",
+                    signal,
+                    pipeline
+                );
+                Ok(StateAction::Done)
+            }
         }
     }
 }
