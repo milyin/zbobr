@@ -138,7 +138,8 @@ impl Workflow {
         }
 
         match &task.state {
-            State::Empty | State::Ready => {
+            State::Empty => Ok(StateAction::Idle),
+            State::Ready => {
                 if task.stack.is_empty() {
                     // Push default pipeline's start stage
                     let default_pipeline = self.config.default_pipeline();
@@ -395,12 +396,12 @@ role = "merger"
         )]);
         let workflow = Workflow::from_config(wf);
 
-        // Fresh task → state machine should resolve to RunStage for the call stage
+        // Ready task → state machine should resolve to RunStage for the call stage
         let task = Task {
             id: 1,
             title: String::new(),
             description: String::new(),
-            state: State::Empty,
+            state: State::Ready,
             destination_repository: None,
             destination_branch: None,
             work_branch: None,
