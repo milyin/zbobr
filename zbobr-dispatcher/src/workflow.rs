@@ -8,11 +8,6 @@ use zbobr_api::config::{
 };
 use zbobr_api::{Pipeline, Signal, Stage, State, Task};
 
-// Re-export constants for convenience.
-pub const MAIN_PIPELINE: &str = Pipeline::MAIN;
-pub const INIT_PIPELINE: &str = Pipeline::INIT;
-pub const MERGE_PIPELINE: &str = Pipeline::MERGE;
-
 /// Workflow wraps a `WorkflowConfig` and exposes state machine logic as methods.
 #[derive(Clone, Debug)]
 pub struct Workflow {
@@ -38,7 +33,7 @@ impl Default for Workflow {
             role: Some("default".to_string()),
             ..Default::default()
         };
-        for name in [MAIN_PIPELINE, INIT_PIPELINE, MERGE_PIPELINE] {
+        for name in [Pipeline::MAIN, Pipeline::INIT, Pipeline::MERGE] {
             pipelines.insert(
                 Pipeline::from(name),
                 PipelineConfig {

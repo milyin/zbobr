@@ -16,7 +16,6 @@ use crate::{
 };
 use zbobr_api::config_tools::McpTool;
 use zbobr_api::config::StageDefinition;
-use crate::workflow::{INIT_PIPELINE, MERGE_PIPELINE};
 use zbobr_api::{CommentTag, Pipeline, Signal, State};
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 
@@ -842,7 +841,7 @@ async fn detect_and_handle_worktree(
         Some(id) => id,
         None => {
             // If we ARE the undefined handler pipeline, proceed with task_dir
-            if pipeline_name.as_str() == INIT_PIPELINE {
+            if pipeline_name.as_str() == Pipeline::INIT {
                 return Ok(WorktreeResult::Ready(task_dir.to_path_buf()));
             }
             // Otherwise, dispatch to undefined handler
@@ -895,7 +894,7 @@ async fn detect_and_handle_worktree(
 
     // If we ARE the conflict handler, start the merge but don't abort on failure —
     // the agent needs to see conflict markers in the working tree.
-    let is_conflict_handler = pipeline_name.as_str() == MERGE_PIPELINE;
+    let is_conflict_handler = pipeline_name.as_str() == Pipeline::MERGE;
 
     let merged_ok = git_check(
         &work_dir,
@@ -939,8 +938,8 @@ async fn handle_worktree_problem(
     problem: zbobr_api::task::WorktreeProblem,
 ) -> anyhow::Result<WorktreeResult> {
     let handler_pipeline = match problem {
-        zbobr_api::task::WorktreeProblem::Undefined => INIT_PIPELINE,
-        zbobr_api::task::WorktreeProblem::Conflict => MERGE_PIPELINE,
+        zbobr_api::task::WorktreeProblem::Undefined => Pipeline::INIT,
+        zbobr_api::task::WorktreeProblem::Conflict => Pipeline::MERGE,
     };
 
     let task_session = zbobr.task_session(task_id);
