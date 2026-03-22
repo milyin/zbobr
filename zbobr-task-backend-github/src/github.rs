@@ -92,6 +92,17 @@ where
 // -- Shared response types --
 
 #[derive(Debug, serde::Deserialize)]
+struct IssueMilestone {
+    title: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct MilestoneResponse {
+    number: u64,
+    title: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
 struct IssueResponse {
     number: u64,
     title: String,
@@ -99,6 +110,7 @@ struct IssueResponse {
     #[allow(dead_code)]
     state: String,
     labels: Vec<IssueLabel>,
+    milestone: Option<IssueMilestone>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -210,14 +222,9 @@ impl ZbobrTaskBackendGithubImpl {
         label.strip_prefix("signal:")?.parse().ok()
     }
 
-    /// Convert a state value to its GitHub label representation.
-    fn state_to_label(state: &State) -> String {
-        format!("state:{}", state)
-    }
-
-    /// Parse a GitHub label string back to a state string.
-    fn label_to_state(label: &str) -> Option<&str> {
-        label.strip_prefix("state:")
+    /// Convert a state value to its GitHub milestone title.
+    fn state_to_milestone_title(state: &State) -> String {
+        state.to_string()
     }
 
     /// Convert a flag name to its GitHub label representation.
@@ -247,40 +254,59 @@ impl ZbobrTaskBackendGithubImpl {
         Ok(())
     }
 
-    /// Apply a state change on a GitHub issue (remove old state labels, add new one).
-    async fn apply_state_change(&self, id: u64, state: &State) -> anyhow::Result<()> {
+    /// List all milestones in the repository, returning title → number map.
+    async fn list_milestones(&self) -> anyhow::Result<HashMap<String, u64>> {
         let (owner, repo) = self.parse_repo()?;
-
-        // Fetch current labels and remove all existing state: labels
-        let issue: IssueResponse = retry_github("get issue labels", || {
-            self.octocrab
-                .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
+        let params = vec![("state", "all".to_string()), ("per_page", "100".to_string())];
+        let milestones: Vec<MilestoneResponse> = retry_github("list milestones", || {
+            self.octocrab.get(
+                format!("/repos/{owner}/{repo}/milestones"),
+                Some(&params),
+            )
         })
         .await?;
-        for label in &issue.labels {
-            if Self::label_to_state(&label.name).is_some() {
-                let _ = retry_github("remove state label", || async {
-                    self.octocrab
-                        .issues(owner, repo)
-                        .remove_label(id, &label.name)
-                        .await
-                })
-                .await;
-            }
-        }
+        Ok(milestones.into_iter().map(|m| (m.title, m.number)).collect())
+    }
 
-        // Add new state label
-        if !state.is_empty() {
-            let label = Self::state_to_label(state);
-            let labels: Vec<String> = vec![label];
-            retry_github("add state label", || async {
-                self.octocrab
-                    .issues(owner, repo)
-                    .add_labels(id, &labels)
-                    .await
-            })
-            .await?;
+    /// Create a milestone and return its number.
+    async fn create_milestone(&self, title: &str) -> anyhow::Result<u64> {
+        let (owner, repo) = self.parse_repo()?;
+        let url = format!("/repos/{owner}/{repo}/milestones");
+        let body = serde_json::json!({ "title": title });
+        let milestone: MilestoneResponse = retry_github("create milestone", || {
+            self.octocrab.post(url.clone(), Some(&body))
+        })
+        .await?;
+        Ok(milestone.number)
+    }
+
+    /// Get the milestone number for a title, creating it if absent.
+    async fn get_or_create_milestone(&self, title: &str) -> anyhow::Result<u64> {
+        let milestones = self.list_milestones().await?;
+        if let Some(&number) = milestones.get(title) {
+            return Ok(number);
         }
+        self.create_milestone(title).await
+    }
+
+    /// Apply a state change on a GitHub issue via milestone assignment.
+    async fn apply_state_change(&self, id: u64, state: &State) -> anyhow::Result<()> {
+        let (owner, repo) = self.parse_repo()?;
+        let url = format!("/repos/{owner}/{repo}/issues/{id}");
+
+        let body = if state.is_empty() {
+            serde_json::json!({ "milestone": serde_json::Value::Null })
+        } else {
+            let title = Self::state_to_milestone_title(state);
+            let number = self.get_or_create_milestone(&title).await?;
+            serde_json::json!({ "milestone": number })
+        };
+
+        retry_github("set issue milestone", || {
+            self.octocrab.patch(url.clone(), Some(&body))
+        })
+        .await
+        .map(|_: serde_json::Value| ())?;
 
         Ok(())
     }
@@ -462,11 +488,10 @@ impl ZbobrTaskBackendGithubImpl {
         // Ensure the task repo exists
         self.ensure_task_repo_exists().await?;
 
-        // Create flag and state labels
+        // Create flag labels
         let existing_labels = self.list_labels().await?;
 
         const FLAG_LABEL_COLOR: &str = "f9d0c4";
-        const STATE_LABEL_COLOR: &str = "0075ca";
 
         for flag_name in ["pause", "confirm"] {
             let flag_label = Self::flag_to_label(flag_name);
@@ -484,19 +509,16 @@ impl ZbobrTaskBackendGithubImpl {
             }
         }
 
+        // Create milestones for fixed states
+        let existing_milestones = self.list_milestones().await?;
+
         for state in [State::Ready, State::Done, State::Pause] {
-            let state_label = Self::state_to_label(&state);
-            let state_desc = format!("State: {}", state);
-            if !existing_labels.contains(&state_label) {
-                tracing::info!("Creating label '{state_label}'");
-                self.create_label(&state_label, STATE_LABEL_COLOR, &state_desc)
-                    .await?;
-            } else if force {
-                tracing::info!("Updating label '{state_label}' (force)");
-                self.update_label(&state_label, STATE_LABEL_COLOR, &state_desc)
-                    .await?;
+            let title = Self::state_to_milestone_title(&state);
+            if !existing_milestones.contains_key(&title) {
+                tracing::info!("Creating milestone '{title}'");
+                self.create_milestone(&title).await?;
             } else {
-                tracing::info!("Label '{state_label}' already exists");
+                tracing::info!("Milestone '{title}' already exists");
             }
         }
 
@@ -524,12 +546,11 @@ impl ZbobrTaskBackendGithubImpl {
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
 
-        // state is stored as a label
+        // state is stored as a milestone
         let state = issue
-            .labels
-            .iter()
-            .find_map(|l| Self::label_to_state(&l.name))
-            .map(State::from)
+            .milestone
+            .as_ref()
+            .map(|m| State::from(m.title.as_str()))
             .unwrap_or(State::Empty);
 
         // signal is stored as a label
