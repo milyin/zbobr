@@ -8,9 +8,9 @@ use tokio::{
     sync::{Mutex, OwnedMutexGuard},
 };
 use zbobr_api::{
-    ChecklistItem, Comment, HistoryRecordType, Model, Signal, StackEntry, State, Task, Tool,
+    ChecklistItem, Comment, Model, Signal, StackEntry, State, Task, Tool,
     backend::{TaskBackend, TaskMut, TaskWeak},
-    classify_comment,
+    comment_tag,
 };
 
 use crate::config::ZbobrTaskBackendFsConfig;
@@ -448,12 +448,8 @@ impl TaskMut for FsTaskMut {
         report_text: Option<&str>,
         prompt_text: Option<&str>,
     ) -> anyhow::Result<()> {
+        let tag = comment_tag(body);
         let report_name = if let Some(text) = report_text {
-            let tag = match classify_comment(body) {
-                HistoryRecordType::Success => "success",
-                HistoryRecordType::Failure => "failure",
-                _ => "report",
-            };
             let base_name = format!("report_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
             Some(self.backend.store_report(self.id, &base_name, text).await?)
         } else {
@@ -461,11 +457,6 @@ impl TaskMut for FsTaskMut {
         };
 
         let prompt_name = if let Some(text) = prompt_text {
-            let tag = match classify_comment(body) {
-                HistoryRecordType::Success => "success",
-                HistoryRecordType::Failure => "failure",
-                _ => "report",
-            };
             let base_name = format!("prompt_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
             Some(self.backend.store_report(self.id, &base_name, text).await?)
         } else {

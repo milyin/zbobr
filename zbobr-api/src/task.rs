@@ -120,6 +120,16 @@ pub fn classify_comment(text: &str) -> HistoryRecordType {
     }
 }
 
+/// Return a short tag derived from the comment's `[tool_name]` classification.
+/// Used to build report/prompt filenames.
+pub fn comment_tag(body: &str) -> &'static str {
+    match classify_comment(body) {
+        HistoryRecordType::Success => "success",
+        HistoryRecordType::Failure => "failure",
+        _ => "report",
+    }
+}
+
 /// Extract a one-line summary from comment text (first non-prefix line, truncated).
 pub fn extract_summary(text: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();

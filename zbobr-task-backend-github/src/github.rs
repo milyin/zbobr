@@ -7,9 +7,9 @@ use std::{
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use zbobr_api::{
-    Comment, CommentTag, HistoryRecordType, Model, Task, Tool,
+    Comment, CommentTag, Model, Task, Tool,
     backend::TaskBackend,
-    classify_comment,
+    comment_tag,
     task::{StackEntry, State},
 };
 
@@ -1104,12 +1104,8 @@ impl TaskMut for GithubTaskMut {
         report_text: Option<&str>,
         prompt_text: Option<&str>,
     ) -> anyhow::Result<()> {
+        let tag = comment_tag(body);
         let report_name = if let Some(text) = report_text {
-            let tag = match classify_comment(body) {
-                HistoryRecordType::Success => "success",
-                HistoryRecordType::Failure => "failure",
-                _ => "report",
-            };
             let base_name = format!("report_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
             Some(self.backend.store_report(self.id, &base_name, text).await?)
         } else {
@@ -1117,11 +1113,6 @@ impl TaskMut for GithubTaskMut {
         };
 
         let prompt_name = if let Some(text) = prompt_text {
-            let tag = match classify_comment(body) {
-                HistoryRecordType::Success => "success",
-                HistoryRecordType::Failure => "failure",
-                _ => "report",
-            };
             let base_name = format!("prompt_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
             Some(self.backend.store_report(self.id, &base_name, text).await?)
         } else {

@@ -701,6 +701,26 @@ mod comment_model_tests {
         }
     }
 
+    impl TrackingMut {
+        async fn mock_store_report(&self, base_name: &str, text: &str) -> String {
+            let mut reports = self.backend.reports.lock().await;
+            let mut n = 0u32;
+            let filename = loop {
+                let candidate = if n == 0 {
+                    format!("{base_name}.md")
+                } else {
+                    format!("{base_name}_{n}.md")
+                };
+                if !reports.contains_key(&(self.id, candidate.clone())) {
+                    break candidate;
+                }
+                n += 1;
+            };
+            reports.insert((self.id, filename.clone()), text.to_string());
+            filename
+        }
+    }
+
     #[async_trait]
     impl TaskMut for TrackingMut {
         fn task_id(&self) -> u64 {
@@ -751,54 +771,17 @@ mod comment_model_tests {
             report_text: Option<&str>,
             prompt_text: Option<&str>,
         ) -> anyhow::Result<()> {
+            let tag = comment_tag(body);
             let report_name = if let Some(text) = report_text {
-                let tag = match classify_comment(body) {
-                    HistoryRecordType::Success => "success",
-                    HistoryRecordType::Failure => "failure",
-                    _ => "report",
-                };
                 let base_name = format!("report_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
-                let mut reports = self.backend.reports.lock().await;
-                let mut n = 0u32;
-                let filename = loop {
-                    let candidate = if n == 0 {
-                        format!("{base_name}.md")
-                    } else {
-                        format!("{base_name}_{n}.md")
-                    };
-                    if !reports.contains_key(&(self.id, candidate.clone())) {
-                        break candidate;
-                    }
-                    n += 1;
-                };
-                reports.insert((self.id, filename.clone()), text.to_string());
-                Some(filename)
+                Some(self.mock_store_report(&base_name, text).await)
             } else {
                 None
             };
 
             let prompt_name = if let Some(text) = prompt_text {
-                let tag = match classify_comment(body) {
-                    HistoryRecordType::Success => "success",
-                    HistoryRecordType::Failure => "failure",
-                    _ => "report",
-                };
                 let base_name = format!("prompt_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
-                let mut reports = self.backend.reports.lock().await;
-                let mut n = 0u32;
-                let filename = loop {
-                    let candidate = if n == 0 {
-                        format!("{base_name}.md")
-                    } else {
-                        format!("{base_name}_{n}.md")
-                    };
-                    if !reports.contains_key(&(self.id, candidate.clone())) {
-                        break candidate;
-                    }
-                    n += 1;
-                };
-                reports.insert((self.id, filename.clone()), text.to_string());
-                Some(filename)
+                Some(self.mock_store_report(&base_name, text).await)
             } else {
                 None
             };
