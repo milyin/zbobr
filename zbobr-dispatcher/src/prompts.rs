@@ -232,7 +232,7 @@ pub async fn build_full_prompt(
     // Look up allowed tools for this role; fall back to all static tools.
     let allowed_tools: Vec<McpTool> = workflow
         .role_definition(role_name)
-        .map(|d| d.tools.clone())
+        .map(|d| d.mcp.clone())
         .unwrap_or_else(|| McpTool::all().to_vec());
     add_mcp_tool_variables(&mut vars, &allowed_tools);
 

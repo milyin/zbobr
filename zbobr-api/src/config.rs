@@ -18,7 +18,7 @@ pub trait Config: Sized {
 /// Definition of a role: which MCP tools it can access, and an optional prompt file.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct RoleDefinition {
-    pub tools: Vec<McpTool>,
+    pub mcp: Vec<McpTool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<PathBuf>,
 }

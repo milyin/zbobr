@@ -368,7 +368,7 @@ impl<'a> CliStageRunner<'a> {
             .zbobr
             .workflow()
             .role_definition(role)
-            .map(|d| d.tools.iter().copied().collect())
+            .map(|d| d.mcp.iter().copied().collect())
             .unwrap_or_else(|| {
                 // No explicit role definition — allow all tools for backward compatibility.
                 self.zbobr

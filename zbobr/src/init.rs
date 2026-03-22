@@ -193,7 +193,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             "preparator".into(),
             RoleDefinition {
-                tools: vec![
+                mcp: vec![
                     GetHistory,
                     StopWithError,
                     ReportSuccess,
@@ -206,7 +206,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             "planner".into(),
             RoleDefinition {
-                tools: vec![
+                mcp: vec![
                     GetHistory,
                     StopWithError,
                     StopWithQuestion,
@@ -221,7 +221,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             "worker".into(),
             RoleDefinition {
-                tools: vec![
+                mcp: vec![
                     GetHistory,
                     StopWithError,
                     ReportSuccess,
@@ -238,7 +238,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             "reviewer".into(),
             RoleDefinition {
-                tools: vec![
+                mcp: vec![
                     GetHistory,
                     StopWithError,
                     ReportSuccess,
@@ -251,7 +251,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             "tester".into(),
             RoleDefinition {
-                tools: vec![
+                mcp: vec![
                     GetHistory,
                     StopWithError,
                     ReportSuccess,
@@ -264,7 +264,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             "merger".into(),
             RoleDefinition {
-                tools: vec![GetHistory, StopWithError, ReportSuccess, StopWithQuestion],
+                mcp: vec![GetHistory, StopWithError, ReportSuccess, StopWithQuestion],
                 prompt: Some(PathBuf::from("merger.md")),
             },
         ),
