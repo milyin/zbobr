@@ -146,6 +146,7 @@ pub async fn run_role_mcp_server(
     tool_tracker: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     pipeline_name: String,
     pipeline_run_id: u64,
+    prompt_holder: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 ) -> anyhow::Result<u16> {
     let base_port = zbobr.config().base_port;
     use rmcp::transport::streamable_http_server::{
@@ -159,6 +160,7 @@ pub async fn run_role_mcp_server(
         tool_tracker,
         pipeline_name.clone(),
         pipeline_run_id,
+        prompt_holder,
     );
 
     let role_name_owned = role_name.to_string();

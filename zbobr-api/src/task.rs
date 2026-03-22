@@ -84,6 +84,9 @@ pub struct Comment {
     #[schemars(description = "Optional full report filename stored via task backend")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_name: Option<String>,
+    #[schemars(description = "Optional prompt filename stored via task backend (logging only)")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_name: Option<String>,
 }
 
 // -- History helper types --
@@ -1069,6 +1072,7 @@ mod tests {
             caller_pipeline: None,
             caller_pipeline_run_id: None,
             report_name: None,
+            prompt_name: None,
         }
     }
 
@@ -1085,6 +1089,7 @@ mod tests {
             caller_pipeline: Some("main".into()),
             caller_pipeline_run_id: Some(caller_run_id),
             report_name: None,
+            prompt_name: None,
         }
     }
 

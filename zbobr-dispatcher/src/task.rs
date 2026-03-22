@@ -25,6 +25,8 @@ pub struct RoleSession {
     pipeline_name: String,
     /// Pipeline run ID for this session's comments.
     pipeline_run_id: u64,
+    /// Holds the prompt text for logging alongside comments.
+    prompt_text: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl RoleSession {
@@ -37,6 +39,7 @@ impl RoleSession {
             last_mapped_tool: Arc::new(std::sync::Mutex::new(None)),
             pipeline_name: String::new(),
             pipeline_run_id: 0,
+            prompt_text: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -46,6 +49,7 @@ impl RoleSession {
         tracker: Arc<std::sync::Mutex<Option<String>>>,
         pipeline_name: String,
         pipeline_run_id: u64,
+        prompt_holder: Arc<std::sync::Mutex<Option<String>>>,
     ) -> Self {
         Self {
             zbobr,
@@ -53,6 +57,7 @@ impl RoleSession {
             last_mapped_tool: tracker,
             pipeline_name,
             pipeline_run_id,
+            prompt_text: prompt_holder,
         }
     }
 
@@ -270,6 +275,7 @@ impl RoleSession {
         model: Option<Model>,
         report_text: Option<&str>,
     ) -> anyhow::Result<()> {
+        let prompt = self.prompt_text.lock().unwrap().clone();
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
         mutable
@@ -284,6 +290,7 @@ impl RoleSession {
                 None,
                 None,
                 report_text,
+                prompt.as_deref(),
             )
             .await
     }
@@ -599,6 +606,7 @@ impl TaskSession {
                 caller_pipeline,
                 caller_pipeline_run_id,
                 None,
+                None,
             )
             .await
     }
@@ -741,6 +749,7 @@ mod comment_model_tests {
             caller_pipeline: Option<&str>,
             caller_pipeline_run_id: Option<u64>,
             report_text: Option<&str>,
+            prompt_text: Option<&str>,
         ) -> anyhow::Result<()> {
             let report_name = if let Some(text) = report_text {
                 let tag = match classify_comment(body) {
@@ -749,6 +758,32 @@ mod comment_model_tests {
                     _ => "report",
                 };
                 let base_name = format!("report_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
+                let mut reports = self.backend.reports.lock().await;
+                let mut n = 0u32;
+                let filename = loop {
+                    let candidate = if n == 0 {
+                        format!("{base_name}.md")
+                    } else {
+                        format!("{base_name}_{n}.md")
+                    };
+                    if !reports.contains_key(&(self.id, candidate.clone())) {
+                        break candidate;
+                    }
+                    n += 1;
+                };
+                reports.insert((self.id, filename.clone()), text.to_string());
+                Some(filename)
+            } else {
+                None
+            };
+
+            let prompt_name = if let Some(text) = prompt_text {
+                let tag = match classify_comment(body) {
+                    HistoryRecordType::Success => "success",
+                    HistoryRecordType::Failure => "failure",
+                    _ => "report",
+                };
+                let base_name = format!("prompt_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
                 let mut reports = self.backend.reports.lock().await;
                 let mut n = 0u32;
                 let filename = loop {
@@ -781,6 +816,7 @@ mod comment_model_tests {
                 caller_pipeline: caller_pipeline.map(str::to_string),
                 caller_pipeline_run_id,
                 report_name,
+                prompt_name,
             });
             Ok(())
         }
@@ -1036,7 +1072,8 @@ mod comment_model_tests {
         task_id: u64,
     ) -> crate::mcp::unified::UnifiedMcp {
         let tracker = Arc::new(std::sync::Mutex::new(None::<String>));
-        let session = zbobr.role_session_with_tracker(task_id, tracker, "main".to_string(), 1);
+        let prompt_holder = Arc::new(std::sync::Mutex::new(None::<String>));
+        let session = zbobr.role_session_with_tracker(task_id, tracker, "main".to_string(), 1, prompt_holder);
         let allowed_tools: std::collections::HashSet<zbobr_api::config_tools::McpTool> =
             zbobr_api::config_tools::McpTool::all()
                 .iter()
@@ -1111,10 +1148,12 @@ mod comment_model_tests {
             .unwrap();
 
         let tracker_a = Arc::new(std::sync::Mutex::new(None::<String>));
-        let session_a = zbobr.role_session_with_tracker(id, tracker_a, "main".to_string(), 1);
+        let prompt_a = Arc::new(std::sync::Mutex::new(None::<String>));
+        let session_a = zbobr.role_session_with_tracker(id, tracker_a, "main".to_string(), 1, prompt_a);
 
         let tracker_b = Arc::new(std::sync::Mutex::new(None::<String>));
-        let session_b = zbobr.role_session_with_tracker(id, tracker_b, "main".to_string(), 2);
+        let prompt_b = Arc::new(std::sync::Mutex::new(None::<String>));
+        let session_b = zbobr.role_session_with_tracker(id, tracker_b, "main".to_string(), 2, prompt_b);
 
         session_a
             .add_checklist_item("same-id", "run-1 item")

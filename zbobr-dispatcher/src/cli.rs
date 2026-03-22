@@ -388,6 +388,7 @@ impl<'a> CliStageRunner<'a> {
         let pipeline_run_id = task_snap.pipeline_run_id;
 
         let tool_tracker = Arc::new(std::sync::Mutex::new(None::<String>));
+        let prompt_holder = Arc::new(std::sync::Mutex::new(None::<String>));
         let (assigned_port, server_handle) = start_mcp_server(
             Arc::clone(self.zbobr),
             role,
@@ -399,6 +400,7 @@ impl<'a> CliStageRunner<'a> {
             Arc::clone(&tool_tracker),
             self.pipeline_name.to_string(),
             pipeline_run_id,
+            Arc::clone(&prompt_holder),
         )
         .await?;
 
@@ -408,6 +410,7 @@ impl<'a> CliStageRunner<'a> {
         );
 
         let prompt_text = self.prompt().await?;
+        *prompt_holder.lock().unwrap() = Some(prompt_text.clone());
         let executor = self
             .zbobr
             .build_executor(cli_tool, model.clone(), self.mcp_tester_override);
@@ -1347,6 +1350,7 @@ async fn start_mcp_server(
     tool_tracker: Arc<std::sync::Mutex<Option<String>>>,
     pipeline_name: String,
     pipeline_run_id: u64,
+    prompt_holder: Arc<std::sync::Mutex<Option<String>>>,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
     let role_name = role_name.to_string();
@@ -1362,6 +1366,7 @@ async fn start_mcp_server(
             tool_tracker,
             pipeline_name,
             pipeline_run_id,
+            prompt_holder,
         )
         .await
         {

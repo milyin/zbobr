@@ -138,6 +138,7 @@ pub trait TaskMut: Send + Sync {
         caller_pipeline: Option<&str>,
         caller_pipeline_run_id: Option<u64>,
         report_text: Option<&str>,
+        prompt_text: Option<&str>,
     ) -> anyhow::Result<()>;
 
     /// Release exclusive access, return read-only handle.

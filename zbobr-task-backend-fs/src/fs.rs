@@ -446,6 +446,7 @@ impl TaskMut for FsTaskMut {
         caller_pipeline: Option<&str>,
         caller_pipeline_run_id: Option<u64>,
         report_text: Option<&str>,
+        prompt_text: Option<&str>,
     ) -> anyhow::Result<()> {
         let report_name = if let Some(text) = report_text {
             let tag = match classify_comment(body) {
@@ -454,6 +455,18 @@ impl TaskMut for FsTaskMut {
                 _ => "report",
             };
             let base_name = format!("report_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
+            Some(self.backend.store_report(self.id, &base_name, text).await?)
+        } else {
+            None
+        };
+
+        let prompt_name = if let Some(text) = prompt_text {
+            let tag = match classify_comment(body) {
+                HistoryRecordType::Success => "success",
+                HistoryRecordType::Failure => "failure",
+                _ => "report",
+            };
+            let base_name = format!("prompt_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
             Some(self.backend.store_report(self.id, &base_name, text).await?)
         } else {
             None
@@ -473,6 +486,7 @@ impl TaskMut for FsTaskMut {
             caller_pipeline: caller_pipeline.map(str::to_string),
             caller_pipeline_run_id,
             report_name,
+            prompt_name,
         };
 
         comments.push(new_comment);

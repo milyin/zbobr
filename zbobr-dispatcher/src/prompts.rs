@@ -355,6 +355,7 @@ mod tests {
             caller_pipeline: None,
             caller_pipeline_run_id: None,
             report_name: None,
+            prompt_name: None,
         }
     }
 

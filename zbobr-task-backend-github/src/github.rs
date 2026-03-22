@@ -836,6 +836,7 @@ impl ZbobrTaskBackendGithubImpl {
                     caller_pipeline: tag.caller_pipeline,
                     caller_pipeline_run_id: tag.caller_pipeline_run_id,
                     report_name,
+                    prompt_name: None,
                 }
             })
             .collect())
@@ -855,6 +856,7 @@ impl ZbobrTaskBackendGithubImpl {
         caller_pipeline: Option<&str>,
         caller_pipeline_run_id: Option<u64>,
         report_name: Option<&str>,
+        prompt_name: Option<&str>,
     ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
@@ -873,16 +875,21 @@ impl ZbobrTaskBackendGithubImpl {
         let reports_branch = self.reports_branch().unwrap_or("main");
         let reports_path = self.reports_path();
 
-        let body_with_report = if let Some(rn) = report_name {
-            format!(
-                "{body}{}",
+        let mut body_extended = body.to_string();
+        if let Some(rn) = report_name {
+            body_extended = format!(
+                "{body_extended}{}",
                 format_report_link(owner, repo, reports_branch, reports_path, id, rn)
-            )
-        } else {
-            body.to_string()
-        };
+            );
+        }
+        if let Some(pn) = prompt_name {
+            body_extended = format!(
+                "{body_extended}{}",
+                format_report_link(owner, repo, reports_branch, reports_path, id, pn)
+            );
+        }
 
-        let formatted_body = format!("{}\n\n{}", tag, body_with_report);
+        let formatted_body = format!("{}\n\n{}", tag, body_extended);
 
         retry_github("create issue comment", || async {
             self.octocrab
@@ -1095,6 +1102,7 @@ impl TaskMut for GithubTaskMut {
         caller_pipeline: Option<&str>,
         caller_pipeline_run_id: Option<u64>,
         report_text: Option<&str>,
+        prompt_text: Option<&str>,
     ) -> anyhow::Result<()> {
         let report_name = if let Some(text) = report_text {
             let tag = match classify_comment(body) {
@@ -1103,6 +1111,18 @@ impl TaskMut for GithubTaskMut {
                 _ => "report",
             };
             let base_name = format!("report_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
+            Some(self.backend.store_report(self.id, &base_name, text).await?)
+        } else {
+            None
+        };
+
+        let prompt_name = if let Some(text) = prompt_text {
+            let tag = match classify_comment(body) {
+                HistoryRecordType::Success => "success",
+                HistoryRecordType::Failure => "failure",
+                _ => "report",
+            };
+            let base_name = format!("prompt_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
             Some(self.backend.store_report(self.id, &base_name, text).await?)
         } else {
             None
@@ -1121,6 +1141,7 @@ impl TaskMut for GithubTaskMut {
                 caller_pipeline,
                 caller_pipeline_run_id,
                 report_name.as_deref(),
+                prompt_name.as_deref(),
             )
             .await
     }
