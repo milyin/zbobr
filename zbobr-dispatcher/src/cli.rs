@@ -456,18 +456,31 @@ enum SequentialSignal {
 fn compute_sequential_signal(
     pipeline_name: &str,
     stage_name: &str,
+    stage_def: Option<&zbobr_api::config::StageDefinition>,
     workflow: &crate::workflow::Workflow,
     last_mapped_tool: Option<&str>,
 ) -> SequentialSignal {
     match last_mapped_tool {
-        Some("report_failure") => SequentialSignal::ReturnFailure,
-        Some("report_success") => match workflow
-            .pipeline(pipeline_name)
-            .and_then(|p| p.next_stage(stage_name))
-        {
-            Some((next, _)) => SequentialSignal::Advance(next.to_string()),
-            None => SequentialSignal::Return,
-        },
+        Some("report_failure") => {
+            if let Some(target) = stage_def.and_then(|s| s.on_failure()) {
+                SequentialSignal::Advance(target.to_string())
+            } else {
+                SequentialSignal::ReturnFailure
+            }
+        }
+        Some("report_success") => {
+            if let Some(target) = stage_def.and_then(|s| s.on_success()) {
+                SequentialSignal::Advance(target.to_string())
+            } else {
+                match workflow
+                    .pipeline(pipeline_name)
+                    .and_then(|p| p.next_stage(stage_name))
+                {
+                    Some((next, _)) => SequentialSignal::Advance(next.to_string()),
+                    None => SequentialSignal::Return,
+                }
+            }
+        }
         _ => SequentialSignal::Pause,
     }
 }
@@ -500,13 +513,18 @@ async fn handle_call_stage(
     let task_session = zbobr.task_session(task_id);
 
     // Determine what signal to emit when the called pipeline returns.
-    let return_signal = match zbobr
-        .workflow()
-        .pipeline(pipeline_name)
-        .and_then(|p| p.next_stage(stage_name))
-    {
-        Some((next, _)) => Signal::go(next),
-        None => Signal::Return,
+    let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
+    let return_signal = if let Some(target) = stage_def.and_then(|s| s.on_success()) {
+        Signal::go(target.as_str())
+    } else {
+        match zbobr
+            .workflow()
+            .pipeline(pipeline_name)
+            .and_then(|p| p.next_stage(stage_name))
+        {
+            Some((next, _)) => Signal::go(next),
+            None => Signal::Return,
+        }
     };
 
     // Push stack so we return to the right place.
@@ -1209,9 +1227,11 @@ async fn finalize_stage_session(
     // that signal takes priority.
     let current_task = zbobr.task_backend().get_task(task_id).await?.snapshot().await?;
     if !current_task.pause && current_task.signal.is_none() {
+        let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
         let seq_signal = compute_sequential_signal(
             pipeline_name,
             stage_name,
+            stage_def,
             zbobr.workflow(),
             last_mapped_tool,
         );

@@ -39,7 +39,7 @@ Each session has its own possible outcomes which are determined by the MCP opera
 
 Each `StageDefinition` has two optional transition fields:
 
-* **`on_success`** — signal emitted when the agent calls `report_success`. If `None`, defaults to `"return"`.
-* **`on_failure`** — signal emitted when the agent calls `report_failure`. If `None`, defaults to `"return"`.
+* **`on_success`** — stage name to transition to when the agent calls `report_success`. If `None`, defaults to the next sequential stage in the pipeline, or `return` if this is the last stage.
+* **`on_failure`** — stage name to transition to when the agent calls `report_failure`. If `None`, defaults to `return_failure` (exit pipeline).
 
 Signal values follow the same format as before: `go_<stage>` to transfer within the current mode, `call_<mode>` to invoke a sub-mode, or `return` to finish the current mode.

@@ -451,4 +451,68 @@ role = "merger"
         // No stage has role matching call target name
         assert!(wf.find_stage_by_role("init").is_none());
     }
+
+    #[test]
+    fn on_success_unknown_stage_fails_validation() {
+        let mut wf = base_workflow();
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.stages.get_mut("working").unwrap().on_success =
+            Some(zbobr_api::Stage::new("nonexistent"));
+        let err = wf.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("on_success references unknown stage"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn on_failure_unknown_stage_fails_validation() {
+        let mut wf = base_workflow();
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.stages.get_mut("working").unwrap().on_failure =
+            Some(zbobr_api::Stage::new("nonexistent"));
+        let err = wf.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("on_failure references unknown stage"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn on_success_self_reference_allowed() {
+        let mut wf = base_workflow();
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.stages.get_mut("working").unwrap().on_success =
+            Some(zbobr_api::Stage::new("working"));
+        assert!(wf.validate().is_ok());
+    }
+
+    #[test]
+    fn on_success_on_failure_toml_round_trip() {
+        let toml_str = r#"
+[pipelines.main.stages.working]
+role = "worker"
+on_failure = "planning"
+
+[pipelines.main.stages.planning]
+role = "planner"
+on_success = "working"
+
+[pipelines.init.stages.preparing]
+role = "preparator"
+
+[pipelines.merge.stages.merging]
+role = "merger"
+"#;
+        let wf: WorkflowConfig = toml::from_str(toml_str).unwrap();
+        assert!(wf.validate().is_ok());
+
+        let working = wf.stage("main", "working").unwrap();
+        assert_eq!(working.on_failure().map(|s| s.as_str()), Some("planning"));
+        assert!(working.on_success().is_none());
+
+        let planning = wf.stage("main", "planning").unwrap();
+        assert_eq!(planning.on_success().map(|s| s.as_str()), Some("working"));
+        assert!(planning.on_failure().is_none());
+    }
 }
