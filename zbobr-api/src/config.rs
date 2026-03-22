@@ -266,8 +266,6 @@ impl Config for WorkflowConfig {
 impl WorkflowConfig {
     /// Required pipeline: main task processing.
     pub const MAIN_PIPELINE: Pipeline = Pipeline::Main;
-    /// Required pipeline: initialization when worktree identity is undefined.
-    pub const INIT_PIPELINE: Pipeline = Pipeline::Init;
     /// Required pipeline: merge conflict resolution.
     pub const MERGE_PIPELINE: Pipeline = Pipeline::Merge;
 
@@ -341,7 +339,7 @@ impl WorkflowConfig {
     /// Validate the entire workflow configuration.
     pub fn validate(&self) -> anyhow::Result<()> {
         // Required pipelines must exist
-        for required in [Self::MAIN_PIPELINE, Self::INIT_PIPELINE, Self::MERGE_PIPELINE] {
+        for required in [Self::MAIN_PIPELINE, Self::MERGE_PIPELINE] {
             if !self.pipelines.contains_key(required.as_str()) {
                 anyhow::bail!(
                     "Required pipeline '{}' is missing from [workflow.pipelines]",

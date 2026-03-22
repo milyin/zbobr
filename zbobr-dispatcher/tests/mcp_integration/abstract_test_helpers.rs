@@ -447,119 +447,37 @@ pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
 }
 
 // ===========================================================================
-// Test 10: Automatic undefined worktree handler
+// Test 10: Undefined identity — stage runs with task_dir
 // ===========================================================================
 
-/// Scenario that sets routing params (simulating preparator work).
-fn preparator_scenario(repo_path: &str) -> String {
-    format!(
-        r#"name: Preparator Scenario
-description: Set routing params and report success
-timeout: 60
-stop_on_failure: true
-
-steps:
-- name: Configure worktree
-  operation:
-    type: tool_call
-    tool: configure_worktree
-    arguments:
-      destination_repository: "{repo_path}"
-      destination_branch: "main"
-      work_branch_postfix: "test"
-  assertions:
-    - type: success
-
-- name: Report success
-  operation:
-    type: tool_call
-    tool: report_success
-    arguments:
-      brief: "Params set"
-      full_report: "Parameters configured successfully."
-  assertions:
-    - type: success
-"#,
-        repo_path = repo_path,
-    )
-}
-
 pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
-    if env.target_repo.is_some() {
-        eprintln!(
-            "[{}] Skipping run_auto_undefined: requires local repo",
-            env.name()
-        );
-        return;
-    }
-
-    let repo_path = env.create_git_repo("repo_auto_undefined").await;
     // Create task WITHOUT identity fields — no routing params
     let task_id = env
         .create_task("Undefined test", "Undefined test description", "READY")
         .await;
-    // DO NOT set branches — this triggers the "undefined" worktree problem
+    // DO NOT set branches — identity is undefined
 
-    let workflow = build_workflow(vec![
-        StageDef {
-            name: "working",
-            role: "role_work",
-            pipeline: "main",
-        },
-        StageDef {
-            name: "preparing",
-            role: "role_prep",
-            pipeline: "init",
-        },
-    ]);
+    // Stage has no prompt files, so no {work_branch}/{destination_branch} placeholders.
+    // With undefined identity the stage should run normally using task_dir.
+    let workflow = build_workflow(vec![StageDef {
+        name: "working",
+        role: "role_work",
+        pipeline: "main",
+    }]);
 
-    // Create a custom dispatcher with on_undefined set
     let scenarios = scenarios_map(vec![
         ("role_work", abstract_scenarios::report_and_finish_scenario()),
-        (
-            "role_prep",
-            preparator_scenario(&repo_path.to_string_lossy()),
-        ),
     ]);
 
-    // First call: should detect undefined identity, dispatch to preparing pipeline
-    {
-        let task = env.get_task(task_id).await;
-        let idx = std::sync::atomic::AtomicU64::new(0);
-        let scenarios_dir = env
-            .base_path
-            .join("scenarios")
-            .join(format!("undefined_{}", idx.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
-        tokio::fs::create_dir_all(&scenarios_dir)
-            .await
-            .expect("failed to create scenarios directory");
-        let mut scenario_paths = HashMap::new();
-        for (role, yaml) in &scenarios {
-            let path = scenarios_dir.join(format!("{role}.yml"));
-            tokio::fs::write(&path, yaml)
-                .await
-                .expect("failed to write scenario file");
-            scenario_paths.insert(role.clone(), path);
-        }
-        let mcp_tester_config = zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig {
-            scenarios: scenario_paths,
-            ..Default::default()
-        };
-        let zbobr = env.make_dispatcher(workflow.clone());
-        zbobr_dispatcher::cli::process_task(&zbobr, &task, Some(&mcp_tester_config))
-            .await
-            .unwrap();
-    }
+    // The stage should execute — identity undefined is no longer a dispatch trigger.
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
 
     let task = env.get_task(task_id).await;
-    assert_eq!(
-        task.signal,
-        Some(Signal::call("init")),
-        "Undefined identity should trigger call_init"
+    // report_success on single-stage main pipeline → Return signal → Done
+    assert!(
+        task.stack.is_empty(),
+        "Stack should be empty after successful single-stage run"
     );
-    assert_eq!(task.stack.len(), 1, "Stack should have go_working");
-    assert_eq!(task.stack[0].pipeline, zbobr_api::Pipeline::Main);
-    assert_eq!(task.stack[0].signal, Signal::go("working"));
 }
 
 
@@ -612,19 +530,6 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
                 "work".into(),
                 StageDefinition {
                     role: Some("role_work".into()),
-                    tool: Some(Tool::McpTester),
-                    ..Default::default()
-                },
-            )]),
-        },
-    );
-    pipelines.insert(
-        Pipeline::Init,
-        PipelineConfig {
-            stages: IndexMap::from([(
-                "preparing".into(),
-                StageDefinition {
-                    role: Some("role_init".into()),
                     tool: Some(Tool::McpTester),
                     ..Default::default()
                 },

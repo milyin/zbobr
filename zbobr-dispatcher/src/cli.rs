@@ -308,7 +308,6 @@ impl<'a> CliStageRunner<'a> {
             self.task_id,
             self.pipeline_name,
             self.stage_name,
-            self.stage_def,
             task_dir.path(),
         )
         .await?
@@ -823,14 +822,15 @@ pub async fn run_manager_loop(
 /// Unified worktree detection and problem dispatch.
 ///
 /// Checks whether the task has a valid identity (routing params), sets up the
-/// worktree, and attempts to merge upstream. If a problem is detected (undefined
-/// identity or merge conflict), dispatches to the configured handler mode.
+/// worktree, and attempts to merge upstream. If identity is undefined, returns
+/// the task directory as the working directory (prompt template validation will
+/// catch missing placeholders). If a merge conflict is detected, dispatches to
+/// the configured merge handler.
 async fn detect_and_handle_worktree(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
     pipeline_name: &Pipeline,
     stage_name: &str,
-    _stage_def: &StageDefinition,
     task_dir: &Path,
 ) -> anyhow::Result<WorktreeResult> {
     let task_backend = zbobr.task_backend();
@@ -840,19 +840,10 @@ async fn detect_and_handle_worktree(
     let identity = match task.identity() {
         Some(id) => id,
         None => {
-            // If we ARE the undefined handler pipeline, proceed with task_dir
-            if pipeline_name.as_str() == Pipeline::INIT {
-                return Ok(WorktreeResult::Ready(task_dir.to_path_buf()));
-            }
-            // Otherwise, dispatch to undefined handler
-            return handle_worktree_problem(
-                zbobr,
-                task_id,
-                pipeline_name,
-                stage_name,
-                zbobr_api::task::WorktreeProblem::Undefined,
-            )
-            .await;
+            // Identity not yet configured — proceed with task_dir.
+            // If the stage's prompt uses {destination_branch} or {work_branch},
+            // template rendering will catch the error before the agent starts.
+            return Ok(WorktreeResult::Ready(task_dir.to_path_buf()));
         }
     };
 
@@ -919,43 +910,30 @@ async fn detect_and_handle_worktree(
     // Merge failed in a normal mode — abort and dispatch to conflict handler
     let _ = git(&work_dir, &["merge", "--abort"]).await;
 
-    handle_worktree_problem(
-        zbobr,
-        task_id,
-        pipeline_name,
-        stage_name,
-        zbobr_api::task::WorktreeProblem::Conflict,
-    )
-    .await
+    handle_merge_conflict(zbobr, task_id, pipeline_name, stage_name).await
 }
 
-/// Unified dispatch for worktree problems (Undefined identity or Conflict).
-async fn handle_worktree_problem(
+/// Dispatch to the merge conflict handler pipeline.
+///
+/// Pushes the current stage onto the stack and calls the merge pipeline.
+/// If already inside the merge pipeline, pauses the task.
+async fn handle_merge_conflict(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
     pipeline_name: &Pipeline,
     stage_name: &str,
-    problem: zbobr_api::task::WorktreeProblem,
 ) -> anyhow::Result<WorktreeResult> {
-    let handler_pipeline = match problem {
-        zbobr_api::task::WorktreeProblem::Undefined => Pipeline::INIT,
-        zbobr_api::task::WorktreeProblem::Conflict => Pipeline::MERGE,
-    };
-
     let task_session = zbobr.task_session(task_id);
     let pending_state = State::pending(pipeline_name.clone());
 
-    // Recursion guard: if already inside the handler pipeline, pause
-    if pipeline_name.as_str() == handler_pipeline {
+    // Recursion guard: if already inside the merge pipeline, pause
+    if pipeline_name.as_str() == Pipeline::MERGE {
         tracing::error!(
-            "Task #{task_id}: worktree problem {:?} inside handler pipeline '{handler_pipeline}' — pausing",
-            problem
+            "Task #{task_id}: merge conflict inside merge pipeline — pausing"
         );
         let hostname = get_hostname();
-        let msg = format!(
-            "Worktree problem {:?} inside handler pipeline '{handler_pipeline}'. Manual intervention required.",
-            problem
-        );
+        let msg =
+            "Merge conflict inside merge pipeline. Manual intervention required.".to_string();
         task_session
             .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
             .await
@@ -976,13 +954,12 @@ async fn handle_worktree_problem(
         .await?;
     task_session.allocate_pipeline_run_id().await?;
     task_session
-        .set_signal(Some(Signal::call(handler_pipeline)))
+        .set_signal(Some(Signal::call(Pipeline::MERGE)))
         .await?;
     task_session.set_state(pending_state).await?;
 
     tracing::info!(
-        "Task #{task_id}: worktree problem {:?} — calling handler pipeline '{handler_pipeline}'",
-        problem
+        "Task #{task_id}: merge conflict — calling merge pipeline"
     );
     Ok(WorktreeResult::HandlerCalled)
 }

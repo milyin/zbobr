@@ -33,7 +33,7 @@ impl Default for Workflow {
             role: Some("default".to_string()),
             ..Default::default()
         };
-        for name in [Pipeline::MAIN, Pipeline::INIT, Pipeline::MERGE] {
+        for name in [Pipeline::MAIN, Pipeline::MERGE] {
             pipelines.insert(
                 Pipeline::from(name),
                 PipelineConfig {
@@ -265,7 +265,6 @@ mod tests {
         WorkflowConfig {
             pipelines: [
                 ("main".into(), single_pipeline("working", "worker")),
-                ("init".into(), single_pipeline("preparing", "preparator")),
                 ("merge".into(), single_pipeline("merging", "merger")),
             ]
             .into(),
@@ -326,7 +325,7 @@ mod tests {
             "bad".into(),
             StageDefinition {
                 role: Some("worker".into()),
-                call: Some("init".into()),
+                call: Some("merge".into()),
                 ..Default::default()
             },
         );
@@ -353,12 +352,12 @@ mod tests {
     fn call_stage_toml_round_trip() {
         let toml_str = r#"
 [pipelines.main.stages.setup]
-call = "init"
+call = "sub"
 [pipelines.main.stages.working]
 role = "worker"
 
-[pipelines.init.stages.preparing]
-role = "preparator"
+[pipelines.sub.stages.s1]
+role = "helper"
 
 [pipelines.merge.stages.merging]
 role = "merger"
@@ -367,7 +366,7 @@ role = "merger"
         assert!(wf.validate().is_ok());
 
         let setup = wf.stage("main", "setup").unwrap();
-        assert_eq!(setup.call_pipeline().map(|p| p.as_str()), Some("init"));
+        assert_eq!(setup.call_pipeline().map(|p| p.as_str()), Some("sub"));
         assert_eq!(setup.role_name(), None);
         assert!(setup.is_call());
 
@@ -440,12 +439,24 @@ role = "merger"
     #[test]
     fn find_stage_by_role_skips_call_stages() {
         let mut wf = base_workflow();
+        wf.pipelines.insert(
+            "sub".into(),
+            PipelineConfig {
+                stages: IndexMap::from([(
+                    "s1".into(),
+                    StageDefinition {
+                        role: Some("helper".into()),
+                        ..Default::default()
+                    },
+                )]),
+            },
+        );
         let main = wf.pipelines.get_mut("main").unwrap();
         let working = main.stages.shift_remove("working").unwrap();
         main.stages.insert(
-            "call_init".into(),
+            "call_sub".into(),
             StageDefinition {
-                call: Some("init".into()),
+                call: Some("sub".into()),
                 ..Default::default()
             },
         );
@@ -453,7 +464,7 @@ role = "merger"
         // "worker" role should still be found on the "working" stage
         assert!(wf.find_stage_by_role("worker").is_some());
         // No stage has role matching call target name
-        assert!(wf.find_stage_by_role("init").is_none());
+        assert!(wf.find_stage_by_role("sub").is_none());
     }
 
     #[test]
@@ -501,9 +512,6 @@ on_failure = "planning"
 [pipelines.main.stages.planning]
 role = "planner"
 on_success = "working"
-
-[pipelines.init.stages.preparing]
-role = "preparator"
 
 [pipelines.merge.stages.merging]
 role = "merger"

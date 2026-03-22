@@ -600,7 +600,6 @@ pub struct StackEntry {
 /// A worktree problem detected before stage execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorktreeProblem {
-    Undefined,
     Conflict,
 }
 

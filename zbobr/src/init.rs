@@ -123,6 +123,10 @@ fn default_workflow() -> WorkflowConfig {
     let task_prompt = vec![PathBuf::from("task.md")];
 
     let main_stages = IndexMap::from([
+        (Stage::from("preparing"), StageDefinition {
+            role: Some("preparator".into()),
+            ..Default::default()
+        }),
         (Stage::from("planning"), StageDefinition {
             role: Some("planner".into()),
             additional_prompts: task_prompt.clone(),
@@ -145,14 +149,6 @@ fn default_workflow() -> WorkflowConfig {
         }),
     ]);
 
-    let init_stages = IndexMap::from([
-        (Stage::from("preparing"), StageDefinition {
-            role: Some("preparator".into()),
-            additional_prompts: task_prompt.clone(),
-            ..Default::default()
-        }),
-    ]);
-
     let merge_stages = IndexMap::from([
         (Stage::from("merging"), StageDefinition {
             role: Some("merger".into()),
@@ -163,7 +159,6 @@ fn default_workflow() -> WorkflowConfig {
 
     let mut pipelines = HashMap::new();
     pipelines.insert(Pipeline::Main, PipelineConfig { stages: main_stages });
-    pipelines.insert(Pipeline::Init, PipelineConfig { stages: init_stages });
     pipelines.insert(Pipeline::Merge, PipelineConfig { stages: merge_stages });
 
     let roles = HashMap::from([
@@ -348,7 +343,15 @@ Read the task description below and set the required parameters for the implemen
 2. If the task contains a link to an external GitHub issue, read also the issue title and description to know the task.
 3. Set task parameters using `{mcp_configure_worktree}`:
     - Call `{mcp_configure_worktree}` with `destination_repository` (in owner/repo format from the task description), `destination_branch` (from the task description or "main"), and `work_branch_postfix` (short but meaningful name related to the task).
-4. Call `{mcp_report_success}` to provide a brief and concise report of the parameters you set."#;
+4. Call `{mcp_report_success}` to provide a brief and concise report of the parameters you set.
+
+---
+
+# Current task: {title}
+
+# Task description
+
+{description}"#;
 
 const PLANNER_PROMPT: &str = r#"# Planner Agent
 

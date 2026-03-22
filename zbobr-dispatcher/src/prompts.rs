@@ -138,18 +138,15 @@ pub fn build_template_variables<'a>(
     // Task fields
     vars.insert(Cow::Borrowed(VAR_TITLE), Cow::Borrowed(&task.title));
     vars.insert(Cow::Borrowed(VAR_DESCRIPTION), Cow::Borrowed(&task.description));
-    vars.insert(
-        Cow::Borrowed(VAR_DESTINATION_REPOSITORY),
-        Cow::Borrowed(task.destination_repository.as_deref().unwrap_or("")),
-    );
-    vars.insert(
-        Cow::Borrowed(VAR_DESTINATION_BRANCH),
-        Cow::Borrowed(task.destination_branch.as_deref().unwrap_or("")),
-    );
-    vars.insert(
-        Cow::Borrowed(VAR_WORK_BRANCH),
-        Cow::Borrowed(task.work_branch.as_deref().unwrap_or("")),
-    );
+    if let Some(ref v) = task.destination_repository {
+        vars.insert(Cow::Borrowed(VAR_DESTINATION_REPOSITORY), Cow::Borrowed(v));
+    }
+    if let Some(ref v) = task.destination_branch {
+        vars.insert(Cow::Borrowed(VAR_DESTINATION_BRANCH), Cow::Borrowed(v));
+    }
+    if let Some(ref v) = task.work_branch {
+        vars.insert(Cow::Borrowed(VAR_WORK_BRANCH), Cow::Borrowed(v));
+    }
 
     // Checklist: unchecked items
     let unchecked: Vec<_> = task.checklist.iter().filter(|item| !item.checked).collect();
@@ -421,11 +418,15 @@ mod tests {
         let task = dummy_task("Test");
         let vars = build_template_variables(&task, &[]);
         let keys: Vec<&str> = vars.keys().map(|k| k.as_ref()).collect();
+        // Always-present keys
         for expected in &[
-            VAR_TITLE, VAR_DESCRIPTION, VAR_DESTINATION_REPOSITORY, VAR_DESTINATION_BRANCH,
-            VAR_WORK_BRANCH, VAR_CHECKLIST, VAR_LAST_REPORT, VAR_LAST_REQUEST,
+            VAR_TITLE, VAR_DESCRIPTION, VAR_CHECKLIST, VAR_LAST_REPORT, VAR_LAST_REQUEST,
         ] {
             assert!(keys.contains(expected), "missing key: {expected}");
+        }
+        // Optional keys absent when task fields are None
+        for absent in &[VAR_DESTINATION_REPOSITORY, VAR_DESTINATION_BRANCH, VAR_WORK_BRANCH] {
+            assert!(!keys.contains(absent), "key should be absent: {absent}");
         }
     }
 
