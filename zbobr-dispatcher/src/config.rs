@@ -299,11 +299,39 @@ mod tests {
 
     #[test]
     fn stage_settings_override_helpers() {
+        use std::collections::HashMap;
+
         let mut cfg = ZbobrDispatcherConfig::default();
         cfg.tool = Tool::Copilot;
         cfg.model = Model::Gpt5;
         cfg.preparator.tool = Some(Tool::Claude);
         cfg.preparator.model = Some(Model::ClaudeOpus4_5);
+
+        // Create workflow with role definitions
+        let mut roles = HashMap::new();
+        roles.insert(
+            "preparator".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: None,
+                tool: Some(Tool::Claude),
+                model: Some(Model::ClaudeOpus4_5),
+            },
+        );
+        roles.insert(
+            "planner".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: None,
+                tool: None,
+                model: None,
+            },
+        );
+        let workflow = WorkflowConfig {
+            pipelines: Default::default(),
+            roles,
+            prompts_dir: None,
+        };
 
         // Stage with overrides → uses stage-level settings
         let prep_stage = StageDefinition {
@@ -312,15 +340,18 @@ mod tests {
             model: Some(Model::ClaudeOpus4_5),
             ..Default::default()
         };
-        // Stage without overrides → falls back to global config
+        // Stage without overrides → uses role defaults
         let plan_stage = StageDefinition {
             role: Some("planner".to_string()),
             ..Default::default()
         };
-        assert_eq!(cfg.tool_for_stage(&prep_stage), Tool::Claude);
-        assert_eq!(cfg.tool_for_stage(&plan_stage), Tool::Copilot);
-        assert_eq!(cfg.model_for_stage(&prep_stage), Model::ClaudeOpus4_5);
-        assert_eq!(cfg.model_for_stage(&plan_stage), Model::Gpt5);
+        assert_eq!(cfg.tool_for_stage(&prep_stage, &workflow), Tool::Claude);
+        assert_eq!(cfg.tool_for_stage(&plan_stage, &workflow), Tool::Copilot);
+        assert_eq!(
+            cfg.model_for_stage(&prep_stage, &workflow),
+            Model::ClaudeOpus4_5
+        );
+        assert_eq!(cfg.model_for_stage(&plan_stage, &workflow), Model::Gpt5);
     }
 
     #[test]

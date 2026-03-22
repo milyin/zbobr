@@ -15,12 +15,16 @@ pub trait Config: Sized {
     fn build(toml: Option<Self::Toml>, args: Self::Args, config_dir: &std::path::Path) -> Self;
 }
 
-/// Definition of a role: which MCP tools it can access, and an optional prompt file.
+/// Definition of a role: which MCP tools it can access, an optional prompt file, and default tool/model.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct RoleDefinition {
     pub mcp: Vec<McpTool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<Tool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<Model>,
 }
 
 /// A stage transition descriptor with an optional target stage and pause flag.
@@ -540,13 +544,41 @@ impl ZbobrDispatcherConfig {
         Ok(())
     }
 
-    /// Determine which tool to use for a stage, falling back to global default.
-    pub fn tool_for_stage(&self, stage_def: &StageDefinition) -> Tool {
-        stage_def.tool.unwrap_or(self.tool)
+    /// Determine which tool to use for a stage, falling back to role default, then global default.
+    pub fn tool_for_stage(&self, stage_def: &StageDefinition, workflow: &WorkflowConfig) -> Tool {
+        if let Some(tool) = stage_def.tool {
+            tool
+        } else if let Some(role_name) = stage_def.role_name() {
+            if let Some(role_def) = workflow.role_definition(role_name) {
+                if let Some(tool) = role_def.tool {
+                    tool
+                } else {
+                    self.tool
+                }
+            } else {
+                self.tool
+            }
+        } else {
+            self.tool
+        }
     }
 
-    /// Determine which model to use for a stage, falling back to global default.
-    pub fn model_for_stage(&self, stage_def: &StageDefinition) -> Model {
-        stage_def.model.clone().unwrap_or(self.model.clone())
+    /// Determine which model to use for a stage, falling back to role default, then global default.
+    pub fn model_for_stage(&self, stage_def: &StageDefinition, workflow: &WorkflowConfig) -> Model {
+        if let Some(model) = stage_def.model.as_ref() {
+            model.clone()
+        } else if let Some(role_name) = stage_def.role_name() {
+            if let Some(role_def) = workflow.role_definition(role_name) {
+                if let Some(model) = role_def.model.as_ref() {
+                    model.clone()
+                } else {
+                    self.model.clone()
+                }
+            } else {
+                self.model.clone()
+            }
+        } else {
+            self.model.clone()
+        }
     }
 }

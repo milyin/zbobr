@@ -291,8 +291,8 @@ impl<'a> CliStageRunner<'a> {
             .stage_def
             .role_name()
             .expect("role stage must have role");
-        let cli_tool = self.zbobr.config().tool_for_stage(self.stage_def);
-        let model = self.zbobr.config().model_for_stage(self.stage_def);
+        let cli_tool = self.zbobr.config().tool_for_stage(self.stage_def, self.zbobr.workflow().config());
+        let model = self.zbobr.config().model_for_stage(self.stage_def, self.zbobr.workflow().config());
 
         // Set state to running
         self.zbobr
@@ -843,8 +843,8 @@ pub async fn run_manager_loop(
         if let Some(target) = stage_def.call_pipeline() {
             tracing::info!("Stage {}/{}: call={}", pipeline_name, stage_name, target,);
         } else {
-            let tool = zbobr.config().tool_for_stage(stage_def);
-            let model = zbobr.config().model_for_stage(stage_def);
+            let tool = zbobr.config().tool_for_stage(stage_def, zbobr.workflow().config());
+            let model = zbobr.config().model_for_stage(stage_def, zbobr.workflow().config());
             tracing::info!(
                 "Stage {}/{}: role={:?}, tool={:?}, model={:?}, prompts={:?}",
                 pipeline_name,
