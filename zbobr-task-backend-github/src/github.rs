@@ -174,9 +174,16 @@ fn parse_report_link_line(line: &str) -> Option<String> {
 }
 
 /// Format a clickable markdown link to a report file in the GitHub repo.
-fn format_report_link(owner: &str, repo: &str, task_id: u64, filename: &str) -> String {
+fn format_report_link(
+    owner: &str,
+    repo: &str,
+    branch: &str,
+    reports_path: &str,
+    task_id: u64,
+    filename: &str,
+) -> String {
     format!(
-        "\n\n[{filename}](https://github.com/{owner}/{repo}/blob/main/reports/task_{task_id}/{filename})"
+        "\n\n[{filename}](https://github.com/{owner}/{repo}/blob/{branch}/{reports_path}/task_{task_id}/{filename})"
     )
 }
 
@@ -239,6 +246,19 @@ impl ZbobrTaskBackendGithubImpl {
 
     fn parse_repo(&self) -> anyhow::Result<(&str, &str)> {
         self.backend_config.parse_repo()
+    }
+
+    /// Returns the configured reports branch, if any.
+    fn reports_branch(&self) -> Option<&str> {
+        self.backend_config.reports_branch.as_deref()
+    }
+
+    /// Returns the configured reports path prefix (default: "reports").
+    fn reports_path(&self) -> &str {
+        self.backend_config
+            .reports_path
+            .as_deref()
+            .unwrap_or("reports")
     }
 
     /// Low-level: write the raw serialized task body.
@@ -850,8 +870,14 @@ impl ZbobrTaskBackendGithubImpl {
             tag = tag.with_caller(cp.to_string(), cr);
         }
 
+        let reports_branch = self.reports_branch().unwrap_or("main");
+        let reports_path = self.reports_path();
+
         let body_with_report = if let Some(rn) = report_name {
-            format!("{body}{}", format_report_link(owner, repo, id, rn))
+            format!(
+                "{body}{}",
+                format_report_link(owner, repo, reports_branch, reports_path, id, rn)
+            )
         } else {
             body.to_string()
         };
@@ -883,7 +909,13 @@ impl ZbobrTaskBackendGithubImpl {
         content: &str,
     ) -> anyhow::Result<String> {
         let (owner, repo) = self.parse_repo()?;
-        let dir = format!("reports/task_{task_id}");
+        let reports_path = self.reports_path();
+        let reports_branch = self.reports_branch();
+        let dir = format!("{reports_path}/task_{task_id}");
+
+        // When checking existence on a non-default branch, pass ?ref=
+        let ref_query: Option<Vec<(&str, &str)>> =
+            reports_branch.map(|b| vec![("ref", b)]);
 
         let mut n = 0u32;
         let filename = loop {
@@ -899,7 +931,7 @@ impl ZbobrTaskBackendGithubImpl {
                 .octocrab
                 .get::<serde_json::Value, _, _>(
                     format!("/repos/{owner}/{repo}/contents/{path}"),
-                    None::<&()>,
+                    ref_query.as_ref(),
                 )
                 .await
                 .is_ok();
@@ -914,10 +946,13 @@ impl ZbobrTaskBackendGithubImpl {
         let message = format!("zbobr: store report {filename} for task #{task_id}");
         let encoded = BASE64.encode(content.as_bytes());
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "message": message,
             "content": encoded,
         });
+        if let Some(branch) = reports_branch {
+            body["branch"] = serde_json::Value::String(branch.to_string());
+        }
 
         retry_github("create report file", || async {
             self.octocrab
@@ -937,12 +972,15 @@ impl ZbobrTaskBackendGithubImpl {
     async fn read_report_internal(&self, task_id: u64, name: &str) -> anyhow::Result<String> {
         anyhow::ensure!(!name.contains(".."), "Invalid report name: {name}");
         let (owner, repo) = self.parse_repo()?;
-        let path = format!("reports/task_{task_id}/{name}");
+        let reports_path = self.reports_path();
+        let path = format!("{reports_path}/task_{task_id}/{name}");
+        let ref_query: Option<Vec<(&str, &str)>> =
+            self.reports_branch().map(|b| vec![("ref", b)]);
 
         let resp: ContentResponse = retry_github("read report file", || {
             self.octocrab.get(
                 format!("/repos/{owner}/{repo}/contents/{path}"),
-                None::<&()>,
+                ref_query.as_ref(),
             )
         })
         .await?;
@@ -1376,7 +1414,7 @@ mod report_link_tests {
         let with_link = format!(
             "{}{}",
             original,
-            format_report_link("org", "repo", 5, filename)
+            format_report_link("org", "repo", "main", "reports", 5, filename)
         );
         let (text, name) = extract_report_link(&with_link);
         assert_eq!(text, original);

@@ -10,6 +10,13 @@ pub struct ZbobrTaskBackendGithubConfig {
     /// GitHub token with read/write access to tasks repo.
     #[arg(long, env = "ZBOBR_TASK_GITHUB_TOKEN")]
     pub github_token: String,
+    /// Branch to store report files on (default: repo's default branch).
+    /// Use this when the default branch has protection rules that prevent direct pushes.
+    #[arg(long)]
+    pub reports_branch: Option<String>,
+    /// Path prefix for report files (default: "reports").
+    #[arg(long)]
+    pub reports_path: Option<String>,
 }
 
 impl ZbobrTaskBackendGithubConfig {

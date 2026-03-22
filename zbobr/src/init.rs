@@ -91,6 +91,8 @@ fn default_config_toml() -> RootConfigToml {
         tasks: Some(ZbobrTaskBackendGithubToml {
             github_repo: Some("owner/repo".into()),
             github_token: Some(String::new()),
+            reports_branch: None,
+            reports_path: None,
         }),
         repo: Some(ZbobrRepoBackendGithubToml {
             fork_owner: Some(String::new()),
