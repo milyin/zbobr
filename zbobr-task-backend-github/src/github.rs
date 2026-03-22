@@ -5,7 +5,8 @@ use std::{
 };
 
 use async_trait::async_trait;
-use zbobr_api::{Comment, CommentTag, Model, Task, Tool, backend::TaskBackend, task::{StackEntry, State}};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use zbobr_api::{Comment, CommentTag, HistoryRecordType, Model, Task, Tool, backend::TaskBackend, classify_comment, task::{StackEntry, State}};
 
 use crate::{
     config::ZbobrTaskBackendGithubConfig,
@@ -110,6 +111,56 @@ struct CommentResponse {
 #[allow(dead_code)]
 struct RepoResponse {
     full_name: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ContentResponse {
+    content: Option<String>,
+}
+
+/// Extract report filename from a trailing markdown link in comment body.
+///
+/// Looks for a last line matching `[{filename}]({url})` where the url contains
+/// `/reports/task_`. Returns (clean_body, Some(filename)) or (original, None).
+fn extract_report_link(text: &str) -> (String, Option<String>) {
+    let trimmed = text.trim_end();
+    if let Some(last_newline) = trimmed.rfind('\n') {
+        let last_line = trimmed[last_newline + 1..].trim();
+        if let Some(report_name) = parse_report_link_line(last_line) {
+            let clean = trimmed[..last_newline].trim_end().to_string();
+            return (clean, Some(report_name));
+        }
+    } else if let Some(report_name) = parse_report_link_line(trimmed) {
+        return (String::new(), Some(report_name));
+    }
+    (text.to_string(), None)
+}
+
+/// Parse a single line as a report link: `[{filename}]({url containing /reports/task_})`.
+fn parse_report_link_line(line: &str) -> Option<String> {
+    let line = line.trim();
+    if !line.starts_with('[') {
+        return None;
+    }
+    let close_bracket = line.find(']')?;
+    let filename = &line[1..close_bracket];
+    let rest = &line[close_bracket + 1..];
+    if !rest.starts_with('(') || !rest.ends_with(')') {
+        return None;
+    }
+    let url = &rest[1..rest.len() - 1];
+    if url.contains("/reports/task_") {
+        Some(filename.to_string())
+    } else {
+        None
+    }
+}
+
+/// Format a clickable markdown link to a report file in the GitHub repo.
+fn format_report_link(owner: &str, repo: &str, task_id: u64, filename: &str) -> String {
+    format!(
+        "\n\n[{filename}](https://github.com/{owner}/{repo}/blob/main/reports/task_{task_id}/{filename})"
+    )
 }
 
 // ============================================================================
@@ -693,7 +744,7 @@ impl ZbobrTaskBackendGithubImpl {
                 let tag_line = parts.next().unwrap_or("");
                 let rest = parts.next();
 
-                let (tag, text) = match tag_line.parse::<CommentTag>() {
+                let (tag, raw_text) = match tag_line.parse::<CommentTag>() {
                     Ok(t) => {
                         let body_text = rest.unwrap_or("").trim_start().to_string();
                         (t, body_text)
@@ -703,6 +754,8 @@ impl ZbobrTaskBackendGithubImpl {
                         body.clone(),
                     ),
                 };
+
+                let (text, report_name) = extract_report_link(&raw_text);
 
                 Comment {
                     timestamp,
@@ -715,7 +768,7 @@ impl ZbobrTaskBackendGithubImpl {
                     pipeline_run_id: tag.pipeline_run_id,
                     caller_pipeline: tag.caller_pipeline,
                     caller_pipeline_run_id: tag.caller_pipeline_run_id,
-                    report_name: None,
+                    report_name,
                 }
             })
             .collect())
@@ -734,6 +787,7 @@ impl ZbobrTaskBackendGithubImpl {
         pipeline_run_id: u64,
         caller_pipeline: Option<&str>,
         caller_pipeline_run_id: Option<u64>,
+        report_name: Option<&str>,
     ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
@@ -748,7 +802,14 @@ impl ZbobrTaskBackendGithubImpl {
         if let (Some(cp), Some(cr)) = (caller_pipeline, caller_pipeline_run_id) {
             tag = tag.with_caller(cp.to_string(), cr);
         }
-        let formatted_body = format!("{}\n\n{}", tag, body);
+
+        let body_with_report = if let Some(rn) = report_name {
+            format!("{body}{}", format_report_link(owner, repo, id, rn))
+        } else {
+            body.to_string()
+        };
+
+        let formatted_body = format!("{}\n\n{}", tag, body_with_report);
 
         retry_github("create issue comment", || async {
             self.octocrab
@@ -758,6 +819,97 @@ impl ZbobrTaskBackendGithubImpl {
         })
         .await?;
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Report file storage (GitHub Contents API)
+// ---------------------------------------------------------------------------
+
+impl ZbobrTaskBackendGithubImpl {
+    /// Store a report file in the GitHub repo, deduplicating with `_N` suffix if needed.
+    /// Returns the actual filename (without directory prefix).
+    async fn store_report(
+        &self,
+        task_id: u64,
+        base_name: &str,
+        content: &str,
+    ) -> anyhow::Result<String> {
+        let (owner, repo) = self.parse_repo()?;
+        let dir = format!("reports/task_{task_id}");
+
+        let mut n = 0u32;
+        let filename = loop {
+            let candidate = if n == 0 {
+                format!("{base_name}.md")
+            } else {
+                format!("{base_name}_{n}.md")
+            };
+            let path = format!("{dir}/{candidate}");
+
+            // 404 → file does not exist → is_ok() == false; no retry for 404
+            let exists = self
+                .octocrab
+                .get::<serde_json::Value, _, _>(
+                    format!("/repos/{owner}/{repo}/contents/{path}"),
+                    None::<&()>,
+                )
+                .await
+                .is_ok();
+
+            if !exists {
+                break candidate;
+            }
+            n += 1;
+        };
+
+        let path = format!("{dir}/{filename}");
+        let message = format!("zbobr: store report {filename} for task #{task_id}");
+        let encoded = BASE64.encode(content.as_bytes());
+
+        let body = serde_json::json!({
+            "message": message,
+            "content": encoded,
+        });
+
+        retry_github("create report file", || async {
+            self.octocrab
+                .put::<serde_json::Value, _, _>(
+                    format!("/repos/{owner}/{repo}/contents/{path}"),
+                    Some(&body),
+                )
+                .await
+        })
+        .await?;
+
+        tracing::debug!("Stored report for task {task_id}: {filename}");
+        Ok(filename)
+    }
+
+    /// Read a report file from the GitHub repo by exact name.
+    async fn read_report_internal(&self, task_id: u64, name: &str) -> anyhow::Result<String> {
+        anyhow::ensure!(!name.contains(".."), "Invalid report name: {name}");
+        let (owner, repo) = self.parse_repo()?;
+        let path = format!("reports/task_{task_id}/{name}");
+
+        let resp: ContentResponse = retry_github("read report file", || {
+            self.octocrab.get(
+                format!("/repos/{owner}/{repo}/contents/{path}"),
+                None::<&()>,
+            )
+        })
+        .await?;
+
+        let encoded = resp
+            .content
+            .ok_or_else(|| anyhow::anyhow!("Report file has no content: {name}"))?;
+        // GitHub returns base64 with embedded newlines
+        let clean: String = encoded.chars().filter(|c| !c.is_whitespace()).collect();
+        let bytes = BASE64
+            .decode(&clean)
+            .map_err(|e| anyhow::anyhow!("Failed to decode report content: {e}"))?;
+        String::from_utf8(bytes)
+            .map_err(|e| anyhow::anyhow!("Report content is not valid UTF-8: {e}"))
     }
 }
 
@@ -799,8 +951,8 @@ impl TaskWeak for GithubTaskWeak {
         self.backend.get_task_comments_internal(self.id).await
     }
 
-    async fn read_report(&self, _name: &str) -> anyhow::Result<String> {
-        anyhow::bail!("read_report not yet implemented for GitHub backend")
+    async fn read_report(&self, name: &str) -> anyhow::Result<String> {
+        self.backend.read_report_internal(self.id, name).await
     }
 }
 
@@ -842,8 +994,20 @@ impl TaskMut for GithubTaskMut {
         pipeline_run_id: u64,
         caller_pipeline: Option<&str>,
         caller_pipeline_run_id: Option<u64>,
-        _report_text: Option<&str>,
+        report_text: Option<&str>,
     ) -> anyhow::Result<()> {
+        let report_name = if let Some(text) = report_text {
+            let tag = match classify_comment(body) {
+                HistoryRecordType::Success => "success",
+                HistoryRecordType::Failure => "failure",
+                _ => "report",
+            };
+            let base_name = format!("report_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
+            Some(self.backend.store_report(self.id, &base_name, text).await?)
+        } else {
+            None
+        };
+
         self.backend
             .post_task_comment_internal(
                 self.id,
@@ -856,6 +1020,7 @@ impl TaskMut for GithubTaskMut {
                 pipeline_run_id,
                 caller_pipeline,
                 caller_pipeline_run_id,
+                report_name.as_deref(),
             )
             .await
     }
@@ -1100,5 +1265,51 @@ mod parse_tests {
         assert_eq!(linked_s, "// sub:2:done by host for main:1");
         let linked_parsed: CommentTag = linked_s.parse().unwrap();
         assert_eq!(linked_parsed, linked);
+    }
+}
+
+#[cfg(test)]
+mod report_link_tests {
+    use super::*;
+
+    #[test]
+    fn extract_no_link() {
+        let (text, name) = extract_report_link("just some text");
+        assert_eq!(text, "just some text");
+        assert_eq!(name, None);
+    }
+
+    #[test]
+    fn extract_with_link() {
+        let body = "[report_success] Brief\n\n[report_main_1_working_success.md](https://github.com/org/repo/blob/main/reports/task_5/report_main_1_working_success.md)";
+        let (text, name) = extract_report_link(body);
+        assert_eq!(text, "[report_success] Brief");
+        assert_eq!(name.as_deref(), Some("report_main_1_working_success.md"));
+    }
+
+    #[test]
+    fn extract_non_report_link() {
+        let body = "text\n\n[something](https://example.com/other)";
+        let (text, name) = extract_report_link(body);
+        assert_eq!(text, "text\n\n[something](https://example.com/other)");
+        assert_eq!(name, None);
+    }
+
+    #[test]
+    fn roundtrip() {
+        let original = "[report_success] Brief summary";
+        let filename = "report_main_1_working_success.md";
+        let with_link = format!("{}{}", original, format_report_link("org", "repo", 5, filename));
+        let (text, name) = extract_report_link(&with_link);
+        assert_eq!(text, original);
+        assert_eq!(name.as_deref(), Some(filename));
+    }
+
+    #[test]
+    fn link_only_body() {
+        let body = "[report.md](https://github.com/o/r/blob/main/reports/task_1/report.md)";
+        let (text, name) = extract_report_link(body);
+        assert_eq!(text, "");
+        assert_eq!(name.as_deref(), Some("report.md"));
     }
 }
