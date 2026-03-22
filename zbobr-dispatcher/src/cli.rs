@@ -968,12 +968,19 @@ pub async fn run_manager_loop(
                         None,
                     );
                     if let Err(e) = runner.run().await {
-                        tracing::error!(
+                        let msg = format!(
                             "Stage {}/{} failed for task #{}: {e}",
-                            pipeline_name,
-                            stage_name,
-                            task.id
+                            pipeline_name, stage_name, task.id
                         );
+                        tracing::error!("{msg}");
+                        let hostname = get_hostname();
+                        if let Err(post_err) = zbobr
+                            .task_session(task.id)
+                            .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
+                            .await
+                        {
+                            tracing::warn!("Failed to post error to task discussion: {post_err}");
+                        }
                     }
                     session_run = true;
                     break;
