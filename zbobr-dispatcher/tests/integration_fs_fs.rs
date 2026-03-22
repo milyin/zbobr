@@ -105,3 +105,30 @@ async fn test_fs_fs_abstract_call_stage() {
     };
     abstract_test_helpers::run_call_stage(&env).await;
 }
+
+#[tokio::test]
+async fn test_fs_fs_abstract_pause_state_conversion() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(env) = get_env().await else {
+        return;
+    };
+    abstract_test_helpers::run_pause_state_conversion(&env).await;
+}
+
+#[tokio::test]
+async fn test_fs_fs_abstract_pause_resume_cycle() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(env) = get_env().await else {
+        return;
+    };
+    abstract_test_helpers::run_pause_resume_cycle(&env).await;
+}
+
+#[tokio::test]
+async fn test_fs_fs_abstract_ready_fresh_start() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(env) = get_env().await else {
+        return;
+    };
+    abstract_test_helpers::run_ready_fresh_start(&env).await;
+}

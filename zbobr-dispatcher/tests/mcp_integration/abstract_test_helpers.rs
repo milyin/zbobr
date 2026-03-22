@@ -11,8 +11,7 @@ use zbobr_api::{
     Pipeline, Signal, Stage,
     config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig},
 };
-use zbobr_dispatcher::task::Tool;
-use zbobr_executor_mcp_tester;
+use zbobr_dispatcher::{backend::TaskBackendExt, task::Tool};
 
 use super::{abstract_scenarios, env::IntegrationTestEnv};
 
@@ -311,6 +310,11 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     assert!(task.pause, "stop_with_error should set pause flag");
     assert_eq!(task.state, "main_PENDING", "Should be pending, not DONE");
+    assert_eq!(
+        task.signal,
+        Some(Signal::go("work")),
+        "Pause should set signal to re-run the stage"
+    );
 
     let comments = env.get_comments(task_id).await;
     assert!(
@@ -425,6 +429,11 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     let task = env.get_task(task_id).await;
     assert_eq!(task.state, "main_PENDING");
     assert!(task.pause, "Should be paused at root on failure");
+    assert_eq!(
+        task.signal,
+        Some(Signal::go("check")),
+        "Root failure should set signal to pipeline's first stage for resume"
+    );
 }
 
 // ===========================================================================
@@ -456,6 +465,11 @@ pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert!(task.pause, "stop_with_question should set pause flag");
+    assert_eq!(
+        task.signal,
+        Some(Signal::go("work")),
+        "Pause should set signal to re-run the stage"
+    );
 }
 
 // ===========================================================================
@@ -606,5 +620,174 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
     assert!(
         task.stack.is_empty(),
         "Stack should be empty after completion"
+    );
+}
+
+// ===========================================================================
+// Test 13: Pause flag converts to PAUSE state with stack push
+// ===========================================================================
+
+pub async fn run_pause_state_conversion(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_pause_conv").await;
+    let task_id = env
+        .create_task(
+            "Pause conversion test",
+            "Pause conversion test description",
+            "READY",
+        )
+        .await;
+    let work_branch = format!("zbobr_fix-{task_id}-pause-conv");
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
+
+    let workflow = build_workflow(vec![StageDef {
+        name: "work",
+        role: "role_err",
+        pipeline: "main",
+    }]);
+
+    let scenarios = scenarios_map(vec![(
+        "role_err",
+        abstract_scenarios::stop_with_error_scenario(),
+    )]);
+
+    // Step 1: run_pipeline → stage runs → stop_with_error → pause=true
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
+
+    let task = env.get_task(task_id).await;
+    assert!(task.pause, "stop_with_error should set pause flag");
+    assert_eq!(task.state, "main_PENDING");
+    assert_eq!(task.signal, Some(Signal::go("work")));
+
+    // Step 2: continue_pipeline → centralized handler converts pause flag to PAUSE state
+    env.continue_pipeline(task_id, &workflow, &scenarios).await;
+
+    let task = env.get_task(task_id).await;
+    assert!(!task.pause, "Pause flag should be cleared");
+    assert_eq!(task.state, "PAUSE", "State should be PAUSE");
+    assert!(task.signal.is_none(), "Signal should be cleared");
+    assert_eq!(task.stack.len(), 1, "Stack should have one entry");
+    assert_eq!(task.stack[0].pipeline, zbobr_api::Pipeline::Main);
+    assert_eq!(
+        task.stack[0].signal,
+        Signal::go("work"),
+        "Stack entry should save signal to re-run the stage"
+    );
+}
+
+// ===========================================================================
+// Test 14: Full pause → READY → resume cycle
+// ===========================================================================
+
+pub async fn run_pause_resume_cycle(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_pause_resume").await;
+    let task_id = env
+        .create_task(
+            "Pause resume test",
+            "Pause resume test description",
+            "READY",
+        )
+        .await;
+    let work_branch = format!("zbobr_fix-{task_id}-pause-resume");
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
+
+    let workflow = build_workflow(vec![StageDef {
+        name: "work",
+        role: "role_work",
+        pipeline: "main",
+    }]);
+
+    // Step 1: run stage with stop_with_error → pause
+    let err_scenarios = scenarios_map(vec![(
+        "role_work",
+        abstract_scenarios::stop_with_error_scenario(),
+    )]);
+    env.run_pipeline(task_id, &workflow, &err_scenarios).await;
+
+    let task = env.get_task(task_id).await;
+    assert!(task.pause, "Should be paused after stop_with_error");
+
+    // Step 2: convert pause to PAUSE state
+    env.continue_pipeline(task_id, &workflow, &err_scenarios)
+        .await;
+
+    let task = env.get_task(task_id).await;
+    assert_eq!(task.state, "PAUSE");
+    assert_eq!(task.stack.len(), 1);
+
+    // Step 3: simulate user unpause by setting state to READY
+    env.zbobr
+        .task_backend()
+        .set_task_state(task_id, zbobr_api::State::Ready)
+        .await
+        .unwrap();
+
+    let task = env.get_task(task_id).await;
+    assert_eq!(task.state, "READY");
+    assert_eq!(task.stack.len(), 1, "Stack should still have the entry");
+
+    // Step 4: process READY → pops stack, restores pipeline/signal
+    let success_scenarios = scenarios_map(vec![(
+        "role_work",
+        abstract_scenarios::report_and_finish_scenario(),
+    )]);
+    env.continue_pipeline(task_id, &workflow, &success_scenarios)
+        .await;
+
+    // After READY handler: state=Pending(main), signal=Go(work)
+    // Then process_task resolves and runs the stage with success scenario.
+    // After the stage succeeds (single stage → Return → Done at root → finish)
+    // Let it run to completion.
+    env.run_to_completion(task_id, &workflow, &success_scenarios, 5)
+        .await;
+
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.state, "DONE",
+        "Task should complete after pause/resume cycle"
+    );
+    assert!(
+        task.stack.is_empty(),
+        "Stack should be empty after completion"
+    );
+}
+
+// ===========================================================================
+// Test 15: READY with empty stack — fresh start from main pipeline
+// ===========================================================================
+
+pub async fn run_ready_fresh_start(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_fresh").await;
+    let task_id = env
+        .create_task("Fresh start test", "Fresh start test description", "READY")
+        .await;
+    let work_branch = format!("zbobr_fix-{task_id}-fresh");
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
+
+    let workflow = build_workflow(vec![StageDef {
+        name: "start",
+        role: "role_start",
+        pipeline: "main",
+    }]);
+
+    let scenarios = scenarios_map(vec![(
+        "role_start",
+        abstract_scenarios::report_and_finish_scenario(),
+    )]);
+
+    // READY with empty stack should start from main pipeline's first stage
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
+    env.run_to_completion(task_id, &workflow, &scenarios, 5)
+        .await;
+
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.state, "DONE",
+        "READY with empty stack should start fresh and complete"
     );
 }

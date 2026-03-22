@@ -415,6 +415,9 @@ impl IntegrationTestEnv {
                 return i;
             }
             if task.pause {
+                // One more process_task call to convert pause flag to PAUSE state
+                let mcp_cfg = ZbobrExecutorMcpTesterConfig::default();
+                process_task(&zbobr, &task, Some(&mcp_cfg)).await.ok();
                 return i;
             }
             // If state is PENDING but no signal, nothing to do
