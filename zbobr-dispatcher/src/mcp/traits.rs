@@ -377,14 +377,25 @@ pub trait CommonMcpImpl: Send + Sync {
         }
 
         let session = self.session();
+        let config = session.dispatcher_config();
+
+        // Apply defaults from config when agent doesn't provide values
+        let effective_repo = destination_repository
+            .or_else(|| config.default_destination_repository.clone());
+        let effective_branch = destination_branch
+            .or_else(|| config.default_destination_branch.clone());
         let work_branch = work_branch_postfix.map(|v| session.create_branch_name(&v));
+
+        let repo_for_response = effective_repo.clone();
+        let branch_for_response = effective_branch.clone();
+        let wb_for_response = work_branch.clone();
 
         let response = match session
             .modify_task(move |mut task| {
-                if let Some(repo) = destination_repository {
+                if let Some(repo) = effective_repo {
                     task.destination_repository = Some(repo);
                 }
-                if let Some(branch) = destination_branch {
+                if let Some(branch) = effective_branch {
                     task.destination_branch = Some(branch);
                 }
                 if let Some(wb) = work_branch {
@@ -394,7 +405,14 @@ pub trait CommonMcpImpl: Send + Sync {
             })
             .await
         {
-            Ok(()) => "Worktree configured".to_string(),
+            Ok(()) => {
+                format!(
+                    "Worktree configured: destination_repository={}, destination_branch={}, work_branch={}",
+                    repo_for_response.as_deref().unwrap_or("(not set)"),
+                    branch_for_response.as_deref().unwrap_or("(not set)"),
+                    wb_for_response.as_deref().unwrap_or("(not set)"),
+                )
+            }
             Err(e) => return self.configure_worktree_error(e.to_string()).await,
         };
         log_mcp_string_response(

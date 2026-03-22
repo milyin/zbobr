@@ -103,16 +103,10 @@ async fn main() -> anyhow::Result<()> {
     let task_backend = TaskBackendGithub::new(config.tasks).await?;
     let repo_backend = ZbobrRepoBackendGithub::new(config.repo).await?;
 
-    let mut prompt_builder = ConfiguredPromptBuilder::new(
+    let prompt_builder = ConfiguredPromptBuilder::new(
         Some(location.config_dir.clone()),
         Arc::new(workflow.clone()),
     );
-    if let Some(ref v) = config.dispatcher.default_destination_repository {
-        prompt_builder = prompt_builder.with_var("default_destination_repository", v.clone());
-    }
-    if let Some(ref v) = config.dispatcher.default_destination_branch {
-        prompt_builder = prompt_builder.with_var("default_destination_branch", v.clone());
-    }
 
     let claude = ClaudeExecutor::new(config.executor.claude);
     let copilot = CopilotExecutor::new(config.executor.copilot);

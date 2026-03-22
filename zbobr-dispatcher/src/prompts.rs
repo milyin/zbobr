@@ -18,8 +18,6 @@ pub const VAR_WORK_BRANCH: &str = "work_branch";
 pub const VAR_CHECKLIST: &str = "checklist";
 pub const VAR_LAST_REPORT: &str = "last_report";
 pub const VAR_LAST_REQUEST: &str = "last_request";
-pub const VAR_DEFAULT_DESTINATION_REPOSITORY: &str = "default_destination_repository";
-pub const VAR_DEFAULT_DESTINATION_BRANCH: &str = "default_destination_branch";
 
 #[derive(Clone)]
 pub struct ConfiguredPromptBuilder {
@@ -248,7 +246,7 @@ pub async fn build_full_prompt(
         .unwrap_or_else(|| McpTool::all().to_vec());
     add_mcp_tool_variables(&mut vars, &allowed_tools);
 
-    // Inject extra variables from config (e.g. default_destination_repository/branch).
+    // Inject extra variables from config.
     for (k, v) in extra_vars {
         vars.insert(Cow::Owned(k.clone()), Cow::Owned(v.clone()));
     }

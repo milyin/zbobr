@@ -487,13 +487,11 @@ pub struct ZbobrDispatcherConfig {
     pub model: Model,
     /// Prefix for work branches (default: "zbobr_fix").
     pub work_branch_prefix: String,
-    /// Default destination repository exposed as `{default_destination_repository}` placeholder
-    /// in prompt templates (e.g. "owner/repo" or a full git URL). The preparator prompt
-    /// uses this as a fallback when the task description doesn't specify one.
+    /// Default destination repository (e.g. "owner/repo" or a full git URL).
+    /// Used by `configure_worktree` as a fallback when the agent doesn't provide one.
     pub default_destination_repository: Option<String>,
-    /// Default destination branch exposed as `{default_destination_branch}` placeholder
-    /// in prompt templates (e.g. "main"). The preparator prompt uses this as a fallback
-    /// when the task description doesn't specify one.
+    /// Default destination branch (e.g. "main").
+    /// Used by `configure_worktree` as a fallback when the agent doesn't provide one.
     pub default_destination_branch: Option<String>,
     /// Git user name for commits made by the tool.
     pub git_user_name: String,

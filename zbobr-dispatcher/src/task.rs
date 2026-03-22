@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 pub use zbobr_api::task::*;
 
+use zbobr_api::config::ZbobrDispatcherConfig;
+
 use crate::{TaskDir, ZbobrDispatcher};
 
 // ---------------------------------------------------------------------------
@@ -56,6 +58,10 @@ impl RoleSession {
 
     pub fn task_id(&self) -> u64 {
         self.task_id
+    }
+
+    pub fn dispatcher_config(&self) -> &ZbobrDispatcherConfig {
+        self.zbobr.config()
     }
 
     /// Create a branch name with the proper prefix for this task.

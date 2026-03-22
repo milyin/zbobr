@@ -380,9 +380,12 @@ Read the task description below and set the required parameters for the implemen
 
 1. Read the task description provided below in this prompt.
 2. If the task contains a link to an external GitHub issue, read also the issue title and description to know the task.
-3. Set task parameters using `{mcp_configure_worktree}`
-4. If `{mcp_configure_worktree}` returns an error, call `{mcp_stop_with_error}` with the error details.
-   If `{mcp_configure_worktree}` succeeded, call `{mcp_report_success}` to provide a brief and concise report of the parameters you set."#;
+3. Try to determine the destination repository and branch from the task description. If you can't determine them, that's OK — pass null values to `{mcp_configure_worktree}` and defaults will be applied automatically.
+4. Call `{mcp_configure_worktree}` with the parameters you determined (or null for those you couldn't).
+5. If `{mcp_configure_worktree}` returns an error, call `{mcp_stop_with_error}` with the error details.
+   If `{mcp_configure_worktree}` succeeded, call `{mcp_report_success}` with a detailed report containing:
+   - What you found in the task description (your findings for repository, branch, work branch postfix)
+   - The actual values set by `{mcp_configure_worktree}` (from its response)"#;
 
 const PREPARATOR_TASK_TEMPLATE: &str = r#"---
 
@@ -392,8 +395,7 @@ const PREPARATOR_TASK_TEMPLATE: &str = r#"---
 
 {description}
 
-Use destination repository `{default_destination_repository}` and destination branch `{default_destination_branch}`
-if they are not specified in the task description above."#;
+"#;
 
 const PLANNER_PROMPT: &str = r#"# Planner Agent
 
