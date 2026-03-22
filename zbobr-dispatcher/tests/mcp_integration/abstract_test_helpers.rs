@@ -7,10 +7,12 @@
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
-use zbobr_api::{Pipeline, Signal, Stage};
-use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig};
-use zbobr_executor_mcp_tester;
+use zbobr_api::{
+    Pipeline, Signal, Stage,
+    config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig},
+};
 use zbobr_dispatcher::task::Tool;
+use zbobr_executor_mcp_tester;
 
 use super::{abstract_scenarios, env::IntegrationTestEnv};
 
@@ -231,8 +233,14 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
     ]);
 
     let scenarios = scenarios_map(vec![
-        ("role_work", abstract_scenarios::report_and_finish_scenario()),
-        ("role_resolve", abstract_scenarios::report_and_finish_scenario()),
+        (
+            "role_work",
+            abstract_scenarios::report_and_finish_scenario(),
+        ),
+        (
+            "role_resolve",
+            abstract_scenarios::report_and_finish_scenario(),
+        ),
     ]);
 
     env.run_pipeline(task_id, &workflow, &scenarios).await;
@@ -250,7 +258,8 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
     );
     assert_eq!(task.stack[0].pipeline, zbobr_api::Pipeline::Main);
     assert_eq!(
-        task.stack[0].signal, Signal::go("work"),
+        task.stack[0].signal,
+        Signal::go("work"),
         "Stack entry should have signal go_work (re-run interrupted stage)"
     );
 
@@ -269,10 +278,7 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
         "After return from conflict, signal should be go_work (popped from stack)"
     );
     assert_eq!(task.state, "main_PENDING");
-    assert!(
-        task.stack.is_empty(),
-        "Stack should be empty after pop"
-    );
+    assert!(task.stack.is_empty(), "Stack should be empty after pop");
 }
 
 // ===========================================================================
@@ -346,7 +352,10 @@ pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
         .await;
 
     let task = env.get_task(task_id).await;
-    assert_eq!(task.state, "DONE", "READY task should dispatch and complete");
+    assert_eq!(
+        task.state, "DONE",
+        "READY task should dispatch and complete"
+    );
 }
 
 // ===========================================================================
@@ -396,7 +405,10 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     // First run: failure → return_failure → root pipeline pauses
     let scenarios_reject = scenarios_map(vec![
         ("role_check", abstract_scenarios::report_failure_scenario()),
-        ("role_finish", abstract_scenarios::report_and_finish_scenario()),
+        (
+            "role_finish",
+            abstract_scenarios::report_and_finish_scenario(),
+        ),
     ]);
     env.run_pipeline(task_id, &workflow, &scenarios_reject)
         .await;
@@ -465,9 +477,10 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
         pipeline: "main",
     }]);
 
-    let scenarios = scenarios_map(vec![
-        ("role_work", abstract_scenarios::report_and_finish_scenario()),
-    ]);
+    let scenarios = scenarios_map(vec![(
+        "role_work",
+        abstract_scenarios::report_and_finish_scenario(),
+    )]);
 
     // The stage should execute — identity undefined is no longer a dispatch trigger.
     env.run_pipeline(task_id, &workflow, &scenarios).await;
@@ -479,7 +492,6 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
         "Stack should be empty after successful single-stage run"
     );
 }
-
 
 // ===========================================================================
 // Test 12: Call stage invokes a sub-pipeline and advances on return
@@ -556,8 +568,14 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
     };
 
     let scenarios = scenarios_map(vec![
-        ("role_work", abstract_scenarios::report_and_finish_scenario()),
-        ("role_finish", abstract_scenarios::report_and_finish_scenario()),
+        (
+            "role_work",
+            abstract_scenarios::report_and_finish_scenario(),
+        ),
+        (
+            "role_finish",
+            abstract_scenarios::report_and_finish_scenario(),
+        ),
     ]);
 
     // Step 1: process_task from READY — hits call stage, pushes stack, emits call_sub
@@ -572,7 +590,8 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
     assert_eq!(task.stack.len(), 1, "Stack should have one entry");
     assert_eq!(task.stack[0].pipeline, zbobr_api::Pipeline::Main);
     assert_eq!(
-        task.stack[0].signal, Signal::go("finish"),
+        task.stack[0].signal,
+        Signal::go("finish"),
         "Return signal should advance to next stage"
     );
 
@@ -584,5 +603,8 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
         task.state, "DONE",
         "Task should complete after call stage returns and finish stage runs"
     );
-    assert!(task.stack.is_empty(), "Stack should be empty after completion");
+    assert!(
+        task.stack.is_empty(),
+        "Stack should be empty after completion"
+    );
 }

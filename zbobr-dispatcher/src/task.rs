@@ -1,10 +1,8 @@
-pub use zbobr_api::task::*;
-
 use std::sync::Arc;
 
-use crate::{
-    TaskDir, ZbobrDispatcher,
-};
+pub use zbobr_api::task::*;
+
+use crate::{TaskDir, ZbobrDispatcher};
 
 // ---------------------------------------------------------------------------
 // RoleSession — restricted access for MCP tools during agent sessions.
@@ -380,7 +378,6 @@ impl RoleSession {
     pub fn last_mapped_tool(&self) -> Option<String> {
         self.last_mapped_tool.lock().unwrap().clone()
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -398,14 +395,8 @@ pub struct TaskSession {
 }
 
 impl TaskSession {
-    pub(crate) fn new(
-        zbobr: Arc<ZbobrDispatcher>,
-        task_id: u64,
-    ) -> Self {
-        Self {
-            zbobr,
-            task_id,
-        }
+    pub(crate) fn new(zbobr: Arc<ZbobrDispatcher>, task_id: u64) -> Self {
+        Self { zbobr, task_id }
     }
 
     pub fn task_id(&self) -> u64 {
@@ -487,7 +478,11 @@ impl TaskSession {
     }
 
     /// Push an entry onto the task's call stack, saving the current pipeline_run_id.
-    pub async fn push_stack(&self, pipeline: impl Into<crate::task::Pipeline>, signal: Signal) -> anyhow::Result<()> {
+    pub async fn push_stack(
+        &self,
+        pipeline: impl Into<crate::task::Pipeline>,
+        signal: Signal,
+    ) -> anyhow::Result<()> {
         let task = self.get_task().await?;
         let entry = crate::task::StackEntry {
             pipeline: pipeline.into(),
@@ -605,14 +600,17 @@ impl TaskSession {
 
 #[cfg(test)]
 mod comment_model_tests {
-    use super::*;
-    use crate::config::ZbobrDispatcherConfig;
-    use crate::mcp::traits::CommonMcpImpl;
+    use std::{
+        collections::HashMap,
+        sync::{Arc, atomic::AtomicU64},
+    };
+
     use async_trait::async_trait;
-    use std::collections::HashMap;
-    use std::sync::{Arc, atomic::AtomicU64};
     use tokio::sync::Mutex;
     use zbobr_api::backend::{TaskBackend, TaskMut, TaskWeak};
+
+    use super::*;
+    use crate::{config::ZbobrDispatcherConfig, mcp::traits::CommonMcpImpl};
 
     // Simple in-memory backend for testing
 
@@ -810,9 +808,7 @@ mod comment_model_tests {
             }
         }
 
-        async fn list_tasks(
-            &self,
-        ) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+        async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
             Ok(vec![])
         }
 
@@ -902,12 +898,14 @@ mod comment_model_tests {
                 locks: Mutex::new(HashMap::new()),
             }),
         };
-        let zbobr = Arc::new(crate::ZbobrDispatcherBuilder::new()
-            .with_config(ZbobrDispatcherConfig::default())
-            .with_workflow(crate::workflow::Workflow::default())
-            .with_task_backend(backend.clone())
-            .with_repo_backend(DummyRepo)
-            .build());
+        let zbobr = Arc::new(
+            crate::ZbobrDispatcherBuilder::new()
+                .with_config(ZbobrDispatcherConfig::default())
+                .with_workflow(crate::workflow::Workflow::default())
+                .with_task_backend(backend.clone())
+                .with_repo_backend(DummyRepo)
+                .build(),
+        );
         (zbobr, backend)
     }
 
@@ -990,7 +988,10 @@ mod comment_model_tests {
             Some(Tool::Copilot),
             Some(Model::Gpt5Mini),
         );
-        assert_eq!(tag.to_string(), "// main:3:planning by host:copilot:gpt-5-mini");
+        assert_eq!(
+            tag.to_string(),
+            "// main:3:planning by host:copilot:gpt-5-mini"
+        );
         let parsed: CommentTag = tag.to_string().parse().unwrap();
         assert_eq!(parsed, tag);
 
@@ -1014,7 +1015,10 @@ mod comment_model_tests {
             Some(Tool::Claude),
             None,
         );
-        assert_eq!(tag_tool_no_model.to_string(), "// init:2:working by host:claude");
+        assert_eq!(
+            tag_tool_no_model.to_string(),
+            "// init:2:working by host:claude"
+        );
         let parsed_tnm: CommentTag = tag_tool_no_model.to_string().parse().unwrap();
         assert_eq!(parsed_tnm, tag_tool_no_model);
     }
@@ -1028,14 +1032,12 @@ mod comment_model_tests {
         task_id: u64,
     ) -> crate::mcp::unified::UnifiedMcp {
         let tracker = Arc::new(std::sync::Mutex::new(None::<String>));
-        let session = zbobr.role_session_with_tracker(
-            task_id,
-            tracker,
-            "main".to_string(),
-            1,
-        );
+        let session = zbobr.role_session_with_tracker(task_id, tracker, "main".to_string(), 1);
         let allowed_tools: std::collections::HashSet<zbobr_api::config_tools::McpTool> =
-            zbobr_api::config_tools::McpTool::all().iter().copied().collect();
+            zbobr_api::config_tools::McpTool::all()
+                .iter()
+                .copied()
+                .collect();
         crate::mcp::unified::UnifiedMcp::new(
             session,
             allowed_tools,
@@ -1058,21 +1060,41 @@ mod comment_model_tests {
 
         let mcp = make_test_mcp(&zbobr, id);
 
-        let _ = mcp.report_success_impl("result one", "detailed success report").await;
-        let _ = mcp.report_failure_impl("needs work", "detailed failure report").await;
+        let _ = mcp
+            .report_success_impl("result one", "detailed success report")
+            .await;
+        let _ = mcp
+            .report_failure_impl("needs work", "detailed failure report")
+            .await;
 
         let weak = task_backend.get_task(id).await.unwrap();
         let backend_comments = weak.get_comments().await.unwrap();
-        assert_eq!(backend_comments.len(), 2, "each comment must be posted separately");
+        assert_eq!(
+            backend_comments.len(),
+            2,
+            "each comment must be posted separately"
+        );
         assert!(backend_comments[0].text.starts_with("[report_success]"));
-        assert_eq!(backend_comments[0].report_name.as_deref(), Some("report_main_1_working_success.md"));
+        assert_eq!(
+            backend_comments[0].report_name.as_deref(),
+            Some("report_main_1_working_success.md")
+        );
         assert!(backend_comments[1].text.starts_with("[report_failure]"));
-        assert_eq!(backend_comments[1].report_name.as_deref(), Some("report_main_1_working_failure.md"));
+        assert_eq!(
+            backend_comments[1].report_name.as_deref(),
+            Some("report_main_1_working_failure.md")
+        );
 
         // Verify reports were stored and are readable
-        let success_report = weak.read_report("report_main_1_working_success.md").await.unwrap();
+        let success_report = weak
+            .read_report("report_main_1_working_success.md")
+            .await
+            .unwrap();
         assert_eq!(success_report, "detailed success report");
-        let failure_report = weak.read_report("report_main_1_working_failure.md").await.unwrap();
+        let failure_report = weak
+            .read_report("report_main_1_working_failure.md")
+            .await
+            .unwrap();
         assert_eq!(failure_report, "detailed failure report");
     }
 
@@ -1085,23 +1107,19 @@ mod comment_model_tests {
             .unwrap();
 
         let tracker_a = Arc::new(std::sync::Mutex::new(None::<String>));
-        let session_a = zbobr.role_session_with_tracker(
-            id,
-            tracker_a,
-            "main".to_string(),
-            1,
-        );
+        let session_a = zbobr.role_session_with_tracker(id, tracker_a, "main".to_string(), 1);
 
         let tracker_b = Arc::new(std::sync::Mutex::new(None::<String>));
-        let session_b = zbobr.role_session_with_tracker(
-            id,
-            tracker_b,
-            "main".to_string(),
-            2,
-        );
+        let session_b = zbobr.role_session_with_tracker(id, tracker_b, "main".to_string(), 2);
 
-        session_a.add_checklist_item("same-id", "run-1 item").await.unwrap();
-        session_b.add_checklist_item("same-id", "run-2 item").await.unwrap();
+        session_a
+            .add_checklist_item("same-id", "run-1 item")
+            .await
+            .unwrap();
+        session_b
+            .add_checklist_item("same-id", "run-2 item")
+            .await
+            .unwrap();
 
         let run1_items = session_a.get_checklist().await.unwrap();
         assert_eq!(run1_items.len(), 1);
@@ -1138,7 +1156,10 @@ mod comment_model_tests {
             .unwrap();
 
         let session = zbobr.role_session(id);
-        session.add_checklist_item("plain", "legacy item").await.unwrap();
+        session
+            .add_checklist_item("plain", "legacy item")
+            .await
+            .unwrap();
 
         let items = session.get_checklist().await.unwrap();
         assert_eq!(items.len(), 1);

@@ -115,7 +115,11 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id(),
         );
 
-        match self.session().get_history_for_run(self.pipeline_run_id()).await {
+        match self
+            .session()
+            .get_history_for_run(self.pipeline_run_id())
+            .await
+        {
             Ok(text) => {
                 log_mcp_string_response(
                     self.role_name(),
@@ -153,7 +157,14 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), Some(full_report))
+            .post_comment(
+                &body,
+                self.stage_name(),
+                &hostname,
+                Some(self.mcp_tool()),
+                Some(self.mcp_model()),
+                Some(full_report),
+            )
             .await
         {
             tracing::error!(
@@ -222,7 +233,14 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), None)
+            .post_comment(
+                &body,
+                self.stage_name(),
+                &hostname,
+                Some(self.mcp_tool()),
+                Some(self.mcp_model()),
+                None,
+            )
             .await
         {
             tracing::error!(
@@ -276,7 +294,14 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), None)
+            .post_comment(
+                &body,
+                self.stage_name(),
+                &hostname,
+                Some(self.mcp_tool()),
+                Some(self.mcp_model()),
+                None,
+            )
             .await
         {
             tracing::error!(

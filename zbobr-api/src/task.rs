@@ -89,7 +89,9 @@ pub struct Comment {
 // -- History helper types --
 
 /// Type of a history record, derived from `[tool_name]` prefix in comment text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum HistoryRecordType {
     Task,
@@ -104,10 +106,11 @@ pub enum HistoryRecordType {
 pub fn classify_comment(text: &str) -> HistoryRecordType {
     let prefix = text.split('\n').next().unwrap_or("");
     match prefix {
-        "[report_results]" | "[report_success]" | "[post_plan]"
-        | "[review_accept]" | "[test_accept]" => HistoryRecordType::Success,
-        "[report_failure]" | "[ask_planner]"
-        | "[review_reject]" | "[test_reject]" => HistoryRecordType::Failure,
+        "[report_results]" | "[report_success]" | "[post_plan]" | "[review_accept]"
+        | "[test_accept]" => HistoryRecordType::Success,
+        "[report_failure]" | "[ask_planner]" | "[review_reject]" | "[test_reject]" => {
+            HistoryRecordType::Failure
+        }
         "[ask_user]" | "[stop_with_question]" => HistoryRecordType::Question,
         "[report_error]" | "[stop_with_error]" => HistoryRecordType::Error,
         _ => HistoryRecordType::Other,
@@ -118,7 +121,10 @@ pub fn classify_comment(text: &str) -> HistoryRecordType {
 pub fn extract_summary(text: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
     // Skip the [tool_name] prefix line if present
-    let content_line = if lines.first().map_or(false, |l| l.starts_with('[') && l.ends_with(']')) {
+    let content_line = if lines
+        .first()
+        .map_or(false, |l| l.starts_with('[') && l.ends_with(']'))
+    {
         lines.get(1).copied().unwrap_or("")
     } else {
         lines.first().copied().unwrap_or("")
@@ -277,16 +283,12 @@ impl State {
             State::Done => other == Self::DONE,
             State::Pause => other == Self::PAUSE,
             State::Ready => other == Self::READY,
-            State::Pending(pipeline) => {
-                other
-                    .strip_suffix(Self::PENDING_SUFFIX)
-                    .is_some_and(|p| p == pipeline.as_str())
-            }
-            State::Running(pipeline, stage) => {
-                other
-                    .split_once('_')
-                    .is_some_and(|(p, s)| p == pipeline.as_str() && s == stage.as_str())
-            }
+            State::Pending(pipeline) => other
+                .strip_suffix(Self::PENDING_SUFFIX)
+                .is_some_and(|p| p == pipeline.as_str()),
+            State::Running(pipeline, stage) => other
+                .split_once('_')
+                .is_some_and(|(p, s)| p == pipeline.as_str() && s == stage.as_str()),
             State::Unknown(raw) => raw == other,
         }
     }
@@ -606,7 +608,6 @@ pub enum WorktreeProblem {
 /// Role for task execution — now a plain string to support configurable roles.
 pub type Role = String;
 
-
 /// AI Tool/Agent to use.
 #[derive(
     Debug,
@@ -885,7 +886,11 @@ impl std::fmt::Display for CommentTag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         const FOR_SEPARATOR: &str = " for ";
 
-        write!(f, "// {}:{}:{} by {}", self.pipeline, self.pipeline_run_id, self.stage, self.hostname)?;
+        write!(
+            f,
+            "// {}:{}:{} by {}",
+            self.pipeline, self.pipeline_run_id, self.stage, self.hostname
+        )?;
         if let Some(ref tool) = self.tool {
             write!(f, ":{tool}")?;
             if let Some(ref model) = self.model {
@@ -919,7 +924,8 @@ impl std::str::FromStr for CommentTag {
             return Err(anyhow::anyhow!("Invalid tag prefix: {}", prefix));
         }
         let pipeline = prefix_parts[0].to_string();
-        let pipeline_run_id = prefix_parts[1].parse::<u64>()
+        let pipeline_run_id = prefix_parts[1]
+            .parse::<u64>()
             .map_err(|_| anyhow::anyhow!("Invalid run id in tag prefix: {}", prefix_parts[1]))?;
         let stage = prefix_parts[2].to_string();
 
@@ -1106,9 +1112,9 @@ mod tests {
     fn filter_user_comments_inherit_run_id() {
         let comments = vec![
             make_comment("agent start", "main", 1),
-            make_comment("user reply", "", 0),   // user comment
+            make_comment("user reply", "", 0), // user comment
             make_comment("agent in sub", "sub", 2),
-            make_comment("user in sub", "", 0),   // user comment
+            make_comment("user in sub", "", 0), // user comment
             make_comment("agent back", "main", 1),
         ];
         let run1: Vec<_> = filter_comments_for_run(&comments, 1)
@@ -1131,10 +1137,7 @@ mod tests {
 
     #[test]
     fn filter_no_matching_run() {
-        let comments = vec![
-            make_comment("a", "main", 1),
-            make_comment("b", "main", 1),
-        ];
+        let comments = vec![make_comment("a", "main", 1), make_comment("b", "main", 1)];
         assert!(filter_comments_for_run(&comments, 99).is_empty());
     }
 

@@ -6,9 +6,8 @@ use std::{
 use anyhow::Context;
 use async_trait::async_trait;
 use tokio::fs;
-use zbobr_utility::{git, git_check, git_output};
-
 use zbobr_api::backend::WorktreeBackend;
+use zbobr_utility::{git, git_check, git_output};
 
 use crate::config::ZbobrRepoBackendGithubConfig;
 
@@ -448,12 +447,7 @@ impl ZbobrRepoBackendGithub {
             .await?;
         }
 
-        zbobr_utility::configure_git_user(
-            workspace_path,
-            git_user_name,
-            git_user_email,
-        )
-        .await?;
+        zbobr_utility::configure_git_user(workspace_path, git_user_name, git_user_email).await?;
 
         Ok(())
     }
@@ -628,7 +622,13 @@ impl ZbobrRepoBackendGithub {
         tracing::info!("Stashing uncommitted changes in worktree");
         git(
             worktree_path,
-            &["stash", "push", "--include-untracked", "-m", "auto-stash before merge"],
+            &[
+                "stash",
+                "push",
+                "--include-untracked",
+                "-m",
+                "auto-stash before merge",
+            ],
         )
         .await?;
         Ok(true)
@@ -862,7 +862,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             git_user_name,
             git_user_email,
         )
-            .await?;
+        .await?;
 
         // Phase 5: Ensure PR exists
         if !remote_exists {

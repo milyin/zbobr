@@ -1,12 +1,15 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use indexmap::IndexMap;
-
-use zbobr_api::config_tools::McpTool;
-use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig, WorkflowToml};
-use zbobr_api::task::{Model, Tool};
-use zbobr_api::{Pipeline, Stage};
+use zbobr_api::{
+    Pipeline, Stage,
+    config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig, WorkflowToml},
+    config_tools::McpTool,
+    task::{Model, Tool},
+};
 use zbobr_dispatcher::config::{ZbobrDispatcherToml, ZbobrExecutorToml};
 use zbobr_executor_claude::ZbobrExecutorClaudeToml;
 use zbobr_executor_copilot::ZbobrExecutorCopilotToml;
@@ -115,51 +118,76 @@ fn default_config_toml() -> RootConfigToml {
 /// Build the default workflow configuration with predefined pipelines and roles.
 fn default_workflow() -> WorkflowConfig {
     use McpTool::{
-        AddChecklistItem, CheckChecklistItem, ConfigureWorktree, DeleteChecklistItem,
-        GetChecklist, GetHistory, ReportFailure, ReportSuccess, StopWithError,
-        StopWithQuestion,
+        AddChecklistItem, CheckChecklistItem, ConfigureWorktree, DeleteChecklistItem, GetChecklist,
+        GetHistory, ReportFailure, ReportSuccess, StopWithError, StopWithQuestion,
     };
 
     let task_prompt = vec![PathBuf::from("task.md")];
 
     let main_stages = IndexMap::from([
-        (Stage::from("preparing"), StageDefinition {
-            role: Some("preparator".into()),
-            ..Default::default()
-        }),
-        (Stage::from("planning"), StageDefinition {
-            role: Some("planner".into()),
-            additional_prompts: task_prompt.clone(),
-            ..Default::default()
-        }),
-        (Stage::from("working"), StageDefinition {
-            role: Some("worker".into()),
-            additional_prompts: task_prompt.clone(),
-            ..Default::default()
-        }),
-        (Stage::from("reviewing"), StageDefinition {
-            role: Some("reviewer".into()),
-            additional_prompts: task_prompt.clone(),
-            ..Default::default()
-        }),
-        (Stage::from("merging"), StageDefinition {
-            role: Some("merger".into()),
-            additional_prompts: task_prompt.clone(),
-            ..Default::default()
-        }),
+        (
+            Stage::from("preparing"),
+            StageDefinition {
+                role: Some("preparator".into()),
+                ..Default::default()
+            },
+        ),
+        (
+            Stage::from("planning"),
+            StageDefinition {
+                role: Some("planner".into()),
+                additional_prompts: task_prompt.clone(),
+                ..Default::default()
+            },
+        ),
+        (
+            Stage::from("working"),
+            StageDefinition {
+                role: Some("worker".into()),
+                additional_prompts: task_prompt.clone(),
+                ..Default::default()
+            },
+        ),
+        (
+            Stage::from("reviewing"),
+            StageDefinition {
+                role: Some("reviewer".into()),
+                additional_prompts: task_prompt.clone(),
+                ..Default::default()
+            },
+        ),
+        (
+            Stage::from("merging"),
+            StageDefinition {
+                role: Some("merger".into()),
+                additional_prompts: task_prompt.clone(),
+                ..Default::default()
+            },
+        ),
     ]);
 
-    let merge_stages = IndexMap::from([
-        (Stage::from("merging"), StageDefinition {
+    let merge_stages = IndexMap::from([(
+        Stage::from("merging"),
+        StageDefinition {
             role: Some("merger".into()),
             additional_prompts: task_prompt,
             ..Default::default()
-        }),
-    ]);
+        },
+    )]);
 
     let mut pipelines = HashMap::new();
-    pipelines.insert(Pipeline::Main, PipelineConfig { stages: main_stages });
-    pipelines.insert(Pipeline::Merge, PipelineConfig { stages: merge_stages });
+    pipelines.insert(
+        Pipeline::Main,
+        PipelineConfig {
+            stages: main_stages,
+        },
+    );
+    pipelines.insert(
+        Pipeline::Merge,
+        PipelineConfig {
+            stages: merge_stages,
+        },
+    );
 
     let roles = HashMap::from([
         (
@@ -236,12 +264,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             "merger".into(),
             RoleDefinition {
-                tools: vec![
-                    GetHistory,
-                    StopWithError,
-                    ReportSuccess,
-                    StopWithQuestion,
-                ],
+                tools: vec![GetHistory, StopWithError, ReportSuccess, StopWithQuestion],
                 prompt: Some(PathBuf::from("merger.md")),
             },
         ),

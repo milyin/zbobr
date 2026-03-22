@@ -1,12 +1,10 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use indexmap::IndexMap;
-
-use zbobr_api::config::{
-    PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig,
+use zbobr_api::{
+    Pipeline, Signal, Stage, State, Task,
+    config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig},
 };
-use zbobr_api::{Pipeline, Signal, Stage, State, Task};
 
 /// Workflow wraps a `WorkflowConfig` and exposes state machine logic as methods.
 #[derive(Clone, Debug)]
@@ -37,10 +35,7 @@ impl Default for Workflow {
             pipelines.insert(
                 Pipeline::from(name),
                 PipelineConfig {
-                    stages: IndexMap::from([(
-                        Stage::from("default"),
-                        dummy_stage.clone(),
-                    )]),
+                    stages: IndexMap::from([(Stage::from("default"), dummy_stage.clone())]),
                 },
             );
         }
@@ -102,7 +97,10 @@ impl Workflow {
         self.config.role_definition(role)
     }
 
-    pub fn start_stage_for_pipeline(&self, pipeline: &Pipeline) -> Option<(&str, &StageDefinition)> {
+    pub fn start_stage_for_pipeline(
+        &self,
+        pipeline: &Pipeline,
+    ) -> Option<(&str, &StageDefinition)> {
         self.config.start_stage_for_pipeline(pipeline.clone())
     }
 
@@ -154,19 +152,14 @@ impl Workflow {
                                 default_pipeline
                             )
                         })?;
-                    let (stage_name, stage_def) = pipeline_config
-                        .start_stage()
-                        .ok_or_else(|| {
+                    let (stage_name, stage_def) =
+                        pipeline_config.start_stage().ok_or_else(|| {
                             anyhow::anyhow!(
                                 "No start stage for default pipeline '{}'",
                                 default_pipeline
                             )
                         })?;
-                    Ok(StateAction::RunStage(
-                        pipeline_key,
-                        stage_name,
-                        stage_def,
-                    ))
+                    Ok(StateAction::RunStage(pipeline_key, stage_name, stage_def))
                 } else if let Some(ref signal) = task.signal {
                     self.resolve_signal(task, signal)
                 } else {
@@ -187,8 +180,8 @@ impl Workflow {
     }
 
     fn resolve_signal(&self, task: &Task, signal: &Signal) -> anyhow::Result<StateAction<'_>> {
-        let pipeline = pipeline_from_state(&task.state)
-            .unwrap_or_else(|| self.config.default_pipeline());
+        let pipeline =
+            pipeline_from_state(&task.state).unwrap_or_else(|| self.config.default_pipeline());
         self.resolve_signal_in_pipeline(signal, &pipeline)
     }
 
@@ -199,8 +192,11 @@ impl Workflow {
     ) -> anyhow::Result<StateAction<'_>> {
         match signal {
             Signal::Go(target_stage) => {
-                let (pipeline_key, pipeline_config) =
-                    self.config.pipelines.get_key_value(pipeline.as_str()).ok_or_else(|| {
+                let (pipeline_key, pipeline_config) = self
+                    .config
+                    .pipelines
+                    .get_key_value(pipeline.as_str())
+                    .ok_or_else(|| {
                         anyhow::anyhow!(
                             "Signal '{signal}' references unknown pipeline '{pipeline}'"
                         )
@@ -232,11 +228,7 @@ impl Workflow {
                 let (stage_key, start) = pipeline_config.start_stage().ok_or_else(|| {
                     anyhow::anyhow!("Pipeline '{target_pipeline}' has no start stage")
                 })?;
-                Ok(StateAction::RunStage(
-                    pipeline_key,
-                    stage_key,
-                    start,
-                ))
+                Ok(StateAction::RunStage(pipeline_key, stage_key, start))
             }
             Signal::Return | Signal::ReturnFailure => Ok(StateAction::Done),
         }
@@ -250,8 +242,9 @@ pub fn pipeline_from_state(state: &State) -> Option<Pipeline> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use zbobr_api::config::{PipelineConfig, StageDefinition, WorkflowConfig};
+
+    use super::*;
 
     /// Helper: build a minimal valid WorkflowConfig with main/init/merge pipelines.
     fn base_workflow() -> WorkflowConfig {
@@ -340,7 +333,8 @@ mod tests {
     fn stage_neither_role_nor_call() {
         let mut wf = base_workflow();
         let main = wf.pipelines.get_mut("main").unwrap();
-        main.stages.insert("empty".into(), StageDefinition::default());
+        main.stages
+            .insert("empty".into(), StageDefinition::default());
         let err = wf.validate().unwrap_err();
         assert!(
             err.to_string().contains("neither 'role' nor 'call'"),
@@ -427,12 +421,15 @@ role = "merger"
                 assert!(def.is_call());
                 assert_eq!(def.call_pipeline().map(|p| p.as_str()), Some("sub"));
             }
-            other => panic!("expected RunStage, got {:?}", match other {
-                StateAction::Done => "Done",
-                StateAction::Paused => "Paused",
-                StateAction::Idle => "Idle",
-                _ => "RunStage",
-            }),
+            other => panic!(
+                "expected RunStage, got {:?}",
+                match other {
+                    StateAction::Done => "Done",
+                    StateAction::Paused => "Paused",
+                    StateAction::Idle => "Idle",
+                    _ => "RunStage",
+                }
+            ),
         }
     }
 
@@ -475,7 +472,8 @@ role = "merger"
             Some(zbobr_api::Stage::new("nonexistent"));
         let err = wf.validate().unwrap_err();
         assert!(
-            err.to_string().contains("on_success references unknown stage"),
+            err.to_string()
+                .contains("on_success references unknown stage"),
             "unexpected error: {err}"
         );
     }
@@ -488,7 +486,8 @@ role = "merger"
             Some(zbobr_api::Stage::new("nonexistent"));
         let err = wf.validate().unwrap_err();
         assert!(
-            err.to_string().contains("on_failure references unknown stage"),
+            err.to_string()
+                .contains("on_failure references unknown stage"),
             "unexpected error: {err}"
         );
     }
@@ -497,8 +496,7 @@ role = "merger"
     fn on_success_self_reference_allowed() {
         let mut wf = base_workflow();
         let main = wf.pipelines.get_mut("main").unwrap();
-        main.stages.get_mut("working").unwrap().on_success =
-            Some(zbobr_api::Stage::new("working"));
+        main.stages.get_mut("working").unwrap().on_success = Some(zbobr_api::Stage::new("working"));
         assert!(wf.validate().is_ok());
     }
 

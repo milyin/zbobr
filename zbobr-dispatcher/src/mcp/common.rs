@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 
+use zbobr_api::config_tools::McpTool;
+
 use crate::{
     ZbobrDispatcher,
     task::{Model, RoleSession, Tool},
 };
-use zbobr_api::config_tools::McpTool;
 
 /// Get the current hostname, or "unknown" if it cannot be determined.
 pub fn get_hostname() -> String {
@@ -26,7 +27,9 @@ pub struct MessageParam {
 pub struct ReportParam {
     #[schemars(description = "Brief, concise summary of results (stored as comment)")]
     pub brief: String,
-    #[schemars(description = "Full detailed report content (stored as a file in the task repository)")]
+    #[schemars(
+        description = "Full detailed report content (stored as a file in the task repository)"
+    )]
     pub full_report: String,
 }
 
@@ -40,11 +43,15 @@ pub struct GetFullReportParam {
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct ConfigureWorktreeParam {
-    #[schemars(description = "Destination repository (full git URL, local path, or owner/repo format)")]
+    #[schemars(
+        description = "Destination repository (full git URL, local path, or owner/repo format)"
+    )]
     pub destination_repository: Option<String>,
     #[schemars(description = "Destination branch name (e.g. 'main')")]
     pub destination_branch: Option<String>,
-    #[schemars(description = "Work branch postfix (e.g. 'implement-feature'). Combined with prefix and task ID to form the full branch name.")]
+    #[schemars(
+        description = "Work branch postfix (e.g. 'implement-feature'). Combined with prefix and task ID to form the full branch name."
+    )]
     pub work_branch_postfix: Option<String>,
 }
 
@@ -69,7 +76,6 @@ pub struct DeleteChecklistItemParam {
     #[schemars(description = "ID of the checklist item to delete")]
     pub id: String,
 }
-
 
 /// Bind to an available port starting from the given base port.
 ///
@@ -146,14 +152,23 @@ pub async fn run_role_mcp_server(
 
     let path = format!("/{}/{}", role_name, task_id);
 
-    let session: RoleSession =
-        zbobr.role_session_with_tracker(task_id, tool_tracker, pipeline_name.clone(), pipeline_run_id);
+    let session: RoleSession = zbobr.role_session_with_tracker(
+        task_id,
+        tool_tracker,
+        pipeline_name.clone(),
+        pipeline_run_id,
+    );
 
     let role_name_owned = role_name.to_string();
-    tracing::info!("Creating UnifiedMcp service for task {task_id} role '{role_name}' at path {path}");
+    tracing::info!(
+        "Creating UnifiedMcp service for task {task_id} role '{role_name}' at path {path}"
+    );
     let svc = StreamableHttpService::new(
         move || {
-            tracing::debug!("Creating new UnifiedMcp instance for task {task_id} role '{}'", role_name_owned);
+            tracing::debug!(
+                "Creating new UnifiedMcp instance for task {task_id} role '{}'",
+                role_name_owned
+            );
             Ok(super::unified::UnifiedMcp::new(
                 session.clone(),
                 allowed_tools.clone(),

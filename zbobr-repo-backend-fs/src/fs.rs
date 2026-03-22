@@ -3,8 +3,7 @@ use std::path::Path;
 use anyhow::Context;
 use async_trait::async_trait;
 use tokio::fs;
-use zbobr_api::backend::WorktreeBackend;
-use zbobr_api::task::TaskIdentity;
+use zbobr_api::{backend::WorktreeBackend, task::TaskIdentity};
 use zbobr_utility::{git, git_check, git_output};
 
 use crate::config::ZbobrRepoBackendFsConfig;

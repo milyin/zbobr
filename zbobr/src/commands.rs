@@ -1,14 +1,11 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use clap::Subcommand;
-use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
-
-use zbobr_utility::{git, git_output};
-
 use zbobr_dispatcher::{TaskDir, ZbobrDispatcher, print_task};
+use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
+use zbobr_utility::{git, git_output};
 
 // ---------------------------------------------------------------------------
 // CLI types
@@ -164,10 +161,7 @@ pub enum TaskSubcommand {
 // ---------------------------------------------------------------------------
 
 /// Run the given command against the dispatcher.
-pub async fn run_command(
-    zbobr: ZbobrDispatcher,
-    command: Command,
-) -> anyhow::Result<()> {
+pub async fn run_command(zbobr: ZbobrDispatcher, command: Command) -> anyhow::Result<()> {
     let zbobr = Arc::new(zbobr);
     match command {
         Command::Init { .. } => {
@@ -177,9 +171,7 @@ pub async fn run_command(
             zbobr.setup(force).await?;
         }
         Command::Cleanup { dry_run } => {
-            zbobr
-                .cleanup_closed_tasks(dry_run)
-                .await?;
+            zbobr.cleanup_closed_tasks(dry_run).await?;
         }
         Command::Task { subcommand } => {
             run_task_subcommand(&zbobr, subcommand).await?;
@@ -189,8 +181,7 @@ pub async fn run_command(
             cleanup_interval,
             ..
         } => {
-            zbobr_dispatcher::run_manager_loop(&zbobr, interval, cleanup_interval)
-                .await?;
+            zbobr_dispatcher::run_manager_loop(&zbobr, interval, cleanup_interval).await?;
         }
     }
     Ok(())
@@ -212,19 +203,10 @@ async fn run_task_subcommand(
         } => {
             let parsed_state = state.parse::<zbobr_api::State>()?;
             let id = zbobr
-                .create_task(
-                    &title,
-                    &description,
-                    parsed_state,
-                    dest_repo,
-                    dest_branch,
-                )
+                .create_task(&title, &description, parsed_state, dest_repo, dest_branch)
                 .await?;
             if confirm {
-                zbobr
-                    .task_session(id)
-                    .set_confirm(true)
-                    .await?;
+                zbobr.task_session(id).set_confirm(true).await?;
             }
             println!("Created task #{}", id);
         }
@@ -272,9 +254,7 @@ async fn run_task_subcommand(
             signal,
             confirm,
         } => {
-            let parsed_state = state
-                .map(|s| s.parse::<zbobr_api::State>())
-                .transpose()?;
+            let parsed_state = state.map(|s| s.parse::<zbobr_api::State>()).transpose()?;
             let parsed_signal = signal.map(|s| s.parse::<zbobr_api::Signal>()).transpose()?;
             let weak = task_backend.get_task(id).await?;
             let mutable = weak.upgrade().await?;
@@ -347,7 +327,8 @@ async fn run_task_subcommand(
             } else {
                 None
             };
-            zbobr_dispatcher::process_task(zbobr, &task_obj, mcp_tester_config_override.as_ref()).await?;
+            zbobr_dispatcher::process_task(zbobr, &task_obj, mcp_tester_config_override.as_ref())
+                .await?;
         }
         TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
             overwrite_author(zbobr, id, force, dry_run).await?;

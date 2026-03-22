@@ -6,7 +6,12 @@ use std::{
 
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use zbobr_api::{Comment, CommentTag, HistoryRecordType, Model, Task, Tool, backend::TaskBackend, classify_comment, task::{StackEntry, State}};
+use zbobr_api::{
+    Comment, CommentTag, HistoryRecordType, Model, Task, Tool,
+    backend::TaskBackend,
+    classify_comment,
+    task::{StackEntry, State},
+};
 
 use crate::{
     config::ZbobrTaskBackendGithubConfig,
@@ -281,7 +286,11 @@ impl ZbobrTaskBackendGithubImpl {
     }
 
     /// Apply a signal change on a GitHub issue (remove old signal labels, add new one).
-    async fn apply_signal_change(&self, id: u64, signal: Option<&zbobr_api::Signal>) -> anyhow::Result<()> {
+    async fn apply_signal_change(
+        &self,
+        id: u64,
+        signal: Option<&zbobr_api::Signal>,
+    ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
         // Fetch current labels and remove all existing signal: labels
@@ -319,12 +328,7 @@ impl ZbobrTaskBackendGithubImpl {
     }
 
     /// Apply flag changes on a GitHub issue (sync pause/confirm labels).
-    async fn apply_flag_change(
-        &self,
-        id: u64,
-        pause: bool,
-        confirm: bool,
-    ) -> anyhow::Result<()> {
+    async fn apply_flag_change(&self, id: u64, pause: bool, confirm: bool) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
         for (flag_name, desired) in [("pause", pause), ("confirm", confirm)] {
@@ -570,7 +574,10 @@ impl ZbobrTaskBackendGithubImpl {
             }
         }
         if task.pipeline_run_id > 0 {
-            params.insert("pipeline_run_id".to_string(), task.pipeline_run_id.to_string());
+            params.insert(
+                "pipeline_run_id".to_string(),
+                task.pipeline_run_id.to_string(),
+            );
         }
         params
     }
@@ -1073,7 +1080,10 @@ impl TaskBackend for TaskBackendGithub {
         self.inner.await_all_cooling().await;
 
         let (owner, repo) = self.inner.parse_repo()?;
-        let params = vec![("state", "open".to_string()), ("per_page", "100".to_string())];
+        let params = vec![
+            ("state", "open".to_string()),
+            ("per_page", "100".to_string()),
+        ];
 
         let issues: Vec<IssueResponse> = retry_github("list issues", || {
             self.inner
@@ -1115,9 +1125,7 @@ impl TaskBackend for TaskBackendGithub {
 
         // Apply the initial state as a label
         if !state.is_empty() {
-            self.inner
-            .apply_state_change(issue_id, &state)
-                .await?;
+            self.inner.apply_state_change(issue_id, &state).await?;
         }
 
         Ok(issue_id)
@@ -1154,7 +1162,6 @@ impl TaskBackend for TaskBackendGithub {
         )
     }
 }
-
 
 /*
 #[cfg(test)]
@@ -1254,7 +1261,14 @@ mod parse_tests {
 
     #[test]
     fn test_comment_tag_roundtrip() {
-        let tag = CommentTag::new("main".into(), 5, "working".into(), "host".into(), None, None);
+        let tag = CommentTag::new(
+            "main".into(),
+            5,
+            "working".into(),
+            "host".into(),
+            None,
+            None,
+        );
         let s = tag.to_string();
         let parsed: CommentTag = s.parse().unwrap();
         assert_eq!(parsed, tag);
@@ -1299,7 +1313,11 @@ mod report_link_tests {
     fn roundtrip() {
         let original = "[report_success] Brief summary";
         let filename = "report_main_1_working_success.md";
-        let with_link = format!("{}{}", original, format_report_link("org", "repo", 5, filename));
+        let with_link = format!(
+            "{}{}",
+            original,
+            format_report_link("org", "repo", 5, filename)
+        );
         let (text, name) = extract_report_link(&with_link);
         assert_eq!(text, original);
         assert_eq!(name.as_deref(), Some(filename));

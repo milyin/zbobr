@@ -7,17 +7,18 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
-use zbobr_dispatcher::config::{
-    Config as _, ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
-    ZbobrExecutorArgs, ZbobrExecutorConfig, ZbobrExecutorToml,
+use commands::Command;
+use zbobr_api::config::{WorkflowArgs, WorkflowConfig, WorkflowToml};
+use zbobr_dispatcher::{
+    ConfigFileArg, ConfiguredPromptBuilder, Workflow,
+    config::{
+        Config as _, ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
+        ZbobrExecutorArgs, ZbobrExecutorConfig, ZbobrExecutorToml,
+    },
 };
-use zbobr_dispatcher::{ConfigFileArg, ConfiguredPromptBuilder, Workflow};
 use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::McpTesterExecutor;
-use zbobr_api::config::{WorkflowConfig, WorkflowArgs, WorkflowToml};
-use zbobr_utility::config_struct;
-
 use zbobr_repo_backend_github::{
     ZbobrRepoBackendGithub, ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubConfig,
     ZbobrRepoBackendGithubToml,
@@ -26,8 +27,7 @@ use zbobr_task_backend_github::{
     TaskBackendGithub, ZbobrTaskBackendGithubArgs, ZbobrTaskBackendGithubConfig,
     ZbobrTaskBackendGithubToml,
 };
-
-use commands::Command;
+use zbobr_utility::config_struct;
 
 #[derive(Clone, Default)]
 #[config_struct]
@@ -103,7 +103,10 @@ async fn main() -> anyhow::Result<()> {
     let task_backend = TaskBackendGithub::new(config.tasks).await?;
     let repo_backend = ZbobrRepoBackendGithub::new(config.repo).await?;
 
-    let prompt_builder = ConfiguredPromptBuilder::new(Some(location.config_dir.clone()), Arc::new(workflow.clone()));
+    let prompt_builder = ConfiguredPromptBuilder::new(
+        Some(location.config_dir.clone()),
+        Arc::new(workflow.clone()),
+    );
 
     let claude = ClaudeExecutor::new(config.executor.claude);
     let copilot = CopilotExecutor::new(config.executor.copilot);

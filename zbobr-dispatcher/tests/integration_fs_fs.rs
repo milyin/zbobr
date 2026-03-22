@@ -105,4 +105,3 @@ async fn test_fs_fs_abstract_call_stage() {
     };
     abstract_test_helpers::run_call_stage(&env).await;
 }
-

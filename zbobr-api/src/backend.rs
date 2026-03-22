@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 
-use crate::task::{ChecklistItem, Comment, Model, Signal, StackEntry, State, Task, TaskIdentity, Tool};
+use crate::task::{
+    ChecklistItem, Comment, Model, Signal, StackEntry, State, Task, TaskIdentity, Tool,
+};
 
 /// Read-only handle to a task. Returned by `TaskBackend::get_task()` and `TaskBackend::list_tasks()`.
 #[async_trait]

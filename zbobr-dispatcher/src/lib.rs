@@ -8,10 +8,12 @@ pub mod config;
 pub mod mcp;
 pub mod prompts;
 pub mod setup;
-pub mod workflow;
 pub mod task;
 pub mod task_dir;
 pub mod tool_executor;
+pub mod workflow;
+
+use std::sync::Arc;
 
 pub use cli::{
     ConfigFileArg, ConfigLocation, GlobalArgs, parse_cli, print_task, process_task,
@@ -21,22 +23,20 @@ pub use config::{
     ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs, ZbobrExecutorToml,
 };
 pub use mcp::UnifiedMcp;
-pub use prompts::{ConfiguredPromptBuilder, add_mcp_tool_variables, build_full_prompt, load_prompts, validate_stage_prompts};
-pub use workflow::{Workflow, StateAction};
-pub use task::{
-    ChecklistItem, Comment, Model, RoleSession, StackEntry, Task, TaskSession, Tool,
+pub use prompts::{
+    ConfiguredPromptBuilder, add_mcp_tool_variables, build_full_prompt, load_prompts,
+    validate_stage_prompts,
 };
+pub use task::{ChecklistItem, Comment, Model, RoleSession, StackEntry, Task, TaskSession, Tool};
 pub use task_dir::TaskDir;
 pub use tool_executor::ToolExecutor;
+use typesafe_builder::{_TypesafeBuilderEmpty, _TypesafeBuilderFilled, Builder};
+pub use workflow::{StateAction, Workflow};
+use zbobr_api::State;
 pub use zbobr_api::config::Config;
-
-use std::sync::Arc;
-
-use typesafe_builder::{Builder, _TypesafeBuilderEmpty, _TypesafeBuilderFilled};
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
-use zbobr_api::State;
 
 use crate::backend::{TaskBackend, WorktreeBackend};
 
@@ -88,14 +88,21 @@ impl ZbobrDispatcher {
     }
 
     pub fn prompt_builder(&self) -> &ConfiguredPromptBuilder {
-        self.prompt_builder.as_ref().expect("prompt_builder not set on ZbobrDispatcher")
+        self.prompt_builder
+            .as_ref()
+            .expect("prompt_builder not set on ZbobrDispatcher")
     }
 
     pub fn mcp_tester_config(&self) -> &ZbobrExecutorMcpTesterConfig {
         &self.mcp_tester.config
     }
 
-    pub fn build_executor(&self, tool: Tool, model: Model, mcp_tester_override: Option<&ZbobrExecutorMcpTesterConfig>) -> Box<dyn ToolExecutor> {
+    pub fn build_executor(
+        &self,
+        tool: Tool,
+        model: Model,
+        mcp_tester_override: Option<&ZbobrExecutorMcpTesterConfig>,
+    ) -> Box<dyn ToolExecutor> {
         match tool {
             Tool::Copilot => {
                 let mut config = self.copilot.config.clone();
@@ -108,7 +115,9 @@ impl ZbobrDispatcher {
                 Box::new(ClaudeExecutor { config })
             }
             Tool::McpTester => Box::new(McpTesterExecutor {
-                config: mcp_tester_override.cloned().unwrap_or_else(|| self.mcp_tester.config.clone()),
+                config: mcp_tester_override
+                    .cloned()
+                    .unwrap_or_else(|| self.mcp_tester.config.clone()),
             }),
         }
     }
@@ -170,10 +179,7 @@ impl ZbobrDispatcher {
         Ok(id)
     }
 
-    pub async fn setup_repository(
-        &self,
-        force: bool,
-    ) -> anyhow::Result<()> {
+    pub async fn setup_repository(&self, force: bool) -> anyhow::Result<()> {
         tokio::fs::create_dir_all(&self.config.workspaces)
             .await
             .map_err(|e| {
@@ -215,18 +221,12 @@ impl ZbobrDispatcher {
     }
 
     /// Create a TaskSession bound to a specific task (full dispatcher access).
-    pub fn task_session(
-        self: &Arc<Self>,
-        task_id: u64,
-    ) -> TaskSession {
+    pub fn task_session(self: &Arc<Self>, task_id: u64) -> TaskSession {
         TaskSession::new(Arc::clone(self), task_id)
     }
 
     /// Create a RoleSession bound to a specific task (restricted MCP tool access).
-    pub fn role_session(
-        self: &Arc<Self>,
-        task_id: u64,
-    ) -> RoleSession {
+    pub fn role_session(self: &Arc<Self>, task_id: u64) -> RoleSession {
         RoleSession::new(Arc::clone(self), task_id)
     }
 
@@ -238,6 +238,12 @@ impl ZbobrDispatcher {
         pipeline_name: String,
         pipeline_run_id: u64,
     ) -> RoleSession {
-        RoleSession::with_shared_tracker(Arc::clone(self), task_id, tracker, pipeline_name, pipeline_run_id)
+        RoleSession::with_shared_tracker(
+            Arc::clone(self),
+            task_id,
+            tracker,
+            pipeline_name,
+            pipeline_run_id,
+        )
     }
 }

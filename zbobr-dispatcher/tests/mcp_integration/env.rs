@@ -11,12 +11,8 @@ use std::{
 
 use zbobr_api::config::WorkflowConfig;
 use zbobr_dispatcher::{
-    Comment, Task, Workflow, ZbobrDispatcher,
-    ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
-    backend::TaskBackendExt,
-    cli::process_task,
-    prompts::ConfiguredPromptBuilder,
-    task::Tool,
+    Comment, Task, Workflow, ZbobrDispatcher, ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
+    backend::TaskBackendExt, cli::process_task, prompts::ConfiguredPromptBuilder, task::Tool,
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_repo_backend_fs::{ZbobrRepoBackendFs, ZbobrRepoBackendFsConfig};
@@ -76,22 +72,25 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
         repos_dir: base_path.join("repos"),
     };
 
-    let task_backend = ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config.clone()).ok()?);
+    let task_backend =
+        ArcTaskBackendFs::new(ZbobrTaskBackendFs::from_config(task_backend_config.clone()).ok()?);
     let repo_backend = ZbobrRepoBackendFs::from_config(repo_backend_config.clone()).ok()?;
 
     let default_workflow = Workflow::default();
-    let zbobr = Arc::new(ZbobrDispatcherBuilder::new()
-        .with_config(dispatcher_config.clone())
-        .with_workflow(default_workflow.clone())
-        .with_task_backend(task_backend)
-        .with_repo_backend(repo_backend)
-        .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(default_workflow)))
-        .build());
+    let zbobr = Arc::new(
+        ZbobrDispatcherBuilder::new()
+            .with_config(dispatcher_config.clone())
+            .with_workflow(default_workflow.clone())
+            .with_task_backend(task_backend)
+            .with_repo_backend(repo_backend)
+            .with_prompt_builder(ConfiguredPromptBuilder::new(
+                None,
+                Arc::new(default_workflow),
+            ))
+            .build(),
+    );
 
-    zbobr
-        .setup_repository(false)
-        .await
-        .ok()?;
+    zbobr.setup_repository(false).await.ok()?;
 
     let factory_config = dispatcher_config;
     let factory_task_config = task_backend_config;
@@ -101,13 +100,15 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
             ZbobrTaskBackendFs::from_config(factory_task_config.clone()).unwrap(),
         );
         let rb = ZbobrRepoBackendFs::from_config(factory_repo_config.clone()).unwrap();
-        Arc::new(ZbobrDispatcherBuilder::new()
-            .with_config(factory_config.clone())
-            .with_workflow(workflow.clone())
-            .with_task_backend(tb)
-            .with_repo_backend(rb)
-            .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(workflow)))
-            .build())
+        Arc::new(
+            ZbobrDispatcherBuilder::new()
+                .with_config(factory_config.clone())
+                .with_workflow(workflow.clone())
+                .with_task_backend(tb)
+                .with_repo_backend(rb)
+                .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(workflow)))
+                .build(),
+        )
     });
 
     Some(Arc::new(IntegrationTestEnv {
@@ -164,18 +165,20 @@ pub async fn init_github_github(
     let repo_backend = ZbobrRepoBackendGithub::from_config(repo_backend_config.clone()).ok()?;
 
     let default_workflow = Workflow::default();
-    let zbobr = Arc::new(ZbobrDispatcherBuilder::new()
-        .with_config(dispatcher_config.clone())
-        .with_workflow(default_workflow.clone())
-        .with_task_backend(task_backend)
-        .with_repo_backend(repo_backend)
-        .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(default_workflow)))
-        .build());
+    let zbobr = Arc::new(
+        ZbobrDispatcherBuilder::new()
+            .with_config(dispatcher_config.clone())
+            .with_workflow(default_workflow.clone())
+            .with_task_backend(task_backend)
+            .with_repo_backend(repo_backend)
+            .with_prompt_builder(ConfiguredPromptBuilder::new(
+                None,
+                Arc::new(default_workflow),
+            ))
+            .build(),
+    );
 
-    zbobr
-        .setup_repository(false)
-        .await
-        .ok()?;
+    zbobr.setup_repository(false).await.ok()?;
 
     let factory_config = dispatcher_config;
     let factory_task_config = task_backend_config;
@@ -183,13 +186,15 @@ pub async fn init_github_github(
     let dispatcher_factory = Box::new(move |workflow: Workflow| {
         let tb = TaskBackendGithub::from_config(factory_task_config.clone()).unwrap();
         let rb = ZbobrRepoBackendGithub::from_config(factory_repo_config.clone()).unwrap();
-        Arc::new(ZbobrDispatcherBuilder::new()
-            .with_config(factory_config.clone())
-            .with_workflow(workflow.clone())
-            .with_task_backend(tb)
-            .with_repo_backend(rb)
-            .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(workflow)))
-            .build())
+        Arc::new(
+            ZbobrDispatcherBuilder::new()
+                .with_config(factory_config.clone())
+                .with_workflow(workflow.clone())
+                .with_task_backend(tb)
+                .with_repo_backend(rb)
+                .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(workflow)))
+                .build(),
+        )
     });
 
     Some(Arc::new(IntegrationTestEnv {
@@ -243,7 +248,8 @@ impl IntegrationTestEnv {
     }
 
     pub async fn get_task(&self, task_id: u64) -> Task {
-        self.zbobr.task_backend()
+        self.zbobr
+            .task_backend()
             .get_task(task_id)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name))
@@ -253,7 +259,8 @@ impl IntegrationTestEnv {
     }
 
     pub async fn get_comments(&self, task_id: u64) -> Vec<Comment> {
-        self.zbobr.task_backend()
+        self.zbobr
+            .task_backend()
             .get_task(task_id)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name))
@@ -277,7 +284,9 @@ impl IntegrationTestEnv {
         let dest_repo = dest_repo.to_string();
         let dest_branch = dest_branch.to_string();
         let work_branch = work_branch.to_string();
-        let weak = self.zbobr.task_backend()
+        let weak = self
+            .zbobr
+            .task_backend()
             .get_task(task_id)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name));
@@ -346,11 +355,13 @@ impl IntegrationTestEnv {
         workflow: &WorkflowConfig,
         role_scenarios: &HashMap<String, String>,
     ) {
-        self.zbobr.task_backend()
+        self.zbobr
+            .task_backend()
             .set_task_state(task_id, zbobr_api::State::Ready)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to set task state: {e}", self.name));
-        self.zbobr.task_backend()
+        self.zbobr
+            .task_backend()
             .set_task_stack(task_id, vec![])
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to clear task stack: {e}", self.name));
@@ -488,7 +499,6 @@ impl IntegrationTestEnv {
                 )
             });
     }
-
 }
 
 // ---------------------------------------------------------------------------

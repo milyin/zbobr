@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
-use zbobr_api::task::ChecklistItem;
-use zbobr_api::checklist_format::{parse_grouped_checklist, serialize_grouped_checklist};
+use zbobr_api::{
+    checklist_format::{parse_grouped_checklist, serialize_grouped_checklist},
+    task::ChecklistItem,
+};
 
 // -- Checklist parsing and serialization helpers --
 
@@ -97,8 +99,6 @@ pub(crate) fn serialize_description_full(
 
     result
 }
-
-
 
 /// Merge concurrent updates to a task description.
 ///
@@ -203,5 +203,3 @@ mod tests {
         assert_eq!(items.len(), 0);
     }
 }
-
-

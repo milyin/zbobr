@@ -3,7 +3,7 @@ use crate::task::ChecklistItem;
 /// Serialize a list of checklist items into grouped format with run headers.
 /// Items are grouped by pipeline and run ID (extracted from scoped IDs).
 /// Scoped ID format: pipeline__run_id__item_id
-/// 
+///
 /// Display format:
 /// ```text
 /// <!-- Run: pipeline #run_id -->
@@ -24,7 +24,10 @@ pub fn serialize_grouped_checklist(items: &[ChecklistItem]) -> String {
             continue;
         };
 
-        if let Some(group) = run_groups.iter_mut().find(|(p, r, _)| p == &pipeline && *r == run_id) {
+        if let Some(group) = run_groups
+            .iter_mut()
+            .find(|(p, r, _)| p == &pipeline && *r == run_id)
+        {
             group.2.push(item);
         } else {
             run_groups.push((pipeline, run_id, vec![item]));
@@ -47,13 +50,13 @@ pub fn serialize_grouped_checklist(items: &[ChecklistItem]) -> String {
 }
 
 /// Parse grouped checklist text back into ChecklistItem list with scoped IDs.
-/// 
+///
 /// Input format (with run headers):
 /// ```text
 /// <!-- Run: pipeline #run_id -->
 /// - [ ] item_id: text
 /// ```
-/// 
+///
 /// Output: ChecklistItem with id = "pipeline__run_id__item_id"
 pub fn parse_grouped_checklist(text: &str) -> Vec<ChecklistItem> {
     let mut items = Vec::new();
@@ -128,11 +131,7 @@ fn extract_run_scope(scoped_id: &str) -> Option<(String, u64, String)> {
     if run_id == 0 {
         return None;
     }
-    Some((
-        pipeline.to_string(),
-        run_id,
-        item_suffix.to_string(),
-    ))
+    Some((pipeline.to_string(), run_id, item_suffix.to_string()))
 }
 
 /// Strip the scope prefix from a scoped checklist item ID.
@@ -236,13 +235,11 @@ mod tests {
 
     #[test]
     fn unscoped_items_are_not_serialized() {
-        let items = vec![
-            ChecklistItem {
-                id: "simple".to_string(),
-                checked: false,
-                text: "legacy".to_string(),
-            },
-        ];
+        let items = vec![ChecklistItem {
+            id: "simple".to_string(),
+            checked: false,
+            text: "legacy".to_string(),
+        }];
 
         let serialized = serialize_grouped_checklist(&items);
         assert_eq!(serialized, "");

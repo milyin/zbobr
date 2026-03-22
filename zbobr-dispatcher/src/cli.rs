@@ -1,11 +1,16 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::Context;
 use clap::{Args, Parser};
-
+use zbobr_api::{
+    CommentTag, Pipeline, Signal, State, config::StageDefinition, config_tools::McpTool,
+};
+use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 // bring in the generic git helpers from utility crate
 use zbobr_utility::{git, git_check, git_output};
 
@@ -14,10 +19,6 @@ use crate::{
     mcp::common::get_hostname,
     task::{Model, Tool},
 };
-use zbobr_api::config_tools::McpTool;
-use zbobr_api::config::StageDefinition;
-use zbobr_api::{CommentTag, Pipeline, Signal, State};
-use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 
 // ---------------------------------------------------------------------------
 // CLI types
@@ -286,7 +287,10 @@ impl<'a> CliStageRunner<'a> {
     }
 
     async fn run(&self) -> anyhow::Result<()> {
-        let role = self.stage_def.role_name().expect("role stage must have role");
+        let role = self
+            .stage_def
+            .role_name()
+            .expect("role stage must have role");
         let cli_tool = self.zbobr.config().tool_for_stage(self.stage_def);
         let model = self.zbobr.config().model_for_stage(self.stage_def);
 
@@ -318,7 +322,13 @@ impl<'a> CliStageRunner<'a> {
 
         // Ensure PR URL if identity exists
         {
-            let task = self.zbobr.task_backend().get_task(self.task_id).await?.snapshot().await?;
+            let task = self
+                .zbobr
+                .task_backend()
+                .get_task(self.task_id)
+                .await?
+                .snapshot()
+                .await?;
             if task.identity().is_some() {
                 ensure_pr_url(self.zbobr, self.task_id).await?;
             }
@@ -371,7 +381,13 @@ impl<'a> CliStageRunner<'a> {
             });
 
         // Read current pipeline_run_id for this session.
-        let task_snap = self.zbobr.task_backend().get_task(self.task_id).await?.snapshot().await?;
+        let task_snap = self
+            .zbobr
+            .task_backend()
+            .get_task(self.task_id)
+            .await?
+            .snapshot()
+            .await?;
         let pipeline_run_id = task_snap.pipeline_run_id;
 
         let tool_tracker = Arc::new(std::sync::Mutex::new(None::<String>));
@@ -395,7 +411,9 @@ impl<'a> CliStageRunner<'a> {
         );
 
         let prompt_text = self.prompt().await?;
-        let executor = self.zbobr.build_executor(cli_tool, model.clone(), self.mcp_tester_override);
+        let executor = self
+            .zbobr
+            .build_executor(cli_tool, model.clone(), self.mcp_tester_override);
         let copilot_token = match cli_tool {
             Tool::Copilot => self.zbobr.copilot_github_token(),
             _ => "",
@@ -531,9 +549,7 @@ async fn handle_call_stage(
         .await?;
     task_session.allocate_pipeline_run_id().await?;
     let call_signal = Signal::call(call_pipeline.clone());
-    task_session
-        .set_signal(Some(call_signal.clone()))
-        .await?;
+    task_session.set_signal(Some(call_signal.clone())).await?;
     task_session
         .set_state(State::pending(pipeline_name.clone()))
         .await?;
@@ -567,7 +583,14 @@ pub async fn process_task(
             if let Some(call_target) = stage_def.call_pipeline() {
                 handle_call_stage(zbobr, task.id, pipeline_name, stage_name, call_target).await?;
             } else {
-                let runner = CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, mcp_tester_override);
+                let runner = CliStageRunner::new(
+                    zbobr,
+                    task.id,
+                    pipeline_name,
+                    stage_name,
+                    stage_def,
+                    mcp_tester_override,
+                );
                 runner.run().await?;
             }
         }
@@ -587,7 +610,10 @@ pub async fn process_task(
                     );
                 } else {
                     task_session
-                        .modify_task(|mut t| { t.pause = true; t })
+                        .modify_task(|mut t| {
+                            t.pause = true;
+                            t
+                        })
                         .await?;
                     println!("Task #{} pipeline failed at root — paused", task.id);
                 }
@@ -610,7 +636,10 @@ pub async fn process_task(
             println!("Task #{} is paused — skipped", task.id);
         }
         crate::workflow::StateAction::Idle => {
-            println!("Task #{} is idle (state={}, signal={:?}) — skipped", task.id, task.state, task.signal);
+            println!(
+                "Task #{} is idle (state={}, signal={:?}) — skipped",
+                task.id, task.state, task.signal
+            );
         }
     }
     Ok(())
@@ -641,12 +670,7 @@ pub async fn run_manager_loop(
     let workflow = zbobr.workflow();
     for (pipeline_name, stage_name, stage_def) in workflow.all_stages() {
         if let Some(target) = stage_def.call_pipeline() {
-            tracing::info!(
-                "Stage {}/{}: call={}",
-                pipeline_name,
-                stage_name,
-                target,
-            );
+            tracing::info!("Stage {}/{}: call={}", pipeline_name, stage_name, target,);
         } else {
             let tool = zbobr.config().tool_for_stage(stage_def);
             let model = zbobr.config().model_for_stage(stage_def);
@@ -715,15 +739,40 @@ pub async fn run_manager_loop(
                         stage_name,
                     );
                     if let Some(call_target) = stage_def.call_pipeline() {
-                        if let Err(e) = handle_call_stage(zbobr, task.id, pipeline_name, stage_name, call_target).await {
-                            tracing::error!("Call stage {}/{} failed for task #{}: {e}", pipeline_name, stage_name, task.id);
+                        if let Err(e) = handle_call_stage(
+                            zbobr,
+                            task.id,
+                            pipeline_name,
+                            stage_name,
+                            call_target,
+                        )
+                        .await
+                        {
+                            tracing::error!(
+                                "Call stage {}/{} failed for task #{}: {e}",
+                                pipeline_name,
+                                stage_name,
+                                task.id
+                            );
                         }
                         // Don't break — call stages are instant, continue processing
                         continue;
                     }
-                    let runner = CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, None);
+                    let runner = CliStageRunner::new(
+                        zbobr,
+                        task.id,
+                        pipeline_name,
+                        stage_name,
+                        stage_def,
+                        None,
+                    );
                     if let Err(e) = runner.run().await {
-                        tracing::error!("Stage {}/{} failed for task #{}: {e}", pipeline_name, stage_name, task.id);
+                        tracing::error!(
+                            "Stage {}/{} failed for task #{}: {e}",
+                            pipeline_name,
+                            stage_name,
+                            task.id
+                        );
                     }
                     session_run = true;
                     break;
@@ -735,35 +784,59 @@ pub async fn run_manager_loop(
                         // Pipeline failed — return to caller or pause at root
                         match task_session.pop_stack().await {
                             Ok(Some(entry)) => {
-                                if let Err(e) = task_session.set_signal(Some(Signal::ReturnFailure)).await {
-                                    tracing::error!("Failed to set return_failure signal for task #{}: {e}", task.id);
+                                if let Err(e) =
+                                    task_session.set_signal(Some(Signal::ReturnFailure)).await
+                                {
+                                    tracing::error!(
+                                        "Failed to set return_failure signal for task #{}: {e}",
+                                        task.id
+                                    );
                                 }
                                 if let Err(e) = task_session
                                     .set_state(State::pending(entry.pipeline.clone()))
                                     .await
                                 {
-                                    tracing::error!("Failed to set return state for task #{}: {e}", task.id);
+                                    tracing::error!(
+                                        "Failed to set return state for task #{}: {e}",
+                                        task.id
+                                    );
                                 }
                             }
                             Ok(None) => {
-                                if let Err(e) = task_session.modify_task(|mut t| { t.pause = true; t }).await {
+                                if let Err(e) = task_session
+                                    .modify_task(|mut t| {
+                                        t.pause = true;
+                                        t
+                                    })
+                                    .await
+                                {
                                     tracing::error!("Failed to pause task #{}: {e}", task.id);
                                 }
                             }
-                            Err(e) => tracing::error!("Failed to pop stack for task #{}: {e}", task.id),
+                            Err(e) => {
+                                tracing::error!("Failed to pop stack for task #{}: {e}", task.id)
+                            }
                         }
                     } else {
                         match task_session.pop_stack().await {
                             Ok(Some(entry)) => {
                                 // Success return from sub-pipeline — re-run calling stage
-                                if let Err(e) = task_session.set_signal(Some(entry.signal.clone())).await {
-                                    tracing::error!("Failed to set return signal for task #{}: {e}", task.id);
+                                if let Err(e) =
+                                    task_session.set_signal(Some(entry.signal.clone())).await
+                                {
+                                    tracing::error!(
+                                        "Failed to set return signal for task #{}: {e}",
+                                        task.id
+                                    );
                                 }
                                 if let Err(e) = task_session
                                     .set_state(State::pending(entry.pipeline.clone()))
                                     .await
                                 {
-                                    tracing::error!("Failed to set return state for task #{}: {e}", task.id);
+                                    tracing::error!(
+                                        "Failed to set return state for task #{}: {e}",
+                                        task.id
+                                    );
                                 }
                             }
                             Ok(None) => {
@@ -786,11 +859,15 @@ pub async fn run_manager_loop(
         }
 
         // Task statistics
-        let mut state_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut state_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         for task in &all_tasks {
             *state_counts.entry(task.state.to_string()).or_default() += 1;
         }
-        let stats: Vec<String> = state_counts.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        let stats: Vec<String> = state_counts
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
         tracing::info!("Task statistics: {}", stats.join(", "));
 
         let elapsed = loop_start.elapsed();
@@ -928,12 +1005,9 @@ async fn handle_merge_conflict(
 
     // Recursion guard: if already inside the merge pipeline, pause
     if pipeline_name.as_str() == Pipeline::MERGE {
-        tracing::error!(
-            "Task #{task_id}: merge conflict inside merge pipeline — pausing"
-        );
+        tracing::error!("Task #{task_id}: merge conflict inside merge pipeline — pausing");
         let hostname = get_hostname();
-        let msg =
-            "Merge conflict inside merge pipeline. Manual intervention required.".to_string();
+        let msg = "Merge conflict inside merge pipeline. Manual intervention required.".to_string();
         task_session
             .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
             .await
@@ -958,16 +1032,11 @@ async fn handle_merge_conflict(
         .await?;
     task_session.set_state(pending_state).await?;
 
-    tracing::info!(
-        "Task #{task_id}: merge conflict — calling merge pipeline"
-    );
+    tracing::info!("Task #{task_id}: merge conflict — calling merge pipeline");
     Ok(WorktreeResult::HandlerCalled)
 }
 
-async fn ensure_pr_url(
-    zbobr: &Arc<ZbobrDispatcher>,
-    task_id: u64,
-) -> anyhow::Result<()> {
+async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Result<()> {
     let role_session = zbobr.role_session(task_id);
     let task = role_session.get_task().await?;
     if task.pr_url.is_some() {
@@ -1013,12 +1082,14 @@ async fn ensure_pr_url(
 /// Only sets a parameter if it is not already present, so a previously
 /// prepared task keeps its values unchanged. Called unconditionally at
 /// the start of every stage run.
-async fn seed_defaults(
-    zbobr: &Arc<ZbobrDispatcher>,
-    task_id: u64,
-) -> anyhow::Result<()> {
+async fn seed_defaults(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Result<()> {
     let config = zbobr.config();
-    let task = zbobr.task_backend().get_task(task_id).await?.snapshot().await?;
+    let task = zbobr
+        .task_backend()
+        .get_task(task_id)
+        .await?
+        .snapshot()
+        .await?;
     let role_session = zbobr.role_session(task_id);
 
     if let Some(default_repo) = &config.default_destination_repository
@@ -1055,7 +1126,19 @@ async fn start_mcp_server(
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
     let role_name = role_name.to_string();
     let server_handle = tokio::spawn(async move {
-        match crate::mcp::run_role_mcp_server(zbobr, &role_name, task_id, tool, model, stage_name, allowed_tools, tool_tracker, pipeline_name, pipeline_run_id).await
+        match crate::mcp::run_role_mcp_server(
+            zbobr,
+            &role_name,
+            task_id,
+            tool,
+            model,
+            stage_name,
+            allowed_tools,
+            tool_tracker,
+            pipeline_name,
+            pipeline_run_id,
+        )
+        .await
         {
             Ok(assigned_port) => {
                 let _ = port_tx.send(assigned_port);
@@ -1143,14 +1226,14 @@ async fn finalize_stage_session(
 
     if let Some(e) = outcome.execution_error.as_ref() {
         if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name).await {
-            tracing::warn!(
-                "Stash/push failed during error handling for task #{task_id}: {e}"
-            );
+            tracing::warn!("Stash/push failed during error handling for task #{task_id}: {e}");
         }
         let error_msg = format!("Execution failed: {e}");
         let hostname = get_hostname();
         if let Err(post_err) = task_session
-            .post_comment("error", &hostname, None, None, &error_msg, "", 0, None, None)
+            .post_comment(
+                "error", &hostname, None, None, &error_msg, "", 0, None, None,
+            )
             .await
         {
             tracing::error!("Failed to post error to task #{task_id}: {post_err}");
@@ -1179,9 +1262,7 @@ async fn finalize_stage_session(
             .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
             .await
         {
-            tracing::error!(
-                "Failed to post stash/push error for task #{task_id}: {post_err}"
-            );
+            tracing::error!("Failed to post stash/push error for task #{task_id}: {post_err}");
         }
         if let Err(pause_err) = task_session
             .modify_task(|mut task| {
@@ -1201,7 +1282,12 @@ async fn finalize_stage_session(
     // Compute post-stage signal using the sequential pipeline model.
     // If the agent already set a signal during the session (e.g. stop_with_error),
     // that signal takes priority.
-    let current_task = zbobr.task_backend().get_task(task_id).await?.snapshot().await?;
+    let current_task = zbobr
+        .task_backend()
+        .get_task(task_id)
+        .await?
+        .snapshot()
+        .await?;
     if !current_task.pause && current_task.signal.is_none() {
         let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
         let seq_signal = compute_sequential_signal(
@@ -1223,7 +1309,10 @@ async fn finalize_stage_session(
             }
             SequentialSignal::Pause => {
                 task_session
-                    .modify_task(|mut t| { t.pause = true; t })
+                    .modify_task(|mut t| {
+                        t.pause = true;
+                        t
+                    })
                     .await?;
             }
         }
@@ -1248,7 +1337,12 @@ async fn perform_stash_and_push(
             if !status.is_empty() {
                 let stash_msg = format!("Stashed by {} agent for task #{}", role, task_id);
                 tracing::info!("Found uncommitted changes, stashing...");
-                match git(work_dir, &["stash", "push", "--include-untracked", "-m", &stash_msg]).await {
+                match git(
+                    work_dir,
+                    &["stash", "push", "--include-untracked", "-m", &stash_msg],
+                )
+                .await
+                {
                     Ok(_) => tracing::info!("Git stash successful"),
                     Err(e) => tracing::warn!("Git stash failed: {e}"),
                 }

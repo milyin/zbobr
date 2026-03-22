@@ -1,15 +1,13 @@
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{borrow::Cow, collections::HashMap, path::PathBuf, sync::Arc};
 
 use simpleinterpolation::Interpolation;
+use zbobr_api::{
+    Comment, HistoryRecordType, Task, classify_comment,
+    config::{StageDefinition, WorkflowConfig},
+    config_tools::McpTool,
+};
 
-use crate::backend::TaskBackend;
-use zbobr_api::{Comment, HistoryRecordType, Task, classify_comment};
-use zbobr_api::config::{StageDefinition, WorkflowConfig};
-use zbobr_api::config_tools::McpTool;
-use crate::workflow::Workflow;
+use crate::{backend::TaskBackend, workflow::Workflow};
 
 // Template placeholder names used in prompt .md files.
 pub const VAR_TITLE: &str = "title";
@@ -29,7 +27,10 @@ pub struct ConfiguredPromptBuilder {
 
 impl ConfiguredPromptBuilder {
     pub fn new(base_path: Option<PathBuf>, workflow: Arc<Workflow>) -> Self {
-        Self { base_path, workflow }
+        Self {
+            base_path,
+            workflow,
+        }
     }
 
     pub fn base_path(&self) -> Option<&PathBuf> {
@@ -59,11 +60,17 @@ impl ConfiguredPromptBuilder {
 /// Collect prompt file paths from a StageDefinition.
 /// If no main_prompt is specified, tries the role's prompt from the workflow config.
 /// Relative paths are prefixed with `workflow.prompts_dir` when set.
-pub fn prompt_files_for_stage(stage_def: &StageDefinition, workflow: &WorkflowConfig) -> Vec<PathBuf> {
+pub fn prompt_files_for_stage(
+    stage_def: &StageDefinition,
+    workflow: &WorkflowConfig,
+) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if let Some(ref main) = stage_def.main_prompt {
         files.push(main.clone());
-    } else if let Some(role_def) = stage_def.role_name().and_then(|r| workflow.role_definition(r)) {
+    } else if let Some(role_def) = stage_def
+        .role_name()
+        .and_then(|r| workflow.role_definition(r))
+    {
         if let Some(ref prompt_path) = role_def.prompt {
             files.push(prompt_path.clone());
         }
@@ -72,7 +79,13 @@ pub fn prompt_files_for_stage(stage_def: &StageDefinition, workflow: &WorkflowCo
     if let Some(ref prompts_dir) = workflow.prompts_dir {
         files = files
             .into_iter()
-            .map(|p| if p.is_relative() { prompts_dir.join(&p) } else { p })
+            .map(|p| {
+                if p.is_relative() {
+                    prompts_dir.join(&p)
+                } else {
+                    p
+                }
+            })
             .collect();
     }
     files
@@ -137,7 +150,10 @@ pub fn build_template_variables<'a>(
 
     // Task fields
     vars.insert(Cow::Borrowed(VAR_TITLE), Cow::Borrowed(&task.title));
-    vars.insert(Cow::Borrowed(VAR_DESCRIPTION), Cow::Borrowed(&task.description));
+    vars.insert(
+        Cow::Borrowed(VAR_DESCRIPTION),
+        Cow::Borrowed(&task.description),
+    );
     if let Some(ref v) = task.destination_repository {
         vars.insert(Cow::Borrowed(VAR_DESTINATION_REPOSITORY), Cow::Borrowed(v));
     }
@@ -287,9 +303,9 @@ mod tests {
     use std::{fs, io::Write};
 
     use tempfile::TempDir;
+    use zbobr_api::ChecklistItem;
 
     use super::*;
-    use zbobr_api::ChecklistItem;
 
     fn dummy_task(title: &str) -> Task {
         Task {
@@ -420,12 +436,20 @@ mod tests {
         let keys: Vec<&str> = vars.keys().map(|k| k.as_ref()).collect();
         // Always-present keys
         for expected in &[
-            VAR_TITLE, VAR_DESCRIPTION, VAR_CHECKLIST, VAR_LAST_REPORT, VAR_LAST_REQUEST,
+            VAR_TITLE,
+            VAR_DESCRIPTION,
+            VAR_CHECKLIST,
+            VAR_LAST_REPORT,
+            VAR_LAST_REQUEST,
         ] {
             assert!(keys.contains(expected), "missing key: {expected}");
         }
         // Optional keys absent when task fields are None
-        for absent in &[VAR_DESTINATION_REPOSITORY, VAR_DESTINATION_BRANCH, VAR_WORK_BRANCH] {
+        for absent in &[
+            VAR_DESTINATION_REPOSITORY,
+            VAR_DESTINATION_BRANCH,
+            VAR_WORK_BRANCH,
+        ] {
             assert!(!keys.contains(absent), "key should be absent: {absent}");
         }
     }
@@ -439,20 +463,47 @@ mod tests {
         task.work_branch = Some("feature-x".to_string());
 
         let vars = build_template_variables(&task, &[]);
-        assert_eq!(vars[&Cow::Borrowed(VAR_TITLE) as &Cow<str>].as_ref(), "My Task");
-        assert_eq!(vars[&Cow::Borrowed(VAR_DESCRIPTION) as &Cow<str>].as_ref(), "Task desc");
-        assert_eq!(vars[&Cow::Borrowed(VAR_DESTINATION_REPOSITORY) as &Cow<str>].as_ref(), "owner/repo");
-        assert_eq!(vars[&Cow::Borrowed(VAR_DESTINATION_BRANCH) as &Cow<str>].as_ref(), "main");
-        assert_eq!(vars[&Cow::Borrowed(VAR_WORK_BRANCH) as &Cow<str>].as_ref(), "feature-x");
+        assert_eq!(
+            vars[&Cow::Borrowed(VAR_TITLE) as &Cow<str>].as_ref(),
+            "My Task"
+        );
+        assert_eq!(
+            vars[&Cow::Borrowed(VAR_DESCRIPTION) as &Cow<str>].as_ref(),
+            "Task desc"
+        );
+        assert_eq!(
+            vars[&Cow::Borrowed(VAR_DESTINATION_REPOSITORY) as &Cow<str>].as_ref(),
+            "owner/repo"
+        );
+        assert_eq!(
+            vars[&Cow::Borrowed(VAR_DESTINATION_BRANCH) as &Cow<str>].as_ref(),
+            "main"
+        );
+        assert_eq!(
+            vars[&Cow::Borrowed(VAR_WORK_BRANCH) as &Cow<str>].as_ref(),
+            "feature-x"
+        );
     }
 
     #[test]
     fn build_template_variables_checklist() {
         let mut task = dummy_task("T");
         task.checklist = vec![
-            ChecklistItem { id: "1".to_string(), checked: true, text: "Done item".to_string() },
-            ChecklistItem { id: "2".to_string(), checked: false, text: "Todo item".to_string() },
-            ChecklistItem { id: "3".to_string(), checked: false, text: "Another".to_string() },
+            ChecklistItem {
+                id: "1".to_string(),
+                checked: true,
+                text: "Done item".to_string(),
+            },
+            ChecklistItem {
+                id: "2".to_string(),
+                checked: false,
+                text: "Todo item".to_string(),
+            },
+            ChecklistItem {
+                id: "3".to_string(),
+                checked: false,
+                text: "Another".to_string(),
+            },
         ];
         let vars = build_template_variables(&task, &[]);
         let checklist = vars[&Cow::Borrowed(VAR_CHECKLIST) as &Cow<str>].as_ref();
@@ -470,17 +521,21 @@ mod tests {
             dummy_comment("another user msg"),
         ];
         let vars = build_template_variables(&task, &comments);
-        assert_eq!(vars[&Cow::Borrowed(VAR_LAST_REPORT) as &Cow<str>].as_ref(), "All tests passed");
+        assert_eq!(
+            vars[&Cow::Borrowed(VAR_LAST_REPORT) as &Cow<str>].as_ref(),
+            "All tests passed"
+        );
     }
 
     #[test]
     fn build_template_variables_last_report_failure() {
         let task = dummy_task("T");
-        let comments = vec![
-            dummy_comment("[report_failure]\nBuild failed"),
-        ];
+        let comments = vec![dummy_comment("[report_failure]\nBuild failed")];
         let vars = build_template_variables(&task, &comments);
-        assert_eq!(vars[&Cow::Borrowed(VAR_LAST_REPORT) as &Cow<str>].as_ref(), "Build failed");
+        assert_eq!(
+            vars[&Cow::Borrowed(VAR_LAST_REPORT) as &Cow<str>].as_ref(),
+            "Build failed"
+        );
     }
 
     #[test]
@@ -491,18 +546,22 @@ mod tests {
             dummy_comment("[report_success]\nDone"),
         ];
         let vars = build_template_variables(&task, &comments);
-        assert_eq!(vars[&Cow::Borrowed(VAR_LAST_REQUEST) as &Cow<str>].as_ref(), "Please fix the bug");
+        assert_eq!(
+            vars[&Cow::Borrowed(VAR_LAST_REQUEST) as &Cow<str>].as_ref(),
+            "Please fix the bug"
+        );
     }
 
     #[test]
     fn build_template_variables_last_request_fallback_to_description() {
         let mut task = dummy_task("T");
         task.description = "Implement feature X".to_string();
-        let comments = vec![
-            dummy_comment("[report_success]\nDone"),
-        ];
+        let comments = vec![dummy_comment("[report_success]\nDone")];
         let vars = build_template_variables(&task, &comments);
-        assert_eq!(vars[&Cow::Borrowed(VAR_LAST_REQUEST) as &Cow<str>].as_ref(), "Implement feature X");
+        assert_eq!(
+            vars[&Cow::Borrowed(VAR_LAST_REQUEST) as &Cow<str>].as_ref(),
+            "Implement feature X"
+        );
     }
 
     // --- template rendering ---
@@ -595,8 +654,14 @@ mod tests {
         let allowed = vec![McpTool::ReportSuccess, McpTool::StopWithError];
         let mut vars: HashMap<Cow<'static, str>, Cow<str>> = HashMap::new();
         add_mcp_tool_variables(&mut vars, &allowed);
-        assert_eq!(vars[&Cow::Borrowed("mcp_report_success") as &Cow<str>].as_ref(), "report_success");
-        assert_eq!(vars[&Cow::Borrowed("mcp_stop_with_error") as &Cow<str>].as_ref(), "stop_with_error");
+        assert_eq!(
+            vars[&Cow::Borrowed("mcp_report_success") as &Cow<str>].as_ref(),
+            "report_success"
+        );
+        assert_eq!(
+            vars[&Cow::Borrowed("mcp_stop_with_error") as &Cow<str>].as_ref(),
+            "stop_with_error"
+        );
         assert!(!vars.contains_key(&Cow::Borrowed("mcp_configure_worktree") as &Cow<str>));
     }
 
@@ -608,7 +673,10 @@ mod tests {
         let result = template.try_render(&vars);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("mcp_nonexistent"), "error should name the undefined variable: {err}");
+        assert!(
+            err.to_string().contains("mcp_nonexistent"),
+            "error should name the undefined variable: {err}"
+        );
     }
 
     #[test]
@@ -641,6 +709,9 @@ mod tests {
         let result = template.try_render(&owned_vars);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("mcp_configure_worktree"), "error should name the unavailable tool: {err}");
+        assert!(
+            err.to_string().contains("mcp_configure_worktree"),
+            "error should name the unavailable tool: {err}"
+        );
     }
 }

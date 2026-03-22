@@ -7,19 +7,21 @@ use rmcp::{
         CallToolRequestParams, CallToolResult, Content, ServerCapabilities, ServerInfo,
         Tool as McpToolDef,
     },
+    service::RequestContext,
     tool, tool_router,
 };
-use rmcp::service::RequestContext;
+use zbobr_api::config_tools::McpTool;
 
 use crate::{
-    mcp::common::{
-        AddChecklistItemParam, CheckChecklistItemParam, ConfigureWorktreeParam,
-        DeleteChecklistItemParam, GetFullReportParam, MessageParam, ReportParam,
+    mcp::{
+        common::{
+            AddChecklistItemParam, CheckChecklistItemParam, ConfigureWorktreeParam,
+            DeleteChecklistItemParam, GetFullReportParam, MessageParam, ReportParam,
+        },
+        traits::CommonMcpImpl,
     },
-    mcp::traits::CommonMcpImpl,
     task::{Model, RoleSession, Tool},
 };
-use zbobr_api::config_tools::McpTool;
 
 /// A single unified MCP server that defines ALL possible tools and filters them
 /// at runtime based on the role's `allowed_tools` set.
@@ -107,14 +109,16 @@ impl UnifiedMcp {
         description = "Provide a brief summary and a full detailed report of your results and finish your work. The brief summary is stored as a comment; the full report is stored as a file for later retrieval."
     )]
     async fn report_success(&self, Parameters(params): Parameters<ReportParam>) -> String {
-        self.report_success_impl(&params.brief, &params.full_report).await
+        self.report_success_impl(&params.brief, &params.full_report)
+            .await
     }
 
     #[tool(
         description = "Report a failure or rejection with a brief summary and full detailed findings. The brief summary is stored as a comment; the full report is stored as a file for later retrieval."
     )]
     async fn report_failure(&self, Parameters(params): Parameters<ReportParam>) -> String {
-        self.report_failure_impl(&params.brief, &params.full_report).await
+        self.report_failure_impl(&params.brief, &params.full_report)
+            .await
     }
 
     #[tool(description = "Retrieve the full content of a stored report file by name.")]
@@ -258,7 +262,8 @@ impl UnifiedMcp {
             })
             .collect();
 
-        let mut doc = String::from("## MCP API\n\nAvailable tools (all pre-scoped to your task):\n\n");
+        let mut doc =
+            String::from("## MCP API\n\nAvailable tools (all pre-scoped to your task):\n\n");
         for tool in filtered {
             doc.push_str(&format!("### `{}`\n\n", tool.name));
             doc.push_str(&format!(
@@ -278,17 +283,26 @@ mod tests {
     #[test]
     fn all_tool_names_match_router() {
         let router = UnifiedMcp::tool_router();
-        let mut router_names: Vec<_> = router.list_all().iter().map(|t| t.name.to_string()).collect();
+        let mut router_names: Vec<_> = router
+            .list_all()
+            .iter()
+            .map(|t| t.name.to_string())
+            .collect();
         router_names.sort();
         let mut expected: Vec<_> = ALL_TOOL_NAMES.iter().map(|s| s.to_string()).collect();
         expected.sort();
-        assert_eq!(router_names, expected, "ALL_TOOL_NAMES diverged from router");
+        assert_eq!(
+            router_names, expected,
+            "ALL_TOOL_NAMES diverged from router"
+        );
     }
 
     #[test]
     fn filtering_works() {
         let router = UnifiedMcp::tool_router();
-        let allowed: HashSet<McpTool> = [McpTool::GetHistory, McpTool::StopWithError].into_iter().collect();
+        let allowed: HashSet<McpTool> = [McpTool::GetHistory, McpTool::StopWithError]
+            .into_iter()
+            .collect();
         let all_tools = router.list_all();
         let filtered: Vec<_> = all_tools
             .iter()

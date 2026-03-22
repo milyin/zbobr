@@ -14,9 +14,7 @@ use super::{env::IntegrationTestEnv, scenarios};
 // Preparation
 // ---------------------------------------------------------------------------
 
-pub async fn run_preparation(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_preparation(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_preparation").await;
     let task_id = env
         .create_task("Dummy Task", "Dummy task description", "READY")
@@ -42,9 +40,7 @@ pub async fn run_preparation(
 // Planning
 // ---------------------------------------------------------------------------
 
-pub async fn run_planning(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_planning(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_planning").await;
     let task_id = env
         .create_task("Dummy Task", "Dummy task description", "READY")
@@ -88,9 +84,7 @@ pub async fn run_planning(
 // Working
 // ---------------------------------------------------------------------------
 
-pub async fn run_working(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_working(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_working").await;
     let task_id = env
         .create_task("Dummy Task", "Dummy task description", "READY")
@@ -147,9 +141,7 @@ pub async fn run_working(
 // Reviewing
 // ---------------------------------------------------------------------------
 
-pub async fn run_reviewing(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_reviewing(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_reviewing").await;
     let task_id = env
         .create_task("Dummy Task", "Dummy task description", "READY")
@@ -229,9 +221,7 @@ pub async fn run_reviewing(
 // Reviewing — approval path (no issues → DONE + PR)
 // ---------------------------------------------------------------------------
 
-pub async fn run_reviewing_approval(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_reviewing_approval(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_reviewing_approval").await;
     let task_id = env
         .create_task("Dummy Task", "Dummy task description", "READY")
@@ -307,9 +297,7 @@ pub async fn run_reviewing_approval(
 // Merging
 // ---------------------------------------------------------------------------
 
-pub async fn run_merging(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_merging(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_merging").await;
     let dest_repo = env
         .target_repo
@@ -375,12 +363,8 @@ pub async fn run_merging(
     )
     .await;
 
-    env.run_stage(
-        task_report,
-        "merger",
-        scenarios::merging_scenario("report"),
-    )
-    .await;
+    env.run_stage(task_report, "merger", scenarios::merging_scenario("report"))
+        .await;
 
     let task = env.get_task(task_report).await;
     let comments = env.get_comments(task_report).await;
@@ -432,9 +416,7 @@ pub async fn run_merging(
     );
 }
 
-pub async fn run_merging_with_real_conflict(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_merging_with_real_conflict(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_merging_conflict").await;
     let repo_path_str = repo_path.to_string_lossy().to_string();
     let dest_repo = env
@@ -444,11 +426,7 @@ pub async fn run_merging_with_real_conflict(
         .unwrap_or_else(|| repo_path_str.clone());
 
     let task_id = env
-        .create_task(
-            "Conflict task",
-            "Test merging with real conflicts",
-            "READY",
-        )
+        .create_task("Conflict task", "Test merging with real conflicts", "READY")
         .await;
     let work_branch = format!("zbobr_conflict-{task_id}-test");
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
@@ -543,12 +521,8 @@ pub async fn run_merging_with_real_conflict(
     );
     git_in(&work_dir, &["merge", "--abort"]).await;
 
-    env.run_stage(
-        task_id,
-        "merger",
-        scenarios::merging_conflict_scenario(),
-    )
-    .await;
+    env.run_stage(task_id, "merger", scenarios::merging_conflict_scenario())
+        .await;
 
     let task = env.get_task(task_id).await;
     let comments: Vec<zbobr_dispatcher::Comment> = env.get_comments(task_id).await;
@@ -567,9 +541,7 @@ pub async fn run_merging_with_real_conflict(
 
 /// Verify the automatic conflict-detection path executed by the role session
 /// code.
-pub async fn run_conflict_detection(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_conflict_detection(env: &IntegrationTestEnv) {
     if env.target_repo.is_some() {
         eprintln!(
             "[{}] Skipping run_conflict_detection: requires local repo backend",
@@ -601,11 +573,7 @@ pub async fn run_conflict_detection(
     .await;
 
     let task_id = env
-        .create_task(
-            "Conflict Detection",
-            "Dummy task description",
-            "READY",
-        )
+        .create_task("Conflict Detection", "Dummy task description", "READY")
         .await;
     env.update_task_branches(task_id, &repo_path_str, "main", work_branch)
         .await;
@@ -627,22 +595,15 @@ pub async fn run_conflict_detection(
 
     // Run the Merger — it will attempt the merge, encounter the conflict,
     // and invoke the agent to resolve it.
-    env.run_stage(
-        task_id,
-        "merger",
-        scenarios::merging_conflict_scenario(),
-    )
-    .await;
-
+    env.run_stage(task_id, "merger", scenarios::merging_conflict_scenario())
+        .await;
 }
 
 // ---------------------------------------------------------------------------
 // report_error signal preservation
 // ---------------------------------------------------------------------------
 
-pub async fn run_report_error_preserves_signal(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_report_error_preserves_signal(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_report_error").await;
     let dest_repo = env
         .target_repo
@@ -659,12 +620,8 @@ pub async fn run_report_error_preserves_signal(
     // Set a signal before the session so we can verify it survives report_error.
     env.update_task_signal(task_id, "go_work").await;
 
-    env.run_stage(
-        task_id,
-        "worker",
-        scenarios::worker_report_error_scenario(),
-    )
-    .await;
+    env.run_stage(task_id, "worker", scenarios::worker_report_error_scenario())
+        .await;
 
     let task = env.get_task(task_id).await;
     let comments: Vec<zbobr_dispatcher::Comment> = env.get_comments(task_id).await;
@@ -692,9 +649,7 @@ pub async fn run_report_error_preserves_signal(
 // Signal Preservation During Conflict Resolution
 // ---------------------------------------------------------------------------
 
-pub async fn run_signal_preservation_during_conflict(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_signal_preservation_during_conflict(env: &IntegrationTestEnv) {
     if env.target_repo.is_some() {
         eprintln!(
             "[{}] Skipping run_signal_preservation_during_conflict: requires local repo backend",
@@ -753,12 +708,8 @@ pub async fn run_signal_preservation_during_conflict(
     );
 
     // Run the Merger stage to resolve the conflict.
-    env.run_stage(
-        task_id,
-        "merger",
-        scenarios::merging_conflict_scenario(),
-    )
-    .await;
+    env.run_stage(task_id, "merger", scenarios::merging_conflict_scenario())
+        .await;
 
     // Re-fetch the task after the Merger run.
     // The merging_conflict_scenario does not actually resolve the conflict,
@@ -780,9 +731,7 @@ pub async fn run_signal_preservation_during_conflict(
 ///  - returns the task description as a user Reply comment when no plan exists
 ///  - returns only the plan and subsequent comments up to the next plan for each offset
 ///  - returns an error for an out-of-range offset
-pub async fn run_plan_history_with_index(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_plan_history_with_index(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_plan_history").await;
     const TASK_DESCRIPTION: &str = "Plan history MCP test description";
 
@@ -900,9 +849,7 @@ const CROSS_ORG_DEST_REPO: &str = "octocat/Spoon-Knife";
 
 /// Test `clone_and_setup` against a same-org target (`env.target_repo`).
 /// Skipped when the repo backend is not GitHub or `target_repo` is not set.
-pub async fn run_repo_backend_clone(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_repo_backend_clone(env: &IntegrationTestEnv) {
     let Some(target) = env.target_repo.as_deref() else {
         eprintln!(
             "[{}] Skipping run_repo_backend_clone: target_repo not configured",
@@ -937,10 +884,7 @@ pub async fn run_repo_backend_clone(
             env.name()
         )
     });
-    env.zbobr
-        .update_worktree(&identity)
-        .await
-        .unwrap();
+    env.zbobr.update_worktree(&identity).await.unwrap();
 
     let task_dir = TaskDir::new(&env.workspaces_dir, task_id);
     let workspace_dir = task_dir.path().join(repo_name);
@@ -992,9 +936,7 @@ pub async fn run_repo_backend_clone(
 
 /// Test `clone_and_setup` against `octocat/Spoon-Knife` (cross-org).
 /// Skipped when the repo backend is not GitHub.
-pub async fn run_repo_backend_clone_cross_org(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_repo_backend_clone_cross_org(env: &IntegrationTestEnv) {
     if env.fork_owner().is_none() {
         eprintln!(
             "[{}] Skipping run_repo_backend_clone_cross_org: not a GitHub repo backend",
@@ -1024,10 +966,7 @@ pub async fn run_repo_backend_clone_cross_org(
             env.name()
         )
     });
-    env.zbobr
-        .update_worktree(&identity)
-        .await
-        .unwrap();
+    env.zbobr.update_worktree(&identity).await.unwrap();
 
     let task_dir = TaskDir::new(&env.workspaces_dir, task_id);
     let workspace_dir = task_dir.path().join(repo_name);
@@ -1093,9 +1032,7 @@ pub async fn run_repo_backend_clone_cross_org(
 // Repo backend — same-org planning / working / reviewing / merging
 // ---------------------------------------------------------------------------
 
-pub async fn run_repo_backend_planning(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_repo_backend_planning(env: &IntegrationTestEnv) {
     let Some(target) = env.target_repo.as_deref() else {
         eprintln!(
             "[{}] Skipping run_repo_backend_planning: target_repo not configured",
@@ -1113,9 +1050,7 @@ pub async fn run_repo_backend_planning(
     repo_backend_planning_for(env, target, "plan").await;
 }
 
-pub async fn run_repo_backend_working(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_repo_backend_working(env: &IntegrationTestEnv) {
     let Some(target) = env.target_repo.as_deref() else {
         eprintln!(
             "[{}] Skipping run_repo_backend_working: target_repo not configured",
@@ -1133,9 +1068,7 @@ pub async fn run_repo_backend_working(
     repo_backend_working_for(env, target, "work").await;
 }
 
-pub async fn run_repo_backend_reviewing(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_repo_backend_reviewing(env: &IntegrationTestEnv) {
     let Some(target) = env.target_repo.as_deref() else {
         eprintln!(
             "[{}] Skipping run_repo_backend_reviewing: target_repo not configured",
@@ -1153,9 +1086,7 @@ pub async fn run_repo_backend_reviewing(
     repo_backend_reviewing_for(env, target, "review").await;
 }
 
-pub async fn run_repo_backend_merging(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_repo_backend_merging(env: &IntegrationTestEnv) {
     let Some(target) = env.target_repo.as_deref() else {
         eprintln!(
             "[{}] Skipping run_repo_backend_merging: target_repo not configured",
@@ -1177,9 +1108,7 @@ pub async fn run_repo_backend_merging(
 // Repo backend — cross-org planning / working / reviewing / merging
 // ---------------------------------------------------------------------------
 
-pub async fn run_repo_backend_planning_cross_org(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_repo_backend_planning_cross_org(env: &IntegrationTestEnv) {
     if env.fork_owner().is_none() {
         eprintln!(
             "[{}] Skipping run_repo_backend_planning_cross_org: not a GitHub repo backend",
@@ -1190,9 +1119,7 @@ pub async fn run_repo_backend_planning_cross_org(
     repo_backend_planning_for(env, CROSS_ORG_DEST_REPO, "xorg-plan").await;
 }
 
-pub async fn run_repo_backend_working_cross_org(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_repo_backend_working_cross_org(env: &IntegrationTestEnv) {
     if env.fork_owner().is_none() {
         eprintln!(
             "[{}] Skipping run_repo_backend_working_cross_org: not a GitHub repo backend",
@@ -1203,9 +1130,7 @@ pub async fn run_repo_backend_working_cross_org(
     repo_backend_working_for(env, CROSS_ORG_DEST_REPO, "xorg-work").await;
 }
 
-pub async fn run_repo_backend_reviewing_cross_org(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_repo_backend_reviewing_cross_org(env: &IntegrationTestEnv) {
     if env.fork_owner().is_none() {
         eprintln!(
             "[{}] Skipping run_repo_backend_reviewing_cross_org: not a GitHub repo backend",
@@ -1216,9 +1141,7 @@ pub async fn run_repo_backend_reviewing_cross_org(
     repo_backend_reviewing_for(env, CROSS_ORG_DEST_REPO, "xorg-review").await;
 }
 
-pub async fn run_repo_backend_merging_cross_org(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_repo_backend_merging_cross_org(env: &IntegrationTestEnv) {
     if env.fork_owner().is_none() {
         eprintln!(
             "[{}] Skipping run_repo_backend_merging_cross_org: not a GitHub repo backend",
@@ -1234,9 +1157,7 @@ pub async fn run_repo_backend_merging_cross_org(
 // ---------------------------------------------------------------------------
 
 /// Verify that a stage change with `confirm=true` triggers an automatic pause.
-pub async fn run_cli_confirm_flag(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_cli_confirm_flag(env: &IntegrationTestEnv) {
     let task_id = env
         .create_task_with_confirm("Confirm test", "desc", "main_PENDING", true)
         .await;
@@ -1283,11 +1204,7 @@ async fn repo_backend_planning_for(env: &IntegrationTestEnv, target: &str, suffi
 
 async fn repo_backend_working_for(env: &IntegrationTestEnv, target: &str, suffix: &str) {
     let task_id = env
-        .create_task(
-            "Repo backend working",
-            "Dummy task description",
-            "READY",
-        )
+        .create_task("Repo backend working", "Dummy task description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-{suffix}-test");
     env.update_task_branches(task_id, target, "main", &work_branch)
@@ -1309,11 +1226,7 @@ async fn repo_backend_working_for(env: &IntegrationTestEnv, target: &str, suffix
 
 async fn repo_backend_reviewing_for(env: &IntegrationTestEnv, target: &str, suffix: &str) {
     let task_id = env
-        .create_task(
-            "Repo backend reviewing",
-            "Dummy task description",
-            "READY",
-        )
+        .create_task("Repo backend reviewing", "Dummy task description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-{suffix}-test");
     env.update_task_branches(task_id, target, "main", &work_branch)
@@ -1335,11 +1248,7 @@ async fn repo_backend_reviewing_for(env: &IntegrationTestEnv, target: &str, suff
 
 async fn repo_backend_merging_for(env: &IntegrationTestEnv, target: &str, suffix: &str) {
     let task_id = env
-        .create_task(
-            "Repo backend merging",
-            "Dummy task description",
-            "READY",
-        )
+        .create_task("Repo backend merging", "Dummy task description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-{suffix}-test");
     env.update_task_branches(task_id, target, "main", &work_branch)
@@ -1360,12 +1269,8 @@ async fn repo_backend_merging_for(env: &IntegrationTestEnv, target: &str, suffix
     )
     .await;
 
-    env.run_stage(
-        task_id,
-        "merger",
-        scenarios::merging_scenario("report"),
-    )
-    .await;
+    env.run_stage(task_id, "merger", scenarios::merging_scenario("report"))
+        .await;
 
     // When there are no merge conflicts the merger performs a fast-path
     // auto-merge and skips the agent session, so no "Merger complete."
@@ -1584,9 +1489,7 @@ async fn assert_github_pr_has_commits(env: &IntegrationTestEnv, pr_url: &str, de
 /// entry, Rule 2.3 fires and sets GoWork (has_unchecked=true).  If the signal
 /// were *not* cleared, Rule 2 would see `signal.is_some()` and preserve the
 /// pre-set GoReview instead.
-pub async fn run_entry_clears_signal_for_worker(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_entry_clears_signal_for_worker(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_entry_clear_worker").await;
     let dest_repo = env
         .target_repo
@@ -1594,11 +1497,7 @@ pub async fn run_entry_clears_signal_for_worker(
         .map(|r| format!("https://github.com/{r}"))
         .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
     let task_id = env
-        .create_task(
-            "Entry Clear Worker",
-            "Dummy task description",
-            "READY",
-        )
+        .create_task("Entry Clear Worker", "Dummy task description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-entry-test");
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
@@ -1628,9 +1527,7 @@ pub async fn run_entry_clears_signal_for_worker(
 /// Verify that after a Merger session:
 ///   - conflict == false (cleared on entry)
 ///   - signal == Some(GoWork) (preserved; Merger entry must not clear it)
-pub async fn run_entry_clears_conflict_preserves_signal_for_merger(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_entry_clears_conflict_preserves_signal_for_merger(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_entry_clear_merger").await;
     let dest_repo = env
         .target_repo
@@ -1643,11 +1540,7 @@ pub async fn run_entry_clears_conflict_preserves_signal_for_merger(
         .unwrap_or(&dest_repo)
         .to_string();
     let task_id = env
-        .create_task(
-            "Entry Clear Merger",
-            "Dummy task description",
-            "READY",
-        )
+        .create_task("Entry Clear Merger", "Dummy task description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-merger-entry-test");
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
@@ -1678,12 +1571,8 @@ pub async fn run_entry_clears_conflict_preserves_signal_for_merger(
     // Set GoWork signal before running Merger.
     env.update_task_signal(task_id, "go_working").await;
 
-    env.run_stage(
-        task_id,
-        "merger",
-        scenarios::merging_scenario("report"),
-    )
-    .await;
+    env.run_stage(task_id, "merger", scenarios::merging_scenario("report"))
+        .await;
 
     let task = env.get_task(task_id).await;
     assert_eq!(
@@ -1699,9 +1588,7 @@ pub async fn run_entry_clears_conflict_preserves_signal_for_merger(
 /// Runs Planning from a clean state (no pre-set signal) and verifies that
 /// GoWork is emitted afterwards.  This is a focused test for the fix to the
 /// Planner exit path (it previously emitted no signal at all).
-pub async fn run_planner_sets_go_work_on_exit(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_planner_sets_go_work_on_exit(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_planner_exit").await;
     let dest_repo = env
         .target_repo
@@ -1709,11 +1596,7 @@ pub async fn run_planner_sets_go_work_on_exit(
         .map(|r| format!("https://github.com/{r}"))
         .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
     let task_id = env
-        .create_task(
-            "Planner Exit Test",
-            "Dummy task description",
-            "READY",
-        )
+        .create_task("Planner Exit Test", "Dummy task description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-test");
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
@@ -1738,9 +1621,7 @@ pub async fn run_planner_sets_go_work_on_exit(
 /// Uses `report_error` which sets `pause = true`.  The exit logic checks
 /// `!pause && signal.is_none()` before computing a sequential signal, so
 /// the pause flag should be preserved and no signal should be set.
-pub async fn run_exit_preserves_agent_set_signal(
-    env: &IntegrationTestEnv,
-) {
+pub async fn run_exit_preserves_agent_set_signal(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_exit_preserve").await;
     let dest_repo = env
         .target_repo
@@ -1748,11 +1629,7 @@ pub async fn run_exit_preserves_agent_set_signal(
         .map(|r| format!("https://github.com/{r}"))
         .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
     let task_id = env
-        .create_task(
-            "Exit Preserve Test",
-            "Dummy task description",
-            "READY",
-        )
+        .create_task("Exit Preserve Test", "Dummy task description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-exit-preserve");
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
@@ -1774,7 +1651,8 @@ pub async fn run_exit_preserves_agent_set_signal(
         env.name()
     );
     assert_eq!(
-        task.signal, None,
+        task.signal,
+        None,
         "[{}] No signal should be set when pause is active",
         env.name()
     );

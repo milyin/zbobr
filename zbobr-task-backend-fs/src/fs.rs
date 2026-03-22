@@ -3,8 +3,10 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tokio::fs;
-use tokio::sync::{Mutex, OwnedMutexGuard};
+use tokio::{
+    fs,
+    sync::{Mutex, OwnedMutexGuard},
+};
 use zbobr_api::{
     ChecklistItem, Comment, HistoryRecordType, Model, Signal, StackEntry, State, Task, Tool,
     backend::{TaskBackend, TaskMut, TaskWeak},
@@ -285,10 +287,7 @@ impl ZbobrTaskBackendFs {
 
     /// Read a report file by exact name.
     async fn read_report(&self, task_id: u64, name: &str) -> anyhow::Result<String> {
-        anyhow::ensure!(
-            !name.contains(".."),
-            "Invalid report name: {name}"
-        );
+        anyhow::ensure!(!name.contains(".."), "Invalid report name: {name}");
         let path = self.reports_dir(task_id).join(name);
         fs::read_to_string(&path)
             .await
@@ -682,13 +681,27 @@ mod parse_tests {
 
     #[test]
     fn test_comment_tag_roundtrip() {
-        let tag = CommentTag::new("main".into(), 1, "planning".into(), "localhost".into(), None, None);
+        let tag = CommentTag::new(
+            "main".into(),
+            1,
+            "planning".into(),
+            "localhost".into(),
+            None,
+            None,
+        );
         let s = tag.to_string();
         assert_eq!(s, "// main:1:planning by localhost");
         let parsed: CommentTag = s.parse().unwrap();
         assert_eq!(parsed, tag);
 
-        let tag2 = CommentTag::new("init".into(), 2, "reviewing".into(), "host".into(), None, None);
+        let tag2 = CommentTag::new(
+            "init".into(),
+            2,
+            "reviewing".into(),
+            "host".into(),
+            None,
+            None,
+        );
         let s2 = tag2.to_string();
         assert_eq!(s2, "// init:2:reviewing by host");
         let parsed2: CommentTag = s2.parse().unwrap();
@@ -705,8 +718,9 @@ mod parse_tests {
 
 #[cfg(test)]
 mod checklist_format_tests {
-    use super::*;
     use zbobr_api::checklist_format::{parse_grouped_checklist, serialize_grouped_checklist};
+
+    use super::*;
 
     #[test]
     fn fs_backend_checklist_serialize_grouped() {
