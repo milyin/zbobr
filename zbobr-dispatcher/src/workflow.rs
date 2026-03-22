@@ -22,7 +22,7 @@ pub struct Workflow {
 /// Action determined by the state machine for the next step.
 pub enum StateAction<'a> {
     /// Execute this stage definition: (pipeline_name, stage_name, stage_def).
-    RunStage(&'a str, &'a str, &'a StageDefinition),
+    RunStage(&'a Pipeline, &'a str, &'a StageDefinition),
     /// Task is completed.
     Done,
     /// Task is paused, waiting for user.
@@ -79,49 +79,36 @@ impl Workflow {
 
     // -- Delegated getters --
 
-    pub fn pipeline(&self, name: &str) -> Option<&PipelineConfig> {
-        self.config.pipeline(name)
+    pub fn pipeline(&self, name: &Pipeline) -> Option<&PipelineConfig> {
+        self.config.pipeline(name.clone())
     }
 
-    pub fn stage(&self, pipeline: &str, stage: &str) -> Option<&StageDefinition> {
-        self.config.stage(pipeline, stage)
+    pub fn stage(&self, pipeline: &Pipeline, stage: &str) -> Option<&StageDefinition> {
+        self.config.stage(pipeline.clone(), stage)
     }
 
-    pub fn all_stages(&self) -> Vec<(&str, &str, &StageDefinition)> {
-        self
-            .config
-            .all_stages()
-            .into_iter()
-            .map(|(pipeline, stage, def)| (pipeline.as_str(), stage, def))
-            .collect()
+    pub fn all_stages(&self) -> Vec<(&Pipeline, &str, &StageDefinition)> {
+        self.config.all_stages()
     }
 
-    pub fn default_pipeline(&self) -> &str {
-        MAIN_PIPELINE
+    pub fn default_pipeline(&self) -> Pipeline {
+        self.config.default_pipeline()
     }
 
-    pub fn pipeline_names(&self) -> Vec<&str> {
-        self
-            .config
-            .pipeline_names()
-            .into_iter()
-            .map(|pipeline| pipeline.as_str())
-            .collect()
+    pub fn pipeline_names(&self) -> Vec<&Pipeline> {
+        self.config.pipeline_names()
     }
 
-    pub fn find_stage_by_role(&self, role: &str) -> Option<(&str, &str, &StageDefinition)> {
-        self
-            .config
-            .find_stage_by_role(role)
-            .map(|(pipeline, stage, def)| (pipeline.as_str(), stage, def))
+    pub fn find_stage_by_role(&self, role: &str) -> Option<(&Pipeline, &str, &StageDefinition)> {
+        self.config.find_stage_by_role(role)
     }
 
     pub fn role_definition(&self, role: &str) -> Option<&RoleDefinition> {
         self.config.role_definition(role)
     }
 
-    pub fn start_stage_for_pipeline(&self, pipeline: &str) -> Option<(&str, &StageDefinition)> {
-        self.config.start_stage_for_pipeline(pipeline)
+    pub fn start_stage_for_pipeline(&self, pipeline: &Pipeline) -> Option<(&str, &StageDefinition)> {
+        self.config.start_stage_for_pipeline(pipeline.clone())
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
@@ -181,7 +168,7 @@ impl Workflow {
                             )
                         })?;
                     Ok(StateAction::RunStage(
-                        pipeline_key.as_str(),
+                        pipeline_key,
                         stage_name,
                         stage_def,
                     ))
@@ -232,7 +219,7 @@ impl Workflow {
                         )
                     })?;
                 Ok(StateAction::RunStage(
-                    pipeline_key.as_str(),
+                    pipeline_key,
                     stage_key.as_str(),
                     stage_def,
                 ))
@@ -251,7 +238,7 @@ impl Workflow {
                     anyhow::anyhow!("Pipeline '{target_pipeline}' has no start stage")
                 })?;
                 Ok(StateAction::RunStage(
-                    pipeline_key.as_str(),
+                    pipeline_key,
                     stage_key,
                     start,
                 ))
@@ -441,7 +428,7 @@ role = "merger"
         let action = workflow.resolve_next_action(&task).unwrap();
         match action {
             StateAction::RunStage(pipeline, stage, def) => {
-                assert_eq!(pipeline, "main");
+                assert_eq!(pipeline, &Pipeline::Main);
                 assert_eq!(stage, "call_sub");
                 assert!(def.is_call());
                 assert_eq!(def.call_pipeline().map(|p| p.as_str()), Some("sub"));

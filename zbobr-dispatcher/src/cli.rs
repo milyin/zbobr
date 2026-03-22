@@ -250,7 +250,7 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
 struct CliStageRunner<'a> {
     zbobr: &'a Arc<ZbobrDispatcher>,
     task_id: u64,
-    pipeline_name: &'a str,
+    pipeline_name: &'a Pipeline,
     stage_name: &'a str,
     stage_def: &'a StageDefinition,
     mcp_tester_override: Option<&'a ZbobrExecutorMcpTesterConfig>,
@@ -260,7 +260,7 @@ impl<'a> CliStageRunner<'a> {
     fn new(
         zbobr: &'a Arc<ZbobrDispatcher>,
         task_id: u64,
-        pipeline_name: &'a str,
+        pipeline_name: &'a Pipeline,
         stage_name: &'a str,
         stage_def: &'a StageDefinition,
         mcp_tester_override: Option<&'a ZbobrExecutorMcpTesterConfig>,
@@ -276,7 +276,7 @@ impl<'a> CliStageRunner<'a> {
     }
 
     fn running_state(&self) -> State {
-        State::running(self.pipeline_name, self.stage_name)
+        State::running(self.pipeline_name.clone(), self.stage_name)
     }
 
     async fn prompt(&self) -> anyhow::Result<String> {
@@ -454,7 +454,7 @@ enum SequentialSignal {
 
 /// Compute the post-execution signal for the sequential pipeline model.
 fn compute_sequential_signal(
-    pipeline_name: &str,
+    pipeline_name: &Pipeline,
     stage_name: &str,
     stage_def: Option<&zbobr_api::config::StageDefinition>,
     workflow: &crate::workflow::Workflow,
@@ -506,7 +506,7 @@ enum WorktreeResult {
 async fn handle_call_stage(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
-    pipeline_name: &str,
+    pipeline_name: &Pipeline,
     stage_name: &str,
     call_pipeline: &Pipeline,
 ) -> anyhow::Result<()> {
@@ -529,7 +529,7 @@ async fn handle_call_stage(
 
     // Push stack so we return to the right place.
     task_session
-        .push_stack(pipeline_name, return_signal.clone())
+        .push_stack(pipeline_name.clone(), return_signal.clone())
         .await?;
     task_session.allocate_pipeline_run_id().await?;
     let call_signal = Signal::call(call_pipeline.clone());
@@ -537,7 +537,7 @@ async fn handle_call_stage(
         .set_signal(Some(call_signal.clone()))
         .await?;
     task_session
-        .set_state(State::pending(Pipeline::from(pipeline_name)))
+        .set_state(State::pending(pipeline_name.clone()))
         .await?;
 
     tracing::info!(
@@ -829,7 +829,7 @@ pub async fn run_manager_loop(
 async fn detect_and_handle_worktree(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
-    pipeline_name: &str,
+    pipeline_name: &Pipeline,
     stage_name: &str,
     _stage_def: &StageDefinition,
     task_dir: &Path,
@@ -842,7 +842,7 @@ async fn detect_and_handle_worktree(
         Some(id) => id,
         None => {
             // If we ARE the undefined handler pipeline, proceed with task_dir
-            if pipeline_name == INIT_PIPELINE {
+            if pipeline_name.as_str() == INIT_PIPELINE {
                 return Ok(WorktreeResult::Ready(task_dir.to_path_buf()));
             }
             // Otherwise, dispatch to undefined handler
@@ -895,7 +895,7 @@ async fn detect_and_handle_worktree(
 
     // If we ARE the conflict handler, start the merge but don't abort on failure —
     // the agent needs to see conflict markers in the working tree.
-    let is_conflict_handler = pipeline_name == MERGE_PIPELINE;
+    let is_conflict_handler = pipeline_name.as_str() == MERGE_PIPELINE;
 
     let merged_ok = git_check(
         &work_dir,
@@ -934,7 +934,7 @@ async fn detect_and_handle_worktree(
 async fn handle_worktree_problem(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
-    pipeline_name: &str,
+    pipeline_name: &Pipeline,
     stage_name: &str,
     problem: zbobr_api::task::WorktreeProblem,
 ) -> anyhow::Result<WorktreeResult> {
@@ -944,10 +944,10 @@ async fn handle_worktree_problem(
     };
 
     let task_session = zbobr.task_session(task_id);
-    let pending_state = State::pending(Pipeline::from(pipeline_name));
+    let pending_state = State::pending(pipeline_name.clone());
 
     // Recursion guard: if already inside the handler pipeline, pause
-    if pipeline_name == handler_pipeline {
+    if pipeline_name.as_str() == handler_pipeline {
         tracing::error!(
             "Task #{task_id}: worktree problem {:?} inside handler pipeline '{handler_pipeline}' — pausing",
             problem
@@ -973,7 +973,7 @@ async fn handle_worktree_problem(
 
     // Push stack: re-run the interrupted stage upon return
     task_session
-        .push_stack(pipeline_name, Signal::go(stage_name))
+        .push_stack(pipeline_name.clone(), Signal::go(stage_name))
         .await?;
     task_session.allocate_pipeline_run_id().await?;
     task_session
@@ -1147,14 +1147,14 @@ async fn execute_tool(
 async fn finalize_stage_session(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
-    pipeline_name: &str,
+    pipeline_name: &Pipeline,
     stage_name: &str,
     work_dir: &Path,
     outcome: SessionOutcome,
     last_mapped_tool: Option<&str>,
 ) -> anyhow::Result<Option<anyhow::Error>> {
     let task_session = zbobr.task_session(task_id);
-    let pending_state = State::pending(Pipeline::from(pipeline_name));
+    let pending_state = State::pending(pipeline_name.clone());
 
     if outcome.execution_interrupted {
         if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name).await {
