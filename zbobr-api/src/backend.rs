@@ -16,6 +16,9 @@ pub trait TaskWeak: Send + Sync {
 
     /// Read comments (read-only).
     async fn get_comments(&self) -> anyhow::Result<Vec<Comment>>;
+
+    /// Read a stored report file by name.
+    async fn read_report(&self, name: &str) -> anyhow::Result<String>;
 }
 
 /// Exclusive mutable handle. Obtained via `TaskWeak::upgrade()`. Dropping releases the lock.
@@ -112,6 +115,10 @@ pub trait TaskMut: Send + Sync {
         }))
         .await
     }
+
+    /// Store a report file. If `base_name` already exists, appends `_N` suffix.
+    /// Returns the actual filename used (e.g., `report_main_1_working_success.md`).
+    async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String>;
 
     /// Post a structured comment (requires exclusive access).
     async fn post_comment(

@@ -14,7 +14,7 @@ use rmcp::service::RequestContext;
 use crate::{
     mcp::common::{
         AddChecklistItemParam, CheckChecklistItemParam, ConfigureWorktreeParam,
-        DeleteChecklistItemParam, MessageParam,
+        DeleteChecklistItemParam, GetFullReportParam, MessageParam, ReportParam,
     },
     mcp::traits::CommonMcpImpl,
     task::{Model, RoleSession, Tool},
@@ -103,17 +103,22 @@ impl UnifiedMcp {
     }
 
     #[tool(
-        description = "Provide a brief and concise report of your results and finish your work. These reports add up to discussion and shorten the context for further agent calls, so they MUST be compact."
+        description = "Provide a brief summary and a full detailed report of your results and finish your work. The brief summary is stored as a comment; the full report is stored as a file for later retrieval."
     )]
-    async fn report_success(&self, Parameters(params): Parameters<MessageParam>) -> String {
-        self.report_success_impl(&params.message).await
+    async fn report_success(&self, Parameters(params): Parameters<ReportParam>) -> String {
+        self.report_success_impl(&params.brief, &params.full_report).await
     }
 
     #[tool(
-        description = "Report a failure or rejection, returning the task for re-work or re-planning. Provide a concise description of the problems found."
+        description = "Report a failure or rejection with a brief summary and full detailed findings. The brief summary is stored as a comment; the full report is stored as a file for later retrieval."
     )]
-    async fn report_failure(&self, Parameters(params): Parameters<MessageParam>) -> String {
-        self.report_failure_impl(&params.message).await
+    async fn report_failure(&self, Parameters(params): Parameters<ReportParam>) -> String {
+        self.report_failure_impl(&params.brief, &params.full_report).await
+    }
+
+    #[tool(description = "Retrieve the full content of a stored report file by name.")]
+    async fn get_full_report(&self, Parameters(params): Parameters<GetFullReportParam>) -> String {
+        self.get_full_report_impl(&params.name).await
     }
 
     #[tool(description = "Report an error to the user and pause task processing")]

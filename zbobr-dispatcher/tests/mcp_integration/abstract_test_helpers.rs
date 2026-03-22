@@ -492,7 +492,8 @@ steps:
     type: tool_call
     tool: report_success
     arguments:
-      message: "Params set"
+      brief: "Params set"
+      full_report: "Parameters configured successfully."
   assertions:
     - type: success
 "#,

@@ -4,6 +4,7 @@ pub mod unified;
 
 pub use common::{
     AddChecklistItemParam, CheckChecklistItemParam, ConfigureWorktreeParam,
-    DeleteChecklistItemParam, MessageParam, run_role_mcp_server,
+    DeleteChecklistItemParam, GetFullReportParam, MessageParam, ReportParam,
+    run_role_mcp_server,
 };
 pub use unified::UnifiedMcp;

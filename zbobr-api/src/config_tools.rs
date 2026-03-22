@@ -3,6 +3,7 @@ pub const ALL_TOOL_NAMES: &[&str] = &[
     "get_history",
     "report_success",
     "report_failure",
+    "get_full_report",
     "stop_with_error",
     "stop_with_question",
     "configure_worktree",

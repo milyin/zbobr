@@ -797,6 +797,10 @@ impl TaskWeak for GithubTaskWeak {
     async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
         self.backend.get_task_comments_internal(self.id).await
     }
+
+    async fn read_report(&self, _name: &str) -> anyhow::Result<String> {
+        anyhow::bail!("read_report not yet implemented for GitHub backend")
+    }
 }
 
 struct GithubTaskMut {
@@ -824,6 +828,10 @@ impl TaskMut for GithubTaskMut {
 
     async fn close(&self) -> anyhow::Result<()> {
         self.backend.close_task_internal(self.id).await
+    }
+
+    async fn store_report(&self, _base_name: &str, _content: &str) -> anyhow::Result<String> {
+        anyhow::bail!("store_report not yet implemented for GitHub backend")
     }
 
     async fn post_comment(

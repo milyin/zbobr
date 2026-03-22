@@ -240,6 +240,60 @@ impl ZbobrTaskBackendFs {
             .context("Failed to write comments file")
     }
 
+    /// Get the reports directory for a task.
+    fn reports_dir(&self, task_id: u64) -> PathBuf {
+        self.config
+            .tasks_dir
+            .join("reports")
+            .join(format!("task_{task_id}"))
+    }
+
+    /// Store a report file, deduplicating with `_N` suffix if needed.
+    /// Returns the actual filename (without directory prefix).
+    async fn store_report(
+        &self,
+        task_id: u64,
+        base_name: &str,
+        content: &str,
+    ) -> anyhow::Result<String> {
+        let dir = self.reports_dir(task_id);
+        fs::create_dir_all(&dir)
+            .await
+            .context("Failed to create reports directory")?;
+
+        let mut n = 0u32;
+        let filename = loop {
+            let candidate = if n == 0 {
+                format!("{base_name}.md")
+            } else {
+                format!("{base_name}_{n}.md")
+            };
+            if !dir.join(&candidate).exists() {
+                break candidate;
+            }
+            n += 1;
+        };
+
+        fs::write(dir.join(&filename), content)
+            .await
+            .context("Failed to write report file")?;
+
+        tracing::debug!("Stored report for task {task_id}: {filename}");
+        Ok(filename)
+    }
+
+    /// Read a report file by exact name.
+    async fn read_report(&self, task_id: u64, name: &str) -> anyhow::Result<String> {
+        anyhow::ensure!(
+            !name.contains(".."),
+            "Invalid report name: {name}"
+        );
+        let path = self.reports_dir(task_id).join(name);
+        fs::read_to_string(&path)
+            .await
+            .with_context(|| format!("Failed to read report file '{name}' for task {task_id}"))
+    }
+
     /// List all task files in the directory.
     async fn list_task_files(&self) -> anyhow::Result<Vec<u64>> {
         let mut task_ids = Vec::new();
@@ -316,6 +370,10 @@ impl TaskWeak for FsTaskWeak {
     async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
         self.backend.read_comments_structured(self.id).await
     }
+
+    async fn read_report(&self, name: &str) -> anyhow::Result<String> {
+        self.backend.read_report(self.id, name).await
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -362,6 +420,10 @@ impl TaskMut for FsTaskMut {
 
         tracing::info!("Closed task {}", self.id);
         Ok(())
+    }
+
+    async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String> {
+        self.backend.store_report(self.id, base_name, content).await
     }
 
     async fn post_comment(

@@ -21,6 +21,20 @@ pub struct MessageParam {
     pub message: String,
 }
 
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct ReportParam {
+    #[schemars(description = "Brief, concise summary of results (stored as comment)")]
+    pub brief: String,
+    #[schemars(description = "Full detailed report content (stored as a file in the task repository)")]
+    pub full_report: String,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct GetFullReportParam {
+    #[schemars(description = "Report filename (as shown in the history)")]
+    pub name: String,
+}
+
 // -- Worktree configuration --
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]

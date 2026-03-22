@@ -140,14 +140,43 @@ pub trait CommonMcpImpl: Send + Sync {
 
     // -- Report tools --
 
-    async fn report_success_impl(&self, message: &str) -> String {
+    async fn report_impl(&self, tool_name: &str, tag: &str, brief: &str, full_report: &str) -> String {
         tracing::info!(
-            "[{}#{}] report_success",
+            "[{}#{}] {}",
             self.role_name(),
-            self.session().task_id()
+            self.session().task_id(),
+            tool_name,
         );
+
+        // Store the full report as a file via the task backend.
+        let base_name = format!(
+            "report_{}_{}_{}_{}",
+            self.pipeline_name(),
+            self.pipeline_run_id(),
+            self.stage_name(),
+            tag,
+        );
+
+        let report_filename = match self.session().store_report(&base_name, full_report).await {
+            Ok(name) => name,
+            Err(e) => {
+                tracing::error!(
+                    "Failed to store report file for task {}: {e}",
+                    self.session().task_id()
+                );
+                let response = format!("Error storing report file: {e}");
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                return response;
+            }
+        };
+
         let hostname = get_hostname();
-        let body = format!("[report_success]\n{message}");
+        let body = format!("[{tool_name}]\n{brief}\nfull_report: {report_filename}");
 
         if let Err(e) = self
             .session()
@@ -155,66 +184,55 @@ pub trait CommonMcpImpl: Send + Sync {
             .await
         {
             tracing::error!(
-                "Failed to post success message for task {}: {e}",
+                "Failed to post {tool_name} message for task {}: {e}",
                 self.session().task_id()
             );
-            let response = format!("Error posting success message: {e}");
+            let response = format!("Error posting {tool_name} message: {e}");
             log_mcp_string_response(
                 self.role_name(),
                 self.session().task_id(),
-                "report_success",
+                tool_name,
                 &response,
             );
             return response;
         }
 
-        self.record_tool("report_success");
+        self.record_tool(tool_name);
 
-        let response = "Results reported successfully".to_string();
+        let response = format!("Report stored as {report_filename}");
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "report_success",
+            tool_name,
             &response,
         );
         response
     }
 
-    async fn report_failure_impl(&self, message: &str) -> String {
+    async fn report_success_impl(&self, brief: &str, full_report: &str) -> String {
+        self.report_impl("report_success", "success", brief, full_report).await
+    }
+
+    async fn report_failure_impl(&self, brief: &str, full_report: &str) -> String {
+        self.report_impl("report_failure", "failure", brief, full_report).await
+    }
+
+    async fn get_full_report_impl(&self, name: &str) -> String {
         tracing::info!(
-            "[{}#{}] report_failure",
+            "[{}#{}] get_full_report name={}",
             self.role_name(),
-            self.session().task_id()
+            self.session().task_id(),
+            name,
         );
-        let hostname = get_hostname();
-        let body = format!("[report_failure]\n{message}");
 
-        if let Err(e) = self
-            .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()))
-            .await
-        {
-            tracing::error!(
-                "Failed to post failure message for task {}: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Error posting failure message: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                "report_failure",
-                &response,
-            );
-            return response;
-        }
-
-        self.record_tool("report_failure");
-
-        let response = "Failure reported".to_string();
+        let response = match self.session().read_report(name).await {
+            Ok(content) => content,
+            Err(e) => format!("Error: {e}"),
+        };
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "report_failure",
+            "get_full_report",
             &response,
         );
         response

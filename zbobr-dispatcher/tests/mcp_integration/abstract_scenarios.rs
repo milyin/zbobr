@@ -88,7 +88,8 @@ steps:
     type: tool_call
     tool: report_success
     arguments:
-      message: "All tools exercised."
+      brief: "All tools exercised."
+      full_report: "Detailed report: all MCP tools were tested successfully."
   assertions:
     - type: success
 "#,
@@ -109,7 +110,8 @@ steps:
     type: tool_call
     tool: report_success
     arguments:
-      message: "Stage complete."
+      brief: "Stage complete."
+      full_report: "Stage completed successfully."
   assertions:
     - type: success
 "#
@@ -149,7 +151,8 @@ steps:
     type: tool_call
     tool: report_failure
     arguments:
-      message: "Rejected."
+      brief: "Rejected."
+      full_report: "Detailed rejection report."
   assertions:
     - type: success
 "#
@@ -169,7 +172,8 @@ steps:
     type: tool_call
     tool: report_success
     arguments:
-      message: "Accepted."
+      brief: "Accepted."
+      full_report: "Detailed acceptance report."
   assertions:
     - type: success
 "#

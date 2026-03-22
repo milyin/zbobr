@@ -360,6 +360,19 @@ impl RoleSession {
         .await
     }
 
+    /// Store a report file via the task backend.
+    pub async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String> {
+        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
+        let mutable = weak.upgrade().await?;
+        mutable.store_report(base_name, content).await
+    }
+
+    /// Read a report file via the task backend.
+    pub async fn read_report(&self, name: &str) -> anyhow::Result<String> {
+        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
+        weak.read_report(name).await
+    }
+
     /// Record a tool call for transition mapping.
     /// Only `report_success` and `report_failure` are meaningful transition triggers.
     pub fn record_tool_call(&self, tool_name: &str) {
@@ -615,6 +628,8 @@ mod comment_model_tests {
     struct TrackingBackend {
         tasks: Mutex<HashMap<u64, InMemTask>>,
         comments: Mutex<HashMap<u64, Vec<Comment>>>,
+        /// In-memory report storage: (task_id, filename) -> content
+        reports: Mutex<HashMap<(u64, String), String>>,
         next_id: AtomicU64,
         locks: Mutex<HashMap<u64, Arc<Mutex<()>>>>,
     }
@@ -670,6 +685,14 @@ mod comment_model_tests {
             let comments = self.backend.comments.lock().await;
             Ok(comments.get(&self.id).cloned().unwrap_or_default())
         }
+
+        async fn read_report(&self, name: &str) -> anyhow::Result<String> {
+            let reports = self.backend.reports.lock().await;
+            reports
+                .get(&(self.id, name.to_string()))
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("report not found: {name}"))
+        }
     }
 
     #[async_trait]
@@ -706,6 +729,24 @@ mod comment_model_tests {
                 t.closed = true;
             }
             Ok(())
+        }
+
+        async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String> {
+            let mut reports = self.backend.reports.lock().await;
+            let mut n = 0u32;
+            let filename = loop {
+                let candidate = if n == 0 {
+                    format!("{base_name}.md")
+                } else {
+                    format!("{base_name}_{n}.md")
+                };
+                if !reports.contains_key(&(self.id, candidate.clone())) {
+                    break candidate;
+                }
+                n += 1;
+            };
+            reports.insert((self.id, filename.clone()), content.to_string());
+            Ok(filename)
         }
 
         async fn post_comment(
@@ -850,6 +891,7 @@ mod comment_model_tests {
             inner: Arc::new(TrackingBackend {
                 tasks: Mutex::new(HashMap::new()),
                 comments: Mutex::new(HashMap::new()),
+                reports: Mutex::new(HashMap::new()),
                 next_id: AtomicU64::new(0),
                 locks: Mutex::new(HashMap::new()),
             }),
@@ -1010,14 +1052,22 @@ mod comment_model_tests {
 
         let mcp = make_test_mcp(&zbobr, id);
 
-        let _ = mcp.report_success_impl("result one").await;
-        let _ = mcp.report_failure_impl("needs work").await;
+        let _ = mcp.report_success_impl("result one", "detailed success report").await;
+        let _ = mcp.report_failure_impl("needs work", "detailed failure report").await;
 
         let weak = task_backend.get_task(id).await.unwrap();
         let backend_comments = weak.get_comments().await.unwrap();
         assert_eq!(backend_comments.len(), 2, "each comment must be posted separately");
         assert!(backend_comments[0].text.starts_with("[report_success]"));
+        assert!(backend_comments[0].text.contains("full_report:"));
         assert!(backend_comments[1].text.starts_with("[report_failure]"));
+        assert!(backend_comments[1].text.contains("full_report:"));
+
+        // Verify reports were stored and are readable
+        let success_report = weak.read_report("report_main_1_working_success.md").await.unwrap();
+        assert_eq!(success_report, "detailed success report");
+        let failure_report = weak.read_report("report_main_1_working_failure.md").await.unwrap();
+        assert_eq!(failure_report, "detailed failure report");
     }
 
     #[tokio::test]
