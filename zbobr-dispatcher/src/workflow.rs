@@ -9,9 +9,9 @@ use zbobr_api::config::{
 use zbobr_api::{Pipeline, Signal, Stage, State, Task};
 
 // Re-export constants for convenience.
-pub const MAIN_PIPELINE: &str = WorkflowConfig::MAIN_PIPELINE;
-pub const INIT_PIPELINE: &str = WorkflowConfig::INIT_PIPELINE;
-pub const MERGE_PIPELINE: &str = WorkflowConfig::MERGE_PIPELINE;
+pub const MAIN_PIPELINE: &str = Pipeline::MAIN;
+pub const INIT_PIPELINE: &str = Pipeline::INIT;
+pub const MERGE_PIPELINE: &str = Pipeline::MERGE;
 
 /// Workflow wraps a `WorkflowConfig` and exposes state machine logic as methods.
 #[derive(Clone, Debug)]
@@ -40,7 +40,7 @@ impl Default for Workflow {
         };
         for name in [MAIN_PIPELINE, INIT_PIPELINE, MERGE_PIPELINE] {
             pipelines.insert(
-                name.to_string(),
+                Pipeline::from(name),
                 PipelineConfig {
                     stages: IndexMap::from([(
                         Stage::from("default"),
@@ -88,19 +88,32 @@ impl Workflow {
     }
 
     pub fn all_stages(&self) -> Vec<(&str, &str, &StageDefinition)> {
-        self.config.all_stages()
+        self
+            .config
+            .all_stages()
+            .into_iter()
+            .map(|(pipeline, stage, def)| (pipeline.as_str(), stage, def))
+            .collect()
     }
 
     pub fn default_pipeline(&self) -> &str {
-        self.config.default_pipeline()
+        MAIN_PIPELINE
     }
 
     pub fn pipeline_names(&self) -> Vec<&str> {
-        self.config.pipeline_names()
+        self
+            .config
+            .pipeline_names()
+            .into_iter()
+            .map(|pipeline| pipeline.as_str())
+            .collect()
     }
 
     pub fn find_stage_by_role(&self, role: &str) -> Option<(&str, &str, &StageDefinition)> {
-        self.config.find_stage_by_role(role)
+        self
+            .config
+            .find_stage_by_role(role)
+            .map(|(pipeline, stage, def)| (pipeline.as_str(), stage, def))
     }
 
     pub fn role_definition(&self, role: &str) -> Option<&RoleDefinition> {
@@ -123,7 +136,7 @@ impl Workflow {
         &self.config.roles
     }
 
-    pub fn pipelines(&self) -> &HashMap<String, PipelineConfig> {
+    pub fn pipelines(&self) -> &HashMap<Pipeline, PipelineConfig> {
         &self.config.pipelines
     }
 
@@ -149,9 +162,18 @@ impl Workflow {
                 if task.stack.is_empty() {
                     // Push default pipeline's start stage
                     let default_pipeline = self.config.default_pipeline();
-                    let (stage_name, stage_def) = self
+                    let (pipeline_key, pipeline_config) = self
                         .config
-                        .start_stage_for_pipeline(default_pipeline)
+                        .pipelines
+                        .get_key_value(default_pipeline.as_str())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "No start stage for default pipeline '{}'",
+                                default_pipeline
+                            )
+                        })?;
+                    let (stage_name, stage_def) = pipeline_config
+                        .start_stage()
                         .ok_or_else(|| {
                             anyhow::anyhow!(
                                 "No start stage for default pipeline '{}'",
@@ -159,7 +181,7 @@ impl Workflow {
                             )
                         })?;
                     Ok(StateAction::RunStage(
-                        default_pipeline,
+                        pipeline_key.as_str(),
                         stage_name,
                         stage_def,
                     ))
@@ -184,7 +206,7 @@ impl Workflow {
 
     fn resolve_signal(&self, task: &Task, signal: &Signal) -> anyhow::Result<StateAction<'_>> {
         let pipeline = pipeline_from_state(&task.state)
-            .unwrap_or_else(|| Pipeline::from(self.config.default_pipeline()));
+            .unwrap_or_else(|| self.config.default_pipeline());
         self.resolve_signal_in_pipeline(signal, &pipeline)
     }
 
@@ -363,7 +385,7 @@ role = "merger"
         assert!(wf.validate().is_ok());
 
         let setup = wf.stage("main", "setup").unwrap();
-        assert_eq!(setup.call_pipeline(), Some("init"));
+        assert_eq!(setup.call_pipeline().map(|p| p.as_str()), Some("init"));
         assert_eq!(setup.role_name(), None);
         assert!(setup.is_call());
 
@@ -422,7 +444,7 @@ role = "merger"
                 assert_eq!(pipeline, "main");
                 assert_eq!(stage, "call_sub");
                 assert!(def.is_call());
-                assert_eq!(def.call_pipeline(), Some("sub"));
+                assert_eq!(def.call_pipeline().map(|p| p.as_str()), Some("sub"));
             }
             other => panic!("expected RunStage, got {:?}", match other {
                 StateAction::Done => "Done",

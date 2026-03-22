@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
-use zbobr_api::{Signal, Stage};
+use zbobr_api::{Pipeline, Signal, Stage};
 use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig};
 use zbobr_executor_mcp_tester;
 use zbobr_dispatcher::task::Tool;
@@ -32,14 +32,14 @@ fn build_workflow_with_roles(
     stages: Vec<StageDef>,
     roles: HashMap<String, RoleDefinition>,
 ) -> WorkflowConfig {
-    let mut pipeline_stages: HashMap<String, IndexMap<Stage, StageDefinition>> = HashMap::new();
+    let mut pipeline_stages: HashMap<Pipeline, IndexMap<Stage, StageDefinition>> = HashMap::new();
 
     for s in stages {
         pipeline_stages
-            .entry(s.pipeline.to_string())
+            .entry(Pipeline::from(s.pipeline))
             .or_default()
             .insert(
-                Stage::from(s.name.clone()),
+                Stage::from(s.name),
                 StageDefinition {
                     role: Some(s.role.to_string()),
                     tool: Some(Tool::McpTester),
@@ -48,7 +48,7 @@ fn build_workflow_with_roles(
             );
     }
 
-    let mut pipelines: HashMap<String, PipelineConfig> = HashMap::new();
+    let mut pipelines: HashMap<Pipeline, PipelineConfig> = HashMap::new();
     for (pipeline_name, stages) in pipeline_stages {
         pipelines.insert(pipeline_name, PipelineConfig { stages });
     }
@@ -363,9 +363,9 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let mut pipelines = HashMap::new();
+    let mut pipelines: HashMap<Pipeline, PipelineConfig> = HashMap::new();
     pipelines.insert(
-        "main".to_string(),
+        Pipeline::Main,
         PipelineConfig {
             stages: IndexMap::from([
                 (
@@ -582,9 +582,9 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
     //   sub:   work (reports success)
     //   init:  preparing (required)
     //   merge: merging   (required)
-    let mut pipelines: HashMap<String, PipelineConfig> = HashMap::new();
+    let mut pipelines: HashMap<Pipeline, PipelineConfig> = HashMap::new();
     pipelines.insert(
-        "main".to_string(),
+        Pipeline::Main,
         PipelineConfig {
             stages: IndexMap::from([
                 (
@@ -606,7 +606,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
         },
     );
     pipelines.insert(
-        "sub".to_string(),
+        Pipeline::from("sub"),
         PipelineConfig {
             stages: IndexMap::from([(
                 "work".into(),
@@ -619,7 +619,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
         },
     );
     pipelines.insert(
-        "init".to_string(),
+        Pipeline::Init,
         PipelineConfig {
             stages: IndexMap::from([(
                 "preparing".into(),
@@ -632,7 +632,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
         },
     );
     pipelines.insert(
-        "merge".to_string(),
+        Pipeline::Merge,
         PipelineConfig {
             stages: IndexMap::from([(
                 "merging".into(),

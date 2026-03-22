@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use zbobr_api::config_tools::McpTool;
 use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig, WorkflowToml};
 use zbobr_api::task::{Model, Tool};
-use zbobr_api::Stage;
+use zbobr_api::{Pipeline, Stage};
 use zbobr_dispatcher::config::{ZbobrDispatcherToml, ZbobrExecutorToml};
 use zbobr_executor_claude::ZbobrExecutorClaudeToml;
 use zbobr_executor_copilot::ZbobrExecutorCopilotToml;
@@ -162,9 +162,9 @@ fn default_workflow() -> WorkflowConfig {
     ]);
 
     let mut pipelines = HashMap::new();
-    pipelines.insert(WorkflowConfig::MAIN_PIPELINE.to_string(), PipelineConfig { stages: main_stages });
-    pipelines.insert(WorkflowConfig::INIT_PIPELINE.to_string(), PipelineConfig { stages: init_stages });
-    pipelines.insert(WorkflowConfig::MERGE_PIPELINE.to_string(), PipelineConfig { stages: merge_stages });
+    pipelines.insert(Pipeline::Main, PipelineConfig { stages: main_stages });
+    pipelines.insert(Pipeline::Init, PipelineConfig { stages: init_stages });
+    pipelines.insert(Pipeline::Merge, PipelineConfig { stages: merge_stages });
 
     let roles = HashMap::from([
         (

@@ -384,7 +384,7 @@ impl PartialEq<String> for State {
 }
 
 /// A pipeline identifier: one of the three built-in pipelines or a custom one.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub enum Pipeline {
     /// The primary workflow pipeline (name: `"main"`).
     Main,
@@ -397,11 +397,15 @@ pub enum Pipeline {
 }
 
 impl Pipeline {
+    pub const MAIN: &'static str = "main";
+    pub const MERGE: &'static str = "merge";
+    pub const INIT: &'static str = "init";
+
     pub fn as_str(&self) -> &str {
         match self {
-            Pipeline::Main => "main",
-            Pipeline::Merge => "merge",
-            Pipeline::Init => "init",
+            Pipeline::Main => Self::MAIN,
+            Pipeline::Merge => Self::MERGE,
+            Pipeline::Init => Self::INIT,
             Pipeline::Custom(s) => s.as_str(),
         }
     }
@@ -417,11 +421,43 @@ impl std::str::FromStr for Pipeline {
     type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
-            "main" => Pipeline::Main,
-            "merge" => Pipeline::Merge,
-            "init" => Pipeline::Init,
+            Self::MAIN => Pipeline::Main,
+            Self::MERGE => Pipeline::Merge,
+            Self::INIT => Pipeline::Init,
             other => Pipeline::Custom(other.to_string()),
         })
+    }
+}
+
+impl std::borrow::Borrow<str> for Pipeline {
+    fn borrow(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl PartialEq for Pipeline {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl Eq for Pipeline {}
+
+impl std::hash::Hash for Pipeline {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::hash::Hash::hash(self.as_str(), state);
+    }
+}
+
+impl PartialOrd for Pipeline {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Pipeline {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_str().cmp(other.as_str())
     }
 }
 

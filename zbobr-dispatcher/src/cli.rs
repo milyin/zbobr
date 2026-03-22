@@ -508,7 +508,7 @@ async fn handle_call_stage(
     task_id: u64,
     pipeline_name: &str,
     stage_name: &str,
-    call_pipeline: &str,
+    call_pipeline: &Pipeline,
 ) -> anyhow::Result<()> {
     let task_session = zbobr.task_session(task_id);
 
@@ -532,7 +532,7 @@ async fn handle_call_stage(
         .push_stack(pipeline_name, return_signal.clone())
         .await?;
     task_session.allocate_pipeline_run_id().await?;
-    let call_signal = Signal::call(call_pipeline);
+    let call_signal = Signal::call(call_pipeline.clone());
     task_session
         .set_signal(Some(call_signal.clone()))
         .await?;
