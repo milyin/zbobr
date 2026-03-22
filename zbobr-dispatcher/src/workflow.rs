@@ -469,7 +469,7 @@ role = "merger"
         let mut wf = base_workflow();
         let main = wf.pipelines.get_mut("main").unwrap();
         main.stages.get_mut("working").unwrap().on_success =
-            Some(zbobr_api::Stage::new("nonexistent"));
+            Some(zbobr_api::StageTransition::stage("nonexistent"));
         let err = wf.validate().unwrap_err();
         assert!(
             err.to_string()
@@ -483,7 +483,7 @@ role = "merger"
         let mut wf = base_workflow();
         let main = wf.pipelines.get_mut("main").unwrap();
         main.stages.get_mut("working").unwrap().on_failure =
-            Some(zbobr_api::Stage::new("nonexistent"));
+            Some(zbobr_api::StageTransition::stage("nonexistent"));
         let err = wf.validate().unwrap_err();
         assert!(
             err.to_string()
@@ -496,7 +496,8 @@ role = "merger"
     fn on_success_self_reference_allowed() {
         let mut wf = base_workflow();
         let main = wf.pipelines.get_mut("main").unwrap();
-        main.stages.get_mut("working").unwrap().on_success = Some(zbobr_api::Stage::new("working"));
+        main.stages.get_mut("working").unwrap().on_success =
+            Some(zbobr_api::StageTransition::stage("working"));
         assert!(wf.validate().is_ok());
     }
 
@@ -518,11 +519,60 @@ role = "merger"
         assert!(wf.validate().is_ok());
 
         let working = wf.stage("main", "working").unwrap();
-        assert_eq!(working.on_failure().map(|s| s.as_str()), Some("planning"));
+        assert_eq!(
+            working
+                .on_failure()
+                .and_then(|t| t.next.as_ref())
+                .map(|s| s.as_str()),
+            Some("planning")
+        );
         assert!(working.on_success().is_none());
 
         let planning = wf.stage("main", "planning").unwrap();
-        assert_eq!(planning.on_success().map(|s| s.as_str()), Some("working"));
+        assert_eq!(
+            planning
+                .on_success()
+                .and_then(|t| t.next.as_ref())
+                .map(|s| s.as_str()),
+            Some("working")
+        );
         assert!(planning.on_failure().is_none());
+    }
+
+    #[test]
+    fn on_success_structured_with_pause_toml_round_trip() {
+        let toml_str = r#"
+[pipelines.main.stages.working]
+role = "worker"
+on_success = { pause = true }
+
+[pipelines.main.stages.reviewing]
+role = "reviewer"
+on_success = { next = "working", pause = true }
+
+[pipelines.merge.stages.merging]
+role = "merger"
+"#;
+        let wf: WorkflowConfig = toml::from_str(toml_str).unwrap();
+        assert!(wf.validate().is_ok());
+
+        let working = wf.stage("main", "working").unwrap();
+        let t = working.on_success().unwrap();
+        assert!(t.next.is_none());
+        assert!(t.pause);
+
+        let reviewing = wf.stage("main", "reviewing").unwrap();
+        let t = reviewing.on_success().unwrap();
+        assert_eq!(t.next.as_ref().map(|s| s.as_str()), Some("working"));
+        assert!(t.pause);
+    }
+
+    #[test]
+    fn on_success_pause_only_passes_validation() {
+        let mut wf = base_workflow();
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.stages.get_mut("working").unwrap().on_success =
+            Some(zbobr_api::StageTransition::pause());
+        assert!(wf.validate().is_ok());
     }
 }

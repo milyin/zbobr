@@ -466,6 +466,8 @@ enum SequentialSignal {
     Return,
     /// No report tool called (crash/timeout/stop_with_error) → pause.
     Pause,
+    /// Stage-configured pause → set pause flag, emit given signal on resume.
+    PauseThenSignal(Signal),
 }
 
 /// Compute the post-execution signal for the sequential pipeline model.
@@ -478,21 +480,47 @@ fn compute_sequential_signal(
 ) -> SequentialSignal {
     match last_mapped_tool {
         Some("report_failure") => {
-            if let Some(target) = stage_def.and_then(|s| s.on_failure()) {
-                SequentialSignal::Advance(target.to_string())
+            let transition = stage_def.and_then(|s| s.on_failure());
+            let target = transition.and_then(|t| t.next.as_ref());
+            let should_pause = transition.map_or(false, |t| t.pause);
+
+            let signal = if let Some(target) = target {
+                Signal::go(target.as_str())
+            } else {
+                Signal::ReturnFailure
+            };
+
+            if should_pause {
+                SequentialSignal::PauseThenSignal(signal)
+            } else if target.is_some() {
+                SequentialSignal::Advance(target.unwrap().to_string())
             } else {
                 SequentialSignal::ReturnFailure
             }
         }
         Some("report_success") => {
-            if let Some(target) = stage_def.and_then(|s| s.on_success()) {
-                SequentialSignal::Advance(target.to_string())
+            let transition = stage_def.and_then(|s| s.on_success());
+            let explicit_target = transition.and_then(|t| t.next.as_ref());
+            let should_pause = transition.map_or(false, |t| t.pause);
+
+            let advance_target = if let Some(target) = explicit_target {
+                Some(target.to_string())
             } else {
-                match workflow
+                workflow
                     .pipeline(pipeline_name)
                     .and_then(|p| p.next_stage(stage_name))
-                {
-                    Some((next, _)) => SequentialSignal::Advance(next.to_string()),
+                    .map(|(next, _)| next.to_string())
+            };
+
+            if should_pause {
+                let signal = match advance_target {
+                    Some(next) => Signal::go(next),
+                    None => Signal::Return,
+                };
+                SequentialSignal::PauseThenSignal(signal)
+            } else {
+                match advance_target {
+                    Some(next) => SequentialSignal::Advance(next),
                     None => SequentialSignal::Return,
                 }
             }
@@ -530,7 +558,10 @@ async fn handle_call_stage(
 
     // Determine what signal to emit when the called pipeline returns.
     let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
-    let return_signal = if let Some(target) = stage_def.and_then(|s| s.on_success()) {
+    let return_signal = if let Some(target) = stage_def
+        .and_then(|s| s.on_success())
+        .and_then(|t| t.next.as_ref())
+    {
         Signal::go(target.as_str())
     } else {
         match zbobr
@@ -1500,6 +1531,15 @@ async fn finalize_stage_session(
                     .modify_task(move |mut t| {
                         t.pause = true;
                         t.signal = Some(Signal::go(stage));
+                        t
+                    })
+                    .await?;
+            }
+            SequentialSignal::PauseThenSignal(signal) => {
+                task_session
+                    .modify_task(move |mut t| {
+                        t.pause = true;
+                        t.signal = Some(signal);
                         t
                     })
                     .await?;

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 use zbobr_api::{
-    Pipeline, Signal, Stage,
+    Pipeline, Signal, Stage, StageTransition,
     config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig},
 };
 use zbobr_dispatcher::{backend::TaskBackendExt, task::Tool};
@@ -23,6 +23,20 @@ struct StageDef {
     name: &'static str,
     role: &'static str,
     pipeline: &'static str,
+    on_success: Option<StageTransition>,
+    on_failure: Option<StageTransition>,
+}
+
+impl StageDef {
+    fn new(name: &'static str, role: &'static str, pipeline: &'static str) -> Self {
+        Self {
+            name,
+            role,
+            pipeline,
+            on_success: None,
+            on_failure: None,
+        }
+    }
 }
 
 /// Build a WorkflowConfig from a list of stage definitions.
@@ -44,6 +58,8 @@ fn build_workflow_with_roles(
                 StageDefinition {
                     role: Some(s.role.to_string()),
                     tool: Some(Tool::McpTester),
+                    on_success: s.on_success,
+                    on_failure: s.on_failure,
                     ..Default::default()
                 },
             );
@@ -108,11 +124,7 @@ pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let workflow = build_workflow(vec![StageDef {
-        name: "alpha",
-        role: "alpha",
-        pipeline: "main",
-    }]);
+    let workflow = build_workflow(vec![StageDef::new("alpha", "alpha", "main")]);
 
     let scenarios = scenarios_map(vec![(
         "alpha",
@@ -142,16 +154,8 @@ pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
         .await;
 
     let workflow = build_workflow(vec![
-        StageDef {
-            name: "first",
-            role: "role_a",
-            pipeline: "main",
-        },
-        StageDef {
-            name: "second",
-            role: "role_b",
-            pipeline: "main",
-        },
+        StageDef::new("first", "role_a", "main"),
+        StageDef::new("second", "role_b", "main"),
     ]);
 
     let scenarios = scenarios_map(vec![
@@ -219,16 +223,8 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
         .await;
 
     let workflow = build_workflow(vec![
-        StageDef {
-            name: "work",
-            role: "role_work",
-            pipeline: "main",
-        },
-        StageDef {
-            name: "resolve",
-            role: "role_resolve",
-            pipeline: "merge",
-        },
+        StageDef::new("work", "role_work", "main"),
+        StageDef::new("resolve", "role_resolve", "merge"),
     ]);
 
     let scenarios = scenarios_map(vec![
@@ -294,11 +290,7 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let workflow = build_workflow(vec![StageDef {
-        name: "work",
-        role: "role_err",
-        pipeline: "main",
-    }]);
+    let workflow = build_workflow(vec![StageDef::new("work", "role_err", "main")]);
 
     let scenarios = scenarios_map(vec![(
         "role_err",
@@ -339,11 +331,7 @@ pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let workflow = build_workflow(vec![StageDef {
-        name: "start",
-        role: "role_start",
-        pipeline: "main",
-    }]);
+    let workflow = build_workflow(vec![StageDef::new("start", "role_start", "main")]);
 
     let scenarios = scenarios_map(vec![(
         "role_start",
@@ -450,11 +438,7 @@ pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let workflow = build_workflow(vec![StageDef {
-        name: "work",
-        role: "role_ask",
-        pipeline: "main",
-    }]);
+    let workflow = build_workflow(vec![StageDef::new("work", "role_ask", "main")]);
 
     let scenarios = scenarios_map(vec![(
         "role_ask",
@@ -485,11 +469,7 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
 
     // Stage has no prompt files, so no {work_branch}/{destination_branch} placeholders.
     // With undefined identity the stage should run normally using task_dir.
-    let workflow = build_workflow(vec![StageDef {
-        name: "working",
-        role: "role_work",
-        pipeline: "main",
-    }]);
+    let workflow = build_workflow(vec![StageDef::new("working", "role_work", "main")]);
 
     let scenarios = scenarios_map(vec![(
         "role_work",
@@ -641,11 +621,7 @@ pub async fn run_pause_state_conversion(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let workflow = build_workflow(vec![StageDef {
-        name: "work",
-        role: "role_err",
-        pipeline: "main",
-    }]);
+    let workflow = build_workflow(vec![StageDef::new("work", "role_err", "main")]);
 
     let scenarios = scenarios_map(vec![(
         "role_err",
@@ -694,11 +670,7 @@ pub async fn run_pause_resume_cycle(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let workflow = build_workflow(vec![StageDef {
-        name: "work",
-        role: "role_work",
-        pipeline: "main",
-    }]);
+    let workflow = build_workflow(vec![StageDef::new("work", "role_work", "main")]);
 
     // Step 1: run stage with stop_with_error → pause
     let err_scenarios = scenarios_map(vec![(
@@ -769,11 +741,7 @@ pub async fn run_ready_fresh_start(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    let workflow = build_workflow(vec![StageDef {
-        name: "start",
-        role: "role_start",
-        pipeline: "main",
-    }]);
+    let workflow = build_workflow(vec![StageDef::new("start", "role_start", "main")]);
 
     let scenarios = scenarios_map(vec![(
         "role_start",
@@ -789,5 +757,88 @@ pub async fn run_ready_fresh_start(env: &IntegrationTestEnv) {
     assert_eq!(
         task.state, "DONE",
         "READY with empty stack should start fresh and complete"
+    );
+}
+
+// ===========================================================================
+// Test 16: Stage with on_success.pause pauses after success, then advances
+// ===========================================================================
+
+pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_stage_pause").await;
+    let task_id = env
+        .create_task("Stage pause test", "Stage pause test description", "READY")
+        .await;
+    let work_branch = format!("zbobr_fix-{task_id}-stage-pause");
+    let dest_repo = env.dest_repo(&repo_path);
+    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+        .await;
+
+    // Two stages: stage_a has on_success = { pause = true }, stage_b is normal
+    let workflow = build_workflow(vec![
+        StageDef {
+            on_success: Some(StageTransition::pause()),
+            ..StageDef::new("stage_a", "role_a", "main")
+        },
+        StageDef::new("stage_b", "role_b", "main"),
+    ]);
+
+    let scenarios = scenarios_map(vec![
+        ("role_a", abstract_scenarios::report_and_finish_scenario()),
+        ("role_b", abstract_scenarios::report_and_finish_scenario()),
+    ]);
+
+    // Step 1: Run pipeline — stage_a succeeds but on_success has pause: true
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
+
+    let task = env.get_task(task_id).await;
+    assert!(
+        task.pause,
+        "Stage with on_success.pause should set pause flag after report_success"
+    );
+    assert_eq!(
+        task.signal,
+        Some(Signal::go("stage_b")),
+        "Pause signal should point to NEXT stage, not current"
+    );
+    assert_eq!(task.state, "main_PENDING");
+
+    // Step 2: Convert pause to PAUSE state
+    env.continue_pipeline(task_id, &workflow, &scenarios).await;
+
+    let task = env.get_task(task_id).await;
+    assert_eq!(task.state, "PAUSE");
+    assert!(!task.pause, "Pause flag should be cleared");
+    assert!(task.signal.is_none(), "Signal should be cleared");
+    assert_eq!(task.stack.len(), 1, "Stack should have one entry");
+    assert_eq!(
+        task.stack[0].signal,
+        Signal::go("stage_b"),
+        "Stack should save signal to advance to next stage"
+    );
+
+    // Step 3: User unpauses by setting state to READY
+    env.zbobr
+        .task_backend()
+        .set_task_state(task_id, zbobr_api::State::Ready)
+        .await
+        .unwrap();
+
+    let task = env.get_task(task_id).await;
+    assert_eq!(task.state, "READY");
+    assert_eq!(task.stack.len(), 1);
+
+    // Step 4: Resume and run to completion (stage_b runs, then DONE)
+    env.run_to_completion(task_id, &workflow, &scenarios, 5)
+        .await;
+
+    let task = env.get_task(task_id).await;
+    assert_eq!(
+        task.state, "DONE",
+        "Task should complete after pause/resume with stage advance"
+    );
+    assert!(
+        task.stack.is_empty(),
+        "Stack should be empty after completion"
     );
 }

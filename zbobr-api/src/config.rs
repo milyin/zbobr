@@ -23,6 +23,63 @@ pub struct RoleDefinition {
     pub prompt: Option<PathBuf>,
 }
 
+/// A stage transition descriptor with an optional target stage and pause flag.
+///
+/// Accepts two TOML forms:
+/// - String shorthand: `on_success = "stage_b"` → `{ next: Some("stage_b"), pause: false }`
+/// - Full table: `on_success = { next = "stage_b", pause = true }`
+///
+/// Both `next` and `pause` are optional (defaults: `None` and `false`).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct StageTransition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<Stage>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pause: bool,
+}
+
+impl StageTransition {
+    pub fn stage(next: impl Into<Stage>) -> Self {
+        Self {
+            next: Some(next.into()),
+            pause: false,
+        }
+    }
+
+    pub fn pause() -> Self {
+        Self {
+            next: None,
+            pause: true,
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for StageTransition {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Helper {
+            Stage(Stage),
+            Full {
+                #[serde(default)]
+                next: Option<Stage>,
+                #[serde(default)]
+                pause: bool,
+            },
+        }
+        match Helper::deserialize(deserializer)? {
+            Helper::Stage(s) => Ok(StageTransition {
+                next: Some(s),
+                pause: false,
+            }),
+            Helper::Full { next, pause } => Ok(StageTransition { next, pause }),
+        }
+    }
+}
+
 /// A single stage in the configurable pipeline.
 ///
 /// The stage's name and pipeline are derived from its structural position
@@ -45,9 +102,9 @@ pub struct StageDefinition {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub additional_prompts: Vec<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub on_success: Option<Stage>,
+    pub on_success: Option<StageTransition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub on_failure: Option<Stage>,
+    pub on_failure: Option<StageTransition>,
 }
 
 impl StageDefinition {
@@ -63,11 +120,11 @@ impl StageDefinition {
         self.call.is_some()
     }
 
-    pub fn on_success(&self) -> Option<&Stage> {
+    pub fn on_success(&self) -> Option<&StageTransition> {
         self.on_success.as_ref()
     }
 
-    pub fn on_failure(&self) -> Option<&Stage> {
+    pub fn on_failure(&self) -> Option<&StageTransition> {
         self.on_failure.as_ref()
     }
 }
@@ -144,7 +201,7 @@ impl PipelineConfig {
                 ),
                 _ => {}
             }
-            if let Some(ref target) = stage.on_success {
+            if let Some(ref target) = stage.on_success.as_ref().and_then(|t| t.next.as_ref()) {
                 if !self.stages.contains_key(target.as_str()) {
                     anyhow::bail!(
                         "Pipeline '{}' stage '{}' on_success references unknown stage '{}'",
@@ -154,7 +211,7 @@ impl PipelineConfig {
                     );
                 }
             }
-            if let Some(ref target) = stage.on_failure {
+            if let Some(ref target) = stage.on_failure.as_ref().and_then(|t| t.next.as_ref()) {
                 if !self.stages.contains_key(target.as_str()) {
                     anyhow::bail!(
                         "Pipeline '{}' stage '{}' on_failure references unknown stage '{}'",
