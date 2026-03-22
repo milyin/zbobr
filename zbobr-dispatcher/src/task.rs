@@ -665,9 +665,7 @@ mod comment_model_tests {
 
         async fn upgrade(&self) -> anyhow::Result<Box<dyn TaskMut>> {
             let lock = self.backend.task_lock(self.id).await;
-            let guard = lock
-                .try_lock_owned()
-                .map_err(|_| anyhow::anyhow!("locked"))?;
+            let guard = lock.lock_owned().await;
             Ok(Box::new(TrackingMut {
                 id: self.id,
                 backend: self.backend.clone(),

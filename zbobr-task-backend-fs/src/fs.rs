@@ -361,12 +361,7 @@ impl TaskWeak for FsTaskWeak {
 
     async fn upgrade(&self) -> anyhow::Result<Box<dyn TaskMut>> {
         let lock = self.backend.task_lock(self.id).await;
-        let guard = lock.try_lock_owned().map_err(|_| {
-            anyhow::anyhow!(
-                "Task {} is already exclusively locked by another TaskMut",
-                self.id
-            )
-        })?;
+        let guard = lock.lock_owned().await;
         Ok(Box::new(FsTaskMut {
             id: self.id,
             backend: self.backend.clone(),

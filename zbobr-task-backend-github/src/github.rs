@@ -1029,9 +1029,7 @@ impl TaskWeak for GithubTaskWeak {
 
     async fn upgrade(&self) -> anyhow::Result<Box<dyn TaskMut>> {
         let lock = self.backend.task_lock(self.id);
-        let guard = lock
-            .try_lock_owned()
-            .map_err(|_| anyhow::anyhow!("Task {} is already exclusively locked", self.id))?;
+        let guard = lock.lock_owned().await;
         Ok(Box::new(GithubTaskMut {
             id: self.id,
             backend: self.backend.clone(),
