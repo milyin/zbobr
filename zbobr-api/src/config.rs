@@ -93,7 +93,7 @@ impl Default for StageDefinition {
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct PipelineConfig {
     #[serde(default)]
-    pub stages: IndexMap<String, StageDefinition>,
+    pub stages: IndexMap<Stage, StageDefinition>,
 }
 
 impl PipelineConfig {

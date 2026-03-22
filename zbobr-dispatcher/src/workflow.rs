@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use zbobr_api::config::{
     PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig,
 };
-use zbobr_api::{Pipeline, Signal, State, Task};
+use zbobr_api::{Pipeline, Signal, Stage, State, Task};
 
 // Re-export constants for convenience.
 pub const MAIN_PIPELINE: &str = WorkflowConfig::MAIN_PIPELINE;
@@ -43,7 +43,7 @@ impl Default for Workflow {
                 name.to_string(),
                 PipelineConfig {
                     stages: IndexMap::from([(
-                        "default".to_string(),
+                        Stage::from("default"),
                         dummy_stage.clone(),
                     )]),
                 },
@@ -256,7 +256,7 @@ mod tests {
             ..Default::default()
         };
         let single_pipeline = |stage_name: &str, role: &str| PipelineConfig {
-            stages: IndexMap::from([(stage_name.to_string(), role_stage(role))]),
+            stages: IndexMap::from([(Stage::from(stage_name), role_stage(role))]),
         };
         WorkflowConfig {
             pipelines: [

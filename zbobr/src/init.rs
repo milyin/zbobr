@@ -6,6 +6,7 @@ use indexmap::IndexMap;
 use zbobr_api::config_tools::McpTool;
 use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig, WorkflowToml};
 use zbobr_api::task::{Model, Tool};
+use zbobr_api::Stage;
 use zbobr_dispatcher::config::{ZbobrDispatcherToml, ZbobrExecutorToml};
 use zbobr_executor_claude::ZbobrExecutorClaudeToml;
 use zbobr_executor_copilot::ZbobrExecutorCopilotToml;
@@ -122,22 +123,22 @@ fn default_workflow() -> WorkflowConfig {
     let task_prompt = vec![PathBuf::from("task.md")];
 
     let main_stages = IndexMap::from([
-        ("planning".to_string(), StageDefinition {
+        (Stage::from("planning"), StageDefinition {
             role: Some("planner".into()),
             additional_prompts: task_prompt.clone(),
             ..Default::default()
         }),
-        ("working".to_string(), StageDefinition {
+        (Stage::from("working"), StageDefinition {
             role: Some("worker".into()),
             additional_prompts: task_prompt.clone(),
             ..Default::default()
         }),
-        ("reviewing".to_string(), StageDefinition {
+        (Stage::from("reviewing"), StageDefinition {
             role: Some("reviewer".into()),
             additional_prompts: task_prompt.clone(),
             ..Default::default()
         }),
-        ("merging".to_string(), StageDefinition {
+        (Stage::from("merging"), StageDefinition {
             role: Some("merger".into()),
             additional_prompts: task_prompt.clone(),
             ..Default::default()
@@ -145,7 +146,7 @@ fn default_workflow() -> WorkflowConfig {
     ]);
 
     let init_stages = IndexMap::from([
-        ("preparing".to_string(), StageDefinition {
+        (Stage::from("preparing"), StageDefinition {
             role: Some("preparator".into()),
             additional_prompts: task_prompt.clone(),
             ..Default::default()
@@ -153,7 +154,7 @@ fn default_workflow() -> WorkflowConfig {
     ]);
 
     let merge_stages = IndexMap::from([
-        ("merging".to_string(), StageDefinition {
+        (Stage::from("merging"), StageDefinition {
             role: Some("merger".into()),
             additional_prompts: task_prompt,
             ..Default::default()

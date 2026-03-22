@@ -158,6 +158,12 @@ impl std::ops::Deref for Stage {
     }
 }
 
+impl std::borrow::Borrow<str> for Stage {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
 impl From<&str> for Stage {
     fn from(s: &str) -> Self {
         Stage(s.to_string())

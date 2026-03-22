@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
-use zbobr_api::Signal;
+use zbobr_api::{Signal, Stage};
 use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig};
 use zbobr_executor_mcp_tester;
 use zbobr_dispatcher::task::Tool;
@@ -32,14 +32,14 @@ fn build_workflow_with_roles(
     stages: Vec<StageDef>,
     roles: HashMap<String, RoleDefinition>,
 ) -> WorkflowConfig {
-    let mut pipeline_stages: HashMap<String, IndexMap<String, StageDefinition>> = HashMap::new();
+    let mut pipeline_stages: HashMap<String, IndexMap<Stage, StageDefinition>> = HashMap::new();
 
     for s in stages {
         pipeline_stages
             .entry(s.pipeline.to_string())
             .or_default()
             .insert(
-                s.name.to_string(),
+                Stage::from(s.name.clone()),
                 StageDefinition {
                     role: Some(s.role.to_string()),
                     tool: Some(Tool::McpTester),
@@ -369,7 +369,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
         PipelineConfig {
             stages: IndexMap::from([
                 (
-                    "check".to_string(),
+                    Stage::from("check"),
                     StageDefinition {
                         role: Some("role_check".to_string()),
                         tool: Some(Tool::McpTester),
@@ -377,7 +377,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
                     },
                 ),
                 (
-                    "finish".to_string(),
+                    Stage::from("finish"),
                     StageDefinition {
                         role: Some("role_finish".to_string()),
                         tool: Some(Tool::McpTester),
