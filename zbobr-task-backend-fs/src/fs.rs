@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use zbobr_api::{
-    ChecklistItem, Comment, Model, Signal, StackEntry, Task, Tool,
+    ChecklistItem, Comment, HistoryRecordType, Model, Signal, StackEntry, Task, Tool,
     backend::{TaskBackend, TaskMut, TaskWeak},
+    classify_comment,
 };
 
 use crate::config::ZbobrTaskBackendFsConfig;
@@ -422,10 +423,6 @@ impl TaskMut for FsTaskMut {
         Ok(())
     }
 
-    async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String> {
-        self.backend.store_report(self.id, base_name, content).await
-    }
-
     async fn post_comment(
         &self,
         stage: &str,
@@ -437,7 +434,20 @@ impl TaskMut for FsTaskMut {
         pipeline_run_id: u64,
         caller_pipeline: Option<&str>,
         caller_pipeline_run_id: Option<u64>,
+        report_text: Option<&str>,
     ) -> anyhow::Result<()> {
+        let report_name = if let Some(text) = report_text {
+            let tag = match classify_comment(body) {
+                HistoryRecordType::Success => "success",
+                HistoryRecordType::Failure => "failure",
+                _ => "report",
+            };
+            let base_name = format!("report_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
+            Some(self.backend.store_report(self.id, &base_name, text).await?)
+        } else {
+            None
+        };
+
         let mut comments = self.backend.read_comments_structured(self.id).await?;
 
         let new_comment = Comment {
@@ -451,6 +461,7 @@ impl TaskMut for FsTaskMut {
             pipeline_run_id,
             caller_pipeline: caller_pipeline.map(str::to_string),
             caller_pipeline_run_id,
+            report_name,
         };
 
         comments.push(new_comment);

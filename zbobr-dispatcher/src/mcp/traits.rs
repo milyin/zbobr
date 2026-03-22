@@ -140,7 +140,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
     // -- Report tools --
 
-    async fn report_impl(&self, tool_name: &str, tag: &str, brief: &str, full_report: &str) -> String {
+    async fn report_impl(&self, tool_name: &str, brief: &str, full_report: &str) -> String {
         tracing::info!(
             "[{}#{}] {}",
             self.role_name(),
@@ -148,39 +148,12 @@ pub trait CommonMcpImpl: Send + Sync {
             tool_name,
         );
 
-        // Store the full report as a file via the task backend.
-        let base_name = format!(
-            "report_{}_{}_{}_{}",
-            self.pipeline_name(),
-            self.pipeline_run_id(),
-            self.stage_name(),
-            tag,
-        );
-
-        let report_filename = match self.session().store_report(&base_name, full_report).await {
-            Ok(name) => name,
-            Err(e) => {
-                tracing::error!(
-                    "Failed to store report file for task {}: {e}",
-                    self.session().task_id()
-                );
-                let response = format!("Error storing report file: {e}");
-                log_mcp_string_response(
-                    self.role_name(),
-                    self.session().task_id(),
-                    tool_name,
-                    &response,
-                );
-                return response;
-            }
-        };
-
         let hostname = get_hostname();
-        let body = format!("[{tool_name}]\n{brief}\nfull_report: {report_filename}");
+        let body = format!("[{tool_name}]\n{brief}");
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()))
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), Some(full_report))
             .await
         {
             tracing::error!(
@@ -199,7 +172,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         self.record_tool(tool_name);
 
-        let response = format!("Report stored as {report_filename}");
+        let response = "Report stored".to_string();
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
@@ -210,11 +183,11 @@ pub trait CommonMcpImpl: Send + Sync {
     }
 
     async fn report_success_impl(&self, brief: &str, full_report: &str) -> String {
-        self.report_impl("report_success", "success", brief, full_report).await
+        self.report_impl("report_success", brief, full_report).await
     }
 
     async fn report_failure_impl(&self, brief: &str, full_report: &str) -> String {
-        self.report_impl("report_failure", "failure", brief, full_report).await
+        self.report_impl("report_failure", brief, full_report).await
     }
 
     async fn get_full_report_impl(&self, name: &str) -> String {
@@ -249,7 +222,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()))
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), None)
             .await
         {
             tracing::error!(
@@ -303,7 +276,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         if let Err(e) = self
             .session()
-            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()))
+            .post_comment(&body, self.stage_name(), &hostname, Some(self.mcp_tool()), Some(self.mcp_model()), None)
             .await
         {
             tracing::error!(

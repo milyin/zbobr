@@ -715,6 +715,7 @@ impl ZbobrTaskBackendGithubImpl {
                     pipeline_run_id: tag.pipeline_run_id,
                     caller_pipeline: tag.caller_pipeline,
                     caller_pipeline_run_id: tag.caller_pipeline_run_id,
+                    report_name: None,
                 }
             })
             .collect())
@@ -830,10 +831,6 @@ impl TaskMut for GithubTaskMut {
         self.backend.close_task_internal(self.id).await
     }
 
-    async fn store_report(&self, _base_name: &str, _content: &str) -> anyhow::Result<String> {
-        anyhow::bail!("store_report not yet implemented for GitHub backend")
-    }
-
     async fn post_comment(
         &self,
         stage: &str,
@@ -845,6 +842,7 @@ impl TaskMut for GithubTaskMut {
         pipeline_run_id: u64,
         caller_pipeline: Option<&str>,
         caller_pipeline_run_id: Option<u64>,
+        _report_text: Option<&str>,
     ) -> anyhow::Result<()> {
         self.backend
             .post_task_comment_internal(

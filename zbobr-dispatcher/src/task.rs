@@ -264,6 +264,7 @@ impl RoleSession {
         hostname: &str,
         tool: Option<Tool>,
         model: Option<Model>,
+        report_text: Option<&str>,
     ) -> anyhow::Result<()> {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
@@ -278,6 +279,7 @@ impl RoleSession {
                 self.pipeline_run_id,
                 None,
                 None,
+                report_text,
             )
             .await
     }
@@ -358,13 +360,6 @@ impl RoleSession {
             task
         })
         .await
-    }
-
-    /// Store a report file via the task backend.
-    pub async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String> {
-        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
-        let mutable = weak.upgrade().await?;
-        mutable.store_report(base_name, content).await
     }
 
     /// Read a report file via the task backend.
@@ -602,6 +597,7 @@ impl TaskSession {
                 pipeline_run_id,
                 caller_pipeline,
                 caller_pipeline_run_id,
+                None,
             )
             .await
     }
@@ -731,24 +727,6 @@ mod comment_model_tests {
             Ok(())
         }
 
-        async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String> {
-            let mut reports = self.backend.reports.lock().await;
-            let mut n = 0u32;
-            let filename = loop {
-                let candidate = if n == 0 {
-                    format!("{base_name}.md")
-                } else {
-                    format!("{base_name}_{n}.md")
-                };
-                if !reports.contains_key(&(self.id, candidate.clone())) {
-                    break candidate;
-                }
-                n += 1;
-            };
-            reports.insert((self.id, filename.clone()), content.to_string());
-            Ok(filename)
-        }
-
         async fn post_comment(
             &self,
             stage: &str,
@@ -760,7 +738,34 @@ mod comment_model_tests {
             pipeline_run_id: u64,
             caller_pipeline: Option<&str>,
             caller_pipeline_run_id: Option<u64>,
+            report_text: Option<&str>,
         ) -> anyhow::Result<()> {
+            let report_name = if let Some(text) = report_text {
+                let tag = match classify_comment(body) {
+                    HistoryRecordType::Success => "success",
+                    HistoryRecordType::Failure => "failure",
+                    _ => "report",
+                };
+                let base_name = format!("report_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
+                let mut reports = self.backend.reports.lock().await;
+                let mut n = 0u32;
+                let filename = loop {
+                    let candidate = if n == 0 {
+                        format!("{base_name}.md")
+                    } else {
+                        format!("{base_name}_{n}.md")
+                    };
+                    if !reports.contains_key(&(self.id, candidate.clone())) {
+                        break candidate;
+                    }
+                    n += 1;
+                };
+                reports.insert((self.id, filename.clone()), text.to_string());
+                Some(filename)
+            } else {
+                None
+            };
+
             let mut comments = self.backend.comments.lock().await;
             comments.entry(self.id).or_default().push(Comment {
                 timestamp: String::new(),
@@ -773,6 +778,7 @@ mod comment_model_tests {
                 pipeline_run_id,
                 caller_pipeline: caller_pipeline.map(str::to_string),
                 caller_pipeline_run_id,
+                report_name,
             });
             Ok(())
         }
@@ -1059,9 +1065,9 @@ mod comment_model_tests {
         let backend_comments = weak.get_comments().await.unwrap();
         assert_eq!(backend_comments.len(), 2, "each comment must be posted separately");
         assert!(backend_comments[0].text.starts_with("[report_success]"));
-        assert!(backend_comments[0].text.contains("full_report:"));
+        assert_eq!(backend_comments[0].report_name.as_deref(), Some("report_main_1_working_success.md"));
         assert!(backend_comments[1].text.starts_with("[report_failure]"));
-        assert!(backend_comments[1].text.contains("full_report:"));
+        assert_eq!(backend_comments[1].report_name.as_deref(), Some("report_main_1_working_failure.md"));
 
         // Verify reports were stored and are readable
         let success_report = weak.read_report("report_main_1_working_success.md").await.unwrap();

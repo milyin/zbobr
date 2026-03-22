@@ -116,11 +116,10 @@ pub trait TaskMut: Send + Sync {
         .await
     }
 
-    /// Store a report file. If `base_name` already exists, appends `_N` suffix.
-    /// Returns the actual filename used (e.g., `report_main_1_working_success.md`).
-    async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String>;
-
     /// Post a structured comment (requires exclusive access).
+    /// If `report_text` is provided, stores it as a report file and sets `report_name`
+    /// on the comment. The filename is generated from the comment's pipeline, run id,
+    /// stage, and outcome (derived from the body's `[tool_name]` tag).
     async fn post_comment(
         &self,
         stage: &str,
@@ -132,6 +131,7 @@ pub trait TaskMut: Send + Sync {
         pipeline_run_id: u64,
         caller_pipeline: Option<&str>,
         caller_pipeline_run_id: Option<u64>,
+        report_text: Option<&str>,
     ) -> anyhow::Result<()>;
 
     /// Release exclusive access, return read-only handle.

@@ -326,6 +326,7 @@ mod tests {
             pipeline_run_id: 0,
             caller_pipeline: None,
             caller_pipeline_run_id: None,
+            report_name: None,
         }
     }
 

@@ -81,6 +81,9 @@ pub struct Comment {
     #[schemars(description = "Optional caller pipeline run id for linked final pipeline reports")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caller_pipeline_run_id: Option<u64>,
+    #[schemars(description = "Optional full report filename stored via task backend")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_name: Option<String>,
 }
 
 // -- History helper types --
@@ -832,6 +835,7 @@ mod tests {
             pipeline_run_id: run_id,
             caller_pipeline: None,
             caller_pipeline_run_id: None,
+            report_name: None,
         }
     }
 
@@ -847,6 +851,7 @@ mod tests {
             pipeline_run_id: run_id,
             caller_pipeline: Some("main".into()),
             caller_pipeline_run_id: Some(caller_run_id),
+            report_name: None,
         }
     }
 
