@@ -218,7 +218,7 @@ async fn run_task_subcommand(
             let weak_tasks = task_backend.list_tasks().await?;
             let mut tasks = Vec::new();
             for w in &weak_tasks {
-                let task = w.snapshot().await?;
+                let task = w.snapshot(false).await?;
                 if let Some(ref filter) = state_filter {
                     if task.state != *filter {
                         continue;
@@ -239,7 +239,7 @@ async fn run_task_subcommand(
         }
         TaskSubcommand::Show { id } => {
             let weak = task_backend.get_task(id).await?;
-            let task = weak.snapshot().await?;
+            let task = weak.snapshot(false).await?;
             let discussion = weak.get_comments().await?;
             print_task(&task, &discussion);
         }
@@ -307,7 +307,7 @@ async fn run_task_subcommand(
             executor_mcp_tester_testing,
             executor_mcp_tester_merging,
         } => {
-            let task_obj = task_backend.get_task(task).await?.snapshot().await?;
+            let task_obj = task_backend.get_task(task).await?.snapshot(false).await?;
             let mcp_tester_config_override = if executor_mcp_tester_preparation.is_some()
                 || executor_mcp_tester_planning.is_some()
                 || executor_mcp_tester_working.is_some()
@@ -345,7 +345,7 @@ async fn overwrite_author(
 ) -> anyhow::Result<()> {
     let task_backend = zbobr.task_backend();
     let repo_backend = zbobr.repo_backend();
-    let task = task_backend.get_task(id).await?.snapshot().await?;
+    let task = task_backend.get_task(id).await?.snapshot(false).await?;
     let identity = task
         .identity()
         .ok_or_else(|| anyhow::anyhow!("Task #{} missing routing parameters", id))?;

@@ -225,7 +225,7 @@ pub async fn build_full_prompt(
     workflow: &WorkflowConfig,
 ) -> anyhow::Result<String> {
     let weak = task_backend.get_task(task_id).await?;
-    let task = weak.snapshot().await?;
+    let task = weak.snapshot(false).await?;
     let comments = weak.get_comments().await?;
     let mut vars = build_template_variables(&task, &comments);
 

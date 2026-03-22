@@ -253,7 +253,7 @@ impl IntegrationTestEnv {
             .get_task(task_id)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", self.name))
-            .snapshot()
+            .snapshot(false)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to snapshot task #{task_id}: {e}", self.name))
     }

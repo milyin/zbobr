@@ -81,7 +81,7 @@ impl RoleSession {
     /// Read the full task state.
     pub async fn get_task(&self) -> anyhow::Result<Task> {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
-        weak.snapshot().await
+        weak.snapshot(false).await
     }
 
     /// Get the current task description.
@@ -93,7 +93,7 @@ impl RoleSession {
     pub async fn get_history_for_run(&self, target_run_id: u64) -> anyhow::Result<String> {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let comments = weak.get_comments().await?;
-        let task = weak.snapshot().await?;
+        let task = weak.snapshot(false).await?;
         let filtered = zbobr_api::filter_comments_for_run(&comments, target_run_id);
         let mut parts = vec![format!("[task]\n{}", task.description)];
         for comment in filtered {
@@ -411,7 +411,7 @@ impl TaskSession {
     /// Read the full task state.
     pub async fn get_task(&self) -> anyhow::Result<Task> {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
-        weak.snapshot().await
+        weak.snapshot(false).await
     }
 
     /// Get the current task checklist.
@@ -655,7 +655,7 @@ mod comment_model_tests {
             self.id
         }
 
-        async fn snapshot(&self) -> anyhow::Result<Task> {
+        async fn snapshot(&self, _refresh: bool) -> anyhow::Result<Task> {
             let tasks = self.backend.tasks.lock().await;
             tasks
                 .get(&self.id)
@@ -695,7 +695,7 @@ mod comment_model_tests {
             self.id
         }
 
-        async fn snapshot(&self) -> anyhow::Result<Task> {
+        async fn snapshot(&self, _refresh: bool) -> anyhow::Result<Task> {
             let tasks = self.backend.tasks.lock().await;
             tasks
                 .get(&self.id)
@@ -1141,7 +1141,7 @@ mod comment_model_tests {
         assert!(!run2_after_check[0].checked);
 
         let weak = task_backend.get_task(id).await.unwrap();
-        let task = weak.snapshot().await.unwrap();
+        let task = weak.snapshot(false).await.unwrap();
         assert_eq!(task.checklist.len(), 2);
         assert!(task.checklist.iter().any(|i| i.id == "main__1__same-id"));
         assert!(task.checklist.iter().any(|i| i.id == "main__2__same-id"));
@@ -1167,7 +1167,7 @@ mod comment_model_tests {
         assert_eq!(items[0].text, "legacy item");
 
         let weak = task_backend.get_task(id).await.unwrap();
-        let task = weak.snapshot().await.unwrap();
+        let task = weak.snapshot(false).await.unwrap();
         assert_eq!(task.checklist.len(), 1);
         assert_eq!(task.checklist[0].id, "plain");
     }

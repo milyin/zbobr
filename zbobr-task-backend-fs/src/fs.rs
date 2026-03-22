@@ -340,6 +340,7 @@ impl ZbobrTaskBackendFs {
 struct FsTaskWeak {
     id: u64,
     backend: Arc<ZbobrTaskBackendFs>,
+    saved_snapshot: Arc<std::sync::Mutex<Option<Task>>>,
 }
 
 #[async_trait]
@@ -348,8 +349,14 @@ impl TaskWeak for FsTaskWeak {
         self.id
     }
 
-    async fn snapshot(&self) -> anyhow::Result<Task> {
-        self.backend.read_task(self.id).await
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task> {
+        if !refresh && let Some(task) = self.saved_snapshot.lock().unwrap().clone() {
+            return Ok(task);
+        }
+
+        let task = self.backend.read_task(self.id).await?;
+        *self.saved_snapshot.lock().unwrap() = Some(task.clone());
+        Ok(task)
     }
 
     async fn upgrade(&self) -> anyhow::Result<Box<dyn TaskMut>> {
@@ -363,6 +370,7 @@ impl TaskWeak for FsTaskWeak {
         Ok(Box::new(FsTaskMut {
             id: self.id,
             backend: self.backend.clone(),
+            saved_snapshot: self.saved_snapshot.clone(),
             _guard: guard,
         }))
     }
@@ -383,6 +391,7 @@ impl TaskWeak for FsTaskWeak {
 struct FsTaskMut {
     id: u64,
     backend: Arc<ZbobrTaskBackendFs>,
+    saved_snapshot: Arc<std::sync::Mutex<Option<Task>>>,
     _guard: OwnedMutexGuard<()>,
 }
 
@@ -392,8 +401,14 @@ impl TaskMut for FsTaskMut {
         self.id
     }
 
-    async fn snapshot(&self) -> anyhow::Result<Task> {
-        self.backend.read_task(self.id).await
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task> {
+        if !refresh && let Some(task) = self.saved_snapshot.lock().unwrap().clone() {
+            return Ok(task);
+        }
+
+        let task = self.backend.read_task(self.id).await?;
+        *self.saved_snapshot.lock().unwrap() = Some(task.clone());
+        Ok(task)
     }
 
     async fn modify_task(
@@ -408,6 +423,7 @@ impl TaskMut for FsTaskMut {
 
         let task_file = TaskFile::from_task(&task, was_closed);
         self.backend.write_task_file(&task_file).await?;
+        *self.saved_snapshot.lock().unwrap() = Some(task);
 
         tracing::debug!("Modified task {}", self.id);
         Ok(())
@@ -417,6 +433,7 @@ impl TaskMut for FsTaskMut {
         let mut task_file = self.backend.read_task_file(self.id).await?;
         task_file.closed = true;
         self.backend.write_task_file(&task_file).await?;
+        self.saved_snapshot.lock().unwrap().take();
 
         tracing::info!("Closed task {}", self.id);
         Ok(())
@@ -476,6 +493,7 @@ impl TaskMut for FsTaskMut {
         Box::new(FsTaskWeak {
             id: self.id,
             backend: self.backend.clone(),
+            saved_snapshot: self.saved_snapshot.clone(),
         })
     }
 }
@@ -591,10 +609,11 @@ impl ArcTaskBackendFs {
 impl TaskBackend for ArcTaskBackendFs {
     async fn get_task(&self, id: u64) -> anyhow::Result<Box<dyn TaskWeak>> {
         // Verify the task exists
-        let _task = self.inner.read_task(id).await?;
+        let task = self.inner.read_task(id).await?;
         Ok(Box::new(FsTaskWeak {
             id,
             backend: self.inner.clone(),
+            saved_snapshot: Arc::new(std::sync::Mutex::new(Some(task))),
         }))
     }
 
@@ -625,6 +644,7 @@ impl TaskBackend for ArcTaskBackendFs {
             result.push(Box::new(FsTaskWeak {
                 id,
                 backend: self.inner.clone(),
+                saved_snapshot: Arc::new(std::sync::Mutex::new(Some(task))),
             }));
         }
 

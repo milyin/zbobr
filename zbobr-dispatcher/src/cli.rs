@@ -327,7 +327,7 @@ impl<'a> CliStageRunner<'a> {
                 .task_backend()
                 .get_task(self.task_id)
                 .await?
-                .snapshot()
+                .snapshot(false)
                 .await?;
             if task.identity().is_some() {
                 ensure_pr_url(self.zbobr, self.task_id).await?;
@@ -355,7 +355,7 @@ impl<'a> CliStageRunner<'a> {
         // Pre-flight check
         {
             let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
-            let task_snap = weak.snapshot().await?;
+            let task_snap = weak.snapshot(false).await?;
             if task_snap.description.is_empty() {
                 anyhow::bail!(
                     "Task #{} has no description — nothing for the agent to do",
@@ -386,7 +386,7 @@ impl<'a> CliStageRunner<'a> {
             .task_backend()
             .get_task(self.task_id)
             .await?
-            .snapshot()
+            .snapshot(false)
             .await?;
         let pipeline_run_id = task_snap.pipeline_run_id;
 
@@ -730,7 +730,7 @@ pub async fn process_task(
             .task_backend()
             .get_task(task.id)
             .await?
-            .snapshot()
+            .snapshot(false)
             .await?
     } else {
         task.clone()
@@ -879,7 +879,7 @@ pub async fn run_manager_loop(
         };
         let mut all_tasks: Vec<Task> = Vec::new();
         for w in &all_weak {
-            match w.snapshot().await {
+            match w.snapshot(false).await {
                 Ok(t) => all_tasks.push(t),
                 Err(e) => tracing::warn!("Failed to snapshot task: {e}"),
             }
@@ -1083,19 +1083,16 @@ pub async fn run_manager_loop(
         tracing::info!("Task statistics: {}", stats.join(", "));
 
         let elapsed = loop_start.elapsed();
-        let sleep_dur = std::time::Duration::from_secs(interval_secs).saturating_sub(elapsed);
-        if sleep_dur.is_zero() {
-            tracing::info!(
-                "No processable tasks. Interval already elapsed, continuing immediately."
-            );
-        } else {
-            tracing::info!("No processable tasks. Sleeping {}s...", sleep_dur.as_secs());
-            tokio::select! {
-                _ = tokio::time::sleep(sleep_dur) => {}
-                _ = tokio::signal::ctrl_c() => {
-                    tracing::info!("Received shutdown signal, exiting...");
-                    break;
-                }
+        let interval_dur = std::time::Duration::from_secs(interval_secs);
+        let min_idle_sleep = std::time::Duration::from_secs(1);
+        let sleep_dur = interval_dur.saturating_sub(elapsed).max(min_idle_sleep);
+
+        tracing::info!("No processable tasks. Sleeping {}s...", sleep_dur.as_secs());
+        tokio::select! {
+            _ = tokio::time::sleep(sleep_dur) => {}
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("Received shutdown signal, exiting...");
+                break;
             }
         }
     }
@@ -1123,7 +1120,7 @@ async fn detect_and_handle_worktree(
     task_dir: &Path,
 ) -> anyhow::Result<WorktreeResult> {
     let task_backend = zbobr.task_backend();
-    let task = task_backend.get_task(task_id).await?.snapshot().await?;
+    let task = task_backend.get_task(task_id).await?.snapshot(false).await?;
 
     // 1. Check if identity is defined
     let identity = match task.identity() {
@@ -1302,7 +1299,7 @@ async fn seed_defaults(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Re
         .task_backend()
         .get_task(task_id)
         .await?
-        .snapshot()
+        .snapshot(false)
         .await?;
     let role_session = zbobr.role_session(task_id);
 
@@ -1504,7 +1501,7 @@ async fn finalize_stage_session(
         .task_backend()
         .get_task(task_id)
         .await?
-        .snapshot()
+        .snapshot(false)
         .await?;
     if !current_task.pause && current_task.signal.is_none() {
         let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
@@ -1589,7 +1586,7 @@ async fn perform_stash_and_push(
         Err(e) => tracing::warn!("Failed to check git status for stash: {e}"),
     }
 
-    let task = task_backend.get_task(task_id).await?.snapshot().await?;
+    let task = task_backend.get_task(task_id).await?.snapshot(false).await?;
     if let Some(identity) = task.identity() {
         if let Err(e) = repo_backend.update_pr(&identity).await {
             tracing::warn!("Could not push branch commits for task #{task_id}: {e}");

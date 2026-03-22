@@ -38,7 +38,7 @@ impl ZbobrDispatcher {
             // Check if task is closed by trying to get it. If get_task fails,
             // the task was deleted/closed and we can clean up the workspace.
             match task_backend.get_task(task_id).await {
-                Ok(weak) => match weak.snapshot().await {
+                Ok(weak) => match weak.snapshot(false).await {
                     Ok(task) if task.state == "DONE" => {
                         if dry_run {
                             tracing::info!(

@@ -10,7 +10,11 @@ pub trait TaskWeak: Send + Sync {
     fn task_id(&self) -> u64;
 
     /// Get a snapshot of the full task state.
-    async fn snapshot(&self) -> anyhow::Result<Task>;
+    ///
+    /// When `refresh` is `false`, implementations may return a cached snapshot.
+    /// When `refresh` is `true`, implementations must reload from the backing store
+    /// and refresh any saved snapshot cache.
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task>;
 
     /// Try to acquire exclusive write access.
     /// Fails if another TaskMut is held for this task.
@@ -27,7 +31,7 @@ pub trait TaskWeak: Send + Sync {
 #[async_trait]
 pub trait TaskMut: Send + Sync {
     fn task_id(&self) -> u64;
-    async fn snapshot(&self) -> anyhow::Result<Task>;
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task>;
 
     /// Core mutation primitive — reads task, applies closure, writes back.
     async fn modify_task(&self, mutate: Box<dyn FnOnce(Task) -> Task + Send>)

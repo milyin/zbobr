@@ -670,7 +670,7 @@ impl ZbobrTaskBackendGithubImpl {
         &self,
         id: u64,
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Task> {
         let task = self.fetch_task(id).await?;
         let original_state = task.state.clone();
         let original_signal = task.signal.clone();
@@ -727,7 +727,9 @@ impl ZbobrTaskBackendGithubImpl {
         }
 
         self.record_cooling(id);
-        Ok(())
+        let mut saved_task = task;
+        saved_task.etag = Some(new_desc);
+        Ok(saved_task)
     }
 
     /// Internal: get task comments.
@@ -930,6 +932,7 @@ use zbobr_api::backend::{TaskMut, TaskWeak};
 struct GithubTaskWeak {
     id: u64,
     backend: Arc<ZbobrTaskBackendGithubImpl>,
+    saved_snapshot: Arc<std::sync::Mutex<Option<Task>>>,
 }
 
 #[async_trait]
@@ -938,8 +941,14 @@ impl TaskWeak for GithubTaskWeak {
         self.id
     }
 
-    async fn snapshot(&self) -> anyhow::Result<Task> {
-        self.backend.read_task(self.id).await
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task> {
+        if !refresh && let Some(task) = self.saved_snapshot.lock().unwrap().clone() {
+            return Ok(task);
+        }
+
+        let task = self.backend.read_task(self.id).await?;
+        *self.saved_snapshot.lock().unwrap() = Some(task.clone());
+        Ok(task)
     }
 
     async fn upgrade(&self) -> anyhow::Result<Box<dyn TaskMut>> {
@@ -950,6 +959,7 @@ impl TaskWeak for GithubTaskWeak {
         Ok(Box::new(GithubTaskMut {
             id: self.id,
             backend: self.backend.clone(),
+            saved_snapshot: self.saved_snapshot.clone(),
             _guard: guard,
         }))
     }
@@ -966,6 +976,7 @@ impl TaskWeak for GithubTaskWeak {
 struct GithubTaskMut {
     id: u64,
     backend: Arc<ZbobrTaskBackendGithubImpl>,
+    saved_snapshot: Arc<std::sync::Mutex<Option<Task>>>,
     _guard: OwnedMutexGuard<()>,
 }
 
@@ -975,15 +986,23 @@ impl TaskMut for GithubTaskMut {
         self.id
     }
 
-    async fn snapshot(&self) -> anyhow::Result<Task> {
-        self.backend.read_task(self.id).await
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task> {
+        if !refresh && let Some(task) = self.saved_snapshot.lock().unwrap().clone() {
+            return Ok(task);
+        }
+
+        let task = self.backend.read_task(self.id).await?;
+        *self.saved_snapshot.lock().unwrap() = Some(task.clone());
+        Ok(task)
     }
 
     async fn modify_task(
         &self,
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
     ) -> anyhow::Result<()> {
-        self.backend.modify_task_internal(self.id, mutate).await
+        let task = self.backend.modify_task_internal(self.id, mutate).await?;
+        *self.saved_snapshot.lock().unwrap() = Some(task);
+        Ok(())
     }
 
     async fn close(&self) -> anyhow::Result<()> {
@@ -1036,6 +1055,7 @@ impl TaskMut for GithubTaskMut {
         Box::new(GithubTaskWeak {
             id: self.id,
             backend: self.backend.clone(),
+            saved_snapshot: self.saved_snapshot.clone(),
         })
     }
 }
@@ -1069,10 +1089,11 @@ impl TaskBackendGithub {
 impl TaskBackend for TaskBackendGithub {
     async fn get_task(&self, id: u64) -> anyhow::Result<Box<dyn TaskWeak>> {
         // Verify the task exists
-        let _task = self.inner.read_task(id).await?;
+        let task = self.inner.read_task(id).await?;
         Ok(Box::new(GithubTaskWeak {
             id,
             backend: self.inner.clone(),
+            saved_snapshot: Arc::new(std::sync::Mutex::new(Some(task))),
         }))
     }
 
@@ -1095,11 +1116,12 @@ impl TaskBackend for TaskBackendGithub {
         let mut result: Vec<Box<dyn TaskWeak>> = Vec::new();
         for issue in issues {
             let id = issue.number;
-            // Verify it parses correctly
-            let _task = ZbobrTaskBackendGithubImpl::issue_to_task(issue);
+            // Reuse list payload as the saved snapshot until a caller asks for refresh.
+            let task = ZbobrTaskBackendGithubImpl::issue_to_task(issue);
             result.push(Box::new(GithubTaskWeak {
                 id,
                 backend: self.inner.clone(),
+                saved_snapshot: Arc::new(std::sync::Mutex::new(Some(task))),
             }));
         }
         Ok(result)
