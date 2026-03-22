@@ -198,7 +198,6 @@ fn default_workflow() -> WorkflowConfig {
             "preparator".into(),
             RoleDefinition {
                 mcp: vec![
-                    GetHistory,
                     StopWithError,
                     ReportSuccess,
                     StopWithQuestion,
@@ -379,7 +378,7 @@ Read the task description below and set the required parameters for the implemen
 
 ## Workflow
 
-1. Read the task description provided below in this prompt. Use `{mcp_get_history}` to see the full discussion history.
+1. Read the task description provided below in this prompt.
 2. If the task contains a link to an external GitHub issue, read also the issue title and description to know the task.
 3. Set task parameters using `{mcp_configure_worktree}`
 4. If `{mcp_configure_worktree}` returns an error, call `{mcp_stop_with_error}` with the error details.
