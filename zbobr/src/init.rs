@@ -123,12 +123,14 @@ fn default_workflow() -> WorkflowConfig {
     };
 
     let task_prompt = vec![PathBuf::from("task.md")];
+    let preparator_task_prompt = vec![PathBuf::from("preparator_task.md")];
 
     let main_stages = IndexMap::from([
         (
             Stage::from("preparing"),
             StageDefinition {
                 role: Some("preparator".into()),
+                additional_prompts: preparator_task_prompt,
                 ..Default::default()
             },
         ),
@@ -327,6 +329,7 @@ fn inline_stage_tables(doc: &mut toml_edit::DocumentMut) {
 
 const PROMPT_FILES: &[(&str, &str)] = &[
     ("preparator", PREPARATOR_PROMPT),
+    ("preparator_task", PREPARATOR_TASK_TEMPLATE),
     ("planner", PLANNER_PROMPT),
     ("worker", WORKER_PROMPT),
     ("reviewer", REVIEWER_PROMPT),
@@ -377,16 +380,19 @@ Read the task description below and set the required parameters for the implemen
 1. Read the task description provided below in this prompt. Use `{mcp_get_history}` to see the full discussion history.
 2. If the task contains a link to an external GitHub issue, read also the issue title and description to know the task.
 3. Set task parameters using `{mcp_configure_worktree}`:
-    - Call `{mcp_configure_worktree}` with `destination_repository` (in owner/repo format from the task description), `destination_branch` (from the task description or "main"), and `work_branch_postfix` (short but meaningful name related to the task).
-4. Call `{mcp_report_success}` to provide a brief and concise report of the parameters you set.
+    - Call `{mcp_configure_worktree}` with `destination_repository` (in owner/repo format from the task description), `destination_branch` (from the task description), and `work_branch_postfix` (short but meaningful name related to the task).
+4. Call `{mcp_report_success}` to provide a brief and concise report of the parameters you set."#;
 
----
+const PREPARATOR_TASK_TEMPLATE: &str = r#"---
 
 # Current task: {title}
 
 # Task description
 
-{description}"#;
+{description}
+
+Use destination repository `{default_destination_repository}` and destination branch `{default_destination_branch}`
+if they are not specified in the task description above."#;
 
 const PLANNER_PROMPT: &str = r#"# Planner Agent
 

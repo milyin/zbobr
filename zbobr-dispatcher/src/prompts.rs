@@ -18,11 +18,14 @@ pub const VAR_WORK_BRANCH: &str = "work_branch";
 pub const VAR_CHECKLIST: &str = "checklist";
 pub const VAR_LAST_REPORT: &str = "last_report";
 pub const VAR_LAST_REQUEST: &str = "last_request";
+pub const VAR_DEFAULT_DESTINATION_REPOSITORY: &str = "default_destination_repository";
+pub const VAR_DEFAULT_DESTINATION_BRANCH: &str = "default_destination_branch";
 
 #[derive(Clone)]
 pub struct ConfiguredPromptBuilder {
     base_path: Option<PathBuf>,
     workflow: Arc<Workflow>,
+    extra_vars: HashMap<String, String>,
 }
 
 impl ConfiguredPromptBuilder {
@@ -30,7 +33,14 @@ impl ConfiguredPromptBuilder {
         Self {
             base_path,
             workflow,
+            extra_vars: HashMap::new(),
         }
+    }
+
+    /// Add an extra template variable that will be available in all prompts.
+    pub fn with_var(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.extra_vars.insert(key.into(), value.into());
+        self
     }
 
     pub fn base_path(&self) -> Option<&PathBuf> {
@@ -52,6 +62,7 @@ impl ConfiguredPromptBuilder {
             task_id,
             task_backend,
             self.workflow.config(),
+            &self.extra_vars,
         )
         .await
     }
@@ -223,6 +234,7 @@ pub async fn build_full_prompt(
     task_id: u64,
     task_backend: &dyn TaskBackend,
     workflow: &WorkflowConfig,
+    extra_vars: &HashMap<String, String>,
 ) -> anyhow::Result<String> {
     let weak = task_backend.get_task(task_id).await?;
     let task = weak.snapshot(false).await?;
@@ -235,6 +247,11 @@ pub async fn build_full_prompt(
         .map(|d| d.mcp.clone())
         .unwrap_or_else(|| McpTool::all().to_vec());
     add_mcp_tool_variables(&mut vars, &allowed_tools);
+
+    // Inject extra variables from config (e.g. default_destination_repository/branch).
+    for (k, v) in extra_vars {
+        vars.insert(Cow::Owned(k.clone()), Cow::Owned(v.clone()));
+    }
 
     // Convert to owned HashMap for Interpolation
     let owned_vars: HashMap<Cow<str>, Cow<str>> = vars

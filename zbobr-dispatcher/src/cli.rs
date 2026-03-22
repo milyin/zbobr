@@ -303,9 +303,6 @@ impl<'a> CliStageRunner<'a> {
         let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), self.task_id);
         tokio::fs::create_dir_all(task_dir.path()).await?;
 
-        // Seed default config values (unconditional)
-        seed_defaults(self.zbobr, self.task_id).await?;
-
         // Unified worktree detection and problem handling
         let work_dir = match detect_and_handle_worktree(
             self.zbobr,
@@ -1338,34 +1335,6 @@ async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Re
 /// Only sets a parameter if it is not already present, so a previously
 /// prepared task keeps its values unchanged. Called unconditionally at
 /// the start of every stage run.
-async fn seed_defaults(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Result<()> {
-    let config = zbobr.config();
-    let task = zbobr
-        .task_backend()
-        .get_task(task_id)
-        .await?
-        .snapshot(false)
-        .await?;
-    let role_session = zbobr.role_session(task_id);
-
-    if let Some(default_repo) = &config.default_destination_repository
-        && task.destination_repository.is_none()
-    {
-        role_session
-            .set_destination_repository(Some(default_repo.clone()))
-            .await?;
-    }
-
-    if let Some(default_branch) = &config.default_destination_branch
-        && task.destination_branch.is_none()
-    {
-        role_session
-            .set_destination_branch(Some(default_branch.clone()))
-            .await?;
-    }
-
-    Ok(())
-}
 
 async fn start_mcp_server(
     zbobr: Arc<ZbobrDispatcher>,
