@@ -210,11 +210,12 @@ async fn run_task_subcommand(
             dest_branch,
             confirm,
         } => {
+            let parsed_state = state.parse::<zbobr_api::State>()?;
             let id = zbobr
                 .create_task(
                     &title,
                     &description,
-                    &state,
+                    parsed_state,
                     dest_repo,
                     dest_branch,
                 )
@@ -228,12 +229,16 @@ async fn run_task_subcommand(
             println!("Created task #{}", id);
         }
         TaskSubcommand::List { state } => {
+            let state_filter = state
+                .as_deref()
+                .map(str::parse::<zbobr_api::State>)
+                .transpose()?;
             let weak_tasks = task_backend.list_tasks().await?;
             let mut tasks = Vec::new();
             for w in &weak_tasks {
                 let task = w.snapshot().await?;
-                if let Some(ref filter) = state {
-                    if task.state != filter.to_uppercase() {
+                if let Some(ref filter) = state_filter {
+                    if task.state != *filter {
                         continue;
                     }
                 }
@@ -267,6 +272,9 @@ async fn run_task_subcommand(
             signal,
             confirm,
         } => {
+            let parsed_state = state
+                .map(|s| s.parse::<zbobr_api::State>())
+                .transpose()?;
             let parsed_signal = signal.map(|s| s.parse::<zbobr_api::Signal>()).transpose()?;
             let weak = task_backend.get_task(id).await?;
             let mutable = weak.upgrade().await?;
@@ -281,11 +289,11 @@ async fn run_task_subcommand(
                     if let Some(c) = confirm {
                         task.confirm = c;
                     }
-                    if let Some(s) = state {
+                    if let Some(s) = parsed_state {
                         if task.confirm && task.state != s {
                             task.pause = true;
                         }
-                        task.state = s.into();
+                        task.state = s;
                     }
                     if let Some(s) = parsed_signal {
                         task.signal = Some(s);

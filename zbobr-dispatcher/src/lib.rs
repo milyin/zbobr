@@ -36,6 +36,7 @@ use typesafe_builder::{Builder, _TypesafeBuilderEmpty, _TypesafeBuilderFilled};
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
+use zbobr_api::State;
 
 use crate::backend::{TaskBackend, WorktreeBackend};
 
@@ -121,10 +122,11 @@ impl ZbobrDispatcher {
         &self,
         title: &str,
         description: &str,
-        state: &str,
+        state: impl Into<State>,
         destination_repository: Option<String>,
         destination_branch: Option<String>,
     ) -> anyhow::Result<u64> {
+        let state = state.into();
         self.create_task_with_confirm(
             title,
             description,
@@ -143,12 +145,15 @@ impl ZbobrDispatcher {
         &self,
         title: &str,
         description: &str,
-        state: &str,
+        state: impl Into<State>,
         destination_repository: Option<String>,
         destination_branch: Option<String>,
         confirm: bool,
     ) -> anyhow::Result<u64> {
-        let id = self.task_backend.create_task(title, description, state).await?;
+        let id = self
+            .task_backend
+            .create_task(title, description, state.into())
+            .await?;
         // Set promoted fields + confirm flag via modify
         let weak = self.task_backend.get_task(id).await?;
         let mutable = weak.upgrade().await?;

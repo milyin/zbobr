@@ -444,13 +444,13 @@ impl TaskSession {
     }
 
     /// Set the task state (dispatcher only).
-    pub async fn set_state(&self, state: &str) -> anyhow::Result<()> {
-        let state = state.to_string();
+    pub async fn set_state(&self, state: impl Into<State>) -> anyhow::Result<()> {
+        let state = state.into();
         self.modify_task(move |mut task| {
             if task.confirm && task.state != state {
                 task.pause = true;
             }
-            task.state = state.into();
+            task.state = state;
             task
         })
         .await

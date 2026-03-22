@@ -934,7 +934,7 @@ impl TaskBackend for TaskBackendGithub {
         &self,
         title: &str,
         description: &str,
-        state: &str,
+        state: State,
     ) -> anyhow::Result<u64> {
         let (owner, repo) = self.inner.parse_repo()?;
         let body = serialize_description_full(description, &HashMap::new(), &[]);
@@ -951,7 +951,7 @@ impl TaskBackend for TaskBackendGithub {
         // Apply the initial state as a label
         if !state.is_empty() {
             self.inner
-                .apply_state_change(issue_id, &State::from(state))
+            .apply_state_change(issue_id, &state)
                 .await?;
         }
 

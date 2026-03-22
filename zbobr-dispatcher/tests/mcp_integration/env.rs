@@ -347,7 +347,7 @@ impl IntegrationTestEnv {
         role_scenarios: &HashMap<String, String>,
     ) {
         self.zbobr.task_backend()
-            .set_task_state(task_id, "READY")
+            .set_task_state(task_id, zbobr_api::State::Ready)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to set task state: {e}", self.name));
         self.zbobr.task_backend()

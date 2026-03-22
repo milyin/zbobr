@@ -17,7 +17,7 @@ use crate::{
 use zbobr_api::config_tools::McpTool;
 use zbobr_api::config::StageDefinition;
 use crate::workflow::{INIT_PIPELINE, MERGE_PIPELINE};
-use zbobr_api::{CommentTag, Signal};
+use zbobr_api::{CommentTag, Pipeline, Signal, State};
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 
 // ---------------------------------------------------------------------------
@@ -275,8 +275,8 @@ impl<'a> CliStageRunner<'a> {
         }
     }
 
-    fn running_state(&self) -> String {
-        format!("{}_{}", self.pipeline_name, self.stage_name)
+    fn running_state(&self) -> State {
+        State::running(self.pipeline_name, self.stage_name)
     }
 
     async fn prompt(&self) -> anyhow::Result<String> {
@@ -294,7 +294,7 @@ impl<'a> CliStageRunner<'a> {
         // Set state to running
         self.zbobr
             .task_session(self.task_id)
-            .set_state(&self.running_state())
+            .set_state(self.running_state())
             .await?;
 
         let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), self.task_id);
@@ -519,7 +519,7 @@ async fn handle_call_stage(
         .set_signal(Some(call_signal.clone()))
         .await?;
     task_session
-        .set_state(&format!("{pipeline_name}_PENDING"))
+        .set_state(State::pending(Pipeline::from(pipeline_name)))
         .await?;
 
     tracing::info!(
@@ -563,7 +563,7 @@ pub async fn process_task(
                 if let Some(entry) = task_session.pop_stack().await? {
                     task_session.set_signal(Some(Signal::ReturnFailure)).await?;
                     task_session
-                        .set_state(&format!("{}_PENDING", entry.pipeline))
+                        .set_state(State::pending(entry.pipeline.clone()))
                         .await?;
                     println!(
                         "Task #{} pipeline failed — returning failure to pipeline '{}'",
@@ -579,7 +579,7 @@ pub async fn process_task(
                 // Success return from sub-pipeline — re-run calling stage
                 task_session.set_signal(Some(entry.signal.clone())).await?;
                 task_session
-                    .set_state(&format!("{}_PENDING", entry.pipeline))
+                    .set_state(State::pending(entry.pipeline.clone()))
                     .await?;
                 println!(
                     "Task #{} returning to pipeline '{}' with signal '{}'",
@@ -723,7 +723,7 @@ pub async fn run_manager_loop(
                                     tracing::error!("Failed to set return_failure signal for task #{}: {e}", task.id);
                                 }
                                 if let Err(e) = task_session
-                                    .set_state(&format!("{}_PENDING", entry.pipeline))
+                                    .set_state(State::pending(entry.pipeline.clone()))
                                     .await
                                 {
                                     tracing::error!("Failed to set return state for task #{}: {e}", task.id);
@@ -744,7 +744,7 @@ pub async fn run_manager_loop(
                                     tracing::error!("Failed to set return signal for task #{}: {e}", task.id);
                                 }
                                 if let Err(e) = task_session
-                                    .set_state(&format!("{}_PENDING", entry.pipeline))
+                                    .set_state(State::pending(entry.pipeline.clone()))
                                     .await
                                 {
                                     tracing::error!("Failed to set return state for task #{}: {e}", task.id);
@@ -926,7 +926,7 @@ async fn handle_worktree_problem(
     };
 
     let task_session = zbobr.task_session(task_id);
-    let pending_state = format!("{}_PENDING", pipeline_name);
+    let pending_state = State::pending(Pipeline::from(pipeline_name));
 
     // Recursion guard: if already inside the handler pipeline, pause
     if pipeline_name == handler_pipeline {
@@ -949,7 +949,7 @@ async fn handle_worktree_problem(
                 t
             })
             .await?;
-        task_session.set_state(&pending_state).await?;
+        task_session.set_state(pending_state.clone()).await?;
         return Ok(WorktreeResult::Paused);
     }
 
@@ -961,7 +961,7 @@ async fn handle_worktree_problem(
     task_session
         .set_signal(Some(Signal::call(handler_pipeline)))
         .await?;
-    task_session.set_state(&pending_state).await?;
+    task_session.set_state(pending_state).await?;
 
     tracing::info!(
         "Task #{task_id}: worktree problem {:?} — calling handler pipeline '{handler_pipeline}'",
@@ -1136,13 +1136,13 @@ async fn finalize_stage_session(
     last_mapped_tool: Option<&str>,
 ) -> anyhow::Result<Option<anyhow::Error>> {
     let task_session = zbobr.task_session(task_id);
-    let pending_state = format!("{}_PENDING", pipeline_name);
+    let pending_state = State::pending(Pipeline::from(pipeline_name));
 
     if outcome.execution_interrupted {
         if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name).await {
             tracing::warn!("Stash/push failed during interruption for task #{task_id}: {e}");
         }
-        task_session.set_state(&pending_state).await?;
+        task_session.set_state(pending_state.clone()).await?;
         tracing::info!("Session interrupted for task #{task_id}, moved to {pending_state}");
         return Ok(None);
     }
@@ -1170,7 +1170,7 @@ async fn finalize_stage_session(
         {
             tracing::error!("Failed to set pause for task #{task_id}: {pause_err}");
         }
-        task_session.set_state(&pending_state).await?;
+        task_session.set_state(pending_state.clone()).await?;
         tracing::info!("Session failed for task #{task_id}, moved to {pending_state} with pause");
         return Ok(outcome.execution_error);
     }
@@ -1200,7 +1200,7 @@ async fn finalize_stage_session(
                 "Failed to pause task #{task_id} after stash/push failure: {pause_err}"
             );
         }
-        task_session.set_state(&pending_state).await?;
+        task_session.set_state(pending_state.clone()).await?;
         return Ok(None);
     }
 
@@ -1232,7 +1232,7 @@ async fn finalize_stage_session(
             }
         }
     }
-    task_session.set_state(&pending_state).await?;
+    task_session.set_state(pending_state).await?;
 
     Ok(None)
 }

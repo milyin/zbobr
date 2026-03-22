@@ -20,7 +20,7 @@ impl zbobr_api::backend::TaskBackend for DummyBackend {
         &self,
         _title: &str,
         _description: &str,
-        _state: &str,
+        _state: zbobr_api::State,
     ) -> anyhow::Result<u64> {
         unimplemented!()
     }

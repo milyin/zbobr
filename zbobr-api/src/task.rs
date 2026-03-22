@@ -335,6 +335,14 @@ impl From<String> for State {
     }
 }
 
+impl std::str::FromStr for State {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(State::from(s))
+    }
+}
+
 impl serde::Serialize for State {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.to_string())

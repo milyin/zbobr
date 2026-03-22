@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::task::{ChecklistItem, Comment, Model, Signal, StackEntry, Task, TaskIdentity, Tool};
+use crate::task::{ChecklistItem, Comment, Model, Signal, StackEntry, State, Task, TaskIdentity, Tool};
 
 /// Read-only handle to a task. Returned by `TaskBackend::get_task()` and `TaskBackend::list_tasks()`.
 #[async_trait]
@@ -36,9 +36,9 @@ pub trait TaskMut: Send + Sync {
 
     // --- Default setter methods (use modify_task) ---
 
-    async fn set_state(&self, state: String) -> anyhow::Result<()> {
+    async fn set_state(&self, state: State) -> anyhow::Result<()> {
         self.modify_task(Box::new(move |mut task| {
-            task.state = state.into();
+            task.state = state;
             task
         }))
         .await
@@ -156,7 +156,7 @@ pub trait TaskBackend: Send + Sync {
         &self,
         title: &str,
         description: &str,
-        state: &str,
+        state: State,
     ) -> anyhow::Result<u64>;
 
     /// Initialize storage with required stages, labels, etc.
@@ -174,8 +174,7 @@ pub trait TaskBackend: Send + Sync {
 #[async_trait]
 pub trait TaskBackendExt: TaskBackend {
     /// Set the state of a task.
-    async fn set_task_state(&self, id: u64, state: &str) -> anyhow::Result<()> {
-        let state = state.to_string();
+    async fn set_task_state(&self, id: u64, state: State) -> anyhow::Result<()> {
         let weak = self.get_task(id).await?;
         let mutable = weak.upgrade().await?;
         mutable.set_state(state).await

@@ -500,7 +500,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
         &self,
         title: &str,
         description: &str,
-        state: &str,
+        state: State,
     ) -> anyhow::Result<u64> {
         let id = self.get_next_id().await?;
 
@@ -508,7 +508,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             id,
             title: title.to_string(),
             description: description.to_string(),
-            state: State::from(state),
+            state,
             destination_repository: None,
             destination_branch: None,
             work_branch: None,
@@ -636,7 +636,7 @@ impl TaskBackend for ArcTaskBackendFs {
         &self,
         title: &str,
         description: &str,
-        state: &str,
+        state: State,
     ) -> anyhow::Result<u64> {
         self.inner.create_task(title, description, state).await
     }
