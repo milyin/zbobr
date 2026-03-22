@@ -462,10 +462,11 @@ impl ZbobrTaskBackendGithubImpl {
         // Ensure the task repo exists
         self.ensure_task_repo_exists().await?;
 
-        // Create flag labels
+        // Create flag and state labels
         let existing_labels = self.list_labels().await?;
 
         const FLAG_LABEL_COLOR: &str = "f9d0c4";
+        const STATE_LABEL_COLOR: &str = "0075ca";
 
         for flag_name in ["pause", "confirm"] {
             let flag_label = Self::flag_to_label(flag_name);
@@ -480,6 +481,22 @@ impl ZbobrTaskBackendGithubImpl {
                     .await?;
             } else {
                 tracing::info!("Label '{flag_label}' already exists");
+            }
+        }
+
+        for state in [State::Ready, State::Done, State::Pause] {
+            let state_label = Self::state_to_label(&state);
+            let state_desc = format!("State: {}", state);
+            if !existing_labels.contains(&state_label) {
+                tracing::info!("Creating label '{state_label}'");
+                self.create_label(&state_label, STATE_LABEL_COLOR, &state_desc)
+                    .await?;
+            } else if force {
+                tracing::info!("Updating label '{state_label}' (force)");
+                self.update_label(&state_label, STATE_LABEL_COLOR, &state_desc)
+                    .await?;
+            } else {
+                tracing::info!("Label '{state_label}' already exists");
             }
         }
 
