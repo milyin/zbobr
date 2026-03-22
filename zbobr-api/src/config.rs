@@ -22,9 +22,9 @@ pub struct RoleDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<Tool>,
+    pub default_tool: Option<Tool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<Model>,
+    pub default_model: Option<Model>,
 }
 
 /// A stage transition descriptor with an optional target stage and pause flag.
@@ -550,7 +550,7 @@ impl ZbobrDispatcherConfig {
             tool
         } else if let Some(role_name) = stage_def.role_name() {
             if let Some(role_def) = workflow.role_definition(role_name) {
-                if let Some(tool) = role_def.tool {
+                if let Some(tool) = role_def.default_tool {
                     tool
                 } else {
                     self.tool
@@ -569,7 +569,7 @@ impl ZbobrDispatcherConfig {
             model.clone()
         } else if let Some(role_name) = stage_def.role_name() {
             if let Some(role_def) = workflow.role_definition(role_name) {
-                if let Some(model) = role_def.model.as_ref() {
+                if let Some(model) = role_def.default_model.as_ref() {
                     model.clone()
                 } else {
                     self.model.clone()

@@ -201,8 +201,8 @@ fn default_workflow() -> WorkflowConfig {
                     ConfigureWorktree,
                 ],
                 prompt: Some(PathBuf::from("preparator.md")),
-                tool: None,
-                model: None,
+                default_tool: None,
+                default_model: None,
             },
         ),
         (
@@ -218,8 +218,8 @@ fn default_workflow() -> WorkflowConfig {
                     DeleteChecklistItem,
                 ],
                 prompt: Some(PathBuf::from("planner.md")),
-                tool: None,
-                model: None,
+                default_tool: None,
+                default_model: None,
             },
         ),
         (
@@ -237,8 +237,8 @@ fn default_workflow() -> WorkflowConfig {
                     DeleteChecklistItem,
                 ],
                 prompt: Some(PathBuf::from("worker.md")),
-                tool: None,
-                model: None,
+                default_tool: None,
+                default_model: None,
             },
         ),
         (
@@ -252,8 +252,8 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithQuestion,
                 ],
                 prompt: Some(PathBuf::from("reviewer.md")),
-                tool: None,
-                model: None,
+                default_tool: None,
+                default_model: None,
             },
         ),
         (
@@ -267,8 +267,8 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithQuestion,
                 ],
                 prompt: Some(PathBuf::from("tester.md")),
-                tool: None,
-                model: None,
+                default_tool: None,
+                default_model: None,
             },
         ),
         (
@@ -276,8 +276,8 @@ fn default_workflow() -> WorkflowConfig {
             RoleDefinition {
                 mcp: vec![GetHistory, StopWithError, ReportSuccess, StopWithQuestion],
                 prompt: Some(PathBuf::from("merger.md")),
-                tool: None,
-                model: None,
+                default_tool: None,
+                default_model: None,
             },
         ),
     ]);
