@@ -381,9 +381,9 @@ Read the task description below and set the required parameters for the implemen
 
 1. Read the task description provided below in this prompt. Use `{mcp_get_history}` to see the full discussion history.
 2. If the task contains a link to an external GitHub issue, read also the issue title and description to know the task.
-3. Set task parameters using `{mcp_configure_worktree}`:
-    - Call `{mcp_configure_worktree}` with `destination_repository` (in owner/repo format from the task description), `destination_branch` (from the task description), and `work_branch_postfix` (short but meaningful name related to the task).
-4. Call `{mcp_report_success}` to provide a brief and concise report of the parameters you set."#;
+3. Set task parameters using `{mcp_configure_worktree}`
+4. If `{mcp_configure_worktree}` returns an error, call `{mcp_stop_with_error}` with the error details.
+   If `{mcp_configure_worktree}` succeeded, call `{mcp_report_success}` to provide a brief and concise report of the parameters you set."#;
 
 const PREPARATOR_TASK_TEMPLATE: &str = r#"---
 

@@ -44,13 +44,15 @@ pub struct GetFullReportParam {
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct ConfigureWorktreeParam {
     #[schemars(
-        description = "Destination repository (full git URL, local path, or owner/repo format)"
+        description = "Destination repository in owner/repo format (e.g. 'myorg/myrepo') from the task description. Can also be a full git URL or local path."
     )]
     pub destination_repository: Option<String>,
-    #[schemars(description = "Destination branch name (e.g. 'main')")]
+    #[schemars(
+        description = "Destination branch name from the task description (e.g. 'main', 'develop')"
+    )]
     pub destination_branch: Option<String>,
     #[schemars(
-        description = "Work branch postfix (e.g. 'implement-feature'). Combined with prefix and task ID to form the full branch name."
+        description = "Short but meaningful name related to the task (e.g. 'fix-login-bug', 'add-retry-logic'). Combined with prefix and task ID to form the full work branch name."
     )]
     pub work_branch_postfix: Option<String>,
 }

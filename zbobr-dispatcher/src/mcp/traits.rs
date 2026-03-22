@@ -364,8 +364,14 @@ pub trait CommonMcpImpl: Send + Sync {
         // Validate work_branch_postfix: if provided, work_branch must not already be set
         if work_branch_postfix.is_some() {
             match self.session().get_work_branch().await {
-                Ok(Some(_)) => return "Error: work_branch is already set".to_string(),
-                Err(e) => return format!("Error: {e}"),
+                Ok(Some(_)) => {
+                    return self
+                        .configure_worktree_error("work_branch is already set".to_string())
+                        .await;
+                }
+                Err(e) => {
+                    return self.configure_worktree_error(e.to_string()).await;
+                }
                 Ok(None) => {}
             }
         }
@@ -389,8 +395,24 @@ pub trait CommonMcpImpl: Send + Sync {
             .await
         {
             Ok(()) => "Worktree configured".to_string(),
-            Err(e) => format!("Error: {e}"),
+            Err(e) => return self.configure_worktree_error(e.to_string()).await,
         };
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "configure_worktree",
+            &response,
+        );
+        response
+    }
+
+    async fn configure_worktree_error(&self, error: String) -> String {
+        if let Err(pause_err) = self.session().set_pause(true).await {
+            tracing::error!(
+                "Failed to pause task after configure_worktree error: {pause_err}"
+            );
+        }
+        let response = format!("Error: {error}");
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
