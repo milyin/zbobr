@@ -74,7 +74,7 @@ pub fn prompt_files_for_stage(
     workflow: &WorkflowConfig,
 ) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    if let Some(ref main) = stage_def.main_prompt {
+    if let Some(ref main) = stage_def.role_prompt {
         files.push(main.clone());
     } else if let Some(role_def) = stage_def
         .role_name()
@@ -84,7 +84,7 @@ pub fn prompt_files_for_stage(
             files.push(prompt_path.clone());
         }
     }
-    files.extend(stage_def.additional_prompts.iter().cloned());
+    files.extend(stage_def.prompts.iter().cloned());
     if let Some(ref prompts_dir) = workflow.prompts_dir {
         files = files
             .into_iter()

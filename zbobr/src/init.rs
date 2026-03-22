@@ -132,7 +132,7 @@ fn default_workflow() -> WorkflowConfig {
             Stage::from("preparing"),
             StageDefinition {
                 role: Some("preparator".into()),
-                additional_prompts: preparator_task_prompt,
+                prompts: preparator_task_prompt,
                 ..Default::default()
             },
         ),
@@ -140,7 +140,7 @@ fn default_workflow() -> WorkflowConfig {
             Stage::from("planning"),
             StageDefinition {
                 role: Some("planner".into()),
-                additional_prompts: task_prompt.clone(),
+                prompts: task_prompt.clone(),
                 ..Default::default()
             },
         ),
@@ -148,7 +148,7 @@ fn default_workflow() -> WorkflowConfig {
             Stage::from("working"),
             StageDefinition {
                 role: Some("worker".into()),
-                additional_prompts: task_prompt.clone(),
+                prompts: task_prompt.clone(),
                 ..Default::default()
             },
         ),
@@ -156,7 +156,7 @@ fn default_workflow() -> WorkflowConfig {
             Stage::from("reviewing"),
             StageDefinition {
                 role: Some("reviewer".into()),
-                additional_prompts: task_prompt.clone(),
+                prompts: task_prompt.clone(),
                 ..Default::default()
             },
         ),
@@ -164,7 +164,7 @@ fn default_workflow() -> WorkflowConfig {
             Stage::from("merging"),
             StageDefinition {
                 role: Some("merger".into()),
-                additional_prompts: task_prompt.clone(),
+                prompts: task_prompt.clone(),
                 ..Default::default()
             },
         ),
@@ -174,7 +174,7 @@ fn default_workflow() -> WorkflowConfig {
         Stage::from("merging"),
         StageDefinition {
             role: Some("merger".into()),
-            additional_prompts: task_prompt,
+            prompts: task_prompt,
             ..Default::default()
         },
     )]);

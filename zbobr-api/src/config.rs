@@ -91,7 +91,7 @@ impl<'de> serde::Deserialize<'de> for StageTransition {
 ///
 /// A stage must have exactly one of `role` (run an agent session) or
 /// `call` (call another pipeline). They are mutually exclusive.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Default)]
 pub struct StageDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
@@ -102,9 +102,9 @@ pub struct StageDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<Tool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub main_prompt: Option<PathBuf>,
+    pub role_prompt: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub additional_prompts: Vec<PathBuf>,
+    pub prompts: Vec<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_success: Option<StageTransition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -130,21 +130,6 @@ impl StageDefinition {
 
     pub fn on_failure(&self) -> Option<&StageTransition> {
         self.on_failure.as_ref()
-    }
-}
-
-impl Default for StageDefinition {
-    fn default() -> Self {
-        Self {
-            role: None,
-            call: None,
-            model: None,
-            tool: None,
-            main_prompt: None,
-            additional_prompts: vec![],
-            on_success: None,
-            on_failure: None,
-        }
     }
 }
 

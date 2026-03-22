@@ -291,8 +291,14 @@ impl<'a> CliStageRunner<'a> {
             .stage_def
             .role_name()
             .expect("role stage must have role");
-        let cli_tool = self.zbobr.config().tool_for_stage(self.stage_def, self.zbobr.workflow().config());
-        let model = self.zbobr.config().model_for_stage(self.stage_def, self.zbobr.workflow().config());
+        let cli_tool = self
+            .zbobr
+            .config()
+            .tool_for_stage(self.stage_def, self.zbobr.workflow().config());
+        let model = self
+            .zbobr
+            .config()
+            .model_for_stage(self.stage_def, self.zbobr.workflow().config());
 
         // Set state to running
         self.zbobr
@@ -801,10 +807,7 @@ pub async fn process_task(
                             t
                         })
                         .await?;
-                    tracing::info!(
-                        "Task #{}: pipeline failed at root — paused",
-                        task.id
-                    );
+                    tracing::info!("Task #{}: pipeline failed at root — paused", task.id);
                 }
             } else if let Some(entry) = task_session.pop_stack().await? {
                 // Success return from sub-pipeline — re-run calling stage
@@ -865,8 +868,12 @@ pub async fn run_manager_loop(
         if let Some(target) = stage_def.call_pipeline() {
             tracing::info!("Stage {}/{}: call={}", pipeline_name, stage_name, target,);
         } else {
-            let tool = zbobr.config().tool_for_stage(stage_def, zbobr.workflow().config());
-            let model = zbobr.config().model_for_stage(stage_def, zbobr.workflow().config());
+            let tool = zbobr
+                .config()
+                .tool_for_stage(stage_def, zbobr.workflow().config());
+            let model = zbobr
+                .config()
+                .model_for_stage(stage_def, zbobr.workflow().config());
             tracing::info!(
                 "Stage {}/{}: role={:?}, tool={:?}, model={:?}, prompts={:?}",
                 pipeline_name,
@@ -874,7 +881,7 @@ pub async fn run_manager_loop(
                 stage_def.role_name().unwrap_or("<none>"),
                 tool,
                 model,
-                stage_def.main_prompt
+                stage_def.role_prompt
             );
         }
     }
@@ -1165,7 +1172,11 @@ async fn detect_and_handle_worktree(
     task_dir: &Path,
 ) -> anyhow::Result<WorktreeResult> {
     let task_backend = zbobr.task_backend();
-    let task = task_backend.get_task(task_id).await?.snapshot(false).await?;
+    let task = task_backend
+        .get_task(task_id)
+        .await?
+        .snapshot(false)
+        .await?;
 
     // 1. Check if identity is defined
     let identity = match task.identity() {
@@ -1605,7 +1616,11 @@ async fn perform_stash_and_push(
         Err(e) => tracing::warn!("Failed to check git status for stash: {e}"),
     }
 
-    let task = task_backend.get_task(task_id).await?.snapshot(false).await?;
+    let task = task_backend
+        .get_task(task_id)
+        .await?
+        .snapshot(false)
+        .await?;
     if let Some(identity) = task.identity() {
         if let Err(e) = repo_backend.update_pr(&identity).await {
             tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
