@@ -125,7 +125,7 @@ impl Workflow {
     /// Given a task's current state/signal/stack and the workflow configuration,
     /// determine the next action to take.
     pub fn resolve_next_action(&self, task: &Task) -> anyhow::Result<StateAction<'_>> {
-        tracing::info!(
+        tracing::debug!(
             "Task #{}: resolving next action (state={}, signal={:?}, stack_depth={})",
             task.id,
             task.state,
@@ -153,9 +153,9 @@ impl Workflow {
                     );
                 }
             }
-            StateAction::Done => tracing::info!("Task #{}: resolved → Done", task.id),
-            StateAction::Paused => tracing::info!("Task #{}: resolved → Paused", task.id),
-            StateAction::Idle => tracing::info!("Task #{}: resolved → Idle", task.id),
+            StateAction::Done => tracing::debug!("Task #{}: resolved → Done", task.id),
+            StateAction::Paused => tracing::debug!("Task #{}: resolved → Paused", task.id),
+            StateAction::Idle => tracing::debug!("Task #{}: resolved → Idle", task.id),
         }
         Ok(action)
     }
@@ -207,7 +207,7 @@ impl Workflow {
                     );
                     self.resolve_signal(task, signal)
                 } else {
-                    tracing::info!(
+                    tracing::debug!(
                         "Task #{}: READY with stack but no signal → Idle",
                         task.id
                     );
@@ -226,7 +226,7 @@ impl Workflow {
                     );
                     self.resolve_signal_in_pipeline(signal, pipeline)
                 } else {
-                    tracing::info!(
+                    tracing::debug!(
                         "Task #{}: PENDING in pipeline '{}' but no signal → Idle",
                         task.id,
                         pipeline
