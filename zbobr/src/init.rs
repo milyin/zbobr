@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use indexmap::IndexMap;
+
 use zbobr_api::config_tools::McpTool;
 use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig, WorkflowToml};
 use zbobr_api::task::{Model, Tool};
@@ -119,46 +121,49 @@ fn default_workflow() -> WorkflowConfig {
 
     let task_prompt = vec![PathBuf::from("task.md")];
 
-    let mut main_stages = HashMap::new();
-    main_stages.insert("planning".to_string(), StageDefinition {
-        role: Some("planner".into()),
-        additional_prompts: task_prompt.clone(),
-        ..Default::default()
-    });
-    main_stages.insert("working".to_string(), StageDefinition {
-        role: Some("worker".into()),
-        additional_prompts: task_prompt.clone(),
-        ..Default::default()
-    });
-    main_stages.insert("reviewing".to_string(), StageDefinition {
-        role: Some("reviewer".into()),
-        additional_prompts: task_prompt.clone(),
-        ..Default::default()
-    });
-    main_stages.insert("merging".to_string(), StageDefinition {
-        role: Some("merger".into()),
-        additional_prompts: task_prompt.clone(),
-        ..Default::default()
-    });
+    let main_stages = IndexMap::from([
+        ("planning".to_string(), StageDefinition {
+            role: Some("planner".into()),
+            additional_prompts: task_prompt.clone(),
+            ..Default::default()
+        }),
+        ("working".to_string(), StageDefinition {
+            role: Some("worker".into()),
+            additional_prompts: task_prompt.clone(),
+            ..Default::default()
+        }),
+        ("reviewing".to_string(), StageDefinition {
+            role: Some("reviewer".into()),
+            additional_prompts: task_prompt.clone(),
+            ..Default::default()
+        }),
+        ("merging".to_string(), StageDefinition {
+            role: Some("merger".into()),
+            additional_prompts: task_prompt.clone(),
+            ..Default::default()
+        }),
+    ]);
 
-    let mut init_stages = HashMap::new();
-    init_stages.insert("preparing".to_string(), StageDefinition {
-        role: Some("preparator".into()),
-        additional_prompts: task_prompt.clone(),
-        ..Default::default()
-    });
+    let init_stages = IndexMap::from([
+        ("preparing".to_string(), StageDefinition {
+            role: Some("preparator".into()),
+            additional_prompts: task_prompt.clone(),
+            ..Default::default()
+        }),
+    ]);
 
-    let mut merge_stages = HashMap::new();
-    merge_stages.insert("merging".to_string(), StageDefinition {
-        role: Some("merger".into()),
-        additional_prompts: task_prompt,
-        ..Default::default()
-    });
+    let merge_stages = IndexMap::from([
+        ("merging".to_string(), StageDefinition {
+            role: Some("merger".into()),
+            additional_prompts: task_prompt,
+            ..Default::default()
+        }),
+    ]);
 
     let mut pipelines = HashMap::new();
-    pipelines.insert(WorkflowConfig::MAIN_PIPELINE.to_string(), PipelineConfig { order: vec!["planning".into(), "working".into(), "reviewing".into(), "merging".into()], stages: main_stages, ..Default::default() });
-    pipelines.insert(WorkflowConfig::INIT_PIPELINE.to_string(), PipelineConfig { order: vec!["preparing".into()], stages: init_stages, ..Default::default() });
-    pipelines.insert(WorkflowConfig::MERGE_PIPELINE.to_string(), PipelineConfig { order: vec!["merging".into()], stages: merge_stages, ..Default::default() });
+    pipelines.insert(WorkflowConfig::MAIN_PIPELINE.to_string(), PipelineConfig { stages: main_stages });
+    pipelines.insert(WorkflowConfig::INIT_PIPELINE.to_string(), PipelineConfig { stages: init_stages });
+    pipelines.insert(WorkflowConfig::MERGE_PIPELINE.to_string(), PipelineConfig { stages: merge_stages });
 
     let roles = HashMap::from([
         (

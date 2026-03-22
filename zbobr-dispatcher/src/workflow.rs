@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use indexmap::IndexMap;
+
 use zbobr_api::config::{
     PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig,
 };
@@ -40,13 +42,10 @@ impl Default for Workflow {
             pipelines.insert(
                 name.to_string(),
                 PipelineConfig {
-                    order: vec!["default".to_string()],
-                    stages: [(
+                    stages: IndexMap::from([(
                         "default".to_string(),
                         dummy_stage.clone(),
-                    )]
-                    .into(),
-                    ..Default::default()
+                    )]),
                 },
             );
         }
@@ -257,9 +256,7 @@ mod tests {
             ..Default::default()
         };
         let single_pipeline = |stage_name: &str, role: &str| PipelineConfig {
-            order: vec![stage_name.to_string()],
-            stages: [(stage_name.to_string(), role_stage(role))].into(),
-            ..Default::default()
+            stages: IndexMap::from([(stage_name.to_string(), role_stage(role))]),
         };
         WorkflowConfig {
             pipelines: [
@@ -279,20 +276,16 @@ mod tests {
         wf.pipelines.insert(
             "review".into(),
             PipelineConfig {
-                order: vec!["checking".into()],
-                stages: [(
+                stages: IndexMap::from([(
                     "checking".into(),
                     StageDefinition {
                         role: Some("reviewer".into()),
                         ..Default::default()
                     },
-                )]
-                .into(),
-                ..Default::default()
+                )]),
             },
         );
         let main = wf.pipelines.get_mut("main").unwrap();
-        main.order = vec!["working".into(), "call_review".into()];
         main.stages.insert(
             "call_review".into(),
             StageDefinition {
@@ -307,7 +300,6 @@ mod tests {
     fn call_stage_unknown_target() {
         let mut wf = base_workflow();
         let main = wf.pipelines.get_mut("main").unwrap();
-        main.order.push("do_call".into());
         main.stages.insert(
             "do_call".into(),
             StageDefinition {
@@ -326,7 +318,6 @@ mod tests {
     fn stage_both_role_and_call() {
         let mut wf = base_workflow();
         let main = wf.pipelines.get_mut("main").unwrap();
-        main.order.push("bad".into());
         main.stages.insert(
             "bad".into(),
             StageDefinition {
@@ -346,7 +337,6 @@ mod tests {
     fn stage_neither_role_nor_call() {
         let mut wf = base_workflow();
         let main = wf.pipelines.get_mut("main").unwrap();
-        main.order.push("empty".into());
         main.stages.insert("empty".into(), StageDefinition::default());
         let err = wf.validate().unwrap_err();
         assert!(
@@ -358,20 +348,14 @@ mod tests {
     #[test]
     fn call_stage_toml_round_trip() {
         let toml_str = r#"
-[pipelines.main]
-order = ["setup", "working"]
 [pipelines.main.stages.setup]
 call = "init"
 [pipelines.main.stages.working]
 role = "worker"
 
-[pipelines.init]
-order = ["preparing"]
 [pipelines.init.stages.preparing]
 role = "preparator"
 
-[pipelines.merge]
-order = ["merging"]
 [pipelines.merge.stages.merging]
 role = "merger"
 "#;
@@ -395,28 +379,23 @@ role = "merger"
         wf.pipelines.insert(
             "sub".into(),
             PipelineConfig {
-                order: vec!["s1".into()],
-                stages: [(
+                stages: IndexMap::from([(
                     "s1".into(),
                     StageDefinition {
                         role: Some("worker".into()),
                         ..Default::default()
                     },
-                )]
-                .into(),
-                ..Default::default()
+                )]),
             },
         );
         let main = wf.pipelines.get_mut("main").unwrap();
-        main.order = vec!["call_sub".into()];
-        main.stages.clear();
-        main.stages.insert(
+        main.stages = IndexMap::from([(
             "call_sub".into(),
             StageDefinition {
                 call: Some("sub".into()),
                 ..Default::default()
             },
-        );
+        )]);
         let workflow = Workflow::from_config(wf);
 
         // Fresh task → state machine should resolve to RunStage for the call stage
@@ -458,7 +437,7 @@ role = "merger"
     fn find_stage_by_role_skips_call_stages() {
         let mut wf = base_workflow();
         let main = wf.pipelines.get_mut("main").unwrap();
-        main.order = vec!["call_init".into(), "working".into()];
+        let working = main.stages.shift_remove("working").unwrap();
         main.stages.insert(
             "call_init".into(),
             StageDefinition {
@@ -466,6 +445,7 @@ role = "merger"
                 ..Default::default()
             },
         );
+        main.stages.insert("working".into(), working);
         // "worker" role should still be found on the "working" stage
         assert!(wf.find_stage_by_role("worker").is_some());
         // No stage has role matching call target name

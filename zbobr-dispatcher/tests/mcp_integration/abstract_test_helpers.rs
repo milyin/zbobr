@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use indexmap::IndexMap;
 use zbobr_api::Signal;
 use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig};
 use zbobr_executor_mcp_tester;
@@ -26,21 +27,14 @@ struct StageDef {
 /// Build a WorkflowConfig from a list of stage definitions.
 ///
 /// Stages are added to their respective pipelines in the order they appear.
-/// The `order` field is derived from insertion order within each pipeline.
 /// Optional `roles` map allows specifying tool lists for roles.
 fn build_workflow_with_roles(
     stages: Vec<StageDef>,
     roles: HashMap<String, RoleDefinition>,
 ) -> WorkflowConfig {
-    // Collect stages per pipeline, preserving insertion order
-    let mut pipeline_order: HashMap<String, Vec<String>> = HashMap::new();
-    let mut pipeline_stages: HashMap<String, HashMap<String, StageDefinition>> = HashMap::new();
+    let mut pipeline_stages: HashMap<String, IndexMap<String, StageDefinition>> = HashMap::new();
 
     for s in stages {
-        pipeline_order
-            .entry(s.pipeline.to_string())
-            .or_default()
-            .push(s.name.to_string());
         pipeline_stages
             .entry(s.pipeline.to_string())
             .or_default()
@@ -55,16 +49,8 @@ fn build_workflow_with_roles(
     }
 
     let mut pipelines: HashMap<String, PipelineConfig> = HashMap::new();
-    for (pipeline_name, order) in pipeline_order {
-        let stages = pipeline_stages.remove(&pipeline_name).unwrap_or_default();
-        pipelines.insert(
-            pipeline_name,
-            PipelineConfig {
-                order,
-                stages,
-                ..Default::default()
-            },
-        );
+    for (pipeline_name, stages) in pipeline_stages {
+        pipelines.insert(pipeline_name, PipelineConfig { stages });
     }
 
     WorkflowConfig {
@@ -381,27 +367,24 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     pipelines.insert(
         "main".to_string(),
         PipelineConfig {
-            order: vec!["check".to_string(), "finish".to_string()],
-            stages: {
-                let mut m = HashMap::new();
-                m.insert(
+            stages: IndexMap::from([
+                (
                     "check".to_string(),
                     StageDefinition {
                         role: Some("role_check".to_string()),
                         tool: Some(Tool::McpTester),
                         ..Default::default()
                     },
-                );
-                m.insert(
+                ),
+                (
                     "finish".to_string(),
                     StageDefinition {
                         role: Some("role_finish".to_string()),
                         tool: Some(Tool::McpTester),
                         ..Default::default()
                     },
-                );
-                m
-            },
+                ),
+            ]),
         },
     );
     let workflow = WorkflowConfig {
@@ -603,8 +586,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
     pipelines.insert(
         "main".to_string(),
         PipelineConfig {
-            order: vec!["call_sub".into(), "finish".into()],
-            stages: [
+            stages: IndexMap::from([
                 (
                     "call_sub".into(),
                     StageDefinition {
@@ -620,57 +602,46 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
                         ..Default::default()
                     },
                 ),
-            ]
-            .into(),
-            ..Default::default()
+            ]),
         },
     );
     pipelines.insert(
         "sub".to_string(),
         PipelineConfig {
-            order: vec!["work".into()],
-            stages: [(
+            stages: IndexMap::from([(
                 "work".into(),
                 StageDefinition {
                     role: Some("role_work".into()),
                     tool: Some(Tool::McpTester),
                     ..Default::default()
                 },
-            )]
-            .into(),
-            ..Default::default()
+            )]),
         },
     );
     pipelines.insert(
         "init".to_string(),
         PipelineConfig {
-            order: vec!["preparing".into()],
-            stages: [(
+            stages: IndexMap::from([(
                 "preparing".into(),
                 StageDefinition {
                     role: Some("role_init".into()),
                     tool: Some(Tool::McpTester),
                     ..Default::default()
                 },
-            )]
-            .into(),
-            ..Default::default()
+            )]),
         },
     );
     pipelines.insert(
         "merge".to_string(),
         PipelineConfig {
-            order: vec!["merging".into()],
-            stages: [(
+            stages: IndexMap::from([(
                 "merging".into(),
                 StageDefinition {
                     role: Some("role_merge".into()),
                     tool: Some(Tool::McpTester),
                     ..Default::default()
                 },
-            )]
-            .into(),
-            ..Default::default()
+            )]),
         },
     );
     let workflow = WorkflowConfig {

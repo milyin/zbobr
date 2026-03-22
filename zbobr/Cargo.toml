@@ -34,3 +34,4 @@ anyhow = { workspace = true }
 toml = { workspace = true }
 toml_edit = { workspace = true }
 rustls = { workspace = true }
+indexmap = { workspace = true }

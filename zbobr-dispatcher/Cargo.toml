@@ -24,6 +24,7 @@ paste.workspace = true
 toml = { workspace = true }
 typesafe_builder = { workspace = true }
 simpleinterpolation = { workspace = true }
+indexmap = { workspace = true }
 
 [dev-dependencies]
 zbobr-task-backend-github = { version = "0.1.0", path = "../zbobr-task-backend-github" }

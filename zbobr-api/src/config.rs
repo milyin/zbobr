@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use indexmap::IndexMap;
+
 use zbobr_utility::config_struct;
 
 use crate::config_tools::McpTool;
@@ -72,13 +74,12 @@ impl Default for StageDefinition {
 }
 
 /// Per-pipeline configuration: an ordered sequence of stages.
+///
+/// Stage order is determined by insertion order in the `IndexMap`.
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct PipelineConfig {
-    /// Ordered list of stage names. Success advances to the next stage.
     #[serde(default)]
-    pub order: Vec<String>,
-    #[serde(default)]
-    pub stages: HashMap<String, StageDefinition>,
+    pub stages: IndexMap<String, StageDefinition>,
 }
 
 impl PipelineConfig {
@@ -87,23 +88,21 @@ impl PipelineConfig {
         self.stages.get(name)
     }
 
-    /// Get the index of a stage in the order list.
+    /// Get the index of a stage in the order.
     pub fn stage_index(&self, name: &str) -> Option<usize> {
-        self.order.iter().position(|n| n == name)
+        self.stages.get_index_of(name)
     }
 
-    /// Get the next stage after `name` in the order list.
+    /// Get the next stage after `name`.
     pub fn next_stage(&self, name: &str) -> Option<(&str, &StageDefinition)> {
-        let idx = self.stage_index(name)?;
-        let next_name = self.order.get(idx + 1)?;
-        let def = self.stages.get(next_name)?;
+        let idx = self.stages.get_index_of(name)?;
+        let (next_name, def) = self.stages.get_index(idx + 1)?;
         Some((next_name.as_str(), def))
     }
 
     /// Get the first stage of this pipeline.
     pub fn first_stage(&self) -> Option<(&str, &StageDefinition)> {
-        let name = self.order.first()?;
-        let def = self.stages.get(name)?;
+        let (name, def) = self.stages.first()?;
         Some((name.as_str(), def))
     }
 
@@ -114,29 +113,12 @@ impl PipelineConfig {
 
     /// Validate pipeline configuration.
     pub fn validate(&self, pipeline_name: &str) -> anyhow::Result<()> {
-        if self.order.is_empty() {
+        if self.stages.is_empty() {
             anyhow::bail!(
-                "Pipeline '{}' has empty 'order' list",
+                "Pipeline '{}' has no stages",
                 pipeline_name
             );
         }
-        for name in &self.order {
-            if !self.stages.contains_key(name) {
-                anyhow::bail!(
-                    "Pipeline '{}' order references unknown stage '{}'",
-                    pipeline_name, name
-                );
-            }
-        }
-        for name in self.stages.keys() {
-            if !self.order.contains(name) {
-                anyhow::bail!(
-                    "Pipeline '{}' stage '{}' is not in the order list",
-                    pipeline_name, name
-                );
-            }
-        }
-        // Each stage must have exactly one of role or call
         for (sname, stage) in &self.stages {
             match (&stage.role, &stage.call) {
                 (Some(_), Some(_)) => anyhow::bail!(
