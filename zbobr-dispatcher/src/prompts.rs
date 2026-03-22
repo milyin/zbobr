@@ -299,7 +299,7 @@ mod tests {
             id: 1,
             title: title.to_owned(),
             description: String::new(),
-            state: "READY".to_string(),
+            state: "READY".into(),
             destination_repository: None,
             destination_branch: None,
             work_branch: None,

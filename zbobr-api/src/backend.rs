@@ -38,7 +38,7 @@ pub trait TaskMut: Send + Sync {
 
     async fn set_state(&self, state: String) -> anyhow::Result<()> {
         self.modify_task(Box::new(move |mut task| {
-            task.state = state;
+            task.state = state.into();
             task
         }))
         .await

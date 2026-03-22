@@ -450,7 +450,7 @@ impl TaskSession {
             if task.confirm && task.state != state {
                 task.pause = true;
             }
-            task.state = state;
+            task.state = state.into();
             task
         })
         .await
@@ -564,7 +564,7 @@ impl TaskSession {
         }
 
         self.modify_task(move |mut task| {
-            task.state = "DONE".to_string();
+            task.state = State::Done;
             task.signal = None;
             task
         })
@@ -831,7 +831,7 @@ mod comment_model_tests {
                 id,
                 title: title.to_string(),
                 description: description.to_string(),
-                state: state.to_string(),
+                state: state.into(),
                 destination_repository: None,
                 destination_branch: None,
                 work_branch: None,

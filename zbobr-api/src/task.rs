@@ -191,6 +191,184 @@ impl schemars::JsonSchema for Stage {
     }
 }
 
+/// Task lifecycle state.
+///
+/// Serialized as a string for storage/backward compatibility:
+/// - "" (empty)
+/// - "DONE"
+/// - "PAUSE"
+/// - "READY"
+/// - "{pipeline}_PENDING"
+/// - "{pipeline}_{stage}"
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum State {
+    Empty,
+    Done,
+    Pause,
+    Ready,
+    Pending(Pipeline),
+    Running(Pipeline, Stage),
+    /// Unrecognized state preserved verbatim to keep compatibility with
+    /// external/manual values.
+    Unknown(String),
+}
+
+impl State {
+    const DONE: &'static str = "DONE";
+    const PAUSE: &'static str = "PAUSE";
+    const READY: &'static str = "READY";
+    const PENDING_SUFFIX: &'static str = "_PENDING";
+
+    pub fn pending(pipeline: impl Into<Pipeline>) -> Self {
+        State::Pending(pipeline.into())
+    }
+
+    pub fn running(pipeline: impl Into<Pipeline>, stage: impl Into<Stage>) -> Self {
+        State::Running(pipeline.into(), stage.into())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        matches!(self, State::Empty)
+    }
+
+    pub fn is_done(&self) -> bool {
+        matches!(self, State::Done)
+    }
+
+    pub fn is_pause(&self) -> bool {
+        matches!(self, State::Pause)
+    }
+
+    pub fn is_ready(&self) -> bool {
+        matches!(self, State::Ready)
+    }
+
+    pub fn pipeline(&self) -> Option<&Pipeline> {
+        match self {
+            State::Pending(p) | State::Running(p, _) => Some(p),
+            _ => None,
+        }
+    }
+
+    pub fn stage(&self) -> Option<&Stage> {
+        match self {
+            State::Running(_, s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn contains(&self, pat: &str) -> bool {
+        self.to_string().contains(pat)
+    }
+
+    pub fn ends_with(&self, suffix: &str) -> bool {
+        self.to_string().ends_with(suffix)
+    }
+
+    fn equals_str(&self, other: &str) -> bool {
+        match self {
+            State::Empty => other.is_empty(),
+            State::Done => other == Self::DONE,
+            State::Pause => other == Self::PAUSE,
+            State::Ready => other == Self::READY,
+            State::Pending(pipeline) => {
+                other
+                    .strip_suffix(Self::PENDING_SUFFIX)
+                    .is_some_and(|p| p == pipeline.as_str())
+            }
+            State::Running(pipeline, stage) => {
+                other
+                    .split_once('_')
+                    .is_some_and(|(p, s)| p == pipeline.as_str() && s == stage.as_str())
+            }
+            State::Unknown(raw) => raw == other,
+        }
+    }
+}
+
+impl std::fmt::Display for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            State::Empty => Ok(()),
+            State::Done => f.write_str(Self::DONE),
+            State::Pause => f.write_str(Self::PAUSE),
+            State::Ready => f.write_str(Self::READY),
+            State::Pending(pipeline) => write!(f, "{pipeline}{}", Self::PENDING_SUFFIX),
+            State::Running(pipeline, stage) => write!(f, "{pipeline}_{stage}"),
+            State::Unknown(raw) => f.write_str(raw),
+        }
+    }
+}
+
+impl From<&str> for State {
+    fn from(s: &str) -> Self {
+        if s.is_empty() {
+            return State::Empty;
+        }
+        if s == State::DONE {
+            return State::Done;
+        }
+        if s == State::PAUSE {
+            return State::Pause;
+        }
+        if s == State::READY {
+            return State::Ready;
+        }
+        if let Some(pipeline) = s.strip_suffix(State::PENDING_SUFFIX)
+            && !pipeline.is_empty()
+        {
+            return State::Pending(Pipeline::from(pipeline));
+        }
+        if let Some((pipeline, stage)) = s.split_once('_')
+            && !pipeline.is_empty()
+            && !stage.is_empty()
+        {
+            return State::Running(Pipeline::from(pipeline), Stage::from(stage));
+        }
+        State::Unknown(s.to_string())
+    }
+}
+
+impl From<String> for State {
+    fn from(s: String) -> Self {
+        State::from(s.as_str())
+    }
+}
+
+impl serde::Serialize for State {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for State {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(State::from(s))
+    }
+}
+
+impl schemars::JsonSchema for State {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "State".into()
+    }
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "string" })
+    }
+}
+
+impl PartialEq<&str> for State {
+    fn eq(&self, other: &&str) -> bool {
+        self.equals_str(other)
+    }
+}
+
+impl PartialEq<String> for State {
+    fn eq(&self, other: &String) -> bool {
+        self.equals_str(other)
+    }
+}
+
 /// A pipeline identifier: one of the three built-in pipelines or a custom one.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Pipeline {
@@ -759,8 +937,8 @@ pub struct Task {
     pub id: u64,
     pub title: String,
     pub description: String,
-    /// Task state: empty | "DONE" | "PAUSE" | "READY" | "{PIPELINE}_PENDING" | "{PIPELINE}_{STAGE}"
-    pub state: String,
+    /// Task state.
+    pub state: State,
     pub destination_repository: Option<String>,
     pub destination_branch: Option<String>,
     pub work_branch: Option<String>,

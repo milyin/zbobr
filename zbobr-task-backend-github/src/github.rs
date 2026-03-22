@@ -5,7 +5,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use zbobr_api::{Comment, CommentTag, Model, Task, Tool, backend::TaskBackend, task::StackEntry};
+use zbobr_api::{Comment, CommentTag, Model, Task, Tool, backend::TaskBackend, task::{StackEntry, State}};
 
 use crate::{
     config::ZbobrTaskBackendGithubConfig,
@@ -154,8 +154,8 @@ impl ZbobrTaskBackendGithubImpl {
         label.strip_prefix("signal:")?.parse().ok()
     }
 
-    /// Convert a state string to its GitHub label representation.
-    fn state_to_label(state: &str) -> String {
+    /// Convert a state value to its GitHub label representation.
+    fn state_to_label(state: &State) -> String {
         format!("state:{}", state)
     }
 
@@ -192,7 +192,7 @@ impl ZbobrTaskBackendGithubImpl {
     }
 
     /// Apply a state change on a GitHub issue (remove old state labels, add new one).
-    async fn apply_state_change(&self, id: u64, state: &str) -> anyhow::Result<()> {
+    async fn apply_state_change(&self, id: u64, state: &State) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
         // Fetch current labels and remove all existing state: labels
@@ -457,8 +457,8 @@ impl ZbobrTaskBackendGithubImpl {
             .labels
             .iter()
             .find_map(|l| Self::label_to_state(&l.name))
-            .unwrap_or("")
-            .to_string();
+            .map(State::from)
+            .unwrap_or(State::Empty);
 
         // signal is stored as a label
         let signal = issue
@@ -950,7 +950,9 @@ impl TaskBackend for TaskBackendGithub {
 
         // Apply the initial state as a label
         if !state.is_empty() {
-            self.inner.apply_state_change(issue_id, state).await?;
+            self.inner
+                .apply_state_change(issue_id, &State::from(state))
+                .await?;
         }
 
         Ok(issue_id)

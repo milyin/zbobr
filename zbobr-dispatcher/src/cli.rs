@@ -772,7 +772,7 @@ pub async fn run_manager_loop(
         // Task statistics
         let mut state_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for task in &all_tasks {
-            *state_counts.entry(task.state.clone()).or_default() += 1;
+            *state_counts.entry(task.state.to_string()).or_default() += 1;
         }
         let stats: Vec<String> = state_counts.iter().map(|(k, v)| format!("{k}={v}")).collect();
         tracing::info!("Task statistics: {}", stats.join(", "));

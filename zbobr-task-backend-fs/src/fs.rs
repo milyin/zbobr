@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use zbobr_api::{
-    ChecklistItem, Comment, HistoryRecordType, Model, Signal, StackEntry, Task, Tool,
+    ChecklistItem, Comment, HistoryRecordType, Model, Signal, StackEntry, State, Task, Tool,
     backend::{TaskBackend, TaskMut, TaskWeak},
     classify_comment,
 };
@@ -67,7 +67,7 @@ impl TaskFile {
             id: self.id,
             title: self.title.clone(),
             description: self.description.clone(),
-            state,
+            state: state.into(),
             destination_repository: self.destination_repository.clone(),
             destination_branch: self.destination_branch.clone(),
             work_branch: self.work_branch.clone(),
@@ -87,7 +87,7 @@ impl TaskFile {
             id: task.id,
             title: task.title.clone(),
             description: task.description.clone(),
-            state: task.state.clone(),
+            state: task.state.to_string(),
             stage: None,
             destination_repository: task.destination_repository.clone(),
             destination_branch: task.destination_branch.clone(),
@@ -508,7 +508,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             id,
             title: title.to_string(),
             description: description.to_string(),
-            state: state.to_string(),
+            state: State::from(state),
             destination_repository: None,
             destination_branch: None,
             work_branch: None,

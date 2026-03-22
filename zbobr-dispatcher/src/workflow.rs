@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use zbobr_api::config::{
     PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig,
 };
-use zbobr_api::{Pipeline, Signal, Task};
+use zbobr_api::{Pipeline, Signal, State, Task};
 
 // Re-export constants for convenience.
 pub const MAIN_PIPELINE: &str = WorkflowConfig::MAIN_PIPELINE;
@@ -145,55 +145,42 @@ impl Workflow {
             );
         }
 
-        let state = &task.state;
-
-        // Empty or READY state: initialize from stack or default pipeline
-        if state.is_empty() || state == "READY" {
-            if task.stack.is_empty() {
-                // Push default pipeline's start stage
-                let default_pipeline = self.config.default_pipeline();
-                let (stage_name, stage_def) = self
-                    .config
-                    .start_stage_for_pipeline(default_pipeline)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "No start stage for default pipeline '{}'",
-                            default_pipeline
-                        )
-                    })?;
-                return Ok(StateAction::RunStage(
-                    default_pipeline,
-                    stage_name,
-                    stage_def,
-                ));
+        match &task.state {
+            State::Empty | State::Ready => {
+                if task.stack.is_empty() {
+                    // Push default pipeline's start stage
+                    let default_pipeline = self.config.default_pipeline();
+                    let (stage_name, stage_def) = self
+                        .config
+                        .start_stage_for_pipeline(default_pipeline)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "No start stage for default pipeline '{}'",
+                                default_pipeline
+                            )
+                        })?;
+                    Ok(StateAction::RunStage(
+                        default_pipeline,
+                        stage_name,
+                        stage_def,
+                    ))
+                } else if let Some(ref signal) = task.signal {
+                    self.resolve_signal(task, signal)
+                } else {
+                    Ok(StateAction::Idle)
+                }
             }
-            // Stack not empty: pop and continue (conceptually — caller handles state transitions)
-            // For now, use signal to determine action if present
-            if let Some(ref signal) = task.signal {
-                return self.resolve_signal(task, signal);
+            State::Done => Ok(StateAction::Done),
+            State::Pause => Ok(StateAction::Paused),
+            State::Pending(pipeline) => {
+                if let Some(ref signal) = task.signal {
+                    self.resolve_signal_in_pipeline(signal, pipeline)
+                } else {
+                    Ok(StateAction::Idle)
+                }
             }
-            return Ok(StateAction::Idle);
+            State::Running(_, _) | State::Unknown(_) => Ok(StateAction::Idle),
         }
-
-        if state == "DONE" {
-            return Ok(StateAction::Done);
-        }
-
-        if state == "PAUSE" {
-            return Ok(StateAction::Paused);
-        }
-
-        // State is "{pipeline}_PENDING" — dispatch based on signal
-        if let Some(pipeline_str) = state.strip_suffix("_PENDING") {
-            if let Some(ref signal) = task.signal {
-                let pipeline = Pipeline::from(pipeline_str);
-                return self.resolve_signal_in_pipeline(signal, &pipeline);
-            }
-            return Ok(StateAction::Idle);
-        }
-
-        // State is "{pipeline}_{stage}" — currently running, nothing to do
-        Ok(StateAction::Idle)
     }
 
     fn resolve_signal(&self, task: &Task, signal: &Signal) -> anyhow::Result<StateAction<'_>> {
@@ -253,13 +240,9 @@ impl Workflow {
     }
 }
 
-/// Extract pipeline name from a state string like "main_PENDING" or "main_working".
-pub fn pipeline_from_state(state: &str) -> Option<Pipeline> {
-    if state.is_empty() || state == "READY" || state == "DONE" || state == "PAUSE" {
-        return None;
-    }
-    // "{pipeline}_PENDING" or "{pipeline}_{stage}"
-    state.find('_').map(|pos| Pipeline::from(&state[..pos]))
+/// Extract pipeline name from a typed task state.
+pub fn pipeline_from_state(state: &State) -> Option<Pipeline> {
+    state.pipeline().cloned()
 }
 
 #[cfg(test)]
@@ -441,7 +424,7 @@ role = "merger"
             id: 1,
             title: String::new(),
             description: String::new(),
-            state: String::new(),
+            state: State::Empty,
             destination_repository: None,
             destination_branch: None,
             work_branch: None,

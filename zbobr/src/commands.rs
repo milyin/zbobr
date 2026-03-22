@@ -285,7 +285,7 @@ async fn run_task_subcommand(
                         if task.confirm && task.state != s {
                             task.pause = true;
                         }
-                        task.state = s;
+                        task.state = s.into();
                     }
                     if let Some(s) = parsed_signal {
                         task.signal = Some(s);
