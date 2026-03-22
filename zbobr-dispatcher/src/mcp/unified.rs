@@ -19,6 +19,7 @@ use crate::{
     mcp::traits::CommonMcpImpl,
     task::{Model, RoleSession, Tool},
 };
+use zbobr_api::config_tools::McpTool;
 
 /// A single unified MCP server that defines ALL possible tools and filters them
 /// at runtime based on the role's `allowed_tools` set.
@@ -26,7 +27,7 @@ use crate::{
 pub struct UnifiedMcp {
     session: RoleSession,
     tool_router: ToolRouter<Self>,
-    allowed_tools: HashSet<String>,
+    allowed_tools: HashSet<McpTool>,
     role_name: String,
     tool: Tool,
     model: Model,
@@ -74,7 +75,7 @@ pub const ALL_TOOL_NAMES: &[&str] = zbobr_api::config_tools::ALL_TOOL_NAMES;
 impl UnifiedMcp {
     pub fn new(
         session: RoleSession,
-        allowed_tools: HashSet<String>,
+        allowed_tools: HashSet<McpTool>,
         role_name: String,
         tool: Tool,
         model: Model,
@@ -201,7 +202,13 @@ impl ServerHandler for UnifiedMcp {
         let all_tools = self.tool_router.list_all();
         let filtered: Vec<McpToolDef> = all_tools
             .into_iter()
-            .filter(|t| self.allowed_tools.contains(t.name.as_ref()))
+            .filter(|t| {
+                t.name
+                    .as_ref()
+                    .parse::<McpTool>()
+                    .map(|tool| self.allowed_tools.contains(&tool))
+                    .unwrap_or(false)
+            })
             .collect();
 
         Ok(rmcp::model::ListToolsResult {
@@ -217,7 +224,8 @@ impl ServerHandler for UnifiedMcp {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let tool_name = request.name.as_ref();
-        if !self.allowed_tools.contains(tool_name) {
+        let requested_tool = tool_name.parse::<McpTool>().ok();
+        if requested_tool.is_none_or(|tool| !self.allowed_tools.contains(&tool)) {
             return Ok(CallToolResult {
                 content: vec![Content::text(format!(
                     "Error: tool '{}' is not available for role '{}'",
@@ -236,12 +244,18 @@ impl ServerHandler for UnifiedMcp {
 
 impl UnifiedMcp {
     /// Generate API documentation for the tools available to this role.
-    pub fn generate_api_docs(allowed_tools: &HashSet<String>) -> String {
+    pub fn generate_api_docs(allowed_tools: &HashSet<McpTool>) -> String {
         let router = Self::tool_router();
         let all_tools = router.list_all();
         let filtered: Vec<_> = all_tools
             .iter()
-            .filter(|t| allowed_tools.contains(t.name.as_ref()))
+            .filter(|t| {
+                t.name
+                    .as_ref()
+                    .parse::<McpTool>()
+                    .map(|tool| allowed_tools.contains(&tool))
+                    .unwrap_or(false)
+            })
             .collect();
 
         let mut doc = String::from("## MCP API\n\nAvailable tools (all pre-scoped to your task):\n\n");
@@ -274,11 +288,17 @@ mod tests {
     #[test]
     fn filtering_works() {
         let router = UnifiedMcp::tool_router();
-        let allowed: HashSet<String> = ["get_history", "stop_with_error"].iter().map(|s| s.to_string()).collect();
+        let allowed: HashSet<McpTool> = [McpTool::GetHistory, McpTool::StopWithError].into_iter().collect();
         let all_tools = router.list_all();
         let filtered: Vec<_> = all_tools
             .iter()
-            .filter(|t| allowed.contains(t.name.as_ref()))
+            .filter(|t| {
+                t.name
+                    .as_ref()
+                    .parse::<McpTool>()
+                    .map(|tool| allowed.contains(&tool))
+                    .unwrap_or(false)
+            })
             .collect();
         assert_eq!(filtered.len(), 2);
     }

@@ -8,6 +8,7 @@ use simpleinterpolation::Interpolation;
 use crate::backend::TaskBackend;
 use zbobr_api::{Comment, HistoryRecordType, Task, classify_comment};
 use zbobr_api::config::{StageDefinition, WorkflowConfig};
+use zbobr_api::config_tools::McpTool;
 use crate::workflow::Workflow;
 
 // Template placeholder names used in prompt .md files.
@@ -192,11 +193,12 @@ pub fn build_template_variables<'a>(
 /// Insert `mcp_{name}` → `name` for each tool in the allowed set.
 pub fn add_mcp_tool_variables<'a>(
     vars: &mut HashMap<Cow<'static, str>, Cow<'a, str>>,
-    allowed_tools: &'a [String],
+    allowed_tools: &'a [McpTool],
 ) {
     for tool_name in allowed_tools {
-        let key = format!("mcp_{tool_name}");
-        vars.insert(Cow::Owned(key), Cow::Borrowed(tool_name.as_str()));
+        let tool_name_str = tool_name.as_str();
+        let key = format!("mcp_{tool_name_str}");
+        vars.insert(Cow::Owned(key), Cow::Borrowed(tool_name_str));
     }
 }
 
@@ -215,12 +217,10 @@ pub async fn build_full_prompt(
     let mut vars = build_template_variables(&task, &comments);
 
     // Look up allowed tools for this role; fall back to all static tools.
-    let allowed_tools: Vec<String> = workflow
+    let allowed_tools: Vec<McpTool> = workflow
         .role_definition(role_name)
         .map(|d| d.tools.clone())
-        .unwrap_or_else(|| {
-            workflow.all_tool_names()
-        });
+        .unwrap_or_else(|| McpTool::all().to_vec());
     add_mcp_tool_variables(&mut vars, &allowed_tools);
 
     // Convert to owned HashMap for Interpolation
@@ -591,7 +591,7 @@ mod tests {
 
     #[test]
     fn mcp_tool_variables_added() {
-        let allowed = vec!["report_success".to_string(), "stop_with_error".to_string()];
+        let allowed = vec![McpTool::ReportSuccess, McpTool::StopWithError];
         let mut vars: HashMap<Cow<'static, str>, Cow<str>> = HashMap::new();
         add_mcp_tool_variables(&mut vars, &allowed);
         assert_eq!(vars[&Cow::Borrowed("mcp_report_success") as &Cow<str>].as_ref(), "report_success");
@@ -613,7 +613,7 @@ mod tests {
     #[test]
     fn mcp_tool_renders_correctly() {
         let template_str = "Call `{mcp_report_success}` when done";
-        let allowed = vec!["report_success".to_string()];
+        let allowed = vec![McpTool::ReportSuccess];
         let mut vars: HashMap<Cow<'static, str>, Cow<str>> = HashMap::new();
         add_mcp_tool_variables(&mut vars, &allowed);
         let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
@@ -629,7 +629,7 @@ mod tests {
     fn unavailable_tool_for_role_errors() {
         // A role that only has report_success should fail if prompt uses configure_worktree
         let template_str = "Use {mcp_configure_worktree} to set up";
-        let allowed = vec!["report_success".to_string()];
+        let allowed = vec![McpTool::ReportSuccess];
         let mut vars: HashMap<Cow<'static, str>, Cow<str>> = HashMap::new();
         add_mcp_tool_variables(&mut vars, &allowed);
         let owned_vars: HashMap<Cow<str>, Cow<str>> = vars

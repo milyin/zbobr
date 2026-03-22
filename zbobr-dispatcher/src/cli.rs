@@ -14,6 +14,7 @@ use crate::{
     mcp::common::get_hostname,
     task::{Model, Tool},
 };
+use zbobr_api::config_tools::McpTool;
 use zbobr_api::config::StageDefinition;
 use crate::workflow::{INIT_PIPELINE, MERGE_PIPELINE};
 use zbobr_api::{CommentTag, Signal};
@@ -355,11 +356,11 @@ impl<'a> CliStageRunner<'a> {
             }
         }
 
-        let allowed_tools: std::collections::HashSet<String> = self
+        let allowed_tools: std::collections::HashSet<McpTool> = self
             .zbobr
             .workflow()
             .role_definition(role)
-            .map(|d| d.tools.iter().cloned().collect())
+            .map(|d| d.tools.iter().copied().collect())
             .unwrap_or_else(|| {
                 // No explicit role definition — allow all tools for backward compatibility.
                 self.zbobr
@@ -367,6 +368,7 @@ impl<'a> CliStageRunner<'a> {
                     .config()
                     .all_tool_names()
                     .into_iter()
+                    .filter_map(|name| name.parse::<McpTool>().ok())
                     .collect()
             });
 
@@ -1051,7 +1053,7 @@ async fn start_mcp_server(
     tool: Tool,
     model: Model,
     stage_name: String,
-    allowed_tools: std::collections::HashSet<String>,
+    allowed_tools: std::collections::HashSet<McpTool>,
     tool_tracker: Arc<std::sync::Mutex<Option<String>>>,
     pipeline_name: String,
     pipeline_run_id: u64,

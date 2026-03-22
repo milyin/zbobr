@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use zbobr_api::config_tools::McpTool;
 use zbobr_api::config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig, WorkflowToml};
 use zbobr_api::task::{Model, Tool};
 use zbobr_dispatcher::config::{ZbobrDispatcherToml, ZbobrExecutorToml};
@@ -110,6 +111,12 @@ fn default_config_toml() -> RootConfigToml {
 
 /// Build the default workflow configuration with predefined pipelines and roles.
 fn default_workflow() -> WorkflowConfig {
+    use McpTool::{
+        AddChecklistItem, CheckChecklistItem, ConfigureWorktree, DeleteChecklistItem,
+        GetChecklist, GetHistory, ReportFailure, ReportSuccess, StopWithError,
+        StopWithQuestion,
+    };
+
     let task_prompt = vec![PathBuf::from("task.md")];
 
     let mut main_stages = HashMap::new();
@@ -158,16 +165,12 @@ fn default_workflow() -> WorkflowConfig {
             "preparator".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history",
-
-                    "stop_with_error",
-                    "report_success",
-                    "stop_with_question",
-                    "configure_worktree",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
+                    GetHistory,
+                    StopWithError,
+                    ReportSuccess,
+                    StopWithQuestion,
+                    ConfigureWorktree,
+                ],
                 prompt: Some(PathBuf::from("preparator.md")),
             },
         ),
@@ -175,18 +178,14 @@ fn default_workflow() -> WorkflowConfig {
             "planner".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history",
-
-                    "stop_with_error",
-                    "stop_with_question",
-                    "report_success",
-                    "get_checklist",
-                    "add_checklist_item",
-                    "delete_checklist_item",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
+                    GetHistory,
+                    StopWithError,
+                    StopWithQuestion,
+                    ReportSuccess,
+                    GetChecklist,
+                    AddChecklistItem,
+                    DeleteChecklistItem,
+                ],
                 prompt: Some(PathBuf::from("planner.md")),
             },
         ),
@@ -194,20 +193,16 @@ fn default_workflow() -> WorkflowConfig {
             "worker".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history",
-
-                    "stop_with_error",
-                    "report_success",
-                    "report_failure",
-                    "stop_with_question",
-                    "get_checklist",
-                    "add_checklist_item",
-                    "check_checklist_item",
-                    "delete_checklist_item",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
+                    GetHistory,
+                    StopWithError,
+                    ReportSuccess,
+                    ReportFailure,
+                    StopWithQuestion,
+                    GetChecklist,
+                    AddChecklistItem,
+                    CheckChecklistItem,
+                    DeleteChecklistItem,
+                ],
                 prompt: Some(PathBuf::from("worker.md")),
             },
         ),
@@ -215,16 +210,12 @@ fn default_workflow() -> WorkflowConfig {
             "reviewer".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history",
-
-                    "stop_with_error",
-                    "report_success",
-                    "report_failure",
-                    "stop_with_question",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
+                    GetHistory,
+                    StopWithError,
+                    ReportSuccess,
+                    ReportFailure,
+                    StopWithQuestion,
+                ],
                 prompt: Some(PathBuf::from("reviewer.md")),
             },
         ),
@@ -232,16 +223,12 @@ fn default_workflow() -> WorkflowConfig {
             "tester".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history",
-
-                    "stop_with_error",
-                    "report_success",
-                    "report_failure",
-                    "stop_with_question",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
+                    GetHistory,
+                    StopWithError,
+                    ReportSuccess,
+                    ReportFailure,
+                    StopWithQuestion,
+                ],
                 prompt: Some(PathBuf::from("tester.md")),
             },
         ),
@@ -249,15 +236,11 @@ fn default_workflow() -> WorkflowConfig {
             "merger".into(),
             RoleDefinition {
                 tools: vec![
-                    "get_history",
-
-                    "stop_with_error",
-                    "report_success",
-                    "stop_with_question",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
+                    GetHistory,
+                    StopWithError,
+                    ReportSuccess,
+                    StopWithQuestion,
+                ],
                 prompt: Some(PathBuf::from("merger.md")),
             },
         ),

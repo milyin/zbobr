@@ -920,11 +920,13 @@ mod comment_model_tests {
             .unwrap();
 
         let session = zbobr.role_session(id);
-        let allowed_tools: std::collections::HashSet<String> =
-            ["get_history", "stop_with_error", "report_success"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
+        let allowed_tools: std::collections::HashSet<zbobr_api::config_tools::McpTool> = [
+            zbobr_api::config_tools::McpTool::GetHistory,
+            zbobr_api::config_tools::McpTool::StopWithError,
+            zbobr_api::config_tools::McpTool::ReportSuccess,
+        ]
+        .into_iter()
+        .collect();
         let planner = crate::mcp::unified::UnifiedMcp::new(
             session,
             allowed_tools,
@@ -1032,10 +1034,8 @@ mod comment_model_tests {
             "main".to_string(),
             1,
         );
-        let allowed_tools: std::collections::HashSet<String> = crate::mcp::unified::ALL_TOOL_NAMES
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let allowed_tools: std::collections::HashSet<zbobr_api::config_tools::McpTool> =
+            zbobr_api::config_tools::McpTool::all().iter().copied().collect();
         crate::mcp::unified::UnifiedMcp::new(
             session,
             allowed_tools,
