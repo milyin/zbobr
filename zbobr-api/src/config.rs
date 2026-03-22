@@ -264,11 +264,6 @@ impl Config for WorkflowConfig {
 }
 
 impl WorkflowConfig {
-    /// Required pipeline: main task processing.
-    pub const MAIN_PIPELINE: Pipeline = Pipeline::Main;
-    /// Required pipeline: merge conflict resolution.
-    pub const MERGE_PIPELINE: Pipeline = Pipeline::Merge;
-
     /// Look up a pipeline by name.
     pub fn pipeline(&self, name: impl Into<Pipeline>) -> Option<&PipelineConfig> {
         self.pipelines.get(name.into().as_str())
@@ -289,7 +284,7 @@ impl WorkflowConfig {
 
     /// The default pipeline name.
     pub fn default_pipeline(&self) -> Pipeline {
-        Self::MAIN_PIPELINE
+        Pipeline::Main
     }
 
     /// All pipeline names.
@@ -339,7 +334,7 @@ impl WorkflowConfig {
     /// Validate the entire workflow configuration.
     pub fn validate(&self) -> anyhow::Result<()> {
         // Required pipelines must exist
-        for required in [Self::MAIN_PIPELINE, Self::MERGE_PIPELINE] {
+        for required in [Pipeline::Main, Pipeline::Merge] {
             if !self.pipelines.contains_key(required.as_str()) {
                 anyhow::bail!(
                     "Required pipeline '{}' is missing from [workflow.pipelines]",
