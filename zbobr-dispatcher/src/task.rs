@@ -820,7 +820,7 @@ mod comment_model_tests {
             &self,
             title: &str,
             description: &str,
-            state: &str,
+            state: zbobr_api::State,
         ) -> anyhow::Result<u64> {
             let id = self
                 .inner
@@ -831,7 +831,7 @@ mod comment_model_tests {
                 id,
                 title: title.to_string(),
                 description: description.to_string(),
-                state: state.into(),
+                state: state,
                 destination_repository: None,
                 destination_branch: None,
                 work_branch: None,
