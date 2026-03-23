@@ -229,9 +229,78 @@ impl ZbobrTaskBackendGithubImpl {
         label.strip_prefix("signal:")?.parse().ok()
     }
 
-    /// Convert a state value to its GitHub milestone title.
-    fn state_to_milestone_title(state: &State) -> String {
-        state.to_string()
+    /// Convert a state to its GitHub label representations.
+    fn state_to_labels(state: &State) -> Vec<String> {
+        match state {
+            State::Empty => vec![],
+            State::Done => vec!["state:done".to_string()],
+            State::Pause => vec!["state:pause".to_string()],
+            State::Ready => vec!["state:ready".to_string()],
+            State::Pending(pipeline) => vec![
+                "state:pending".to_string(),
+                format!("pipeline:{}", pipeline.as_str()),
+            ],
+            State::Running(pipeline, stage) => vec![
+                "state:running".to_string(),
+                format!("pipeline:{}", pipeline.as_str()),
+                format!("stage:{}", stage.as_str()),
+            ],
+            State::Unknown(raw) => vec![format!("state:{raw}")],
+        }
+    }
+
+    /// Parse a State from GitHub issue labels.
+    fn labels_to_state(labels: &[IssueLabel]) -> State {
+        let mut state_value: Option<&str> = None;
+        let mut pipeline_value: Option<&str> = None;
+        let mut stage_value: Option<&str> = None;
+
+        for label in labels {
+            if let Some(v) = label.name.strip_prefix("state:") {
+                state_value = Some(v);
+            } else if let Some(v) = label.name.strip_prefix("pipeline:") {
+                pipeline_value = Some(v);
+            } else if let Some(v) = label.name.strip_prefix("stage:") {
+                stage_value = Some(v);
+            }
+        }
+
+        match state_value {
+            None => State::Empty,
+            Some("done") => State::Done,
+            Some("pause") => State::Pause,
+            Some("ready") => State::Ready,
+            Some("pending") => match pipeline_value {
+                Some(p) => State::Pending(Pipeline::from(p)),
+                None => State::Unknown("state:pending".to_string()),
+            },
+            Some("running") => match (pipeline_value, stage_value) {
+                (Some(p), Some(s)) => {
+                    State::Running(Pipeline::from(p), Stage::from(s))
+                }
+                (None, Some(s)) => {
+                    State::Unknown(format!("state:running, stage:{s}"))
+                }
+                (Some(p), None) => {
+                    State::Unknown(format!("state:running, pipeline:{p}"))
+                }
+                (None, None) => State::Unknown("state:running".to_string()),
+            },
+            Some(other) => State::Unknown(format!("state:{other}")),
+        }
+    }
+
+    /// Return the GitHub label color for a state-related label.
+    fn state_label_color(label: &str) -> &'static str {
+        match label {
+            "state:done" => "0e8a16",       // green
+            "state:ready" => "0075ca",      // blue
+            "state:pause" => "e4e669",      // yellow
+            "state:pending" => "d4c5f9",    // gray
+            "state:running" => "c2e0c6",    // light green
+            _ if label.starts_with("pipeline:") || label.starts_with("stage:") => "ededed",
+            _ => "ededed", // fallback light gray
+        }
     }
 
     /// Convert a flag name to its GitHub label representation.
