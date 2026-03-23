@@ -207,6 +207,13 @@ impl ZbobrTaskBackendGithubImpl {
         })
     }
 
+    /// Label prefix for state labels (e.g. "state:done").
+    const STATE_PREFIX: &'static str = "state:";
+    /// Label prefix for pipeline labels (e.g. "pipeline:main").
+    const PIPELINE_PREFIX: &'static str = "pipeline:";
+    /// Label prefix for stage labels (e.g. "stage:working").
+    const STAGE_PREFIX: &'static str = "stage:";
+
     /// Convert a Signal to its GitHub label representation.
     fn signal_to_label(signal: &zbobr_api::Signal) -> String {
         format!("signal:{signal}")
@@ -219,21 +226,25 @@ impl ZbobrTaskBackendGithubImpl {
 
     /// Convert a state to its GitHub label representations.
     fn state_to_labels(state: &State) -> Vec<String> {
+        let state_label = |name: &str| format!("{}{name}", Self::STATE_PREFIX);
+        let pipeline_label = |p: &Pipeline| format!("{}{}", Self::PIPELINE_PREFIX, p.as_str());
+        let stage_label = |s: &Stage| format!("{}{}", Self::STAGE_PREFIX, s.as_str());
+
         match state {
             State::Empty => vec![],
-            State::Done => vec!["state:done".to_string()],
-            State::Pause => vec!["state:pause".to_string()],
-            State::Ready => vec!["state:ready".to_string()],
+            State::Done => vec![state_label(State::LABEL_DONE)],
+            State::Pause => vec![state_label(State::LABEL_PAUSE)],
+            State::Ready => vec![state_label(State::LABEL_READY)],
             State::Pending(pipeline) => vec![
-                "state:pending".to_string(),
-                format!("pipeline:{}", pipeline.as_str()),
+                state_label(State::LABEL_PENDING),
+                pipeline_label(pipeline),
             ],
             State::Running(pipeline, stage) => vec![
-                "state:running".to_string(),
-                format!("pipeline:{}", pipeline.as_str()),
-                format!("stage:{}", stage.as_str()),
+                state_label(State::LABEL_RUNNING),
+                pipeline_label(pipeline),
+                stage_label(stage),
             ],
-            State::Unknown(raw) => vec![format!("state:{raw}")],
+            State::Unknown(raw) => vec![state_label(raw)],
         }
     }
 
@@ -244,50 +255,55 @@ impl ZbobrTaskBackendGithubImpl {
         let mut stage_value: Option<&str> = None;
 
         for label in labels {
-            if let Some(v) = label.name.strip_prefix("state:") {
+            if let Some(v) = label.name.strip_prefix(Self::STATE_PREFIX) {
                 state_value = Some(v);
-            } else if let Some(v) = label.name.strip_prefix("pipeline:") {
+            } else if let Some(v) = label.name.strip_prefix(Self::PIPELINE_PREFIX) {
                 pipeline_value = Some(v);
-            } else if let Some(v) = label.name.strip_prefix("stage:") {
+            } else if let Some(v) = label.name.strip_prefix(Self::STAGE_PREFIX) {
                 stage_value = Some(v);
             }
         }
 
         match state_value {
             None => State::Empty,
-            Some("done") => State::Done,
-            Some("pause") => State::Pause,
-            Some("ready") => State::Ready,
-            Some("pending") => match pipeline_value {
+            Some(v) if v == State::LABEL_DONE => State::Done,
+            Some(v) if v == State::LABEL_PAUSE => State::Pause,
+            Some(v) if v == State::LABEL_READY => State::Ready,
+            Some(v) if v == State::LABEL_PENDING => match pipeline_value {
                 Some(p) => State::Pending(Pipeline::from(p)),
-                None => State::Unknown("state:pending".to_string()),
+                None => State::Unknown(format!("{}{}", Self::STATE_PREFIX, State::LABEL_PENDING)),
             },
-            Some("running") => match (pipeline_value, stage_value) {
+            Some(v) if v == State::LABEL_RUNNING => match (pipeline_value, stage_value) {
                 (Some(p), Some(s)) => {
                     State::Running(Pipeline::from(p), Stage::from(s))
                 }
                 (None, Some(s)) => {
-                    State::Unknown(format!("state:running, stage:{s}"))
+                    State::Unknown(format!("{}{}, {}{s}", Self::STATE_PREFIX, State::LABEL_RUNNING, Self::STAGE_PREFIX))
                 }
                 (Some(p), None) => {
-                    State::Unknown(format!("state:running, pipeline:{p}"))
+                    State::Unknown(format!("{}{}, {}{p}", Self::STATE_PREFIX, State::LABEL_RUNNING, Self::PIPELINE_PREFIX))
                 }
-                (None, None) => State::Unknown("state:running".to_string()),
+                (None, None) => State::Unknown(format!("{}{}", Self::STATE_PREFIX, State::LABEL_RUNNING)),
             },
-            Some(other) => State::Unknown(format!("state:{other}")),
+            Some(other) => State::Unknown(format!("{}{other}", Self::STATE_PREFIX)),
         }
     }
 
     /// Return the GitHub label color for a state-related label.
     fn state_label_color(label: &str) -> &'static str {
-        match label {
-            "state:done" => "0e8a16",       // green
-            "state:ready" => "0075ca",      // blue
-            "state:pause" => "e4e669",      // yellow
-            "state:pending" => "d3d3d3",    // gray
-            "state:running" => "c2e0c6",    // light green
-            _ if label.starts_with("pipeline:") || label.starts_with("stage:") => "ededed",
-            _ => "ededed", // fallback light gray
+        if let Some(state_name) = label.strip_prefix(Self::STATE_PREFIX) {
+            match state_name {
+                v if v == State::LABEL_DONE => "0e8a16",    // green
+                v if v == State::LABEL_READY => "0075ca",   // blue
+                v if v == State::LABEL_PAUSE => "e4e669",   // yellow
+                v if v == State::LABEL_PENDING => "d3d3d3", // gray
+                v if v == State::LABEL_RUNNING => "c2e0c6", // light green
+                _ => "ededed",
+            }
+        } else if label.starts_with(Self::PIPELINE_PREFIX) || label.starts_with(Self::STAGE_PREFIX) {
+            "ededed"
+        } else {
+            "ededed" // fallback light gray
         }
     }
 
@@ -342,9 +358,9 @@ impl ZbobrTaskBackendGithubImpl {
         })
         .await?;
         for label in &issue.labels {
-            if label.name.starts_with("state:")
-                || label.name.starts_with("pipeline:")
-                || label.name.starts_with("stage:")
+            if label.name.starts_with(Self::STATE_PREFIX)
+                || label.name.starts_with(Self::PIPELINE_PREFIX)
+                || label.name.starts_with(Self::STAGE_PREFIX)
             {
                 let _ = retry_github("remove state label", || async {
                     self.octocrab
@@ -648,24 +664,24 @@ impl ZbobrTaskBackendGithubImpl {
             }
         }
 
-        // Create state labels
-        let state_labels = [
-            "state:done",
-            "state:pause",
-            "state:ready",
-            "state:pending",
-            "state:running",
-            "pipeline:main",
-            "pipeline:merge",
-        ];
+        // Create state labels programmatically from type constants
+        let state_labels: Vec<String> = State::ALL_LABEL_NAMES
+            .iter()
+            .map(|name| format!("{}{name}", Self::STATE_PREFIX))
+            .chain(
+                [Pipeline::MAIN, Pipeline::MERGE]
+                    .iter()
+                    .map(|name| format!("{}{name}", Self::PIPELINE_PREFIX)),
+            )
+            .collect();
 
-        for label_name in state_labels {
+        for label_name in &state_labels {
             let color = Self::state_label_color(label_name);
             let desc = format!(
                 "State: {}",
                 label_name
             );
-            if !existing_labels.contains(&label_name.to_string()) {
+            if !existing_labels.contains(label_name) {
                 tracing::info!("Creating label '{label_name}'");
                 self.create_label(label_name, color, &desc).await?;
             } else if force {
