@@ -78,15 +78,15 @@ pub enum TaskSubcommand {
         #[arg(long)]
         state: Option<String>,
     },
-    /// Show a task by ID
+    /// Show a task by ID (or list all tasks if no ID given)
     Show {
         /// Task ID
-        id: u64,
+        id: Option<u64>,
     },
     /// Update fields of an existing task
     Update {
         /// Task ID
-        id: u64,
+        id: Option<u64>,
         /// New title
         #[arg(long)]
         title: Option<String>,
@@ -119,12 +119,12 @@ pub enum TaskSubcommand {
     /// Delete (close) a task by ID
     Delete {
         /// Task ID
-        id: u64,
+        id: Option<u64>,
     },
     /// Process a task according to its current stage (single-step)
     Process {
         /// Task ID
-        task: u64,
+        task: Option<u64>,
         /// MCP tester scenario file for preparation role
         #[arg(long)]
         executor_mcp_tester_preparation: Option<PathBuf>,
@@ -161,7 +161,7 @@ pub enum TaskSubcommand {
     /// Rewrite commit authors on the task's PR branch and push back
     OverwriteAuthor {
         /// Task ID
-        id: u64,
+        id: Option<u64>,
         /// Skip confirmation and force execution
         #[arg(long)]
         force: bool,
@@ -200,6 +200,10 @@ pub async fn run_command(zbobr: ZbobrDispatcher, command: Command) -> anyhow::Re
         }
     }
     Ok(())
+}
+
+fn require_task_id(id: Option<u64>, command: &str) -> anyhow::Result<u64> {
+    id.ok_or_else(|| anyhow::anyhow!("Task ID is required for '{command}'"))
 }
 
 async fn run_task_subcommand(
@@ -253,10 +257,27 @@ async fn run_task_subcommand(
             }
         }
         TaskSubcommand::Show { id } => {
-            let weak = task_backend.get_task(id).await?;
-            let task = weak.snapshot(false).await?;
-            let discussion = weak.get_comments().await?;
-            print_task(&task, &discussion);
+            if let Some(id) = id {
+                let weak = task_backend.get_task(id).await?;
+                let task = weak.snapshot(false).await?;
+                let discussion = weak.get_comments().await?;
+                print_task(&task, &discussion);
+            } else {
+                let weak_tasks = task_backend.list_tasks().await?;
+                let mut tasks = Vec::new();
+                for w in &weak_tasks {
+                    tasks.push(w.snapshot(false).await?);
+                }
+                tasks.sort_by_key(|t| t.id);
+                if tasks.is_empty() {
+                    println!("No tasks found");
+                } else {
+                    for task in &tasks {
+                        print_task(task, &[]);
+                        println!("---");
+                    }
+                }
+            }
         }
         TaskSubcommand::Update {
             id,
@@ -269,6 +290,7 @@ async fn run_task_subcommand(
             signal,
             confirm,
         } => {
+            let id = require_task_id(id, "update")?;
             let parsed_state = state.map(|s| s.parse::<zbobr_api::State>()).transpose()?;
             let parsed_signal = signal.map(|s| s.parse::<zbobr_api::Signal>()).transpose()?;
             let weak = task_backend.get_task(id).await?;
@@ -308,6 +330,7 @@ async fn run_task_subcommand(
             println!("Updated task #{}", id);
         }
         TaskSubcommand::Delete { id } => {
+            let id = require_task_id(id, "delete")?;
             let weak = task_backend.get_task(id).await?;
             let mutable = weak.upgrade().await?;
             mutable.close().await?;
@@ -322,6 +345,7 @@ async fn run_task_subcommand(
             executor_mcp_tester_testing,
             executor_mcp_tester_merging,
         } => {
+            let task = require_task_id(task, "process")?;
             let task_obj = task_backend.get_task(task).await?.snapshot(false).await?;
             let mcp_tester_config_override = if executor_mcp_tester_preparation.is_some()
                 || executor_mcp_tester_planning.is_some()
@@ -354,6 +378,7 @@ async fn run_task_subcommand(
             show_prompt(zbobr, id, stage, role, pipeline).await?;
         }
         TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
+            let id = require_task_id(id, "overwrite-author")?;
             overwrite_author(zbobr, id, force, dry_run).await?;
         }
     }
