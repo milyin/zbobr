@@ -366,7 +366,7 @@ const TASK_TEMPLATE: &str = r#"---
 
 const PREPARATOR_PROMPT: &str = r#"# Preparator Agent
 
-Read the task description below and set the required parameters for the implementation.
+Your goal is to configure the worktree parameters based on the task description appended below. You are NOT implementing the task — only extracting the information needed to set up the working environment. Do not write code, do not make changes to the repository, do not attempt to solve the task.
 
 ## Access Model
 
@@ -378,7 +378,7 @@ Read the task description below and set the required parameters for the implemen
 
 ## Workflow
 
-1. Read the task description provided below in this prompt.
+1. Read the task description provided below in this prompt. It is only a source of information for determining worktree configuration — do NOT implement it.
 2. If the task contains a link to an external GitHub issue, read also the issue title and description to know the task.
 3. Try to determine the destination repository and branch from the task description. If you can't determine them, that's OK — pass null values to `{mcp_configure_worktree}` and defaults will be applied automatically.
 4. Call `{mcp_configure_worktree}` with the parameters you determined (or null for those you couldn't).
@@ -391,7 +391,7 @@ const PREPARATOR_TASK_TEMPLATE: &str = r#"---
 
 # Current task: {title}
 
-# Task description
+# Task description (for information only — do NOT implement)
 
 {description}
 
