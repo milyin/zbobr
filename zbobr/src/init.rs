@@ -143,7 +143,26 @@ fn default_workflow() -> WorkflowConfig {
     let task_prompt = vec![PathBuf::from("task.md")];
     let preparator_task_prompt = vec![PathBuf::from("preparator_task.md")];
 
-    let validation_stages = IndexMap::from([
+    let implement_stages = IndexMap::from([
+        (
+            Stage::from("planning"),
+            StageDefinition {
+                role: Some("planner".into()),
+                prompts: task_prompt.clone(),
+                ..Default::default()
+            },
+        ),
+        (
+            Stage::from("working"),
+            StageDefinition {
+                role: Some("worker".into()),
+                prompts: task_prompt.clone(),
+                ..Default::default()
+            },
+        ),
+    ]);
+
+    let verify_stages = IndexMap::from([
         (
             Stage::from("reviewing"),
             StageDefinition {
@@ -172,26 +191,17 @@ fn default_workflow() -> WorkflowConfig {
             },
         ),
         (
-            Stage::from("planning"),
+            Stage::from("implementing"),
             StageDefinition {
-                role: Some("planner".into()),
-                prompts: task_prompt.clone(),
+                call: Some(Pipeline::from("implement")),
                 ..Default::default()
             },
         ),
         (
-            Stage::from("working"),
+            Stage::from("verifying"),
             StageDefinition {
-                role: Some("worker".into()),
-                prompts: task_prompt.clone(),
-                ..Default::default()
-            },
-        ),
-        (
-            Stage::from("validating"),
-            StageDefinition {
-                call: Some(Pipeline::from("validation")),
-                on_failure: Some(StageTransition::stage("planning")),
+                call: Some(Pipeline::from("verify")),
+                on_failure: Some(StageTransition::stage("implementing")),
                 ..Default::default()
             },
         ),
@@ -222,9 +232,15 @@ fn default_workflow() -> WorkflowConfig {
         },
     );
     pipelines.insert(
-        Pipeline::from("validation"),
+        Pipeline::from("implement"),
         PipelineConfig {
-            stages: validation_stages,
+            stages: implement_stages,
+        },
+    );
+    pipelines.insert(
+        Pipeline::from("verify"),
+        PipelineConfig {
+            stages: verify_stages,
         },
     );
     pipelines.insert(
