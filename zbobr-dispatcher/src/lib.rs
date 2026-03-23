@@ -193,7 +193,21 @@ impl ZbobrDispatcher {
             "Workspaces directory ready: {}",
             self.config.workspaces.display()
         );
-        self.task_backend.setup(force).await
+
+        // Compute required signal labels from workflow config
+        let mut signal_labels: Vec<String> = Vec::new();
+        for (_pipeline, stage_name, _stage_def) in self.workflow.all_stages() {
+            signal_labels.push(format!("signal:go_{stage_name}"));
+        }
+        for pipeline_name in self.workflow.pipeline_names() {
+            signal_labels.push(format!("signal:call_{pipeline_name}"));
+        }
+        signal_labels.push("signal:return".to_string());
+        signal_labels.push("signal:return_failure".to_string());
+        signal_labels.sort();
+        signal_labels.dedup();
+
+        self.task_backend.setup(force, &signal_labels).await
     }
 
     /// Extract repo name from a remote repo path (last path component).

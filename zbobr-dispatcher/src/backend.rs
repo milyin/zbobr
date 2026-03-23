@@ -24,7 +24,7 @@ impl zbobr_api::backend::TaskBackend for DummyBackend {
     ) -> anyhow::Result<u64> {
         unimplemented!()
     }
-    async fn setup(&self, _force: bool) -> anyhow::Result<()> {
+    async fn setup(&self, _force: bool, _signal_labels: &[String]) -> anyhow::Result<()> {
         unimplemented!()
     }
     async fn validate_connectivity(&self) -> anyhow::Result<()> {

@@ -447,6 +447,18 @@ impl ZbobrTaskBackendGithubImpl {
         Ok(())
     }
 
+    /// Delete a label from the repository.
+    async fn delete_label(&self, name: &str) -> anyhow::Result<()> {
+        let (owner, repo) = self.parse_repo()?;
+        let url = format!("/repos/{owner}/{repo}/labels/{name}");
+        retry_github("delete label", || {
+            self.octocrab.delete(url.clone(), None::<&()>)
+        })
+        .await
+        .map(|_: serde_json::Value| ())?;
+        Ok(())
+    }
+
     /// Ensure the task repo exists (used internally by setup).
     async fn ensure_task_repo_exists(&self) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
@@ -498,7 +510,7 @@ impl ZbobrTaskBackendGithubImpl {
         Ok(())
     }
 
-    async fn setup(&self, force: bool) -> anyhow::Result<()> {
+    async fn setup(&self, force: bool, signal_labels: &[String]) -> anyhow::Result<()> {
         tracing::info!(
             "Setting up GitHub repo: {} (force: {})",
             self.backend_config.github_repo,
@@ -526,6 +538,38 @@ impl ZbobrTaskBackendGithubImpl {
                     .await?;
             } else {
                 tracing::info!("Label '{flag_label}' already exists");
+            }
+        }
+
+        // Sync signal labels: delete obsolete, create missing
+        const SIGNAL_LABEL_COLOR: &str = "c2e0c6";
+
+        let existing_signal_labels: Vec<String> = existing_labels
+            .iter()
+            .filter(|l| l.starts_with("signal:"))
+            .cloned()
+            .collect();
+
+        // Delete obsolete signal labels (exist in repo but not in required set)
+        for label in &existing_signal_labels {
+            if !signal_labels.contains(label) {
+                tracing::info!("Deleting obsolete signal label '{label}'");
+                self.delete_label(label).await?;
+            }
+        }
+
+        // Create missing signal labels (required but not in repo)
+        for label in signal_labels {
+            if !existing_signal_labels.contains(label) {
+                let desc = format!("Signal: {}", label.strip_prefix("signal:").unwrap_or(label));
+                tracing::info!("Creating signal label '{label}'");
+                self.create_label(label, SIGNAL_LABEL_COLOR, &desc).await?;
+            } else if force {
+                let desc = format!("Signal: {}", label.strip_prefix("signal:").unwrap_or(label));
+                tracing::info!("Updating signal label '{label}' (force)");
+                self.update_label(label, SIGNAL_LABEL_COLOR, &desc).await?;
+            } else {
+                tracing::info!("Signal label '{label}' already exists");
             }
         }
 
@@ -1249,8 +1293,8 @@ impl TaskBackend for TaskBackendGithub {
         Ok(issue_id)
     }
 
-    async fn setup(&self, force: bool) -> anyhow::Result<()> {
-        self.inner.setup(force).await
+    async fn setup(&self, force: bool, signal_labels: &[String]) -> anyhow::Result<()> {
+        self.inner.setup(force, signal_labels).await
     }
 
     async fn validate_connectivity(&self) -> anyhow::Result<()> {
