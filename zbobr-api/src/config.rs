@@ -17,6 +17,7 @@ pub trait Config: Sized {
 
 /// Definition of a role: which MCP tools it can access, an optional prompt file, and default tool/model.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RoleDefinition {
     pub mcp: Vec<McpTool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -64,22 +65,28 @@ impl<'de> serde::Deserialize<'de> for StageTransition {
         D: serde::Deserializer<'de>,
     {
         #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct FullTransition {
+            #[serde(default)]
+            next: Option<Stage>,
+            #[serde(default)]
+            pause: bool,
+        }
+        #[derive(serde::Deserialize)]
         #[serde(untagged)]
         enum Helper {
             Stage(Stage),
-            Full {
-                #[serde(default)]
-                next: Option<Stage>,
-                #[serde(default)]
-                pause: bool,
-            },
+            Full(FullTransition),
         }
         match Helper::deserialize(deserializer)? {
             Helper::Stage(s) => Ok(StageTransition {
                 next: Some(s),
                 pause: false,
             }),
-            Helper::Full { next, pause } => Ok(StageTransition { next, pause }),
+            Helper::Full(f) => Ok(StageTransition {
+                next: f.next,
+                pause: f.pause,
+            }),
         }
     }
 }
@@ -92,6 +99,7 @@ impl<'de> serde::Deserialize<'de> for StageTransition {
 /// A stage must have exactly one of `role` (run an agent session) or
 /// `call` (call another pipeline). They are mutually exclusive.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct StageDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
@@ -137,6 +145,7 @@ impl StageDefinition {
 ///
 /// Stage order is determined by insertion order in the `IndexMap`.
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PipelineConfig {
     #[serde(default)]
     pub stages: IndexMap<Stage, StageDefinition>,
@@ -217,10 +226,10 @@ impl PipelineConfig {
 
 /// Top-level workflow configuration: a container of named pipelines and shared roles.
 ///
-/// Replaces the old `PipelineConfig` at the top level. Defined manually
-/// (not via `#[config_struct]`) because `#[serde(flatten)]` on pipelines
-/// is incompatible with `deny_unknown_fields`.
+/// Defined manually (not via `#[config_struct]`) because it needs
+/// custom `Config` impl with `WorkflowArgs` / `WorkflowToml`.
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct WorkflowConfig {
     /// Base directory for prompt files; prepended to relative prompt paths.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -233,6 +242,7 @@ pub struct WorkflowConfig {
 
 /// TOML representation of WorkflowConfig (all fields optional).
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct WorkflowToml {
     #[serde(default)]
     pub prompts_dir: Option<PathBuf>,
