@@ -146,8 +146,8 @@ pub enum TaskSubcommand {
     },
     /// Show the resolved prompt for a task stage
     Prompt {
-        /// Task ID
-        id: u64,
+        /// Task ID (if omitted, placeholders are used instead of real task data)
+        id: Option<u64>,
         /// Stage name to show the prompt for
         #[arg(long, value_parser = |s: &str| -> Result<Stage, std::convert::Infallible> { Ok(Stage::from(s)) })]
         stage: Option<Stage>,
@@ -362,7 +362,7 @@ async fn run_task_subcommand(
 
 async fn show_prompt(
     zbobr: &Arc<ZbobrDispatcher>,
-    id: u64,
+    id: Option<u64>,
     stage: Option<Stage>,
     role: Option<String>,
     pipeline: Option<Pipeline>,
@@ -438,10 +438,16 @@ async fn show_prompt(
         }
     };
 
-    let prompt = zbobr
-        .prompt_builder()
-        .build_for_stage(stage_def, id, zbobr.task_backend())
-        .await?;
+    let prompt = if let Some(task_id) = id {
+        zbobr
+            .prompt_builder()
+            .build_for_stage(stage_def, task_id, zbobr.task_backend())
+            .await?
+    } else {
+        zbobr
+            .prompt_builder()
+            .build_for_stage_with_placeholders(stage_def)?
+    };
     println!("{}", prompt);
     Ok(())
 }

@@ -64,6 +64,22 @@ impl ConfiguredPromptBuilder {
         )
         .await
     }
+
+    /// Build prompt for a stage using placeholder values instead of real task data.
+    pub fn build_for_stage_with_placeholders(
+        &self,
+        stage_def: &StageDefinition,
+    ) -> anyhow::Result<String> {
+        let prompt_files = prompt_files_for_stage(stage_def, self.workflow.config());
+        let base_prompt = load_prompts(&prompt_files, self.base_path.as_ref())?;
+        let role_name = stage_def.role_name().unwrap_or("");
+        build_prompt_with_placeholders(
+            &base_prompt,
+            role_name,
+            self.workflow.config(),
+            &self.extra_vars,
+        )
+    }
 }
 
 /// Collect prompt file paths from a StageDefinition.
@@ -260,6 +276,46 @@ pub async fn build_full_prompt(
         .map_err(|e| anyhow::anyhow!("Failed to parse prompt template: {e}"))?;
     template
         .try_render(&owned_vars)
+        .map_err(|e| anyhow::anyhow!("Failed to render prompt template: {e}"))
+}
+
+/// Build prompt using placeholder values (e.g. `{TITLE}`) instead of real task data.
+pub fn build_prompt_with_placeholders(
+    user_context: &str,
+    role_name: &str,
+    workflow: &WorkflowConfig,
+    extra_vars: &HashMap<String, String>,
+) -> anyhow::Result<String> {
+    let placeholder_vars: &[(&str, &str)] = &[
+        (VAR_TITLE, "{TITLE}"),
+        (VAR_DESCRIPTION, "{DESCRIPTION}"),
+        (VAR_DESTINATION_REPOSITORY, "{DESTINATION_REPOSITORY}"),
+        (VAR_DESTINATION_BRANCH, "{DESTINATION_BRANCH}"),
+        (VAR_WORK_BRANCH, "{WORK_BRANCH}"),
+        (VAR_CHECKLIST, "{CHECKLIST}"),
+        (VAR_LAST_REPORT, "{LAST_REPORT}"),
+        (VAR_LAST_REQUEST, "{LAST_REQUEST}"),
+    ];
+
+    let mut vars: HashMap<Cow<str>, Cow<str>> = placeholder_vars
+        .iter()
+        .map(|(k, v)| (Cow::Borrowed(*k), Cow::Borrowed(*v)))
+        .collect();
+
+    let allowed_tools: Vec<McpTool> = workflow
+        .role_definition(role_name)
+        .map(|d| d.mcp.clone())
+        .unwrap_or_else(|| McpTool::all().to_vec());
+    add_mcp_tool_variables(&mut vars, &allowed_tools);
+
+    for (k, v) in extra_vars {
+        vars.insert(Cow::Owned(k.clone()), Cow::Owned(v.clone()));
+    }
+
+    let template = Interpolation::new(user_context)
+        .map_err(|e| anyhow::anyhow!("Failed to parse prompt template: {e}"))?;
+    template
+        .try_render(&vars)
         .map_err(|e| anyhow::anyhow!("Failed to render prompt template: {e}"))
 }
 
