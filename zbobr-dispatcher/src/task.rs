@@ -885,7 +885,7 @@ mod comment_model_tests {
             Ok(id)
         }
 
-        async fn setup(&self, _force: bool) -> anyhow::Result<()> {
+        async fn setup(&self, _force: bool, _signal_labels: &[String]) -> anyhow::Result<()> {
             Ok(())
         }
         async fn validate_connectivity(&self) -> anyhow::Result<()> {

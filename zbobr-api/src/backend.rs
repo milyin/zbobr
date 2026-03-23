@@ -168,7 +168,8 @@ pub trait TaskBackend: Send + Sync {
 
     /// Initialize storage with required stages, labels, etc.
     /// If force is true, overwrites existing labels.
-    async fn setup(&self, force: bool) -> anyhow::Result<()>;
+    /// `signal_labels` lists the signal label names that should exist (e.g. "signal:go_working").
+    async fn setup(&self, force: bool, signal_labels: &[String]) -> anyhow::Result<()>;
 
     /// Validate connectivity to the task storage.
     async fn validate_connectivity(&self) -> anyhow::Result<()>;
