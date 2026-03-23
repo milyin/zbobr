@@ -97,6 +97,56 @@ steps:
     )
 }
 
+/// Scenario that calls configure_worktree twice with identical values.
+/// The second call must remain successful and report that values were already set.
+pub fn configure_worktree_idempotent_scenario(repo_path: &str, postfix: &str) -> String {
+    format!(
+        r#"name: Configure Worktree Idempotent
+description: Repeated configure_worktree calls with same parameters should be a no-op success
+timeout: 60
+stop_on_failure: true
+
+steps:
+- name: configure_worktree first call
+  operation:
+    type: tool_call
+    tool: configure_worktree
+    arguments:
+      destination_repository: "{repo_path}"
+      destination_branch: "main"
+      work_branch_postfix: "{postfix}"
+  assertions:
+    - type: success
+
+- name: configure_worktree repeated call
+  operation:
+    type: tool_call
+    tool: configure_worktree
+    arguments:
+      destination_repository: "{repo_path}"
+      destination_branch: "main"
+      work_branch_postfix: "{postfix}"
+  assertions:
+    - type: success
+    - type: contains
+      path: result
+      value: "values were already set"
+
+- name: report_success
+  operation:
+    type: tool_call
+    tool: report_success
+    arguments:
+      brief: "Idempotent configure_worktree verified."
+      full_report: "Repeated configure_worktree calls with identical parameters remained successful."
+  assertions:
+    - type: success
+"#,
+        repo_path = repo_path,
+        postfix = postfix,
+    )
+}
+
 /// Minimal scenario that just reports success (used for default-transition stages).
 pub fn report_and_finish_scenario() -> String {
     r#"name: Report And Finish
