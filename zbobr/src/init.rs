@@ -6,7 +6,7 @@ use std::{
 use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Stage,
-    config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig, WorkflowToml},
+    config::{PipelineConfig, RoleDefinition, StageDefinition, StageTransition, WorkflowConfig, WorkflowToml},
     config_tools::McpTool,
     task::{Model, Tool},
 };
@@ -143,6 +143,25 @@ fn default_workflow() -> WorkflowConfig {
     let task_prompt = vec![PathBuf::from("task.md")];
     let preparator_task_prompt = vec![PathBuf::from("preparator_task.md")];
 
+    let validation_stages = IndexMap::from([
+        (
+            Stage::from("reviewing"),
+            StageDefinition {
+                role: Some("reviewer".into()),
+                prompts: task_prompt.clone(),
+                ..Default::default()
+            },
+        ),
+        (
+            Stage::from("testing"),
+            StageDefinition {
+                role: Some("tester".into()),
+                prompts: task_prompt.clone(),
+                ..Default::default()
+            },
+        ),
+    ]);
+
     let main_stages = IndexMap::from([
         (
             Stage::from("preparing"),
@@ -169,10 +188,10 @@ fn default_workflow() -> WorkflowConfig {
             },
         ),
         (
-            Stage::from("reviewing"),
+            Stage::from("validating"),
             StageDefinition {
-                role: Some("reviewer".into()),
-                prompts: task_prompt.clone(),
+                call: Some(Pipeline::from("validation")),
+                on_failure: Some(StageTransition::stage("planning")),
                 ..Default::default()
             },
         ),
@@ -200,6 +219,12 @@ fn default_workflow() -> WorkflowConfig {
         Pipeline::Main,
         PipelineConfig {
             stages: main_stages,
+        },
+    );
+    pipelines.insert(
+        Pipeline::from("validation"),
+        PipelineConfig {
+            stages: validation_stages,
         },
     );
     pipelines.insert(
