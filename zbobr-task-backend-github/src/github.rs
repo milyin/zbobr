@@ -10,7 +10,7 @@ use zbobr_api::{
     Comment, CommentTag, Model, Task, Tool,
     backend::TaskBackend,
     comment_tag,
-    task::{StackEntry, State},
+    task::{Pipeline, StackEntry, Stage, State},
 };
 
 use crate::{
@@ -92,17 +92,6 @@ where
 // -- Shared response types --
 
 #[derive(Debug, serde::Deserialize)]
-struct IssueMilestone {
-    title: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct MilestoneResponse {
-    number: u64,
-    title: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
 struct IssueResponse {
     number: u64,
     title: String,
@@ -110,7 +99,6 @@ struct IssueResponse {
     #[allow(dead_code)]
     state: String,
     labels: Vec<IssueLabel>,
-    milestone: Option<IssueMilestone>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -343,59 +331,42 @@ impl ZbobrTaskBackendGithubImpl {
         Ok(())
     }
 
-    /// List all milestones in the repository, returning title → number map.
-    async fn list_milestones(&self) -> anyhow::Result<HashMap<String, u64>> {
-        let (owner, repo) = self.parse_repo()?;
-        let params = vec![("state", "all".to_string()), ("per_page", "100".to_string())];
-        let milestones: Vec<MilestoneResponse> = retry_github("list milestones", || {
-            self.octocrab.get(
-                format!("/repos/{owner}/{repo}/milestones"),
-                Some(&params),
-            )
-        })
-        .await?;
-        Ok(milestones.into_iter().map(|m| (m.title, m.number)).collect())
-    }
-
-    /// Create a milestone and return its number.
-    async fn create_milestone(&self, title: &str) -> anyhow::Result<u64> {
-        let (owner, repo) = self.parse_repo()?;
-        let url = format!("/repos/{owner}/{repo}/milestones");
-        let body = serde_json::json!({ "title": title });
-        let milestone: MilestoneResponse = retry_github("create milestone", || {
-            self.octocrab.post(url.clone(), Some(&body))
-        })
-        .await?;
-        Ok(milestone.number)
-    }
-
-    /// Get the milestone number for a title, creating it if absent.
-    async fn get_or_create_milestone(&self, title: &str) -> anyhow::Result<u64> {
-        let milestones = self.list_milestones().await?;
-        if let Some(&number) = milestones.get(title) {
-            return Ok(number);
-        }
-        self.create_milestone(title).await
-    }
-
-    /// Apply a state change on a GitHub issue via milestone assignment.
+    /// Apply a state change on a GitHub issue via labels.
     async fn apply_state_change(&self, id: u64, state: &State) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
-        let url = format!("/repos/{owner}/{repo}/issues/{id}");
 
-        let body = if state.is_empty() {
-            serde_json::json!({ "milestone": serde_json::Value::Null })
-        } else {
-            let title = Self::state_to_milestone_title(state);
-            let number = self.get_or_create_milestone(&title).await?;
-            serde_json::json!({ "milestone": number })
-        };
-
-        retry_github("set issue milestone", || {
-            self.octocrab.patch(url.clone(), Some(&body))
+        // Fetch current labels and remove all existing state:/pipeline:/stage: labels
+        let issue: IssueResponse = retry_github("get issue labels", || {
+            self.octocrab
+                .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
         })
-        .await
-        .map(|_: serde_json::Value| ())?;
+        .await?;
+        for label in &issue.labels {
+            if label.name.starts_with("state:")
+                || label.name.starts_with("pipeline:")
+                || label.name.starts_with("stage:")
+            {
+                let _ = retry_github("remove state label", || async {
+                    self.octocrab
+                        .issues(owner, repo)
+                        .remove_label(id, &label.name)
+                        .await
+                })
+                .await;
+            }
+        }
+
+        // Add new state labels if not empty
+        let new_labels = Self::state_to_labels(state);
+        if !new_labels.is_empty() {
+            retry_github("add state labels", || async {
+                self.octocrab
+                    .issues(owner, repo)
+                    .add_labels(id, &new_labels)
+                    .await
+            })
+            .await?;
+        }
 
         Ok(())
     }
@@ -642,16 +613,31 @@ impl ZbobrTaskBackendGithubImpl {
             }
         }
 
-        // Create milestones for fixed states
-        let existing_milestones = self.list_milestones().await?;
+        // Create state labels
+        let state_labels = [
+            "state:done",
+            "state:pause",
+            "state:ready",
+            "state:pending",
+            "state:running",
+            "pipeline:main",
+            "pipeline:merge",
+        ];
 
-        for state in [State::Ready, State::Done, State::Pause] {
-            let title = Self::state_to_milestone_title(&state);
-            if !existing_milestones.contains_key(&title) {
-                tracing::info!("Creating milestone '{title}'");
-                self.create_milestone(&title).await?;
+        for label_name in state_labels {
+            let color = Self::state_label_color(label_name);
+            let desc = format!(
+                "State: {}",
+                label_name
+            );
+            if !existing_labels.contains(&label_name.to_string()) {
+                tracing::info!("Creating label '{label_name}'");
+                self.create_label(label_name, color, &desc).await?;
+            } else if force {
+                tracing::info!("Updating label '{label_name}' (force)");
+                self.update_label(label_name, color, &desc).await?;
             } else {
-                tracing::info!("Milestone '{title}' already exists");
+                tracing::info!("Label '{label_name}' already exists");
             }
         }
 
@@ -679,12 +665,8 @@ impl ZbobrTaskBackendGithubImpl {
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
 
-        // state is stored as a milestone
-        let state = issue
-            .milestone
-            .as_ref()
-            .map(|m| State::from(m.title.as_str()))
-            .unwrap_or(State::Empty);
+        // state is stored as labels
+        let state = Self::labels_to_state(&issue.labels);
 
         // signal is stored as a label
         let signal = issue
@@ -1407,7 +1389,6 @@ mod tests {
             title: "foo".to_string(),
             body: Some("".to_string()),
             state: "open".to_string(),
-            milestone: None,
             labels: vec![IssueLabel {
                 name: "flag:confirm".to_string(),
             }],
