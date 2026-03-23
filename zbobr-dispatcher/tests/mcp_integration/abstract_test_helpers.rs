@@ -140,6 +140,35 @@ pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
 }
 
 // ===========================================================================
+// Test 1b: configure_worktree is idempotent for repeated identical calls
+// ===========================================================================
+
+pub async fn run_configure_worktree_idempotent(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_worktree_idempotent").await;
+    let task_id = env
+        .create_task(
+            "Worktree idempotent test",
+            "Repeated configure_worktree should be a no-op success",
+            "READY",
+        )
+        .await;
+
+    let workflow = build_workflow(vec![StageDef::new("alpha", "alpha", "main")]);
+    let dest_repo = env.dest_repo(&repo_path);
+    let scenarios = scenarios_map(vec![(
+        "alpha",
+        abstract_scenarios::configure_worktree_idempotent_scenario(&dest_repo, "idempotent"),
+    )]);
+
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
+    env.run_to_completion(task_id, &workflow, &scenarios, 5)
+        .await;
+
+    let task = env.get_task(task_id).await;
+    assert_eq!(task.state, "DONE", "Should complete as DONE");
+}
+
+// ===========================================================================
 // Test 2: Sequential stage advancement within a pipeline
 // ===========================================================================
 
