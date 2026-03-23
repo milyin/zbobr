@@ -1601,6 +1601,20 @@ async fn perform_stash_and_push(
 ) -> anyhow::Result<()> {
     let task_backend = zbobr.task_backend();
     let repo_backend = zbobr.repo_backend();
+
+    // Skip git operations if work_dir is not a git repository (e.g. preparator
+    // stage that only configured worktree metadata but didn't clone yet).
+    if git_output(work_dir, &["rev-parse", "--is-inside-work-tree"])
+        .await
+        .is_err()
+    {
+        tracing::info!(
+            "Skipping stash/push for task #{task_id}: {} is not a git repository",
+            work_dir.display()
+        );
+        return Ok(());
+    }
+
     tracing::info!("Checking for uncommitted changes in {}", work_dir.display());
 
     match git_output(work_dir, &["status", "--porcelain"]).await {
