@@ -339,18 +339,36 @@ impl<'a> CliStageRunner<'a> {
         }
 
         // Allocate pipeline run ID if this is a fresh task (run_id == 0).
+        // Also initialize stage_count from config if task_stage_limit is set.
         {
             let task_session = self.zbobr.task_session(self.task_id);
             let task = task_session.get_task().await?;
             if task.pipeline_run_id == 0 {
                 task_session.allocate_pipeline_run_id().await?;
+                if let Some(limit) = self.zbobr.config().task_stage_limit {
+                    task_session.set_stage_count(limit).await?;
+                }
             }
         }
 
-        // Increment the stage counter.
+        // Decrement the stage counter; pause the task if it reaches 0 and a limit is configured.
         {
             let task_session = self.zbobr.task_session(self.task_id);
-            task_session.increment_stage_count().await?;
+            let new_count = task_session.decrement_stage_count().await?;
+            if new_count == 0 && self.zbobr.config().task_stage_limit.is_some() {
+                tracing::info!(
+                    "Task #{}: stage counter reached 0 (limit: {}), pausing",
+                    self.task_id,
+                    self.zbobr.config().task_stage_limit.unwrap()
+                );
+                task_session
+                    .modify_task(|mut t| {
+                        t.pause = true;
+                        t
+                    })
+                    .await?;
+                return Ok(());
+            }
         }
 
         // Clear the triggering signal before the agent session starts.
@@ -592,7 +610,20 @@ async fn handle_call_stage(
         .push_stack(pipeline_name.clone(), return_signal.clone())
         .await?;
     task_session.allocate_pipeline_run_id().await?;
-    task_session.increment_stage_count().await?;
+    let new_count = task_session.decrement_stage_count().await?;
+    if new_count == 0 && zbobr.config().task_stage_limit.is_some() {
+        tracing::info!(
+            "Task #{task_id}: stage counter reached 0 (limit: {}), pausing",
+            zbobr.config().task_stage_limit.unwrap()
+        );
+        task_session
+            .modify_task(|mut t| {
+                t.pause = true;
+                t
+            })
+            .await?;
+        return Ok(());
+    }
     let call_signal = Signal::call(call_pipeline.clone());
     task_session.set_signal(Some(call_signal.clone())).await?;
     task_session

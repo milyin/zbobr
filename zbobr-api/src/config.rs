@@ -494,6 +494,10 @@ pub struct ZbobrDispatcherConfig {
     pub git_user_email: String,
     /// Rewrite commit authors after each stage completes to match configured git user.
     pub overwrite_author: bool,
+    /// Maximum number of stages a task may pass through before being auto-paused.
+    /// When set, the stage counter is initialized to this value on a fresh task
+    /// and decremented on each stage entry; the task pauses when it reaches 0.
+    pub task_stage_limit: Option<u64>,
 }
 
 impl Default for ZbobrDispatcherConfig {
@@ -510,6 +514,7 @@ impl Default for ZbobrDispatcherConfig {
             git_user_name: String::new(),
             git_user_email: String::new(),
             overwrite_author: false,
+            task_stage_limit: None,
         }
     }
 }
