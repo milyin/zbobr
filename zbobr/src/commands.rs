@@ -3,7 +3,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Subcommand;
-use zbobr_api::{Pipeline, Stage, config::WorkflowConfig};
+use zbobr_api::{Comment, Pipeline, Stage, State, Task, config::WorkflowConfig};
 use zbobr_dispatcher::{
     ConfiguredPromptBuilder, TaskDir, Workflow, ZbobrDispatcher,
     config::{ZbobrDispatcherConfig, ZbobrExecutorConfig},
@@ -191,6 +191,9 @@ impl Command {
             Command::Task {
                 subcommand: TaskSubcommand::Prompt { id: None, .. },
             } => false,
+            Command::Task {
+                subcommand: TaskSubcommand::Show { id: None },
+            } => false,
             _ => true,
         }
     }
@@ -258,12 +261,86 @@ fn run_without_backends(
         } => {
             let workflow = prompt_builder.workflow_config();
             let stage_def = resolve_stage_def(workflow, &stage, &role, &pipeline)?;
-            let prompt = prompt_builder.build_for_stage_with_placeholders(stage_def)?;
+            let (task, comments) = dummy_task_and_comments();
+            let prompt =
+                prompt_builder.build_for_stage_with_task(stage_def, &task, &comments)?;
             println!("{}", prompt);
+            Ok(())
+        }
+        Command::Task {
+            subcommand: TaskSubcommand::Show { id: None },
+        } => {
+            let (task, comments) = dummy_task_and_comments();
+            print_task(&task, &comments);
             Ok(())
         }
         _ => unreachable!("needs_backends() returned false for unexpected command"),
     }
+}
+
+fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
+    let task = Task {
+        id: 0,
+        title: "{TITLE}".to_string(),
+        description: "{DESCRIPTION}".to_string(),
+        state: State::Ready,
+        destination_repository: Some("{DESTINATION_REPOSITORY}".to_string()),
+        destination_branch: Some("{DESTINATION_BRANCH}".to_string()),
+        work_branch: Some("{WORK_BRANCH}".to_string()),
+        pr_url: None,
+        checklist: vec![],
+        signal: None,
+        stack: vec![],
+        pause: false,
+        confirm: false,
+        pipeline_run_id: 0,
+        etag: None,
+    };
+    let comments = vec![
+        Comment {
+            timestamp: "2025-01-01T00:00:00Z".to_string(),
+            stage: "planning".to_string(),
+            hostname: "dummy".to_string(),
+            tool: None,
+            model: None,
+            text: "{USER_REQUEST}".to_string(),
+            pipeline: "main".to_string(),
+            pipeline_run_id: 1,
+            caller_pipeline: None,
+            caller_pipeline_run_id: None,
+            report_name: None,
+            prompt_name: None,
+        },
+        Comment {
+            timestamp: "2025-01-01T01:00:00Z".to_string(),
+            stage: "planning".to_string(),
+            hostname: "dummy".to_string(),
+            tool: None,
+            model: None,
+            text: "[report_success]\n{LAST_REPORT}".to_string(),
+            pipeline: "main".to_string(),
+            pipeline_run_id: 1,
+            caller_pipeline: None,
+            caller_pipeline_run_id: None,
+            report_name: None,
+            prompt_name: None,
+        },
+        Comment {
+            timestamp: "2025-01-01T02:00:00Z".to_string(),
+            stage: "working".to_string(),
+            hostname: "dummy".to_string(),
+            tool: None,
+            model: None,
+            text: "[report_failure]\n{LAST_FAILURE}".to_string(),
+            pipeline: "main".to_string(),
+            pipeline_run_id: 1,
+            caller_pipeline: None,
+            caller_pipeline_run_id: None,
+            report_name: None,
+            prompt_name: None,
+        },
+    ];
+    (task, comments)
 }
 
 /// Handle commands that need the full dispatcher.
@@ -472,9 +549,10 @@ async fn run_task_subcommand(
                     .build_for_stage(stage_def, task_id, zbobr.task_backend())
                     .await?
             } else {
+                let (task, comments) = dummy_task_and_comments();
                 zbobr
                     .prompt_builder()
-                    .build_for_stage_with_placeholders(stage_def)?
+                    .build_for_stage_with_task(stage_def, &task, &comments)?
             };
             println!("{}", prompt);
         }

@@ -69,17 +69,22 @@ impl ConfiguredPromptBuilder {
         .await
     }
 
-    /// Build prompt for a stage using placeholder values instead of real task data.
-    pub fn build_for_stage_with_placeholders(
+    /// Build prompt for a stage using the given task and comments
+    /// instead of fetching from the backend.
+    pub fn build_for_stage_with_task(
         &self,
         stage_def: &StageDefinition,
+        task: &Task,
+        comments: &[Comment],
     ) -> anyhow::Result<String> {
         let prompt_files = prompt_files_for_stage(stage_def, self.workflow.config());
         let base_prompt = load_prompts(&prompt_files, self.base_path.as_ref())?;
         let role_name = stage_def.role_name().unwrap_or("");
-        build_prompt_with_placeholders(
+        build_prompt_with_task(
             &base_prompt,
             role_name,
+            task,
+            comments,
             self.workflow.config(),
             &self.extra_vars,
         )
@@ -283,28 +288,16 @@ pub async fn build_full_prompt(
         .map_err(|e| anyhow::anyhow!("Failed to render prompt template: {e}"))
 }
 
-/// Build prompt using placeholder values (e.g. `{TITLE}`) instead of real task data.
-pub fn build_prompt_with_placeholders(
+/// Build prompt using a provided task and comments (no backend needed).
+pub fn build_prompt_with_task(
     user_context: &str,
     role_name: &str,
+    task: &Task,
+    comments: &[Comment],
     workflow: &WorkflowConfig,
     extra_vars: &HashMap<String, String>,
 ) -> anyhow::Result<String> {
-    let placeholder_vars: &[(&str, &str)] = &[
-        (VAR_TITLE, "{TITLE}"),
-        (VAR_DESCRIPTION, "{DESCRIPTION}"),
-        (VAR_DESTINATION_REPOSITORY, "{DESTINATION_REPOSITORY}"),
-        (VAR_DESTINATION_BRANCH, "{DESTINATION_BRANCH}"),
-        (VAR_WORK_BRANCH, "{WORK_BRANCH}"),
-        (VAR_CHECKLIST, "{CHECKLIST}"),
-        (VAR_LAST_REPORT, "{LAST_REPORT}"),
-        (VAR_LAST_REQUEST, "{LAST_REQUEST}"),
-    ];
-
-    let mut vars: HashMap<Cow<str>, Cow<str>> = placeholder_vars
-        .iter()
-        .map(|(k, v)| (Cow::Borrowed(*k), Cow::Borrowed(*v)))
-        .collect();
+    let mut vars = build_template_variables(task, comments);
 
     let allowed_tools: Vec<McpTool> = workflow
         .role_definition(role_name)
@@ -316,10 +309,14 @@ pub fn build_prompt_with_placeholders(
         vars.insert(Cow::Owned(k.clone()), Cow::Owned(v.clone()));
     }
 
+    let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
+        .into_iter()
+        .map(|(k, v)| (k, Cow::Owned(v.into_owned())))
+        .collect();
     let template = Interpolation::new(user_context)
         .map_err(|e| anyhow::anyhow!("Failed to parse prompt template: {e}"))?;
     template
-        .try_render(&vars)
+        .try_render(&owned_vars)
         .map_err(|e| anyhow::anyhow!("Failed to render prompt template: {e}"))
 }
 
