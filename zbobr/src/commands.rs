@@ -3,6 +3,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Subcommand;
+use zbobr_api::{Pipeline, Stage};
 use zbobr_dispatcher::{TaskDir, ZbobrDispatcher, print_task};
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_utility::{git, git_output};
@@ -142,6 +143,20 @@ pub enum TaskSubcommand {
         /// MCP tester scenario file for merging role
         #[arg(long)]
         executor_mcp_tester_merging: Option<PathBuf>,
+    },
+    /// Show the resolved prompt for a task stage
+    Prompt {
+        /// Task ID
+        id: u64,
+        /// Stage name to show the prompt for
+        #[arg(long, value_parser = |s: &str| -> Result<Stage, std::convert::Infallible> { Ok(Stage::from(s)) })]
+        stage: Option<Stage>,
+        /// Role name to show the prompt for
+        #[arg(long)]
+        role: Option<String>,
+        /// Pipeline name (required when stage name exists in multiple pipelines)
+        #[arg(long)]
+        pipeline: Option<Pipeline>,
     },
     /// Rewrite commit authors on the task's PR branch and push back
     OverwriteAuthor {
@@ -330,10 +345,104 @@ async fn run_task_subcommand(
             zbobr_dispatcher::process_task(zbobr, &task_obj, mcp_tester_config_override.as_ref())
                 .await?;
         }
+        TaskSubcommand::Prompt {
+            id,
+            stage,
+            role,
+            pipeline,
+        } => {
+            show_prompt(zbobr, id, stage, role, pipeline).await?;
+        }
         TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
             overwrite_author(zbobr, id, force, dry_run).await?;
         }
     }
+    Ok(())
+}
+
+async fn show_prompt(
+    zbobr: &Arc<ZbobrDispatcher>,
+    id: u64,
+    stage: Option<Stage>,
+    role: Option<String>,
+    pipeline: Option<Pipeline>,
+) -> anyhow::Result<()> {
+    let workflow = zbobr.workflow().config();
+
+    let stage_def = match (&stage, &role) {
+        (None, None) => {
+            anyhow::bail!("Either --stage or --role must be specified");
+        }
+        (Some(_), Some(_)) => {
+            anyhow::bail!("Only one of --stage or --role may be specified, not both");
+        }
+        (Some(stage_name), None) => {
+            if let Some(ref p) = pipeline {
+                // Directly look up stage in the specified pipeline
+                workflow
+                    .stage(p.clone(), stage_name.as_str())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Stage '{}' not found in pipeline '{}'",
+                            stage_name,
+                            p
+                        )
+                    })?
+            } else {
+                // Find stage across all pipelines; error if ambiguous
+                let matches: Vec<_> = workflow
+                    .all_stages()
+                    .into_iter()
+                    .filter(|(_, sname, _)| *sname == stage_name.as_str())
+                    .collect();
+                match matches.len() {
+                    0 => anyhow::bail!("Stage '{}' not found in any pipeline", stage_name),
+                    1 => matches[0].2,
+                    _ => {
+                        let pipelines: Vec<_> =
+                            matches.iter().map(|(p, _, _)| p.to_string()).collect();
+                        anyhow::bail!(
+                            "Stage '{}' exists in multiple pipelines: {}. Use --pipeline to disambiguate.",
+                            stage_name,
+                            pipelines.join(", ")
+                        );
+                    }
+                }
+            }
+        }
+        (None, Some(role_name)) => {
+            if let Some(ref p) = pipeline {
+                // Find the stage with this role in the specified pipeline
+                let pipeline_config = workflow
+                    .pipeline(p.clone())
+                    .ok_or_else(|| anyhow::anyhow!("Pipeline '{}' not found", p))?;
+                pipeline_config
+                    .stages
+                    .values()
+                    .find(|s| s.role_name() == Some(role_name.as_str()))
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "No stage with role '{}' found in pipeline '{}'",
+                            role_name,
+                            p
+                        )
+                    })?
+            } else {
+                workflow
+                    .find_stage_by_role(role_name)
+                    .map(|(_, _, def)| def)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("No stage with role '{}' found", role_name)
+                    })?
+            }
+        }
+    };
+
+    let prompt = zbobr
+        .prompt_builder()
+        .build_for_stage(stage_def, id, zbobr.task_backend())
+        .await?;
+    println!("{}", prompt);
     Ok(())
 }
 
