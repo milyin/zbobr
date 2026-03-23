@@ -284,7 +284,7 @@ impl ZbobrTaskBackendGithubImpl {
             "state:done" => "0e8a16",       // green
             "state:ready" => "0075ca",      // blue
             "state:pause" => "e4e669",      // yellow
-            "state:pending" => "d4c5f9",    // gray
+            "state:pending" => "d3d3d3",    // gray
             "state:running" => "c2e0c6",    // light green
             _ if label.starts_with("pipeline:") || label.starts_with("stage:") => "ededed",
             _ => "ededed", // fallback light gray
@@ -359,6 +359,12 @@ impl ZbobrTaskBackendGithubImpl {
         // Add new state labels if not empty
         let new_labels = Self::state_to_labels(state);
         if !new_labels.is_empty() {
+            // Ensure all labels exist before assigning them
+            for label in &new_labels {
+                let color = Self::state_label_color(label);
+                let desc = format!("State: {label}");
+                self.ensure_label_exists(label, color, &desc).await?;
+            }
             retry_github("add state labels", || async {
                 self.octocrab
                     .issues(owner, repo)
@@ -469,6 +475,35 @@ impl ZbobrTaskBackendGithubImpl {
         })
         .await?;
         Ok(())
+    }
+
+    /// Ensure a label exists in the repository.
+    /// Creates the label if it doesn't exist; silently ignores 422 (already exists) errors.
+    async fn ensure_label_exists(
+        &self,
+        name: &str,
+        color: &str,
+        description: &str,
+    ) -> anyhow::Result<()> {
+        let (owner, repo) = self.parse_repo()?;
+        match self
+            .octocrab
+            .issues(owner, repo)
+            .create_label(name, color, description)
+            .await
+        {
+            Ok(_) => {
+                tracing::debug!("Created label '{name}'");
+                Ok(())
+            }
+            Err(octocrab::Error::GitHub { source, .. })
+                if source.status_code.as_u16() == 422 =>
+            {
+                tracing::debug!("Label '{name}' already exists");
+                Ok(())
+            }
+            Err(e) => Err(octocrab_to_anyhow(e)),
+        }
     }
 
     /// Update a label's color and description.
