@@ -117,6 +117,32 @@ pub fn parse_grouped_checklist(text: &str) -> Vec<ChecklistItem> {
     items
 }
 
+/// Filter checklist items to those matching the given pipeline scope,
+/// and strip the scope prefix from their IDs.
+///
+/// This mirrors the scoping logic used by `RoleSession::get_checklist` so that
+/// prompt templates show the same unscoped IDs that MCP tools expect.
+pub fn filter_and_strip_scope(
+    items: &[ChecklistItem],
+    pipeline_name: &str,
+    pipeline_run_id: u64,
+) -> Vec<ChecklistItem> {
+    if pipeline_name.is_empty() || pipeline_run_id == 0 {
+        return items.to_vec();
+    }
+    let prefix = format!("{pipeline_name}__{pipeline_run_id}__");
+    items
+        .iter()
+        .filter_map(|item| {
+            item.id.strip_prefix(&prefix).map(|stripped| ChecklistItem {
+                id: stripped.to_string(),
+                checked: item.checked,
+                text: item.text.clone(),
+            })
+        })
+        .collect()
+}
+
 /// Extract pipeline, run ID, and item suffix from a scoped checklist item ID.
 /// Format: pipeline__run_id__item_id
 fn extract_run_scope(scoped_id: &str) -> Option<(String, u64, String)> {
@@ -136,7 +162,7 @@ fn extract_run_scope(scoped_id: &str) -> Option<(String, u64, String)> {
 
 /// Strip the scope prefix from a scoped checklist item ID.
 /// Format: pipeline__run_id__item_id -> item_id
-fn strip_run_scope(scoped_id: &str) -> String {
+pub fn strip_run_scope(scoped_id: &str) -> String {
     extract_run_scope(scoped_id)
         .map(|(_, _, suffix)| suffix)
         .unwrap_or_else(|| scoped_id.to_string())

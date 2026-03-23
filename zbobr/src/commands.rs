@@ -263,7 +263,7 @@ fn run_without_backends(
             let stage_def = resolve_stage_def(workflow, &stage, &role, &pipeline)?;
             let (task, comments) = dummy_task_and_comments();
             let prompt =
-                prompt_builder.build_for_stage_with_task(stage_def, &task, &comments)?;
+                prompt_builder.build_for_stage_with_task(stage_def, &task, &comments, None)?;
             println!("{}", prompt);
             Ok(())
         }
@@ -547,13 +547,13 @@ async fn run_task_subcommand(
             let prompt = if let Some(task_id) = id {
                 zbobr
                     .prompt_builder()
-                    .build_for_stage(stage_def, task_id, zbobr.task_backend())
+                    .build_for_stage(stage_def, task_id, zbobr.task_backend(), None)
                     .await?
             } else {
                 let (task, comments) = dummy_task_and_comments();
                 zbobr
                     .prompt_builder()
-                    .build_for_stage_with_task(stage_def, &task, &comments)?
+                    .build_for_stage_with_task(stage_def, &task, &comments, None)?
             };
             println!("{}", prompt);
         }

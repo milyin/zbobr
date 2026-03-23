@@ -279,10 +279,11 @@ impl<'a> CliStageRunner<'a> {
         State::running(self.pipeline_name.clone(), self.stage_name)
     }
 
-    async fn prompt(&self) -> anyhow::Result<String> {
+    async fn prompt(&self, pipeline_run_id: u64) -> anyhow::Result<String> {
+        let scope = Some((self.pipeline_name.as_str(), pipeline_run_id));
         self.zbobr
             .prompt_builder()
-            .build_for_stage(self.stage_def, self.task_id, self.zbobr.task_backend())
+            .build_for_stage(self.stage_def, self.task_id, self.zbobr.task_backend(), scope)
             .await
     }
 
@@ -421,7 +422,7 @@ impl<'a> CliStageRunner<'a> {
             assigned_port, role, self.task_id,
         );
 
-        let prompt_text = self.prompt().await?;
+        let prompt_text = self.prompt(pipeline_run_id).await?;
         *prompt_holder.lock().unwrap() = Some(prompt_text.clone());
         let executor = self
             .zbobr
