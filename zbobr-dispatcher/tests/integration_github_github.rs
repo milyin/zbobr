@@ -69,6 +69,14 @@ async fn test_github_github_abstract_all_mcp_tools() {
 #[tokio::test]
 #[serial]
 #[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
+async fn test_github_github_abstract_configure_worktree_idempotent() {
+    let env = get_env().await;
+    abstract_test_helpers::run_configure_worktree_idempotent(&env).await;
+}
+
+#[tokio::test]
+#[serial]
+#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
 async fn test_github_github_abstract_stage_transfer() {
     let env = get_env().await;
     abstract_test_helpers::run_stage_transfer(&env).await;

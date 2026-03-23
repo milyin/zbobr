@@ -361,21 +361,6 @@ pub trait CommonMcpImpl: Send + Sync {
             work_branch_postfix,
         );
 
-        // Validate work_branch_postfix: if provided, work_branch must not already be set
-        if work_branch_postfix.is_some() {
-            match self.session().get_work_branch().await {
-                Ok(Some(_)) => {
-                    return self
-                        .configure_worktree_error("work_branch is already set".to_string())
-                        .await;
-                }
-                Err(e) => {
-                    return self.configure_worktree_error(e.to_string()).await;
-                }
-                Ok(None) => {}
-            }
-        }
-
         let session = self.session();
         let config = session.dispatcher_config();
 
@@ -385,6 +370,62 @@ pub trait CommonMcpImpl: Send + Sync {
         let effective_branch = destination_branch
             .or_else(|| config.default_destination_branch.clone());
         let work_branch = work_branch_postfix.map(|v| session.create_branch_name(&v));
+
+        // Validate work_branch_postfix: if provided and work_branch is already set,
+        // treat identical repeated setup as a successful no-op.
+        if let Some(requested_work_branch) = work_branch.as_deref() {
+            match session.get_work_branch().await {
+                Ok(Some(existing_work_branch)) => {
+                    let existing_repo = match session.get_destination_repository().await {
+                        Ok(v) => v,
+                        Err(e) => return self.configure_worktree_error(e.to_string()).await,
+                    };
+                    let existing_branch = match session.get_destination_branch().await {
+                        Ok(v) => v,
+                        Err(e) => return self.configure_worktree_error(e.to_string()).await,
+                    };
+
+                    let repo_matches = effective_repo
+                        .as_ref()
+                        .map(|v| Some(v) == existing_repo.as_ref())
+                        .unwrap_or(true);
+                    let branch_matches = effective_branch
+                        .as_ref()
+                        .map(|v| Some(v) == existing_branch.as_ref())
+                        .unwrap_or(true);
+
+                    if existing_work_branch == requested_work_branch
+                        && repo_matches
+                        && branch_matches
+                    {
+                        let response = format!(
+                            "Worktree configured: destination_repository={}, destination_branch={}, work_branch={} (values were already set)",
+                            existing_repo.as_deref().unwrap_or("(not set)"),
+                            existing_branch.as_deref().unwrap_or("(not set)"),
+                            existing_work_branch,
+                        );
+                        log_mcp_string_response(
+                            self.role_name(),
+                            self.session().task_id(),
+                            "configure_worktree",
+                            &response,
+                        );
+                        return response;
+                    }
+
+                    return self
+                        .configure_worktree_error(
+                            "work_branch is already set and differs from requested values"
+                                .to_string(),
+                        )
+                        .await;
+                }
+                Err(e) => {
+                    return self.configure_worktree_error(e.to_string()).await;
+                }
+                Ok(None) => {}
+            }
+        }
 
         let repo_for_response = effective_repo.clone();
         let branch_for_response = effective_branch.clone();
