@@ -385,16 +385,13 @@ async fn run_task_subcommand(
     Ok(())
 }
 
-async fn show_prompt(
-    zbobr: &Arc<ZbobrDispatcher>,
-    id: Option<u64>,
-    stage: Option<Stage>,
-    role: Option<String>,
-    pipeline: Option<Pipeline>,
-) -> anyhow::Result<()> {
-    let workflow = zbobr.workflow().config();
-
-    let stage_def = match (&stage, &role) {
+fn resolve_stage_def<'a>(
+    workflow: &'a zbobr_api::config::WorkflowConfig,
+    stage: &Option<Stage>,
+    role: &Option<String>,
+    pipeline: &Option<Pipeline>,
+) -> anyhow::Result<&'a zbobr_api::config::StageDefinition> {
+    match (stage, role) {
         (None, None) => {
             anyhow::bail!("Either --stage or --role must be specified");
         }
@@ -402,8 +399,7 @@ async fn show_prompt(
             anyhow::bail!("Only one of --stage or --role may be specified, not both");
         }
         (Some(stage_name), None) => {
-            if let Some(ref p) = pipeline {
-                // Directly look up stage in the specified pipeline
+            if let Some(p) = pipeline {
                 workflow
                     .stage(p.clone(), stage_name.as_str())
                     .ok_or_else(|| {
@@ -412,9 +408,8 @@ async fn show_prompt(
                             stage_name,
                             p
                         )
-                    })?
+                    })
             } else {
-                // Find stage across all pipelines; error if ambiguous
                 let matches: Vec<_> = workflow
                     .all_stages()
                     .into_iter()
@@ -422,7 +417,7 @@ async fn show_prompt(
                     .collect();
                 match matches.len() {
                     0 => anyhow::bail!("Stage '{}' not found in any pipeline", stage_name),
-                    1 => matches[0].2,
+                    1 => Ok(matches[0].2),
                     _ => {
                         let pipelines: Vec<_> =
                             matches.iter().map(|(p, _, _)| p.to_string()).collect();
@@ -436,8 +431,7 @@ async fn show_prompt(
             }
         }
         (None, Some(role_name)) => {
-            if let Some(ref p) = pipeline {
-                // Find the stage with this role in the specified pipeline
+            if let Some(p) = pipeline {
                 let pipeline_config = workflow
                     .pipeline(p.clone())
                     .ok_or_else(|| anyhow::anyhow!("Pipeline '{}' not found", p))?;
@@ -451,17 +445,42 @@ async fn show_prompt(
                             role_name,
                             p
                         )
-                    })?
+                    })
             } else {
                 workflow
                     .find_stage_by_role(role_name)
                     .map(|(_, _, def)| def)
                     .ok_or_else(|| {
                         anyhow::anyhow!("No stage with role '{}' found", role_name)
-                    })?
+                    })
             }
         }
-    };
+    }
+}
+
+/// Show prompt with placeholder values (no task backend needed).
+pub fn run_prompt_with_placeholders(
+    prompt_builder: &zbobr_dispatcher::ConfiguredPromptBuilder,
+    stage: Option<Stage>,
+    role: Option<String>,
+    pipeline: Option<Pipeline>,
+) -> anyhow::Result<()> {
+    let workflow = prompt_builder.workflow_config();
+    let stage_def = resolve_stage_def(workflow, &stage, &role, &pipeline)?;
+    let prompt = prompt_builder.build_for_stage_with_placeholders(stage_def)?;
+    println!("{}", prompt);
+    Ok(())
+}
+
+async fn show_prompt(
+    zbobr: &Arc<ZbobrDispatcher>,
+    id: Option<u64>,
+    stage: Option<Stage>,
+    role: Option<String>,
+    pipeline: Option<Pipeline>,
+) -> anyhow::Result<()> {
+    let workflow = zbobr.workflow().config();
+    let stage_def = resolve_stage_def(workflow, &stage, &role, &pipeline)?;
 
     let prompt = if let Some(task_id) = id {
         zbobr

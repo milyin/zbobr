@@ -45,6 +45,10 @@ impl ConfiguredPromptBuilder {
         self.base_path.as_ref()
     }
 
+    pub fn workflow_config(&self) -> &WorkflowConfig {
+        self.workflow.config()
+    }
+
     /// Build full prompt for a stage definition.
     pub async fn build_for_stage(
         &self,

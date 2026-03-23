@@ -98,6 +98,31 @@ async fn main() -> anyhow::Result<()> {
     let config = RootConfig::build(root_toml, cli.settings, &location.config_dir);
 
     let command = cli.command;
+
+    // Handle commands that only need workflow config, not backends
+    if let Command::Task {
+        subcommand:
+            commands::TaskSubcommand::Prompt {
+                id: None,
+                ref stage,
+                ref role,
+                ref pipeline,
+            },
+    } = command
+    {
+        let workflow = Workflow::new(config.workflow)?;
+        let prompt_builder = ConfiguredPromptBuilder::new(
+            Some(location.config_dir.clone()),
+            Arc::new(workflow),
+        );
+        return commands::run_prompt_with_placeholders(
+            &prompt_builder,
+            stage.clone(),
+            role.clone(),
+            pipeline.clone(),
+        );
+    }
+
     let workflow = Workflow::new(config.workflow)?;
 
     let task_backend = TaskBackendGithub::new(config.tasks).await?;
