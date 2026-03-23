@@ -47,6 +47,8 @@ struct TaskFile {
     stack: Vec<StackEntry>,
     #[serde(default)]
     pipeline_run_id: u64,
+    #[serde(default)]
+    stage_count: u64,
     closed: bool,
 }
 
@@ -80,6 +82,7 @@ impl TaskFile {
             pause: self.pause,
             confirm: self.confirm,
             pipeline_run_id: self.pipeline_run_id,
+            stage_count: self.stage_count,
             etag: None,
         })
     }
@@ -107,6 +110,7 @@ impl TaskFile {
             signal: task.signal.clone(),
             stack: task.stack.clone(),
             pipeline_run_id: task.pipeline_run_id,
+            stage_count: task.stage_count,
             closed,
         }
     }
@@ -536,6 +540,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             pause: false,
             confirm: false,
             pipeline_run_id: 0,
+            stage_count: 0,
             etag: None,
         };
 

@@ -607,6 +607,10 @@ impl ZbobrTaskBackendGithubImpl {
                 .get("pipeline_run_id")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0),
+            stage_count: params_map
+                .get("stage_count")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
             etag: Some(body),
         }
     }
@@ -635,6 +639,12 @@ impl ZbobrTaskBackendGithubImpl {
             params.insert(
                 "pipeline_run_id".to_string(),
                 task.pipeline_run_id.to_string(),
+            );
+        }
+        if task.stage_count > 0 {
+            params.insert(
+                "stage_count".to_string(),
+                task.stage_count.to_string(),
             );
         }
         params

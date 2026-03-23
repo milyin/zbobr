@@ -347,6 +347,12 @@ impl<'a> CliStageRunner<'a> {
             }
         }
 
+        // Increment the stage counter.
+        {
+            let task_session = self.zbobr.task_session(self.task_id);
+            task_session.increment_stage_count().await?;
+        }
+
         // Clear the triggering signal before the agent session starts.
         {
             let task_session = self.zbobr.task_session(self.task_id);
@@ -586,6 +592,7 @@ async fn handle_call_stage(
         .push_stack(pipeline_name.clone(), return_signal.clone())
         .await?;
     task_session.allocate_pipeline_run_id().await?;
+    task_session.increment_stage_count().await?;
     let call_signal = Signal::call(call_pipeline.clone());
     task_session.set_signal(Some(call_signal.clone())).await?;
     task_session
