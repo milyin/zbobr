@@ -7,7 +7,8 @@ use std::{
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use zbobr_api::{
-    Comment, CommentTag, Model, Task, Tool,
+    Comment, CommentTag, FLAG_PREFIX, Model, PIPELINE_PREFIX, SIGNAL_PREFIX, STAGE_PREFIX,
+    STATE_PREFIX, Task, Tool,
     backend::TaskBackend,
     comment_tag,
     task::{Pipeline, StackEntry, Stage, State},
@@ -207,28 +208,21 @@ impl ZbobrTaskBackendGithubImpl {
         })
     }
 
-    /// Label prefix for state labels (e.g. "state:done").
-    const STATE_PREFIX: &'static str = "state:";
-    /// Label prefix for pipeline labels (e.g. "pipeline:main").
-    const PIPELINE_PREFIX: &'static str = "pipeline:";
-    /// Label prefix for stage labels (e.g. "stage:working").
-    const STAGE_PREFIX: &'static str = "stage:";
-
     /// Convert a Signal to its GitHub label representation.
     fn signal_to_label(signal: &zbobr_api::Signal) -> String {
-        format!("signal:{signal}")
+        format!("{SIGNAL_PREFIX}{signal}")
     }
 
     /// Parse a GitHub label string back to a Signal.
     fn label_to_signal(label: &str) -> Option<zbobr_api::Signal> {
-        label.strip_prefix("signal:")?.parse().ok()
+        label.strip_prefix(SIGNAL_PREFIX)?.parse().ok()
     }
 
     /// Convert a state to its GitHub label representations.
     fn state_to_labels(state: &State) -> Vec<String> {
-        let state_label = |name: &str| format!("{}{name}", Self::STATE_PREFIX);
-        let pipeline_label = |p: &Pipeline| format!("{}{}", Self::PIPELINE_PREFIX, p.as_str());
-        let stage_label = |s: &Stage| format!("{}{}", Self::STAGE_PREFIX, s.as_str());
+        let state_label = |name: &str| format!("{}{name}", STATE_PREFIX);
+        let pipeline_label = |p: &Pipeline| format!("{}{}", PIPELINE_PREFIX, p.as_str());
+        let stage_label = |s: &Stage| format!("{}{}", STAGE_PREFIX, s.as_str());
 
         match state {
             State::Empty => vec![],
@@ -255,11 +249,11 @@ impl ZbobrTaskBackendGithubImpl {
         let mut stage_value: Option<&str> = None;
 
         for label in labels {
-            if let Some(v) = label.name.strip_prefix(Self::STATE_PREFIX) {
+            if let Some(v) = label.name.strip_prefix(STATE_PREFIX) {
                 state_value = Some(v);
-            } else if let Some(v) = label.name.strip_prefix(Self::PIPELINE_PREFIX) {
+            } else if let Some(v) = label.name.strip_prefix(PIPELINE_PREFIX) {
                 pipeline_value = Some(v);
-            } else if let Some(v) = label.name.strip_prefix(Self::STAGE_PREFIX) {
+            } else if let Some(v) = label.name.strip_prefix(STAGE_PREFIX) {
                 stage_value = Some(v);
             }
         }
@@ -271,27 +265,27 @@ impl ZbobrTaskBackendGithubImpl {
             Some(v) if v == State::LABEL_READY => State::Ready,
             Some(v) if v == State::LABEL_PENDING => match pipeline_value {
                 Some(p) => State::Pending(Pipeline::from(p)),
-                None => State::Unknown(format!("{}{}", Self::STATE_PREFIX, State::LABEL_PENDING)),
+                None => State::Unknown(format!("{}{}", STATE_PREFIX, State::LABEL_PENDING)),
             },
             Some(v) if v == State::LABEL_RUNNING => match (pipeline_value, stage_value) {
                 (Some(p), Some(s)) => {
                     State::Running(Pipeline::from(p), Stage::from(s))
                 }
                 (None, Some(s)) => {
-                    State::Unknown(format!("{}{}, {}{s}", Self::STATE_PREFIX, State::LABEL_RUNNING, Self::STAGE_PREFIX))
+                    State::Unknown(format!("{}{}, {}{s}", STATE_PREFIX, State::LABEL_RUNNING, STAGE_PREFIX))
                 }
                 (Some(p), None) => {
-                    State::Unknown(format!("{}{}, {}{p}", Self::STATE_PREFIX, State::LABEL_RUNNING, Self::PIPELINE_PREFIX))
+                    State::Unknown(format!("{}{}, {}{p}", STATE_PREFIX, State::LABEL_RUNNING, PIPELINE_PREFIX))
                 }
-                (None, None) => State::Unknown(format!("{}{}", Self::STATE_PREFIX, State::LABEL_RUNNING)),
+                (None, None) => State::Unknown(format!("{}{}", STATE_PREFIX, State::LABEL_RUNNING)),
             },
-            Some(other) => State::Unknown(format!("{}{other}", Self::STATE_PREFIX)),
+            Some(other) => State::Unknown(format!("{}{other}", STATE_PREFIX)),
         }
     }
 
     /// Return the GitHub label color for a state-related label.
     fn state_label_color(label: &str) -> &'static str {
-        if let Some(state_name) = label.strip_prefix(Self::STATE_PREFIX) {
+        if let Some(state_name) = label.strip_prefix(STATE_PREFIX) {
             match state_name {
                 v if v == State::LABEL_DONE => "0e8a16",    // green
                 v if v == State::LABEL_READY => "0075ca",   // blue
@@ -300,7 +294,7 @@ impl ZbobrTaskBackendGithubImpl {
                 v if v == State::LABEL_RUNNING => "c2e0c6", // light green
                 _ => "ededed",
             }
-        } else if label.starts_with(Self::PIPELINE_PREFIX) || label.starts_with(Self::STAGE_PREFIX) {
+        } else if label.starts_with(PIPELINE_PREFIX) || label.starts_with(STAGE_PREFIX) {
             "ededed"
         } else {
             "ededed" // fallback light gray
@@ -309,12 +303,12 @@ impl ZbobrTaskBackendGithubImpl {
 
     /// Convert a flag name to its GitHub label representation.
     fn flag_to_label(name: &str) -> String {
-        format!("flag:{}", name)
+        format!("{FLAG_PREFIX}{name}")
     }
 
     /// Parse a GitHub label string back to a flag name.
     fn label_to_flag(label: &str) -> Option<&str> {
-        label.strip_prefix("flag:")
+        label.strip_prefix(FLAG_PREFIX)
     }
 
     fn parse_repo(&self) -> anyhow::Result<(&str, &str)> {
@@ -358,9 +352,9 @@ impl ZbobrTaskBackendGithubImpl {
         })
         .await?;
         for label in &issue.labels {
-            if label.name.starts_with(Self::STATE_PREFIX)
-                || label.name.starts_with(Self::PIPELINE_PREFIX)
-                || label.name.starts_with(Self::STAGE_PREFIX)
+            if label.name.starts_with(STATE_PREFIX)
+                || label.name.starts_with(PIPELINE_PREFIX)
+                || label.name.starts_with(STAGE_PREFIX)
             {
                 let _ = retry_github("remove state label", || async {
                     self.octocrab
@@ -637,7 +631,7 @@ impl ZbobrTaskBackendGithubImpl {
 
         let existing_signal_labels: Vec<String> = existing_labels
             .iter()
-            .filter(|l| l.starts_with("signal:"))
+            .filter(|l| l.starts_with(SIGNAL_PREFIX))
             .cloned()
             .collect();
 
@@ -652,11 +646,11 @@ impl ZbobrTaskBackendGithubImpl {
         // Create missing signal labels (required but not in repo)
         for label in signal_labels {
             if !existing_signal_labels.contains(label) {
-                let desc = format!("Signal: {}", label.strip_prefix("signal:").unwrap_or(label));
+                let desc = format!("Signal: {}", label.strip_prefix(SIGNAL_PREFIX).unwrap_or(label));
                 tracing::info!("Creating signal label '{label}'");
                 self.create_label(label, SIGNAL_LABEL_COLOR, &desc).await?;
             } else if force {
-                let desc = format!("Signal: {}", label.strip_prefix("signal:").unwrap_or(label));
+                let desc = format!("Signal: {}", label.strip_prefix(SIGNAL_PREFIX).unwrap_or(label));
                 tracing::info!("Updating signal label '{label}' (force)");
                 self.update_label(label, SIGNAL_LABEL_COLOR, &desc).await?;
             } else {
@@ -667,11 +661,11 @@ impl ZbobrTaskBackendGithubImpl {
         // Create state labels programmatically from type constants
         let state_labels: Vec<String> = State::ALL_LABEL_NAMES
             .iter()
-            .map(|name| format!("{}{name}", Self::STATE_PREFIX))
+            .map(|name| format!("{}{name}", STATE_PREFIX))
             .chain(
                 [Pipeline::MAIN, Pipeline::MERGE]
                     .iter()
-                    .map(|name| format!("{}{name}", Self::PIPELINE_PREFIX)),
+                    .map(|name| format!("{}{name}", PIPELINE_PREFIX)),
             )
             .collect();
 
@@ -1441,7 +1435,7 @@ mod tests {
             body: Some("".to_string()),
             state: "open".to_string(),
             labels: vec![IssueLabel {
-                name: "flag:confirm".to_string(),
+                name: format!("{FLAG_PREFIX}confirm"),
             }],
         };
 

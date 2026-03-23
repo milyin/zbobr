@@ -1,3 +1,16 @@
+// -- Label prefix constants --
+
+/// Label prefix for state labels (e.g. "state:done").
+pub const STATE_PREFIX: &str = "state:";
+/// Label prefix for pipeline labels (e.g. "pipeline:main").
+pub const PIPELINE_PREFIX: &str = "pipeline:";
+/// Label prefix for stage labels (e.g. "stage:working").
+pub const STAGE_PREFIX: &str = "stage:";
+/// Label prefix for signal labels (e.g. "signal:go_working").
+pub const SIGNAL_PREFIX: &str = "signal:";
+/// Label prefix for flag labels (e.g. "flag:confirm").
+pub const FLAG_PREFIX: &str = "flag:";
+
 // -- TaskIdentity --
 
 /// Bundles task routing info for worktree operations.
