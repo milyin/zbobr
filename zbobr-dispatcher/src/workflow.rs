@@ -1,0 +1,660 @@
+use std::{collections::HashMap, path::PathBuf};
+
+use indexmap::IndexMap;
+use zbobr_api::{
+    Pipeline, Signal, Stage, State, Task,
+    config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig},
+};
+
+/// Workflow wraps a `WorkflowConfig` and exposes state machine logic as methods.
+#[derive(Clone, Debug)]
+pub struct Workflow {
+    config: WorkflowConfig,
+}
+
+/// Action determined by the state machine for the next step.
+pub enum StateAction<'a> {
+    /// Execute this stage definition: (pipeline_name, stage_name, stage_def).
+    RunStage(&'a Pipeline, &'a str, &'a StageDefinition),
+    /// Task is completed.
+    Done,
+    /// Task is paused, waiting for user.
+    Paused,
+    /// Nothing to do (no signal, no pending action).
+    Idle,
+}
+
+impl Default for Workflow {
+    fn default() -> Self {
+        let mut pipelines = HashMap::new();
+        let dummy_stage = StageDefinition {
+            role: Some("default".to_string()),
+            ..Default::default()
+        };
+        for name in [Pipeline::MAIN, Pipeline::MERGE] {
+            pipelines.insert(
+                Pipeline::from(name),
+                PipelineConfig {
+                    stages: IndexMap::from([(Stage::from("default"), dummy_stage.clone())]),
+                },
+            );
+        }
+        Self {
+            config: WorkflowConfig {
+                prompts_dir: None,
+                pipelines,
+                roles: HashMap::new(),
+            },
+        }
+    }
+}
+
+impl Workflow {
+    pub fn new(config: WorkflowConfig) -> anyhow::Result<Self> {
+        config.validate()?;
+        Ok(Self { config })
+    }
+
+    /// Create a `Workflow` without validating the config.
+    /// Use in tests or when the config is known to be partial.
+    pub fn from_config(config: WorkflowConfig) -> Self {
+        Self { config }
+    }
+
+    // -- Config access --
+
+    pub fn config(&self) -> &WorkflowConfig {
+        &self.config
+    }
+
+    // -- Delegated getters --
+
+    pub fn pipeline(&self, name: &Pipeline) -> Option<&PipelineConfig> {
+        self.config.pipeline(name.clone())
+    }
+
+    pub fn stage(&self, pipeline: &Pipeline, stage: &str) -> Option<&StageDefinition> {
+        self.config.stage(pipeline.clone(), stage)
+    }
+
+    pub fn all_stages(&self) -> Vec<(&Pipeline, &str, &StageDefinition)> {
+        self.config.all_stages()
+    }
+
+    pub fn default_pipeline(&self) -> Pipeline {
+        self.config.default_pipeline()
+    }
+
+    pub fn pipeline_names(&self) -> Vec<&Pipeline> {
+        self.config.pipeline_names()
+    }
+
+    pub fn find_stage_by_role(&self, role: &str) -> Option<(&Pipeline, &str, &StageDefinition)> {
+        self.config.find_stage_by_role(role)
+    }
+
+    pub fn role_definition(&self, role: &str) -> Option<&RoleDefinition> {
+        self.config.role_definition(role)
+    }
+
+    pub fn start_stage_for_pipeline(
+        &self,
+        pipeline: &Pipeline,
+    ) -> Option<(&str, &StageDefinition)> {
+        self.config.start_stage_for_pipeline(pipeline.clone())
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        self.config.validate()
+    }
+
+    pub fn prompts_dir(&self) -> Option<&PathBuf> {
+        self.config.prompts_dir.as_ref()
+    }
+
+    pub fn roles(&self) -> &HashMap<String, RoleDefinition> {
+        &self.config.roles
+    }
+
+    pub fn pipelines(&self) -> &HashMap<Pipeline, PipelineConfig> {
+        &self.config.pipelines
+    }
+
+    // -- State machine --
+
+    /// Given a task's current state/signal/stack and the workflow configuration,
+    /// determine the next action to take.
+    pub fn resolve_next_action(&self, task: &Task) -> anyhow::Result<StateAction<'_>> {
+        tracing::debug!(
+            "Task #{}: resolving next action (state={}, signal={:?}, stack_depth={})",
+            task.id,
+            task.state,
+            task.signal,
+            task.stack.len()
+        );
+        let action = self.resolve_inner(task, 0)?;
+        match &action {
+            StateAction::RunStage(pipeline, stage, def) => {
+                if let Some(call_target) = def.call_pipeline() {
+                    tracing::info!(
+                        "Task #{}: resolved → RunStage {}/{} (call → {})",
+                        task.id,
+                        pipeline,
+                        stage,
+                        call_target
+                    );
+                } else {
+                    tracing::info!(
+                        "Task #{}: resolved → RunStage {}/{} (role={:?})",
+                        task.id,
+                        pipeline,
+                        stage,
+                        def.role_name()
+                    );
+                }
+            }
+            StateAction::Done => tracing::debug!("Task #{}: resolved → Done", task.id),
+            StateAction::Paused => tracing::debug!("Task #{}: resolved → Paused", task.id),
+            StateAction::Idle => tracing::debug!("Task #{}: resolved → Idle", task.id),
+        }
+        Ok(action)
+    }
+
+    fn resolve_inner(&self, task: &Task, depth: usize) -> anyhow::Result<StateAction<'_>> {
+        // Guard against infinite recursion
+        if depth > 20 {
+            anyhow::bail!(
+                "State machine recursion limit exceeded for task #{}",
+                task.id
+            );
+        }
+
+        match &task.state {
+            State::Empty => Ok(StateAction::Idle),
+            State::Ready => {
+                if task.stack.is_empty() {
+                    // Push default pipeline's start stage
+                    let default_pipeline = self.config.default_pipeline();
+                    tracing::info!(
+                        "Task #{}: READY with empty stack → starting default pipeline '{}'",
+                        task.id,
+                        default_pipeline
+                    );
+                    let (pipeline_key, pipeline_config) = self
+                        .config
+                        .pipelines
+                        .get_key_value(default_pipeline.as_str())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "No start stage for default pipeline '{}'",
+                                default_pipeline
+                            )
+                        })?;
+                    let (stage_name, stage_def) =
+                        pipeline_config.start_stage().ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "No start stage for default pipeline '{}'",
+                                default_pipeline
+                            )
+                        })?;
+                    Ok(StateAction::RunStage(pipeline_key, stage_name, stage_def))
+                } else if let Some(ref signal) = task.signal {
+                    tracing::info!(
+                        "Task #{}: READY with stack (depth={}) and signal '{}' → resolving signal",
+                        task.id,
+                        task.stack.len(),
+                        signal
+                    );
+                    self.resolve_signal(task, signal)
+                } else {
+                    tracing::debug!(
+                        "Task #{}: READY with stack but no signal → Idle",
+                        task.id
+                    );
+                    Ok(StateAction::Idle)
+                }
+            }
+            State::Done => Ok(StateAction::Done),
+            State::Pause => Ok(StateAction::Paused),
+            State::Pending(pipeline) => {
+                if let Some(ref signal) = task.signal {
+                    tracing::info!(
+                        "Task #{}: PENDING in pipeline '{}' with signal '{}' → resolving",
+                        task.id,
+                        pipeline,
+                        signal
+                    );
+                    self.resolve_signal_in_pipeline(signal, pipeline)
+                } else {
+                    tracing::debug!(
+                        "Task #{}: PENDING in pipeline '{}' but no signal → Idle",
+                        task.id,
+                        pipeline
+                    );
+                    Ok(StateAction::Idle)
+                }
+            }
+            State::Running(_, _) | State::Unknown(_) => Ok(StateAction::Idle),
+        }
+    }
+
+    fn resolve_signal(&self, task: &Task, signal: &Signal) -> anyhow::Result<StateAction<'_>> {
+        let pipeline =
+            pipeline_from_state(&task.state).unwrap_or_else(|| self.config.default_pipeline());
+        tracing::info!(
+            "Task #{}: resolve_signal '{}' in pipeline '{}'",
+            task.id,
+            signal,
+            pipeline
+        );
+        self.resolve_signal_in_pipeline(signal, &pipeline)
+    }
+
+    fn resolve_signal_in_pipeline(
+        &self,
+        signal: &Signal,
+        pipeline: &Pipeline,
+    ) -> anyhow::Result<StateAction<'_>> {
+        match signal {
+            Signal::Go(target_stage) => {
+                tracing::info!(
+                    "Signal Go('{}') → looking up stage in pipeline '{}'",
+                    target_stage,
+                    pipeline
+                );
+                let (pipeline_key, pipeline_config) = self
+                    .config
+                    .pipelines
+                    .get_key_value(pipeline.as_str())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Signal '{signal}' references unknown pipeline '{pipeline}'"
+                        )
+                    })?;
+                let (stage_key, stage_def) = pipeline_config
+                    .stages
+                    .get_key_value(target_stage.as_str())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Signal '{signal}' references unknown stage '{target_stage}' in pipeline '{pipeline}'"
+                        )
+                    })?;
+                Ok(StateAction::RunStage(
+                    pipeline_key,
+                    stage_key.as_str(),
+                    stage_def,
+                ))
+            }
+            Signal::Call(target_pipeline) => {
+                tracing::info!(
+                    "Signal Call('{}') → entering sub-pipeline from '{}'",
+                    target_pipeline,
+                    pipeline
+                );
+                let (pipeline_key, pipeline_config) = self
+                    .config
+                    .pipelines
+                    .get_key_value(target_pipeline.as_str())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Signal '{signal}' references unknown pipeline '{target_pipeline}' (no start stage)"
+                        )
+                    })?;
+                let (stage_key, start) = pipeline_config.start_stage().ok_or_else(|| {
+                    anyhow::anyhow!("Pipeline '{target_pipeline}' has no start stage")
+                })?;
+                Ok(StateAction::RunStage(pipeline_key, stage_key, start))
+            }
+            Signal::Return | Signal::ReturnFailure => {
+                tracing::info!(
+                    "Signal '{}' → Done (returning from pipeline '{}')",
+                    signal,
+                    pipeline
+                );
+                Ok(StateAction::Done)
+            }
+        }
+    }
+}
+
+/// Extract pipeline name from a typed task state.
+pub fn pipeline_from_state(state: &State) -> Option<Pipeline> {
+    state.pipeline().cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use zbobr_api::config::{PipelineConfig, StageDefinition, WorkflowConfig};
+
+    use super::*;
+
+    /// Helper: build a minimal valid WorkflowConfig with main/init/merge pipelines.
+    fn base_workflow() -> WorkflowConfig {
+        let role_stage = |role: &str| StageDefinition {
+            role: Some(role.to_string()),
+            ..Default::default()
+        };
+        let single_pipeline = |stage_name: &str, role: &str| PipelineConfig {
+            stages: IndexMap::from([(Stage::from(stage_name), role_stage(role))]),
+        };
+        WorkflowConfig {
+            pipelines: [
+                ("main".into(), single_pipeline("working", "worker")),
+                ("merge".into(), single_pipeline("merging", "merger")),
+            ]
+            .into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn call_stage_valid() {
+        let mut wf = base_workflow();
+        // Add a "review" pipeline and a call stage in main that calls it
+        wf.pipelines.insert(
+            "review".into(),
+            PipelineConfig {
+                stages: IndexMap::from([(
+                    "checking".into(),
+                    StageDefinition {
+                        role: Some("reviewer".into()),
+                        ..Default::default()
+                    },
+                )]),
+            },
+        );
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.stages.insert(
+            "call_review".into(),
+            StageDefinition {
+                call: Some("review".into()),
+                ..Default::default()
+            },
+        );
+        assert!(wf.validate().is_ok());
+    }
+
+    #[test]
+    fn call_stage_unknown_target() {
+        let mut wf = base_workflow();
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.stages.insert(
+            "do_call".into(),
+            StageDefinition {
+                call: Some("nonexistent".into()),
+                ..Default::default()
+            },
+        );
+        let err = wf.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("calls unknown pipeline"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn stage_both_role_and_call() {
+        let mut wf = base_workflow();
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.stages.insert(
+            "bad".into(),
+            StageDefinition {
+                role: Some("worker".into()),
+                call: Some("merge".into()),
+                ..Default::default()
+            },
+        );
+        let err = wf.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("both 'role' and 'call'"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn stage_neither_role_nor_call() {
+        let mut wf = base_workflow();
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.stages
+            .insert("empty".into(), StageDefinition::default());
+        let err = wf.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("neither 'role' nor 'call'"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn call_stage_toml_round_trip() {
+        let toml_str = r#"
+[pipelines.main.stages.setup]
+call = "sub"
+[pipelines.main.stages.working]
+role = "worker"
+
+[pipelines.sub.stages.s1]
+role = "helper"
+
+[pipelines.merge.stages.merging]
+role = "merger"
+"#;
+        let wf: WorkflowConfig = toml::from_str(toml_str).unwrap();
+        assert!(wf.validate().is_ok());
+
+        let setup = wf.stage("main", "setup").unwrap();
+        assert_eq!(setup.call_pipeline().map(|p| p.as_str()), Some("sub"));
+        assert_eq!(setup.role_name(), None);
+        assert!(setup.is_call());
+
+        let working = wf.stage("main", "working").unwrap();
+        assert_eq!(working.role_name(), Some("worker"));
+        assert_eq!(working.call_pipeline(), None);
+        assert!(!working.is_call());
+    }
+
+    #[test]
+    fn resolve_next_action_call_stage_returns_run_stage() {
+        let mut wf = base_workflow();
+        wf.pipelines.insert(
+            "sub".into(),
+            PipelineConfig {
+                stages: IndexMap::from([(
+                    "s1".into(),
+                    StageDefinition {
+                        role: Some("worker".into()),
+                        ..Default::default()
+                    },
+                )]),
+            },
+        );
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.stages = IndexMap::from([(
+            "call_sub".into(),
+            StageDefinition {
+                call: Some("sub".into()),
+                ..Default::default()
+            },
+        )]);
+        let workflow = Workflow::from_config(wf);
+
+        // Ready task → state machine should resolve to RunStage for the call stage
+        let task = Task {
+            id: 1,
+            title: String::new(),
+            description: String::new(),
+            state: State::Ready,
+            destination_repository: None,
+            destination_branch: None,
+            work_branch: None,
+            pr_url: None,
+            checklist: vec![],
+            signal: None,
+            stack: vec![],
+            pause: false,
+            confirm: false,
+            pipeline_run_id: 0,
+            etag: None,
+        };
+        let action = workflow.resolve_next_action(&task).unwrap();
+        match action {
+            StateAction::RunStage(pipeline, stage, def) => {
+                assert_eq!(pipeline, &Pipeline::Main);
+                assert_eq!(stage, "call_sub");
+                assert!(def.is_call());
+                assert_eq!(def.call_pipeline().map(|p| p.as_str()), Some("sub"));
+            }
+            other => panic!(
+                "expected RunStage, got {:?}",
+                match other {
+                    StateAction::Done => "Done",
+                    StateAction::Paused => "Paused",
+                    StateAction::Idle => "Idle",
+                    _ => "RunStage",
+                }
+            ),
+        }
+    }
+
+    #[test]
+    fn find_stage_by_role_skips_call_stages() {
+        let mut wf = base_workflow();
+        wf.pipelines.insert(
+            "sub".into(),
+            PipelineConfig {
+                stages: IndexMap::from([(
+                    "s1".into(),
+                    StageDefinition {
+                        role: Some("helper".into()),
+                        ..Default::default()
+                    },
+                )]),
+            },
+        );
+        let main = wf.pipelines.get_mut("main").unwrap();
+        let working = main.stages.shift_remove("working").unwrap();
+        main.stages.insert(
+            "call_sub".into(),
+            StageDefinition {
+                call: Some("sub".into()),
+                ..Default::default()
+            },
+        );
+        main.stages.insert("working".into(), working);
+        // "worker" role should still be found on the "working" stage
+        assert!(wf.find_stage_by_role("worker").is_some());
+        // No stage has role matching call target name
+        assert!(wf.find_stage_by_role("sub").is_none());
+    }
+
+    #[test]
+    fn on_success_unknown_stage_fails_validation() {
+        let mut wf = base_workflow();
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.stages.get_mut("working").unwrap().on_success =
+            Some(zbobr_api::StageTransition::stage("nonexistent"));
+        let err = wf.validate().unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("on_success references unknown stage"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn on_failure_unknown_stage_fails_validation() {
+        let mut wf = base_workflow();
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.stages.get_mut("working").unwrap().on_failure =
+            Some(zbobr_api::StageTransition::stage("nonexistent"));
+        let err = wf.validate().unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("on_failure references unknown stage"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn on_success_self_reference_allowed() {
+        let mut wf = base_workflow();
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.stages.get_mut("working").unwrap().on_success =
+            Some(zbobr_api::StageTransition::stage("working"));
+        assert!(wf.validate().is_ok());
+    }
+
+    #[test]
+    fn on_success_on_failure_toml_round_trip() {
+        let toml_str = r#"
+[pipelines.main.stages.working]
+role = "worker"
+on_failure = "planning"
+
+[pipelines.main.stages.planning]
+role = "planner"
+on_success = "working"
+
+[pipelines.merge.stages.merging]
+role = "merger"
+"#;
+        let wf: WorkflowConfig = toml::from_str(toml_str).unwrap();
+        assert!(wf.validate().is_ok());
+
+        let working = wf.stage("main", "working").unwrap();
+        assert_eq!(
+            working
+                .on_failure()
+                .and_then(|t| t.next.as_ref())
+                .map(|s| s.as_str()),
+            Some("planning")
+        );
+        assert!(working.on_success().is_none());
+
+        let planning = wf.stage("main", "planning").unwrap();
+        assert_eq!(
+            planning
+                .on_success()
+                .and_then(|t| t.next.as_ref())
+                .map(|s| s.as_str()),
+            Some("working")
+        );
+        assert!(planning.on_failure().is_none());
+    }
+
+    #[test]
+    fn on_success_structured_with_pause_toml_round_trip() {
+        let toml_str = r#"
+[pipelines.main.stages.working]
+role = "worker"
+on_success = { pause = true }
+
+[pipelines.main.stages.reviewing]
+role = "reviewer"
+on_success = { next = "working", pause = true }
+
+[pipelines.merge.stages.merging]
+role = "merger"
+"#;
+        let wf: WorkflowConfig = toml::from_str(toml_str).unwrap();
+        assert!(wf.validate().is_ok());
+
+        let working = wf.stage("main", "working").unwrap();
+        let t = working.on_success().unwrap();
+        assert!(t.next.is_none());
+        assert!(t.pause);
+
+        let reviewing = wf.stage("main", "reviewing").unwrap();
+        let t = reviewing.on_success().unwrap();
+        assert_eq!(t.next.as_ref().map(|s| s.as_str()), Some("working"));
+        assert!(t.pause);
+    }
+
+    #[test]
+    fn on_success_pause_only_passes_validation() {
+        let mut wf = base_workflow();
+        let main = wf.pipelines.get_mut("main").unwrap();
+        main.stages.get_mut("working").unwrap().on_success =
+            Some(zbobr_api::StageTransition::pause());
+        assert!(wf.validate().is_ok());
+    }
+}

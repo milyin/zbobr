@@ -1,26 +1,13 @@
-use std::collections::HashMap;
+// -- TaskIdentity --
 
-// -- Parameter names enum --
-
-/// Standardized parameter names for task configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum Parameter {
-    DestinationRepository,
-    DestinationBranch,
-    WorkBranch,
-    PrUrl,
-}
-
-impl Parameter {
-    /// Returns the parameter name as a string.
-    pub fn name(&self) -> &'static str {
-        match self {
-            Parameter::DestinationRepository => "destination_repository",
-            Parameter::DestinationBranch => "destination_branch",
-            Parameter::WorkBranch => "work_branch",
-            Parameter::PrUrl => "pr_url",
-        }
-    }
+/// Bundles task routing info for worktree operations.
+/// Only constructible when all three fields (destination_repository, destination_branch, work_branch) are set.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TaskIdentity {
+    pub task_id: u64,
+    pub destination_repository: String,
+    pub destination_branch: String,
+    pub work_branch: String,
 }
 
 /// Robustly extract the repository name from a string (which could be a URL, local path, or owner/repo).
@@ -57,462 +44,582 @@ pub struct ChecklistItem {
     pub text: String,
 }
 
-// -- Comment types --
-
-/// Comment type classification.
-///
-/// Variants:
-/// - `Error`    — posted by `report_error` MCP tool when an agent encounters an unrecoverable
-///   problem; also posted by the dispatcher/CLI on execution failure.
-/// - `Report`   — posted by `report_results` MCP tool to deliver a role's completion output.
-/// - `Plan`     — posted by `post_plan` MCP tool (planner role) to record the implementation plan.
-/// - `Request`  — posted for user-originated messages and for questions raised by `ask_user` (and
-///   similar ASK_xxx MCP tools) that pause the task waiting for a human response.
-/// - `Reject`   — posted by reviewer/tester when rejecting work; acts as a context chunk boundary
-///   and contains the rejection message. Visible in GET_HISTORY as the first comment of a new chunk.
-/// - `Done`     — posted by the dispatcher when a task is accepted and marked complete; acts as a
-///   context chunk boundary but is excluded from GET_HISTORY results.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
-)]
-pub enum CommentType {
-    /// Unrecoverable error from an agent or the dispatcher.
-    #[serde(rename = "error")]
-    Error,
-    /// Completion report from an agent role.
-    #[serde(rename = "report")]
-    Report,
-    /// Implementation plan posted by the planner role.
-    #[serde(rename = "plan")]
-    Plan,
-    /// User message or agent request awaiting a human response (ASK_xxx operations).
-    #[serde(rename = "request")]
-    Request,
-    /// Rejection posted by a reviewer or tester; also serves as a context chunk boundary.
-    /// Contains the rejection message and is included in GET_HISTORY as the first comment of a chunk.
-    #[serde(rename = "reject")]
-    Reject,
-    /// Completion marker posted by the dispatcher after a task is accepted and marked done.
-    /// Serves as a context chunk boundary; excluded from GET_HISTORY results.
-    #[serde(rename = "done")]
-    Done,
-}
-
-impl CommentType {
-    /// Returns the comment type as a string.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            CommentType::Error => "error",
-            CommentType::Report => "report",
-            CommentType::Plan => "plan",
-            CommentType::Request => "request",
-            CommentType::Reject => "reject",
-            CommentType::Done => "done",
-        }
-    }
-
-    /// Parse from string representation, returning `None` on unknown input.
-    pub fn parse(s: &str) -> Option<Self> {
-        let s = s.to_ascii_lowercase();
-        match s.as_str() {
-            "error" => Some(CommentType::Error),
-            "report" => Some(CommentType::Report),
-            "plan" => Some(CommentType::Plan),
-            "request" => Some(CommentType::Request),
-            "reject" => Some(CommentType::Reject),
-            "done" => Some(CommentType::Done),
-            _ => None,
-        }
-    }
-
-    /// Returns `true` for comment types that act as context chunk boundaries
-    /// (`Reject` and `Done`). Used by GET_HISTORY to split the comment history into chunks.
-    pub fn is_cut(&self) -> bool {
-        matches!(self, CommentType::Reject | CommentType::Done)
-    }
-}
-
-// Implement the standard `FromStr` trait so callers can use `.parse()` and to
-// appease the `clippy::should_implement_trait` lint.  The inherent `from_str`
-// method above remains available for callers who prefer an `Option`-returning
-// convenience.
-impl std::str::FromStr for CommentType {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        CommentType::parse(s).ok_or(())
-    }
-}
+// -- Comment --
 
 /// A structured comment with metadata.
+///
+/// The `stage` field identifies which stage posted the comment (e.g. "planning",
+/// "working"). The body text may contain `[tool_name]` section headers added by
+/// MCP tools (e.g. `[report_success]`, `[report_failure]`).
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
 pub struct Comment {
-    #[schemars(description = "Comment type (error, report, plan, or request)")]
-    pub comment_type: CommentType,
-    #[schemars(description = "Timestamp when comment was created (ISO 8601 format)")]
+    #[schemars(description = "Timestamp when comment was created")]
     pub timestamp: String,
-    #[schemars(description = "Role of the comment author (None if user-originated)")]
-    pub role: Option<Role>,
+    #[schemars(description = "Stage that posted this comment")]
+    pub stage: String,
     #[schemars(description = "Hostname of the system posting the comment")]
     pub hostname: String,
-    #[schemars(description = "Execution tool that produced the comment (if known)")]
+    #[schemars(description = "Tool that executed this comment (e.g. copilot, claude)")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<Tool>,
-    #[schemars(description = "AI model used (if applicable)")]
+    #[schemars(description = "Model used by the tool")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<Model>,
-    #[schemars(description = "Comment text without signature/tag")]
+    #[schemars(description = "Comment text (may contain [tool] section headers)")]
     pub text: String,
+    #[schemars(description = "Pipeline name that produced this comment")]
+    #[serde(default)]
+    pub pipeline: String,
+    #[schemars(description = "Monotonic run counter within the pipeline")]
+    #[serde(default)]
+    pub pipeline_run_id: u64,
+    #[schemars(description = "Optional caller pipeline for linked final pipeline reports")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_pipeline: Option<String>,
+    #[schemars(description = "Optional caller pipeline run id for linked final pipeline reports")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_pipeline_run_id: Option<u64>,
+    #[schemars(description = "Optional full report filename stored via task backend")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_name: Option<String>,
+    #[schemars(description = "Optional prompt filename stored via task backend (logging only)")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_name: Option<String>,
 }
 
-/// Result of extracting a history chunk, including navigation metadata.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub struct HistoryChunk {
-    /// Index of the returned chunk (0-based, 0 = oldest).
-    pub current_chunk: usize,
-    /// Index of the last available chunk.
-    pub last_chunk: usize,
-    /// Comments in this chunk
-    pub comments: Vec<Comment>,
-}
+// -- History helper types --
 
-/// Prepend a task description as a synthetic `Request` comment, then extract
-/// the chunk at `offset` from the comment history.
-///
-/// Chunks are delimited by "cut" comments (`Reject` / `Done`).
-/// Chunks are numbered 0 to N where 0 is the oldest and N is the newest.
-/// When `offset` is `None`, the last (newest) chunk is returned.
-///
-/// Non-actionable comments (`Error` and `Done`) are filtered out.
-/// Returns an empty `comments` vec when the chunk has no actionable messages.
-/// Returns `Err` only for hard failures (offset out of range).
-pub fn extract_history_chunk(
-    mut comments: Vec<Comment>,
-    description: &str,
-    offset: Option<usize>,
-) -> anyhow::Result<HistoryChunk> {
-    // Prepend description as synthetic first comment.
-    if !description.is_empty() {
-        comments.insert(
-            0,
-            Comment {
-                comment_type: CommentType::Request,
-                timestamp: String::new(),
-                role: None,
-                hostname: String::new(),
-                tool: None,
-                model: None,
-                text: description.to_owned(),
-            },
-        );
-    }
-
-    if comments.is_empty() {
-        return Ok(HistoryChunk {
-            current_chunk: 0,
-            last_chunk: 0,
-            comments: Vec::new(),
-        });
-    }
-
-    // Find cut-boundary indices.
-    let cut_indices: Vec<usize> = comments
-        .iter()
-        .enumerate()
-        .filter(|(_, c)| c.comment_type.is_cut())
-        .map(|(i, _)| i)
-        .collect();
-
-    let num_chunks = cut_indices.len() + 1;
-    let last_chunk = num_chunks - 1;
-
-    // Resolve target chunk: None or out-of-range defaults to last.
-    let target_chunk = match offset {
-        None => last_chunk,
-        Some(idx) => {
-            anyhow::ensure!(
-                idx < num_chunks,
-                "offset {} out of range: only {} chunk(s) available (0..{})",
-                idx,
-                num_chunks,
-                last_chunk
-            );
-            idx
-        }
-    };
-
-    // Extract chunk boundaries.
-    let (start_idx, end_idx) = if cut_indices.is_empty() {
-        (0, comments.len())
-    } else if target_chunk == 0 {
-        (0, cut_indices[0])
-    } else if target_chunk == last_chunk {
-        (cut_indices[target_chunk - 1], comments.len())
-    } else {
-        (cut_indices[target_chunk - 1], cut_indices[target_chunk])
-    };
-
-    // Filter out Error and Done comments.
-    let chunk_comments = comments[start_idx..end_idx]
-        .iter()
-        .filter(|c| c.comment_type != CommentType::Error && c.comment_type != CommentType::Done)
-        .cloned()
-        .collect();
-
-    Ok(HistoryChunk {
-        current_chunk: target_chunk,
-        last_chunk,
-        comments: chunk_comments,
-    })
-}
-
-/// Workflow stage (maps to GitHub milestones internally).
+/// Type of a history record, derived from `[tool_name]` prefix in comment text.
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
-pub enum Stage {
-    Pending,
-    Preparing,
-    Planning,
-    Working,
-    Reviewing,
-    Testing,
-    Merging,
-    Done,
+#[serde(rename_all = "snake_case")]
+pub enum HistoryRecordType {
+    Task,
+    Success,
+    Failure,
+    Question,
+    Error,
+    Other,
 }
+
+/// Determine the record type from a comment's `[tool_name]` prefix.
+pub fn classify_comment(text: &str) -> HistoryRecordType {
+    let prefix = text.split('\n').next().unwrap_or("");
+    match prefix {
+        "[report_results]" | "[report_success]" | "[post_plan]" | "[review_accept]"
+        | "[test_accept]" => HistoryRecordType::Success,
+        "[report_failure]" | "[ask_planner]" | "[review_reject]" | "[test_reject]" => {
+            HistoryRecordType::Failure
+        }
+        "[ask_user]" | "[stop_with_question]" => HistoryRecordType::Question,
+        "[report_error]" | "[stop_with_error]" => HistoryRecordType::Error,
+        _ => HistoryRecordType::Other,
+    }
+}
+
+/// Return a short tag derived from the comment's `[tool_name]` classification.
+/// Used to build report/prompt filenames.
+pub fn comment_tag(body: &str) -> &'static str {
+    match classify_comment(body) {
+        HistoryRecordType::Success => "success",
+        HistoryRecordType::Failure => "failure",
+        _ => "report",
+    }
+}
+
+/// Extract a one-line summary from comment text (first non-prefix line, truncated).
+pub fn extract_summary(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    // Skip the [tool_name] prefix line if present
+    let content_line = if lines
+        .first()
+        .map_or(false, |l| l.starts_with('[') && l.ends_with(']'))
+    {
+        lines.get(1).copied().unwrap_or("")
+    } else {
+        lines.first().copied().unwrap_or("")
+    };
+    let trimmed = content_line.trim();
+    if trimmed.len() > 120 {
+        format!("{}...", &trimmed[..120])
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// A stage name within a pipeline (user-defined, dynamically configured).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Stage(pub String);
 
 impl Stage {
-    pub fn milestone_name(&self) -> &'static str {
-        match self {
-            Stage::Pending => "PENDING",
-            Stage::Preparing => "PREPARING",
-            Stage::Planning => "PLANNING",
-            Stage::Working => "WORKING",
-            Stage::Reviewing => "REVIEWING",
-            Stage::Testing => "TESTING",
-            Stage::Merging => "MERGING",
-            Stage::Done => "DONE",
-        }
+    pub fn new(s: impl Into<String>) -> Self {
+        Stage(s.into())
     }
 
-    pub fn from_milestone_name(name: &str) -> Option<Self> {
-        match name {
-            "PENDING" => Some(Stage::Pending),
-            "PREPARING" | "PREPARATION" => Some(Stage::Preparing),
-            "PLANNING" => Some(Stage::Planning),
-            "WORKING" => Some(Stage::Working),
-            "REVIEWING" => Some(Stage::Reviewing),
-            "TESTING" => Some(Stage::Testing),
-            "MERGING" => Some(Stage::Merging),
-            "DONE" => Some(Stage::Done),
-            _ => None,
-        }
-    }
-
-    /// Returns a priority value for task selection by stage proximity.
-    /// Lower values = higher priority (closer to completion).
-    pub fn priority(&self) -> u8 {
-        match self {
-            Stage::Testing => 0,
-            Stage::Reviewing => 1,
-            Stage::Merging => 2,
-            Stage::Working => 3,
-            Stage::Planning => 4,
-            Stage::Preparing => 5,
-            Stage::Pending => 6,
-            Stage::Done => 7,
-        }
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
 impl std::fmt::Display for Stage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.milestone_name())
+        f.write_str(&self.0)
     }
 }
 
-/// Role for task execution (planner, worker, reviewer, merger, or user).
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub enum Role {
-    #[serde(rename = "preparator")]
-    Preparator,
-    #[serde(rename = "planner")]
-    Planner,
-    #[serde(rename = "worker")]
-    Worker,
-    #[serde(rename = "reviewer")]
-    Reviewer,
-    #[serde(rename = "tester")]
-    Tester,
-    #[serde(rename = "merger")]
-    Merger,
+impl std::ops::Deref for Stage {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
 }
 
-impl Role {
-    /// Returns the role name as a string.
-    pub fn as_str(&self) -> &'static str {
+impl std::borrow::Borrow<str> for Stage {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for Stage {
+    fn from(s: &str) -> Self {
+        Stage(s.to_string())
+    }
+}
+
+impl From<String> for Stage {
+    fn from(s: String) -> Self {
+        Stage(s)
+    }
+}
+
+impl serde::Serialize for Stage {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Stage {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Stage(String::deserialize(deserializer)?))
+    }
+}
+
+impl schemars::JsonSchema for Stage {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Stage".into()
+    }
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "string" })
+    }
+}
+
+/// Task lifecycle state.
+///
+/// Serialized as a string for storage/backward compatibility:
+/// - "" (empty)
+/// - "DONE"
+/// - "PAUSE"
+/// - "READY"
+/// - "{pipeline}_PENDING"
+/// - "{pipeline}_{stage}"
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum State {
+    Empty,
+    Done,
+    Pause,
+    Ready,
+    Pending(Pipeline),
+    Running(Pipeline, Stage),
+    /// Unrecognized state preserved verbatim to keep compatibility with
+    /// external/manual values.
+    Unknown(String),
+}
+
+impl State {
+    const DONE: &'static str = "DONE";
+    const PAUSE: &'static str = "PAUSE";
+    const READY: &'static str = "READY";
+    const PENDING_SUFFIX: &'static str = "_PENDING";
+
+    pub fn pending(pipeline: impl Into<Pipeline>) -> Self {
+        State::Pending(pipeline.into())
+    }
+
+    pub fn running(pipeline: impl Into<Pipeline>, stage: impl Into<Stage>) -> Self {
+        State::Running(pipeline.into(), stage.into())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        matches!(self, State::Empty)
+    }
+
+    pub fn is_done(&self) -> bool {
+        matches!(self, State::Done)
+    }
+
+    pub fn is_pause(&self) -> bool {
+        matches!(self, State::Pause)
+    }
+
+    pub fn is_ready(&self) -> bool {
+        matches!(self, State::Ready)
+    }
+
+    pub fn pipeline(&self) -> Option<&Pipeline> {
         match self {
-            Role::Preparator => "preparator",
-            Role::Planner => "planner",
-            Role::Worker => "worker",
-            Role::Reviewer => "reviewer",
-            Role::Tester => "tester",
-            Role::Merger => "merger",
+            State::Pending(p) | State::Running(p, _) => Some(p),
+            _ => None,
+        }
+    }
+
+    pub fn stage(&self) -> Option<&Stage> {
+        match self {
+            State::Running(_, s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn contains(&self, pat: &str) -> bool {
+        self.to_string().contains(pat)
+    }
+
+    pub fn ends_with(&self, suffix: &str) -> bool {
+        self.to_string().ends_with(suffix)
+    }
+
+    fn equals_str(&self, other: &str) -> bool {
+        match self {
+            State::Empty => other.is_empty(),
+            State::Done => other == Self::DONE,
+            State::Pause => other == Self::PAUSE,
+            State::Ready => other == Self::READY,
+            State::Pending(pipeline) => other
+                .strip_suffix(Self::PENDING_SUFFIX)
+                .is_some_and(|p| p == pipeline.as_str()),
+            State::Running(pipeline, stage) => other
+                .split_once('_')
+                .is_some_and(|(p, s)| p == pipeline.as_str() && s == stage.as_str()),
+            State::Unknown(raw) => raw == other,
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Conversion helpers
-// ---------------------------------------------------------------------------
-
-impl From<Role> for Stage {
-    fn from(role: Role) -> Stage {
-        match role {
-            Role::Preparator => Stage::Preparing,
-            Role::Planner => Stage::Planning,
-            Role::Worker => Stage::Working,
-            Role::Reviewer => Stage::Reviewing,
-            Role::Tester => Stage::Testing,
-            Role::Merger => Stage::Merging,
+impl std::fmt::Display for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            State::Empty => Ok(()),
+            State::Done => f.write_str(Self::DONE),
+            State::Pause => f.write_str(Self::PAUSE),
+            State::Ready => f.write_str(Self::READY),
+            State::Pending(pipeline) => write!(f, "{pipeline}{}", Self::PENDING_SUFFIX),
+            State::Running(pipeline, stage) => write!(f, "{pipeline}_{stage}"),
+            State::Unknown(raw) => f.write_str(raw),
         }
     }
 }
 
-impl std::convert::TryFrom<Stage> for Role {
-    type Error = anyhow::Error;
+impl From<&str> for State {
+    fn from(s: &str) -> Self {
+        if s.is_empty() {
+            return State::Empty;
+        }
+        if s == State::DONE {
+            return State::Done;
+        }
+        if s == State::PAUSE {
+            return State::Pause;
+        }
+        if s == State::READY {
+            return State::Ready;
+        }
+        if let Some(pipeline) = s.strip_suffix(State::PENDING_SUFFIX)
+            && !pipeline.is_empty()
+        {
+            return State::Pending(Pipeline::from(pipeline));
+        }
+        if let Some((pipeline, stage)) = s.split_once('_')
+            && !pipeline.is_empty()
+            && !stage.is_empty()
+        {
+            return State::Running(Pipeline::from(pipeline), Stage::from(stage));
+        }
+        State::Unknown(s.to_string())
+    }
+}
 
-    fn try_from(stage: Stage) -> Result<Self, Self::Error> {
-        match stage {
-            Stage::Preparing => Ok(Role::Preparator),
-            Stage::Planning => Ok(Role::Planner),
-            Stage::Working => Ok(Role::Worker),
-            Stage::Reviewing => Ok(Role::Reviewer),
-            Stage::Testing => Ok(Role::Tester),
-            Stage::Merging => Ok(Role::Merger),
-            other => Err(anyhow::anyhow!(
-                "cannot convert stage {:?} into a role",
-                other
-            )),
+impl From<String> for State {
+    fn from(s: String) -> Self {
+        State::from(s.as_str())
+    }
+}
+
+impl std::str::FromStr for State {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(State::from(s))
+    }
+}
+
+impl serde::Serialize for State {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for State {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(State::from(s))
+    }
+}
+
+impl schemars::JsonSchema for State {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "State".into()
+    }
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "string" })
+    }
+}
+
+impl PartialEq<&str> for State {
+    fn eq(&self, other: &&str) -> bool {
+        self.equals_str(other)
+    }
+}
+
+impl PartialEq<String> for State {
+    fn eq(&self, other: &String) -> bool {
+        self.equals_str(other)
+    }
+}
+
+/// A pipeline identifier: one of the three built-in pipelines or a custom one.
+#[derive(Debug, Clone)]
+pub enum Pipeline {
+    /// The primary workflow pipeline (name: `"main"`).
+    Main,
+    /// The merge/conflict-resolution pipeline (name: `"merge"`).
+    Merge,
+    /// The initialisation pipeline (name: `"init"`).
+    Init,
+    /// Any other user-defined pipeline.
+    Custom(String),
+}
+
+impl Pipeline {
+    pub const MAIN: &'static str = "main";
+    pub const MERGE: &'static str = "merge";
+    pub const INIT: &'static str = "init";
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Pipeline::Main => Self::MAIN,
+            Pipeline::Merge => Self::MERGE,
+            Pipeline::Init => Self::INIT,
+            Pipeline::Custom(s) => s.as_str(),
         }
     }
 }
 
-impl std::fmt::Display for Role {
+impl std::fmt::Display for Pipeline {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl std::str::FromStr for Role {
-    type Err = anyhow::Error;
+impl std::str::FromStr for Pipeline {
+    type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "preparator" => Ok(Role::Preparator),
-            "planner" => Ok(Role::Planner),
-            "worker" => Ok(Role::Worker),
-            "reviewer" => Ok(Role::Reviewer),
-            "merger" => Ok(Role::Merger),
-            _ => Err(anyhow::anyhow!("Unknown role: {}", s)),
-        }
+        Ok(match s {
+            Self::MAIN => Pipeline::Main,
+            Self::MERGE => Pipeline::Merge,
+            Self::INIT => Pipeline::Init,
+            other => Pipeline::Custom(other.to_string()),
+        })
     }
 }
 
-/// Signal for task flow control (mapped to labels in GitHub backend).
-/// Ordered by priority (highest to lowest): GoPrepare > GoPlan > GoWork > GoReview > GoTest.
-///
-/// Note: there is no GoMerge signal. Merging is triggered by the `conflict`
-/// flag on the Task struct, which is set automatically when a work branch
-/// diverges from its base branch.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
+impl std::borrow::Borrow<str> for Pipeline {
+    fn borrow(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl PartialEq for Pipeline {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl Eq for Pipeline {}
+
+impl std::hash::Hash for Pipeline {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::hash::Hash::hash(self.as_str(), state);
+    }
+}
+
+impl PartialOrd for Pipeline {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Pipeline {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_str().cmp(other.as_str())
+    }
+}
+
+impl From<&str> for Pipeline {
+    fn from(s: &str) -> Self {
+        s.parse().unwrap()
+    }
+}
+
+impl From<String> for Pipeline {
+    fn from(s: String) -> Self {
+        s.parse().unwrap()
+    }
+}
+
+impl serde::Serialize for Pipeline {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Pipeline {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(s.parse().unwrap())
+    }
+}
+
+impl schemars::JsonSchema for Pipeline {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Pipeline".into()
+    }
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "string" })
+    }
+}
+
+/// Flow-control signal for the task state machine.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Signal {
-    #[serde(rename = "go_prepare")]
-    GoPrepare = 1,
-    #[serde(rename = "go_plan")]
-    GoPlan = 2,
-    #[serde(rename = "go_work")]
-    GoWork = 3,
-    #[serde(rename = "go_review")]
-    GoReview = 4,
-    #[serde(rename = "go_test")]
-    GoTest = 5,
+    /// Navigate to a specific stage within the current pipeline.
+    Go(Stage),
+    /// Call a sub-pipeline.
+    Call(Pipeline),
+    /// Return successfully from a sub-pipeline.
+    Return,
+    /// Return with failure from a sub-pipeline.
+    ReturnFailure,
 }
 
 impl Signal {
-    /// Returns the plain signal name.
-    pub fn name(&self) -> &'static str {
+    pub fn go(stage: impl Into<Stage>) -> Self {
+        Signal::Go(stage.into())
+    }
+
+    pub fn call(pipeline: impl Into<Pipeline>) -> Self {
+        Signal::Call(pipeline.into())
+    }
+
+    pub fn go_target(&self) -> Option<&Stage> {
         match self {
-            Signal::GoReview => "go_review",
-            Signal::GoTest => "go_test",
-            Signal::GoWork => "go_work",
-            Signal::GoPlan => "go_plan",
-            Signal::GoPrepare => "go_prepare",
+            Signal::Go(s) => Some(s),
+            _ => None,
         }
     }
 
-    /// Returns all available signals in priority order.
-    pub fn all() -> &'static [Signal] {
-        &[
-            Signal::GoPrepare,
-            Signal::GoPlan,
-            Signal::GoWork,
-            Signal::GoReview,
-            Signal::GoTest,
-        ]
-    }
-
-    /// Maps signal to the role that should execute the session.
-    pub fn target_role(&self) -> Role {
+    pub fn call_target(&self) -> Option<&Pipeline> {
         match self {
-            Signal::GoReview => Role::Reviewer,
-            Signal::GoTest => Role::Tester,
-            Signal::GoWork => Role::Worker,
-            Signal::GoPlan => Role::Planner,
-            Signal::GoPrepare => Role::Preparator,
+            Signal::Call(p) => Some(p),
+            _ => None,
         }
     }
 }
 
 impl std::fmt::Display for Signal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.name())
+        match self {
+            Signal::Go(stage) => write!(f, "go_{stage}"),
+            Signal::Call(pipeline) => write!(f, "call_{pipeline}"),
+            Signal::Return => f.write_str("return"),
+            Signal::ReturnFailure => f.write_str("return_failure"),
+        }
     }
 }
 
 impl std::str::FromStr for Signal {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().replace('_', "").as_str() {
-            "goreview" | "go-review" => Ok(Signal::GoReview),
-            "gotest" | "go-test" => Ok(Signal::GoTest),
-            "gowork" | "go-work" => Ok(Signal::GoWork),
-            "goplan" | "go-plan" => Ok(Signal::GoPlan),
-            "goprepare" | "go-prepare" => Ok(Signal::GoPrepare),
-            _ => Err(anyhow::anyhow!("Unknown signal: {}", s)),
+        if let Some(stage) = s.strip_prefix("go_") {
+            Ok(Signal::Go(Stage::new(stage)))
+        } else if let Some(pipeline) = s.strip_prefix("call_") {
+            Ok(Signal::Call(Pipeline::from(pipeline)))
+        } else if s == "return" {
+            Ok(Signal::Return)
+        } else if s == "return_failure" {
+            Ok(Signal::ReturnFailure)
+        } else {
+            Err(anyhow::anyhow!("Unknown signal: {}", s))
         }
     }
 }
+
+impl serde::Serialize for Signal {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Signal {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl schemars::JsonSchema for Signal {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Signal".into()
+    }
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "string" })
+    }
+}
+
+/// An entry on the task's call stack, recording which pipeline to return to
+/// and which signal to emit upon return (e.g. `Signal::Go("working")`).
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct StackEntry {
+    pub pipeline: Pipeline,
+    /// Signal to emit when returning to this pipeline.
+    #[serde(alias = "stage")]
+    pub signal: Signal,
+    /// Caller's pipeline_run_id to restore on return.
+    #[serde(default)]
+    pub pipeline_run_id: u64,
+}
+
+/// A worktree problem detected before stage execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorktreeProblem {
+    Conflict,
+}
+
+/// Role for task execution — now a plain string to support configurable roles.
+pub type Role = String;
 
 /// AI Tool/Agent to use.
 #[derive(
@@ -743,83 +850,72 @@ impl std::str::FromStr for Model {
     }
 }
 
-/// Tag for GitHub-specific comment formatting (e.g., `// REPORT role:host:model`).
+/// Tag for comment formatting. Contains pipeline info, stage name, hostname, and optional tool/model.
 ///
-/// The `model` field is optional and is mainly used by MCP handlers to record the
-/// concrete LLM model that generated the message (for example, a Copilot or
-/// Claude session).  Dispatcher-originated messages normally leave this field
-/// unset, so that comments created by internal code do not imply any model.
-/// Agents should supply the model explicitly when they know it; the tag merely
-/// serializes whatever value is provided.
-///
-/// This type handles only serialization/deserialization.  Logic for deciding when
-/// to include a model (and what value to use) lives in the dispatcher and MCP
-/// helpers rather than here.
+/// Format: `// {pipeline}:{run_id}:{stage} by {hostname}[:{tool}[:{model}]]`
+/// Example: `// main:3:working by myhost:copilot:gpt-5-mini`
+/// Example (no tool): `// main:3:working by myhost`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommentTag {
-    pub comment_type: CommentType,
-    pub role: Option<Role>,
+    pub pipeline: String,
+    pub pipeline_run_id: u64,
+    pub stage: String,
     pub hostname: String,
-    /// Which tool executed the action that produced this comment (if any).
     pub tool: Option<Tool>,
     pub model: Option<Model>,
+    pub caller_pipeline: Option<String>,
+    pub caller_pipeline_run_id: Option<u64>,
 }
 
 impl CommentTag {
-    /// Create a new CommentTag.
     pub fn new(
-        comment_type: CommentType,
-        role: Option<Role>,
+        pipeline: String,
+        pipeline_run_id: u64,
+        stage: String,
         hostname: String,
         tool: Option<Tool>,
         model: Option<Model>,
     ) -> Self {
         Self {
-            comment_type,
-            role,
+            pipeline,
+            pipeline_run_id,
+            stage,
             hostname,
             tool,
             model,
+            caller_pipeline: None,
+            caller_pipeline_run_id: None,
         }
+    }
+
+    pub fn with_caller(mut self, caller_pipeline: String, caller_pipeline_run_id: u64) -> Self {
+        self.caller_pipeline = Some(caller_pipeline);
+        self.caller_pipeline_run_id = Some(caller_pipeline_run_id);
+        self
     }
 }
 
 impl std::fmt::Display for CommentTag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let tag_type = match self.comment_type {
-            CommentType::Error => "ERROR",
-            CommentType::Report => "REPORT",
-            CommentType::Plan => "PLAN",
-            CommentType::Request => "REQUEST",
-            CommentType::Reject => "REJECT",
-            CommentType::Done => "DONE",
-        };
+        const FOR_SEPARATOR: &str = " for ";
 
-        // All tag types now follow the same serialization rules.  REQUEST no
-        // longer has special handling because it may carry a role/host/model,
-        // and we want to be able to see `// REQUEST planner:foo:bar` or
-        // `// REQUEST user:host` in the log.
-        // role is always present now
-        let role = self
-            .role
-            .as_ref()
-            .map(|r| r.to_string())
-            .unwrap_or_else(|| "user".to_string());
-
-        // Serialization includes optional tool and model.  Maintain backward
-        // compatibility by emitting only hostname:model when tool is absent.
-        match (&self.tool, &self.model) {
-            (Some(tool), Some(model)) => write!(
-                f,
-                "// {} {}:{}:{}:{}",
-                tag_type, role, self.hostname, tool, model
-            ),
-            (Some(tool), None) => write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, tool),
-            (None, Some(model)) => {
-                write!(f, "// {} {}:{}:{}", tag_type, role, self.hostname, model)
+        write!(
+            f,
+            "// {}:{}:{} by {}",
+            self.pipeline, self.pipeline_run_id, self.stage, self.hostname
+        )?;
+        if let Some(ref tool) = self.tool {
+            write!(f, ":{tool}")?;
+            if let Some(ref model) = self.model {
+                write!(f, ":{model}")?;
             }
-            (None, None) => write!(f, "// {} {}:{}", tag_type, role, self.hostname),
         }
+        if let (Some(caller_pipeline), Some(caller_run_id)) =
+            (&self.caller_pipeline, self.caller_pipeline_run_id)
+        {
+            write!(f, "{FOR_SEPARATOR}{caller_pipeline}:{caller_run_id}")?;
+        }
+        Ok(())
     }
 }
 
@@ -827,61 +923,78 @@ impl std::str::FromStr for CommentTag {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        const BY_SEPARATOR: &str = " by ";
+        const FOR_SEPARATOR: &str = " for ";
+
         let s = s.trim_start_matches("//").trim_start();
-        let (tag_type_str, rest) = if let Some(pos) = s.find(' ') {
-            (&s[..pos], &s[pos + 1..])
+
+        let (prefix, suffix) = s
+            .split_once(BY_SEPARATOR)
+            .ok_or_else(|| anyhow::anyhow!("Invalid tag format: {}", s))?;
+
+        let prefix_parts: Vec<&str> = prefix.split(':').collect();
+        if prefix_parts.len() < 3 {
+            return Err(anyhow::anyhow!("Invalid tag prefix: {}", prefix));
+        }
+        let pipeline = prefix_parts[0].to_string();
+        let pipeline_run_id = prefix_parts[1]
+            .parse::<u64>()
+            .map_err(|_| anyhow::anyhow!("Invalid run id in tag prefix: {}", prefix_parts[1]))?;
+        let stage = prefix_parts[2].to_string();
+
+        let (host_part, caller_part) = if let Some((lhs, rhs)) = suffix.split_once(FOR_SEPARATOR) {
+            (lhs, Some(rhs))
         } else {
-            (s, "")
+            (suffix, None)
         };
 
-        let comment_type = CommentType::parse(tag_type_str)
-            .ok_or_else(|| anyhow::anyhow!("Unknown comment type: {}", tag_type_str))?;
+        let suffix_parts: Vec<&str> = host_part.split(':').collect();
+        let hostname = suffix_parts
+            .first()
+            .copied()
+            .unwrap_or_default()
+            .to_string();
+        if hostname.is_empty() {
+            return Err(anyhow::anyhow!("Invalid hostname in tag: {}", s));
+        }
 
-        let (role, hostname, tool, model) = if rest.is_empty() {
-            // no metadata supplied; default to user/request with empty host
-            (None, String::new(), None, None)
-        } else {
-            let parts: Vec<&str> = rest.split(':').collect();
-            if parts.len() < 2 {
-                return Err(anyhow::anyhow!("Invalid tag format: {}", s));
+        let mut tool: Option<Tool> = None;
+        let mut model: Option<Model> = None;
+        for part in &suffix_parts[1..] {
+            if tool.is_none() {
+                if let Ok(t) = part.parse::<Tool>() {
+                    tool = Some(t);
+                }
+            } else if model.is_none() {
+                if let Ok(m) = part.parse::<Model>() {
+                    model = Some(m);
+                }
             }
+        }
 
-            let role = Role::from_str(parts[0]).ok();
-            let hostname = parts[1].to_string();
-
-            // backwards compatibility: three parts used to mean role:host:model
-            let (tool, model) = if parts.len() == 3 {
-                (
-                    None,
-                    if !parts[2].is_empty() && parts[2] != "unknown" {
-                        Some(Model::from_str(parts[2])?)
-                    } else {
-                        None
-                    },
-                )
-            } else {
-                let tool = if parts.len() > 2 && !parts[2].is_empty() {
-                    Some(Tool::from_str(parts[2])?)
-                } else {
-                    None
-                };
-                let model = if parts.len() > 3 && !parts[3].is_empty() && parts[3] != "unknown" {
-                    Some(Model::from_str(parts[3])?)
-                } else {
-                    None
-                };
-                (tool, model)
-            };
-
-            (role, hostname, tool, model)
+        let (caller_pipeline, caller_pipeline_run_id) = if let Some(caller) = caller_part {
+            let caller_parts: Vec<&str> = caller.split(':').collect();
+            if caller_parts.len() != 2 {
+                return Err(anyhow::anyhow!("Invalid caller suffix: {}", caller));
+            }
+            let caller_pipeline = caller_parts[0].to_string();
+            let caller_pipeline_run_id = caller_parts[1]
+                .parse::<u64>()
+                .map_err(|_| anyhow::anyhow!("Invalid caller run id: {}", caller_parts[1]))?;
+            (Some(caller_pipeline), Some(caller_pipeline_run_id))
+        } else {
+            (None, None)
         };
 
         Ok(CommentTag {
-            comment_type,
-            role,
+            pipeline,
+            pipeline_run_id,
+            stage,
             hostname,
             tool,
             model,
+            caller_pipeline,
+            caller_pipeline_run_id,
         })
     }
 }
@@ -892,18 +1005,168 @@ pub struct Task {
     pub id: u64,
     pub title: String,
     pub description: String,
-    pub stage: Stage,
-    pub parameters: HashMap<Parameter, String>,
+    /// Task state.
+    pub state: State,
+    pub destination_repository: Option<String>,
+    pub destination_branch: Option<String>,
+    pub work_branch: Option<String>,
+    pub pr_url: Option<String>,
     pub checklist: Vec<ChecklistItem>,
+    /// Signal for flow control: go_{stage}, call_{pipeline}, return
     pub signal: Option<Signal>,
-    pub conflict: bool,
+    /// Call stack for pipeline call/return semantics.
+    #[serde(default)]
+    pub stack: Vec<StackEntry>,
     pub pause: bool,
     /// When true the dispatcher will automatically set the pause flag any time
-    /// the task's stage is changed.  This gives human operators an opportunity to
+    /// the task's state is changed.  This gives human operators an opportunity to
     /// review a transition before the next processing step occurs.
     pub confirm: bool,
+    /// Current/latest pipeline run counter. Incremented on each new pipeline call.
+    #[serde(default)]
+    pub pipeline_run_id: u64,
     /// ETag for optimistic locking to prevent concurrent update conflicts.
     /// Used to detect if the task has been modified between read and write operations.
     #[serde(skip)]
     pub etag: Option<String>,
+}
+
+/// Filter comments for a specific pipeline run.
+///
+/// Comments with `pipeline_run_id == 0` (user comments) inherit the run ID
+/// of the previous comment at retrieval time.
+pub fn filter_comments_for_run(comments: &[Comment], target_run_id: u64) -> Vec<&Comment> {
+    let mut result = Vec::new();
+    let mut current_run_id: u64 = 0;
+    for comment in comments {
+        let effective = if comment.pipeline_run_id > 0 {
+            current_run_id = comment.pipeline_run_id;
+            comment.pipeline_run_id
+        } else {
+            current_run_id // user comment inherits previous
+        };
+        let caller_match = comment.caller_pipeline_run_id == Some(target_run_id);
+        if effective == target_run_id || caller_match {
+            result.push(comment);
+        }
+    }
+    result
+}
+
+impl Task {
+    /// Returns a TaskIdentity if all three routing fields are set.
+    pub fn identity(&self) -> Option<TaskIdentity> {
+        Some(TaskIdentity {
+            task_id: self.id,
+            destination_repository: self.destination_repository.clone()?,
+            destination_branch: self.destination_branch.clone()?,
+            work_branch: self.work_branch.clone()?,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_comment(text: &str, pipeline: &str, run_id: u64) -> Comment {
+        Comment {
+            timestamp: String::new(),
+            stage: "s".into(),
+            hostname: "h".into(),
+            tool: None,
+            model: None,
+            text: text.into(),
+            pipeline: pipeline.into(),
+            pipeline_run_id: run_id,
+            caller_pipeline: None,
+            caller_pipeline_run_id: None,
+            report_name: None,
+            prompt_name: None,
+        }
+    }
+
+    fn make_comment_for(text: &str, pipeline: &str, run_id: u64, caller_run_id: u64) -> Comment {
+        Comment {
+            timestamp: String::new(),
+            stage: "s".into(),
+            hostname: "h".into(),
+            tool: None,
+            model: None,
+            text: text.into(),
+            pipeline: pipeline.into(),
+            pipeline_run_id: run_id,
+            caller_pipeline: Some("main".into()),
+            caller_pipeline_run_id: Some(caller_run_id),
+            report_name: None,
+            prompt_name: None,
+        }
+    }
+
+    #[test]
+    fn filter_separates_pipeline_runs() {
+        let comments = vec![
+            make_comment("main work", "main", 1),
+            make_comment("sub work", "sub", 2),
+            make_comment("more sub", "sub", 2),
+            make_comment("back to main", "main", 1),
+        ];
+        let run1: Vec<_> = filter_comments_for_run(&comments, 1)
+            .iter()
+            .map(|c| c.text.as_str())
+            .collect();
+        let run2: Vec<_> = filter_comments_for_run(&comments, 2)
+            .iter()
+            .map(|c| c.text.as_str())
+            .collect();
+        assert_eq!(run1, vec!["main work", "back to main"]);
+        assert_eq!(run2, vec!["sub work", "more sub"]);
+    }
+
+    #[test]
+    fn filter_user_comments_inherit_run_id() {
+        let comments = vec![
+            make_comment("agent start", "main", 1),
+            make_comment("user reply", "", 0), // user comment
+            make_comment("agent in sub", "sub", 2),
+            make_comment("user in sub", "", 0), // user comment
+            make_comment("agent back", "main", 1),
+        ];
+        let run1: Vec<_> = filter_comments_for_run(&comments, 1)
+            .iter()
+            .map(|c| c.text.as_str())
+            .collect();
+        let run2: Vec<_> = filter_comments_for_run(&comments, 2)
+            .iter()
+            .map(|c| c.text.as_str())
+            .collect();
+        assert_eq!(run1, vec!["agent start", "user reply", "agent back"]);
+        assert_eq!(run2, vec!["agent in sub", "user in sub"]);
+    }
+
+    #[test]
+    fn filter_empty_comments() {
+        let comments: Vec<Comment> = vec![];
+        assert!(filter_comments_for_run(&comments, 1).is_empty());
+    }
+
+    #[test]
+    fn filter_no_matching_run() {
+        let comments = vec![make_comment("a", "main", 1), make_comment("b", "main", 1)];
+        assert!(filter_comments_for_run(&comments, 99).is_empty());
+    }
+
+    #[test]
+    fn filter_matches_caller_linked_comments() {
+        let comments = vec![
+            make_comment("main work", "main", 1),
+            make_comment_for("sub final report", "sub", 2, 1),
+            make_comment("next main", "main", 1),
+        ];
+        let run1: Vec<_> = filter_comments_for_run(&comments, 1)
+            .iter()
+            .map(|c| c.text.as_str())
+            .collect();
+        assert_eq!(run1, vec!["main work", "sub final report", "next main"]);
+    }
 }

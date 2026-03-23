@@ -12,6 +12,8 @@ default-run = "zbobr"
 
 [dependencies]
 zbobr-dispatcher = { workspace = true }
+zbobr-api = { workspace = true }
+zbobr-utility = { workspace = true }
 zbobr-task-backend-github = { workspace = true }
 zbobr-repo-backend-github = { workspace = true }
 zbobr-task-backend-fs = { workspace = true }
@@ -30,4 +32,6 @@ serde_json = { workspace = true }
 schemars = { workspace = true }
 anyhow = { workspace = true }
 toml = { workspace = true }
+toml_edit = { workspace = true }
 rustls = { workspace = true }
+indexmap = { workspace = true }

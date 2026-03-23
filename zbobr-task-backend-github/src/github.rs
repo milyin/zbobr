@@ -5,9 +5,12 @@ use std::{
 };
 
 use async_trait::async_trait;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use zbobr_api::{
-    Comment, CommentTag, CommentType, Model, Parameter, Role, Signal, Stage, Task, Tool,
+    Comment, CommentTag, Model, Task, Tool,
     backend::TaskBackend,
+    comment_tag,
+    task::{StackEntry, State},
 };
 
 use crate::{
@@ -89,19 +92,25 @@ where
 // -- Shared response types --
 
 #[derive(Debug, serde::Deserialize)]
+struct IssueMilestone {
+    title: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct MilestoneResponse {
+    number: u64,
+    title: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
 struct IssueResponse {
     number: u64,
     title: String,
     body: Option<String>,
     #[allow(dead_code)]
     state: String,
-    milestone: Option<IssueMilestone>,
     labels: Vec<IssueLabel>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct IssueMilestone {
-    title: String,
+    milestone: Option<IssueMilestone>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -122,9 +131,60 @@ struct RepoResponse {
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct MilestoneResponse {
-    number: u64,
-    title: String,
+struct ContentResponse {
+    content: Option<String>,
+}
+
+/// Extract report filename from a trailing markdown link in comment body.
+///
+/// Looks for a last line matching `[{filename}]({url})` where the url contains
+/// `/reports/task_`. Returns (clean_body, Some(filename)) or (original, None).
+fn extract_report_link(text: &str) -> (String, Option<String>) {
+    let trimmed = text.trim_end();
+    if let Some(last_newline) = trimmed.rfind('\n') {
+        let last_line = trimmed[last_newline + 1..].trim();
+        if let Some(report_name) = parse_report_link_line(last_line) {
+            let clean = trimmed[..last_newline].trim_end().to_string();
+            return (clean, Some(report_name));
+        }
+    } else if let Some(report_name) = parse_report_link_line(trimmed) {
+        return (String::new(), Some(report_name));
+    }
+    (text.to_string(), None)
+}
+
+/// Parse a single line as a report link: `[{filename}]({url containing /reports/task_})`.
+fn parse_report_link_line(line: &str) -> Option<String> {
+    let line = line.trim();
+    if !line.starts_with('[') {
+        return None;
+    }
+    let close_bracket = line.find(']')?;
+    let filename = &line[1..close_bracket];
+    let rest = &line[close_bracket + 1..];
+    if !rest.starts_with('(') || !rest.ends_with(')') {
+        return None;
+    }
+    let url = &rest[1..rest.len() - 1];
+    if url.contains("/reports/task_") {
+        Some(filename.to_string())
+    } else {
+        None
+    }
+}
+
+/// Format a clickable markdown link to a report file in the GitHub repo.
+fn format_report_link(
+    owner: &str,
+    repo: &str,
+    branch: &str,
+    reports_path: &str,
+    task_id: u64,
+    filename: &str,
+) -> String {
+    format!(
+        "\n\n[{filename}](https://github.com/{owner}/{repo}/blob/{branch}/{reports_path}/task_{task_id}/{filename})"
+    )
 }
 
 // ============================================================================
@@ -135,7 +195,7 @@ struct MilestoneResponse {
 /// This handles GitHub API eventual consistency for list/filter queries.
 const COOLING_DURATION: Duration = Duration::from_secs(3);
 
-pub struct ZbobrTaskBackendGithub {
+pub struct ZbobrTaskBackendGithubImpl {
     backend_config: ZbobrTaskBackendGithubConfig,
     octocrab: octocrab::Octocrab,
     cooling_deadlines: Mutex<HashMap<u64, tokio::time::Instant>>,
@@ -144,19 +204,7 @@ pub struct ZbobrTaskBackendGithub {
     task_locks: std::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>,
 }
 
-impl ZbobrTaskBackendGithub {
-    pub fn new(
-        toml: Option<crate::config::ZbobrTaskBackendGithubToml>,
-        args: crate::config::ZbobrTaskBackendGithubArgs,
-    ) -> anyhow::Result<Self> {
-        let backend_config = <ZbobrTaskBackendGithubConfig as zbobr_api::config::Config>::build(
-            toml,
-            args,
-            std::path::Path::new("."),
-        );
-        Self::from_config(backend_config)
-    }
-
+impl ZbobrTaskBackendGithubImpl {
     pub fn from_config(backend_config: ZbobrTaskBackendGithubConfig) -> anyhow::Result<Self> {
         backend_config.validate()?;
         let octocrab = octocrab::Octocrab::builder()
@@ -172,15 +220,18 @@ impl ZbobrTaskBackendGithub {
     }
 
     /// Convert a Signal to its GitHub label representation.
-    fn signal_to_label(signal: Signal) -> String {
-        format!("signal:{}", signal.name())
+    fn signal_to_label(signal: &zbobr_api::Signal) -> String {
+        format!("signal:{signal}")
     }
 
     /// Parse a GitHub label string back to a Signal.
-    fn label_to_signal(label: &str) -> Option<Signal> {
-        label
-            .strip_prefix("signal:")
-            .and_then(|name| name.parse().ok())
+    fn label_to_signal(label: &str) -> Option<zbobr_api::Signal> {
+        label.strip_prefix("signal:")?.parse().ok()
+    }
+
+    /// Convert a state value to its GitHub milestone title.
+    fn state_to_milestone_title(state: &State) -> String {
+        state.to_string()
     }
 
     /// Convert a flag name to its GitHub label representation.
@@ -197,10 +248,17 @@ impl ZbobrTaskBackendGithub {
         self.backend_config.parse_repo()
     }
 
-    async fn find_stage_number(&self, stage: Stage) -> anyhow::Result<Option<u64>> {
-        let title = stage.milestone_name();
-        let stages = self.list_stages().await?;
-        Ok(stages.into_iter().find(|(_, t)| t == title).map(|(n, _)| n))
+    /// Returns the configured reports branch, if any.
+    fn reports_branch(&self) -> Option<&str> {
+        self.backend_config.reports_branch.as_deref()
+    }
+
+    /// Returns the configured reports path prefix (default: "reports").
+    fn reports_path(&self) -> &str {
+        self.backend_config
+            .reports_path
+            .as_deref()
+            .unwrap_or("reports")
     }
 
     /// Low-level: write the raw serialized task body.
@@ -216,38 +274,87 @@ impl ZbobrTaskBackendGithub {
         Ok(())
     }
 
-    /// Apply a stage change on a GitHub issue (update milestone).
-    async fn apply_stage_change(&self, id: u64, stage: Stage) -> anyhow::Result<()> {
-        let stage_number = self
-            .find_stage_number(stage)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Milestone '{}' not found", stage))?;
+    /// List all milestones in the repository, returning title → number map.
+    async fn list_milestones(&self) -> anyhow::Result<HashMap<String, u64>> {
+        let (owner, repo) = self.parse_repo()?;
+        let params = vec![("state", "all".to_string()), ("per_page", "100".to_string())];
+        let milestones: Vec<MilestoneResponse> = retry_github("list milestones", || {
+            self.octocrab.get(
+                format!("/repos/{owner}/{repo}/milestones"),
+                Some(&params),
+            )
+        })
+        .await?;
+        Ok(milestones.into_iter().map(|m| (m.title, m.number)).collect())
+    }
 
+    /// Create a milestone and return its number.
+    async fn create_milestone(&self, title: &str) -> anyhow::Result<u64> {
+        let (owner, repo) = self.parse_repo()?;
+        let url = format!("/repos/{owner}/{repo}/milestones");
+        let body = serde_json::json!({ "title": title });
+        let milestone: MilestoneResponse = retry_github("create milestone", || {
+            self.octocrab.post(url.clone(), Some(&body))
+        })
+        .await?;
+        Ok(milestone.number)
+    }
+
+    /// Get the milestone number for a title, creating it if absent.
+    async fn get_or_create_milestone(&self, title: &str) -> anyhow::Result<u64> {
+        let milestones = self.list_milestones().await?;
+        if let Some(&number) = milestones.get(title) {
+            return Ok(number);
+        }
+        self.create_milestone(title).await
+    }
+
+    /// Apply a state change on a GitHub issue via milestone assignment.
+    async fn apply_state_change(&self, id: u64, state: &State) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
         let url = format!("/repos/{owner}/{repo}/issues/{id}");
-        let body = serde_json::json!({ "milestone": stage_number });
+
+        let body = if state.is_empty() {
+            serde_json::json!({ "milestone": serde_json::Value::Null })
+        } else {
+            let title = Self::state_to_milestone_title(state);
+            let number = self.get_or_create_milestone(&title).await?;
+            serde_json::json!({ "milestone": number })
+        };
+
         retry_github("set issue milestone", || {
             self.octocrab.patch(url.clone(), Some(&body))
         })
         .await
         .map(|_: serde_json::Value| ())?;
+
         Ok(())
     }
 
     /// Apply a signal change on a GitHub issue (remove old signal labels, add new one).
-    async fn apply_signal_change(&self, id: u64, signal: Option<Signal>) -> anyhow::Result<()> {
+    async fn apply_signal_change(
+        &self,
+        id: u64,
+        signal: Option<&zbobr_api::Signal>,
+    ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        // Remove all existing signal labels
-        for sig in Signal::all() {
-            let label = Self::signal_to_label(*sig);
-            let _ = retry_github("remove signal label", || async {
-                self.octocrab
-                    .issues(owner, repo)
-                    .remove_label(id, &label)
-                    .await
-            })
-            .await;
+        // Fetch current labels and remove all existing signal: labels
+        let issue: IssueResponse = retry_github("get issue labels", || {
+            self.octocrab
+                .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
+        })
+        .await?;
+        for label in &issue.labels {
+            if Self::label_to_signal(&label.name).is_some() {
+                let _ = retry_github("remove signal label", || async {
+                    self.octocrab
+                        .issues(owner, repo)
+                        .remove_label(id, &label.name)
+                        .await
+                })
+                .await;
+            }
         }
 
         // Add new signal label if provided
@@ -266,21 +373,11 @@ impl ZbobrTaskBackendGithub {
         Ok(())
     }
 
-    /// Apply flag changes on a GitHub issue (sync conflict and pause labels).
-    async fn apply_flag_change(
-        &self,
-        id: u64,
-        conflict: bool,
-        pause: bool,
-        confirm: bool,
-    ) -> anyhow::Result<()> {
+    /// Apply flag changes on a GitHub issue (sync pause/confirm labels).
+    async fn apply_flag_change(&self, id: u64, pause: bool, confirm: bool) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        for (flag_name, desired) in [
-            ("conflict", conflict),
-            ("pause", pause),
-            ("confirm", confirm),
-        ] {
+        for (flag_name, desired) in [("pause", pause), ("confirm", confirm)] {
             let label = Self::flag_to_label(flag_name);
             if desired {
                 let labels: Vec<String> = vec![label];
@@ -401,47 +498,6 @@ impl ZbobrTaskBackendGithub {
         Ok(())
     }
 
-    async fn list_stages(&self) -> anyhow::Result<Vec<(u64, String)>> {
-        let (owner, repo) = self.parse_repo()?;
-        let milestones: Vec<MilestoneResponse> = retry_github("list milestones", || {
-            self.octocrab
-                .get(format!("/repos/{owner}/{repo}/milestones"), None::<&()>)
-        })
-        .await?;
-        Ok(milestones
-            .into_iter()
-            .map(|m| (m.number, m.title))
-            .collect())
-    }
-
-    async fn create_stage(&self, stage: Stage) -> anyhow::Result<()> {
-        let (owner, repo) = self.parse_repo()?;
-        let url = format!("/repos/{owner}/{repo}/milestones");
-        let title = stage.milestone_name();
-        let description = stage_description(stage);
-        let body = serde_json::json!({
-            "title": title,
-            "description": description,
-            "state": "open"
-        });
-        retry_github("create milestone", || {
-            self.octocrab.post(url.clone(), Some(&body))
-        })
-        .await
-        .map(|_: serde_json::Value| ())?;
-        Ok(())
-    }
-
-    async fn delete_stage(&self, number: u64) -> anyhow::Result<()> {
-        let (owner, repo) = self.parse_repo()?;
-        let url = format!("/repos/{owner}/{repo}/milestones/{number}");
-        let _response = retry_github("delete milestone", || {
-            self.octocrab._delete(url.clone(), None::<&()>)
-        })
-        .await?;
-        Ok(())
-    }
-
     async fn setup(&self, force: bool) -> anyhow::Result<()> {
         tracing::info!(
             "Setting up GitHub repo: {} (force: {})",
@@ -452,62 +508,12 @@ impl ZbobrTaskBackendGithub {
         // Ensure the task repo exists
         self.ensure_task_repo_exists().await?;
 
-        // Create stages
-        let desired_stages = [
-            Stage::Pending,
-            Stage::Preparing,
-            Stage::Planning,
-            Stage::Working,
-            Stage::Reviewing,
-            Stage::Testing,
-            Stage::Merging,
-            Stage::Done,
-        ];
-        let existing = self.list_stages().await?;
-        let existing_titles: Vec<&str> = existing.iter().map(|(_, t)| t.as_str()).collect();
-
-        for stage in &desired_stages {
-            let title = stage.milestone_name();
-            if existing_titles.contains(&title) {
-                tracing::info!("Stage '{title}' already exists");
-            } else {
-                tracing::info!("Creating stage '{title}'");
-                self.create_stage(*stage).await?;
-            }
-        }
-
-        // Delete extra stages
-        let desired_titles: Vec<&str> = desired_stages.iter().map(|s| s.milestone_name()).collect();
-        for (number, title) in &existing {
-            if !desired_titles.contains(&title.as_str()) {
-                tracing::info!("Deleting stage '{title}'");
-                self.delete_stage(*number).await?;
-            }
-        }
-
-        // Create labels
+        // Create flag labels
         let existing_labels = self.list_labels().await?;
 
-        const SIGNAL_LABEL_COLOR: &str = "5319e7";
         const FLAG_LABEL_COLOR: &str = "f9d0c4";
 
-        for signal in Signal::all() {
-            let signal_label = Self::signal_to_label(*signal);
-            let signal_desc = format!("Signal: {}", signal.name());
-            if !existing_labels.contains(&signal_label) {
-                tracing::info!("Creating label '{signal_label}'");
-                self.create_label(&signal_label, SIGNAL_LABEL_COLOR, &signal_desc)
-                    .await?;
-            } else if force {
-                tracing::info!("Updating label '{signal_label}' (force)");
-                self.update_label(&signal_label, SIGNAL_LABEL_COLOR, &signal_desc)
-                    .await?;
-            } else {
-                tracing::info!("Label '{signal_label}' already exists");
-            }
-        }
-
-        for flag_name in ["conflict", "pause", "confirm"] {
+        for flag_name in ["pause", "confirm"] {
             let flag_label = Self::flag_to_label(flag_name);
             let flag_desc = format!("Flag: {}", flag_name);
             if !existing_labels.contains(&flag_label) {
@@ -523,6 +529,19 @@ impl ZbobrTaskBackendGithub {
             }
         }
 
+        // Create milestones for fixed states
+        let existing_milestones = self.list_milestones().await?;
+
+        for state in [State::Ready, State::Done, State::Pause] {
+            let title = Self::state_to_milestone_title(&state);
+            if !existing_milestones.contains_key(&title) {
+                tracing::info!("Creating milestone '{title}'");
+                self.create_milestone(&title).await?;
+            } else {
+                tracing::info!("Milestone '{title}' already exists");
+            }
+        }
+
         tracing::info!(
             "GitHub setup complete for {}",
             self.backend_config.github_repo
@@ -532,38 +551,33 @@ impl ZbobrTaskBackendGithub {
 
     /// Parse an IssueResponse into a Task.
     fn issue_to_task(issue: IssueResponse) -> Task {
-        let stage = match issue.milestone.as_ref().map(|m| m.title.as_str()) {
-            Some(t) => Stage::from_milestone_name(t).unwrap_or(Stage::Planning),
-            _ => Stage::Planning,
-        };
-
         let body = issue.body.unwrap_or_default();
         let (description, params_map, checklist) = parse_description_full(&body);
 
-        let mut parameters = HashMap::new();
-        if let Some(repo) = params_map.get(Parameter::DestinationRepository.name()) {
-            parameters.insert(Parameter::DestinationRepository, repo.clone());
-        }
-        if let Some(branch) = params_map.get(Parameter::DestinationBranch.name()) {
-            parameters.insert(Parameter::DestinationBranch, branch.clone());
-        }
-        if let Some(branch) = params_map.get(Parameter::WorkBranch.name()) {
-            parameters.insert(Parameter::WorkBranch, branch.clone());
-        }
-        if let Some(url) = params_map.get(Parameter::PrUrl.name()) {
-            parameters.insert(Parameter::PrUrl, url.clone());
-        }
+        // Promoted fields: read from params_map where they were stored
+        let destination_repository = params_map.get("destination_repository").cloned();
+        let destination_branch = params_map.get("destination_branch").cloned();
+        let work_branch = params_map.get("work_branch").cloned();
+        let pr_url = params_map.get("pr_url").cloned();
 
+        // stack is stored as JSON in params_map
+        let stack: Vec<StackEntry> = params_map
+            .get("stack")
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+
+        // state is stored as a milestone
+        let state = issue
+            .milestone
+            .as_ref()
+            .map(|m| State::from(m.title.as_str()))
+            .unwrap_or(State::Empty);
+
+        // signal is stored as a label
         let signal = issue
             .labels
             .iter()
-            .filter_map(|l| Self::label_to_signal(&l.name))
-            .min();
-
-        let conflict = issue
-            .labels
-            .iter()
-            .any(|l| Self::label_to_flag(&l.name) == Some("conflict"));
+            .find_map(|l| Self::label_to_signal(&l.name));
 
         let pause = issue
             .labels
@@ -579,18 +593,53 @@ impl ZbobrTaskBackendGithub {
             id: issue.number,
             title: issue.title,
             description,
-            stage,
-            parameters,
+            state,
+            destination_repository,
+            destination_branch,
+            work_branch,
+            pr_url,
             checklist,
             signal,
-            conflict,
+            stack,
             pause,
             confirm,
+            pipeline_run_id: params_map
+                .get("pipeline_run_id")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
             etag: Some(body),
         }
     }
 
-    /// Record that an issue was just written to and needs a cooling period.
+    /// Build the string parameters map for serialization, including promoted fields.
+    fn task_to_string_params(task: &Task) -> HashMap<String, String> {
+        let mut params: HashMap<String, String> = HashMap::new();
+        if let Some(ref v) = task.pr_url {
+            params.insert("pr_url".to_string(), v.clone());
+        }
+        if let Some(ref v) = task.destination_repository {
+            params.insert("destination_repository".to_string(), v.clone());
+        }
+        if let Some(ref v) = task.destination_branch {
+            params.insert("destination_branch".to_string(), v.clone());
+        }
+        if let Some(ref v) = task.work_branch {
+            params.insert("work_branch".to_string(), v.clone());
+        }
+        if !task.stack.is_empty() {
+            if let Ok(json) = serde_json::to_string(&task.stack) {
+                params.insert("stack".to_string(), json);
+            }
+        }
+        if task.pipeline_run_id > 0 {
+            params.insert(
+                "pipeline_run_id".to_string(),
+                task.pipeline_run_id.to_string(),
+            );
+        }
+        params
+    }
+
     fn record_cooling(&self, id: u64) {
         let deadline = tokio::time::Instant::now() + COOLING_DURATION;
         let mut map = self.cooling_deadlines.lock().unwrap();
@@ -645,58 +694,24 @@ impl ZbobrTaskBackendGithub {
         .await?;
         Ok(Self::issue_to_task(issue))
     }
-}
 
-#[async_trait]
-impl TaskBackend for ZbobrTaskBackendGithub {
-    async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
+    /// Internal: read task with cooling check.
+    async fn read_task(&self, id: u64) -> anyhow::Result<Task> {
         self.await_cooling_for(id).await;
         self.fetch_task(id).await
     }
 
-    async fn create_task(
-        &self,
-        title: &str,
-        description: &str,
-        stage: Stage,
-        parameters: HashMap<Parameter, String>,
-    ) -> anyhow::Result<u64> {
-        let (owner, repo) = self.parse_repo()?;
-        let mut params_text: HashMap<String, String> = HashMap::new();
-        if let Some(v) = parameters.get(&Parameter::DestinationRepository) {
-            params_text.insert(
-                Parameter::DestinationRepository.name().to_string(),
-                v.clone(),
-            );
-        }
-        if let Some(v) = parameters.get(&Parameter::DestinationBranch) {
-            params_text.insert(Parameter::DestinationBranch.name().to_string(), v.clone());
-        }
-        if let Some(v) = parameters.get(&Parameter::WorkBranch) {
-            params_text.insert(Parameter::WorkBranch.name().to_string(), v.clone());
-        }
-        if let Some(v) = parameters.get(&Parameter::PrUrl) {
-            params_text.insert(Parameter::PrUrl.name().to_string(), v.clone());
-        }
-        let body = serialize_description_full(description, &params_text, &[]);
-
-        let stage_number = self.find_stage_number(stage).await?;
-
-        let issue = retry_github("create issue", || async {
-            let issues = self.octocrab.issues(owner, repo);
-            let mut builder = issues.create(title).body(body.clone());
-
-            if let Some(n) = stage_number {
-                builder = builder.milestone(n);
-            }
-
-            builder.send().await
-        })
-        .await?;
-        Ok(issue.number)
+    /// Get or create a per-task lock.
+    fn task_lock(&self, id: u64) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.task_locks.lock().unwrap();
+        locks
+            .entry(id)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 
-    async fn close_task(&self, id: u64) -> anyhow::Result<()> {
+    /// Internal: close a task (issue).
+    async fn close_task_internal(&self, id: u64) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
         let url = format!("/repos/{owner}/{repo}/issues/{id}");
         let body = serde_json::json!({ "state": "closed" });
@@ -708,52 +723,25 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         Ok(())
     }
 
-    async fn is_task_closed(&self, id: u64) -> anyhow::Result<bool> {
-        let (owner, repo) = self.backend_config.parse_repo()?;
-        let issue: IssueResponse = retry_github("get issue state", || {
-            self.octocrab
-                .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
-        })
-        .await?;
-        Ok(issue.state == "closed")
-    }
-
-    async fn modify_task(
+    /// Internal: read-modify-write a task atomically.
+    async fn modify_task_internal(
         &self,
         id: u64,
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-    ) -> anyhow::Result<()> {
-        let lock = {
-            let mut locks = self.task_locks.lock().unwrap();
-            locks
-                .entry(id)
-                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
-                .clone()
-        };
-        let _guard = lock.lock().await;
-
+    ) -> anyhow::Result<Task> {
         let task = self.fetch_task(id).await?;
-        let original_stage = task.stage;
-        let original_signal = task.signal;
-        let original_conflict = task.conflict;
+        let original_state = task.state.clone();
+        let original_signal = task.signal.clone();
         let original_pause = task.pause;
         let original_confirm = task.confirm;
         let expected_description = task.etag.clone().unwrap_or_else(|| {
-            let string_params: HashMap<String, String> = task
-                .parameters
-                .iter()
-                .map(|(k, v)| (k.name().to_string(), v.clone()))
-                .collect();
+            let string_params = Self::task_to_string_params(&task);
             serialize_description_full(&task.description, &string_params, &task.checklist)
         });
 
         let task = mutate(task);
 
-        let string_params: HashMap<String, String> = task
-            .parameters
-            .iter()
-            .map(|(k, v)| (k.name().to_string(), v.clone()))
-            .collect();
+        let string_params = Self::task_to_string_params(&task);
         let new_description =
             serialize_description_full(&task.description, &string_params, &task.checklist);
 
@@ -767,16 +755,18 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                 Err(e) if attempt >= MAX_RETRIES => return Err(e),
                 Err(_) => {}
             }
-            // Re-read to check for concurrent modifications
             let current_task = self.fetch_task(id).await?;
-            let current_body = current_task.etag.unwrap_or_else(|| {
-                let sp: HashMap<String, String> = current_task
-                    .parameters
-                    .iter()
-                    .map(|(k, v)| (k.name().to_string(), v.clone()))
-                    .collect();
-                serialize_description_full(&current_task.description, &sp, &current_task.checklist)
-            });
+            let current_body = match current_task.etag {
+                Some(etag) => etag,
+                None => {
+                    let sp = Self::task_to_string_params(&current_task);
+                    serialize_description_full(
+                        &current_task.description,
+                        &sp,
+                        &current_task.checklist,
+                    )
+                }
+            };
             if current_body != expected_desc {
                 new_desc =
                     merge_concurrent_description_updates(&expected_desc, &current_body, &new_desc);
@@ -784,58 +774,24 @@ impl TaskBackend for ZbobrTaskBackendGithub {
             }
         }
 
-        // Apply stage change if it differs
-        if task.stage != original_stage {
-            self.apply_stage_change(id, task.stage).await?;
+        if task.state != original_state {
+            self.apply_state_change(id, &task.state).await?;
         }
-
-        // Apply signal change if it differs
         if task.signal != original_signal {
-            self.apply_signal_change(id, task.signal).await?;
+            self.apply_signal_change(id, task.signal.as_ref()).await?;
         }
-
-        // Apply flag changes if they differ
-        if task.conflict != original_conflict
-            || task.pause != original_pause
-            || task.confirm != original_confirm
-        {
-            self.apply_flag_change(id, task.conflict, task.pause, task.confirm)
-                .await?;
+        if task.pause != original_pause || task.confirm != original_confirm {
+            self.apply_flag_change(id, task.pause, task.confirm).await?;
         }
 
         self.record_cooling(id);
-        Ok(())
+        let mut saved_task = task;
+        saved_task.etag = Some(new_desc);
+        Ok(saved_task)
     }
 
-    async fn list_tasks_by_stage(&self, stage: Stage) -> anyhow::Result<Vec<Task>> {
-        self.await_all_cooling().await;
-        let stage_number = match self.find_stage_number(stage).await? {
-            Some(n) => n,
-            None => return Ok(vec![]),
-        };
-
-        let (owner, repo) = self.parse_repo()?;
-        let params = vec![
-            ("milestone", stage_number.to_string()),
-            ("state", "open".to_string()),
-        ];
-
-        let issues: Vec<IssueResponse> = retry_github("list issues", || {
-            self.octocrab
-                .get(format!("/repos/{owner}/{repo}/issues"), Some(&params))
-        })
-        .await?;
-
-        let mut tasks = Vec::new();
-        for issue in issues {
-            let task = Self::issue_to_task(issue);
-
-            tasks.push(task);
-        }
-        Ok(tasks)
-    }
-
-    async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
+    /// Internal: get task comments.
+    async fn get_task_comments_internal(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
         let (owner, repo) = self.parse_repo()?;
         let comments: Vec<CommentResponse> = retry_github("list issue comments", || {
             self.octocrab.get(
@@ -851,53 +807,89 @@ impl TaskBackend for ZbobrTaskBackendGithub {
                 let body = c.body.unwrap_or_default();
                 let timestamp = c.created_at.unwrap_or_default();
 
-                // Split first line (tag) from body text so we can parse metadata.
-                // split into first line (possible tag) plus the rest of the text
                 let mut parts = body.splitn(2, '\n');
                 let tag_line = parts.next().unwrap_or("");
                 let rest = parts.next();
 
-                // if the first line parses as a tag we drop it and keep the trailing
-                // body.  otherwise we treat the entire comment as a simple request
-                // and retain the original text verbatim.
-                let (tag, text) = match tag_line.parse::<CommentTag>() {
+                let (tag, raw_text) = match tag_line.parse::<CommentTag>() {
                     Ok(t) => {
                         let body_text = rest.unwrap_or("").trim_start().to_string();
                         (t, body_text)
                     }
                     Err(_) => (
-                        CommentTag::new(CommentType::Request, None, String::new(), None, None),
+                        CommentTag::new(String::new(), 0, String::new(), String::new(), None, None),
                         body.clone(),
                     ),
                 };
 
+                let (text, report_name) = extract_report_link(&raw_text);
+
                 Comment {
-                    comment_type: tag.comment_type,
                     timestamp,
-                    role: tag.role,
+                    stage: tag.stage,
                     hostname: tag.hostname,
                     tool: tag.tool,
                     model: tag.model,
                     text,
+                    pipeline: tag.pipeline,
+                    pipeline_run_id: tag.pipeline_run_id,
+                    caller_pipeline: tag.caller_pipeline,
+                    caller_pipeline_run_id: tag.caller_pipeline_run_id,
+                    report_name,
+                    prompt_name: None,
                 }
             })
             .collect())
     }
 
-    async fn post_task_comment(
+    /// Internal: post a task comment.
+    async fn post_task_comment_internal(
         &self,
         id: u64,
-        comment_type: CommentType,
-        role: Option<Role>,
+        stage: &str,
         hostname: &str,
         tool: Option<Tool>,
         model: Option<Model>,
         body: &str,
+        pipeline: &str,
+        pipeline_run_id: u64,
+        caller_pipeline: Option<&str>,
+        caller_pipeline_run_id: Option<u64>,
+        report_name: Option<&str>,
+        prompt_name: Option<&str>,
     ) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        let tag = CommentTag::new(comment_type, role, hostname.to_string(), tool, model);
-        let formatted_body = format!("{}\n\n{}", tag, body);
+        let mut tag = CommentTag::new(
+            pipeline.to_string(),
+            pipeline_run_id,
+            stage.to_string(),
+            hostname.to_string(),
+            tool,
+            model,
+        );
+        if let (Some(cp), Some(cr)) = (caller_pipeline, caller_pipeline_run_id) {
+            tag = tag.with_caller(cp.to_string(), cr);
+        }
+
+        let reports_branch = self.reports_branch().unwrap_or("main");
+        let reports_path = self.reports_path();
+
+        let mut body_extended = body.to_string();
+        if let Some(rn) = report_name {
+            body_extended = format!(
+                "{body_extended}{}",
+                format_report_link(owner, repo, reports_branch, reports_path, id, rn)
+            );
+        }
+        if let Some(pn) = prompt_name {
+            body_extended = format!(
+                "{body_extended}{}",
+                format_report_link(owner, repo, reports_branch, reports_path, id, pn)
+            );
+        }
+
+        let formatted_body = format!("{}\n\n{}", tag, body_extended);
 
         retry_github("create issue comment", || async {
             self.octocrab
@@ -908,15 +900,354 @@ impl TaskBackend for ZbobrTaskBackendGithub {
         .await?;
         Ok(())
     }
+}
+
+// ---------------------------------------------------------------------------
+// Report file storage (GitHub Contents API)
+// ---------------------------------------------------------------------------
+
+impl ZbobrTaskBackendGithubImpl {
+    /// Store a report file in the GitHub repo, deduplicating with `_N` suffix if needed.
+    /// Returns the actual filename (without directory prefix).
+    async fn store_report(
+        &self,
+        task_id: u64,
+        base_name: &str,
+        content: &str,
+    ) -> anyhow::Result<String> {
+        let (owner, repo) = self.parse_repo()?;
+        let reports_path = self.reports_path();
+        let reports_branch = self.reports_branch();
+        let dir = format!("{reports_path}/task_{task_id}");
+
+        // When checking existence on a non-default branch, pass ?ref=
+        let ref_query: Option<Vec<(&str, &str)>> =
+            reports_branch.map(|b| vec![("ref", b)]);
+
+        let mut n = 0u32;
+        let filename = loop {
+            let candidate = if n == 0 {
+                format!("{base_name}.md")
+            } else {
+                format!("{base_name}_{n}.md")
+            };
+            let path = format!("{dir}/{candidate}");
+
+            // 404 → file does not exist → is_ok() == false; no retry for 404
+            let exists = self
+                .octocrab
+                .get::<serde_json::Value, _, _>(
+                    format!("/repos/{owner}/{repo}/contents/{path}"),
+                    ref_query.as_ref(),
+                )
+                .await
+                .is_ok();
+
+            if !exists {
+                break candidate;
+            }
+            n += 1;
+        };
+
+        let path = format!("{dir}/{filename}");
+        let message = format!("zbobr: store report {filename} for task #{task_id}");
+        let encoded = BASE64.encode(content.as_bytes());
+
+        let mut body = serde_json::json!({
+            "message": message,
+            "content": encoded,
+        });
+        if let Some(branch) = reports_branch {
+            body["branch"] = serde_json::Value::String(branch.to_string());
+        }
+
+        retry_github("create report file", || async {
+            self.octocrab
+                .put::<serde_json::Value, _, _>(
+                    format!("/repos/{owner}/{repo}/contents/{path}"),
+                    Some(&body),
+                )
+                .await
+        })
+        .await?;
+
+        tracing::debug!("Stored report for task {task_id}: {filename}");
+        Ok(filename)
+    }
+
+    /// Read a report file from the GitHub repo by exact name.
+    async fn read_report_internal(&self, task_id: u64, name: &str) -> anyhow::Result<String> {
+        anyhow::ensure!(!name.contains(".."), "Invalid report name: {name}");
+        let (owner, repo) = self.parse_repo()?;
+        let reports_path = self.reports_path();
+        let path = format!("{reports_path}/task_{task_id}/{name}");
+        let ref_query: Option<Vec<(&str, &str)>> =
+            self.reports_branch().map(|b| vec![("ref", b)]);
+
+        let resp: ContentResponse = retry_github("read report file", || {
+            self.octocrab.get(
+                format!("/repos/{owner}/{repo}/contents/{path}"),
+                ref_query.as_ref(),
+            )
+        })
+        .await?;
+
+        let encoded = resp
+            .content
+            .ok_or_else(|| anyhow::anyhow!("Report file has no content: {name}"))?;
+        // GitHub returns base64 with embedded newlines
+        let clean: String = encoded.chars().filter(|c| !c.is_whitespace()).collect();
+        let bytes = BASE64
+            .decode(&clean)
+            .map_err(|e| anyhow::anyhow!("Failed to decode report content: {e}"))?;
+        String::from_utf8(bytes)
+            .map_err(|e| anyhow::anyhow!("Report content is not valid UTF-8: {e}"))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GithubTaskWeak / GithubTaskMut
+// ---------------------------------------------------------------------------
+
+use tokio::sync::OwnedMutexGuard;
+use zbobr_api::backend::{TaskMut, TaskWeak};
+
+struct GithubTaskWeak {
+    id: u64,
+    backend: Arc<ZbobrTaskBackendGithubImpl>,
+    saved_snapshot: Arc<std::sync::Mutex<Option<Task>>>,
+}
+
+#[async_trait]
+impl TaskWeak for GithubTaskWeak {
+    fn task_id(&self) -> u64 {
+        self.id
+    }
+
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task> {
+        if !refresh && let Some(task) = self.saved_snapshot.lock().unwrap().clone() {
+            return Ok(task);
+        }
+
+        let task = self.backend.read_task(self.id).await?;
+        *self.saved_snapshot.lock().unwrap() = Some(task.clone());
+        Ok(task)
+    }
+
+    async fn upgrade(&self) -> anyhow::Result<Box<dyn TaskMut>> {
+        let lock = self.backend.task_lock(self.id);
+        let guard = lock.lock_owned().await;
+        Ok(Box::new(GithubTaskMut {
+            id: self.id,
+            backend: self.backend.clone(),
+            saved_snapshot: self.saved_snapshot.clone(),
+            _guard: guard,
+        }))
+    }
+
+    async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
+        self.backend.get_task_comments_internal(self.id).await
+    }
+
+    async fn read_report(&self, name: &str) -> anyhow::Result<String> {
+        self.backend.read_report_internal(self.id, name).await
+    }
+}
+
+struct GithubTaskMut {
+    id: u64,
+    backend: Arc<ZbobrTaskBackendGithubImpl>,
+    saved_snapshot: Arc<std::sync::Mutex<Option<Task>>>,
+    _guard: OwnedMutexGuard<()>,
+}
+
+#[async_trait]
+impl TaskMut for GithubTaskMut {
+    fn task_id(&self) -> u64 {
+        self.id
+    }
+
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task> {
+        if !refresh && let Some(task) = self.saved_snapshot.lock().unwrap().clone() {
+            return Ok(task);
+        }
+
+        let task = self.backend.read_task(self.id).await?;
+        *self.saved_snapshot.lock().unwrap() = Some(task.clone());
+        Ok(task)
+    }
+
+    async fn modify_task(
+        &self,
+        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
+    ) -> anyhow::Result<()> {
+        let task = self.backend.modify_task_internal(self.id, mutate).await?;
+        *self.saved_snapshot.lock().unwrap() = Some(task);
+        Ok(())
+    }
+
+    async fn close(&self) -> anyhow::Result<()> {
+        self.backend.close_task_internal(self.id).await
+    }
+
+    async fn post_comment(
+        &self,
+        stage: &str,
+        hostname: &str,
+        tool: Option<Tool>,
+        model: Option<Model>,
+        body: &str,
+        pipeline: &str,
+        pipeline_run_id: u64,
+        caller_pipeline: Option<&str>,
+        caller_pipeline_run_id: Option<u64>,
+        report_text: Option<&str>,
+        prompt_text: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let tag = comment_tag(body);
+        let report_name = if let Some(text) = report_text {
+            let base_name = format!("report_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
+            Some(self.backend.store_report(self.id, &base_name, text).await?)
+        } else {
+            None
+        };
+
+        let prompt_name = if let Some(text) = prompt_text {
+            let base_name = format!("prompt_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
+            Some(self.backend.store_report(self.id, &base_name, text).await?)
+        } else {
+            None
+        };
+
+        self.backend
+            .post_task_comment_internal(
+                self.id,
+                stage,
+                hostname,
+                tool,
+                model,
+                body,
+                pipeline,
+                pipeline_run_id,
+                caller_pipeline,
+                caller_pipeline_run_id,
+                report_name.as_deref(),
+                prompt_name.as_deref(),
+            )
+            .await
+    }
+
+    fn downgrade(self: Box<Self>) -> Box<dyn TaskWeak> {
+        Box::new(GithubTaskWeak {
+            id: self.id,
+            backend: self.backend.clone(),
+            saved_snapshot: self.saved_snapshot.clone(),
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ArcTaskBackendGithub — proper TaskBackend wrapper
+// ---------------------------------------------------------------------------
+
+/// Arc-wrapped GitHub backend that properly returns TaskWeak/TaskMut handles.
+#[derive(Clone)]
+pub struct TaskBackendGithub {
+    inner: Arc<ZbobrTaskBackendGithubImpl>,
+}
+
+impl TaskBackendGithub {
+    pub fn from_config(config: ZbobrTaskBackendGithubConfig) -> anyhow::Result<Self> {
+        Ok(Self {
+            inner: Arc::new(ZbobrTaskBackendGithubImpl::from_config(config)?),
+        })
+    }
+
+    /// Create from config and validate connectivity to GitHub.
+    pub async fn new(config: ZbobrTaskBackendGithubConfig) -> anyhow::Result<Self> {
+        let backend = Self::from_config(config)?;
+        backend.validate_connectivity().await?;
+        Ok(backend)
+    }
+}
+
+#[async_trait]
+impl TaskBackend for TaskBackendGithub {
+    async fn get_task(&self, id: u64) -> anyhow::Result<Box<dyn TaskWeak>> {
+        // Verify the task exists
+        let task = self.inner.read_task(id).await?;
+        Ok(Box::new(GithubTaskWeak {
+            id,
+            backend: self.inner.clone(),
+            saved_snapshot: Arc::new(std::sync::Mutex::new(Some(task))),
+        }))
+    }
+
+    async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+        self.inner.await_all_cooling().await;
+
+        let (owner, repo) = self.inner.parse_repo()?;
+        let params = vec![
+            ("state", "open".to_string()),
+            ("per_page", "100".to_string()),
+        ];
+
+        let issues: Vec<IssueResponse> = retry_github("list issues", || {
+            self.inner
+                .octocrab
+                .get(format!("/repos/{owner}/{repo}/issues"), Some(&params))
+        })
+        .await?;
+
+        let mut result: Vec<Box<dyn TaskWeak>> = Vec::new();
+        for issue in issues {
+            let id = issue.number;
+            // Reuse list payload as the saved snapshot until a caller asks for refresh.
+            let task = ZbobrTaskBackendGithubImpl::issue_to_task(issue);
+            result.push(Box::new(GithubTaskWeak {
+                id,
+                backend: self.inner.clone(),
+                saved_snapshot: Arc::new(std::sync::Mutex::new(Some(task))),
+            }));
+        }
+        Ok(result)
+    }
+
+    async fn create_task(
+        &self,
+        title: &str,
+        description: &str,
+        state: State,
+    ) -> anyhow::Result<u64> {
+        let (owner, repo) = self.inner.parse_repo()?;
+        let body = serialize_description_full(description, &HashMap::new(), &[]);
+
+        let issue = retry_github("create issue", || async {
+            let issues = self.inner.octocrab.issues(owner, repo);
+            let builder = issues.create(title).body(body.clone());
+            builder.send().await
+        })
+        .await?;
+
+        let issue_id = issue.number;
+
+        // Apply the initial state as a label
+        if !state.is_empty() {
+            self.inner.apply_state_change(issue_id, &state).await?;
+        }
+
+        Ok(issue_id)
+    }
 
     async fn setup(&self, force: bool) -> anyhow::Result<()> {
-        self.setup(force).await
+        self.inner.setup(force).await
     }
 
     async fn validate_connectivity(&self) -> anyhow::Result<()> {
-        let (owner, repo) = self.parse_repo()?;
+        let (owner, repo) = self.inner.parse_repo()?;
         let task_repo_exists = retry_github("check task repo", || {
-            self.octocrab
+            self.inner
+                .octocrab
                 .get::<RepoResponse, _, _>(format!("/repos/{owner}/{repo}"), None::<&()>)
         })
         .await
@@ -933,21 +1264,10 @@ impl TaskBackend for ZbobrTaskBackendGithub {
     }
 
     fn debug_state(&self) -> String {
-        format!("GitHubTaskBackend({})", self.backend_config.github_repo)
-    }
-}
-
-/// Stage descriptions.
-fn stage_description(stage: Stage) -> &'static str {
-    match stage {
-        Stage::Pending => "Task is pending dispatch",
-        Stage::Preparing => "Task parameters are being set",
-        Stage::Planning => "Task is in planning",
-        Stage::Working => "Task is in work",
-        Stage::Reviewing => "Task is in review",
-        Stage::Testing => "Task is undergoing comprehensive testing",
-        Stage::Merging => "Task is in merge conflict resolution",
-        Stage::Done => "Task is complete",
+        format!(
+            "GitHubTaskBackend({})",
+            self.inner.backend_config.github_repo
+        )
     }
 }
 
@@ -997,11 +1317,7 @@ mod tests {
 
 #[cfg(test)]
 mod parse_tests {
-    use std::str::FromStr;
-
     use zbobr_api::task::CommentTag;
-
-    use super::*;
 
     fn split_tag_body(input: &str) -> (CommentTag, String) {
         let mut parts = input.splitn(2, '\n');
@@ -1014,142 +1330,112 @@ mod parse_tests {
                 (tag, body)
             }
             Err(_) => (
-                CommentTag::new(CommentType::Request, None, String::new(), None, None),
+                CommentTag::new(String::new(), 0, String::new(), String::new(), None, None),
                 input.to_string(),
             ),
         }
     }
 
     #[test]
-    fn test_parse_comment_tag_report_with_body() {
-        let input = "// REPORT worker:localhost:claude-opus-4.6\n\nThis is the report body\nWith multiple lines";
+    fn test_parse_comment_tag_simple() {
+        let input = "// main:1:planning by localhost\n\nThis is the body";
         let (tag, body) = split_tag_body(input);
-        let comment_type = tag.comment_type;
-        let role = tag.role;
-        let host = tag.hostname;
-        let tool = tag.tool;
-        let model = tag.model;
-
-        assert_eq!(comment_type, CommentType::Report);
-        assert_eq!(role, Some(Role::Worker));
-        assert_eq!(host, "localhost");
-        assert_eq!(tool, None);
-        assert_eq!(model, Some(Model::from_str("claude-opus-4.6").unwrap()));
-        assert_eq!(body, "This is the report body\nWith multiple lines");
+        assert_eq!(tag.pipeline, "main");
+        assert_eq!(tag.pipeline_run_id, 1);
+        assert_eq!(tag.stage, "planning");
+        assert_eq!(tag.hostname, "localhost");
+        assert_eq!(body, "This is the body");
     }
 
     #[test]
-    fn test_parse_comment_tag_error_with_body() {
-        let input = "// ERROR planner:skynet:gpt-4o\n\nAn error occurred";
+    fn test_parse_comment_tag_new_format() {
+        let input = "// main:3:reviewing by skynet\n\nRejected.";
         let (tag, body) = split_tag_body(input);
-        let comment_type = tag.comment_type;
-        let tool = tag.tool;
-        let role = tag.role;
-        let host = tag.hostname;
-        let model = tag.model;
-
-        assert_eq!(comment_type, CommentType::Error);
-        assert_eq!(role, Some(Role::Planner));
-        assert_eq!(host, "skynet");
-        assert_eq!(tool, None);
-        assert_eq!(model, Some(Model::from_str("gpt-4o").unwrap()));
-        assert_eq!(body, "An error occurred");
+        assert_eq!(tag.pipeline, "main");
+        assert_eq!(tag.pipeline_run_id, 3);
+        assert_eq!(tag.stage, "reviewing");
+        assert_eq!(tag.hostname, "skynet");
+        assert_eq!(body, "Rejected.");
     }
 
     #[test]
-    fn test_parse_comment_tag_request_with_body() {
-        let input = "// REQUEST\n\nThis is a user request";
-        let (tag, body) = split_tag_body(input);
-        let comment_type = tag.comment_type;
-        let tool = tag.tool;
-        let role = tag.role;
-        let host = tag.hostname;
-        let model = tag.model;
-
-        assert_eq!(comment_type, CommentType::Request);
-        assert_eq!(role, None);
-        assert_eq!(host, "");
-        assert_eq!(tool, None);
-        assert_eq!(model, None);
-        assert_eq!(body, "This is a user request");
-    }
-
-    #[test]
-    fn test_parse_comment_tag_report_no_model() {
-        let input = "// REPORT reviewer:host\n\nBody text";
-        let (tag, body) = split_tag_body(input);
-        let comment_type = tag.comment_type;
-        let tool = tag.tool;
-        let role = tag.role;
-        let host = tag.hostname;
-        let model = tag.model;
-
-        assert_eq!(comment_type, CommentType::Report);
-        assert_eq!(role, Some(Role::Reviewer));
-        assert_eq!(host, "host");
-        assert_eq!(tool, None);
-        assert_eq!(model, None);
-        assert_eq!(body, "Body text");
-    }
-
-    #[test]
-    fn test_parse_comment_tag_no_tag_treated_as_request() {
+    fn test_parse_comment_tag_no_tag_treated_as_empty() {
         let input = "This is just text without a tag";
         let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Request);
-        assert_eq!(tag.role, None);
+        assert_eq!(tag.stage, "");
         assert_eq!(tag.hostname, "");
-        assert_eq!(tag.tool, None);
-        assert_eq!(tag.model, None);
         assert_eq!(body, "This is just text without a tag");
     }
 
     #[test]
-    fn test_parse_comment_tag_bogus_tag_preserves_first_line() {
-        let input = "// NOTATAG\nbody text";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Request);
-        assert_eq!(tag.role, None);
-        assert_eq!(tag.hostname, "");
-        assert_eq!(tag.tool, None);
-        assert_eq!(tag.model, None);
-        assert_eq!(body, "// NOTATAG\nbody text");
+    fn test_comment_tag_roundtrip() {
+        let tag = CommentTag::new(
+            "main".into(),
+            5,
+            "working".into(),
+            "host".into(),
+            None,
+            None,
+        );
+        let s = tag.to_string();
+        let parsed: CommentTag = s.parse().unwrap();
+        assert_eq!(parsed, tag);
+
+        let linked = CommentTag::new("sub".into(), 2, "done".into(), "host".into(), None, None)
+            .with_caller("main".into(), 1);
+        let linked_s = linked.to_string();
+        assert_eq!(linked_s, "// sub:2:done by host for main:1");
+        let linked_parsed: CommentTag = linked_s.parse().unwrap();
+        assert_eq!(linked_parsed, linked);
+    }
+}
+
+#[cfg(test)]
+mod report_link_tests {
+    use super::*;
+
+    #[test]
+    fn extract_no_link() {
+        let (text, name) = extract_report_link("just some text");
+        assert_eq!(text, "just some text");
+        assert_eq!(name, None);
     }
 
     #[test]
-    fn test_parse_comment_tag_request_with_meta() {
-        let input = "// REQUEST planner:skynet:gpt-4o\n\nPlease respond";
-        let (tag, body) = split_tag_body(input);
-        let comment_type = tag.comment_type;
-        let tool = tag.tool;
-        let role = tag.role;
-        let host = tag.hostname;
-        let model = tag.model;
-
-        assert_eq!(comment_type, CommentType::Request);
-        assert_eq!(role, Some(Role::Planner));
-        assert_eq!(host, "skynet");
-        assert_eq!(tool, None);
-        assert_eq!(model, Some(Model::from_str("gpt-4o").unwrap()));
-        assert_eq!(body, "Please respond");
+    fn extract_with_link() {
+        let body = "[report_success] Brief\n\n[report_main_1_working_success.md](https://github.com/org/repo/blob/main/reports/task_5/report_main_1_working_success.md)";
+        let (text, name) = extract_report_link(body);
+        assert_eq!(text, "[report_success] Brief");
+        assert_eq!(name.as_deref(), Some("report_main_1_working_success.md"));
     }
 
     #[test]
-    fn test_parse_comment_tag_plan_with_body() {
-        let input =
-            "// PLAN planner:localhost:claude-opus-4.6\n\nStep 1: analyse\nStep 2: implement";
-        let (tag, body) = split_tag_body(input);
-        let comment_type = tag.comment_type;
-        let role = tag.role;
-        let tool = tag.tool;
-        let host = tag.hostname;
-        let model = tag.model;
+    fn extract_non_report_link() {
+        let body = "text\n\n[something](https://example.com/other)";
+        let (text, name) = extract_report_link(body);
+        assert_eq!(text, "text\n\n[something](https://example.com/other)");
+        assert_eq!(name, None);
+    }
 
-        assert_eq!(comment_type, CommentType::Plan);
-        assert_eq!(role, Some(Role::Planner));
-        assert_eq!(host, "localhost");
-        assert_eq!(tool, None);
-        assert_eq!(model, Some(Model::from_str("claude-opus-4.6").unwrap()));
-        assert_eq!(body, "Step 1: analyse\nStep 2: implement");
+    #[test]
+    fn roundtrip() {
+        let original = "[report_success] Brief summary";
+        let filename = "report_main_1_working_success.md";
+        let with_link = format!(
+            "{}{}",
+            original,
+            format_report_link("org", "repo", "main", "reports", 5, filename)
+        );
+        let (text, name) = extract_report_link(&with_link);
+        assert_eq!(text, original);
+        assert_eq!(name.as_deref(), Some(filename));
+    }
+
+    #[test]
+    fn link_only_body() {
+        let body = "[report.md](https://github.com/o/r/blob/main/reports/task_1/report.md)";
+        let (text, name) = extract_report_link(body);
+        assert_eq!(text, "");
+        assert_eq!(name.as_deref(), Some("report.md"));
     }
 }

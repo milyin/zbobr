@@ -9,55 +9,13 @@ use zbobr_executor_copilot::{
 use zbobr_executor_mcp_tester::{
     ZbobrExecutorMcpTesterArgs, ZbobrExecutorMcpTesterConfig, ZbobrExecutorMcpTesterToml,
 };
-use zbobr_repo_backend_fs::{
-    ZbobrRepoBackendFsArgs, ZbobrRepoBackendFsConfig, ZbobrRepoBackendFsToml,
-};
-use zbobr_repo_backend_github::{
-    ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubConfig, ZbobrRepoBackendGithubToml,
-};
-use zbobr_task_backend_fs::{
-    ZbobrTaskBackendFsArgs, ZbobrTaskBackendFsConfig, ZbobrTaskBackendFsToml,
-};
-use zbobr_task_backend_github::{
-    ZbobrTaskBackendGithubArgs, ZbobrTaskBackendGithubConfig, ZbobrTaskBackendGithubToml,
-};
 use zbobr_utility::config_struct;
 
 #[derive(Clone, Default)]
 #[config_struct]
-/// Task backend configuration section.
+/// Executor configuration section used for TOML/CLI parsing.
 ///
-/// Each backend lives under a named sub-section (e.g. `[tasks.github]`,
-/// `[tasks.fs]`).  `deny_unknown_fields` ensures bare keys at `[tasks]`
-/// level are rejected.
-pub struct ZbobrTaskBackendConfig {
-    /// GitHub issues as the task source
-    #[config(nested)]
-    pub github: ZbobrTaskBackendGithubConfig,
-    /// Filesystem task backend (YAML files in tasks/)
-    #[config(nested)]
-    pub fs: ZbobrTaskBackendFsConfig,
-}
-
-#[derive(Clone, Default)]
-#[config_struct]
-/// Repo backend configuration section.
-///
-/// Each backend lives under a named sub-section (e.g. `[repo.github]`,
-/// `[repo.fs]`).  `deny_unknown_fields` ensures bare keys at `[repo]`
-/// level are rejected.
-pub struct ZbobrRepoBackendConfig {
-    /// GitHub repo backend (fork + push via API)
-    #[config(nested)]
-    pub github: ZbobrRepoBackendGithubConfig,
-    /// Filesystem repo backend (operate on local clones)
-    #[config(nested)]
-    pub fs: ZbobrRepoBackendFsConfig,
-}
-
-#[derive(Clone, Default)]
-#[config_struct]
-/// Executor configuration section.
+/// Runtime ownership lives directly on `ZbobrDispatcher` as separate fields.
 pub struct ZbobrExecutorConfig {
     /// Claude-specific defaults
     #[config(nested)]
@@ -77,6 +35,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use crate::task::{Tool, Model};
+    use zbobr_api::config::StageDefinition;
 
     fn test_config_dir() -> PathBuf {
         PathBuf::from("/test/config")
@@ -340,16 +299,59 @@ mod tests {
 
     #[test]
     fn stage_settings_override_helpers() {
+        use std::collections::HashMap;
+
         let mut cfg = ZbobrDispatcherConfig::default();
         cfg.tool = Tool::Copilot;
         cfg.model = Model::Gpt5;
         cfg.preparator.tool = Some(Tool::Claude);
         cfg.preparator.model = Some(Model::ClaudeOpus4_5);
 
-        assert_eq!(cfg.tool_for_role(Role::Preparator), Tool::Claude);
-        assert_eq!(cfg.tool_for_role(Role::Planner), Tool::Copilot);
-        assert_eq!(cfg.model_for_role(Role::Preparator), Model::ClaudeOpus4_5);
-        assert_eq!(cfg.model_for_role(Role::Planner), Model::Gpt5);
+        // Create workflow with role definitions
+        let mut roles = HashMap::new();
+        roles.insert(
+            "preparator".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: None,
+                tool: Some(Tool::Claude),
+                model: Some(Model::ClaudeOpus4_5),
+            },
+        );
+        roles.insert(
+            "planner".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: None,
+                tool: None,
+                model: None,
+            },
+        );
+        let workflow = WorkflowConfig {
+            pipelines: Default::default(),
+            roles,
+            prompts_dir: None,
+        };
+
+        // Stage with overrides → uses stage-level settings
+        let prep_stage = StageDefinition {
+            role: Some("preparator".to_string()),
+            tool: Some(Tool::Claude),
+            model: Some(Model::ClaudeOpus4_5),
+            ..Default::default()
+        };
+        // Stage without overrides → uses role defaults
+        let plan_stage = StageDefinition {
+            role: Some("planner".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(cfg.tool_for_stage(&prep_stage, &workflow), Tool::Claude);
+        assert_eq!(cfg.tool_for_stage(&plan_stage, &workflow), Tool::Copilot);
+        assert_eq!(
+            cfg.model_for_stage(&prep_stage, &workflow),
+            Model::ClaudeOpus4_5
+        );
+        assert_eq!(cfg.model_for_stage(&plan_stage, &workflow), Model::Gpt5);
     }
 
     #[test]

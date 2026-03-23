@@ -1,24 +1,23 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::Context;
-use clap::{Args, Parser, Subcommand};
-use tokio::process::Command as TokioCommand;
-use zbobr_executor_claude::ClaudeExecutor;
-use zbobr_executor_copilot::CopilotExecutor;
-use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
-
+use clap::{Args, Parser};
+use zbobr_api::{
+    CommentTag, Pipeline, Signal, StackEntry, State, config::StageDefinition, config_tools::McpTool,
+};
+use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 // bring in the generic git helpers from utility crate
-use zbobr_utility::{configure_git_user, git, git_check, git_output};
+use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
-    Comment, CommentType, Signal, Stage, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
-    ZbobrExecutorConfig,
-    backend::TaskBackendExt,
+    Comment, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
     mcp::common::get_hostname,
-    prompts::Prompts,
-    task::{Model, Parameter, Role, Tool},
+    task::{Model, Tool},
 };
 
 // ---------------------------------------------------------------------------
@@ -33,9 +32,43 @@ pub struct ConfigFileArg {
     pub path: Option<PathBuf>,
 }
 
+/// Resolved config file location.
+pub struct ConfigLocation {
+    pub config_path: PathBuf,
+    pub config_dir: PathBuf,
+}
+
+/// Resolve the config file path and its parent directory.
+///
+/// When `cli_path` is `Some`, the file must exist (its parent is used as
+/// `config_dir`).  When `None`, `default_config_name` in the current
+/// directory is used and `config_dir` is `std::env::current_dir()`.
+pub fn resolve_config_location(
+    cli_path: &Option<PathBuf>,
+    default_config_name: &str,
+) -> anyhow::Result<ConfigLocation> {
+    let config_path = cli_path
+        .clone()
+        .unwrap_or_else(|| default_config_name.into());
+
+    let config_dir = if cli_path.is_some() {
+        std::fs::canonicalize(&config_path)
+            .with_context(|| format!("Cannot resolve config path: {}", config_path.display()))?
+            .parent()
+            .expect("config file must have a parent directory")
+            .to_path_buf()
+    } else {
+        std::env::current_dir()?
+    };
+
+    Ok(ConfigLocation {
+        config_path,
+        config_dir,
+    })
+}
+
 /// Global arguments that should be hoisted before subcommands.
 /// This includes only dispatcher and executor config, not backend-specific settings.
-/// For a full CLI with backend-specific options, use GenericCli<TA, RA> instead.
 #[derive(Args, Clone)]
 pub struct GlobalArgs {
     #[command(
@@ -45,214 +78,15 @@ pub struct GlobalArgs {
     pub config_file: ConfigFileArg,
 
     #[command(flatten, next_help_heading = "[dispatcher]")]
-    pub dispatcher: crate::ZbobrDispatcherArgs,
+    pub dispatcher: crate::config::ZbobrDispatcherArgs,
 
     #[command(flatten, next_help_heading = "[executor]")]
     pub executor: crate::ZbobrExecutorArgs,
 }
 
-/// Top-level commands.
-#[derive(Subcommand)]
-pub enum Command {
-    /// Initialize a task project: create repo if needed, set up stages and labels
-    Setup {
-        /// Force overwrite existing labels
-        #[arg(long, short = 'f')]
-        force: bool,
-    },
-    /// Poll for tasks and run roles automatically
-    Loop {
-        /// How often to check for new tasks, in seconds
-        #[arg(long, default_value = "60")]
-        interval: u64,
-        /// How often to clean up workspaces for closed tasks, in seconds
-        #[arg(long, default_value = "600")]
-        cleanup_interval: u64,
-    },
-    /// Remove workspace directories for tasks that have been closed
-    Cleanup {
-        /// Show what would be removed without actually deleting
-        #[arg(long, short = 'n')]
-        dry_run: bool,
-    },
-    /// Manage tasks (create, show, update, delete) and run role sessions
-    Task {
-        #[command(subcommand)]
-        subcommand: TaskSubcommand,
-    },
-}
-
-/// Task management subcommands.
-#[derive(Subcommand)]
-pub enum TaskSubcommand {
-    /// Create a new task
-    Create {
-        /// Task title
-        title: String,
-        /// Task description
-        #[arg(long, default_value = "")]
-        description: String,
-        /// Initial stage (PENDING, GO_PREPARATION, etc.; default: PENDING)
-        #[arg(long, default_value = "PENDING")]
-        stage: String,
-
-        /// Destination repository in owner/repo format
-        #[arg(long)]
-        dest_repo: Option<String>,
-        /// Destination branch
-        #[arg(long)]
-        dest_branch: Option<String>,
-        /// When set the task will be paused automatically on every stage change
-        #[arg(long, action = clap::ArgAction::SetTrue)]
-        confirm: bool,
-    },
-    /// List existing tasks (optionally filter by stage or tool)
-    List {
-        /// Only show tasks in this stage (PENDING, GO_PREPARATION, etc.)
-        #[arg(long)]
-        stage: Option<String>,
-    },
-    /// Show a task by ID
-    Show {
-        /// Task ID
-        id: u64,
-    },
-    /// Update fields of an existing task
-    Update {
-        /// Task ID
-        id: u64,
-        /// New title
-        #[arg(long)]
-        title: Option<String>,
-        /// New description
-        #[arg(long)]
-        description: Option<String>,
-        /// New stage (PENDING, GO_PREPARATION, etc.)
-        #[arg(long)]
-        stage: Option<String>,
-
-        /// New destination repository in owner/repo format.
-        /// Pass `--dest-repo` without a value to delete the parameter.
-        #[arg(long, num_args = 0..=1)]
-        dest_repo: Option<Option<String>>,
-        /// New destination branch.
-        /// Pass `--dest-branch` without a value to delete the parameter.
-        #[arg(long, num_args = 0..=1)]
-        dest_branch: Option<Option<String>>,
-        /// New work branch.
-        /// Pass `--work-branch` without a value to delete the parameter.
-        #[arg(long, num_args = 0..=1)]
-        work_branch: Option<Option<String>>,
-        /// New signal (go_preparation, go_planning, etc.)
-        #[arg(long)]
-        signal: Option<String>,
-        /// Set or clear the confirm flag (true/false).
-        #[arg(long)]
-        confirm: Option<bool>,
-    },
-    /// Delete (close) a task by ID
-    Delete {
-        /// Task ID
-        id: u64,
-    },
-    /// Run preparator role for a specific task (sets destination repository and branches)
-    Prepare {
-        /// Task ID
-        task: u64,
-        /// Show the prompt that would be sent to the model instead of running
-        #[arg(long)]
-        show_prompt: bool,
-    },
-    /// Run planner role for a specific task (creates implementation plan)
-    Plan {
-        /// Task ID
-        task: u64,
-        /// Show the prompt that would be sent to the model instead of running
-        #[arg(long)]
-        show_prompt: bool,
-    },
-    /// Run worker role for a specific task (implements the plan, creates PR)
-    Work {
-        /// Task ID
-        task: u64,
-        /// Show the prompt that would be sent to the model instead of running
-        #[arg(long)]
-        show_prompt: bool,
-    },
-    /// Run reviewer role for a specific task (reviews the implementation)
-    Review {
-        /// Task ID
-        task: u64,
-        /// Show the prompt that would be sent to the model instead of running
-        #[arg(long)]
-        show_prompt: bool,
-    },
-    /// Run merger role for a specific task (resolves merge conflicts)
-    Merge {
-        /// Task ID
-        task: u64,
-        /// Show the prompt that would be sent to the model instead of running
-        #[arg(long)]
-        show_prompt: bool,
-    },
-    /// Process a task according to its current stage (single-step)
-    Process {
-        /// Task ID
-        task: u64,
-        /// MCP tester scenario file for preparation role
-        #[arg(long)]
-        executor_mcp_tester_preparation: Option<PathBuf>,
-        /// MCP tester scenario file for planning role
-        #[arg(long)]
-        executor_mcp_tester_planning: Option<PathBuf>,
-        /// MCP tester scenario file for working role
-        #[arg(long)]
-        executor_mcp_tester_working: Option<PathBuf>,
-        /// MCP tester scenario file for reviewing role
-        #[arg(long)]
-        executor_mcp_tester_reviewing: Option<PathBuf>,
-        /// MCP tester scenario file for testing role
-        #[arg(long)]
-        executor_mcp_tester_testing: Option<PathBuf>,
-        /// MCP tester scenario file for merging role
-        #[arg(long)]
-        executor_mcp_tester_merging: Option<PathBuf>,
-    },
-    /// Rewrite commit authors on the task's PR branch and push back
-    OverwriteAuthor {
-        /// Task ID
-        id: u64,
-        /// Skip confirmation and force execution
-        #[arg(long)]
-        force: bool,
-        /// Show what would be done without making changes
-        #[arg(long)]
-        dry_run: bool,
-    },
-}
-
 // ---------------------------------------------------------------------------
 // CLI parsing
 // ---------------------------------------------------------------------------
-
-/// Standard CLI structure for Zbobr dispatcher apps
-#[derive(clap::Parser)]
-pub struct GenericCli<
-    TTaskArgs: zbobr_utility::PrefixedArgs + Default + Clone + std::fmt::Debug,
-    TRepoArgs: zbobr_utility::PrefixedArgs + Default + Clone + std::fmt::Debug,
-> {
-    #[command(
-        flatten,
-        next_help_heading = "[config] Meta options and config file overrides"
-    )]
-    pub config_file: ConfigFileArg,
-
-    #[command(flatten)]
-    pub settings: crate::GenericConfigArgs<TTaskArgs, TRepoArgs>,
-
-    #[command(subcommand)]
-    pub command: Command,
-}
 
 /// Parse CLI allowing global options both before and after the subcommand.
 ///
@@ -344,31 +178,40 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
 pub fn print_task(task: &Task, discussion: &[Comment]) {
     println!("ID:          {}", task.id);
     println!("Title:       {}", task.title);
-    println!("Stage:       {}", task.stage);
+    println!("State:       {}", task.state);
     println!(
         "Signal:      {}",
         task.signal
+            .as_ref()
             .map(|s| s.to_string())
-            .unwrap_or_else(|| "(none)".to_string())
+            .as_deref()
+            .unwrap_or("(none)")
     );
-    println!("Conflict:    {}", task.conflict);
+    if !task.stack.is_empty() {
+        println!("Stack:       {:?}", task.stack);
+    }
     println!("Pause:       {}", task.pause);
-    if !task.parameters.is_empty() {
-        println!("Parameters:");
-        for (k, v) in &task.parameters {
-            println!("  {}: {}", k.name(), v);
-        }
+    if let Some(ref repo) = task.destination_repository {
+        println!("Dest Repo:   {}", repo);
+    }
+    if let Some(ref branch) = task.destination_branch {
+        println!("Dest Branch: {}", branch);
+    }
+    if let Some(ref branch) = task.work_branch {
+        println!("Work Branch: {}", branch);
+    }
+    if let Some(ref url) = task.pr_url {
+        println!("PR URL: {}", url);
     }
     if !task.description.is_empty() {
         println!("Description:\n{}", task.description);
     }
-    // show latest plan comment if present (old tasks used to store this in
-    // `task.plan` so we try to mimic that behaviour for convenience)
+    // show latest plan comment if present (look for [report_success] or legacy [post_plan] marker)
     if !discussion.is_empty()
         && let Some(plan_comment) = discussion
             .iter()
             .rev()
-            .find(|c| c.comment_type == CommentType::Plan)
+            .find(|c| c.text.starts_with("[report_success]") || c.text.starts_with("[post_plan]"))
     {
         println!("Plan (from comment):\n{}", plan_comment.text);
     }
@@ -382,472 +225,130 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     if !discussion.is_empty() {
         println!("Discussion ({} comment(s)):", discussion.len());
         for (i, c) in discussion.iter().enumerate() {
-            let tag = CommentTag {
-                comment_type: c.comment_type,
-                role: c.role,
-                hostname: c.hostname.clone(),
-                tool: c.tool,
-                model: c.model.clone(),
-            };
+            let mut tag = CommentTag::new(
+                c.pipeline.clone(),
+                c.pipeline_run_id,
+                c.stage.clone(),
+                c.hostname.clone(),
+                c.tool,
+                c.model.clone(),
+            );
+            if let (Some(caller_pipeline), Some(caller_run_id)) =
+                (c.caller_pipeline.clone(), c.caller_pipeline_run_id)
+            {
+                tag = tag.with_caller(caller_pipeline, caller_run_id);
+            }
             println!("  [{}] {}\n{}", i + 1, tag, c.text);
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Command dispatch
+// CliStageRunner — stage execution
 // ---------------------------------------------------------------------------
 
-/// Run the given command against the dispatcher.
-pub async fn run_command(
-    zbobr: ZbobrDispatcher,
-    command: Command,
-    prompts: &Prompts,
-    executor_config: &ZbobrExecutorConfig,
-) -> anyhow::Result<()> {
-    match command {
-        Command::Setup { force } => {
-            zbobr.setup(force).await?;
-        }
-        Command::Cleanup { dry_run } => {
-            zbobr.cleanup_closed_tasks(dry_run).await?;
-        }
-        Command::Task { subcommand } => {
-            run_task_subcommand(&zbobr, subcommand, prompts, executor_config).await?;
-        }
-        Command::Loop {
-            interval,
-            cleanup_interval,
-            ..
-        } => {
-            run_manager_loop(&zbobr, interval, cleanup_interval, prompts, executor_config).await?;
-        }
-    }
-    Ok(())
-}
-
-async fn run_task_subcommand(
-    zbobr: &ZbobrDispatcher,
-    subcommand: TaskSubcommand,
-    prompts: &Prompts,
-    executor_config: &ZbobrExecutorConfig,
-) -> anyhow::Result<()> {
-    match subcommand {
-        TaskSubcommand::Create {
-            title,
-            description,
-            stage,
-            dest_repo,
-            dest_branch,
-            confirm,
-        } => {
-            let stage = Stage::from_milestone_name(&stage.to_uppercase())
-                .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", stage))?;
-            let id = zbobr
-                .create_task(&title, &description, stage, dest_repo, dest_branch)
-                .await?;
-            if confirm {
-                zbobr.task_session(id).set_confirm(true).await?;
-            }
-            println!("Created task #{}", id);
-        }
-        TaskSubcommand::List { stage } => {
-            let stage_filter = if let Some(s) = stage {
-                Some(
-                    Stage::from_milestone_name(&s.to_uppercase())
-                        .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", s))?,
-                )
-            } else {
-                None
-            };
-            let mut tasks = Vec::new();
-            if let Some(stage) = stage_filter {
-                tasks = zbobr.tasks().list_tasks_by_stage(stage).await?;
-            } else {
-                let all_stages = [
-                    Stage::Pending,
-                    Stage::Preparing,
-                    Stage::Planning,
-                    Stage::Working,
-                    Stage::Reviewing,
-                    Stage::Merging,
-                    Stage::Done,
-                ];
-                for st in all_stages {
-                    let mut ts = zbobr.tasks().list_tasks_by_stage(st).await?;
-                    tasks.append(&mut ts);
-                }
-                tasks.sort_by_key(|t| t.id);
-            }
-
-            if tasks.is_empty() {
-                println!("No tasks found");
-            } else {
-                for task in &tasks {
-                    print_task(task, &[]);
-                    println!("---");
-                }
-            }
-        }
-        TaskSubcommand::Show { id } => {
-            let task = zbobr.tasks().get_task(id).await?;
-            let discussion = zbobr.tasks().get_task_comments(id).await?;
-            print_task(&task, &discussion);
-        }
-        TaskSubcommand::Update {
-            id,
-            title,
-            description,
-            stage,
-            dest_repo,
-            dest_branch,
-            work_branch,
-            signal,
-            confirm,
-        } => {
-            let stage = stage
-                .map(|s| {
-                    Stage::from_milestone_name(&s.to_uppercase())
-                        .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", s))
-                })
-                .transpose()?;
-
-            let signal = signal
-                .map(|s| s.parse::<Signal>().context("Invalid signal"))
-                .transpose()?;
-            zbobr
-                .tasks()
-                .modify_task(
-                    id,
-                    Box::new(move |mut task| {
-                        if let Some(t) = title {
-                            task.title = t;
-                        }
-                        if let Some(d) = description {
-                            task.description = d;
-                        }
-                        if let Some(c) = confirm {
-                            task.confirm = c;
-                        }
-                        if let Some(s) = stage {
-                            if task.confirm && task.stage != s {
-                                task.pause = true;
-                            }
-                            task.stage = s;
-                        }
-
-                        if let Some(s) = signal {
-                            task.signal = Some(s);
-                        }
-                        if let Some(repo) = dest_repo {
-                            match repo {
-                                Some(repo) => {
-                                    task.parameters
-                                        .insert(Parameter::DestinationRepository, repo);
-                                }
-                                None => {
-                                    task.parameters.remove(&Parameter::DestinationRepository);
-                                }
-                            }
-                        }
-                        if let Some(branch) = dest_branch {
-                            match branch {
-                                Some(branch) => {
-                                    task.parameters.insert(Parameter::DestinationBranch, branch);
-                                }
-                                None => {
-                                    task.parameters.remove(&Parameter::DestinationBranch);
-                                }
-                            }
-                        }
-                        if let Some(branch) = work_branch {
-                            match branch {
-                                Some(branch) => {
-                                    task.parameters.insert(Parameter::WorkBranch, branch);
-                                }
-                                None => {
-                                    task.parameters.remove(&Parameter::WorkBranch);
-                                }
-                            }
-                        }
-                        if let Some(signal) = signal {
-                            task.signal = Some(signal);
-                        }
-                        task
-                    }),
-                )
-                .await?;
-            println!("Updated task #{}", id);
-        }
-        TaskSubcommand::Delete { id } => {
-            zbobr.tasks().close_task(id).await?;
-            println!("Deleted task #{}", id);
-        }
-        TaskSubcommand::Prepare { task, show_prompt } => {
-            run_role_command(
-                zbobr,
-                task,
-                Role::Preparator,
-                show_prompt,
-                prompts,
-                executor_config,
-            )
-            .await?;
-        }
-        TaskSubcommand::Plan { task, show_prompt } => {
-            run_role_command(
-                zbobr,
-                task,
-                Role::Planner,
-                show_prompt,
-                prompts,
-                executor_config,
-            )
-            .await?;
-        }
-        TaskSubcommand::Work { task, show_prompt } => {
-            run_role_command(
-                zbobr,
-                task,
-                Role::Worker,
-                show_prompt,
-                prompts,
-                executor_config,
-            )
-            .await?;
-        }
-        TaskSubcommand::Review { task, show_prompt } => {
-            run_role_command(
-                zbobr,
-                task,
-                Role::Reviewer,
-                show_prompt,
-                prompts,
-                executor_config,
-            )
-            .await?;
-        }
-        TaskSubcommand::Merge { task, show_prompt } => {
-            run_role_command(
-                zbobr,
-                task,
-                Role::Merger,
-                show_prompt,
-                prompts,
-                executor_config,
-            )
-            .await?;
-        }
-        TaskSubcommand::Process {
-            task,
-            executor_mcp_tester_preparation,
-            executor_mcp_tester_planning,
-            executor_mcp_tester_working,
-            executor_mcp_tester_reviewing,
-            executor_mcp_tester_testing,
-            executor_mcp_tester_merging,
-        } => {
-            let task_obj = zbobr.tasks().get_task(task).await?;
-            let mcp_tester_config_override = if executor_mcp_tester_preparation.is_some()
-                || executor_mcp_tester_planning.is_some()
-                || executor_mcp_tester_working.is_some()
-                || executor_mcp_tester_reviewing.is_some()
-                || executor_mcp_tester_testing.is_some()
-                || executor_mcp_tester_merging.is_some()
-            {
-                Some(ZbobrExecutorMcpTesterConfig {
-                    preparation: executor_mcp_tester_preparation,
-                    planning: executor_mcp_tester_planning,
-                    working: executor_mcp_tester_working,
-                    reviewing: executor_mcp_tester_reviewing,
-                    testing: executor_mcp_tester_testing,
-                    merging: executor_mcp_tester_merging,
-                })
-            } else {
-                None
-            };
-            let effective_executor_config = match mcp_tester_config_override {
-                Some(mcp_tester) => ZbobrExecutorConfig {
-                    mcp_tester,
-                    ..executor_config.clone()
-                },
-                None => executor_config.clone(),
-            };
-            process_task_by_stage(zbobr, &task_obj, prompts, &effective_executor_config).await?;
-        }
-        TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
-            let task = zbobr.tasks().get_task(id).await?;
-            let git_user_name = &zbobr.config().git_user_name;
-            let git_user_email = &zbobr.config().git_user_email;
-
-            // Ensure task has destination repo and branch
-            let dest_repo = task
-                .parameters
-                .get(&Parameter::DestinationRepository)
-                .ok_or_else(|| anyhow::anyhow!("Task #{} has no destination repository", id))?
-                .clone();
-
-            if dry_run {
-                println!(
-                    "Dry run: would rewrite commit authors to '{} <{}>' in repo '{}' (PR: '{}')",
-                    git_user_name, git_user_email, dest_repo, task.title
-                );
-            } else if !force {
-                println!(
-                    "This will rewrite commit authors to '{} <{}>' in repo '{}' (PR: '{}'). Continue? (yes/no)",
-                    git_user_name, git_user_email, dest_repo, task.title
-                );
-                let mut input = String::new();
-                std::io::stdin().read_line(&mut input)?;
-                if !input.trim().eq_ignore_ascii_case("yes") {
-                    println!("Cancelled");
-                    return Ok(());
-                }
-            }
-
-            let task_dir = TaskDir::new(zbobr.config().workspaces.as_path(), id);
-
-            // Derive the actual git repo directory (work_dir/<repo_name>)
-            let repo_name = std::path::Path::new(&dest_repo)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .ok_or_else(|| anyhow::anyhow!("Cannot extract repo name from: {}", dest_repo))?;
-            let repo_dir = task_dir.path().join(repo_name);
-
-            // Fetch latest to ensure we have the destination branch
-            let dest_branch = task
-                .parameters
-                .get(&Parameter::DestinationBranch)
-                .cloned()
-                .unwrap_or_else(|| "main".to_string());
-
-            // Ensure workspace exists and is set up
-            if !repo_dir.exists() {
-                return Err(anyhow::anyhow!(
-                    "Task repo not found at {}. Run 'zbobr task clone {}' first.",
-                    repo_dir.display(),
-                    id
-                ));
-            }
-
-            // Fetch the latest from remote
-            git(&repo_dir, &["fetch", "origin", &dest_branch]).await?;
-
-            // Call the rewrite_commit_authors function
-            rewrite_commit_authors(zbobr, id, &repo_dir, dry_run).await?;
-            if dry_run {
-                println!("Dry run completed. No commits were modified.");
-            } else {
-                println!("Successfully rewrote commit authors and pushed");
-            }
-        }
-    }
-    Ok(())
-}
-
-async fn run_role_command(
-    zbobr: &ZbobrDispatcher,
-    task: u64,
-    role: Role,
-    show_prompt: bool,
-    prompts: &Prompts,
-    executor_config: &ZbobrExecutorConfig,
-) -> anyhow::Result<()> {
-    let session = CliRoleRunner::new(zbobr, task, role, prompts, executor_config);
-    if show_prompt {
-        println!("{}", session.prompt().await?);
-    } else {
-        session.run().await?;
-    }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// CliRoleRunner — CLI-side role execution
-// ---------------------------------------------------------------------------
-
-struct CliRoleRunner<'a> {
-    zbobr: &'a ZbobrDispatcher,
+struct CliStageRunner<'a> {
+    zbobr: &'a Arc<ZbobrDispatcher>,
     task_id: u64,
-    role: Role,
-    prompts: &'a Prompts,
-    executor_config: &'a ZbobrExecutorConfig,
+    pipeline_name: &'a Pipeline,
+    stage_name: &'a str,
+    stage_def: &'a StageDefinition,
+    mcp_tester_override: Option<&'a ZbobrExecutorMcpTesterConfig>,
 }
 
-impl<'a> CliRoleRunner<'a> {
+impl<'a> CliStageRunner<'a> {
     fn new(
-        zbobr: &'a ZbobrDispatcher,
+        zbobr: &'a Arc<ZbobrDispatcher>,
         task_id: u64,
-        role: Role,
-        prompts: &'a Prompts,
-        executor_config: &'a ZbobrExecutorConfig,
+        pipeline_name: &'a Pipeline,
+        stage_name: &'a str,
+        stage_def: &'a StageDefinition,
+        mcp_tester_override: Option<&'a ZbobrExecutorMcpTesterConfig>,
     ) -> Self {
         Self {
             zbobr,
             task_id,
-            role,
-            prompts,
-            executor_config,
+            pipeline_name,
+            stage_name,
+            stage_def,
+            mcp_tester_override,
         }
     }
 
-    async fn prompt(&self) -> anyhow::Result<String> {
-        self.prompts
-            .build_prompt(self.role, self.task_id, self.zbobr)
+    fn running_state(&self) -> State {
+        State::running(self.pipeline_name.clone(), self.stage_name)
+    }
+
+    async fn prompt(&self, pipeline_run_id: u64) -> anyhow::Result<String> {
+        let scope = Some((self.pipeline_name.as_str(), pipeline_run_id));
+        self.zbobr
+            .prompt_builder()
+            .build_for_stage(self.stage_def, self.task_id, self.zbobr.task_backend(), scope)
             .await
     }
 
     async fn run(&self) -> anyhow::Result<()> {
-        // determine which tool and model we should use for this role/stage
-        let cli_tool = self.zbobr.config().tool_for_role(self.role);
-        // model_for_role now returns a concrete model (global or override)
-        let model = self.zbobr.config().model_for_role(self.role);
+        let role = self
+            .stage_def
+            .role_name()
+            .expect("role stage must have role");
+        let cli_tool = self
+            .zbobr
+            .config()
+            .tool_for_stage(self.stage_def, self.zbobr.workflow().config());
+        let model = self
+            .zbobr
+            .config()
+            .model_for_stage(self.stage_def, self.zbobr.workflow().config());
 
+        // Set state to running
         self.zbobr
-            .tasks()
-            .set_task_stage(self.task_id, self.role.into())
+            .task_session(self.task_id)
+            .set_state(self.running_state())
             .await?;
 
         let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), self.task_id);
         tokio::fs::create_dir_all(task_dir.path()).await?;
 
-        let (work_dir, is_uptodate) =
-            prepare_workspace(self.zbobr, self.task_id, self.role, task_dir.path()).await?;
+        // Unified worktree detection and problem handling
+        let work_dir = match detect_and_handle_worktree(
+            self.zbobr,
+            self.task_id,
+            self.pipeline_name,
+            self.stage_name,
+            task_dir.path(),
+        )
+        .await?
+        {
+            WorktreeResult::Ready(path) => path,
+            WorktreeResult::HandlerCalled | WorktreeResult::Paused => return Ok(()),
+        };
 
-        if matches!(self.role, Role::Preparator) {
-            seed_preparator_defaults(self.zbobr, self.task_id).await?;
-        } else {
-            ensure_pr_url(self.zbobr, self.task_id).await?;
+        // Ensure PR URL if identity exists
+        {
+            let task = self
+                .zbobr
+                .task_backend()
+                .get_task(self.task_id)
+                .await?
+                .snapshot(false)
+                .await?;
+            if task.identity().is_some() {
+                ensure_pr_url(self.zbobr, self.task_id).await?;
+            }
         }
 
-        // If the work branch has diverged from the base branch, defer to the
-        // Merger instead of continuing with the current role's session.
-        // The signal is NOT changed — it will be preserved through the merge
-        // and used to resume the interrupted role after the conflict is resolved.
-        if !is_uptodate && self.role != Role::Merger {
-            tracing::info!(
-                "Task #{} work branch diverged from base — setting conflict flag",
-                self.task_id
-            );
+        // Allocate pipeline run ID if this is a fresh task (run_id == 0).
+        {
             let task_session = self.zbobr.task_session(self.task_id);
-            task_session.set_conflict(true).await?;
-            task_session.set_stage(Stage::Pending).await?;
-            return Ok(());
+            let task = task_session.get_task().await?;
+            if task.pipeline_run_id == 0 {
+                task_session.allocate_pipeline_run_id().await?;
+            }
         }
 
-        // Rule 1: clear the triggering condition right before the agent session
-        // starts.
-        // For Merger: clear the conflict flag so re-entry doesn't loop.
-        //   The signal is NOT cleared — it represents the role that was
-        //   interrupted and should resume after the merge.
-        // For all other roles: clear the signal that caused entry.
-        if self.role == Role::Merger {
-            let task_session = self.zbobr.task_session(self.task_id);
-            task_session
-                .set_conflict(false)
-                .await
-                .context("Failed to clear conflict flag on Merger entry")?;
-        } else {
+        // Clear the triggering signal before the agent session starts.
+        {
             let task_session = self.zbobr.task_session(self.task_id);
             task_session
                 .set_signal(None)
@@ -855,101 +356,81 @@ impl<'a> CliRoleRunner<'a> {
                 .context("Failed to clear signal on stage entry")?;
         }
 
-        // For Merger: try a normal git merge first. If it succeeds, no need
-        // to invoke the agent — just commit the merge and return.
-        if self.role == Role::Merger {
-            let task = self.zbobr.tasks().get_task(self.task_id).await?;
-            let dest_branch = task
-                .parameters
-                .get(&Parameter::DestinationBranch)
-                .cloned()
-                .unwrap_or_else(|| "main".to_string());
-            let merged_ok = git_check(&work_dir, &["merge", &dest_branch, "--no-edit"])
-                .await
-                .context("Failed to run git merge for Merger")?;
-            if merged_ok {
-                tracing::info!(
-                    "Task #{}: normal merge with '{}' succeeded — skipping agent session",
-                    self.task_id,
-                    dest_branch
-                );
-                perform_auto_commit_and_push(self.zbobr, self.task_id, &work_dir, self.role)
-                    .await?;
-                self.zbobr
-                    .task_session(self.task_id)
-                    .set_stage(Stage::Pending)
-                    .await?;
-                return Ok(());
-            }
-            tracing::info!(
-                "Task #{}: normal merge with '{}' failed — invoking agent to resolve conflicts",
-                self.task_id,
-                dest_branch
-            );
-            // Abort the failed merge so the agent starts with a clean state
-            let _ = git(&work_dir, &["merge", "--abort"]).await;
-        }
-
-        // Pre-flight check: verify that get_history would return meaningful
-        // content.  If the latest chunk contains no actionable messages the
-        // agent session would do useless work, so bail early.
+        // Pre-flight check
         {
-            let history = self
-                .zbobr
-                .get_history(self.task_id, None)
-                .await
-                .context("Pre-flight get_history check failed")?;
-            tracing::info!(
-                "Task #{} pre-flight: get_history returned {} comment(s)",
-                self.task_id,
-                history.comments.len()
-            );
-            if history.comments.is_empty() {
+            let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
+            let task_snap = weak.snapshot(false).await?;
+            if task_snap.description.is_empty() {
                 anyhow::bail!(
-                    "Task #{} has no actionable messages in the latest chunk — nothing for the agent to do",
+                    "Task #{} has no description — nothing for the agent to do",
                     self.task_id
                 );
             }
         }
 
-        // compute tool/model early so the MCP server can record them in
-        // its session structs.  we already determined `cli_tool` and `model`
-        // above from dispatcher configuration.
-        // clone `model` because we'll still need it after the call
+        let allowed_tools: std::collections::HashSet<McpTool> = self
+            .zbobr
+            .workflow()
+            .role_definition(role)
+            .map(|d| d.mcp.iter().copied().collect())
+            .unwrap_or_else(|| {
+                // No explicit role definition — allow all tools for backward compatibility.
+                self.zbobr
+                    .workflow()
+                    .config()
+                    .all_tool_names()
+                    .into_iter()
+                    .filter_map(|name| name.parse::<McpTool>().ok())
+                    .collect()
+            });
+
+        // Read current pipeline_run_id for this session.
+        let task_snap = self
+            .zbobr
+            .task_backend()
+            .get_task(self.task_id)
+            .await?
+            .snapshot(false)
+            .await?;
+        let pipeline_run_id = task_snap.pipeline_run_id;
+
+        let tool_tracker = Arc::new(std::sync::Mutex::new(None::<String>));
+        let prompt_holder = Arc::new(std::sync::Mutex::new(None::<String>));
         let (assigned_port, server_handle) = start_mcp_server(
-            self.zbobr.clone(),
-            self.role,
+            Arc::clone(self.zbobr),
+            role,
             self.task_id,
             cli_tool,
             model.clone(),
+            self.stage_name.to_string(),
+            allowed_tools,
+            Arc::clone(&tool_tracker),
+            self.pipeline_name.to_string(),
+            pipeline_run_id,
+            Arc::clone(&prompt_holder),
         )
         .await?;
 
         let mcp_url = format!(
-            "http://127.0.0.1:{assigned_port}/{role}/{task_id}",
-            assigned_port = assigned_port,
-            role = self.role,
-            task_id = self.task_id,
+            "http://127.0.0.1:{}/{}/{}",
+            assigned_port, role, self.task_id,
         );
 
-        let prompt_text = self.prompt().await?;
-        // apply the resolved model to the executor configuration; dispatcher
-        // configuration takes precedence over whatever the executor may have
-        // been initialized with.
-        let mut exec_cfg = self.executor_config.clone();
-        match cli_tool {
-            Tool::Copilot => exec_cfg.copilot.default_model = model.clone(),
-            Tool::Claude => exec_cfg.claude.default_model = model.clone(),
-            Tool::McpTester => {
-                // mcp-tester doesn't use models; ignore
-            }
-        }
+        let prompt_text = self.prompt(pipeline_run_id).await?;
+        *prompt_holder.lock().unwrap() = Some(prompt_text.clone());
+        let executor = self
+            .zbobr
+            .build_executor(cli_tool, model.clone(), self.mcp_tester_override);
+        let copilot_token = match cli_tool {
+            Tool::Copilot => self.zbobr.copilot_github_token(),
+            _ => "",
+        };
 
-        let (execution_interrupted, execution_error) = execute_tool(
-            cli_tool,
-            &exec_cfg,
+        let outcome = execute_tool(
+            executor,
+            copilot_token,
             self.task_id,
-            self.role,
+            role,
             assigned_port,
             &prompt_text,
             &work_dir,
@@ -958,69 +439,404 @@ impl<'a> CliRoleRunner<'a> {
         )
         .await;
 
-        finalize_session(
+        // Read the last mapped tool from the shared tracker.
+        let last_mapped_tool = tool_tracker.lock().unwrap().clone();
+
+        if let Some(e) = finalize_stage_session(
             self.zbobr,
             self.task_id,
-            self.role,
+            self.pipeline_name,
+            self.stage_name,
             &work_dir,
-            execution_interrupted,
-            execution_error.as_ref(),
+            outcome,
+            last_mapped_tool.as_deref(),
         )
-        .await?;
-
-        server_handle.abort();
-        if let Some(e) = execution_error {
+        .await?
+        {
+            server_handle.abort();
             return Err(e);
         }
 
+        server_handle.abort();
+
         Ok(())
     }
+}
+
+/// Result of computing the post-stage signal in the sequential pipeline model.
+enum SequentialSignal {
+    /// `report_failure` → immediate return from pipeline.
+    ReturnFailure,
+    /// `report_success` with a next stage → advance to it.
+    Advance(String),
+    /// `report_success` at the last stage → pipeline done, return.
+    Return,
+    /// No report tool called (crash/timeout/stop_with_error) → pause.
+    Pause,
+    /// Stage-configured pause → set pause flag, emit given signal on resume.
+    PauseThenSignal(Signal),
+}
+
+/// Compute the post-execution signal for the sequential pipeline model.
+fn compute_sequential_signal(
+    pipeline_name: &Pipeline,
+    stage_name: &str,
+    stage_def: Option<&zbobr_api::config::StageDefinition>,
+    workflow: &crate::workflow::Workflow,
+    last_mapped_tool: Option<&str>,
+) -> SequentialSignal {
+    match last_mapped_tool {
+        Some("report_failure") => {
+            let transition = stage_def.and_then(|s| s.on_failure());
+            let target = transition.and_then(|t| t.next.as_ref());
+            let should_pause = transition.map_or(false, |t| t.pause);
+
+            let signal = if let Some(target) = target {
+                Signal::go(target.as_str())
+            } else {
+                Signal::ReturnFailure
+            };
+
+            if should_pause {
+                SequentialSignal::PauseThenSignal(signal)
+            } else if target.is_some() {
+                SequentialSignal::Advance(target.unwrap().to_string())
+            } else {
+                SequentialSignal::ReturnFailure
+            }
+        }
+        Some("report_success") => {
+            let transition = stage_def.and_then(|s| s.on_success());
+            let explicit_target = transition.and_then(|t| t.next.as_ref());
+            let should_pause = transition.map_or(false, |t| t.pause);
+
+            let advance_target = if let Some(target) = explicit_target {
+                Some(target.to_string())
+            } else {
+                workflow
+                    .pipeline(pipeline_name)
+                    .and_then(|p| p.next_stage(stage_name))
+                    .map(|(next, _)| next.to_string())
+            };
+
+            if should_pause {
+                let signal = match advance_target {
+                    Some(next) => Signal::go(next),
+                    None => Signal::Return,
+                };
+                SequentialSignal::PauseThenSignal(signal)
+            } else {
+                match advance_target {
+                    Some(next) => SequentialSignal::Advance(next),
+                    None => SequentialSignal::Return,
+                }
+            }
+        }
+        _ => SequentialSignal::Pause,
+    }
+}
+
+/// Result of worktree detection before a stage runs.
+enum WorktreeResult {
+    /// Worktree is ready; proceed with stage execution at this path.
+    Ready(PathBuf),
+    /// A worktree problem handler mode was called; the caller should return.
+    HandlerCalled,
+    /// The task was paused due to unresolvable worktree problem.
+    Paused,
 }
 
 // ---------------------------------------------------------------------------
 // Stage processing helpers
 // ---------------------------------------------------------------------------
 
-/// Process a task according to its current stage (single-step).
-pub async fn process_task_by_stage(
-    zbobr: &ZbobrDispatcher,
-    task: &Task,
-    prompts: &Prompts,
-    executor_config: &ZbobrExecutorConfig,
+/// Handle a stage that calls another pipeline instead of running an agent.
+///
+/// Pushes the current pipeline onto the stack with the appropriate return signal
+/// (advance to next stage or return), then emits a `call_<pipeline>` signal.
+async fn handle_call_stage(
+    zbobr: &Arc<ZbobrDispatcher>,
+    task_id: u64,
+    pipeline_name: &Pipeline,
+    stage_name: &str,
+    call_pipeline: &Pipeline,
 ) -> anyhow::Result<()> {
-    match task.stage {
-        Stage::Pending => {
-            if task.pause {
-                println!("Task #{} is PENDING (paused) — skipped", task.id);
-                return Ok(());
-            }
-            // Conflict flag takes priority: route to Merger to resolve the
-            // diverged work branch before any other role runs.
-            if task.conflict {
-                let session =
-                    CliRoleRunner::new(zbobr, task.id, Role::Merger, prompts, executor_config);
-                session.run().await?;
-            } else if let Some(signal) = task.signal {
-                let role = signal.target_role();
-                let session = CliRoleRunner::new(zbobr, task.id, role, prompts, executor_config);
-                session.run().await?;
+    let task_session = zbobr.task_session(task_id);
+
+    // Determine what signal to emit when the called pipeline returns.
+    let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
+    let return_signal = if let Some(target) = stage_def
+        .and_then(|s| s.on_success())
+        .and_then(|t| t.next.as_ref())
+    {
+        Signal::go(target.as_str())
+    } else {
+        match zbobr
+            .workflow()
+            .pipeline(pipeline_name)
+            .and_then(|p| p.next_stage(stage_name))
+        {
+            Some((next, _)) => Signal::go(next),
+            None => Signal::Return,
+        }
+    };
+
+    // Push stack so we return to the right place.
+    task_session
+        .push_stack(pipeline_name.clone(), return_signal.clone())
+        .await?;
+    task_session.allocate_pipeline_run_id().await?;
+    let call_signal = Signal::call(call_pipeline.clone());
+    task_session.set_signal(Some(call_signal.clone())).await?;
+    task_session
+        .set_state(State::pending(pipeline_name.clone()))
+        .await?;
+
+    tracing::info!(
+        "Task #{task_id}: stage {pipeline_name}/{stage_name} calling pipeline '{call_pipeline}' (return → {return_signal})"
+    );
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Centralized pause / ready handlers
+// ---------------------------------------------------------------------------
+
+/// Centralized pause handler.  Called before dispatching any task.
+///
+/// When `task.pause` is true the handler atomically:
+///   1. pushes `(pipeline, signal)` onto the task stack,
+///   2. sets state to `State::Pause`,
+///   3. clears signal and pause flag.
+///
+/// Returns `Ok(true)` when the task was paused (caller should skip it).
+async fn apply_pause_to_state(zbobr: &Arc<ZbobrDispatcher>, task: &Task) -> anyhow::Result<bool> {
+    if !task.pause {
+        return Ok(false);
+    }
+
+    if task.stack.len() > 100 {
+        anyhow::bail!(
+            "Task #{}: stack overflow (depth {})",
+            task.id,
+            task.stack.len()
+        );
+    }
+
+    let pipeline = match task.state.pipeline() {
+        Some(p) => p.clone(),
+        None => {
+            tracing::warn!(
+                "Task #{}: pause flag set but state is '{}', expected Pending — using default pipeline",
+                task.id,
+                task.state
+            );
+            zbobr.workflow().default_pipeline()
+        }
+    };
+
+    let signal = match &task.signal {
+        Some(s) => s.clone(),
+        None => {
+            tracing::warn!(
+                "Task #{}: pause flag set but no signal — defaulting to pipeline start",
+                task.id
+            );
+            let first_stage = zbobr
+                .workflow()
+                .start_stage_for_pipeline(&pipeline)
+                .map(|(name, _)| name.to_string())
+                .unwrap_or_default();
+            Signal::go(first_stage)
+        }
+    };
+
+    let task_session = zbobr.task_session(task.id);
+    task_session
+        .modify_task(move |mut t| {
+            t.stack.push(StackEntry {
+                pipeline,
+                signal,
+                pipeline_run_id: t.pipeline_run_id,
+            });
+            t.state = State::Pause;
+            t.signal = None;
+            t.pause = false;
+            t
+        })
+        .await?;
+
+    tracing::info!("Task #{}: pause applied — state set to PAUSE", task.id);
+    Ok(true)
+}
+
+/// Handle READY state by popping resume context from the stack.
+///
+/// If the task is READY with a non-empty stack, pops the top entry and
+/// sets state to `Pending(pipeline)` with the saved signal.
+///
+/// If the stack is empty, returns `false` — the existing
+/// `resolve_next_action` handles READY with empty stack by starting
+/// from the default pipeline's first stage.
+///
+/// Returns `Ok(true)` when the task state was updated.
+async fn apply_ready_from_state(zbobr: &Arc<ZbobrDispatcher>, task: &Task) -> anyhow::Result<bool> {
+    if !task.state.is_ready() {
+        return Ok(false);
+    }
+    if task.stack.is_empty() {
+        return Ok(false);
+    }
+
+    let task_session = zbobr.task_session(task.id);
+    let entry = task_session.pop_stack().await?;
+
+    if let Some(entry) = entry {
+        task_session.set_signal(Some(entry.signal.clone())).await?;
+        task_session
+            .set_state(State::pending(entry.pipeline.clone()))
+            .await?;
+        tracing::info!(
+            "Task #{}: READY with stack — restored pipeline '{}' signal '{}'",
+            task.id,
+            entry.pipeline,
+            entry.signal
+        );
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+/// Process a task according to its current state and signal (single-step).
+pub async fn process_task(
+    zbobr: &Arc<ZbobrDispatcher>,
+    task: &Task,
+    mcp_tester_override: Option<&ZbobrExecutorMcpTesterConfig>,
+) -> anyhow::Result<()> {
+    if task.state.is_done() {
+        tracing::info!("Task #{} is DONE — nothing to process", task.id);
+        return Ok(());
+    }
+
+    // Centralized pause handler: convert pause flag → PAUSE state + stack push
+    if apply_pause_to_state(zbobr, task).await? {
+        tracing::info!("Task #{} paused — state set to PAUSE", task.id);
+        return Ok(());
+    }
+
+    if task.state.is_pause() {
+        tracing::info!("Task #{} is paused — skipped", task.id);
+        return Ok(());
+    }
+
+    // Handle READY with stack (resume from pause)
+    let task = if apply_ready_from_state(zbobr, task).await? {
+        zbobr
+            .task_backend()
+            .get_task(task.id)
+            .await?
+            .snapshot(false)
+            .await?
+    } else {
+        task.clone()
+    };
+
+    // Use state machine to determine what to do
+    let action = zbobr.workflow().resolve_next_action(&task)?;
+    match action {
+        crate::workflow::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
+            if let Some(call_target) = stage_def.call_pipeline() {
+                tracing::info!(
+                    "Task #{}: entering call stage {}/{} → pipeline '{}'",
+                    task.id,
+                    pipeline_name,
+                    stage_name,
+                    call_target
+                );
+                handle_call_stage(zbobr, task.id, pipeline_name, stage_name, call_target).await?;
             } else {
-                println!("Task #{} is PENDING (no signal) — skipped", task.id);
-                return Ok(());
+                tracing::info!(
+                    "Task #{}: running stage {}/{} (role={:?})",
+                    task.id,
+                    pipeline_name,
+                    stage_name,
+                    stage_def.role_name()
+                );
+                let runner = CliStageRunner::new(
+                    zbobr,
+                    task.id,
+                    pipeline_name,
+                    stage_name,
+                    stage_def,
+                    mcp_tester_override,
+                );
+                runner.run().await?;
             }
         }
-        Stage::Preparing
-        | Stage::Planning
-        | Stage::Working
-        | Stage::Reviewing
-        | Stage::Testing
-        | Stage::Merging => {
-            let role = Role::try_from(task.stage).unwrap();
-            let session = CliRoleRunner::new(zbobr, task.id, role, prompts, executor_config);
-            session.run().await?;
+        crate::workflow::StateAction::Done => {
+            let task_session = zbobr.task_session(task.id);
+            let is_failure = task.signal.as_ref() == Some(&Signal::ReturnFailure);
+            if is_failure {
+                // Pipeline failed — return to caller or pause at root
+                if let Some(entry) = task_session.pop_stack().await? {
+                    task_session.set_signal(Some(Signal::ReturnFailure)).await?;
+                    task_session
+                        .set_state(State::pending(entry.pipeline.clone()))
+                        .await?;
+                    tracing::info!(
+                        "Task #{}: pipeline failed — returning failure to pipeline '{}'",
+                        task.id,
+                        entry.pipeline
+                    );
+                } else {
+                    let pipeline = task
+                        .state
+                        .pipeline()
+                        .cloned()
+                        .unwrap_or_else(|| zbobr.workflow().default_pipeline());
+                    let first_stage = zbobr
+                        .workflow()
+                        .start_stage_for_pipeline(&pipeline)
+                        .map(|(name, _)| name.to_string())
+                        .unwrap_or_default();
+                    task_session
+                        .modify_task(move |mut t| {
+                            t.pause = true;
+                            t.signal = Some(Signal::go(first_stage));
+                            t
+                        })
+                        .await?;
+                    tracing::info!("Task #{}: pipeline failed at root — paused", task.id);
+                }
+            } else if let Some(entry) = task_session.pop_stack().await? {
+                // Success return from sub-pipeline — re-run calling stage
+                task_session.set_signal(Some(entry.signal.clone())).await?;
+                task_session
+                    .set_state(State::pending(entry.pipeline.clone()))
+                    .await?;
+                tracing::info!(
+                    "Task #{}: returning to pipeline '{}' with signal '{}'",
+                    task.id,
+                    entry.pipeline,
+                    entry.signal
+                );
+            } else {
+                task_session.finish().await?;
+                tracing::info!("Task #{}: completed", task.id);
+            }
         }
-        Stage::Done => {
-            println!("Task #{} is DONE — nothing to process", task.id);
+        crate::workflow::StateAction::Paused => {
+            tracing::info!("Task #{}: paused — skipped", task.id);
+        }
+        crate::workflow::StateAction::Idle => {
+            tracing::info!(
+                "Task #{}: idle (state={}, signal={:?}) — skipped",
+                task.id,
+                task.state,
+                task.signal
+            );
         }
     }
     Ok(())
@@ -1028,86 +844,48 @@ pub async fn process_task_by_stage(
 
 /// Main manager loop: polls for tasks and dispatches role sessions.
 pub async fn run_manager_loop(
-    zbobr: &ZbobrDispatcher,
+    zbobr: &Arc<ZbobrDispatcher>,
     interval_secs: u64,
     cleanup_interval_secs: u64,
-    prompts: &Prompts,
-    executor_config: &ZbobrExecutorConfig,
 ) -> anyhow::Result<()> {
-    tracing::info!("Manager loop started ({})", zbobr.debug_state());
+    let task_backend = zbobr.task_backend();
+    let repo_backend = zbobr.repo_backend();
+    let prompt_builder = zbobr.prompt_builder();
+    tracing::info!(
+        "Manager loop started (task_backend: {}, repo_backend: {})",
+        task_backend.debug_state(),
+        repo_backend.debug_state()
+    );
     tracing::info!("Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s");
     tracing::info!("Global CLI Tool default: {:?}", zbobr.config().tool);
     tracing::info!("Global model default: {:?}", zbobr.config().model);
-    if let Some(ref base) = prompts.base_path {
+    if let Some(base) = prompt_builder.base_path() {
         tracing::info!("Prompts base path: {}", base.display());
     }
 
     // Dump stage-specific settings for visibility
-    for role in &[
-        Role::Preparator,
-        Role::Planner,
-        Role::Worker,
-        Role::Reviewer,
-        Role::Tester,
-        Role::Merger,
-    ] {
-        let tool = zbobr.config().tool_for_role(*role);
-        let model = zbobr.config().model_for_role(*role);
-        let stage_prompts = zbobr.config().stage_for_role(*role).prompts.clone();
-        tracing::info!(
-            "Stage {:?}: tool={:?}, model={:?}, prompt_files={:?}",
-            role,
-            tool,
-            model,
-            stage_prompts
-        );
+    let workflow = zbobr.workflow();
+    for (pipeline_name, stage_name, stage_def) in workflow.all_stages() {
+        if let Some(target) = stage_def.call_pipeline() {
+            tracing::info!("Stage {}/{}: call={}", pipeline_name, stage_name, target,);
+        } else {
+            let tool = zbobr
+                .config()
+                .tool_for_stage(stage_def, zbobr.workflow().config());
+            let model = zbobr
+                .config()
+                .model_for_stage(stage_def, zbobr.workflow().config());
+            tracing::info!(
+                "Stage {}/{}: role={:?}, tool={:?}, model={:?}, prompts={:?}",
+                pipeline_name,
+                stage_name,
+                stage_def.role_name().unwrap_or("<none>"),
+                tool,
+                model,
+                stage_def.role_prompt
+            );
+        }
     }
-
-    tracing::info!(
-        "Preparator prompt files: {}",
-        prompts
-            .preparator
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("; ")
-    );
-    tracing::info!(
-        "Planner prompt files: {}",
-        prompts
-            .planner
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("; ")
-    );
-    tracing::info!(
-        "Worker prompt files: {}",
-        prompts
-            .worker
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("; ")
-    );
-    tracing::info!(
-        "Reviewer prompt files: {}",
-        prompts
-            .reviewer
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("; ")
-    );
-    tracing::info!(
-        "Merger prompt files: {}",
-        prompts
-            .merger
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("; ")
-    );
 
     let mut last_cleanup = std::time::Instant::now();
 
@@ -1122,94 +900,252 @@ pub async fn run_manager_loop(
             last_cleanup = std::time::Instant::now();
         }
 
-        let mut pending_tasks = match zbobr.tasks().list_tasks_by_stage(Stage::Pending).await {
+        let all_weak = match task_backend.list_tasks().await {
             Ok(tasks) => tasks,
             Err(e) => {
-                tracing::error!("Failed to check PENDING tasks: {e}");
+                tracing::error!("Failed to list tasks: {e}");
                 vec![]
             }
         };
-
-        // Sort pending tasks by stage priority (closer to completion first).
-        // Conflict tasks will still take priority in the loop below since they're checked first.
-        pending_tasks.sort_by_key(|task| task.stage.priority());
+        let mut all_tasks: Vec<Task> = Vec::new();
+        for w in &all_weak {
+            match w.snapshot(false).await {
+                Ok(t) => all_tasks.push(t),
+                Err(e) => tracing::warn!("Failed to snapshot task: {e}"),
+            }
+        }
 
         let mut session_run = false;
-        for task in pending_tasks {
-            if task.pause {
+        for task in &all_tasks {
+            if task.state.is_done() {
                 continue;
             }
 
-            // Conflict flag takes priority over signals.
-            let role = if task.conflict {
-                Role::Merger
-            } else if let Some(signal) = task.signal {
-                signal.target_role()
-            } else {
+            // Centralized pause handler: convert pause flag → PAUSE state + stack push
+            match apply_pause_to_state(zbobr, task).await {
+                Ok(true) => {
+                    tracing::info!("Task #{} paused — state set to PAUSE", task.id);
+                    continue;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to apply pause for task #{}: {e}", task.id);
+                    continue;
+                }
+                _ => {}
+            }
+
+            if task.state.is_pause() {
                 continue;
+            }
+
+            // Handle READY with stack (resume from pause)
+            match apply_ready_from_state(zbobr, task).await {
+                Ok(true) => continue, // will be processed next poll cycle
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to apply ready-from-state for task #{}: {e}",
+                        task.id
+                    );
+                    continue;
+                }
+                _ => {}
+            }
+
+            let action = match workflow.resolve_next_action(task) {
+                Ok(a) => a,
+                Err(e) => {
+                    tracing::warn!("State machine error for task #{}: {e}", task.id);
+                    continue;
+                }
             };
 
-            tracing::info!(
-                "Found PENDING task #{} (conflict={}, signal={:?}) - running {:?}",
-                task.id,
-                task.conflict,
-                task.signal,
-                role
-            );
-            let session = CliRoleRunner::new(zbobr, task.id, role, prompts, executor_config);
-            if let Err(e) = session.run().await {
-                tracing::error!("{:?} session failed: {e}", role);
+            match action {
+                crate::workflow::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
+                    tracing::info!(
+                        "Processing task #{} (state={}, signal={:?}) — running stage {}/{}",
+                        task.id,
+                        task.state,
+                        task.signal,
+                        pipeline_name,
+                        stage_name,
+                    );
+                    if let Some(call_target) = stage_def.call_pipeline() {
+                        if let Err(e) = handle_call_stage(
+                            zbobr,
+                            task.id,
+                            pipeline_name,
+                            stage_name,
+                            call_target,
+                        )
+                        .await
+                        {
+                            tracing::error!(
+                                "Call stage {}/{} failed for task #{}: {e}",
+                                pipeline_name,
+                                stage_name,
+                                task.id
+                            );
+                        }
+                        // Don't break — call stages are instant, continue processing
+                        continue;
+                    }
+                    let runner = CliStageRunner::new(
+                        zbobr,
+                        task.id,
+                        pipeline_name,
+                        stage_name,
+                        stage_def,
+                        None,
+                    );
+                    if let Err(e) = runner.run().await {
+                        let msg = format!(
+                            "Stage {}/{} failed for task #{}: {e}",
+                            pipeline_name, stage_name, task.id
+                        );
+                        tracing::error!("{msg}");
+                        let hostname = get_hostname();
+                        if let Err(post_err) = zbobr
+                            .task_session(task.id)
+                            .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
+                            .await
+                        {
+                            tracing::warn!("Failed to post error to task discussion: {post_err}");
+                        }
+                    }
+                    session_run = true;
+                    break;
+                }
+                crate::workflow::StateAction::Done => {
+                    let task_session = zbobr.task_session(task.id);
+                    let is_failure = task.signal.as_ref() == Some(&Signal::ReturnFailure);
+                    if is_failure {
+                        // Pipeline failed — return to caller or pause at root
+                        match task_session.pop_stack().await {
+                            Ok(Some(entry)) => {
+                                tracing::info!(
+                                    "Task #{}: pipeline failed — returning failure to pipeline '{}'",
+                                    task.id,
+                                    entry.pipeline
+                                );
+                                if let Err(e) =
+                                    task_session.set_signal(Some(Signal::ReturnFailure)).await
+                                {
+                                    tracing::error!(
+                                        "Failed to set return_failure signal for task #{}: {e}",
+                                        task.id
+                                    );
+                                }
+                                if let Err(e) = task_session
+                                    .set_state(State::pending(entry.pipeline.clone()))
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "Failed to set return state for task #{}: {e}",
+                                        task.id
+                                    );
+                                }
+                            }
+                            Ok(None) => {
+                                tracing::info!(
+                                    "Task #{}: pipeline failed at root — paused",
+                                    task.id
+                                );
+                                let pipeline = task
+                                    .state
+                                    .pipeline()
+                                    .cloned()
+                                    .unwrap_or_else(|| zbobr.workflow().default_pipeline());
+                                let first_stage = zbobr
+                                    .workflow()
+                                    .start_stage_for_pipeline(&pipeline)
+                                    .map(|(name, _)| name.to_string())
+                                    .unwrap_or_default();
+                                if let Err(e) = task_session
+                                    .modify_task(move |mut t| {
+                                        t.pause = true;
+                                        t.signal = Some(Signal::go(first_stage));
+                                        t
+                                    })
+                                    .await
+                                {
+                                    tracing::error!("Failed to pause task #{}: {e}", task.id);
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to pop stack for task #{}: {e}", task.id)
+                            }
+                        }
+                    } else {
+                        match task_session.pop_stack().await {
+                            Ok(Some(entry)) => {
+                                // Success return from sub-pipeline — re-run calling stage
+                                tracing::info!(
+                                    "Task #{}: returning to pipeline '{}' with signal '{}'",
+                                    task.id,
+                                    entry.pipeline,
+                                    entry.signal
+                                );
+                                if let Err(e) =
+                                    task_session.set_signal(Some(entry.signal.clone())).await
+                                {
+                                    tracing::error!(
+                                        "Failed to set return signal for task #{}: {e}",
+                                        task.id
+                                    );
+                                }
+                                if let Err(e) = task_session
+                                    .set_state(State::pending(entry.pipeline.clone()))
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "Failed to set return state for task #{}: {e}",
+                                        task.id
+                                    );
+                                }
+                            }
+                            Ok(None) => {
+                                tracing::info!("Task #{}: completed", task.id);
+                                if let Err(e) = task_session.finish().await {
+                                    tracing::error!("Failed to finish task #{}: {e}", task.id);
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to pop stack for task #{}: {e}", task.id);
+                            }
+                        }
+                    }
+                }
+                crate::workflow::StateAction::Paused | crate::workflow::StateAction::Idle => {}
             }
-            session_run = true;
-            break;
         }
 
         if session_run {
             continue;
         }
 
-        let active_stages = [
-            Stage::Preparing,
-            Stage::Planning,
-            Stage::Working,
-            Stage::Reviewing,
-            Stage::Testing,
-            Stage::Merging,
-        ];
-        let mut active_counts = std::collections::HashMap::new();
-        for stage in &active_stages {
-            let count = zbobr
-                .tasks()
-                .list_tasks_by_stage(*stage)
-                .await
-                .unwrap_or_default()
-                .len();
-            active_counts.insert(stage, count);
+        // Task statistics
+        let mut state_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for task in &all_tasks {
+            *state_counts.entry(task.state.to_string()).or_default() += 1;
         }
-        tracing::info!(
-            "Task statistics: PREPARING={}, PLANNING={}, WORKING={}, REVIEWING={}, TESTING={}, MERGING={}",
-            active_counts[&Stage::Preparing],
-            active_counts[&Stage::Planning],
-            active_counts[&Stage::Working],
-            active_counts[&Stage::Reviewing],
-            active_counts[&Stage::Testing],
-            active_counts[&Stage::Merging]
-        );
+        let stats: Vec<String> = state_counts
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+        tracing::info!("Task statistics: {}", stats.join(", "));
 
         let elapsed = loop_start.elapsed();
-        let sleep_dur = std::time::Duration::from_secs(interval_secs).saturating_sub(elapsed);
-        if sleep_dur.is_zero() {
-            tracing::info!(
-                "No processable tasks. Interval already elapsed, continuing immediately."
-            );
-        } else {
-            tracing::info!("No processable tasks. Sleeping {}s...", sleep_dur.as_secs());
-            tokio::select! {
-                _ = tokio::time::sleep(sleep_dur) => {}
-                _ = tokio::signal::ctrl_c() => {
-                    tracing::info!("Received shutdown signal, exiting...");
-                    break;
-                }
+        let interval_dur = std::time::Duration::from_secs(interval_secs);
+        let min_idle_sleep = std::time::Duration::from_secs(1);
+        let sleep_dur = interval_dur.saturating_sub(elapsed).max(min_idle_sleep);
+
+        tracing::info!("No processable tasks. Sleeping {}s...", sleep_dur.as_secs());
+        tokio::select! {
+            _ = tokio::time::sleep(sleep_dur) => {}
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("Received shutdown signal, exiting...");
+                break;
             }
         }
     }
@@ -1222,84 +1158,185 @@ pub async fn run_manager_loop(
 // Low-level helpers
 // ---------------------------------------------------------------------------
 
-async fn prepare_workspace(
-    zbobr: &ZbobrDispatcher,
+/// Unified worktree detection and problem dispatch.
+///
+/// Checks whether the task has a valid identity (routing params), sets up the
+/// worktree, and attempts to merge upstream. If identity is undefined, returns
+/// the task directory as the working directory (prompt template validation will
+/// catch missing placeholders). If a merge conflict is detected, dispatches to
+/// the configured merge handler.
+async fn detect_and_handle_worktree(
+    zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
-    role: Role,
+    pipeline_name: &Pipeline,
+    stage_name: &str,
     task_dir: &Path,
-) -> anyhow::Result<(PathBuf, bool)> {
-    match role {
-        Role::Preparator => Ok((task_dir.to_path_buf(), true)),
-        Role::Merger => {
-            let task = zbobr.tasks().get_task(task_id).await?;
-            let dest_repo = task
-                .parameters
-                .get(&Parameter::DestinationRepository)
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Task #{task_id} has no destination_repository parameter")
-                })?
-                .as_str();
-            let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo);
-            Ok((task_dir.join(repo_name), true))
+) -> anyhow::Result<WorktreeResult> {
+    let task_backend = zbobr.task_backend();
+    let task = task_backend
+        .get_task(task_id)
+        .await?
+        .snapshot(false)
+        .await?;
+
+    // 1. Check if identity is defined
+    let identity = match task.identity() {
+        Some(id) => id,
+        None => {
+            // Identity not yet configured — proceed with task_dir.
+            // If the stage's prompt uses {destination_branch} or {work_branch},
+            // template rendering will catch the error before the agent starts.
+            return Ok(WorktreeResult::Ready(task_dir.to_path_buf()));
         }
-        _ => {
-            let task = zbobr.tasks().get_task(task_id).await?;
-            let dest_repo = task
-                .parameters
-                .get(&Parameter::DestinationRepository)
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Task #{task_id} has no destination_repository parameter")
-                })?
-                .clone();
-            let work_branch = task
-                .parameters
-                .get(&Parameter::WorkBranch)
-                .ok_or_else(|| anyhow::anyhow!("Task #{task_id} has no work_branch parameter"))?
-                .clone();
-            let dest_branch = task
-                .parameters
-                .get(&Parameter::DestinationBranch)
-                .cloned()
-                .unwrap_or_else(|| "main".to_string());
-            match zbobr
-                .update_worktree(&dest_repo, &dest_branch, &work_branch, task_id)
+    };
+
+    // 2. Update worktree
+    let is_uptodate = match zbobr.update_worktree(&identity).await {
+        Ok(up) => up,
+        Err(e) => {
+            let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
+            tracing::error!("{msg}");
+            let hostname = get_hostname();
+            if let Err(post_err) = zbobr
+                .task_session(task_id)
+                .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
                 .await
             {
-                Ok(is_uptodate) => {
-                    let repo_name = dest_repo.rsplit('/').next().unwrap_or(&dest_repo);
-                    let task_dir = TaskDir::new(zbobr.config().workspaces.as_path(), task_id);
-                    let path = task_dir.path().join(repo_name);
-                    Ok((path, is_uptodate))
-                }
-                Err(e) => {
-                    let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
-                    tracing::error!("{msg}");
-                    let hostname = get_hostname();
-                    if let Err(post_err) = zbobr
-                        .task_session(task_id)
-                        .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
-                        .await
-                    {
-                        tracing::warn!("Failed to post error to task discussion: {post_err}");
-                    }
-                    Err(anyhow::anyhow!(msg))
-                }
+                tracing::warn!("Failed to post error to task discussion: {post_err}");
             }
+            return Err(anyhow::anyhow!(msg));
         }
+    };
+
+    // 3. Compute work_dir from identity
+    let dest_repo = &identity.destination_repository;
+    let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo);
+    let work_dir = TaskDir::new(zbobr.config().workspaces.as_path(), task_id)
+        .path()
+        .join(repo_name);
+
+    // 4. If up-to-date, no merge needed
+    if is_uptodate {
+        return Ok(WorktreeResult::Ready(work_dir));
     }
+
+    // 5. Attempt merge
+    let dest_branch = task
+        .destination_branch
+        .clone()
+        .unwrap_or_else(|| "main".to_string());
+
+    // If we ARE the conflict handler, start the merge but don't abort on failure —
+    // the agent needs to see conflict markers in the working tree.
+    let is_conflict_handler = pipeline_name.as_str() == Pipeline::MERGE;
+
+    let merged_ok = git_check(
+        &work_dir,
+        &["merge", &format!("origin/{}", dest_branch), "--no-edit"],
+    )
+    .await
+    .context("Failed to run git merge for upstream sync")?;
+
+    if merged_ok {
+        return Ok(WorktreeResult::Ready(work_dir));
+    }
+
+    if is_conflict_handler {
+        // We're the conflict handler — leave the tree in conflicted state
+        // so the agent can resolve the merge markers.
+        tracing::info!(
+            "Task #{task_id}: merge failed inside conflict handler — agent will resolve"
+        );
+        return Ok(WorktreeResult::Ready(work_dir));
+    }
+
+    // Merge failed in a normal mode — abort and dispatch to conflict handler
+    let _ = git(&work_dir, &["merge", "--abort"]).await;
+
+    handle_merge_conflict(zbobr, task_id, pipeline_name, stage_name).await
 }
 
-async fn ensure_pr_url(zbobr: &ZbobrDispatcher, task_id: u64) -> anyhow::Result<()> {
+/// Dispatch to the merge conflict handler pipeline.
+///
+/// Pushes the current stage onto the stack and calls the merge pipeline.
+/// If already inside the merge pipeline, pauses the task.
+async fn handle_merge_conflict(
+    zbobr: &Arc<ZbobrDispatcher>,
+    task_id: u64,
+    pipeline_name: &Pipeline,
+    stage_name: &str,
+) -> anyhow::Result<WorktreeResult> {
+    let task_session = zbobr.task_session(task_id);
+    let pending_state = State::pending(pipeline_name.clone());
+
+    // Recursion guard: if already inside the merge pipeline, pause
+    if pipeline_name.as_str() == Pipeline::MERGE {
+        tracing::error!("Task #{task_id}: merge conflict inside merge pipeline — pausing");
+        let hostname = get_hostname();
+        let msg = "Merge conflict inside merge pipeline. Manual intervention required.".to_string();
+        task_session
+            .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
+            .await
+            .ok();
+        let stage = stage_name.to_string();
+        task_session
+            .modify_task(move |mut t| {
+                t.pause = true;
+                t.signal = Some(Signal::go(stage));
+                t
+            })
+            .await?;
+        task_session.set_state(pending_state.clone()).await?;
+        return Ok(WorktreeResult::Paused);
+    }
+
+    // Push stack: re-run the interrupted stage upon return
+    task_session
+        .push_stack(pipeline_name.clone(), Signal::go(stage_name))
+        .await?;
+    task_session.allocate_pipeline_run_id().await?;
+    task_session
+        .set_signal(Some(Signal::call(Pipeline::MERGE)))
+        .await?;
+    task_session.set_state(pending_state).await?;
+
+    tracing::info!("Task #{task_id}: merge conflict — calling merge pipeline");
+    Ok(WorktreeResult::HandlerCalled)
+}
+
+async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Result<()> {
     let role_session = zbobr.role_session(task_id);
-    match role_session.ensure_pr_url().await {
-        Ok(_) => Ok(()),
+    let task = role_session.get_task().await?;
+    if task.pr_url.is_some() {
+        return Ok(());
+    }
+    let identity = match task.identity() {
+        Some(id) => id,
+        None => {
+            let msg = format!(
+                "Task #{task_id} is missing routing parameters (destination_repository, destination_branch, work_branch)"
+            );
+            tracing::error!("{msg}");
+            return Err(anyhow::anyhow!(msg));
+        }
+    };
+    match zbobr.repo_backend().update_pr(&identity).await {
+        Ok(pr_url) => {
+            role_session
+                .modify_task(move |mut task| {
+                    task.pr_url = Some(pr_url);
+                    task
+                })
+                .await?;
+            Ok(())
+        }
         Err(e) => {
             let msg = format!("Could not ensure PR URL for task #{task_id}: {e}");
             tracing::error!("{msg}");
             let hostname = get_hostname();
             let task_session = zbobr.task_session(task_id);
             if let Err(post_err) = task_session
-                .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
+                .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
                 .await
             {
                 tracing::warn!("Failed to post error to task discussion: {post_err}");
@@ -1309,45 +1346,42 @@ async fn ensure_pr_url(zbobr: &ZbobrDispatcher, task_id: u64) -> anyhow::Result<
     }
 }
 
-/// Pre-populate task parameters from dispatcher config defaults before the
-/// preparator agent runs. Only sets a parameter if it is not already present,
-/// so a previously prepared task (e.g. re-run) keeps its values unchanged.
-async fn seed_preparator_defaults(zbobr: &ZbobrDispatcher, task_id: u64) -> anyhow::Result<()> {
-    let config = zbobr.config();
-    let task = zbobr.tasks().get_task(task_id).await?;
-    let role_session = zbobr.role_session(task_id);
-
-    if let Some(default_repo) = &config.default_destination_repository
-        && !task
-            .parameters
-            .contains_key(&Parameter::DestinationRepository)
-    {
-        role_session
-            .set_parameter(Parameter::DestinationRepository, Some(default_repo.clone()))
-            .await?;
-    }
-
-    if let Some(default_branch) = &config.default_destination_branch
-        && !task.parameters.contains_key(&Parameter::DestinationBranch)
-    {
-        role_session
-            .set_parameter(Parameter::DestinationBranch, Some(default_branch.clone()))
-            .await?;
-    }
-
-    Ok(())
-}
+/// Pre-populate task parameters from dispatcher config defaults.
+/// Only sets a parameter if it is not already present, so a previously
+/// prepared task keeps its values unchanged. Called unconditionally at
+/// the start of every stage run.
 
 async fn start_mcp_server(
-    zbobr: ZbobrDispatcher,
-    role: Role,
+    zbobr: Arc<ZbobrDispatcher>,
+    role_name: &str,
     task_id: u64,
     tool: Tool,
     model: Model,
+    stage_name: String,
+    allowed_tools: std::collections::HashSet<McpTool>,
+    tool_tracker: Arc<std::sync::Mutex<Option<String>>>,
+    pipeline_name: String,
+    pipeline_run_id: u64,
+    prompt_holder: Arc<std::sync::Mutex<Option<String>>>,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
+    let role_name = role_name.to_string();
     let server_handle = tokio::spawn(async move {
-        match crate::mcp::run_role_mcp_server(zbobr, role, task_id, tool, model).await {
+        match crate::mcp::run_role_mcp_server(
+            zbobr,
+            &role_name,
+            task_id,
+            tool,
+            model,
+            stage_name,
+            allowed_tools,
+            tool_tracker,
+            pipeline_name,
+            pipeline_run_id,
+            prompt_holder,
+        )
+        .await
+        {
             Ok(assigned_port) => {
                 let _ = port_tx.send(assigned_port);
                 tracing::info!("MCP server assigned port {assigned_port}");
@@ -1366,459 +1400,250 @@ async fn start_mcp_server(
     Ok((assigned_port, server_handle))
 }
 
+struct SessionOutcome {
+    execution_interrupted: bool,
+    execution_error: Option<anyhow::Error>,
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn execute_tool(
-    cli_tool: Tool,
-    executor_config: &ZbobrExecutorConfig,
+    executor: Box<dyn ToolExecutor>,
+    copilot_token: &str,
     task_id: u64,
-    role: Role,
+    role: &str,
     assigned_port: u16,
     prompt: &str,
     work_dir: &Path,
     mcp_url: &str,
     zbobr: &ZbobrDispatcher,
-) -> (bool, Option<anyhow::Error>) {
-    let executor: Box<dyn ToolExecutor> = match cli_tool {
-        Tool::Copilot => Box::new(CopilotExecutor {
-            config: executor_config.copilot.clone(),
-        }),
-        Tool::Claude => Box::new(ClaudeExecutor {
-            config: executor_config.claude.clone(),
-        }),
-        Tool::McpTester => Box::new(McpTesterExecutor {
-            config: executor_config.mcp_tester.clone(),
-        }),
-    };
+) -> SessionOutcome {
     let agent_token = &zbobr.config().agent_github_token;
-    let copilot_token = match cli_tool {
-        Tool::Copilot => &executor_config.copilot.copilot_github_token,
-        _ => "",
-    };
 
     tokio::select! {
         result = executor.execute(task_id, role, assigned_port, prompt, work_dir, mcp_url, agent_token, copilot_token) => {
             match result {
-                Ok(()) => (false, None),
+                Ok(()) => SessionOutcome {
+                    execution_interrupted: false,
+                    execution_error: None,
+                },
                 Err(e) => {
                     tracing::error!("Tool execution failed: {e}");
-                    (false, Some(e))
+                    SessionOutcome {
+                        execution_interrupted: false,
+                        execution_error: Some(e),
+                    }
                 }
             }
         }
         _ = tokio::signal::ctrl_c() => {
             tracing::warn!("Received shutdown signal during execution");
-            (true, None)
+            SessionOutcome {
+                execution_interrupted: true,
+                execution_error: None,
+            }
         }
     }
 }
 
-async fn finalize_session(
-    zbobr: &ZbobrDispatcher,
+async fn finalize_stage_session(
+    zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
-    role: Role,
+    pipeline_name: &Pipeline,
+    stage_name: &str,
     work_dir: &Path,
-    execution_interrupted: bool,
-    execution_error: Option<&anyhow::Error>,
-) -> anyhow::Result<()> {
+    outcome: SessionOutcome,
+    last_mapped_tool: Option<&str>,
+) -> anyhow::Result<Option<anyhow::Error>> {
     let task_session = zbobr.task_session(task_id);
+    let pending_state = State::pending(pipeline_name.clone());
 
-    if execution_interrupted {
-        if role == Role::Worker || role == Role::Merger {
-            if let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await {
-                tracing::warn!(
-                    "Auto-commit/push failed during interruption for task #{task_id}: {e}"
-                );
-            }
+    if outcome.execution_interrupted {
+        if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name).await {
+            tracing::warn!("Stash/push failed during interruption for task #{task_id}: {e}");
         }
-        task_session.set_stage(Stage::Pending).await?;
-        tracing::info!("Session interrupted for task #{task_id}, moved to PENDING");
-        return Ok(());
+        task_session.set_state(pending_state.clone()).await?;
+        tracing::info!("Session interrupted for task #{task_id}, moved to {pending_state}");
+        return Ok(None);
     }
 
-    if let Some(e) = execution_error {
-        if role == Role::Worker || role == Role::Merger {
-            if let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await {
-                tracing::warn!(
-                    "Auto-commit/push failed during error handling for task #{task_id}: {e}"
-                );
-            }
+    if let Some(e) = outcome.execution_error.as_ref() {
+        if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name).await {
+            tracing::warn!("Stash/push failed during error handling for task #{task_id}: {e}");
         }
         let error_msg = format!("Execution failed: {e}");
         let hostname = get_hostname();
         if let Err(post_err) = task_session
-            .post_comment(CommentType::Error, &error_msg, None, &hostname, None, None)
+            .post_comment(
+                "error", &hostname, None, None, &error_msg, "", 0, None, None,
+            )
             .await
         {
             tracing::error!("Failed to post error to task #{task_id}: {post_err}");
         }
+        let stage = stage_name.to_string();
         if let Err(pause_err) = task_session
-            .modify_task(|task| {
+            .modify_task(move |mut task| {
                 task.pause = true;
+                task.signal = Some(Signal::go(stage));
+                task
             })
             .await
         {
             tracing::error!("Failed to set pause for task #{task_id}: {pause_err}");
         }
-        task_session.set_stage(Stage::Pending).await?;
-        tracing::info!("Session failed for task #{task_id}, moved to PENDING with pause");
-        return Ok(());
+        task_session.set_state(pending_state.clone()).await?;
+        tracing::info!("Session failed for task #{task_id}, moved to {pending_state} with pause");
+        return Ok(outcome.execution_error);
     }
 
     tracing::info!("Session complete for task #{task_id}");
 
-    if (role == Role::Worker || role == Role::Merger)
-        && let Err(e) = perform_auto_commit_and_push(zbobr, task_id, work_dir, role).await
-    {
-        tracing::error!("Auto-commit/push failed for task #{task_id}: {e}");
+    if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name).await {
+        tracing::error!("Stash/push failed for task #{task_id}: {e}");
         let hostname = get_hostname();
-        let msg = format!("Auto-commit/push failed: {e}");
+        let msg = format!("Stash/push failed: {e}");
         if let Err(post_err) = task_session
-            .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
+            .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
             .await
         {
-            tracing::error!(
-                "Failed to post auto-commit/push error for task #{task_id}: {post_err}"
-            );
+            tracing::error!("Failed to post stash/push error for task #{task_id}: {post_err}");
         }
+        let stage = stage_name.to_string();
         if let Err(pause_err) = task_session
-            .modify_task(|task| {
+            .modify_task(move |mut task| {
                 task.pause = true;
+                task.signal = Some(Signal::go(stage));
+                task
             })
             .await
         {
             tracing::error!(
-                "Failed to pause task #{task_id} after auto-commit/push failure: {pause_err}"
+                "Failed to pause task #{task_id} after stash/push failure: {pause_err}"
             );
         }
-        task_session.set_stage(Stage::Pending).await?;
-        return Ok(());
+        task_session.set_state(pending_state.clone()).await?;
+        return Ok(None);
     }
 
-    let current_task = zbobr.tasks().get_task(task_id).await?;
-    let has_unchecked = current_task.checklist.iter().any(|i| !i.checked);
-    match role {
-        Role::Preparator => {
-            if current_task.signal.is_none() && !current_task.pause {
-                task_session.set_signal(Some(Signal::GoPlan)).await?;
+    // Compute post-stage signal using the sequential pipeline model.
+    // If the agent already set a signal during the session (e.g. stop_with_error),
+    // that signal takes priority.
+    let current_task = zbobr
+        .task_backend()
+        .get_task(task_id)
+        .await?
+        .snapshot(false)
+        .await?;
+    if !current_task.pause && current_task.signal.is_none() {
+        let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
+        let seq_signal = compute_sequential_signal(
+            pipeline_name,
+            stage_name,
+            stage_def,
+            zbobr.workflow(),
+            last_mapped_tool,
+        );
+        match seq_signal {
+            SequentialSignal::ReturnFailure => {
+                task_session.set_signal(Some(Signal::ReturnFailure)).await?;
             }
-            task_session.set_stage(Stage::Pending).await?;
-        }
-        Role::Planner => {
-            if current_task.signal.is_none() && !current_task.pause {
-                task_session.set_signal(Some(Signal::GoWork)).await?;
+            SequentialSignal::Advance(next) => {
+                task_session.set_signal(Some(Signal::go(next))).await?;
             }
-            task_session.set_stage(Stage::Pending).await?;
-        }
-        Role::Worker => {
-            if current_task.signal.is_none() && !current_task.pause {
-                if has_unchecked {
-                    task_session.set_signal(Some(Signal::GoWork)).await?;
-                } else {
-                    task_session.set_signal(Some(Signal::GoReview)).await?;
-                }
+            SequentialSignal::Return => {
+                task_session.set_signal(Some(Signal::Return)).await?;
             }
-            task_session.set_stage(Stage::Pending).await?;
-        }
-        Role::Reviewer => {
-            // Routing is driven by the signal set during the session:
-            //   None (review_accept called)  → route to tester
-            //   GoPlan (review_reject called) → route back to planner
-            //   GoReview (report_error)        → preserved as-is (task paused)
-            if !current_task.pause && current_task.signal.is_none() {
-                task_session.set_signal(Some(Signal::GoTest)).await?;
-            }
-            task_session.set_stage(Stage::Pending).await?;
-        }
-        Role::Tester => {
-            // Routing is driven by the signal set during the session:
-            //   None (test_accept called)  → mark task done
-            //   GoPlan (test_reject called) → route back to planner
-            //   GoTest (report_error)       → preserved as-is (task paused)
-            if !current_task.pause && current_task.signal.is_none() {
-                task_session.finish().await?;
-                return Ok(());
-            }
-            task_session.set_stage(Stage::Pending).await?;
-        }
-        Role::Merger => {
-            // The agent was invoked because a normal merge failed.
-            // Retry the merge to verify the agent actually resolved the conflict.
-            // If it still fails, pause the task and report to avoid an infinite loop.
-            let dest_branch = zbobr
-                .tasks()
-                .get_task(task_id)
-                .await?
-                .parameters
-                .get(&Parameter::DestinationBranch)
-                .cloned()
-                .unwrap_or_else(|| "main".to_string());
-            let merged_ok = git_check(work_dir, &["merge", &dest_branch, "--no-edit"])
-                .await
-                .context("Failed to run git merge verification after Merger session")?;
-            if !merged_ok {
-                // Merger did not fix the conflict — abort the leftover merge state,
-                // report the failure, and pause to avoid an infinite retry loop.
-                let _ = git(work_dir, &["merge", "--abort"]).await;
-                let msg = format!(
-                    "Merger failed to resolve merge conflict with branch '{dest_branch}'. \
-                     Manual intervention required."
-                );
-                tracing::error!("task #{task_id}: {msg}");
-                let hostname = get_hostname();
-                if let Err(e) = task_session
-                    .post_comment(CommentType::Error, &msg, None, &hostname, None, None)
-                    .await
-                {
-                    tracing::warn!(
-                        "Failed to post merger-failure comment for task #{task_id}: {e}"
-                    );
-                }
-                if let Err(e) = task_session
-                    .modify_task(|task| {
-                        task.pause = true;
+            SequentialSignal::Pause => {
+                let stage = stage_name.to_string();
+                task_session
+                    .modify_task(move |mut t| {
+                        t.pause = true;
+                        t.signal = Some(Signal::go(stage));
+                        t
                     })
-                    .await
-                {
-                    tracing::warn!("Failed to pause task #{task_id} after merger failure: {e}");
-                }
+                    .await?;
             }
-            // Return to Pending; any signal set before/during the session is preserved.
-            task_session.set_stage(Stage::Pending).await?;
+            SequentialSignal::PauseThenSignal(signal) => {
+                task_session
+                    .modify_task(move |mut t| {
+                        t.pause = true;
+                        t.signal = Some(signal);
+                        t
+                    })
+                    .await?;
+            }
         }
     }
+    // If pause was set by MCP tool (e.g. stop_with_error) but no signal, set
+    // signal to re-run the current stage on resume.
+    if current_task.pause && current_task.signal.is_none() {
+        task_session
+            .set_signal(Some(Signal::go(stage_name)))
+            .await?;
+    }
+    task_session.set_state(pending_state).await?;
 
-    Ok(())
+    Ok(None)
 }
 
-async fn perform_auto_commit_and_push(
-    zbobr: &ZbobrDispatcher,
+async fn perform_stash_and_push(
+    zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
     work_dir: &Path,
-    role: Role,
+    role: &str,
 ) -> anyhow::Result<()> {
+    let task_backend = zbobr.task_backend();
+    let repo_backend = zbobr.repo_backend();
     tracing::info!("Checking for uncommitted changes in {}", work_dir.display());
 
     match git_output(work_dir, &["status", "--porcelain"]).await {
         Ok(status) => {
             if !status.is_empty() {
-                tracing::info!("Found uncommitted changes, auto-committing...");
-                if let Err(e) = git(work_dir, &["add", "."]).await {
-                    tracing::warn!("Failed to stage changes for auto-commit: {e}");
-                }
-                let commit_msg = format!("Auto-commit by {} agent", role.as_str());
-                match git(work_dir, &["commit", "-m", &commit_msg]).await {
-                    Ok(_) => tracing::info!("Auto-commit successful"),
-                    Err(e) => tracing::warn!("Auto-commit failed: {e}"),
+                let stash_msg = format!("Stashed by {} agent for task #{}", role, task_id);
+                tracing::info!("Found uncommitted changes, stashing...");
+                match git(
+                    work_dir,
+                    &["stash", "push", "--include-untracked", "-m", &stash_msg],
+                )
+                .await
+                {
+                    Ok(_) => tracing::info!("Git stash successful"),
+                    Err(e) => tracing::warn!("Git stash failed: {e}"),
                 }
             } else {
                 tracing::info!("No uncommitted changes found");
             }
         }
-        Err(e) => tracing::warn!("Failed to check git status for auto-commit: {e}"),
+        Err(e) => tracing::warn!("Failed to check git status for stash: {e}"),
     }
 
-    let role_session = zbobr.task_session(task_id).role_session();
-    if let Err(e) = role_session.update_pr().await {
-        tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
-    }
-
-    if zbobr.config().overwrite_author {
-        rewrite_commit_authors(zbobr, task_id, work_dir, false).await?;
-    }
-
-    Ok(())
-}
-
-async fn rewrite_commit_authors(
-    zbobr: &ZbobrDispatcher,
-    task_id: u64,
-    work_dir: &Path,
-    dry_run: bool,
-) -> anyhow::Result<()> {
-    let task = zbobr.tasks().get_task(task_id).await?;
-    let dest_branch = task
-        .parameters
-        .get(&Parameter::DestinationBranch)
-        .cloned()
-        .unwrap_or_else(|| "main".to_string());
-
-    let git_user_name = &zbobr.config().git_user_name;
-    let git_user_email = &zbobr.config().git_user_email;
-
-    // Get absolute path to the git repository
-    let git_root = git_output(work_dir, &["rev-parse", "--show-toplevel"]).await?;
-    let git_root_path = std::path::PathBuf::from(&git_root);
-
-    // Get list of commits that will be rewritten
-    let log_output = git_output(
-        &git_root_path,
-        &[
-            "log",
-            &format!("{}..HEAD", dest_branch),
-            "--format=%H %an <%ae>",
-        ],
-    )
-    .await?;
-
-    let commits_to_rewrite = log_output
-        .lines()
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>();
-    println!("Commits to be rewritten ({}):", commits_to_rewrite.len());
-    for commit in &commits_to_rewrite {
-        println!("  {}", commit);
-    }
-
-    if dry_run {
-        println!(
-            "\n[DRY-RUN] Skipping actual rebase. These commits would be rewritten with author: {} <{}>",
-            git_user_name, git_user_email
-        );
-        return Ok(());
-    }
-
-    // configure git user locally using helper
-    configure_git_user(&git_root_path, git_user_name, git_user_email).await?;
-
-    // Use git filter-branch to rewrite author/committer in-place.
-    // Unlike rebase --exec, this does not replay changes so it cannot
-    // produce merge conflicts.
-    let filter_cmd = format!(
-        "git filter-branch -f --env-filter '\
-            export GIT_AUTHOR_NAME=\"{name}\";\
-            export GIT_AUTHOR_EMAIL=\"{email}\";\
-            export GIT_COMMITTER_NAME=\"{name}\";\
-            export GIT_COMMITTER_EMAIL=\"{email}\";\
-        ' '{dest}'..HEAD",
-        name = git_user_name,
-        email = git_user_email,
-        dest = dest_branch,
-    );
-    let filter_output = TokioCommand::new("sh")
-        .arg("-c")
-        .arg(&filter_cmd)
-        .current_dir(&git_root_path)
-        .output()
-        .await;
-    match filter_output {
-        Ok(output) if output.status.success() => {
-            println!("Successfully rewrote commit authors");
-
-            // Show post-rebase log to verify changes
-            if let Ok(updated_commits) = git_output(
-                &git_root_path,
-                &[
-                    "log",
-                    &format!("{}..HEAD", dest_branch),
-                    "--format=%H %an <%ae>",
-                ],
+    let task = task_backend
+        .get_task(task_id)
+        .await?
+        .snapshot(false)
+        .await?;
+    if let Some(identity) = task.identity() {
+        if let Err(e) = repo_backend.update_pr(&identity).await {
+            tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
+        }
+        let config = zbobr.config();
+        if config.overwrite_author {
+            let dest_branch = identity.destination_branch.clone();
+            zbobr_utility::rewrite_authors_on_worktree(
+                work_dir,
+                &dest_branch,
+                &config.git_user_name,
+                &config.git_user_email,
             )
-            .await
-            {
-                println!("Updated commits:");
-                for commit in updated_commits.lines() {
-                    println!("  {}", commit);
-                }
-            }
-
-            if let Err(e) = zbobr.task_session(task_id).role_session().update_pr().await {
+            .await?;
+            // Push rewritten commits
+            if let Err(e) = repo_backend.update_pr(&identity).await {
                 tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
             }
         }
-        Ok(output) => {
-            return Err(anyhow::anyhow!(
-                "Failed to rewrite commit authors: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-        Err(e) => {
-            return Err(anyhow::anyhow!(
-                "Error running git filter-branch for author rewriting: {}",
-                e
-            ));
-        }
+    } else {
+        tracing::warn!("Task #{task_id} missing routing parameters — skipping push");
     }
 
     Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// run_zbobr
-// ---------------------------------------------------------------------------
-
-/// Standard entry point for a Zbobr CLI application.
-///
-/// The `build_backends` closure receives the resolved task and repo config
-/// and maps them into concrete backend instances — this is where the binary
-/// selects which sub-backend to use (e.g. `.github` vs `.fs`).
-use zbobr_api::CommentTag;
-
-pub async fn run_zbobr<F>(
-    app_name: &'static str,
-    app_about: &'static str,
-    app_long_about: &'static str,
-    default_config_name: &'static str,
-    build_backends: F,
-) -> anyhow::Result<()>
-where
-    F: FnOnce(
-        crate::config::ZbobrTaskBackendConfig,
-        crate::config::ZbobrRepoBackendConfig,
-        &crate::config::ZbobrDispatcherConfig,
-    ) -> anyhow::Result<(
-        std::sync::Arc<dyn crate::backend::TaskBackend>,
-        std::sync::Arc<dyn crate::backend::WorktreeBackend>,
-    )>,
-{
-    type TC = crate::config::ZbobrTaskBackendConfig;
-    type RC = crate::config::ZbobrRepoBackendConfig;
-
-    let cli: GenericCli<
-        <TC as zbobr_api::config::Config>::Args,
-        <RC as zbobr_api::config::Config>::Args,
-    > = parse_cli(app_name, app_about, app_long_about);
-
-    let config_path = cli
-        .config_file
-        .path
-        .clone()
-        .unwrap_or_else(|| default_config_name.into());
-
-    let config_dir = if cli.config_file.path.is_some() {
-        std::fs::canonicalize(&config_path)
-            .context(format!(
-                "Cannot resolve config path: {}",
-                config_path.display()
-            ))?
-            .parent()
-            .expect("config file must have a parent directory")
-            .to_path_buf()
-    } else {
-        std::env::current_dir()?
-    };
-
-    let root_toml = crate::GenericConfigToml::<TC, RC>::load(&config_path)
-        .with_context(|| format!("Config file: {}", config_path.display()))?;
-    let config =
-        crate::GenericConfig::<TC, RC>::build(root_toml, cli.settings.clone(), &config_dir);
-    config
-        .dispatcher
-        .validate()
-        .with_context(|| format!("Config file: {}", config_path.display()))?;
-    let executor_config = config.executor.clone();
-
-    let (task_backend, repo_backend) =
-        build_backends(config.tasks, config.repo, &config.dispatcher)?;
-
-    let zbobr = crate::ZbobrDispatcher::new_with_backends(
-        config.dispatcher.clone(),
-        task_backend,
-        repo_backend,
-    );
-    zbobr.validate_connectivity().await?;
-
-    let prompts = crate::prompts::resolve_prompts(&cli.settings.dispatcher, zbobr.config());
-    crate::prompts::validate_prompts(&prompts)?;
-
-    run_command(zbobr, cli.command, &prompts, &executor_config).await
 }

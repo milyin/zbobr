@@ -1,12 +1,16 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tokio::fs;
+use tokio::{
+    fs,
+    sync::{Mutex, OwnedMutexGuard},
+};
 use zbobr_api::{
-    ChecklistItem, Comment, CommentType, Model, Parameter, Role, Stage, Task, Tool,
-    backend::TaskBackend,
+    ChecklistItem, Comment, Model, Signal, StackEntry, State, Task, Tool,
+    backend::{TaskBackend, TaskMut, TaskWeak},
+    comment_tag,
 };
 
 use crate::config::ZbobrTaskBackendFsConfig;
@@ -17,55 +21,65 @@ struct TaskFile {
     id: u64,
     title: String,
     description: String,
-    stage: String,
+    /// Task state string (e.g. "READY", "main_PENDING", "main_working", "DONE")
+    #[serde(default)]
+    state: String,
+    /// Legacy field — migrated to `state` on read.
+    #[serde(default)]
+    stage: Option<String>,
+
+    // First-class routing fields (promoted from parameters)
+    #[serde(default)]
+    destination_repository: Option<String>,
+    #[serde(default)]
+    destination_branch: Option<String>,
+    #[serde(default)]
+    work_branch: Option<String>,
 
     parameters: HashMap<String, String>,
-    #[serde(default)]
-    conflict: bool,
     #[serde(default)]
     pause: bool,
     #[serde(default)]
     confirm: bool,
     checklist: Vec<ChecklistItem>,
-    signal: Option<String>,
+    signal: Option<Signal>,
+    #[serde(default)]
+    stack: Vec<StackEntry>,
+    #[serde(default)]
+    pipeline_run_id: u64,
     closed: bool,
 }
 
 impl TaskFile {
     fn to_task(&self) -> anyhow::Result<Task> {
-        let stage = Stage::from_milestone_name(&self.stage)
-            .ok_or_else(|| anyhow::anyhow!("Invalid stage: {}", self.stage))?;
+        // Migrate legacy `stage` field to `state` if present
+        let state = if self.state.is_empty() {
+            if let Some(ref stage) = self.stage {
+                stage.clone()
+            } else {
+                String::new()
+            }
+        } else {
+            self.state.clone()
+        };
 
-        let signal = self.signal.as_ref().map(|s| s.parse()).transpose()?;
-
-        let parameters: Result<HashMap<Parameter, String>, String> = self
-            .parameters
-            .iter()
-            .map(|(k, v)| {
-                let param = match k.as_str() {
-                    "destination_repository" => Ok(Parameter::DestinationRepository),
-                    "destination_branch" => Ok(Parameter::DestinationBranch),
-                    "work_branch" => Ok(Parameter::WorkBranch),
-                    "pr_url" => Ok(Parameter::PrUrl),
-                    _ => Err(format!("Unknown parameter: {}", k)),
-                }?;
-                Ok((param, v.clone()))
-            })
-            .collect();
-        let parameters = parameters.map_err(|e| anyhow::anyhow!(e))?;
+        let pr_url = self.parameters.get("pr_url").cloned();
 
         Ok(Task {
             id: self.id,
             title: self.title.clone(),
             description: self.description.clone(),
-            stage,
-
-            parameters,
+            state: state.into(),
+            destination_repository: self.destination_repository.clone(),
+            destination_branch: self.destination_branch.clone(),
+            work_branch: self.work_branch.clone(),
+            pr_url,
             checklist: self.checklist.clone(),
-            signal,
-            conflict: self.conflict,
+            signal: self.signal.clone(),
+            stack: self.stack.clone(),
             pause: self.pause,
             confirm: self.confirm,
+            pipeline_run_id: self.pipeline_run_id,
             etag: None,
         })
     }
@@ -75,31 +89,29 @@ impl TaskFile {
             id: task.id,
             title: task.title.clone(),
             description: task.description.clone(),
-            stage: task.stage.milestone_name().to_string(),
-
-            parameters: task
-                .parameters
-                .iter()
-                .map(|(k, v)| (k.name().to_string(), v.clone()))
-                .collect(),
-            conflict: task.conflict,
+            state: task.state.to_string(),
+            stage: None,
+            destination_repository: task.destination_repository.clone(),
+            destination_branch: task.destination_branch.clone(),
+            work_branch: task.work_branch.clone(),
+            parameters: {
+                let mut p = HashMap::new();
+                if let Some(ref url) = task.pr_url {
+                    p.insert("pr_url".to_string(), url.clone());
+                }
+                p
+            },
             pause: task.pause,
             confirm: task.confirm,
             checklist: task.checklist.clone(),
-            signal: task.signal.map(|s| s.name().to_string()),
+            signal: task.signal.clone(),
+            stack: task.stack.clone(),
+            pipeline_run_id: task.pipeline_run_id,
             closed,
         }
     }
 }
 
-/// Parse tag from comment start: `// REPORT role:host:model`,
-/// `// ERROR role:host[:<model>]`, or `// REQUEST [role:host[:model]]`.
-/// Returns (CommentType, role, host, model_opt, remaining_text).
-///
-/// The behaviour is intentionally lenient because user-written requests may
-/// omit the tag entirely; in that case we default the role to `Role::User` so
-/// that downstream code can annotate the request origin.
-///
 /// Comments storage structure - stores structured comments as YAML.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct CommentsFile {
@@ -109,6 +121,8 @@ struct CommentsFile {
 /// Filesystem-based task backend.
 pub struct ZbobrTaskBackendFs {
     config: ZbobrTaskBackendFsConfig,
+    /// Per-task locks for exclusive access.
+    locks: Mutex<HashMap<u64, Arc<Mutex<()>>>>,
 }
 
 impl ZbobrTaskBackendFs {
@@ -124,7 +138,10 @@ impl ZbobrTaskBackendFs {
 
     pub fn from_config(config: ZbobrTaskBackendFsConfig) -> anyhow::Result<Self> {
         config.validate()?;
-        Ok(Self { config })
+        Ok(Self {
+            config,
+            locks: Mutex::new(HashMap::new()),
+        })
     }
 
     /// Get the path to a task file.
@@ -142,22 +159,28 @@ impl ZbobrTaskBackendFs {
         self.config.tasks_dir.join("next_id.txt")
     }
 
+    /// Get or create a per-task lock.
+    async fn task_lock(&self, id: u64) -> Arc<Mutex<()>> {
+        let mut locks = self.locks.lock().await;
+        locks
+            .entry(id)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
     /// Read and increment the next task ID counter.
     async fn get_next_id(&self) -> anyhow::Result<u64> {
         let path = self.next_id_path();
 
-        // Ensure the tasks directory exists
         fs::create_dir_all(&self.config.tasks_dir)
             .await
             .context("Failed to create tasks directory")?;
 
-        // Read current ID or start at 1
         let current_id = match fs::read_to_string(&path).await {
             Ok(content) => content.trim().parse::<u64>().unwrap_or(1),
             Err(_) => 1,
         };
 
-        // Write next ID
         let next_id = current_id + 1;
         fs::write(&path, next_id.to_string())
             .await
@@ -180,7 +203,6 @@ impl ZbobrTaskBackendFs {
     async fn write_task_file(&self, task_file: &TaskFile) -> anyhow::Result<()> {
         let path = self.task_path(task_file.id);
 
-        // Ensure directory exists
         fs::create_dir_all(&self.config.tasks_dir)
             .await
             .context("Failed to create tasks directory")?;
@@ -201,7 +223,7 @@ impl ZbobrTaskBackendFs {
                     serde_yaml::from_str(&content).context("Failed to parse comments file")?;
                 Ok(comments_file.comments)
             }
-            Err(_) => Ok(vec![]), // No comments file yet
+            Err(_) => Ok(vec![]),
         }
     }
 
@@ -221,11 +243,61 @@ impl ZbobrTaskBackendFs {
             .context("Failed to write comments file")
     }
 
+    /// Get the reports directory for a task.
+    fn reports_dir(&self, task_id: u64) -> PathBuf {
+        self.config
+            .tasks_dir
+            .join("reports")
+            .join(format!("task_{task_id}"))
+    }
+
+    /// Store a report file, deduplicating with `_N` suffix if needed.
+    /// Returns the actual filename (without directory prefix).
+    async fn store_report(
+        &self,
+        task_id: u64,
+        base_name: &str,
+        content: &str,
+    ) -> anyhow::Result<String> {
+        let dir = self.reports_dir(task_id);
+        fs::create_dir_all(&dir)
+            .await
+            .context("Failed to create reports directory")?;
+
+        let mut n = 0u32;
+        let filename = loop {
+            let candidate = if n == 0 {
+                format!("{base_name}.md")
+            } else {
+                format!("{base_name}_{n}.md")
+            };
+            if !dir.join(&candidate).exists() {
+                break candidate;
+            }
+            n += 1;
+        };
+
+        fs::write(dir.join(&filename), content)
+            .await
+            .context("Failed to write report file")?;
+
+        tracing::debug!("Stored report for task {task_id}: {filename}");
+        Ok(filename)
+    }
+
+    /// Read a report file by exact name.
+    async fn read_report(&self, task_id: u64, name: &str) -> anyhow::Result<String> {
+        anyhow::ensure!(!name.contains(".."), "Invalid report name: {name}");
+        let path = self.reports_dir(task_id).join(name);
+        fs::read_to_string(&path)
+            .await
+            .with_context(|| format!("Failed to read report file '{name}' for task {task_id}"))
+    }
+
     /// List all task files in the directory.
     async fn list_task_files(&self) -> anyhow::Result<Vec<u64>> {
         let mut task_ids = Vec::new();
 
-        // Check if directory exists
         if !self.config.tasks_dir.exists() {
             return Ok(task_ids);
         }
@@ -241,7 +313,6 @@ impl ZbobrTaskBackendFs {
         {
             let path = entry.path();
             if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
-                // Match files like "123.yaml" but not "123.comments.yaml"
                 if filename.ends_with(".yaml")
                     && !filename.contains(".comments.")
                     && let Some(id_str) = filename.strip_suffix(".yaml")
@@ -254,22 +325,199 @@ impl ZbobrTaskBackendFs {
 
         Ok(task_ids)
     }
+
+    /// Read a task from disk (internal, returns Task directly).
+    async fn read_task(&self, id: u64) -> anyhow::Result<Task> {
+        let task_file = self.read_task_file(id).await?;
+        task_file.to_task()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FsTaskWeak — read-only handle
+// ---------------------------------------------------------------------------
+
+struct FsTaskWeak {
+    id: u64,
+    backend: Arc<ZbobrTaskBackendFs>,
+    saved_snapshot: Arc<std::sync::Mutex<Option<Task>>>,
+}
+
+#[async_trait]
+impl TaskWeak for FsTaskWeak {
+    fn task_id(&self) -> u64 {
+        self.id
+    }
+
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task> {
+        if !refresh && let Some(task) = self.saved_snapshot.lock().unwrap().clone() {
+            return Ok(task);
+        }
+
+        let task = self.backend.read_task(self.id).await?;
+        *self.saved_snapshot.lock().unwrap() = Some(task.clone());
+        Ok(task)
+    }
+
+    async fn upgrade(&self) -> anyhow::Result<Box<dyn TaskMut>> {
+        let lock = self.backend.task_lock(self.id).await;
+        let guard = lock.lock_owned().await;
+        Ok(Box::new(FsTaskMut {
+            id: self.id,
+            backend: self.backend.clone(),
+            saved_snapshot: self.saved_snapshot.clone(),
+            _guard: guard,
+        }))
+    }
+
+    async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
+        self.backend.read_comments_structured(self.id).await
+    }
+
+    async fn read_report(&self, name: &str) -> anyhow::Result<String> {
+        self.backend.read_report(self.id, name).await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FsTaskMut — exclusive mutable handle
+// ---------------------------------------------------------------------------
+
+struct FsTaskMut {
+    id: u64,
+    backend: Arc<ZbobrTaskBackendFs>,
+    saved_snapshot: Arc<std::sync::Mutex<Option<Task>>>,
+    _guard: OwnedMutexGuard<()>,
+}
+
+#[async_trait]
+impl TaskMut for FsTaskMut {
+    fn task_id(&self) -> u64 {
+        self.id
+    }
+
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task> {
+        if !refresh && let Some(task) = self.saved_snapshot.lock().unwrap().clone() {
+            return Ok(task);
+        }
+
+        let task = self.backend.read_task(self.id).await?;
+        *self.saved_snapshot.lock().unwrap() = Some(task.clone());
+        Ok(task)
+    }
+
+    async fn modify_task(
+        &self,
+        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
+    ) -> anyhow::Result<()> {
+        let task_file = self.backend.read_task_file(self.id).await?;
+        let was_closed = task_file.closed;
+
+        let task = self.backend.read_task(self.id).await?;
+        let task = mutate(task);
+
+        let task_file = TaskFile::from_task(&task, was_closed);
+        self.backend.write_task_file(&task_file).await?;
+        *self.saved_snapshot.lock().unwrap() = Some(task);
+
+        tracing::debug!("Modified task {}", self.id);
+        Ok(())
+    }
+
+    async fn close(&self) -> anyhow::Result<()> {
+        let mut task_file = self.backend.read_task_file(self.id).await?;
+        task_file.closed = true;
+        self.backend.write_task_file(&task_file).await?;
+        self.saved_snapshot.lock().unwrap().take();
+
+        tracing::info!("Closed task {}", self.id);
+        Ok(())
+    }
+
+    async fn post_comment(
+        &self,
+        stage: &str,
+        hostname: &str,
+        tool: Option<Tool>,
+        model: Option<Model>,
+        body: &str,
+        pipeline: &str,
+        pipeline_run_id: u64,
+        caller_pipeline: Option<&str>,
+        caller_pipeline_run_id: Option<u64>,
+        report_text: Option<&str>,
+        prompt_text: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let tag = comment_tag(body);
+        let report_name = if let Some(text) = report_text {
+            let base_name = format!("report_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
+            Some(self.backend.store_report(self.id, &base_name, text).await?)
+        } else {
+            None
+        };
+
+        let prompt_name = if let Some(text) = prompt_text {
+            let base_name = format!("prompt_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
+            Some(self.backend.store_report(self.id, &base_name, text).await?)
+        } else {
+            None
+        };
+
+        let mut comments = self.backend.read_comments_structured(self.id).await?;
+
+        let new_comment = Comment {
+            timestamp: format!("{:?}", std::time::SystemTime::now()),
+            stage: stage.to_string(),
+            hostname: hostname.to_string(),
+            tool,
+            model,
+            text: body.to_string(),
+            pipeline: pipeline.to_string(),
+            pipeline_run_id,
+            caller_pipeline: caller_pipeline.map(str::to_string),
+            caller_pipeline_run_id,
+            report_name,
+            prompt_name,
+        };
+
+        comments.push(new_comment);
+        self.backend
+            .write_comments_structured(self.id, comments)
+            .await?;
+
+        tracing::debug!("Posted structured comment to task {}", self.id);
+        Ok(())
+    }
+
+    fn downgrade(self: Box<Self>) -> Box<dyn TaskWeak> {
+        Box::new(FsTaskWeak {
+            id: self.id,
+            backend: self.backend.clone(),
+            saved_snapshot: self.saved_snapshot.clone(),
+        })
+    }
 }
 
 #[async_trait]
 impl TaskBackend for ZbobrTaskBackendFs {
-    async fn get_task(&self, id: u64) -> anyhow::Result<Task> {
-        let task_file = self.read_task_file(id).await?;
-        let task = task_file.to_task()?;
-        Ok(task)
+    async fn get_task(&self, id: u64) -> anyhow::Result<Box<dyn TaskWeak>> {
+        // Verify the task exists by reading it
+        let _task = self.read_task(id).await?;
+        // We need self to be wrapped in Arc for the handles.
+        // This is handled by the caller wrapping ZbobrTaskBackendFs in Arc.
+        // For now, we'll create a simple approach using a trick.
+        anyhow::bail!("ZbobrTaskBackendFs must be wrapped in Arc and accessed via ArcTaskBackendFs")
+    }
+
+    async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+        anyhow::bail!("ZbobrTaskBackendFs must be wrapped in Arc and accessed via ArcTaskBackendFs")
     }
 
     async fn create_task(
         &self,
         title: &str,
         description: &str,
-        stage: Stage,
-        parameters: HashMap<Parameter, String>,
+        state: State,
     ) -> anyhow::Result<u64> {
         let id = self.get_next_id().await?;
 
@@ -277,13 +525,17 @@ impl TaskBackend for ZbobrTaskBackendFs {
             id,
             title: title.to_string(),
             description: description.to_string(),
-            stage,
-            parameters,
+            state,
+            destination_repository: None,
+            destination_branch: None,
+            work_branch: None,
+            pr_url: None,
             checklist: vec![],
             signal: None,
-            conflict: false,
+            stack: vec![],
             pause: false,
             confirm: false,
+            pipeline_run_id: 0,
             etag: None,
         };
 
@@ -294,107 +546,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
         Ok(id)
     }
 
-    async fn close_task(&self, id: u64) -> anyhow::Result<()> {
-        let mut task_file = self.read_task_file(id).await?;
-        task_file.closed = true;
-        self.write_task_file(&task_file).await?;
-
-        tracing::info!("Closed task {}", id);
-        Ok(())
-    }
-
-    async fn is_task_closed(&self, id: u64) -> anyhow::Result<bool> {
-        let task_file = self.read_task_file(id).await?;
-        Ok(task_file.closed)
-    }
-
-    async fn modify_task(
-        &self,
-        id: u64,
-        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-    ) -> anyhow::Result<()> {
-        // Read current task
-        let task = self.get_task(id).await?;
-        let was_closed = self.is_task_closed(id).await?;
-
-        // Apply mutation
-        let modified_task = mutate(task);
-
-        // Write back
-        let task_file = TaskFile::from_task(&modified_task, was_closed);
-        self.write_task_file(&task_file).await?;
-
-        tracing::debug!("Modified task {}", id);
-        Ok(())
-    }
-
-    async fn list_tasks_by_stage(&self, stage: Stage) -> anyhow::Result<Vec<Task>> {
-        let task_ids = self.list_task_files().await?;
-        let mut matching_tasks = Vec::new();
-
-        for id in task_ids {
-            // Skip if task file indicates closed
-            let task_file = match self.read_task_file(id).await {
-                Ok(tf) => tf,
-                Err(_) => continue, // Skip files we can't read
-            };
-
-            if task_file.closed {
-                continue;
-            }
-
-            let task = match task_file.to_task() {
-                Ok(t) => t,
-                Err(_) => continue,
-            };
-
-            // Filter by stage
-            if task.stage != stage {
-                continue;
-            }
-
-            matching_tasks.push(task);
-        }
-
-        Ok(matching_tasks)
-    }
-
-    async fn get_task_comments(&self, id: u64) -> anyhow::Result<Vec<Comment>> {
-        // Now that we store structured comments, return them directly
-        self.read_comments_structured(id).await
-    }
-
-    async fn post_task_comment(
-        &self,
-        id: u64,
-        comment_type: CommentType,
-        role: Option<Role>,
-        hostname: &str,
-        tool: Option<Tool>,
-        model: Option<Model>,
-        body: &str,
-    ) -> anyhow::Result<()> {
-        let mut comments = self.read_comments_structured(id).await?;
-
-        let new_comment = Comment {
-            comment_type,
-            timestamp: format!("{:?}", std::time::SystemTime::now()),
-            role,
-            hostname: hostname.to_string(),
-            tool,
-            model,
-            text: body.to_string(),
-        };
-
-        comments.push(new_comment);
-        self.write_comments_structured(id, comments).await?;
-
-        tracing::debug!("Posted structured comment to task {}", id);
-        Ok(())
-    }
-
     async fn setup(&self, _force: bool) -> anyhow::Result<()> {
-        // Create the tasks directory if it doesn't exist
         fs::create_dir_all(&self.config.tasks_dir)
             .await
             .context("Failed to create tasks directory")?;
@@ -407,7 +559,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
     }
 
     async fn validate_connectivity(&self) -> anyhow::Result<()> {
-        // Check if we can write to the tasks directory
         fs::create_dir_all(&self.config.tasks_dir)
             .await
             .with_context(|| {
@@ -417,7 +568,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
                 )
             })?;
 
-        // Try to write a test file
         let test_path = self.config.tasks_dir.join(".test");
         fs::write(&test_path, "test").await.with_context(|| {
             format!(
@@ -426,7 +576,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
             )
         })?;
 
-        // Clean up test file
         let _ = fs::remove_file(&test_path).await;
 
         tracing::info!("Filesystem backend connectivity validated");
@@ -441,173 +590,254 @@ impl TaskBackend for ZbobrTaskBackendFs {
     }
 }
 
+/// Arc-wrapped FS backend that properly returns TaskWeak/TaskMut handles.
+/// This is the primary way to use ZbobrTaskBackendFs.
+#[derive(Clone)]
+pub struct ArcTaskBackendFs {
+    inner: Arc<ZbobrTaskBackendFs>,
+}
+
+impl ArcTaskBackendFs {
+    pub fn new(backend: ZbobrTaskBackendFs) -> Self {
+        Self {
+            inner: Arc::new(backend),
+        }
+    }
+}
+
+#[async_trait]
+impl TaskBackend for ArcTaskBackendFs {
+    async fn get_task(&self, id: u64) -> anyhow::Result<Box<dyn TaskWeak>> {
+        // Verify the task exists
+        let task = self.inner.read_task(id).await?;
+        Ok(Box::new(FsTaskWeak {
+            id,
+            backend: self.inner.clone(),
+            saved_snapshot: Arc::new(std::sync::Mutex::new(Some(task))),
+        }))
+    }
+
+    async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+        let task_ids = self.inner.list_task_files().await?;
+        let mut result: Vec<Box<dyn TaskWeak>> = Vec::new();
+
+        for id in task_ids {
+            let task_file = match self.inner.read_task_file(id).await {
+                Ok(tf) => tf,
+                Err(_) => continue,
+            };
+
+            if task_file.closed {
+                continue;
+            }
+
+            let task = match task_file.to_task() {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+
+            // Filter out completed tasks
+            if task.state == "DONE" {
+                continue;
+            }
+
+            result.push(Box::new(FsTaskWeak {
+                id,
+                backend: self.inner.clone(),
+                saved_snapshot: Arc::new(std::sync::Mutex::new(Some(task))),
+            }));
+        }
+
+        Ok(result)
+    }
+
+    async fn create_task(
+        &self,
+        title: &str,
+        description: &str,
+        state: State,
+    ) -> anyhow::Result<u64> {
+        self.inner.create_task(title, description, state).await
+    }
+
+    async fn setup(&self, force: bool) -> anyhow::Result<()> {
+        self.inner.setup(force).await
+    }
+
+    async fn validate_connectivity(&self) -> anyhow::Result<()> {
+        self.inner.validate_connectivity().await
+    }
+
+    fn debug_state(&self) -> String {
+        self.inner.debug_state()
+    }
+}
+
 #[cfg(test)]
 mod parse_tests {
-    use std::str::FromStr;
-
     use zbobr_api::task::CommentTag;
+
+    #[test]
+    fn test_parse_comment_tag_new_format() {
+        let input = "// main:3:planning by localhost";
+        let tag: CommentTag = input.parse().unwrap();
+        assert_eq!(tag.pipeline, "main");
+        assert_eq!(tag.pipeline_run_id, 3);
+        assert_eq!(tag.stage, "planning");
+        assert_eq!(tag.hostname, "localhost");
+    }
+
+    #[test]
+    fn test_parse_comment_tag_with_for_suffix() {
+        let input = "// sub:2:done by host:copilot:gpt-5-mini for main:1";
+        let tag: CommentTag = input.parse().unwrap();
+        assert_eq!(tag.pipeline, "sub");
+        assert_eq!(tag.pipeline_run_id, 2);
+        assert_eq!(tag.stage, "done");
+        assert_eq!(tag.hostname, "host");
+        assert_eq!(tag.caller_pipeline.as_deref(), Some("main"));
+        assert_eq!(tag.caller_pipeline_run_id, Some(1));
+    }
+
+    #[test]
+    fn test_comment_tag_roundtrip() {
+        let tag = CommentTag::new(
+            "main".into(),
+            1,
+            "planning".into(),
+            "localhost".into(),
+            None,
+            None,
+        );
+        let s = tag.to_string();
+        assert_eq!(s, "// main:1:planning by localhost");
+        let parsed: CommentTag = s.parse().unwrap();
+        assert_eq!(parsed, tag);
+
+        let tag2 = CommentTag::new(
+            "init".into(),
+            2,
+            "reviewing".into(),
+            "host".into(),
+            None,
+            None,
+        );
+        let s2 = tag2.to_string();
+        assert_eq!(s2, "// init:2:reviewing by host");
+        let parsed2: CommentTag = s2.parse().unwrap();
+        assert_eq!(parsed2, tag2);
+
+        let tag3 = CommentTag::new("sub".into(), 3, "done".into(), "worker".into(), None, None)
+            .with_caller("main".into(), 1);
+        let s3 = tag3.to_string();
+        assert_eq!(s3, "// sub:3:done by worker for main:1");
+        let parsed3: CommentTag = s3.parse().unwrap();
+        assert_eq!(parsed3, tag3);
+    }
+}
+
+#[cfg(test)]
+mod checklist_format_tests {
+    use zbobr_api::checklist_format::{parse_grouped_checklist, serialize_grouped_checklist};
 
     use super::*;
 
-    fn split_tag_body(input: &str) -> (CommentTag, String) {
-        let mut parts = input.splitn(2, '\n');
-        let tag_line = parts.next().unwrap_or("");
-        let rest = parts.next();
+    #[test]
+    fn fs_backend_checklist_serialize_grouped() {
+        let items = vec![
+            ChecklistItem {
+                id: "main__1__task1".to_string(),
+                checked: false,
+                text: "first run work".to_string(),
+            },
+            ChecklistItem {
+                id: "main__1__task2".to_string(),
+                checked: true,
+                text: "first run done".to_string(),
+            },
+            ChecklistItem {
+                id: "main__2__task1".to_string(),
+                checked: false,
+                text: "second run work".to_string(),
+            },
+        ];
 
-        // debug for failing tests
-        eprintln!("split_tag_body: tag_line={:?}", tag_line);
-        match tag_line.parse::<CommentTag>() {
-            Ok(tag) => {
-                eprintln!("split_tag_body: parsed tag={:?}", tag);
-                let body = rest.unwrap_or("").trim_start().to_string();
-                (tag, body)
-            }
-            Err(err) => {
-                eprintln!("split_tag_body: parse error={:?}", err);
-                // parsing failed, keep entire input as body
-                (
-                    CommentTag::new(CommentType::Request, None, String::new(), None, None),
-                    input.to_string(),
-                )
-            }
+        let serialized = serialize_grouped_checklist(&items);
+
+        // Verify grouping headers
+        assert!(serialized.contains("<!-- Run: main #1 -->"));
+        assert!(serialized.contains("<!-- Run: main #2 -->"));
+
+        // Verify display IDs are clean (no scope prefix)
+        assert!(serialized.contains("- [ ] task1: first run work"));
+        assert!(serialized.contains("- [x] task2: first run done"));
+        assert!(serialized.contains("- [ ] task1: second run work"));
+
+        // Scoped IDs should not appear
+        assert!(!serialized.contains("main__1__"));
+        assert!(!serialized.contains("main__2__"));
+    }
+
+    #[test]
+    fn fs_backend_checklist_parse_grouped() {
+        let text = "<!-- Run: main #1 -->\n\
+            - [ ] task1: first run\n\
+            - [x] task2: checked\n\
+            \n\
+            <!-- Run: main #2 -->\n\
+            - [ ] task1: second run\n";
+
+        let items = parse_grouped_checklist(text);
+
+        assert_eq!(items.len(), 3);
+
+        // Verify scoped IDs reconstructed
+        assert_eq!(items[0].id, "main__1__task1");
+        assert_eq!(items[0].checked, false);
+        assert_eq!(items[0].text, "first run");
+
+        assert_eq!(items[1].id, "main__1__task2");
+        assert_eq!(items[1].checked, true);
+        assert_eq!(items[1].text, "checked");
+
+        assert_eq!(items[2].id, "main__2__task1");
+        assert_eq!(items[2].checked, false);
+        assert_eq!(items[2].text, "second run");
+    }
+
+    #[test]
+    fn fs_backend_checklist_roundtrip() {
+        let original_items = vec![
+            ChecklistItem {
+                id: "main__1__a".to_string(),
+                checked: false,
+                text: "work a".to_string(),
+            },
+            ChecklistItem {
+                id: "init__2__b".to_string(),
+                checked: true,
+                text: "work b".to_string(),
+            },
+        ];
+
+        let serialized = serialize_grouped_checklist(&original_items);
+        let parsed = parse_grouped_checklist(&serialized);
+
+        assert_eq!(parsed.len(), original_items.len());
+        for (orig, parsed_item) in original_items.iter().zip(parsed.iter()) {
+            assert_eq!(parsed_item.id, orig.id);
+            assert_eq!(parsed_item.checked, orig.checked);
+            assert_eq!(parsed_item.text, orig.text);
         }
     }
 
     #[test]
-    fn test_parse_comment_tag_report_with_body() {
-        // use a concrete model that `Model::from_str` knows about
-        let input = "// REPORT worker:localhost:claude-opus-4.6\n\nThis is the report body\nWith multiple lines";
-        let (tag, body) = split_tag_body(input);
-        let comment_type = tag.comment_type;
-        let role = tag.role;
-        let host = tag.hostname;
-        let tool = tag.tool;
-        let model = tag.model;
+    fn fs_backend_checklist_unscoped_not_parsed() {
+        let legacy_text = "- [ ] task1: legacy\n\
+            - [x] task2: old\n";
 
-        assert_eq!(comment_type, CommentType::Report);
-        assert_eq!(role, Some(Role::Worker));
-        assert_eq!(host, "localhost");
-        assert_eq!(tool, None);
-        assert_eq!(model, Some(Model::from_str("claude-opus-4.6").unwrap()));
-        assert_eq!(body, "This is the report body\nWith multiple lines");
-    }
+        let items = parse_grouped_checklist(legacy_text);
 
-    #[test]
-    fn test_parse_comment_tag_error_with_body() {
-        let input = "// ERROR planner:skynet:gpt-4o\n\nAn error occurred";
-        let (tag, body) = split_tag_body(input);
-        let comment_type = tag.comment_type;
-        let role = tag.role;
-        let host = tag.hostname;
-        let tool = tag.tool;
-        let model = tag.model;
-
-        assert_eq!(comment_type, CommentType::Error);
-        assert_eq!(role, Some(Role::Planner));
-        assert_eq!(host, "skynet");
-        assert_eq!(tool, None);
-        assert_eq!(model, Some(Model::from_str("gpt-4o").unwrap()));
-        assert_eq!(body, "An error occurred");
-    }
-
-    #[test]
-    fn test_parse_comment_tag_request_with_body() {
-        let input = "// REQUEST\n\nThis is a user request";
-        let (tag, body) = split_tag_body(input);
-        let comment_type = tag.comment_type;
-        let role = tag.role;
-        let host = tag.hostname;
-        let tool = tag.tool;
-        let model = tag.model;
-
-        assert_eq!(comment_type, CommentType::Request);
-        assert_eq!(role, None);
-        assert_eq!(host, "");
-        assert_eq!(tool, None);
-        assert_eq!(model, None);
-        assert_eq!(body, "This is a user request");
-    }
-
-    #[test]
-    fn test_parse_comment_tag_report_no_model() {
-        let input = "// REPORT reviewer:host\n\nBody text";
-        let (tag, body) = split_tag_body(input);
-        let comment_type = tag.comment_type;
-        let role = tag.role;
-        let host = tag.hostname;
-        let tool = tag.tool;
-        let model = tag.model;
-
-        assert_eq!(comment_type, CommentType::Report);
-        assert_eq!(role, Some(Role::Reviewer));
-        assert_eq!(host, "host");
-        assert_eq!(tool, None);
-        assert_eq!(model, None);
-        assert_eq!(body, "Body text");
-    }
-
-    #[test]
-    fn test_parse_comment_tag_no_tag_treated_as_request() {
-        // when there is no `//` prefix we shouldn't try to treat the first
-        // line as a tag; the entire input becomes the body.
-        let input = "This is just text without a tag";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Request);
-        assert_eq!(tag.role, None);
-        assert_eq!(tag.hostname, "");
-        assert_eq!(tag.tool, None);
-        assert_eq!(tag.model, None);
-        assert_eq!(body, "This is just text without a tag");
-    }
-
-    #[test]
-    fn test_parse_comment_tag_bogus_tag_preserves_first_line() {
-        // if we try to parse a seemingly-tagged first line and it doesn't
-        // conform to the expected format we fall back to request/whole-text.
-        let input = "// NOTATAG\nfull body goes here";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Request);
-        assert_eq!(tag.role, None);
-        assert_eq!(tag.hostname, "");
-        assert_eq!(tag.tool, None);
-        assert_eq!(tag.model, None);
-        assert_eq!(body, "// NOTATAG\nfull body goes here");
-    }
-
-    #[test]
-    fn test_parse_comment_tag_request_with_meta() {
-        let input = "// REQUEST planner:skynet:gpt-4o\n\nPlease respond";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Request);
-        assert_eq!(tag.role, Some(Role::Planner));
-        assert_eq!(tag.hostname, "skynet");
-        assert_eq!(tag.tool, None);
-        assert_eq!(tag.model, Some(Model::from_str("gpt-4o").unwrap()));
-        assert_eq!(body, "Please respond");
-    }
-
-    #[test]
-    fn test_parse_comment_tag_plan_with_body() {
-        let input =
-            "// PLAN planner:localhost:claude-opus-4.6\n\nStep 1: analyse\nStep 2: implement";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Plan);
-        assert_eq!(tag.role, Some(Role::Planner));
-        assert_eq!(tag.hostname, "localhost");
-        assert_eq!(tag.tool, None);
-        assert_eq!(tag.model, Some(Model::from_str("claude-opus-4.6").unwrap()));
-        assert_eq!(body, "Step 1: analyse\nStep 2: implement");
-    }
-
-    #[test]
-    fn test_parse_comment_tag_with_tool_and_model() {
-        let input = "// REPORT worker:localhost:copilot:gpt-5-mini\n\nbody";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.comment_type, CommentType::Report);
-        assert_eq!(tag.role, Some(Role::Worker));
-        assert_eq!(tag.hostname, "localhost");
-        assert_eq!(tag.tool, Some(Tool::Copilot));
-        assert_eq!(tag.model, Some(Model::from_str("gpt-5-mini").unwrap()));
-        assert_eq!(body, "body");
+        assert_eq!(items.len(), 0);
     }
 }

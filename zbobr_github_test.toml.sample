@@ -5,12 +5,9 @@
 # tests are marked `#[ignore]` so they will be skipped by default; run them
 # explicitly with `cargo test -- --ignored` once you have filled in credentials:
 #
-#   integration_github_fs  — needs [tasks.github]
-#   integration_fs_github  — needs [repo.github]
-#   integration_github_github — needs both
+#   integration_github_github — needs both [tasks.github] and [repo.github]
 
-# Uncomment to enable GitHub task-backend tests (integration_github_fs,
-# integration_github_github):
+# Uncomment to enable GitHub task-backend tests (integration_github_github):
 #
 # [tasks.github]
 # # GitHub repository whose issues are used as the task tracker (owner/repo).
@@ -18,8 +15,7 @@
 # # GitHub token with read/write access to the tasks repository.
 # github_token = "ghp_your_task_github_token_here"
 
-# Uncomment to enable GitHub repo-backend tests (integration_fs_github,
-# integration_github_github):
+# Uncomment to enable GitHub repo-backend tests (integration_github_github):
 #
 # [repo.github]
 # # GitHub user or organisation where target repos are forked.

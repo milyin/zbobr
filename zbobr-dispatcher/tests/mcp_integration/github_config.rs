@@ -2,69 +2,30 @@
 
 use std::path::PathBuf;
 
+use zbobr_dispatcher::config::ZbobrDispatcherToml;
+
 /// Configuration loaded from `zbobr_github_test.toml` at the workspace root.
 ///
 /// Each section is optional so that only the tests relevant to the present
 /// credentials are activated:
-/// - `tasks.github` → enables GitHub task-backend tests
-/// - `repo.github`  → enables GitHub repo-backend tests
+/// - `[tasks]` → enables GitHub task-backend tests
+/// - `[repo]`  → enables GitHub repo-backend tests
 ///
 /// A section being absent causes the corresponding test combination to be
 /// skipped gracefully rather than failing.
-#[derive(serde::Deserialize, Clone, Default)]
-#[serde(default)]
+#[derive(serde::Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct GitHubTestConfigToml {
+    pub dispatcher: Option<ZbobrDispatcherToml>,
+    pub tasks: Option<zbobr_task_backend_github::ZbobrTaskBackendGithubToml>,
+    pub repo: Option<zbobr_repo_backend_github::ZbobrRepoBackendGithubToml>,
+}
+
+/// Wrapper around the parsed TOML that also carries a dispatcher section for
+/// legacy callers that inspect `dispatcher.agent_token`.
 pub struct GitHubTestConfig {
-    pub tasks: Option<GitHubTasksSection>,
-    pub repo: Option<GitHubRepoSection>,
-    pub dispatcher: GitHubDispatcherSection,
-}
-
-#[derive(serde::Deserialize, Clone)]
-pub struct GitHubTasksSection {
-    pub github: GitHubTasksGithub,
-}
-
-#[derive(serde::Deserialize, Clone)]
-pub struct GitHubTasksGithub {
-    /// GitHub repository used as the task tracker in `owner/repo` format.
-    pub github_repo: String,
-    /// GitHub token with read/write access to the tasks repository.
-    pub github_token: String,
-}
-
-#[derive(serde::Deserialize, Clone)]
-pub struct GitHubRepoSection {
-    pub github: GitHubRepoGithub,
-}
-
-#[derive(serde::Deserialize, Clone)]
-pub struct GitHubRepoGithub {
-    /// GitHub user or organisation where target repos are forked.
-    pub fork_owner: String,
-    /// GitHub token with read/write access to the fork organisation.
-    pub github_token: String,
-}
-
-#[derive(serde::Deserialize, Clone)]
-pub struct GitHubDispatcherSection {
-    /// GitHub token passed as `GH_TOKEN` to agent processes.
-    /// Defaults to a dummy value, which is fine when `mcp-tester` is the executor.
-    #[serde(default = "GitHubDispatcherSection::default_agent_token")]
-    pub agent_token: String,
-}
-
-impl GitHubDispatcherSection {
-    fn default_agent_token() -> String {
-        "dummy-not-used".to_string()
-    }
-}
-
-impl Default for GitHubDispatcherSection {
-    fn default() -> Self {
-        Self {
-            agent_token: Self::default_agent_token(),
-        }
-    }
+    pub tasks: Option<zbobr_task_backend_github::ZbobrTaskBackendGithubToml>,
+    pub repo: Option<zbobr_repo_backend_github::ZbobrRepoBackendGithubToml>,
 }
 
 impl GitHubTestConfig {
@@ -85,8 +46,11 @@ impl GitHubTestConfig {
 
         let content =
             std::fs::read_to_string(&config_path).expect("failed to read zbobr_github_test.toml");
-        let config: GitHubTestConfig =
+        let config: GitHubTestConfigToml =
             toml::from_str(&content).expect("failed to parse zbobr_github_test.toml");
-        Some(config)
+        Some(Self {
+            tasks: config.tasks,
+            repo: config.repo,
+        })
     }
 }

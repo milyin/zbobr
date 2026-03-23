@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use zbobr_api::task::ChecklistItem;
+use zbobr_api::{
+    checklist_format::{parse_grouped_checklist, serialize_grouped_checklist},
+    task::ChecklistItem,
+};
 
 // -- Checklist parsing and serialization helpers --
 
@@ -63,35 +66,14 @@ pub(crate) fn parse_description_full(
     // Parse parameters
     let parameters = parse_parameters(params_text);
 
-    // Parse checklist items
-    let mut items = Vec::new();
-    for line in checklist_text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        // Parse checkbox format: - [ ] id: text or - [x] id: text
-        if let Some(rest) = line.strip_prefix("- [")
-            && let Some(pos) = rest.find(']')
-        {
-            let checkbox = &rest[..pos];
-            let checked = checkbox.trim() == "x" || checkbox.trim() == "X";
-
-            let after_checkbox = rest[pos + 1..].trim();
-            if let Some(colon_pos) = after_checkbox.find(':') {
-                let id = after_checkbox[..colon_pos].trim().to_string();
-                let text = after_checkbox[colon_pos + 1..].trim().to_string();
-
-                items.push(ChecklistItem { id, checked, text });
-            }
-        }
-    }
+    // Parse checklist items using shared format
+    let items = parse_grouped_checklist(checklist_text);
 
     (description, parameters, items)
 }
 
 /// Serialize description, parameters, and checklist items back into the full format.
+/// Items are grouped by pipeline run with visual headers for clarity.
 /// Legacy plan sections are not included; they should be managed via Plan comments.
 pub(crate) fn serialize_description_full(
     original_description: &str,
@@ -109,13 +91,10 @@ pub(crate) fn serialize_description_full(
         result.push_str(&serialize_parameters(parameters));
     }
 
-    // Add checklist if present
+    // Add checklist if present using shared format
     if !items.is_empty() {
         result.push_str(CHECKLIST_SEPARATOR);
-        for item in items {
-            let checkbox = if item.checked { "x" } else { " " };
-            result.push_str(&format!("- [{}] {}: {}\n", checkbox, item.id, item.text));
-        }
+        result.push_str(&serialize_grouped_checklist(items));
     }
 
     result
@@ -169,4 +148,58 @@ pub(crate) fn merge_concurrent_description_updates(
 
     // Serialize back with the merged content
     serialize_description_full(&merged_desc, &merged_params, &merged_checklist)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roundtrip_preserves_grouped_items() {
+        let orig_items = vec![
+            ChecklistItem {
+                id: "main__1__task1".to_string(),
+                checked: false,
+                text: "work".to_string(),
+            },
+            ChecklistItem {
+                id: "main__1__task2".to_string(),
+                checked: true,
+                text: "done".to_string(),
+            },
+            ChecklistItem {
+                id: "merge__3__other".to_string(),
+                checked: false,
+                text: "other pipeline".to_string(),
+            },
+        ];
+
+        let serialized = serialize_description_full("my task", &HashMap::new(), &orig_items);
+        let (desc, _, parsed_items) = parse_description_full(&serialized);
+
+        assert_eq!(desc, "my task");
+        assert_eq!(parsed_items.len(), 3);
+
+        // Verify IDs match after roundtrip
+        assert_eq!(parsed_items[0].id, orig_items[0].id);
+        assert_eq!(parsed_items[1].id, orig_items[1].id);
+        assert_eq!(parsed_items[2].id, orig_items[2].id);
+
+        // Verify states match
+        assert_eq!(parsed_items[0].checked, false);
+        assert_eq!(parsed_items[1].checked, true);
+        assert_eq!(parsed_items[2].checked, false);
+    }
+
+    #[test]
+    fn unscoped_checklist_items_are_not_parsed() {
+        let legacy = "description\n\n---CHECKLIST---\n\
+            - [ ] task1: legacy item\n\
+            - [x] task2: old format\n";
+
+        let (desc, _, items) = parse_description_full(legacy);
+
+        assert_eq!(desc, "description");
+        assert_eq!(items.len(), 0);
+    }
 }

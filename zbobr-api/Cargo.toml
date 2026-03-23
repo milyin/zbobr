@@ -11,3 +11,4 @@ schemars = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 paste = { workspace = true }
+indexmap = { workspace = true }

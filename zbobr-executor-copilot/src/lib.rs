@@ -3,7 +3,7 @@ use std::{path::Path, process::Stdio};
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use zbobr_api::{
-    task::{Role, Tool},
+    task::Tool,
     tool_executor::{ToolExecutor, format_command_for_log},
 };
 
@@ -15,12 +15,18 @@ pub struct CopilotExecutor {
     pub config: ZbobrExecutorCopilotConfig,
 }
 
+impl CopilotExecutor {
+    pub fn new(config: ZbobrExecutorCopilotConfig) -> Self {
+        Self { config }
+    }
+}
+
 #[async_trait]
 impl ToolExecutor for CopilotExecutor {
     async fn execute(
         &self,
         task_id: u64,
-        role: Role,
+        role: &str,
         _port: u16,
         prompt: &str,
         work_dir: &Path,

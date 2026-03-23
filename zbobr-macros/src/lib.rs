@@ -159,6 +159,7 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
 
             if !config_meta.skip_toml {
                 toml_fields.push(quote! {
+                    #[serde(skip_serializing_if = "Option::is_none")]
                     #rename_attr_tokens
                     #(#other_attrs)*
                     #field_vis #field_ident: Option<#nested_toml_ty>,
@@ -294,6 +295,7 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
 
             if !config_meta.skip_toml {
                 toml_fields.push(quote! {
+                    #[serde(skip_serializing_if = "Option::is_none")]
                     #rename_attr_tokens
                     #(#other_attrs)*
                     #field_vis #field_ident: Option<#value_ty>,
@@ -304,50 +306,59 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 });
             }
 
-            derived_args_fields.push(quote! {
-                #(#args_attrs)*
-                #arg_attr
-                #field_vis #field_ident: Option<#value_ty>,
-            });
+            if !config_meta.skip_args {
+                derived_args_fields.push(quote! {
+                    #(#args_attrs)*
+                    #arg_attr
+                    #field_vis #field_ident: Option<#value_ty>,
+                });
+
+                has_override_checks.push(quote! {
+                    self.#field_ident.is_some()
+                });
+            }
 
             plain_args_fields.push(quote! {
                 #(#args_attrs)*
                 #field_vis #field_ident: Option<#value_ty>,
             });
 
-            has_override_checks.push(quote! {
-                self.#field_ident.is_some()
-            });
-
             // Generate the from_matches_prefixed step for this leaf field.
-            // Detect whether value_ty is Vec<T> and use get_many in that case.
-            let base_is_option_for_from = option_inner_type(&field_ty);
-            let value_ty_for_from = base_is_option_for_from.clone().unwrap_or(field_ty.clone());
-            let from_step = if let Some(elem_ty) = vec_inner_type(&value_ty_for_from) {
-                quote! {
-                    let #field_ident = {
-                        let __id = if prefix.is_empty() {
-                            #arg_target_id_lit.to_string()
-                        } else {
-                            format!("{}{}", prefix, #arg_target_id_lit)
-                        };
-                        __matches.get_many::<#elem_ty>(&__id)
-                            .map(|v| v.cloned().collect::<::std::vec::Vec<_>>())
-                    };
-                }
+            if config_meta.skip_args {
+                // skip_args: field is TOML-only, always None in CLI args.
+                prefixed_from_steps.push(quote! {
+                    let #field_ident = ::std::option::Option::None;
+                });
             } else {
-                quote! {
-                    let #field_ident = {
-                        let __id = if prefix.is_empty() {
-                            #arg_target_id_lit.to_string()
-                        } else {
-                            format!("{}{}", prefix, #arg_target_id_lit)
+                // Detect whether value_ty is Vec<T> and use get_many in that case.
+                let base_is_option_for_from = option_inner_type(&field_ty);
+                let value_ty_for_from = base_is_option_for_from.clone().unwrap_or(field_ty.clone());
+                let from_step = if let Some(elem_ty) = vec_inner_type(&value_ty_for_from) {
+                    quote! {
+                        let #field_ident = {
+                            let __id = if prefix.is_empty() {
+                                #arg_target_id_lit.to_string()
+                            } else {
+                                format!("{}{}", prefix, #arg_target_id_lit)
+                            };
+                            __matches.get_many::<#elem_ty>(&__id)
+                                .map(|v| v.cloned().collect::<::std::vec::Vec<_>>())
                         };
-                        __matches.get_one::<#value_ty_for_from>(&__id).cloned()
-                    };
-                }
-            };
-            prefixed_from_steps.push(from_step);
+                    }
+                } else {
+                    quote! {
+                        let #field_ident = {
+                            let __id = if prefix.is_empty() {
+                                #arg_target_id_lit.to_string()
+                            } else {
+                                format!("{}{}", prefix, #arg_target_id_lit)
+                            };
+                            __matches.get_one::<#value_ty_for_from>(&__id).cloned()
+                        };
+                    }
+                };
+                prefixed_from_steps.push(from_step);
+            }
 
             if !config_meta.skip_toml {
                 into_config_setup.push(quote! {
@@ -432,7 +443,7 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
         }
 
         #(#attrs)*
-        #[derive(Debug, Clone, ::serde::Deserialize, Default)]
+        #[derive(Debug, Clone, ::serde::Serialize, ::serde::Deserialize, Default)]
         #[serde(default, deny_unknown_fields)]
         #vis struct #toml_ident #generics #where_clause {
             #(#toml_fields)*
@@ -599,6 +610,7 @@ struct FieldConfig {
     path: bool,
     help_heading: Option<String>,
     skip_toml: bool,
+    skip_args: bool,
     nested_args_ty: Option<TypePath>,
     nested_toml_ty: Option<TypePath>,
     heading_prefix: Option<String>,
@@ -634,6 +646,7 @@ fn parse_config_meta(attr: &Attribute, config: &mut FieldConfig) -> syn::Result<
         match meta {
             Meta::Path(path) if path.is_ident("nested") => config.nested = true,
             Meta::Path(path) if path.is_ident("skip_toml") => config.skip_toml = true,
+            Meta::Path(path) if path.is_ident("skip_args") => config.skip_args = true,
             Meta::Path(path) if path.is_ident("path") => config.path = true,
             Meta::NameValue(name_value) if name_value.path.is_ident("help_heading") => {
                 if let syn::Expr::Lit(syn::ExprLit {

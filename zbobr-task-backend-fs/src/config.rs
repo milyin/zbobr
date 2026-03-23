@@ -19,17 +19,6 @@ impl Default for ZbobrTaskBackendFsConfig {
     }
 }
 
-impl zbobr_api::config::BackendConfig for ZbobrTaskBackendFsConfig {
-    type Backend = crate::ZbobrTaskBackendFs;
-
-    fn build_backend(
-        self,
-        _dispatcher: &zbobr_api::config::ZbobrDispatcherConfig,
-    ) -> anyhow::Result<Self::Backend> {
-        crate::ZbobrTaskBackendFs::from_config(self)
-    }
-}
-
 impl ZbobrTaskBackendFsConfig {
     /// Validate that all required fields are set.
     pub fn validate(&self) -> anyhow::Result<()> {

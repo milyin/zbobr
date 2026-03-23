@@ -1,125 +1,10 @@
 use crate::{
-    CommentType, Signal,
     mcp::common::get_hostname,
-    task::{ChecklistItem, Model, Parameter, Role, RoleSession, Tool},
+    task::{Model, RoleSession, Tool},
 };
-
-// Helper functions for logging MCP responses
-
-/// Log a comments response (typically from get_history). Parses JSON and logs each comment.
-fn log_mcp_comments_response(role_name: &str, task_id: u64, response: &str) {
-    // Log exact JSON in debug level
-    tracing::debug!("[{}#{}] response: {}", role_name, task_id, response);
-
-    // Log info level with parsed comments
-    if response.starts_with('{') {
-        if let Ok(chunk) = serde_json::from_str::<zbobr_api::HistoryChunk>(response) {
-            tracing::info!(
-                "[{}#{}] history chunk {}/{} ({} comment(s))",
-                role_name,
-                task_id,
-                chunk.current_chunk,
-                chunk.last_chunk,
-                chunk.comments.len()
-            );
-            for comment in chunk.comments {
-                let stripped_text = comment.text.lines().next().unwrap_or("").trim();
-                let display_text = if stripped_text.len() > 80 {
-                    format!("{}...", &stripped_text[..80])
-                } else {
-                    stripped_text.to_string()
-                };
-                tracing::info!(
-                    "[{}#{}] comment type={:?} text={}",
-                    role_name,
-                    task_id,
-                    comment.comment_type,
-                    display_text
-                );
-            }
-        } else {
-            tracing::info!(
-                "[{}#{}] get_history response (failed to parse): {}",
-                role_name,
-                task_id,
-                response
-            );
-        }
-    } else if response.starts_with("Error") {
-        tracing::info!(
-            "[{}#{}] get_history error: {}",
-            role_name,
-            task_id,
-            response
-        );
-    } else {
-        tracing::info!(
-            "[{}#{}] get_history response: {}",
-            role_name,
-            task_id,
-            response
-        );
-    }
-}
-
-/// Log a JSON response (e.g., checklist items).
-fn log_mcp_json_response(role_name: &str, task_id: u64, tool_name: &str, response: &str) {
-    // Log exact JSON in debug level
-    tracing::debug!(
-        "[{}#{}] {} response: {}",
-        role_name,
-        task_id,
-        tool_name,
-        response
-    );
-
-    // Log info level with summary
-    if response.starts_with('[') {
-        if let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(response) {
-            tracing::info!(
-                "[{}#{}] {} returned {} item(s)",
-                role_name,
-                task_id,
-                tool_name,
-                items.len()
-            );
-        } else {
-            tracing::info!(
-                "[{}#{}] {} response (failed to parse): {}",
-                role_name,
-                task_id,
-                tool_name,
-                response
-            );
-        }
-    } else if response.starts_with('{') {
-        if serde_json::from_str::<serde_json::Value>(response).is_ok() {
-            tracing::info!("[{}#{}] {} succeeded", role_name, task_id, tool_name);
-        } else {
-            tracing::info!(
-                "[{}#{}] {} response (failed to parse): {}",
-                role_name,
-                task_id,
-                tool_name,
-                response
-            );
-        }
-    } else if response.starts_with("Error") {
-        tracing::info!(
-            "[{}#{}] {} error: {}",
-            role_name,
-            task_id,
-            tool_name,
-            response
-        );
-    } else {
-        tracing::info!("[{}#{}] {}: {}", role_name, task_id, tool_name, response);
-    }
-}
 
 /// Log a string response from MCP methods.
 fn log_mcp_string_response(role_name: &str, task_id: u64, tool_name: &str, response: &str) {
-    // Log exact response in debug level
     tracing::debug!(
         "[{}#{}] {} response: {}",
         role_name,
@@ -128,7 +13,6 @@ fn log_mcp_string_response(role_name: &str, task_id: u64, tool_name: &str, respo
         response
     );
 
-    // Log info level with key information
     if response.starts_with("Error") {
         tracing::info!(
             "[{}#{}] {} error: {}",
@@ -153,11 +37,54 @@ fn log_mcp_string_response(role_name: &str, task_id: u64, tool_name: &str, respo
     }
 }
 
-/// Common trait for MCP services (Planner, Worker) - shared implementations
+/// Log a JSON response (e.g., checklist items).
+fn log_mcp_json_response(role_name: &str, task_id: u64, tool_name: &str, response: &str) {
+    tracing::debug!(
+        "[{}#{}] {} response: {}",
+        role_name,
+        task_id,
+        tool_name,
+        response
+    );
+
+    if response.starts_with('[') {
+        if let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(response) {
+            tracing::info!(
+                "[{}#{}] {} returned {} item(s)",
+                role_name,
+                task_id,
+                tool_name,
+                items.len()
+            );
+        } else {
+            tracing::info!(
+                "[{}#{}] {} response (failed to parse): {}",
+                role_name,
+                task_id,
+                tool_name,
+                response
+            );
+        }
+    } else if response.starts_with("Error") {
+        tracing::info!(
+            "[{}#{}] {} error: {}",
+            role_name,
+            task_id,
+            tool_name,
+            response
+        );
+    } else {
+        tracing::info!("[{}#{}] {}: {}", role_name, task_id, tool_name, response);
+    }
+}
+
+/// Common trait for all MCP services — unified across all roles.
+/// Per-role traits have been removed; all tool implementations live here.
 #[allow(async_fn_in_trait)]
 pub trait CommonMcpImpl: Send + Sync {
     fn session(&self) -> &RoleSession;
-    fn role(&self) -> Role;
+
+    fn role_name(&self) -> &str;
 
     /// Returns the tool that is executing this MCP session
     fn mcp_tool(&self) -> Tool;
@@ -165,57 +92,42 @@ pub trait CommonMcpImpl: Send + Sync {
     /// Returns the concrete model currently in use by the agent tool
     fn mcp_model(&self) -> Model;
 
-    fn role_name(&self) -> &'static str {
-        self.role().as_str()
+    /// Returns the name of the current stage.
+    fn stage_name(&self) -> &str;
+
+    /// Returns the pipeline name for this session.
+    fn pipeline_name(&self) -> &str;
+
+    /// Returns the pipeline run ID for this session.
+    fn pipeline_run_id(&self) -> u64;
+
+    /// Record a tool call for transition mapping.
+    fn record_tool(&self, tool_name: &str) {
+        self.session().record_tool_call(tool_name);
     }
 
-    /// Returns the signal that should re-trigger this role after an interruption
-    /// (e.g. after `report_error` or `ask_user` pauses the task).
-    fn retry_signal(&self) -> Signal {
-        match self.role() {
-            Role::Preparator => Signal::GoPrepare,
-            Role::Planner => Signal::GoPlan,
-            Role::Worker => Signal::GoWork,
-            Role::Reviewer => Signal::GoReview,
-            Role::Tester => Signal::GoTest,
-            Role::Merger => Signal::GoWork,
-        }
-    }
+    // -- History tools --
 
-    async fn get_history_impl(&self, offset: Option<usize>) -> String {
+    async fn get_history_impl(&self) -> String {
         tracing::info!(
-            "[{}#{}] get_history offset={:?}",
+            "[{}#{}] get_history",
             self.role_name(),
             self.session().task_id(),
-            offset
         );
 
-        match self.session().get_history(offset).await {
-            Ok(chunk) => {
-                if chunk.comments.is_empty() {
-                    tracing::warn!(
-                        "[{}#{}] get_history returned 0 comment(s) for offset={:?}",
-                        self.role_name(),
-                        self.session().task_id(),
-                        offset
-                    );
-                } else {
-                    tracing::info!(
-                        "[{}#{}] get_history returned {} comment(s) for offset={:?} (chunk {}/{})",
-                        self.role_name(),
-                        self.session().task_id(),
-                        chunk.comments.len(),
-                        offset,
-                        chunk.current_chunk,
-                        chunk.last_chunk
-                    );
-                }
-                let response = match serde_json::to_string_pretty(&chunk) {
-                    Ok(json) => json,
-                    Err(e) => format!("Error serializing: {e}"),
-                };
-                log_mcp_comments_response(self.role_name(), self.session().task_id(), &response);
-                response
+        match self
+            .session()
+            .get_history_for_run(self.pipeline_run_id())
+            .await
+        {
+            Ok(text) => {
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    "get_history",
+                    &text,
+                );
+                text
             }
             Err(e) => {
                 let response = format!("Error: {e}");
@@ -230,23 +142,104 @@ pub trait CommonMcpImpl: Send + Sync {
         }
     }
 
-    async fn report_error_impl(&self, message: &str) -> String {
+    // -- Report tools --
+
+    async fn report_impl(&self, tool_name: &str, brief: &str, full_report: &str) -> String {
         tracing::info!(
-            "[{}#{}] report_error",
+            "[{}#{}] {}",
             self.role_name(),
-            self.session().task_id()
+            self.session().task_id(),
+            tool_name,
         );
+
         let hostname = get_hostname();
+        let body = format!("[{tool_name}]\n{brief}");
 
         if let Err(e) = self
             .session()
             .post_comment(
-                CommentType::Error,
-                message,
-                Some(self.role()),
+                &body,
+                self.stage_name(),
                 &hostname,
                 Some(self.mcp_tool()),
                 Some(self.mcp_model()),
+                Some(full_report),
+            )
+            .await
+        {
+            tracing::error!(
+                "Failed to post {tool_name} message for task {}: {e}",
+                self.session().task_id()
+            );
+            let response = format!("Error posting {tool_name} message: {e}");
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                tool_name,
+                &response,
+            );
+            return response;
+        }
+
+        self.record_tool(tool_name);
+
+        let response = "Report stored".to_string();
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            tool_name,
+            &response,
+        );
+        response
+    }
+
+    async fn report_success_impl(&self, brief: &str, full_report: &str) -> String {
+        self.report_impl("report_success", brief, full_report).await
+    }
+
+    async fn report_failure_impl(&self, brief: &str, full_report: &str) -> String {
+        self.report_impl("report_failure", brief, full_report).await
+    }
+
+    async fn get_full_report_impl(&self, name: &str) -> String {
+        tracing::info!(
+            "[{}#{}] get_full_report name={}",
+            self.role_name(),
+            self.session().task_id(),
+            name,
+        );
+
+        let response = match self.session().read_report(name).await {
+            Ok(content) => content,
+            Err(e) => format!("Error: {e}"),
+        };
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "get_full_report",
+            &response,
+        );
+        response
+    }
+
+    async fn stop_with_error_impl(&self, message: &str) -> String {
+        tracing::info!(
+            "[{}#{}] stop_with_error",
+            self.role_name(),
+            self.session().task_id()
+        );
+        let hostname = get_hostname();
+        let body = format!("[stop_with_error]\n{message}");
+
+        if let Err(e) = self
+            .session()
+            .post_comment(
+                &body,
+                self.stage_name(),
+                &hostname,
+                Some(self.mcp_tool()),
+                Some(self.mcp_model()),
+                None,
             )
             .await
         {
@@ -258,7 +251,7 @@ pub trait CommonMcpImpl: Send + Sync {
             log_mcp_string_response(
                 self.role_name(),
                 self.session().task_id(),
-                "report_error",
+                "stop_with_error",
                 &response,
             );
             return response;
@@ -274,103 +267,52 @@ pub trait CommonMcpImpl: Send + Sync {
             log_mcp_string_response(
                 self.role_name(),
                 self.session().task_id(),
-                "report_error",
+                "stop_with_error",
                 &response,
             );
             return response;
-        }
-
-        // Set the retry signal so the task returns to this role after the user intervenes.
-        if let Err(e) = self.session().set_signal(self.retry_signal()).await {
-            tracing::warn!(
-                "Failed to set retry signal for task {} after reporting error: {e}",
-                self.session().task_id()
-            );
         }
 
         let response = "Error reported to user - task paused pending response".to_string();
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "report_error",
+            "stop_with_error",
             &response,
         );
         response
     }
 
-    async fn report_results_impl(&self, message: &str) -> String {
+    async fn stop_with_question_impl(&self, message: &str) -> String {
         tracing::info!(
-            "[{}#{}] report_results",
+            "[{}#{}] stop_with_question",
             self.role_name(),
             self.session().task_id()
         );
         let hostname = get_hostname();
+        let body = format!("[stop_with_question]\n{message}");
 
         if let Err(e) = self
             .session()
             .post_comment(
-                CommentType::Report,
-                message,
-                Some(self.role()),
+                &body,
+                self.stage_name(),
                 &hostname,
                 Some(self.mcp_tool()),
                 Some(self.mcp_model()),
+                None,
             )
             .await
         {
             tracing::error!(
-                "Failed to post results message for task {}: {e}",
+                "Failed to post question for task {}: {e}",
                 self.session().task_id()
             );
-            let response = format!("Error posting results message: {e}");
+            let response = format!("Error posting question: {e}");
             log_mcp_string_response(
                 self.role_name(),
                 self.session().task_id(),
-                "report_results",
-                &response,
-            );
-            return response;
-        }
-
-        let response = "Results reported successfully".to_string();
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "report_results",
-            &response,
-        );
-        response
-    }
-
-    async fn ask_user_impl(&self, message: &str) -> String {
-        tracing::info!(
-            "[{}#{}] ask_user",
-            self.role_name(),
-            self.session().task_id()
-        );
-        let hostname = get_hostname();
-
-        if let Err(e) = self
-            .session()
-            .post_comment(
-                CommentType::Request,
-                message,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-            )
-            .await
-        {
-            tracing::error!(
-                "Failed to post ask_user message for task {}: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Error posting ask_user message: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                "ask_user",
+                "stop_with_question",
                 &response,
             );
             return response;
@@ -386,29 +328,119 @@ pub trait CommonMcpImpl: Send + Sync {
             log_mcp_string_response(
                 self.role_name(),
                 self.session().task_id(),
-                "ask_user",
+                "stop_with_question",
                 &response,
             );
             return response;
         }
 
-        // Set the retry signal so the task returns to this role after the user responds.
-        if let Err(e) = self.session().set_signal(self.retry_signal()).await {
-            tracing::warn!(
-                "Failed to set retry signal for task {} after asking user: {e}",
-                self.session().task_id()
-            );
-        }
-
-        let response = "User asked for guidance".to_string();
+        let response = "Question posted - task paused pending user response".to_string();
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "ask_user",
+            "stop_with_question",
             &response,
         );
         response
     }
+
+    // -- Worktree configuration --
+
+    async fn configure_worktree_impl(
+        &self,
+        destination_repository: Option<String>,
+        destination_branch: Option<String>,
+        work_branch_postfix: Option<String>,
+    ) -> String {
+        tracing::info!(
+            "[{}#{}] configure_worktree repo={:?} branch={:?} postfix={:?}",
+            self.role_name(),
+            self.session().task_id(),
+            destination_repository,
+            destination_branch,
+            work_branch_postfix,
+        );
+
+        // Validate work_branch_postfix: if provided, work_branch must not already be set
+        if work_branch_postfix.is_some() {
+            match self.session().get_work_branch().await {
+                Ok(Some(_)) => {
+                    return self
+                        .configure_worktree_error("work_branch is already set".to_string())
+                        .await;
+                }
+                Err(e) => {
+                    return self.configure_worktree_error(e.to_string()).await;
+                }
+                Ok(None) => {}
+            }
+        }
+
+        let session = self.session();
+        let config = session.dispatcher_config();
+
+        // Apply defaults from config when agent doesn't provide values
+        let effective_repo = destination_repository
+            .or_else(|| config.default_destination_repository.clone());
+        let effective_branch = destination_branch
+            .or_else(|| config.default_destination_branch.clone());
+        let work_branch = work_branch_postfix.map(|v| session.create_branch_name(&v));
+
+        let repo_for_response = effective_repo.clone();
+        let branch_for_response = effective_branch.clone();
+        let wb_for_response = work_branch.clone();
+
+        let response = match session
+            .modify_task(move |mut task| {
+                if let Some(repo) = effective_repo {
+                    task.destination_repository = Some(repo);
+                }
+                if let Some(branch) = effective_branch {
+                    task.destination_branch = Some(branch);
+                }
+                if let Some(wb) = work_branch {
+                    task.work_branch = Some(wb);
+                }
+                task
+            })
+            .await
+        {
+            Ok(()) => {
+                format!(
+                    "Worktree configured: destination_repository={}, destination_branch={}, work_branch={}",
+                    repo_for_response.as_deref().unwrap_or("(not set)"),
+                    branch_for_response.as_deref().unwrap_or("(not set)"),
+                    wb_for_response.as_deref().unwrap_or("(not set)"),
+                )
+            }
+            Err(e) => return self.configure_worktree_error(e.to_string()).await,
+        };
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "configure_worktree",
+            &response,
+        );
+        response
+    }
+
+    async fn configure_worktree_error(&self, error: String) -> String {
+        if let Err(pause_err) = self.session().set_pause(true).await {
+            tracing::error!(
+                "Failed to pause task after configure_worktree error: {pause_err}"
+            );
+        }
+        let response = format!("Error: {error}");
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            "configure_worktree",
+            &response,
+        );
+        response
+    }
+
+    // -- Checklist tools --
 
     async fn get_checklist_impl(&self) -> String {
         tracing::info!(
@@ -417,10 +449,14 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
         let response = match self.session().get_checklist().await {
-            Ok(items) => match serde_json::to_string_pretty(&items) {
-                Ok(json) => json,
-                Err(e) => format!("Error serializing checklist: {e}"),
-            },
+            Ok(items) => {
+                // Filter to unchecked items only
+                let unchecked: Vec<_> = items.into_iter().filter(|i| !i.checked).collect();
+                match serde_json::to_string_pretty(&unchecked) {
+                    Ok(json) => json,
+                    Err(e) => format!("Error serializing checklist: {e}"),
+                }
+            }
             Err(e) => format!("Error: {e}"),
         };
         log_mcp_json_response(
@@ -432,82 +468,22 @@ pub trait CommonMcpImpl: Send + Sync {
         response
     }
 
-    async fn check_checklist_item_impl(&self, id: &str, checked: bool) -> String {
+    async fn add_checklist_item_impl(&self, id: &str, text: &str) -> String {
         tracing::info!(
-            "[{}#{}] check_checklist_item id={} checked={}",
+            "[{}#{}] add_checklist_item id={}",
             self.role_name(),
             self.session().task_id(),
-            id,
-            checked
+            id
         );
-        let item_id = id.to_string();
-        let response = match self
-            .session()
-            .modify_task(move |task| {
-                if let Some(item) = task.checklist.iter_mut().find(|item| item.id == item_id) {
-                    item.checked = checked;
-                }
-            })
-            .await
-        {
-            Ok(()) => {
-                // Checklist item state updated; signal transitions are handled by
-                // the main/run loop after a role session completes. Do not set
-                // task signal here to avoid racing state transitions.
-                format!(
-                    "Checklist item '{}' checked state updated to {}",
-                    id, checked
-                )
-            }
-            Err(e) => format!("Error: {e}"),
-        };
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "check_checklist_item",
-            &response,
-        );
-        response
-    }
-
-    async fn insert_checklist_item_impl(
-        &self,
-        id: &str,
-        after_id: Option<String>,
-        text: &str,
-    ) -> String {
-        tracing::info!(
-            "[{}#{}] insert_checklist_item id={} after_id={:?}",
-            self.role_name(),
-            self.session().task_id(),
-            id,
-            after_id
-        );
-        let item_id = id.to_string();
-        let item_text = text.to_string();
-        let after = after_id.clone();
-
-        // Validate first by reading the task
+        // Validate: id must be unique
         match self.session().get_checklist().await {
             Ok(items) => {
-                if items.iter().any(|item| item.id == item_id) {
+                if items.iter().any(|item| item.id == id) {
                     let response = format!("Error: Checklist item with id '{}' already exists", id);
                     log_mcp_string_response(
                         self.role_name(),
                         self.session().task_id(),
-                        "insert_checklist_item",
-                        &response,
-                    );
-                    return response;
-                }
-                if let Some(ref aid) = after
-                    && !items.iter().any(|item| item.id == *aid)
-                {
-                    let response = format!("Error: Checklist item with id '{}' not found", aid);
-                    log_mcp_string_response(
-                        self.role_name(),
-                        self.session().task_id(),
-                        "insert_checklist_item",
+                        "add_checklist_item",
                         &response,
                     );
                     return response;
@@ -518,71 +494,42 @@ pub trait CommonMcpImpl: Send + Sync {
                 log_mcp_string_response(
                     self.role_name(),
                     self.session().task_id(),
-                    "insert_checklist_item",
+                    "add_checklist_item",
                     &response,
                 );
                 return response;
             }
         }
 
-        let response = match self
-            .session()
-            .modify_task(move |task| {
-                let new_item = ChecklistItem {
-                    id: item_id,
-                    checked: false,
-                    text: item_text,
-                };
-
-                if let Some(ref after_id) = after {
-                    if let Some(pos) = task.checklist.iter().position(|item| item.id == *after_id) {
-                        task.checklist.insert(pos + 1, new_item);
-                    } else {
-                        task.checklist.push(new_item);
-                    }
-                } else {
-                    task.checklist.push(new_item);
-                }
-            })
-            .await
-        {
-            Ok(()) => format!("Checklist item '{}' inserted", id),
+        let response = match self.session().add_checklist_item(id, text).await {
+            Ok(()) => format!("Checklist item '{}' added", id),
             Err(e) => format!("Error updating task: {e}"),
         };
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "insert_checklist_item",
+            "add_checklist_item",
             &response,
         );
         response
     }
 
-    async fn update_checklist_item_impl(&self, id: &str, text: &str) -> String {
+    async fn check_checklist_item_impl(&self, id: &str) -> String {
         tracing::info!(
-            "[{}#{}] update_checklist_item id={}",
+            "[{}#{}] check_checklist_item id={}",
             self.role_name(),
             self.session().task_id(),
-            id
+            id,
         );
-        let item_id = id.to_string();
-        let item_text = text.to_string();
-        let response = match self
-            .session()
-            .modify_task(move |task| {
-                if let Some(item) = task.checklist.iter_mut().find(|item| item.id == item_id) {
-                    item.text = item_text;
-                }
-            })
-            .await
-        {
-            Ok(()) => format!("Checklist item '{}' updated", id),
-            Err(e) => format!("Error updating task: {e}"),
+        let response = match self.session().check_checklist_item(id).await {
+            Ok(true) => format!("Checklist item '{}' checked", id),
+            Ok(false) => format!("Error: Checklist item with id '{}' not found", id),
+            Err(e) => format!("Error: {e}"),
         };
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "update_checklist_item",
+            "check_checklist_item",
             &response,
         );
         response
@@ -595,12 +542,10 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id(),
             id
         );
-        let item_id = id.to_string();
-
         // Pre-validate: check the item exists and is not checked
         match self.session().get_checklist().await {
             Ok(items) => {
-                if let Some(item) = items.iter().find(|i| i.id == item_id) {
+                if let Some(item) = items.iter().find(|i| i.id == id) {
                     if item.checked {
                         let response = format!(
                             "Error: Cannot delete checked checklist item '{}'. Checked items are preserved as work history.",
@@ -637,14 +582,9 @@ pub trait CommonMcpImpl: Send + Sync {
             }
         }
 
-        let response = match self
-            .session()
-            .modify_task(move |task| {
-                task.checklist.retain(|item| item.id != item_id);
-            })
-            .await
-        {
-            Ok(()) => format!("Checklist item '{}' deleted", id),
+        let response = match self.session().delete_checklist_item(id).await {
+            Ok(true) => format!("Checklist item '{}' deleted", id),
+            Ok(false) => format!("Error: Checklist item with id '{}' not found", id),
             Err(e) => format!("Error updating task: {e}"),
         };
         log_mcp_string_response(
@@ -654,395 +594,5 @@ pub trait CommonMcpImpl: Send + Sync {
             &response,
         );
         response
-    }
-
-    async fn get_param_impl(&self, param: Parameter) -> String {
-        tracing::info!(
-            "[{}#{}] get_param_{}",
-            self.role_name(),
-            self.session().task_id(),
-            param.name()
-        );
-        let response = match self.session().get_parameter(param).await {
-            Ok(Some(value)) => value,
-            Ok(None) => format!("{} is not set", param.name()),
-            Err(e) => format!("Error: {e}"),
-        };
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            &format!("get_param_{}", param.name()),
-            &response,
-        );
-        response
-    }
-
-    async fn set_param_impl(&self, param: Parameter, value: Option<String>) -> String {
-        tracing::info!(
-            "[{}#{}] set_param_{} value={:?}",
-            self.role_name(),
-            self.session().task_id(),
-            param.name(),
-            value
-        );
-        let response = match self.session().set_parameter(param, value).await {
-            Ok(()) => format!("{} updated", param.name()),
-            Err(e) => format!("Error: {e}"),
-        };
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            &format!("set_param_{}", param.name()),
-            &response,
-        );
-        response
-    }
-}
-
-/// Preparator-specific MCP implementations
-#[allow(async_fn_in_trait)]
-pub trait PreparatorMcpImpl: CommonMcpImpl {
-    async fn get_param_destination_repository_impl(&self) -> String {
-        self.get_param_impl(Parameter::DestinationRepository).await
-    }
-
-    async fn set_param_destination_repository_impl(&self, value: Option<String>) -> String {
-        self.set_param_impl(Parameter::DestinationRepository, value)
-            .await
-    }
-
-    async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::DestinationBranch).await
-    }
-
-    async fn set_param_destination_branch_impl(&self, value: Option<String>) -> String {
-        self.set_param_impl(Parameter::DestinationBranch, value)
-            .await
-    }
-
-    async fn get_param_work_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::WorkBranch).await
-    }
-
-    async fn set_param_work_branch_postfix_impl(&self, value: Option<String>) -> String {
-        match self.session().get_parameter(Parameter::WorkBranch).await {
-            Ok(Some(_)) => return "Error: work_branch is already set".to_string(),
-            Err(e) => return format!("Error: {e}"),
-            Ok(None) => {}
-        }
-        let branch = value.map(|v| self.session().create_branch_name(&v));
-        self.set_param_impl(Parameter::WorkBranch, branch).await
-    }
-}
-
-/// Planner-specific MCP implementations
-#[allow(async_fn_in_trait)]
-pub trait PlannerMcpImpl: CommonMcpImpl {
-    async fn post_plan_impl(&self, plan: &str) -> String {
-        tracing::info!("[planner#{}] post_plan", self.session().task_id());
-        let hostname = get_hostname();
-
-        // Post the plan as a PLAN comment to preserve history
-        if let Err(e) = self
-            .session()
-            .post_comment(
-                CommentType::Plan,
-                plan,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                None,
-            )
-            .await
-        {
-            tracing::error!(
-                "Failed to post plan comment for task {}: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Error posting plan: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                "post_plan",
-                &response,
-            );
-            return response;
-        }
-
-        let response = "Plan posted and task ready for worker implementation".to_string();
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "post_plan",
-            &response,
-        );
-        response
-    }
-
-    async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::DestinationBranch).await
-    }
-
-    async fn get_param_work_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::WorkBranch).await
-    }
-}
-
-/// Worker-specific MCP implementations
-#[allow(async_fn_in_trait)]
-pub trait WorkerMcpImpl: CommonMcpImpl {
-    async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::DestinationBranch).await
-    }
-
-    async fn get_param_work_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::WorkBranch).await
-    }
-
-    async fn ask_planner_impl(&self, message: &str) -> String {
-        tracing::info!("[worker#{}] ask_planner", self.session().task_id());
-        let hostname = get_hostname();
-
-        if let Err(e) = self
-            .session()
-            .post_comment(
-                CommentType::Request,
-                message,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-            )
-            .await
-        {
-            tracing::error!(
-                "Failed to post worker->planner message for task {}: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Error posting message: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                "ask_planner",
-                &response,
-            );
-            return response;
-        }
-
-        // Pass task back to planner agent for clarification or re-planning
-        if let Err(e) = self.session().set_signal(crate::Signal::GoPlan).await {
-            tracing::error!(
-                "Failed to set signal GoPlan for task {} after ask_planner: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Message posted but error returning to planner: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                "ask_planner",
-                &response,
-            );
-            return response;
-        }
-        let response = "Message posted to planner - task returned for clarification".to_string();
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "ask_planner",
-            &response,
-        );
-        response
-    }
-}
-
-/// Reviewer-specific MCP implementations
-#[allow(async_fn_in_trait)]
-pub trait ReviewerMcpImpl: CommonMcpImpl {
-    async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::DestinationBranch).await
-    }
-
-    async fn get_param_work_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::WorkBranch).await
-    }
-
-    async fn review_accept_impl(&self, message: &str) -> String {
-        tracing::info!(
-            "[{}#{}] review_accept",
-            self.role_name(),
-            self.session().task_id()
-        );
-        let hostname = get_hostname();
-        let response = if let Err(e) = self
-            .session()
-            .post_comment(
-                CommentType::Report,
-                message,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-            )
-            .await
-        {
-            format!("Error posting review acceptance: {e}")
-        } else {
-            // No signal set — finalize_session will call finish when signal is None.
-            "Review accepted — task will be marked done".to_string()
-        };
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "review_accept",
-            &response,
-        );
-        response
-    }
-
-    async fn review_reject_impl(&self, message: &str) -> String {
-        tracing::info!(
-            "[{}#{}] review_reject",
-            self.role_name(),
-            self.session().task_id()
-        );
-        let hostname = get_hostname();
-        if let Err(e) = self
-            .session()
-            .post_comment(
-                CommentType::Reject,
-                message,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-            )
-            .await
-        {
-            let response = format!("Error posting review rejection: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                "review_reject",
-                &response,
-            );
-            return response;
-        }
-        if let Err(e) = self.session().set_signal(crate::Signal::GoPlan).await {
-            tracing::warn!(
-                "Failed to set GoPlan signal for task {}: {e}",
-                self.session().task_id()
-            );
-        }
-        let response = "Review rejected — task routed back to planner".to_string();
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "review_reject",
-            &response,
-        );
-        response
-    }
-}
-
-// -- Tester MCP service --
-
-#[allow(async_fn_in_trait)]
-pub trait TesterMcpImpl: CommonMcpImpl {
-    async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::DestinationBranch).await
-    }
-
-    async fn get_param_work_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::WorkBranch).await
-    }
-
-    async fn test_accept_impl(&self, message: &str) -> String {
-        tracing::info!(
-            "[{}#{}] test_accept",
-            self.role_name(),
-            self.session().task_id()
-        );
-        let hostname = get_hostname();
-        let response = if let Err(e) = self
-            .session()
-            .post_comment(
-                CommentType::Report,
-                message,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-            )
-            .await
-        {
-            format!("Error posting test acceptance: {e}")
-        } else {
-            // No signal set — finalize_session will call finish when signal is None.
-            "Testing accepted — task will be marked done".to_string()
-        };
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "test_accept",
-            &response,
-        );
-        response
-    }
-
-    async fn test_reject_impl(&self, message: &str) -> String {
-        tracing::info!(
-            "[{}#{}] test_reject",
-            self.role_name(),
-            self.session().task_id()
-        );
-        let hostname = get_hostname();
-        if let Err(e) = self
-            .session()
-            .post_comment(
-                CommentType::Reject,
-                message,
-                Some(self.role()),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-            )
-            .await
-        {
-            let response = format!("Error posting test rejection: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                "test_reject",
-                &response,
-            );
-            return response;
-        }
-        if let Err(e) = self.session().set_signal(crate::Signal::GoPlan).await {
-            tracing::warn!(
-                "Failed to set GoPlan signal for task {}: {e}",
-                self.session().task_id()
-            );
-        }
-        let response = "Testing rejected — task routed back to planner".to_string();
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            "test_reject",
-            &response,
-        );
-        response
-    }
-}
-
-// -- Merger MCP service --
-
-#[allow(async_fn_in_trait)]
-pub trait MergerMcpImpl: CommonMcpImpl {
-    async fn get_param_destination_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::DestinationBranch).await
-    }
-
-    async fn get_param_work_branch_impl(&self) -> String {
-        self.get_param_impl(Parameter::WorkBranch).await
     }
 }
