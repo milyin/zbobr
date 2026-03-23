@@ -452,10 +452,10 @@ impl ZbobrTaskBackendGithubImpl {
         let (owner, repo) = self.parse_repo()?;
         let url = format!("/repos/{owner}/{repo}/labels/{name}");
         retry_github("delete label", || {
-            self.octocrab.delete(url.clone(), None::<&()>)
+            self.octocrab._delete(url.clone(), None::<&()>)
         })
         .await
-        .map(|_: serde_json::Value| ())?;
+        .map(|_| ())?;
         Ok(())
     }
 
