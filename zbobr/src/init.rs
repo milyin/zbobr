@@ -23,17 +23,12 @@ use super::RootConfigToml;
 /// Creates the directory (if it does not exist), writes a complete `zbobr.toml`
 /// config file, creates prompt files for each predefined role, and creates
 /// the required subdirectories.
+///
+/// If a file already exists with different content, the new version is written
+/// next to it as `{filename}.new` instead of overwriting or refusing.
 pub async fn init_workspace(dest: &Path) -> anyhow::Result<()> {
     // Create destination directory
     tokio::fs::create_dir_all(dest).await?;
-
-    let config_path = dest.join("zbobr.toml");
-    if config_path.exists() {
-        anyhow::bail!(
-            "zbobr.toml already exists at {}. Remove it first to re-initialize.",
-            config_path.display()
-        );
-    }
 
     // Create subdirectories
     let prompts_dir = dest.join("prompts");
@@ -46,8 +41,7 @@ pub async fn init_workspace(dest: &Path) -> anyhow::Result<()> {
     // Write prompt files
     for (name, content) in PROMPT_FILES {
         let path = prompts_dir.join(format!("{name}.md"));
-        tokio::fs::write(&path, content).await?;
-        println!("  wrote {}", path.display());
+        write_or_new(&path, content).await?;
     }
 
     // Serialize with toml pretty-printer, then post-process with toml_edit
@@ -60,13 +54,35 @@ pub async fn init_workspace(dest: &Path) -> anyhow::Result<()> {
         "# zbobr configuration\n# See documentation for all available options.\n\n{}",
         doc
     );
-    tokio::fs::write(&config_path, &config_content).await?;
-    println!("  wrote {}", config_path.display());
+    let config_path = dest.join("zbobr.toml");
+    write_or_new(&config_path, &config_content).await?;
 
     println!(
         "\nWorkspace initialized at {}.\nEdit zbobr.toml to configure backends and tokens before running.",
         dest.display()
     );
+    Ok(())
+}
+
+/// Write `content` to `path`. If the file already exists with identical content,
+/// skip it. If it exists with different content, write to `{path}.new` instead.
+async fn write_or_new(path: &Path, content: &str) -> anyhow::Result<()> {
+    if path.exists() {
+        let existing = tokio::fs::read_to_string(path).await?;
+        if existing == content {
+            println!("  unchanged {}", path.display());
+            return Ok(());
+        }
+        let new_path = path.with_extension(format!(
+            "{}.new",
+            path.extension().unwrap_or_default().to_string_lossy()
+        ));
+        tokio::fs::write(&new_path, content).await?;
+        println!("  wrote {} (existing file differs)", new_path.display());
+    } else {
+        tokio::fs::write(path, content).await?;
+        println!("  wrote {}", path.display());
+    }
     Ok(())
 }
 
