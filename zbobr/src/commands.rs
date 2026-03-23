@@ -3,9 +3,17 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Subcommand;
-use zbobr_api::{Pipeline, Stage};
-use zbobr_dispatcher::{TaskDir, ZbobrDispatcher, print_task};
-use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
+use zbobr_api::{Pipeline, Stage, config::WorkflowConfig};
+use zbobr_dispatcher::{
+    ConfiguredPromptBuilder, TaskDir, Workflow, ZbobrDispatcher,
+    config::{ZbobrDispatcherConfig, ZbobrExecutorConfig},
+    print_task,
+};
+use zbobr_executor_claude::ClaudeExecutor;
+use zbobr_executor_copilot::CopilotExecutor;
+use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
+use zbobr_repo_backend_github::{ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig};
+use zbobr_task_backend_github::{TaskBackendGithub, ZbobrTaskBackendGithubConfig};
 use zbobr_utility::{git, git_output};
 
 // ---------------------------------------------------------------------------
@@ -175,13 +183,94 @@ pub enum TaskSubcommand {
 // Command dispatch
 // ---------------------------------------------------------------------------
 
-/// Run the given command against the dispatcher.
-pub async fn run_command(zbobr: ZbobrDispatcher, command: Command) -> anyhow::Result<()> {
-    let zbobr = Arc::new(zbobr);
+impl Command {
+    /// Whether this command requires backend connectivity (GitHub token, etc.).
+    fn needs_backends(&self) -> bool {
+        match self {
+            Command::Init { .. } => false,
+            Command::Task {
+                subcommand: TaskSubcommand::Prompt { id: None, .. },
+            } => false,
+            _ => true,
+        }
+    }
+}
+
+/// Main entry point for command dispatch. Creates backends only when needed.
+pub async fn run(
+    dispatcher_config: ZbobrDispatcherConfig,
+    tasks_config: ZbobrTaskBackendGithubConfig,
+    repo_config: ZbobrRepoBackendGithubConfig,
+    executor_config: ZbobrExecutorConfig,
+    workflow_config: WorkflowConfig,
+    config_dir: PathBuf,
+    command: Command,
+) -> anyhow::Result<()> {
+    let workflow = Workflow::new(workflow_config)?;
+    let prompt_builder = ConfiguredPromptBuilder::new(
+        Some(config_dir),
+        Arc::new(workflow.clone()),
+    );
+
+    if !command.needs_backends() {
+        return run_without_backends(command, &prompt_builder);
+    }
+
+    let task_backend = TaskBackendGithub::new(tasks_config).await?;
+    let repo_backend = ZbobrRepoBackendGithub::new(repo_config).await?;
+
+    let claude = ClaudeExecutor::new(executor_config.claude);
+    let copilot = CopilotExecutor::new(executor_config.copilot);
+    let mcp_tester = McpTesterExecutor::new(executor_config.mcp_tester);
+
+    let dispatcher = zbobr_dispatcher::ZbobrDispatcherBuilder::new()
+        .with_config(dispatcher_config)
+        .with_workflow(workflow)
+        .with_task_backend(task_backend)
+        .with_repo_backend(repo_backend)
+        .with_claude(claude)
+        .with_copilot(copilot)
+        .with_mcp_tester(mcp_tester)
+        .with_prompt_builder(prompt_builder)
+        .build()
+        .validated()?;
+
+    run_with_dispatcher(dispatcher, command).await
+}
+
+/// Handle commands that don't need backends.
+fn run_without_backends(
+    command: Command,
+    prompt_builder: &ConfiguredPromptBuilder,
+) -> anyhow::Result<()> {
     match command {
         Command::Init { .. } => {
-            unreachable!("Init is handled before dispatcher setup in main()")
+            unreachable!("Init is handled before config loading in main()")
         }
+        Command::Task {
+            subcommand:
+                TaskSubcommand::Prompt {
+                    id: None,
+                    stage,
+                    role,
+                    pipeline,
+                },
+        } => {
+            let workflow = prompt_builder.workflow_config();
+            let stage_def = resolve_stage_def(workflow, &stage, &role, &pipeline)?;
+            let prompt = prompt_builder.build_for_stage_with_placeholders(stage_def)?;
+            println!("{}", prompt);
+            Ok(())
+        }
+        _ => unreachable!("needs_backends() returned false for unexpected command"),
+    }
+}
+
+/// Handle commands that need the full dispatcher.
+async fn run_with_dispatcher(zbobr: ZbobrDispatcher, command: Command) -> anyhow::Result<()> {
+    let zbobr = Arc::new(zbobr);
+    match command {
+        Command::Init { .. } => unreachable!(),
         Command::Setup { force } => {
             zbobr.setup(force).await?;
         }
@@ -375,7 +464,19 @@ async fn run_task_subcommand(
             role,
             pipeline,
         } => {
-            show_prompt(zbobr, id, stage, role, pipeline).await?;
+            let workflow = zbobr.workflow().config();
+            let stage_def = resolve_stage_def(workflow, &stage, &role, &pipeline)?;
+            let prompt = if let Some(task_id) = id {
+                zbobr
+                    .prompt_builder()
+                    .build_for_stage(stage_def, task_id, zbobr.task_backend())
+                    .await?
+            } else {
+                zbobr
+                    .prompt_builder()
+                    .build_for_stage_with_placeholders(stage_def)?
+            };
+            println!("{}", prompt);
         }
         TaskSubcommand::OverwriteAuthor { id, force, dry_run } => {
             let id = require_task_id(id, "overwrite-author")?;
@@ -385,8 +486,12 @@ async fn run_task_subcommand(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 fn resolve_stage_def<'a>(
-    workflow: &'a zbobr_api::config::WorkflowConfig,
+    workflow: &'a WorkflowConfig,
     stage: &Option<Stage>,
     role: &Option<String>,
     pipeline: &Option<Pipeline>,
@@ -456,44 +561,6 @@ fn resolve_stage_def<'a>(
             }
         }
     }
-}
-
-/// Show prompt with placeholder values (no task backend needed).
-pub fn run_prompt_with_placeholders(
-    prompt_builder: &zbobr_dispatcher::ConfiguredPromptBuilder,
-    stage: Option<Stage>,
-    role: Option<String>,
-    pipeline: Option<Pipeline>,
-) -> anyhow::Result<()> {
-    let workflow = prompt_builder.workflow_config();
-    let stage_def = resolve_stage_def(workflow, &stage, &role, &pipeline)?;
-    let prompt = prompt_builder.build_for_stage_with_placeholders(stage_def)?;
-    println!("{}", prompt);
-    Ok(())
-}
-
-async fn show_prompt(
-    zbobr: &Arc<ZbobrDispatcher>,
-    id: Option<u64>,
-    stage: Option<Stage>,
-    role: Option<String>,
-    pipeline: Option<Pipeline>,
-) -> anyhow::Result<()> {
-    let workflow = zbobr.workflow().config();
-    let stage_def = resolve_stage_def(workflow, &stage, &role, &pipeline)?;
-
-    let prompt = if let Some(task_id) = id {
-        zbobr
-            .prompt_builder()
-            .build_for_stage(stage_def, task_id, zbobr.task_backend())
-            .await?
-    } else {
-        zbobr
-            .prompt_builder()
-            .build_for_stage_with_placeholders(stage_def)?
-    };
-    println!("{}", prompt);
-    Ok(())
 }
 
 async fn overwrite_author(

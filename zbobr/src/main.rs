@@ -3,29 +3,22 @@
 mod commands;
 mod init;
 
-use std::sync::Arc;
-
 use anyhow::Context;
 use clap::Parser;
 use commands::Command;
 use zbobr_api::config::{WorkflowArgs, WorkflowConfig, WorkflowToml};
 use zbobr_dispatcher::{
-    ConfigFileArg, ConfiguredPromptBuilder, Workflow,
+    ConfigFileArg,
     config::{
         Config as _, ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
         ZbobrExecutorArgs, ZbobrExecutorConfig, ZbobrExecutorToml,
     },
 };
-use zbobr_executor_claude::ClaudeExecutor;
-use zbobr_executor_copilot::CopilotExecutor;
-use zbobr_executor_mcp_tester::McpTesterExecutor;
 use zbobr_repo_backend_github::{
-    ZbobrRepoBackendGithub, ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubConfig,
-    ZbobrRepoBackendGithubToml,
+    ZbobrRepoBackendGithubArgs, ZbobrRepoBackendGithubConfig, ZbobrRepoBackendGithubToml,
 };
 use zbobr_task_backend_github::{
-    TaskBackendGithub, ZbobrTaskBackendGithubArgs, ZbobrTaskBackendGithubConfig,
-    ZbobrTaskBackendGithubToml,
+    ZbobrTaskBackendGithubArgs, ZbobrTaskBackendGithubConfig, ZbobrTaskBackendGithubToml,
 };
 use zbobr_utility::config_struct;
 
@@ -97,57 +90,5 @@ async fn main() -> anyhow::Result<()> {
 
     let config = RootConfig::build(root_toml, cli.settings, &location.config_dir);
 
-    let command = cli.command;
-
-    // Handle commands that only need workflow config, not backends
-    if let Command::Task {
-        subcommand:
-            commands::TaskSubcommand::Prompt {
-                id: None,
-                ref stage,
-                ref role,
-                ref pipeline,
-            },
-    } = command
-    {
-        let workflow = Workflow::new(config.workflow)?;
-        let prompt_builder = ConfiguredPromptBuilder::new(
-            Some(location.config_dir.clone()),
-            Arc::new(workflow),
-        );
-        return commands::run_prompt_with_placeholders(
-            &prompt_builder,
-            stage.clone(),
-            role.clone(),
-            pipeline.clone(),
-        );
-    }
-
-    let workflow = Workflow::new(config.workflow)?;
-
-    let task_backend = TaskBackendGithub::new(config.tasks).await?;
-    let repo_backend = ZbobrRepoBackendGithub::new(config.repo).await?;
-
-    let prompt_builder = ConfiguredPromptBuilder::new(
-        Some(location.config_dir.clone()),
-        Arc::new(workflow.clone()),
-    );
-
-    let claude = ClaudeExecutor::new(config.executor.claude);
-    let copilot = CopilotExecutor::new(config.executor.copilot);
-    let mcp_tester = McpTesterExecutor::new(config.executor.mcp_tester);
-
-    let dispatcher = zbobr_dispatcher::ZbobrDispatcherBuilder::new()
-        .with_config(config.dispatcher)
-        .with_workflow(workflow)
-        .with_task_backend(task_backend)
-        .with_repo_backend(repo_backend)
-        .with_claude(claude)
-        .with_copilot(copilot)
-        .with_mcp_tester(mcp_tester)
-        .with_prompt_builder(prompt_builder)
-        .build()
-        .validated()?;
-
-    commands::run_command(dispatcher, command).await
+    commands::run(config.dispatcher, config.tasks, config.repo, config.executor, config.workflow, location.config_dir, cli.command).await
 }
