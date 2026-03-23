@@ -1025,6 +1025,9 @@ pub struct Task {
     /// Current/latest pipeline run counter. Incremented on each new pipeline call.
     #[serde(default)]
     pub pipeline_run_id: u64,
+    /// Counter that is automatically incremented on each stage passed.
+    #[serde(default)]
+    pub stage_count: u64,
     /// ETag for optimistic locking to prevent concurrent update conflicts.
     /// Used to detect if the task has been modified between read and write operations.
     #[serde(skip)]

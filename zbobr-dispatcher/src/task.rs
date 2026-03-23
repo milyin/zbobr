@@ -251,9 +251,11 @@ impl RoleSession {
             .modify_task(Box::new(move |mut task| {
                 let saved_state = task.state.clone();
                 let saved_stack = task.stack.clone();
+                let saved_stage_count = task.stage_count;
                 task = mutate(task);
                 task.state = saved_state;
                 task.stack = saved_stack;
+                task.stage_count = saved_stage_count;
                 task
             }))
             .await
@@ -488,6 +490,15 @@ impl TaskSession {
         })
         .await?;
         Ok(new_id)
+    }
+
+    /// Increment the stage counter. Called each time a stage is entered.
+    pub async fn increment_stage_count(&self) -> anyhow::Result<()> {
+        self.modify_task(move |mut t| {
+            t.stage_count += 1;
+            t
+        })
+        .await
     }
 
     /// Push an entry onto the task's call stack, saving the current pipeline_run_id.
@@ -861,6 +872,7 @@ mod comment_model_tests {
                 pause: false,
                 confirm: false,
                 pipeline_run_id: 0,
+                stage_count: 0,
                 etag: None,
             };
             self.inner.tasks.lock().await.insert(

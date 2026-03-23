@@ -395,6 +395,7 @@ mod tests {
             pause: false,
             confirm: false,
             pipeline_run_id: 0,
+            stage_count: 0,
             etag: None,
         }
     }
