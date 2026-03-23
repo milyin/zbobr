@@ -405,8 +405,6 @@ pub enum Pipeline {
     Main,
     /// The merge/conflict-resolution pipeline (name: `"merge"`).
     Merge,
-    /// The initialisation pipeline (name: `"init"`).
-    Init,
     /// Any other user-defined pipeline.
     Custom(String),
 }
@@ -414,13 +412,11 @@ pub enum Pipeline {
 impl Pipeline {
     pub const MAIN: &'static str = "main";
     pub const MERGE: &'static str = "merge";
-    pub const INIT: &'static str = "init";
 
     pub fn as_str(&self) -> &str {
         match self {
             Pipeline::Main => Self::MAIN,
             Pipeline::Merge => Self::MERGE,
-            Pipeline::Init => Self::INIT,
             Pipeline::Custom(s) => s.as_str(),
         }
     }
@@ -438,7 +434,6 @@ impl std::str::FromStr for Pipeline {
         Ok(match s {
             Self::MAIN => Pipeline::Main,
             Self::MERGE => Pipeline::Merge,
-            Self::INIT => Pipeline::Init,
             other => Pipeline::Custom(other.to_string()),
         })
     }
