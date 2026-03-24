@@ -225,8 +225,9 @@ impl schemars::JsonSchema for Stage {
 /// - `"ready"`
 /// - `"pending:{pipeline}"`
 /// - `"running:{pipeline}:{stage}"`
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum State {
+    #[default]
     Empty,
     Done,
     Pause,

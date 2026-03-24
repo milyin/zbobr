@@ -178,7 +178,7 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
 pub fn print_task(task: &Task, discussion: &[Comment]) {
     println!("ID:          {}", task.id);
     println!("Title:       {}", task.title);
-    println!("State:       {}", task.state);
+    println!("State:       {:?}", task.state);
     println!(
         "Signal:      {}",
         task.signal
@@ -635,7 +635,7 @@ async fn apply_pause_to_state(zbobr: &Arc<ZbobrDispatcher>, task: &Task) -> anyh
         Some(p) => p.clone(),
         None => {
             tracing::warn!(
-                "Task #{}: pause flag set but state is '{}', expected Pending — using default pipeline",
+                "Task #{}: pause flag set but state is '{:?}', expected Pending — using default pipeline",
                 task.id,
                 task.state
             );
@@ -839,7 +839,7 @@ pub async fn process_task(
         }
         crate::workflow::StateAction::Idle => {
             tracing::info!(
-                "Task #{}: idle (state={}, signal={:?}) — skipped",
+                "Task #{}: idle (state={:?}, signal={:?}) — skipped",
                 task.id,
                 task.state,
                 task.signal
@@ -969,7 +969,7 @@ pub async fn run_manager_loop(
             match action {
                 crate::workflow::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
                     tracing::info!(
-                        "Processing task #{} (state={}, signal={:?}) — running stage {}/{}",
+                        "Processing task #{} (state={:?}, signal={:?}) — running stage {}/{}",
                         task.id,
                         task.state,
                         task.signal,
@@ -1134,7 +1134,7 @@ pub async fn run_manager_loop(
         let mut state_counts: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
         for task in &all_tasks {
-            *state_counts.entry(task.state.to_string()).or_default() += 1;
+            *state_counts.entry(format!("{:?}", task.state)).or_default() += 1;
         }
         let stats: Vec<String> = state_counts
             .iter()
@@ -1469,7 +1469,7 @@ async fn finalize_stage_session(
             tracing::warn!("Stash/push failed during interruption for task #{task_id}: {e}");
         }
         task_session.set_state(pending_state.clone()).await?;
-        tracing::info!("Session interrupted for task #{task_id}, moved to {pending_state}");
+        tracing::info!("Session interrupted for task #{task_id}, moved to {pending_state:?}");
         return Ok(None);
     }
 
@@ -1499,7 +1499,7 @@ async fn finalize_stage_session(
             tracing::error!("Failed to set pause for task #{task_id}: {pause_err}");
         }
         task_session.set_state(pending_state.clone()).await?;
-        tracing::info!("Session failed for task #{task_id}, moved to {pending_state} with pause");
+        tracing::info!("Session failed for task #{task_id}, moved to {pending_state:?} with pause");
         return Ok(outcome.execution_error);
     }
 
