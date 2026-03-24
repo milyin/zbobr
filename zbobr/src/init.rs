@@ -103,6 +103,7 @@ fn default_config_toml() -> RootConfigToml {
             git_user_name: Some("zbobr".into()),
             git_user_email: Some("zbobr@example.com".into()),
             overwrite_author: Some(false),
+            task_stage_limit: None,
         }),
         tasks: Some(ZbobrTaskBackendGithubToml {
             github_repo: Some("owner/repo".into()),

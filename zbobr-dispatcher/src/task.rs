@@ -492,13 +492,28 @@ impl TaskSession {
         Ok(new_id)
     }
 
-    /// Increment the stage counter. Called each time a stage is entered.
-    pub async fn increment_stage_count(&self) -> anyhow::Result<()> {
+    /// Set the stage counter to a specific value.
+    /// Used to initialize the counter from `task_stage_limit` on fresh tasks.
+    pub async fn set_stage_count(&self, value: u64) -> anyhow::Result<()> {
         self.modify_task(move |mut t| {
-            t.stage_count += 1;
+            t.stage_count = value;
             t
         })
         .await
+    }
+
+    /// Decrement the stage counter. Called each time a stage is entered.
+    /// Returns the new counter value after decrementing.
+    pub async fn decrement_stage_count(&self) -> anyhow::Result<u64> {
+        let new_value = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let nv = new_value.clone();
+        self.modify_task(move |mut t| {
+            t.stage_count = t.stage_count.saturating_sub(1);
+            nv.store(t.stage_count, std::sync::atomic::Ordering::SeqCst);
+            t
+        })
+        .await?;
+        Ok(new_value.load(std::sync::atomic::Ordering::SeqCst))
     }
 
     /// Push an entry onto the task's call stack, saving the current pipeline_run_id.
