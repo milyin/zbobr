@@ -139,7 +139,7 @@ impl UnifiedMcp {
     }
 
     #[tool(
-        description = "Configure worktree parameters: destination repository, destination branch, and/or work branch postfix. All three are optional; only provided values are updated."
+        description = "Configure worktree parameters: destination repository, destination branch, and work branch postfix. The work_branch_postfix is required; destination_repository and destination_branch are optional — only provided values are updated."
     )]
     async fn configure_worktree(
         &self,

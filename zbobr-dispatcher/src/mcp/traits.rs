@@ -350,7 +350,7 @@ pub trait CommonMcpImpl: Send + Sync {
         &self,
         destination_repository: Option<String>,
         destination_branch: Option<String>,
-        work_branch_postfix: Option<String>,
+        work_branch_postfix: String,
     ) -> String {
         tracing::info!(
             "[{}#{}] configure_worktree repo={:?} branch={:?} postfix={:?}",
@@ -361,6 +361,14 @@ pub trait CommonMcpImpl: Send + Sync {
             work_branch_postfix,
         );
 
+        if work_branch_postfix.trim().is_empty() {
+            return self
+                .configure_worktree_error(
+                    "work_branch_postfix is required and must not be empty".to_string(),
+                )
+                .await;
+        }
+
         let session = self.session();
         let config = session.dispatcher_config();
 
@@ -369,7 +377,7 @@ pub trait CommonMcpImpl: Send + Sync {
             .or_else(|| config.default_destination_repository.clone());
         let effective_branch = destination_branch
             .or_else(|| config.default_destination_branch.clone());
-        let work_branch = work_branch_postfix.map(|v| session.create_branch_name(&v));
+        let work_branch = Some(session.create_branch_name(&work_branch_postfix));
 
         // Validate work_branch_postfix: if provided and work_branch is already set,
         // treat identical repeated setup as a successful no-op.

@@ -54,7 +54,7 @@ pub struct ConfigureWorktreeParam {
     #[schemars(
         description = "Short but meaningful name related to the task (e.g. 'fix-login-bug', 'add-retry-logic'). Combined with prefix and task ID to form the full work branch name."
     )]
-    pub work_branch_postfix: Option<String>,
+    pub work_branch_postfix: String,
 }
 
 // -- Checklist parameter types --
