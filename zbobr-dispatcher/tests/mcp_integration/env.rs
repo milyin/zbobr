@@ -413,7 +413,7 @@ impl IntegrationTestEnv {
         let zbobr = self.make_dispatcher(workflow.clone());
         for i in 0..max_iterations {
             let task = self.get_task(task_id).await;
-            if task.state == "DONE" || task.state == "PAUSE" {
+            if task.state.is_done() || task.state.is_pause() {
                 return i;
             }
             if task.pause {
@@ -423,7 +423,7 @@ impl IntegrationTestEnv {
                 return i;
             }
             // If state is PENDING but no signal, nothing to do
-            if task.state.ends_with("_PENDING") && task.signal.is_none() {
+            if task.state.is_pending() && task.signal.is_none() {
                 return i;
             }
 
