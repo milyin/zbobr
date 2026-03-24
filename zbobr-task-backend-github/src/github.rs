@@ -720,7 +720,7 @@ impl ZbobrTaskBackendGithubImpl {
     /// Parse an IssueResponse into a Task.
     fn issue_to_task(issue: IssueResponse) -> Task {
         let body = issue.body.unwrap_or_default();
-        let (description, params_map, checklist) = parse_description_full(&body);
+        let (description, params_map, error, checklist) = parse_description_full(&body);
 
         // Promoted fields: read from params_map where they were stored
         let destination_repository = params_map.get("destination_repository").cloned();
@@ -765,6 +765,7 @@ impl ZbobrTaskBackendGithubImpl {
             checklist,
             signal,
             stack,
+            error,
             pause,
             confirm,
             pipeline_run_id: params_map
@@ -910,14 +911,14 @@ impl ZbobrTaskBackendGithubImpl {
         let original_confirm = task.confirm;
         let expected_description = task.etag.clone().unwrap_or_else(|| {
             let string_params = Self::task_to_string_params(&task);
-            serialize_description_full(&task.description, &string_params, &task.checklist)
+            serialize_description_full(&task.description, &string_params, &task.error, &task.checklist)
         });
 
         let task = mutate(task);
 
         let string_params = Self::task_to_string_params(&task);
         let new_description =
-            serialize_description_full(&task.description, &string_params, &task.checklist);
+            serialize_description_full(&task.description, &string_params, &task.error, &task.checklist);
 
         // Write description with retry and conflict detection
         const MAX_RETRIES: u32 = 3;
@@ -937,6 +938,7 @@ impl ZbobrTaskBackendGithubImpl {
                     serialize_description_full(
                         &current_task.description,
                         &sp,
+                        &current_task.error,
                         &current_task.checklist,
                     )
                 }
@@ -1394,7 +1396,7 @@ impl TaskBackend for TaskBackendGithub {
         state: State,
     ) -> anyhow::Result<u64> {
         let (owner, repo) = self.inner.parse_repo()?;
-        let body = serialize_description_full(description, &HashMap::new(), &[]);
+        let body = serialize_description_full(description, &HashMap::new(), &None, &[]);
 
         let issue = retry_github("create issue", || async {
             let issues = self.inner.octocrab.issues(owner, repo);

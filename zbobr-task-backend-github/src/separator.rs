@@ -8,6 +8,7 @@ use zbobr_api::{
 // -- Checklist parsing and serialization helpers --
 
 pub(crate) const PARAMETERS_SEPARATOR: &str = "\n\n---PARAMETERS---\n";
+pub(crate) const ERROR_SEPARATOR: &str = "\n\n---ERROR---\n";
 pub(crate) const CHECKLIST_SEPARATOR: &str = "\n\n---CHECKLIST---\n";
 
 /// Parse parameters from the PARAMETERS section.
@@ -37,10 +38,11 @@ pub(crate) fn serialize_parameters(params: &HashMap<String, String>) -> String {
     result
 }
 
-/// Parse a task description into (description, parameters, checklist).
+/// Parse a task description into (description, parameters, error, checklist).
+/// Section order: description → PARAMETERS → ERROR → CHECKLIST.
 pub(crate) fn parse_description_full(
     full_text: &str,
-) -> (String, HashMap<String, String>, Vec<ChecklistItem>) {
+) -> (String, HashMap<String, String>, Option<String>, Vec<ChecklistItem>) {
     // Normalize line endings so separators match regardless of \r\n vs \n.
     let normalized = if full_text.contains("\r\n") {
         full_text.replace("\r\n", "\n")
@@ -56,8 +58,18 @@ pub(crate) fn parse_description_full(
         _ => (parts[0], parts[1]),
     };
 
+    // Split by error separator
+    let error_parts: Vec<&str> = before_checklist.split(ERROR_SEPARATOR).collect();
+    let (before_error, error_text) = match error_parts.len() {
+        1 => (error_parts[0], None),
+        _ => {
+            let text = error_parts[1].trim();
+            (error_parts[0], if text.is_empty() { None } else { Some(text) })
+        }
+    };
+
     // Now split by parameters separator
-    let param_parts: Vec<&str> = before_checklist.split(PARAMETERS_SEPARATOR).collect();
+    let param_parts: Vec<&str> = before_error.split(PARAMETERS_SEPARATOR).collect();
     let (description, params_text) = match param_parts.len() {
         1 => (param_parts[0].to_string(), ""),
         _ => (param_parts[0].to_string(), param_parts[1].trim()),
@@ -66,22 +78,26 @@ pub(crate) fn parse_description_full(
     // Parse parameters
     let parameters = parse_parameters(params_text);
 
+    let error = error_text.map(|s| s.to_string());
+
     // Parse checklist items using shared format
     let items = parse_grouped_checklist(checklist_text);
 
-    (description, parameters, items)
+    (description, parameters, error, items)
 }
 
-/// Serialize description, parameters, and checklist items back into the full format.
+/// Serialize description, parameters, error, and checklist items back into the full format.
 /// Items are grouped by pipeline run with visual headers for clarity.
 /// Legacy plan sections are not included; they should be managed via Plan comments.
+/// Section order: description → PARAMETERS → ERROR → CHECKLIST.
 pub(crate) fn serialize_description_full(
     original_description: &str,
     parameters: &HashMap<String, String>,
+    error: &Option<String>,
     items: &[ChecklistItem],
 ) -> String {
     // Strip everything from the description first
-    let (clean_description, _, _) = parse_description_full(original_description);
+    let (clean_description, _, _, _) = parse_description_full(original_description);
 
     let mut result = clean_description;
 
@@ -89,6 +105,13 @@ pub(crate) fn serialize_description_full(
     if !parameters.is_empty() {
         result.push_str(PARAMETERS_SEPARATOR);
         result.push_str(&serialize_parameters(parameters));
+    }
+
+    // Add error if present
+    if let Some(err) = error {
+        result.push_str(ERROR_SEPARATOR);
+        result.push_str(err);
+        result.push('\n');
     }
 
     // Add checklist if present using shared format
@@ -123,13 +146,14 @@ pub(crate) fn merge_concurrent_description_updates(
     our_new: &str,
 ) -> String {
     // Parse all three versions
-    let (orig_desc, orig_params, orig_checklist) = parse_description_full(original);
-    let (curr_desc, curr_params, curr_checklist) = parse_description_full(current);
-    let (new_desc, new_params, new_checklist) = parse_description_full(our_new);
+    let (orig_desc, orig_params, orig_error, orig_checklist) = parse_description_full(original);
+    let (curr_desc, curr_params, curr_error, curr_checklist) = parse_description_full(current);
+    let (new_desc, new_params, new_error, new_checklist) = parse_description_full(our_new);
 
     // Determine what we changed
     let we_changed_desc = new_desc != orig_desc;
     let we_changed_params = new_params != orig_params;
+    let we_changed_error = new_error != orig_error;
     let we_changed_checklist = serde_json::to_string(&new_checklist).unwrap_or_default()
         != serde_json::to_string(&orig_checklist).unwrap_or_default();
 
@@ -140,6 +164,11 @@ pub(crate) fn merge_concurrent_description_updates(
     } else {
         curr_params
     };
+    let merged_error = if we_changed_error {
+        new_error
+    } else {
+        curr_error
+    };
     let merged_checklist = if we_changed_checklist {
         new_checklist
     } else {
@@ -147,7 +176,7 @@ pub(crate) fn merge_concurrent_description_updates(
     };
 
     // Serialize back with the merged content
-    serialize_description_full(&merged_desc, &merged_params, &merged_checklist)
+    serialize_description_full(&merged_desc, &merged_params, &merged_error, &merged_checklist)
 }
 
 #[cfg(test)]
@@ -174,8 +203,8 @@ mod tests {
             },
         ];
 
-        let serialized = serialize_description_full("my task", &HashMap::new(), &orig_items);
-        let (desc, _, parsed_items) = parse_description_full(&serialized);
+        let serialized = serialize_description_full("my task", &HashMap::new(), &None, &orig_items);
+        let (desc, _, _, parsed_items) = parse_description_full(&serialized);
 
         assert_eq!(desc, "my task");
         assert_eq!(parsed_items.len(), 3);
@@ -197,9 +226,49 @@ mod tests {
             - [ ] task1: legacy item\n\
             - [x] task2: old format\n";
 
-        let (desc, _, items) = parse_description_full(legacy);
+        let (desc, _, _, items) = parse_description_full(legacy);
 
         assert_eq!(desc, "description");
         assert_eq!(items.len(), 0);
+    }
+
+    #[test]
+    fn roundtrip_preserves_error_section() {
+        let mut params = HashMap::new();
+        params.insert("key".to_string(), "value".to_string());
+        let error = Some("Something went wrong\ndetails here".to_string());
+        let items = vec![ChecklistItem {
+            id: "main__1__task1".to_string(),
+            checked: false,
+            text: "work".to_string(),
+        }];
+
+        let serialized = serialize_description_full("my task", &params, &error, &items);
+        let (desc, parsed_params, parsed_error, parsed_items) =
+            parse_description_full(&serialized);
+
+        assert_eq!(desc, "my task");
+        assert_eq!(parsed_params.get("key").unwrap(), "value");
+        assert_eq!(parsed_error, error);
+        assert_eq!(parsed_items.len(), 1);
+        assert_eq!(parsed_items[0].id, "main__1__task1");
+
+        // Verify section order in serialized output
+        let params_pos = serialized.find("---PARAMETERS---").unwrap();
+        let error_pos = serialized.find("---ERROR---").unwrap();
+        let checklist_pos = serialized.find("---CHECKLIST---").unwrap();
+        assert!(params_pos < error_pos);
+        assert!(error_pos < checklist_pos);
+    }
+
+    #[test]
+    fn roundtrip_no_error_section() {
+        let serialized = serialize_description_full("desc", &HashMap::new(), &None, &[]);
+        let (desc, _, error, items) = parse_description_full(&serialized);
+
+        assert_eq!(desc, "desc");
+        assert_eq!(error, None);
+        assert!(items.is_empty());
+        assert!(!serialized.contains("---ERROR---"));
     }
 }

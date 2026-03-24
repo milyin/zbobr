@@ -413,6 +413,7 @@ mod tests {
             checklist: vec![],
             signal: None,
             stack: vec![],
+            error: None,
             pause: false,
             confirm: false,
             pipeline_run_id: 0,
