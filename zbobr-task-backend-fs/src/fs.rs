@@ -44,6 +44,8 @@ struct TaskFile {
     signal: Option<Signal>,
     #[serde(default)]
     stack: Vec<StackEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
     #[serde(default)]
     pipeline_run_id: u64,
     #[serde(default)]
@@ -78,7 +80,7 @@ impl TaskFile {
             checklist: self.checklist.clone(),
             signal: self.signal.clone(),
             stack: self.stack.clone(),
-            error: None,
+            error: self.error.clone(),
             pause: self.pause,
             confirm: self.confirm,
             pipeline_run_id: self.pipeline_run_id,
@@ -109,6 +111,7 @@ impl TaskFile {
             checklist: task.checklist.clone(),
             signal: task.signal.clone(),
             stack: task.stack.clone(),
+            error: task.error.clone(),
             pipeline_run_id: task.pipeline_run_id,
             stage_count: task.stage_count,
             closed,

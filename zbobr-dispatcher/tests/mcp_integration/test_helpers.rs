@@ -624,12 +624,12 @@ pub async fn run_report_error_preserves_signal(env: &IntegrationTestEnv) {
         .await;
 
     let task = env.get_task(task_id).await;
-    let comments: Vec<zbobr_dispatcher::Comment> = env.get_comments(task_id).await;
     assert!(
-        comments
-            .iter()
-            .any(|c| c.text.contains("Something went wrong during work")),
-        "[{}] report_error message should appear in discussion",
+        task.error
+            .as_ref()
+            .map(|e| e.contains("Something went wrong during work"))
+            .unwrap_or(false),
+        "[{}] report_error message should appear in task.error",
         env.name()
     );
     assert!(

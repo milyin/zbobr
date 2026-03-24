@@ -330,6 +330,15 @@ impl RoleSession {
         .await
     }
 
+    /// Set the error message on the task.
+    pub async fn set_error(&self, error: Option<String>) -> anyhow::Result<()> {
+        self.modify_task(move |mut task| {
+            task.error = error;
+            task
+        })
+        .await
+    }
+
     /// Get the destination_repository field.
     pub async fn get_destination_repository(&self) -> anyhow::Result<Option<String>> {
         let task = self.get_task().await?;
@@ -972,15 +981,13 @@ mod comment_model_tests {
             1,
         );
 
-        // stop_with_error is unbuffered — goes straight to backend
+        // stop_with_error stores the error in the task's error field
         let _ = planner.stop_with_error_impl("oops").await;
 
         let weak = task_backend.get_task(id).await.unwrap();
-        let comments = weak.get_comments().await.unwrap();
-        assert_eq!(comments.len(), 1);
-        assert_eq!(comments[0].model, Some(Model::Gpt5Mini));
-        assert_eq!(comments[0].tool, Some(Tool::Copilot));
-        assert!(comments[0].text.starts_with("[stop_with_error]"));
+        let task = weak.snapshot(false).await.unwrap();
+        assert_eq!(task.error.as_deref(), Some("oops"));
+        assert!(task.pause, "stop_with_error should set pause flag");
     }
 
     #[tokio::test]

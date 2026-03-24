@@ -337,12 +337,12 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
         "Pause should set signal to re-run the stage"
     );
 
-    let comments = env.get_comments(task_id).await;
     assert!(
-        comments
-            .iter()
-            .any(|c| c.text.contains("Something went wrong")),
-        "Error comment should be recorded"
+        task.error
+            .as_ref()
+            .map(|e| e.contains("Something went wrong"))
+            .unwrap_or(false),
+        "Error message should be stored in task.error"
     );
 }
 
