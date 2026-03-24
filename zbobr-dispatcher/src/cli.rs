@@ -1327,7 +1327,7 @@ async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Re
             return Err(anyhow::anyhow!(msg));
         }
     };
-    match zbobr.repo_backend().update_pr(&identity).await {
+    match zbobr.repo_backend().ensure_pr_url(&identity).await {
         Ok(pr_url) => {
             role_session
                 .modify_task(move |mut task| {

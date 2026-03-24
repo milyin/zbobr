@@ -649,7 +649,6 @@ async fn overwrite_author(
     dry_run: bool,
 ) -> anyhow::Result<()> {
     let task_backend = zbobr.task_backend();
-    let repo_backend = zbobr.repo_backend();
     let task = task_backend.get_task(id).await?.snapshot(false).await?;
     let identity = task
         .identity()
@@ -703,9 +702,15 @@ async fn overwrite_author(
             &config.git_user_email,
         )
         .await?;
-        // Push rewritten commits
-        if let Err(e) = repo_backend.update_pr(&identity).await {
-            tracing::warn!("Could not push rewritten commits for task #{}: {e}", id);
+        // Sync and push rewritten commits
+        match zbobr.update_worktree(&identity).await {
+            Ok(true) => {}
+            Ok(false) => {
+                tracing::warn!("Merge conflict while pushing rewritten commits for task #{id}");
+            }
+            Err(e) => {
+                tracing::warn!("Could not push rewritten commits for task #{id}: {e}");
+            }
         }
         println!("Successfully rewrote commit authors and pushed");
     } else {

@@ -919,7 +919,7 @@ mod comment_model_tests {
             Ok(true)
         }
 
-        async fn update_pr(&self, _identity: &zbobr_api::TaskIdentity) -> anyhow::Result<String> {
+        async fn ensure_pr_url(&self, _identity: &zbobr_api::TaskIdentity) -> anyhow::Result<String> {
             Ok("mock-pr-url".to_string())
         }
 
