@@ -218,15 +218,16 @@ impl schemars::JsonSchema for Stage {
 
 /// Task lifecycle state.
 ///
-/// Serialized as a string for storage/backward compatibility:
-/// - "" (empty)
-/// - "DONE"
-/// - "PAUSE"
-/// - "READY"
-/// - "{pipeline}_PENDING"
-/// - "{pipeline}_{stage}"
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Serialized as a structured string:
+/// - `""` (empty)
+/// - `"done"`
+/// - `"pause"`
+/// - `"ready"`
+/// - `"pending:{pipeline}"`
+/// - `"running:{pipeline}:{stage}"`
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum State {
+    #[default]
     Empty,
     Done,
     Pause,
@@ -239,11 +240,6 @@ pub enum State {
 }
 
 impl State {
-    const DONE: &'static str = "DONE";
-    const PAUSE: &'static str = "PAUSE";
-    const READY: &'static str = "READY";
-    const PENDING_SUFFIX: &'static str = "_PENDING";
-
     pub fn pending(pipeline: impl Into<Pipeline>) -> Self {
         State::Pending(pipeline.into())
     }
@@ -268,6 +264,14 @@ impl State {
         matches!(self, State::Ready)
     }
 
+    pub fn is_pending(&self) -> bool {
+        matches!(self, State::Pending(_))
+    }
+
+    pub fn is_running(&self) -> bool {
+        matches!(self, State::Running(_, _))
+    }
+
     pub fn pipeline(&self) -> Option<&Pipeline> {
         match self {
             State::Pending(p) | State::Running(p, _) => Some(p),
@@ -282,41 +286,21 @@ impl State {
         }
     }
 
-    pub fn contains(&self, pat: &str) -> bool {
-        self.to_string().contains(pat)
-    }
-
-    pub fn ends_with(&self, suffix: &str) -> bool {
-        self.to_string().ends_with(suffix)
-    }
-
-    fn equals_str(&self, other: &str) -> bool {
-        match self {
-            State::Empty => other.is_empty(),
-            State::Done => other == Self::DONE,
-            State::Pause => other == Self::PAUSE,
-            State::Ready => other == Self::READY,
-            State::Pending(pipeline) => other
-                .strip_suffix(Self::PENDING_SUFFIX)
-                .is_some_and(|p| p == pipeline.as_str()),
-            State::Running(pipeline, stage) => other
-                .split_once('_')
-                .is_some_and(|(p, s)| p == pipeline.as_str() && s == stage.as_str()),
-            State::Unknown(raw) => raw == other,
-        }
-    }
 }
 
-impl std::fmt::Display for State {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl State {
+    /// Serialize to the canonical string format used for serde.
+    fn to_serde_string(&self) -> String {
         match self {
-            State::Empty => Ok(()),
-            State::Done => f.write_str(Self::DONE),
-            State::Pause => f.write_str(Self::PAUSE),
-            State::Ready => f.write_str(Self::READY),
-            State::Pending(pipeline) => write!(f, "{pipeline}{}", Self::PENDING_SUFFIX),
-            State::Running(pipeline, stage) => write!(f, "{pipeline}_{stage}"),
-            State::Unknown(raw) => f.write_str(raw),
+            State::Empty => String::new(),
+            State::Done => "done".to_string(),
+            State::Pause => "pause".to_string(),
+            State::Ready => "ready".to_string(),
+            State::Pending(pipeline) => format!("pending:{}", pipeline.as_str()),
+            State::Running(pipeline, stage) => {
+                format!("running:{}:{}", pipeline.as_str(), stage.as_str())
+            }
+            State::Unknown(raw) => raw.clone(),
         }
     }
 }
@@ -326,27 +310,25 @@ impl From<&str> for State {
         if s.is_empty() {
             return State::Empty;
         }
-        if s == State::DONE {
-            return State::Done;
+
+        // Parse "variant" or "variant:arg1" or "variant:arg1:arg2"
+        let mut parts = s.splitn(3, ':');
+        match parts.next().unwrap() {
+            "done" => State::Done,
+            "pause" => State::Pause,
+            "ready" => State::Ready,
+            "pending" => match parts.next() {
+                Some(p) if !p.is_empty() => State::Pending(Pipeline::from(p)),
+                _ => State::Unknown(s.to_string()),
+            },
+            "running" => match (parts.next(), parts.next()) {
+                (Some(p), Some(st)) if !p.is_empty() && !st.is_empty() => {
+                    State::Running(Pipeline::from(p), Stage::from(st))
+                }
+                _ => State::Unknown(s.to_string()),
+            },
+            _ => State::Unknown(s.to_string()),
         }
-        if s == State::PAUSE {
-            return State::Pause;
-        }
-        if s == State::READY {
-            return State::Ready;
-        }
-        if let Some(pipeline) = s.strip_suffix(State::PENDING_SUFFIX)
-            && !pipeline.is_empty()
-        {
-            return State::Pending(Pipeline::from(pipeline));
-        }
-        if let Some((pipeline, stage)) = s.split_once('_')
-            && !pipeline.is_empty()
-            && !stage.is_empty()
-        {
-            return State::Running(Pipeline::from(pipeline), Stage::from(stage));
-        }
-        State::Unknown(s.to_string())
     }
 }
 
@@ -366,7 +348,7 @@ impl std::str::FromStr for State {
 
 impl serde::Serialize for State {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
+        serializer.serialize_str(&self.to_serde_string())
     }
 }
 
@@ -383,18 +365,6 @@ impl schemars::JsonSchema for State {
     }
     fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({ "type": "string" })
-    }
-}
-
-impl PartialEq<&str> for State {
-    fn eq(&self, other: &&str) -> bool {
-        self.equals_str(other)
-    }
-}
-
-impl PartialEq<String> for State {
-    fn eq(&self, other: &String) -> bool {
-        self.equals_str(other)
     }
 }
 
@@ -1166,5 +1136,107 @@ mod tests {
             .map(|c| c.text.as_str())
             .collect();
         assert_eq!(run1, vec!["main work", "sub final report", "next main"]);
+    }
+
+    #[test]
+    fn state_serde_format() {
+        assert_eq!(State::Empty.to_serde_string(), "");
+        assert_eq!(State::Done.to_serde_string(), "done");
+        assert_eq!(State::Pause.to_serde_string(), "pause");
+        assert_eq!(State::Ready.to_serde_string(), "ready");
+        assert_eq!(
+            State::Pending(Pipeline::Main).to_serde_string(),
+            "pending:main"
+        );
+        assert_eq!(
+            State::Pending(Pipeline::Custom("foo".into())).to_serde_string(),
+            "pending:foo"
+        );
+        assert_eq!(
+            State::Running(Pipeline::Main, Stage::from("working")).to_serde_string(),
+            "running:main:working"
+        );
+        assert_eq!(
+            State::Unknown("custom".into()).to_serde_string(),
+            "custom"
+        );
+    }
+
+    #[test]
+    fn state_parse() {
+        assert_eq!(State::from(""), State::Empty);
+        assert_eq!(State::from("done"), State::Done);
+        assert_eq!(State::from("pause"), State::Pause);
+        assert_eq!(State::from("ready"), State::Ready);
+        assert_eq!(
+            State::from("pending:main"),
+            State::Pending(Pipeline::Main)
+        );
+        assert_eq!(
+            State::from("pending:foo"),
+            State::Pending(Pipeline::Custom("foo".into()))
+        );
+        assert_eq!(
+            State::from("running:main:working"),
+            State::Running(Pipeline::Main, Stage::from("working"))
+        );
+    }
+
+    #[test]
+    fn state_parse_incomplete_is_unknown() {
+        // pending without pipeline
+        assert_eq!(
+            State::from("pending"),
+            State::Unknown("pending".into())
+        );
+        assert_eq!(
+            State::from("pending:"),
+            State::Unknown("pending:".into())
+        );
+        // running without stage
+        assert_eq!(
+            State::from("running:main"),
+            State::Unknown("running:main".into())
+        );
+        // running without pipeline or stage
+        assert_eq!(
+            State::from("running"),
+            State::Unknown("running".into())
+        );
+    }
+
+    #[test]
+    fn state_roundtrip_serde_parse() {
+        let states = vec![
+            State::Empty,
+            State::Done,
+            State::Pause,
+            State::Ready,
+            State::Pending(Pipeline::Main),
+            State::Pending(Pipeline::Merge),
+            State::Pending(Pipeline::Custom("custom".into())),
+            State::Running(Pipeline::Main, Stage::from("working")),
+            State::Running(Pipeline::Merge, Stage::from("reviewing")),
+        ];
+        for state in states {
+            let s = state.to_serde_string();
+            let parsed = State::from(s.as_str());
+            assert_eq!(parsed, state, "roundtrip failed for {s:?}");
+        }
+    }
+
+    #[test]
+    fn state_is_pending() {
+        assert!(State::Pending(Pipeline::Main).is_pending());
+        assert!(State::Pending(Pipeline::Custom("x".into())).is_pending());
+        assert!(!State::Done.is_pending());
+        assert!(!State::Running(Pipeline::Main, Stage::from("s")).is_pending());
+    }
+
+    #[test]
+    fn state_is_running() {
+        assert!(State::Running(Pipeline::Main, Stage::from("s")).is_running());
+        assert!(!State::Pending(Pipeline::Main).is_running());
+        assert!(!State::Done.is_running());
     }
 }

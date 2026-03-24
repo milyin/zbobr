@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 use zbobr_api::{
-    Pipeline, Signal, Stage, StageTransition,
+    Pipeline, Signal, Stage, StageTransition, State,
     config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig},
 };
 use zbobr_dispatcher::{backend::TaskBackendExt, task::Tool};
@@ -136,7 +136,7 @@ pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
         .await;
 
     let task = env.get_task(task_id).await;
-    assert_eq!(task.state, "DONE", "Should complete as DONE");
+    assert_eq!(task.state, State::Done, "Should complete as DONE");
 }
 
 // ===========================================================================
@@ -165,7 +165,7 @@ pub async fn run_configure_worktree_idempotent(env: &IntegrationTestEnv) {
         .await;
 
     let task = env.get_task(task_id).await;
-    assert_eq!(task.state, "DONE", "Should complete as DONE");
+    assert_eq!(task.state, State::Done, "Should complete as DONE");
 }
 
 // ===========================================================================
@@ -200,13 +200,13 @@ pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
         Some(Signal::go("second")),
         "Success in first stage should advance to go_second"
     );
-    assert_eq!(task.state, "main_PENDING");
+    assert_eq!(task.state, State::Pending(Pipeline::Main));
 
     // Run to completion: second stage + return resolution
     env.run_to_completion(task_id, &workflow, &scenarios, 5)
         .await;
     let task = env.get_task(task_id).await;
-    assert_eq!(task.state, "DONE", "Should complete after both stages");
+    assert_eq!(task.state, State::Done, "Should complete after both stages");
 }
 
 // ===========================================================================
@@ -291,7 +291,7 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
     env.continue_pipeline(task_id, &workflow, &scenarios).await;
     let task = env.get_task(task_id).await;
     assert_eq!(task.signal, Some(Signal::Return));
-    assert_eq!(task.state, "merge_PENDING");
+    assert_eq!(task.state, State::Pending(Pipeline::Merge));
 
     // Step 3: process return → stack pop → go_work in main pipeline
     env.continue_pipeline(task_id, &workflow, &scenarios).await;
@@ -301,7 +301,7 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
         Some(Signal::go("work")),
         "After return from conflict, signal should be go_work (popped from stack)"
     );
-    assert_eq!(task.state, "main_PENDING");
+    assert_eq!(task.state, State::Pending(Pipeline::Main));
     assert!(task.stack.is_empty(), "Stack should be empty after pop");
 }
 
@@ -330,7 +330,7 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert!(task.pause, "stop_with_error should set pause flag");
-    assert_eq!(task.state, "main_PENDING", "Should be pending, not DONE");
+    assert_eq!(task.state, State::Pending(Pipeline::Main), "Should be pending, not DONE");
     assert_eq!(
         task.signal,
         Some(Signal::go("work")),
@@ -374,7 +374,7 @@ pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert_eq!(
-        task.state, "DONE",
+        task.state, State::Done,
         "READY task should dispatch and complete"
     );
 }
@@ -444,7 +444,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     env.continue_pipeline(task_id, &workflow, &scenarios_reject)
         .await;
     let task = env.get_task(task_id).await;
-    assert_eq!(task.state, "main_PENDING");
+    assert_eq!(task.state, State::Pending(Pipeline::Main));
     assert!(task.pause, "Should be paused at root on failure");
     assert_eq!(
         task.signal,
@@ -609,7 +609,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
         Some(Signal::call("sub")),
         "Call stage should emit call_sub signal"
     );
-    assert_eq!(task.state, "main_PENDING");
+    assert_eq!(task.state, State::Pending(Pipeline::Main));
     assert_eq!(task.stack.len(), 1, "Stack should have one entry");
     assert_eq!(task.stack[0].pipeline, zbobr_api::Pipeline::Main);
     assert_eq!(
@@ -623,7 +623,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
         .await;
     let task = env.get_task(task_id).await;
     assert_eq!(
-        task.state, "DONE",
+        task.state, State::Done,
         "Task should complete after call stage returns and finish stage runs"
     );
     assert!(
@@ -662,7 +662,7 @@ pub async fn run_pause_state_conversion(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert!(task.pause, "stop_with_error should set pause flag");
-    assert_eq!(task.state, "main_PENDING");
+    assert_eq!(task.state, State::Pending(Pipeline::Main));
     assert_eq!(task.signal, Some(Signal::go("work")));
 
     // Step 2: continue_pipeline → centralized handler converts pause flag to PAUSE state
@@ -670,7 +670,7 @@ pub async fn run_pause_state_conversion(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert!(!task.pause, "Pause flag should be cleared");
-    assert_eq!(task.state, "PAUSE", "State should be PAUSE");
+    assert_eq!(task.state, State::Pause, "State should be PAUSE");
     assert!(task.signal.is_none(), "Signal should be cleared");
     assert_eq!(task.stack.len(), 1, "Stack should have one entry");
     assert_eq!(task.stack[0].pipeline, zbobr_api::Pipeline::Main);
@@ -716,7 +716,7 @@ pub async fn run_pause_resume_cycle(env: &IntegrationTestEnv) {
         .await;
 
     let task = env.get_task(task_id).await;
-    assert_eq!(task.state, "PAUSE");
+    assert_eq!(task.state, State::Pause);
     assert_eq!(task.stack.len(), 1);
 
     // Step 3: simulate user unpause by setting state to READY
@@ -727,7 +727,7 @@ pub async fn run_pause_resume_cycle(env: &IntegrationTestEnv) {
         .unwrap();
 
     let task = env.get_task(task_id).await;
-    assert_eq!(task.state, "READY");
+    assert_eq!(task.state, State::Ready);
     assert_eq!(task.stack.len(), 1, "Stack should still have the entry");
 
     // Step 4: process READY → pops stack, restores pipeline/signal
@@ -747,7 +747,7 @@ pub async fn run_pause_resume_cycle(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert_eq!(
-        task.state, "DONE",
+        task.state, State::Done,
         "Task should complete after pause/resume cycle"
     );
     assert!(
@@ -784,7 +784,7 @@ pub async fn run_ready_fresh_start(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert_eq!(
-        task.state, "DONE",
+        task.state, State::Done,
         "READY with empty stack should start fresh and complete"
     );
 }
@@ -830,13 +830,13 @@ pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
         Some(Signal::go("stage_b")),
         "Pause signal should point to NEXT stage, not current"
     );
-    assert_eq!(task.state, "main_PENDING");
+    assert_eq!(task.state, State::Pending(Pipeline::Main));
 
     // Step 2: Convert pause to PAUSE state
     env.continue_pipeline(task_id, &workflow, &scenarios).await;
 
     let task = env.get_task(task_id).await;
-    assert_eq!(task.state, "PAUSE");
+    assert_eq!(task.state, State::Pause);
     assert!(!task.pause, "Pause flag should be cleared");
     assert!(task.signal.is_none(), "Signal should be cleared");
     assert_eq!(task.stack.len(), 1, "Stack should have one entry");
@@ -854,7 +854,7 @@ pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
         .unwrap();
 
     let task = env.get_task(task_id).await;
-    assert_eq!(task.state, "READY");
+    assert_eq!(task.state, State::Ready);
     assert_eq!(task.stack.len(), 1);
 
     // Step 4: Resume and run to completion (stage_b runs, then DONE)
@@ -863,7 +863,7 @@ pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert_eq!(
-        task.state, "DONE",
+        task.state, State::Done,
         "Task should complete after pause/resume with stage advance"
     );
     assert!(

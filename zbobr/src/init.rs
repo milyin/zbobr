@@ -531,7 +531,11 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 8. When implementation for an item is complete, mark the item done with `{mcp_check_checklist_item}`, and add follow-up items as needed.
 9. If you need human clarification or intervention, call `{mcp_stop_with_question}`. If the plan is unclear or requires adjustment, call `{mcp_report_failure}`. In case of technical errors use `{mcp_stop_with_error}`.
 10. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
-11. Call `{mcp_report_success}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact."#;
+11. Call `{mcp_report_success}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact.
+
+## Coding Guidelines
+
+- **Prefer deriving values from types and constants** rather than using hardcoded string literals. If a value can be computed from an existing type, enum variant, or constant, use that derivation instead of duplicating the value as a literal. This ensures consistency and prevents errors when constants change."#;
 
 const REVIEWER_PROMPT: &str = r#"# Reviewer Agent
 
@@ -552,7 +556,12 @@ Review the implementation changes and ensure they meet coding standards and task
 4. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. **Do not run any tests yourself; testing is handled in a separate Testing stage.**
 5. Verify that all changes are related to the task and are necessary for the implementation. Flag any extraneous changes that do not directly contribute to the task requirements or plan.
 6. Prepare a detailed review report describing any issues found, suggested fixes, and overall assessment. Include your assessment of analog consistency.
-7. Call `{mcp_report_success}` if the implementation is correct and complete, or `{mcp_report_failure}` if issues were found. Pass the review report as a parameter to these tools."#;
+7. Call `{mcp_report_success}` if the implementation is correct and complete, or `{mcp_report_failure}` if issues were found. Pass the review report as a parameter to these tools.
+
+## Review Guidelines
+
+- **Check compile-time validation**: Verify whether code correctness can be enforced at compile time (e.g., through type system, constants, enums) rather than relying on runtime checks or string matching. Flag opportunities to strengthen compile-time guarantees.
+- **Check robustness against inconsistent changes**: Verify that the code is resilient to partial updates — e.g., changing a constant or literal in one place and forgetting to update it elsewhere. Flag hardcoded string literals that could be derived from existing types or constants."#;
 
 const TESTER_PROMPT: &str = r#"# Tester Agent
 

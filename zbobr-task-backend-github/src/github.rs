@@ -10,8 +10,33 @@ use zbobr_api::{
     Comment, CommentTag, Model, Task, Tool,
     backend::TaskBackend,
     comment_tag,
-    task::{StackEntry, State},
+    task::{Pipeline, StackEntry, Stage, State},
 };
+
+// -- Label prefix constants (GitHub-backend-specific) --
+
+const STATE_PREFIX: &str = "state:";
+const PIPELINE_PREFIX: &str = "pipeline:";
+const STAGE_PREFIX: &str = "stage:";
+const SIGNAL_PREFIX: &str = "signal:";
+const FLAG_PREFIX: &str = "flag:";
+
+// -- State label name constants --
+
+const STATE_LABEL_DONE: &str = "done";
+const STATE_LABEL_PAUSE: &str = "pause";
+const STATE_LABEL_READY: &str = "ready";
+const STATE_LABEL_PENDING: &str = "pending";
+const STATE_LABEL_RUNNING: &str = "running";
+
+const ALL_STATE_LABEL_NAMES: &[&str] = &[
+    STATE_LABEL_DONE,
+    STATE_LABEL_PAUSE,
+    STATE_LABEL_READY,
+    STATE_LABEL_PENDING,
+    STATE_LABEL_RUNNING,
+];
+
 
 use crate::{
     config::ZbobrTaskBackendGithubConfig,
@@ -92,17 +117,6 @@ where
 // -- Shared response types --
 
 #[derive(Debug, serde::Deserialize)]
-struct IssueMilestone {
-    title: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct MilestoneResponse {
-    number: u64,
-    title: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
 struct IssueResponse {
     number: u64,
     title: String,
@@ -110,7 +124,6 @@ struct IssueResponse {
     #[allow(dead_code)]
     state: String,
     labels: Vec<IssueLabel>,
-    milestone: Option<IssueMilestone>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -221,27 +234,105 @@ impl ZbobrTaskBackendGithubImpl {
 
     /// Convert a Signal to its GitHub label representation.
     fn signal_to_label(signal: &zbobr_api::Signal) -> String {
-        format!("signal:{signal}")
+        format!("{SIGNAL_PREFIX}{signal}")
     }
 
     /// Parse a GitHub label string back to a Signal.
     fn label_to_signal(label: &str) -> Option<zbobr_api::Signal> {
-        label.strip_prefix("signal:")?.parse().ok()
+        label.strip_prefix(SIGNAL_PREFIX)?.parse().ok()
     }
 
-    /// Convert a state value to its GitHub milestone title.
-    fn state_to_milestone_title(state: &State) -> String {
-        state.to_string()
+    /// Convert a state to its GitHub label representations.
+    fn state_to_labels(state: &State) -> Vec<String> {
+        let state_label = |name: &str| format!("{}{name}", STATE_PREFIX);
+        let pipeline_label = |p: &Pipeline| format!("{}{}", PIPELINE_PREFIX, p.as_str());
+        let stage_label = |s: &Stage| format!("{}{}", STAGE_PREFIX, s.as_str());
+
+        match state {
+            State::Empty => vec![],
+            State::Done => vec![state_label(STATE_LABEL_DONE)],
+            State::Pause => vec![state_label(STATE_LABEL_PAUSE)],
+            State::Ready => vec![state_label(STATE_LABEL_READY)],
+            State::Pending(pipeline) => vec![
+                state_label(STATE_LABEL_PENDING),
+                pipeline_label(pipeline),
+            ],
+            State::Running(pipeline, stage) => vec![
+                state_label(STATE_LABEL_RUNNING),
+                pipeline_label(pipeline),
+                stage_label(stage),
+            ],
+            State::Unknown(raw) => vec![state_label(raw)],
+        }
+    }
+
+    /// Parse a State from GitHub issue labels.
+    fn labels_to_state(labels: &[IssueLabel]) -> State {
+        let mut state_value: Option<&str> = None;
+        let mut pipeline_value: Option<&str> = None;
+        let mut stage_value: Option<&str> = None;
+
+        for label in labels {
+            if let Some(v) = label.name.strip_prefix(STATE_PREFIX) {
+                state_value = Some(v);
+            } else if let Some(v) = label.name.strip_prefix(PIPELINE_PREFIX) {
+                pipeline_value = Some(v);
+            } else if let Some(v) = label.name.strip_prefix(STAGE_PREFIX) {
+                stage_value = Some(v);
+            }
+        }
+
+        match state_value {
+            None => State::Empty,
+            Some(v) if v == STATE_LABEL_DONE => State::Done,
+            Some(v) if v == STATE_LABEL_PAUSE => State::Pause,
+            Some(v) if v == STATE_LABEL_READY => State::Ready,
+            Some(v) if v == STATE_LABEL_PENDING => match pipeline_value {
+                Some(p) => State::Pending(Pipeline::from(p)),
+                None => State::Unknown(format!("{}{}", STATE_PREFIX, STATE_LABEL_PENDING)),
+            },
+            Some(v) if v == STATE_LABEL_RUNNING => match (pipeline_value, stage_value) {
+                (Some(p), Some(s)) => {
+                    State::Running(Pipeline::from(p), Stage::from(s))
+                }
+                (None, Some(s)) => {
+                    State::Unknown(format!("{}{}, {}{s}", STATE_PREFIX, STATE_LABEL_RUNNING, STAGE_PREFIX))
+                }
+                (Some(p), None) => {
+                    State::Unknown(format!("{}{}, {}{p}", STATE_PREFIX, STATE_LABEL_RUNNING, PIPELINE_PREFIX))
+                }
+                (None, None) => State::Unknown(format!("{}{}", STATE_PREFIX, STATE_LABEL_RUNNING)),
+            },
+            Some(other) => State::Unknown(format!("{}{other}", STATE_PREFIX)),
+        }
+    }
+
+    /// Return the GitHub label color for a state-related label.
+    fn state_label_color(label: &str) -> &'static str {
+        if let Some(state_name) = label.strip_prefix(STATE_PREFIX) {
+            match state_name {
+                v if v == STATE_LABEL_DONE => "0e8a16",    // green
+                v if v == STATE_LABEL_READY => "0075ca",   // blue
+                v if v == STATE_LABEL_PAUSE => "e4e669",   // yellow
+                v if v == STATE_LABEL_PENDING => "d3d3d3", // gray
+                v if v == STATE_LABEL_RUNNING => "c2e0c6", // light green
+                _ => "ededed",
+            }
+        } else if label.starts_with(PIPELINE_PREFIX) || label.starts_with(STAGE_PREFIX) {
+            "ededed"
+        } else {
+            "ededed" // fallback light gray
+        }
     }
 
     /// Convert a flag name to its GitHub label representation.
     fn flag_to_label(name: &str) -> String {
-        format!("flag:{}", name)
+        format!("{FLAG_PREFIX}{name}")
     }
 
     /// Parse a GitHub label string back to a flag name.
     fn label_to_flag(label: &str) -> Option<&str> {
-        label.strip_prefix("flag:")
+        label.strip_prefix(FLAG_PREFIX)
     }
 
     fn parse_repo(&self) -> anyhow::Result<(&str, &str)> {
@@ -274,59 +365,48 @@ impl ZbobrTaskBackendGithubImpl {
         Ok(())
     }
 
-    /// List all milestones in the repository, returning title → number map.
-    async fn list_milestones(&self) -> anyhow::Result<HashMap<String, u64>> {
-        let (owner, repo) = self.parse_repo()?;
-        let params = vec![("state", "all".to_string()), ("per_page", "100".to_string())];
-        let milestones: Vec<MilestoneResponse> = retry_github("list milestones", || {
-            self.octocrab.get(
-                format!("/repos/{owner}/{repo}/milestones"),
-                Some(&params),
-            )
-        })
-        .await?;
-        Ok(milestones.into_iter().map(|m| (m.title, m.number)).collect())
-    }
-
-    /// Create a milestone and return its number.
-    async fn create_milestone(&self, title: &str) -> anyhow::Result<u64> {
-        let (owner, repo) = self.parse_repo()?;
-        let url = format!("/repos/{owner}/{repo}/milestones");
-        let body = serde_json::json!({ "title": title });
-        let milestone: MilestoneResponse = retry_github("create milestone", || {
-            self.octocrab.post(url.clone(), Some(&body))
-        })
-        .await?;
-        Ok(milestone.number)
-    }
-
-    /// Get the milestone number for a title, creating it if absent.
-    async fn get_or_create_milestone(&self, title: &str) -> anyhow::Result<u64> {
-        let milestones = self.list_milestones().await?;
-        if let Some(&number) = milestones.get(title) {
-            return Ok(number);
-        }
-        self.create_milestone(title).await
-    }
-
-    /// Apply a state change on a GitHub issue via milestone assignment.
+    /// Apply a state change on a GitHub issue via labels.
     async fn apply_state_change(&self, id: u64, state: &State) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
-        let url = format!("/repos/{owner}/{repo}/issues/{id}");
 
-        let body = if state.is_empty() {
-            serde_json::json!({ "milestone": serde_json::Value::Null })
-        } else {
-            let title = Self::state_to_milestone_title(state);
-            let number = self.get_or_create_milestone(&title).await?;
-            serde_json::json!({ "milestone": number })
-        };
-
-        retry_github("set issue milestone", || {
-            self.octocrab.patch(url.clone(), Some(&body))
+        // Fetch current labels and remove all existing state:/pipeline:/stage: labels
+        let issue: IssueResponse = retry_github("get issue labels", || {
+            self.octocrab
+                .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
         })
-        .await
-        .map(|_: serde_json::Value| ())?;
+        .await?;
+        for label in &issue.labels {
+            if label.name.starts_with(STATE_PREFIX)
+                || label.name.starts_with(PIPELINE_PREFIX)
+                || label.name.starts_with(STAGE_PREFIX)
+            {
+                let _ = retry_github("remove state label", || async {
+                    self.octocrab
+                        .issues(owner, repo)
+                        .remove_label(id, &label.name)
+                        .await
+                })
+                .await;
+            }
+        }
+
+        // Add new state labels if not empty
+        let new_labels = Self::state_to_labels(state);
+        if !new_labels.is_empty() {
+            // Ensure all labels exist before assigning them
+            for label in &new_labels {
+                let color = Self::state_label_color(label);
+                let desc = format!("State: {label}");
+                self.ensure_label_exists(label, color, &desc).await?;
+            }
+            retry_github("add state labels", || async {
+                self.octocrab
+                    .issues(owner, repo)
+                    .add_labels(id, &new_labels)
+                    .await
+            })
+            .await?;
+        }
 
         Ok(())
     }
@@ -429,6 +509,35 @@ impl ZbobrTaskBackendGithubImpl {
         })
         .await?;
         Ok(())
+    }
+
+    /// Ensure a label exists in the repository.
+    /// Creates the label if it doesn't exist; silently ignores 422 (already exists) errors.
+    async fn ensure_label_exists(
+        &self,
+        name: &str,
+        color: &str,
+        description: &str,
+    ) -> anyhow::Result<()> {
+        let (owner, repo) = self.parse_repo()?;
+        match self
+            .octocrab
+            .issues(owner, repo)
+            .create_label(name, color, description)
+            .await
+        {
+            Ok(_) => {
+                tracing::debug!("Created label '{name}'");
+                Ok(())
+            }
+            Err(octocrab::Error::GitHub { source, .. })
+                if source.status_code.as_u16() == 422 =>
+            {
+                tracing::debug!("Label '{name}' already exists");
+                Ok(())
+            }
+            Err(e) => Err(octocrab_to_anyhow(e)),
+        }
     }
 
     /// Update a label's color and description.
@@ -546,7 +655,7 @@ impl ZbobrTaskBackendGithubImpl {
 
         let existing_signal_labels: Vec<String> = existing_labels
             .iter()
-            .filter(|l| l.starts_with("signal:"))
+            .filter(|l| l.starts_with(SIGNAL_PREFIX))
             .cloned()
             .collect();
 
@@ -561,11 +670,11 @@ impl ZbobrTaskBackendGithubImpl {
         // Create missing signal labels (required but not in repo)
         for label in signal_labels {
             if !existing_signal_labels.contains(label) {
-                let desc = format!("Signal: {}", label.strip_prefix("signal:").unwrap_or(label));
+                let desc = format!("Signal: {}", label.strip_prefix(SIGNAL_PREFIX).unwrap_or(label));
                 tracing::info!("Creating signal label '{label}'");
                 self.create_label(label, SIGNAL_LABEL_COLOR, &desc).await?;
             } else if force {
-                let desc = format!("Signal: {}", label.strip_prefix("signal:").unwrap_or(label));
+                let desc = format!("Signal: {}", label.strip_prefix(SIGNAL_PREFIX).unwrap_or(label));
                 tracing::info!("Updating signal label '{label}' (force)");
                 self.update_label(label, SIGNAL_LABEL_COLOR, &desc).await?;
             } else {
@@ -573,16 +682,31 @@ impl ZbobrTaskBackendGithubImpl {
             }
         }
 
-        // Create milestones for fixed states
-        let existing_milestones = self.list_milestones().await?;
+        // Create state labels programmatically from type constants
+        let state_labels: Vec<String> = ALL_STATE_LABEL_NAMES
+            .iter()
+            .map(|name| format!("{}{name}", STATE_PREFIX))
+            .chain(
+                [Pipeline::MAIN, Pipeline::MERGE]
+                    .iter()
+                    .map(|name| format!("{}{name}", PIPELINE_PREFIX)),
+            )
+            .collect();
 
-        for state in [State::Ready, State::Done, State::Pause] {
-            let title = Self::state_to_milestone_title(&state);
-            if !existing_milestones.contains_key(&title) {
-                tracing::info!("Creating milestone '{title}'");
-                self.create_milestone(&title).await?;
+        for label_name in &state_labels {
+            let color = Self::state_label_color(label_name);
+            let desc = format!(
+                "State: {}",
+                label_name
+            );
+            if !existing_labels.contains(label_name) {
+                tracing::info!("Creating label '{label_name}'");
+                self.create_label(label_name, color, &desc).await?;
+            } else if force {
+                tracing::info!("Updating label '{label_name}' (force)");
+                self.update_label(label_name, color, &desc).await?;
             } else {
-                tracing::info!("Milestone '{title}' already exists");
+                tracing::info!("Label '{label_name}' already exists");
             }
         }
 
@@ -610,12 +734,8 @@ impl ZbobrTaskBackendGithubImpl {
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
 
-        // state is stored as a milestone
-        let state = issue
-            .milestone
-            .as_ref()
-            .map(|m| State::from(m.title.as_str()))
-            .unwrap_or(State::Empty);
+        // state is stored as labels
+        let state = Self::labels_to_state(&issue.labels);
 
         // signal is stored as a label
         let signal = issue
@@ -1338,9 +1458,8 @@ mod tests {
             title: "foo".to_string(),
             body: Some("".to_string()),
             state: "open".to_string(),
-            milestone: None,
             labels: vec![IssueLabel {
-                name: "flag:confirm".to_string(),
+                name: format!("{FLAG_PREFIX}confirm"),
             }],
         };
 

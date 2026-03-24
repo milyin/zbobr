@@ -126,7 +126,7 @@ impl Workflow {
     /// determine the next action to take.
     pub fn resolve_next_action(&self, task: &Task) -> anyhow::Result<StateAction<'_>> {
         tracing::debug!(
-            "Task #{}: resolving next action (state={}, signal={:?}, stack_depth={})",
+            "Task #{}: resolving next action (state={:?}, signal={:?}, stack_depth={})",
             task.id,
             task.state,
             task.signal,

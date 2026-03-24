@@ -21,9 +21,8 @@ struct TaskFile {
     id: u64,
     title: String,
     description: String,
-    /// Task state string (e.g. "READY", "main_PENDING", "main_working", "DONE")
     #[serde(default)]
-    state: String,
+    state: State,
     /// Legacy field — migrated to `state` on read.
     #[serde(default)]
     stage: Option<String>,
@@ -57,9 +56,9 @@ impl TaskFile {
         // Migrate legacy `stage` field to `state` if present
         let state = if self.state.is_empty() {
             if let Some(ref stage) = self.stage {
-                stage.clone()
+                State::from(stage.as_str())
             } else {
-                String::new()
+                State::Empty
             }
         } else {
             self.state.clone()
@@ -71,7 +70,7 @@ impl TaskFile {
             id: self.id,
             title: self.title.clone(),
             description: self.description.clone(),
-            state: state.into(),
+            state,
             destination_repository: self.destination_repository.clone(),
             destination_branch: self.destination_branch.clone(),
             work_branch: self.work_branch.clone(),
@@ -92,7 +91,7 @@ impl TaskFile {
             id: task.id,
             title: task.title.clone(),
             description: task.description.clone(),
-            state: task.state.to_string(),
+            state: task.state.clone(),
             stage: None,
             destination_repository: task.destination_repository.clone(),
             destination_branch: task.destination_branch.clone(),
@@ -642,7 +641,7 @@ impl TaskBackend for ArcTaskBackendFs {
             };
 
             // Filter out completed tasks
-            if task.state == "DONE" {
+            if task.state.is_done() {
                 continue;
             }
 

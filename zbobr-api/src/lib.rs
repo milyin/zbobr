@@ -16,7 +16,6 @@ pub use config::{
 pub use task::{
     ChecklistItem, Comment, CommentTag, HistoryRecordType, Model, Pipeline, Role, Signal,
     StackEntry, Stage, State, Task, TaskIdentity, Tool, classify_comment, comment_tag,
-    extract_repo_name,
-    extract_summary, filter_comments_for_run,
+    extract_repo_name, extract_summary, filter_comments_for_run,
 };
 pub use tool_executor::{ToolExecutor, format_command_for_log};
