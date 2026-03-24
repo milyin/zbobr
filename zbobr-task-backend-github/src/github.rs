@@ -1126,7 +1126,7 @@ impl ZbobrTaskBackendGithubImpl {
         };
 
         let path = format!("{dir}/{filename}");
-        let message = format!("zbobr: store report {filename} for task #{task_id}");
+        let message = format!("zbobr: store report {filename} for task # {task_id}");
         let encoded = BASE64.encode(content.as_bytes());
 
         let mut body = serde_json::json!({
