@@ -1600,7 +1600,6 @@ async fn perform_stash_and_push(
     role: &str,
 ) -> anyhow::Result<()> {
     let task_backend = zbobr.task_backend();
-    let repo_backend = zbobr.repo_backend();
 
     // Skip git operations if work_dir is not a git repository (e.g. preparator
     // stage that only configured worktree metadata but didn't clone yet).
@@ -1644,8 +1643,9 @@ async fn perform_stash_and_push(
         .snapshot(false)
         .await?;
     if let Some(identity) = task.identity() {
-        if let Err(e) = repo_backend.update_pr(&identity).await {
-            tracing::warn!("Could not push branch commits for task #{task_id}: {e}");
+        let is_uptodate = zbobr.update_worktree(&identity).await?;
+        if !is_uptodate {
+            anyhow::bail!("Merge conflict while syncing work branch for task #{task_id}");
         }
         let config = zbobr.config();
         if config.overwrite_author {
@@ -1658,8 +1658,11 @@ async fn perform_stash_and_push(
             )
             .await?;
             // Push rewritten commits
-            if let Err(e) = repo_backend.update_pr(&identity).await {
-                tracing::warn!("Could not push rewritten commits for task #{task_id}: {e}");
+            let is_uptodate = zbobr.update_worktree(&identity).await?;
+            if !is_uptodate {
+                anyhow::bail!(
+                    "Merge conflict while pushing rewritten commits for task #{task_id}"
+                );
             }
         }
     } else {

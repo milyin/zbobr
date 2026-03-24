@@ -554,10 +554,18 @@ impl TaskSession {
             if let Err(e) = zbobr_utility::delete_placeholder_commit(&work_dir, work_branch).await {
                 tracing::warn!("Failed to delete placeholder commit for task #{task_id}: {e}");
             } else if let Some(identity) = task.identity() {
-                if let Err(e) = self.zbobr.repo_backend().update_pr(&identity).await {
-                    tracing::warn!(
-                        "Failed to push branch after placeholder deletion for task #{task_id}: {e}"
-                    );
+                match self.zbobr.update_worktree(&identity).await {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        tracing::warn!(
+                            "Merge conflict while pushing after placeholder deletion for task #{task_id}"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to push branch after placeholder deletion for task #{task_id}: {e}"
+                        );
+                    }
                 }
             }
         }
