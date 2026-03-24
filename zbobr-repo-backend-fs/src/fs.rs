@@ -169,7 +169,7 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
         Ok(is_uptodate)
     }
 
-    async fn update_pr(&self, identity: &TaskIdentity) -> anyhow::Result<String> {
+    async fn ensure_pr_url(&self, identity: &TaskIdentity) -> anyhow::Result<String> {
         let work_branch = &identity.work_branch;
         if !self.config.repos_dir.exists() {
             anyhow::bail!("No worktree found for work_branch '{}'", work_branch);

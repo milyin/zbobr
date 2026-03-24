@@ -231,8 +231,8 @@ pub trait WorktreeBackend: Send + Sync {
         git_user_email: &str,
     ) -> anyhow::Result<bool>;
 
-    /// Push work branch and ensure PR exists. Returns PR URL.
-    async fn update_pr(&self, identity: &TaskIdentity) -> anyhow::Result<String>;
+    /// Ensure a PR exists for the work branch (no push). Returns PR URL.
+    async fn ensure_pr_url(&self, identity: &TaskIdentity) -> anyhow::Result<String>;
 
     /// Validate connectivity to the repo hosting service.
     async fn validate_connectivity(&self) -> anyhow::Result<()>;

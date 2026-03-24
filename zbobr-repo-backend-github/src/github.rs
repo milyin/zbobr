@@ -680,56 +680,6 @@ impl ZbobrRepoBackendGithub {
         .await
     }
 
-    /// Find the worktree path for a given work branch by scanning bare clones.
-    async fn find_worktree_for_branch(
-        &self,
-        work_branch: &str,
-    ) -> anyhow::Result<(PathBuf, PathBuf)> {
-        if !self.backend_config.repos_dir.exists() {
-            anyhow::bail!("No worktree found for work_branch '{}'", work_branch);
-        }
-
-        let mut entries = fs::read_dir(&self.backend_config.repos_dir)
-            .await
-            .context("Failed to read repos_dir")?;
-
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if !path.is_dir()
-                || !path
-                    .file_name()
-                    .is_some_and(|n| n.to_string_lossy().ends_with(".git"))
-            {
-                continue;
-            }
-
-            let output = match git_output(&path, &["worktree", "list", "--porcelain"]).await {
-                Ok(o) => o,
-                Err(_) => continue,
-            };
-
-            for block in output.split("\n\n") {
-                let mut wt_path = None;
-                let mut branch = None;
-                for line in block.lines() {
-                    if let Some(p) = line.strip_prefix("worktree ") {
-                        wt_path = Some(PathBuf::from(p));
-                    }
-                    if let Some(b) = line.strip_prefix("branch refs/heads/") {
-                        branch = Some(b.to_string());
-                    }
-                }
-                if branch.as_deref() == Some(work_branch)
-                    && let Some(wt) = wt_path
-                {
-                    return Ok((path.clone(), wt));
-                }
-            }
-        }
-
-        anyhow::bail!("No worktree found for work_branch '{}'", work_branch)
-    }
-
     /// Query GitHub for an existing open PR matching `head` → `base`.
     /// Returns the `html_url` of the first matching PR.
     async fn find_existing_pr(
@@ -952,39 +902,29 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         Ok(true)
     }
 
-    async fn update_pr(&self, identity: &zbobr_api::task::TaskIdentity) -> anyhow::Result<String> {
+    async fn ensure_pr_url(
+        &self,
+        identity: &zbobr_api::task::TaskIdentity,
+    ) -> anyhow::Result<String> {
         let work_branch = &identity.work_branch;
         let destination_repo = &identity.destination_repository;
         let base_branch = &identity.destination_branch;
-        // 1. Find the worktree and bare_dir for this branch
-        let (_bare_dir, worktree_path) = self.find_worktree_for_branch(work_branch).await?;
 
-        // 2. Stash any uncommitted changes
-        Self::stash_worktree_changes(&worktree_path).await?;
-
-        // 3. Determine push remote and PR repo
         let repo = parse_github_repo(destination_repo)?;
         let same_org = repo
             .owner()
             .eq_ignore_ascii_case(&self.backend_config.fork_owner);
-        let (push_remote, pr_repo) = if same_org {
-            ("origin", repo.full_name.clone())
+        let pr_repo = if same_org {
+            repo.full_name.clone()
         } else {
-            (
-                "fork",
-                format!("{}/{}", self.backend_config.fork_owner, repo.name()),
-            )
+            format!("{}/{}", self.backend_config.fork_owner, repo.name())
         };
 
-        // 4. Push to remote (no --force)
-        Self::push_worktree_to_remote(&worktree_path, push_remote, work_branch).await?;
-
-        // 5. Find existing PR or create a new one
+        // Find existing PR or create a new one
         if let Ok(url) = self.find_existing_pr(&pr_repo, work_branch, None).await {
             return Ok(url);
         }
 
-        // No existing PR — create one
         tracing::info!("No existing PR found for {work_branch}, creating one in {pr_repo}");
 
         #[derive(serde::Deserialize)]
@@ -1008,7 +948,6 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             Err(octocrab::Error::GitHub { ref source, .. })
                 if source.status_code.as_u16() == 422 =>
             {
-                // Race condition: PR was created between our check and create
                 tracing::info!("PR already exists (422), looking up existing PR");
                 self.find_existing_pr(&pr_repo, work_branch, Some(base_branch))
                     .await
