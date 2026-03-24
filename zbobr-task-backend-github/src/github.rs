@@ -121,7 +121,6 @@ struct IssueResponse {
     number: u64,
     title: String,
     body: Option<String>,
-    #[allow(dead_code)]
     state: String,
     labels: Vec<IssueLabel>,
 }
@@ -776,6 +775,7 @@ impl ZbobrTaskBackendGithubImpl {
                 .get("stage_count")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0),
+            closed: issue.state == "closed",
             etag: Some(body),
         }
     }
