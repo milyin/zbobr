@@ -1465,7 +1465,7 @@ async fn finalize_stage_session(
     let pending_state = State::pending(pipeline_name.clone());
 
     if outcome.execution_interrupted {
-        if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name).await {
+        if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name, pipeline_name).await {
             tracing::warn!("Stash/push failed during interruption for task #{task_id}: {e}");
         }
         task_session.set_state(pending_state.clone()).await?;
@@ -1474,7 +1474,7 @@ async fn finalize_stage_session(
     }
 
     if let Some(e) = outcome.execution_error.as_ref() {
-        if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name).await {
+        if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name, pipeline_name).await {
             tracing::warn!("Stash/push failed during error handling for task #{task_id}: {e}");
         }
         let error_msg = format!("Execution failed: {e}");
@@ -1505,7 +1505,7 @@ async fn finalize_stage_session(
 
     tracing::info!("Session complete for task #{task_id}");
 
-    if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name).await {
+    if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name, pipeline_name).await {
         tracing::error!("Stash/push failed for task #{task_id}: {e}");
         let hostname = get_hostname();
         let msg = format!("Stash/push failed: {e}");
@@ -1598,6 +1598,7 @@ async fn perform_stash_and_push(
     task_id: u64,
     work_dir: &Path,
     role: &str,
+    pipeline_name: &Pipeline,
 ) -> anyhow::Result<()> {
     let task_backend = zbobr.task_backend();
 
@@ -1643,12 +1644,13 @@ async fn perform_stash_and_push(
         .snapshot(false)
         .await?;
     if let Some(identity) = task.identity() {
+        let is_conflict_handler = pipeline_name.as_str() == Pipeline::MERGE;
         let is_uptodate = zbobr.update_worktree(&identity).await?;
-        if !is_uptodate {
+        if !is_uptodate && !is_conflict_handler {
             anyhow::bail!("Merge conflict while syncing work branch for task #{task_id}");
         }
         let config = zbobr.config();
-        if config.overwrite_author {
+        if config.overwrite_author && is_uptodate {
             let dest_branch = identity.destination_branch.clone();
             zbobr_utility::rewrite_authors_on_worktree(
                 work_dir,
