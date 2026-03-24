@@ -239,35 +239,6 @@ pub enum State {
 }
 
 impl State {
-    /// Label name constants (lowercase) used for GitHub label representations.
-    pub const LABEL_DONE: &'static str = "done";
-    pub const LABEL_PAUSE: &'static str = "pause";
-    pub const LABEL_READY: &'static str = "ready";
-    pub const LABEL_PENDING: &'static str = "pending";
-    pub const LABEL_RUNNING: &'static str = "running";
-
-    /// All state label names for programmatic iteration.
-    pub const ALL_LABEL_NAMES: &'static [&'static str] = &[
-        Self::LABEL_DONE,
-        Self::LABEL_PAUSE,
-        Self::LABEL_READY,
-        Self::LABEL_PENDING,
-        Self::LABEL_RUNNING,
-    ];
-
-    /// Returns the label name for this state variant, or `None` for `Empty`/`Unknown`.
-    pub fn label_name(&self) -> Option<&'static str> {
-        match self {
-            State::Empty => None,
-            State::Done => Some(Self::LABEL_DONE),
-            State::Pause => Some(Self::LABEL_PAUSE),
-            State::Ready => Some(Self::LABEL_READY),
-            State::Pending(_) => Some(Self::LABEL_PENDING),
-            State::Running(_, _) => Some(Self::LABEL_RUNNING),
-            State::Unknown(_) => None,
-        }
-    }
-
     pub fn pending(pipeline: impl Into<Pipeline>) -> Self {
         State::Pending(pipeline.into())
     }
@@ -1164,48 +1135,6 @@ mod tests {
             .map(|c| c.text.as_str())
             .collect();
         assert_eq!(run1, vec!["main work", "sub final report", "next main"]);
-    }
-
-    #[test]
-    fn state_label_name_returns_correct_values() {
-        assert_eq!(State::Empty.label_name(), None);
-        assert_eq!(State::Done.label_name(), Some("done"));
-        assert_eq!(State::Pause.label_name(), Some("pause"));
-        assert_eq!(State::Ready.label_name(), Some("ready"));
-        assert_eq!(
-            State::Pending(Pipeline::Main).label_name(),
-            Some("pending")
-        );
-        assert_eq!(
-            State::Running(Pipeline::Main, Stage::from("working")).label_name(),
-            Some("running")
-        );
-        assert_eq!(State::Unknown("foo".into()).label_name(), None);
-    }
-
-    #[test]
-    fn state_label_name_matches_label_constants() {
-        assert_eq!(State::Done.label_name(), Some(State::LABEL_DONE));
-        assert_eq!(State::Pause.label_name(), Some(State::LABEL_PAUSE));
-        assert_eq!(State::Ready.label_name(), Some(State::LABEL_READY));
-        assert_eq!(
-            State::Pending(Pipeline::Main).label_name(),
-            Some(State::LABEL_PENDING)
-        );
-        assert_eq!(
-            State::Running(Pipeline::Merge, Stage::from("s")).label_name(),
-            Some(State::LABEL_RUNNING)
-        );
-    }
-
-    #[test]
-    fn state_all_label_names_covers_all_variants() {
-        assert_eq!(State::ALL_LABEL_NAMES.len(), 5);
-        assert!(State::ALL_LABEL_NAMES.contains(&State::LABEL_DONE));
-        assert!(State::ALL_LABEL_NAMES.contains(&State::LABEL_PAUSE));
-        assert!(State::ALL_LABEL_NAMES.contains(&State::LABEL_READY));
-        assert!(State::ALL_LABEL_NAMES.contains(&State::LABEL_PENDING));
-        assert!(State::ALL_LABEL_NAMES.contains(&State::LABEL_RUNNING));
     }
 
     #[test]
