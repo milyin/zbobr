@@ -296,6 +296,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
         confirm: false,
         pipeline_run_id: 0,
         stage_count: 0,
+        closed: false,
         etag: None,
     };
     let comments = vec![

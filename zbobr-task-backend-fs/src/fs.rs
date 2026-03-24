@@ -85,6 +85,7 @@ impl TaskFile {
             confirm: self.confirm,
             pipeline_run_id: self.pipeline_run_id,
             stage_count: self.stage_count,
+            closed: self.closed,
             etag: None,
         })
     }
@@ -545,6 +546,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             confirm: false,
             pipeline_run_id: 0,
             stage_count: 0,
+            closed: false,
             etag: None,
         };
 

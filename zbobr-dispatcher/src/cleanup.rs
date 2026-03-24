@@ -39,20 +39,23 @@ impl ZbobrDispatcher {
             // the task was deleted/closed and we can clean up the workspace.
             match task_backend.get_task(task_id).await {
                 Ok(weak) => match weak.snapshot(false).await {
-                    Ok(task) if task.state.is_done() => {
+                    Ok(task) if task.closed => {
                         if dry_run {
                             tracing::info!(
-                                "DRY RUN: Would remove {} (task #{task_id} is DONE)",
+                                "DRY RUN: Would remove {} (task #{task_id} is CLOSED)",
                                 path.display()
                             );
                         } else {
-                            tracing::info!("Removing {} (task #{task_id} is DONE)", path.display());
+                            tracing::info!(
+                                "Removing {} (task #{task_id} is CLOSED)",
+                                path.display()
+                            );
                             tokio::fs::remove_dir_all(&path).await?;
                         }
                     }
                     Ok(_) => {
                         tracing::info!(
-                            "Task #{task_id} is open - keeping {}",
+                            "Task #{task_id} is not closed - keeping {}",
                             entry.path().display()
                         );
                     }

@@ -994,6 +994,10 @@ pub struct Task {
     /// Counter that is automatically incremented on each stage passed.
     #[serde(default)]
     pub stage_count: u64,
+    /// Whether the task is closed (e.g. GitHub issue closed, fs task marked closed).
+    /// Closed tasks are not listed by `list_tasks` and their worktrees can be cleaned up.
+    #[serde(default)]
+    pub closed: bool,
     /// ETag for optimistic locking to prevent concurrent update conflicts.
     /// Used to detect if the task has been modified between read and write operations.
     #[serde(skip)]
