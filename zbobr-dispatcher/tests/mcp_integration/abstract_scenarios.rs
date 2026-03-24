@@ -29,6 +29,7 @@ steps:
     arguments:
       destination_repository: "{repo_path}"
       destination_branch: "main"
+      work_branch_postfix: "test-all-tools"
   assertions:
     - type: success
 
