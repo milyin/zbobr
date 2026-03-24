@@ -1,16 +1,3 @@
-// -- Label prefix constants --
-
-/// Label prefix for state labels (e.g. "state:done").
-pub const STATE_PREFIX: &str = "state:";
-/// Label prefix for pipeline labels (e.g. "pipeline:main").
-pub const PIPELINE_PREFIX: &str = "pipeline:";
-/// Label prefix for stage labels (e.g. "stage:working").
-pub const STAGE_PREFIX: &str = "stage:";
-/// Label prefix for signal labels (e.g. "signal:go_working").
-pub const SIGNAL_PREFIX: &str = "signal:";
-/// Label prefix for flag labels (e.g. "flag:confirm").
-pub const FLAG_PREFIX: &str = "flag:";
-
 // -- TaskIdentity --
 
 /// Bundles task routing info for worktree operations.
@@ -344,16 +331,16 @@ impl std::fmt::Display for State {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             State::Empty => Ok(()),
-            State::Done => write!(f, "{STATE_PREFIX}done"),
-            State::Pause => write!(f, "{STATE_PREFIX}pause"),
-            State::Ready => write!(f, "{STATE_PREFIX}ready"),
+            State::Done => write!(f, "state:done"),
+            State::Pause => write!(f, "state:pause"),
+            State::Ready => write!(f, "state:ready"),
             State::Pending(pipeline) => {
-                write!(f, "{STATE_PREFIX}pending, {PIPELINE_PREFIX}{pipeline}")
+                write!(f, "state:pending, pipeline:{pipeline}")
             }
             State::Running(pipeline, stage) => {
                 write!(
                     f,
-                    "{STATE_PREFIX}running, {PIPELINE_PREFIX}{pipeline}, {STAGE_PREFIX}{stage}"
+                    "state:running, pipeline:{pipeline}, stage:{stage}"
                 )
             }
             State::Unknown(raw) => f.write_str(raw),
@@ -368,17 +355,17 @@ impl From<&str> for State {
         }
 
         // New format: split on ", " and match prefix-stripped components
-        if s.starts_with(STATE_PREFIX) {
+        if s.starts_with("state:") {
             let mut state_val: Option<&str> = None;
             let mut pipeline_val: Option<&str> = None;
             let mut stage_val: Option<&str> = None;
 
             for part in s.split(", ") {
-                if let Some(v) = part.strip_prefix(STATE_PREFIX) {
+                if let Some(v) = part.strip_prefix("state:") {
                     state_val = Some(v);
-                } else if let Some(v) = part.strip_prefix(PIPELINE_PREFIX) {
+                } else if let Some(v) = part.strip_prefix("pipeline:") {
                     pipeline_val = Some(v);
-                } else if let Some(v) = part.strip_prefix(STAGE_PREFIX) {
+                } else if let Some(v) = part.strip_prefix("stage:") {
                     stage_val = Some(v);
                 }
             }

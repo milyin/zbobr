@@ -7,12 +7,19 @@ use std::{
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use zbobr_api::{
-    Comment, CommentTag, FLAG_PREFIX, Model, PIPELINE_PREFIX, SIGNAL_PREFIX, STAGE_PREFIX,
-    STATE_PREFIX, Task, Tool,
+    Comment, CommentTag, Model, Task, Tool,
     backend::TaskBackend,
     comment_tag,
     task::{Pipeline, StackEntry, Stage, State},
 };
+
+// -- Label prefix constants (GitHub-backend-specific) --
+
+const STATE_PREFIX: &str = "state:";
+const PIPELINE_PREFIX: &str = "pipeline:";
+const STAGE_PREFIX: &str = "stage:";
+const SIGNAL_PREFIX: &str = "signal:";
+const FLAG_PREFIX: &str = "flag:";
 
 use crate::{
     config::ZbobrTaskBackendGithubConfig,

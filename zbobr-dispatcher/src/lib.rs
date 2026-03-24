@@ -32,7 +32,10 @@ pub use task_dir::TaskDir;
 pub use tool_executor::ToolExecutor;
 use typesafe_builder::{_TypesafeBuilderEmpty, _TypesafeBuilderFilled, Builder};
 pub use workflow::{StateAction, Workflow};
-use zbobr_api::{SIGNAL_PREFIX, State};
+use zbobr_api::State;
+
+/// Label prefix for signal labels (e.g. "signal:go_working").
+const SIGNAL_PREFIX: &str = "signal:";
 pub use zbobr_api::config::Config;
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
