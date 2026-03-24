@@ -291,6 +291,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
         checklist: vec![],
         signal: None,
         stack: vec![],
+        error: None,
         pause: false,
         confirm: false,
         pipeline_run_id: 0,

@@ -228,26 +228,17 @@ pub trait CommonMcpImpl: Send + Sync {
             self.role_name(),
             self.session().task_id()
         );
-        let hostname = get_hostname();
-        let body = format!("[stop_with_error]\n{message}");
 
         if let Err(e) = self
             .session()
-            .post_comment(
-                &body,
-                self.stage_name(),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-                None,
-            )
+            .set_error(Some(message.to_string()))
             .await
         {
             tracing::error!(
-                "Failed to post error message for task {}: {e}",
+                "Failed to set error for task {}: {e}",
                 self.session().task_id()
             );
-            let response = format!("Error posting error message: {e}");
+            let response = format!("Error setting error on task: {e}");
             log_mcp_string_response(
                 self.role_name(),
                 self.session().task_id(),

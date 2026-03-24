@@ -82,6 +82,14 @@ pub trait TaskMut: Send + Sync {
         .await
     }
 
+    async fn set_error(&self, error: Option<String>) -> anyhow::Result<()> {
+        self.modify_task(Box::new(move |mut task| {
+            task.error = error;
+            task
+        }))
+        .await
+    }
+
     async fn set_destination_repository(&self, repo: Option<String>) -> anyhow::Result<()> {
         self.modify_task(Box::new(move |mut task| {
             task.destination_repository = repo;

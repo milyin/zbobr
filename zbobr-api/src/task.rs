@@ -101,7 +101,6 @@ pub enum HistoryRecordType {
     Success,
     Failure,
     Question,
-    Error,
     Other,
 }
 
@@ -115,7 +114,6 @@ pub fn classify_comment(text: &str) -> HistoryRecordType {
             HistoryRecordType::Failure
         }
         "[ask_user]" | "[stop_with_question]" => HistoryRecordType::Question,
-        "[report_error]" | "[stop_with_error]" => HistoryRecordType::Error,
         _ => HistoryRecordType::Other,
     }
 }
@@ -982,6 +980,9 @@ pub struct Task {
     /// Call stack for pipeline call/return semantics.
     #[serde(default)]
     pub stack: Vec<StackEntry>,
+    /// Error message stored in the ERROR section of the task body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
     pub pause: bool,
     /// When true the dispatcher will automatically set the pause flag any time
     /// the task's state is changed.  This gives human operators an opportunity to
