@@ -138,13 +138,21 @@ fn default_config_toml() -> RootConfigToml {
 fn default_workflow() -> WorkflowConfig {
     use McpTool::{
         AddChecklistItem, CheckChecklistItem, ConfigureWorktree, DeleteChecklistItem, GetChecklist,
-        GetHistory, ReportFailure, ReportSuccess, StopWithError, StopWithQuestion,
+        GetHistory, ReportFailure, ReportIntermediate, ReportSuccess, StopWithError, StopWithQuestion,
     };
 
     let task_prompt = vec![PathBuf::from("task.md")];
     let preparator_task_prompt = vec![PathBuf::from("preparator_task.md")];
 
-    let implement_stages = IndexMap::from([
+    let main_stages = IndexMap::from([
+        (
+            Stage::from("preparing"),
+            StageDefinition {
+                role: Some("preparator".into()),
+                prompts: preparator_task_prompt,
+                ..Default::default()
+            },
+        ),
         (
             Stage::from("planning"),
             StageDefinition {
@@ -158,17 +166,17 @@ fn default_workflow() -> WorkflowConfig {
             StageDefinition {
                 role: Some("worker".into()),
                 prompts: task_prompt.clone(),
+                on_intermediate: Some(StageTransition::stage("reviewing")),
                 ..Default::default()
             },
         ),
-    ]);
-
-    let verify_stages = IndexMap::from([
         (
             Stage::from("reviewing"),
             StageDefinition {
                 role: Some("reviewer".into()),
                 prompts: task_prompt.clone(),
+                on_failure: Some(StageTransition::stage("working")),
+                on_intermediate: Some(StageTransition::stage("working")),
                 ..Default::default()
             },
         ),
@@ -177,32 +185,7 @@ fn default_workflow() -> WorkflowConfig {
             StageDefinition {
                 role: Some("tester".into()),
                 prompts: task_prompt.clone(),
-                ..Default::default()
-            },
-        ),
-    ]);
-
-    let main_stages = IndexMap::from([
-        (
-            Stage::from("preparing"),
-            StageDefinition {
-                role: Some("preparator".into()),
-                prompts: preparator_task_prompt,
-                ..Default::default()
-            },
-        ),
-        (
-            Stage::from("implementing"),
-            StageDefinition {
-                call: Some(Pipeline::from("implement")),
-                ..Default::default()
-            },
-        ),
-        (
-            Stage::from("verifying"),
-            StageDefinition {
-                call: Some(Pipeline::from("verify")),
-                on_failure: Some(StageTransition::stage("implementing")),
+                on_failure: Some(StageTransition::stage("working")),
                 ..Default::default()
             },
         ),
@@ -230,18 +213,6 @@ fn default_workflow() -> WorkflowConfig {
         Pipeline::Main,
         PipelineConfig {
             stages: main_stages,
-        },
-    );
-    pipelines.insert(
-        Pipeline::from("implement"),
-        PipelineConfig {
-            stages: implement_stages,
-        },
-    );
-    pipelines.insert(
-        Pipeline::from("verify"),
-        PipelineConfig {
-            stages: verify_stages,
         },
     );
     pipelines.insert(
@@ -291,6 +262,7 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithError,
                     ReportSuccess,
                     ReportFailure,
+                    ReportIntermediate,
                     StopWithQuestion,
                     GetChecklist,
                     AddChecklistItem,
@@ -310,6 +282,7 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithError,
                     ReportSuccess,
                     ReportFailure,
+                    ReportIntermediate,
                     StopWithQuestion,
                 ],
                 prompt: Some(PathBuf::from("reviewer.md")),
@@ -533,7 +506,10 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 8. When implementation for an item is complete, mark the item done with `{mcp_check_checklist_item}`, and add follow-up items as needed.
 9. If you need human clarification or intervention, call `{mcp_stop_with_question}`. If the plan is unclear or requires adjustment, call `{mcp_report_failure}`. In case of technical errors use `{mcp_stop_with_error}`.
 10. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
-11. Call `{mcp_report_success}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact.
+11. When your current session's work is done, decide how to finish:
+    - If **all checklist items are completed** (the full plan is done), call `{mcp_report_success}` to report final success.
+    - If **some items remain unchecked** (more work is needed in future sessions), call `{mcp_report_intermediate}` to report what you accomplished so far.
+    Both calls finish the session. The report is critical context for further agent calls, so it MUST be compact.
 
 ## Coding Guidelines
 
@@ -555,10 +531,14 @@ Review the implementation changes and ensure they meet coding standards and task
 1. Read the task description, work plan, worker's report, comments, and checklist provided below in this prompt. Note if the analog solution in the existing code is referenced in the plan.
 2. **Inspect all changes made in this task**: Use `git diff origin/<destination_branch>...HEAD` (three dots) to see ALL changes introduced by this task relative to the base branch. Do NOT checkout the base branch (it may conflict with worktree setup). You can also use `git log origin/<destination_branch>..HEAD` to see all commits in this branch.
 3. **Verify the analog choice and pattern consistency**: Check that the planner chose an appropriate analog for the new functionality. Then verify that the implementation consistently follows the same patterns, conventions, coding style, and architectural approaches as the analog. Flag any deviations — new code should look like it was written by the same author as the existing analogous code. If the analog was poorly chosen, note this as a review finding.
-4. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. **Do not run any tests yourself; testing is handled in a separate Testing stage.**
+4. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. **Do not run any tests yourself; testing is handled separately.**
 5. Verify that all changes are related to the task and are necessary for the implementation. Flag any extraneous changes that do not directly contribute to the task requirements or plan.
 6. Prepare a detailed review report describing any issues found, suggested fixes, and overall assessment. Include your assessment of analog consistency.
-7. Call `{mcp_report_success}` if the implementation is correct and complete, or `{mcp_report_failure}` if issues were found. Pass the review report as a parameter to these tools.
+7. Finish the review by calling one of:
+    - `{mcp_report_success}` — the implementation is correct and **all checklist items are completed**.
+    - `{mcp_report_intermediate}` — the implementation of completed items looks correct, but **some checklist items remain unchecked**.
+    - `{mcp_report_failure}` — issues were found in the implementation that must be fixed.
+   Pass the review report as a parameter.
 
 ## Review Guidelines
 

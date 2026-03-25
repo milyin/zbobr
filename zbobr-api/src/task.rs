@@ -238,6 +238,7 @@ pub enum HistoryRecordType {
     Task,
     Success,
     Failure,
+    Progress,
     Question,
     Other,
 }
@@ -251,6 +252,7 @@ pub fn classify_comment(text: &str) -> HistoryRecordType {
         "[report_failure]" | "[ask_planner]" | "[review_reject]" | "[test_reject]" => {
             HistoryRecordType::Failure
         }
+        "[report_intermediate]" => HistoryRecordType::Progress,
         "[ask_user]" | "[stop_with_question]" => HistoryRecordType::Question,
         _ => HistoryRecordType::Other,
     }

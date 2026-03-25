@@ -253,7 +253,7 @@ impl ZbobrDispatcher {
     pub fn role_session_with_tracker(
         self: &Arc<Self>,
         task_id: u64,
-        tracker: Arc<std::sync::Mutex<Option<String>>>,
+        tracker: Arc<std::sync::Mutex<Option<zbobr_api::config_tools::McpTool>>>,
         pipeline_name: String,
         pipeline_run_id: u64,
         prompt_holder: Arc<std::sync::Mutex<Option<String>>>,
