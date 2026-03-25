@@ -3,7 +3,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Subcommand;
-use zbobr_api::{Comment, Pipeline, Stage, State, Task, config::WorkflowConfig};
+use zbobr_api::{ChecklistItem, Comment, Pipeline, Stage, State, Task, config::WorkflowConfig};
 use zbobr_dispatcher::{
     ConfiguredPromptBuilder, TaskDir, Workflow, ZbobrDispatcher,
     config::{ZbobrDispatcherConfig, ZbobrExecutorConfig},
@@ -281,14 +281,30 @@ fn run_without_backends(
 fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
     let task = Task {
         id: 0,
-        title: "{TITLE}".to_string(),
-        description: "{DESCRIPTION}".to_string(),
+        title: "TITLE".to_string(),
+        description: "DESCRIPTION".to_string(),
         state: State::Ready,
-        destination_repository: Some("{DESTINATION_REPOSITORY}".to_string()),
-        destination_branch: Some("{DESTINATION_BRANCH}".to_string()),
-        work_branch: Some("{WORK_BRANCH}".to_string()),
+        destination_repository: Some("DESTINATION_REPOSITORY".to_string()),
+        destination_branch: Some("DESTINATION_BRANCH".to_string()),
+        work_branch: Some("WORK_BRANCH".to_string()),
         pr_url: None,
-        checklist: vec![],
+        checklist: vec![
+            ChecklistItem {
+                id: "main__1__collect-context".to_string(),
+                checked: true,
+                text: "Collect context".to_string(),
+            },
+            ChecklistItem {
+                id: "main__1__implement-change".to_string(),
+                checked: false,
+                text: "Implement change".to_string(),
+            },
+            ChecklistItem {
+                id: "main__1__run-tests".to_string(),
+                checked: false,
+                text: "Run tests".to_string(),
+            },
+        ],
         signal: None,
         stack: vec![],
         error: None,
@@ -307,7 +323,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
             hostname: "dummy".to_string(),
             tool: None,
             model: None,
-            text: "{USER_REQUEST}".to_string(),
+            text: "USER_REQUEST".to_string(),
             pipeline: "main".to_string(),
             pipeline_run_id: 1,
             caller_pipeline: None,
@@ -321,21 +337,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
             hostname: "dummy".to_string(),
             tool: None,
             model: None,
-            text: "[report_success]\n{LAST_REPORT}".to_string(),
-            pipeline: "main".to_string(),
-            pipeline_run_id: 1,
-            caller_pipeline: None,
-            caller_pipeline_run_id: None,
-            report_name: None,
-            prompt_name: None,
-        },
-        Comment {
-            timestamp: "2025-01-01T02:00:00Z".to_string(),
-            stage: "working".to_string(),
-            hostname: "dummy".to_string(),
-            tool: None,
-            model: None,
-            text: "[report_failure]\n{LAST_FAILURE}".to_string(),
+            text: "[report_success]\nREPORT".to_string(),
             pipeline: "main".to_string(),
             pipeline_run_id: 1,
             caller_pipeline: None,
