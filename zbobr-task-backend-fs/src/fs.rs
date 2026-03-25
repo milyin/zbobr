@@ -50,6 +50,8 @@ struct TaskFile {
     pipeline_run_id: u64,
     #[serde(default)]
     stage_count: u64,
+    #[serde(default)]
+    max_stage_count: u64,
     closed: bool,
 }
 
@@ -85,6 +87,7 @@ impl TaskFile {
             confirm: self.confirm,
             pipeline_run_id: self.pipeline_run_id,
             stage_count: self.stage_count,
+            max_stage_count: self.max_stage_count,
             closed: self.closed,
             etag: None,
         })
@@ -115,6 +118,7 @@ impl TaskFile {
             error: task.error.clone(),
             pipeline_run_id: task.pipeline_run_id,
             stage_count: task.stage_count,
+            max_stage_count: task.max_stage_count,
             closed,
         }
     }
@@ -546,6 +550,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             confirm: false,
             pipeline_run_id: 0,
             stage_count: 0,
+            max_stage_count: 0,
             closed: false,
             etag: None,
         };

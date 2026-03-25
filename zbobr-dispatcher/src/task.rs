@@ -252,10 +252,12 @@ impl RoleSession {
                 let saved_state = task.state.clone();
                 let saved_stack = task.stack.clone();
                 let saved_stage_count = task.stage_count;
+                let saved_max_stage_count = task.max_stage_count;
                 task = mutate(task);
                 task.state = saved_state;
                 task.stack = saved_stack;
                 task.stage_count = saved_stage_count;
+                task.max_stage_count = saved_max_stage_count;
                 task
             }))
             .await
@@ -891,6 +893,7 @@ mod comment_model_tests {
                 confirm: false,
                 pipeline_run_id: 0,
                 stage_count: 0,
+                max_stage_count: 0,
                 closed: false,
                 etag: None,
             };

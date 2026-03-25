@@ -353,6 +353,25 @@ impl<'a> CliStageRunner<'a> {
             task_session.increment_stage_count().await?;
         }
 
+        // Auto-pause if stage count limit reached.
+        {
+            let task_session = self.zbobr.task_session(self.task_id);
+            let task = task_session.get_task().await?;
+            if task.max_stage_count > 0 && task.stage_count >= task.max_stage_count {
+                tracing::warn!(
+                    "Task #{}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
+                    self.task_id, task.stage_count, task.max_stage_count
+                );
+                task_session
+                    .modify_task(|mut t| {
+                        t.pause = true;
+                        t
+                    })
+                    .await?;
+                return Ok(());
+            }
+        }
+
         // Clear the triggering signal before the agent session starts.
         {
             let task_session = self.zbobr.task_session(self.task_id);
@@ -593,6 +612,25 @@ async fn handle_call_stage(
         .await?;
     task_session.allocate_pipeline_run_id().await?;
     task_session.increment_stage_count().await?;
+
+    // Auto-pause if stage count limit reached.
+    {
+        let task = task_session.get_task().await?;
+        if task.max_stage_count > 0 && task.stage_count >= task.max_stage_count {
+            tracing::warn!(
+                "Task #{task_id}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
+                task.stage_count, task.max_stage_count
+            );
+            task_session
+                .modify_task(|mut t| {
+                    t.pause = true;
+                    t
+                })
+                .await?;
+            return Ok(());
+        }
+    }
+
     let call_signal = Signal::call(call_pipeline.clone());
     task_session.set_signal(Some(call_signal.clone())).await?;
     task_session
@@ -921,6 +959,8 @@ pub async fn run_manager_loop(
                 Err(e) => tracing::warn!("Failed to snapshot task: {e}"),
             }
         }
+        // Sort by stage_count descending so tasks closest to completion are processed first.
+        all_tasks.sort_by(|a, b| b.stage_count.cmp(&a.stage_count));
 
         let mut session_run = false;
         for task in &all_tasks {
