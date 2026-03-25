@@ -104,9 +104,6 @@ pub struct StageContext {
     /// Context records produced during this stage.
     #[serde(default)]
     pub records: Vec<ContextRecord>,
-    /// Optional user comment associated with this stage.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub user_comment: Option<String>,
 }
 
 /// Full task context containing all stage contexts.
@@ -1415,14 +1412,14 @@ mod tests {
                 make_record(1, ContextRecordType::Checkbox(false), "first"),
                 make_record(3, ContextRecordType::Success, "done"),
             ],
-            user_comment: None,
+
         });
         assert_eq!(ctx.next_id(), 4);
 
         ctx.stages.push(StageContext {
             info: make_stage_info("main", "review"),
             records: vec![make_record(5, ContextRecordType::Failure, "fail")],
-            user_comment: None,
+
         });
         assert_eq!(ctx.next_id(), 6);
     }
@@ -1437,12 +1434,12 @@ mod tests {
                         make_record(1, ContextRecordType::Checkbox(false), "a"),
                         make_record(2, ContextRecordType::Success, "b"),
                     ],
-                    user_comment: None,
+
                 },
                 StageContext {
                     info: make_stage_info("main", "review"),
                     records: vec![make_record(3, ContextRecordType::Question, "c")],
-                    user_comment: None,
+
                 },
             ],
         };
@@ -1464,7 +1461,7 @@ mod tests {
             stages: vec![StageContext {
                 info: make_stage_info("main", "working"),
                 records: vec![make_record(1, ContextRecordType::Checkbox(false), "item")],
-                user_comment: None,
+    
             }],
         };
 
@@ -1484,7 +1481,7 @@ mod tests {
                     make_record(1, ContextRecordType::Checkbox(false), "a"),
                     make_record(2, ContextRecordType::Success, "b"),
                 ],
-                user_comment: None,
+    
             }],
         };
 

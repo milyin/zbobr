@@ -226,7 +226,7 @@ fn parse_stage_header(header: &str) -> Result<StageContext> {
             timestamp,
         },
         records: Vec::new(),
-        user_comment: None,
+
     })
 }
 
@@ -327,7 +327,7 @@ mod tests {
                             report_link: Some("reports/plan_success.md".to_string()),
                         },
                     ],
-                    user_comment: None,
+            
                 },
                 StageContext {
                     info: StageInfo {
@@ -359,7 +359,7 @@ mod tests {
                             report_link: None,
                         },
                     ],
-                    user_comment: None,
+            
                 },
             ],
         }
@@ -523,7 +523,7 @@ mod tests {
                     brief: "Task A".to_string(),
                     report_link: None,
                 }],
-                user_comment: None,
+        
             }],
         };
 

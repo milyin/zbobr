@@ -230,7 +230,7 @@ mod tests {
                         report_link: Some("reports/success.md".to_string()),
                     },
                 ],
-                user_comment: None,
+
             }],
         }
     }
@@ -375,7 +375,7 @@ mod tests {
                     brief: "original item".to_string(),
                     report_link: None,
                 }],
-                user_comment: None,
+
             }],
         };
 
@@ -400,7 +400,7 @@ mod tests {
                     brief: "their change".to_string(),
                     report_link: None,
                 }],
-                user_comment: None,
+
             }],
         };
         let current =
@@ -424,7 +424,7 @@ mod tests {
                     brief: "our change".to_string(),
                     report_link: None,
                 }],
-                user_comment: None,
+
             }],
         };
         let our_new =
