@@ -8,9 +8,10 @@ use tokio::{
     sync::{Mutex, OwnedMutexGuard},
 };
 use zbobr_api::{
-    ChecklistItem, Comment, Model, Signal, StackEntry, State, Task, Tool,
+    Comment, Model, Signal, StackEntry, State, Task, Tool,
     backend::{TaskBackend, TaskMut, TaskWeak},
     comment_tag,
+    task::TaskContext,
 };
 
 use crate::config::ZbobrTaskBackendFsConfig;
@@ -40,7 +41,8 @@ struct TaskFile {
     pause: bool,
     #[serde(default)]
     confirm: bool,
-    checklist: Vec<ChecklistItem>,
+    #[serde(default)]
+    context: TaskContext,
     signal: Option<Signal>,
     #[serde(default)]
     stack: Vec<StackEntry>,
@@ -79,7 +81,8 @@ impl TaskFile {
             destination_branch: self.destination_branch.clone(),
             work_branch: self.work_branch.clone(),
             pr_url,
-            checklist: self.checklist.clone(),
+            checklist: vec![],
+            context: self.context.clone(),
             signal: self.signal.clone(),
             stack: self.stack.clone(),
             error: self.error.clone(),
@@ -112,7 +115,7 @@ impl TaskFile {
             },
             pause: task.pause,
             confirm: task.confirm,
-            checklist: task.checklist.clone(),
+            context: task.context.clone(),
             signal: task.signal.clone(),
             stack: task.stack.clone(),
             error: task.error.clone(),
@@ -543,6 +546,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             work_branch: None,
             pr_url: None,
             checklist: vec![],
+            context: TaskContext::default(),
             signal: None,
             stack: vec![],
             error: None,
@@ -754,9 +758,8 @@ mod parse_tests {
 
 #[cfg(test)]
 mod checklist_format_tests {
+    use zbobr_api::ChecklistItem;
     use zbobr_api::checklist_format::{parse_grouped_checklist, serialize_grouped_checklist};
-
-    use super::*;
 
     #[test]
     fn fs_backend_checklist_serialize_grouped() {

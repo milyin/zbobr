@@ -398,7 +398,7 @@ mod tests {
     use std::{fs, io::Write};
 
     use tempfile::TempDir;
-    use zbobr_api::ChecklistItem;
+    use zbobr_api::{ChecklistItem, task::TaskContext};
 
     use super::*;
 
@@ -424,6 +424,7 @@ mod tests {
                     text: "Apply changes".to_string(),
                 },
             ],
+            context: TaskContext::default(),
             signal: None,
             stack: vec![],
             error: None,

@@ -3,7 +3,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Subcommand;
-use zbobr_api::{ChecklistItem, Comment, Pipeline, Stage, State, Task, config::WorkflowConfig};
+use zbobr_api::{ChecklistItem, Comment, Pipeline, Stage, State, Task, config::WorkflowConfig, task::TaskContext};
 use zbobr_dispatcher::{
     ConfiguredPromptBuilder, TaskDir, Workflow, ZbobrDispatcher,
     config::{ZbobrDispatcherConfig, ZbobrExecutorConfig},
@@ -305,6 +305,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
                 text: "Run tests".to_string(),
             },
         ],
+        context: TaskContext::default(),
         signal: None,
         stack: vec![],
         error: None,

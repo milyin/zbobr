@@ -919,6 +919,7 @@ mod comment_model_tests {
                 work_branch: None,
                 pr_url: None,
                 checklist: vec![],
+                context: TaskContext::default(),
                 signal: None,
                 stack: vec![],
                 error: None,

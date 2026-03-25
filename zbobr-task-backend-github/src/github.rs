@@ -10,7 +10,7 @@ use zbobr_api::{
     Comment, CommentTag, Model, Task, Tool,
     backend::TaskBackend,
     comment_tag,
-    task::{Pipeline, StackEntry, Stage, State},
+    task::{Pipeline, StackEntry, Stage, State, TaskContext},
 };
 
 // -- Label prefix constants (GitHub-backend-specific) --
@@ -717,9 +717,9 @@ impl ZbobrTaskBackendGithubImpl {
     }
 
     /// Parse an IssueResponse into a Task.
-    fn issue_to_task(issue: IssueResponse) -> Task {
+    fn issue_to_task(issue: IssueResponse) -> anyhow::Result<Task> {
         let body = issue.body.unwrap_or_default();
-        let (description, params_map, error, checklist) = parse_description_full(&body);
+        let (description, params_map, error, context) = parse_description_full(&body)?;
 
         // Promoted fields: read from params_map where they were stored
         let destination_repository = params_map.get("destination_repository").cloned();
@@ -752,7 +752,7 @@ impl ZbobrTaskBackendGithubImpl {
             .iter()
             .any(|l| Self::label_to_flag(&l.name) == Some("confirm"));
 
-        Task {
+        Ok(Task {
             id: issue.number,
             title: issue.title,
             description,
@@ -761,7 +761,8 @@ impl ZbobrTaskBackendGithubImpl {
             destination_branch,
             work_branch,
             pr_url,
-            checklist,
+            checklist: vec![],
+            context,
             signal,
             stack,
             error,
@@ -781,7 +782,7 @@ impl ZbobrTaskBackendGithubImpl {
                 .unwrap_or(0),
             closed: issue.state == "closed",
             etag: Some(body),
-        }
+        })
     }
 
     /// Build the string parameters map for serialization, including promoted fields.
@@ -877,7 +878,7 @@ impl ZbobrTaskBackendGithubImpl {
                 .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
         })
         .await?;
-        Ok(Self::issue_to_task(issue))
+        Self::issue_to_task(issue)
     }
 
     /// Internal: read task with cooling check.
@@ -921,14 +922,14 @@ impl ZbobrTaskBackendGithubImpl {
         let original_confirm = task.confirm;
         let expected_description = task.etag.clone().unwrap_or_else(|| {
             let string_params = Self::task_to_string_params(&task);
-            serialize_description_full(&task.description, &string_params, &task.error, &task.checklist)
+            serialize_description_full(&task.description, &string_params, &task.error, &task.context)
         });
 
         let task = mutate(task);
 
         let string_params = Self::task_to_string_params(&task);
         let new_description =
-            serialize_description_full(&task.description, &string_params, &task.error, &task.checklist);
+            serialize_description_full(&task.description, &string_params, &task.error, &task.context);
 
         // Write description with retry and conflict detection
         const MAX_RETRIES: u32 = 3;
@@ -949,13 +950,13 @@ impl ZbobrTaskBackendGithubImpl {
                         &current_task.description,
                         &sp,
                         &current_task.error,
-                        &current_task.checklist,
+                        &current_task.context,
                     )
                 }
             };
             if current_body != expected_desc {
                 new_desc =
-                    merge_concurrent_description_updates(&expected_desc, &current_body, &new_desc);
+                    merge_concurrent_description_updates(&expected_desc, &current_body, &new_desc)?;
                 expected_desc = current_body;
             }
         }
@@ -1389,7 +1390,7 @@ impl TaskBackend for TaskBackendGithub {
         for issue in issues {
             let id = issue.number;
             // Reuse list payload as the saved snapshot until a caller asks for refresh.
-            let task = ZbobrTaskBackendGithubImpl::issue_to_task(issue);
+            let task = ZbobrTaskBackendGithubImpl::issue_to_task(issue)?;
             result.push(Box::new(GithubTaskWeak {
                 id,
                 backend: self.inner.clone(),
@@ -1406,7 +1407,7 @@ impl TaskBackend for TaskBackendGithub {
         state: State,
     ) -> anyhow::Result<u64> {
         let (owner, repo) = self.inner.parse_repo()?;
-        let body = serialize_description_full(description, &HashMap::new(), &None, &[]);
+        let body = serialize_description_full(description, &HashMap::new(), &None, &TaskContext::default());
 
         let issue = retry_github("create issue", || async {
             let issues = self.inner.octocrab.issues(owner, repo);
