@@ -92,10 +92,12 @@ pub struct ContextRecord {
 /// Metadata about a stage execution.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct StageInfo {
-    /// Pipeline name (e.g. "main", "merge").
-    pub pipeline: String,
+    /// Pipeline that owns this stage.
+    pub pipeline: Pipeline,
+    /// Run identifier within the pipeline (monotonically increasing per pipeline).
+    pub run_id: u64,
     /// Stage name within the pipeline.
-    pub stage: String,
+    pub stage: Stage,
     /// Tool used for execution (e.g. copilot, claude).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<Tool>,
@@ -1390,8 +1392,9 @@ mod tests {
 
     fn make_stage_info(pipeline: &str, stage: &str) -> StageInfo {
         StageInfo {
-            pipeline: pipeline.to_string(),
-            stage: stage.to_string(),
+            pipeline: Pipeline::from(pipeline),
+            run_id: 1,
+            stage: Stage::from(stage),
             tool: None,
             model: None,
             prompt_link: None,
