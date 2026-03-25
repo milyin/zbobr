@@ -44,6 +44,142 @@ pub struct ChecklistItem {
     pub text: String,
 }
 
+// -- Context types --
+
+/// Type of a context record within a stage.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextRecordType {
+    /// A checkbox item with checked/unchecked state.
+    Checkbox(bool),
+    /// A success report.
+    Success,
+    /// A failure report.
+    Failure,
+    /// A comment.
+    Comment,
+    /// A question requiring human input.
+    Question,
+}
+
+impl std::fmt::Display for ContextRecordType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContextRecordType::Checkbox(true) => write!(f, "checkbox(checked)"),
+            ContextRecordType::Checkbox(false) => write!(f, "checkbox(unchecked)"),
+            ContextRecordType::Success => write!(f, "success"),
+            ContextRecordType::Failure => write!(f, "failure"),
+            ContextRecordType::Comment => write!(f, "comment"),
+            ContextRecordType::Question => write!(f, "question"),
+        }
+    }
+}
+
+/// A single record within a stage context.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct ContextRecord {
+    /// Unique numeric id, generated as max records id + 1.
+    pub id: u64,
+    /// Type of this context record.
+    pub record_type: ContextRecordType,
+    /// Brief description of this record.
+    pub brief: String,
+    /// Optional link to a long description or report.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_link: Option<String>,
+}
+
+/// Metadata about a stage execution.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct StageInfo {
+    /// Pipeline name (e.g. "main", "merge").
+    pub pipeline: String,
+    /// Stage name within the pipeline.
+    pub stage: String,
+    /// Tool used for execution (e.g. copilot, claude).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<Tool>,
+    /// Model used by the tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<Model>,
+    /// Link to the prompt used for this stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_link: Option<String>,
+    /// Timestamp when the stage was created.
+    pub timestamp: String,
+}
+
+/// Context for a single stage execution, containing stage metadata and records.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct StageContext {
+    /// Stage execution metadata.
+    pub info: StageInfo,
+    /// Context records produced during this stage.
+    #[serde(default)]
+    pub records: Vec<ContextRecord>,
+    /// Optional user comment associated with this stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_comment: Option<String>,
+}
+
+/// Full task context containing all stage contexts.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+pub struct TaskContext {
+    /// Ordered list of stage contexts.
+    #[serde(default)]
+    pub stages: Vec<StageContext>,
+}
+
+impl TaskContext {
+    /// Returns the next available record id (max existing id + 1).
+    pub fn next_id(&self) -> u64 {
+        self.stages
+            .iter()
+            .flat_map(|s| s.records.iter())
+            .map(|r| r.id)
+            .max()
+            .map(|max| max + 1)
+            .unwrap_or(1)
+    }
+
+    /// Find a context record by its numeric id across all stages.
+    /// Returns a reference to the record and its stage index.
+    pub fn find_record(&self, id: u64) -> Option<(usize, &ContextRecord)> {
+        for (stage_idx, stage) in self.stages.iter().enumerate() {
+            if let Some(record) = stage.records.iter().find(|r| r.id == id) {
+                return Some((stage_idx, record));
+            }
+        }
+        None
+    }
+
+    /// Find a mutable reference to a context record by its numeric id.
+    /// Returns a mutable reference to the record and its stage index.
+    pub fn find_record_mut(&mut self, id: u64) -> Option<(usize, &mut ContextRecord)> {
+        for (stage_idx, stage) in self.stages.iter_mut().enumerate() {
+            if let Some(record) = stage.records.iter_mut().find(|r| r.id == id) {
+                return Some((stage_idx, record));
+            }
+        }
+        None
+    }
+
+    /// Delete a context record by its numeric id.
+    /// Returns true if the record was found and deleted.
+    pub fn delete_record(&mut self, id: u64) -> bool {
+        for stage in &mut self.stages {
+            let len_before = stage.records.len();
+            stage.records.retain(|r| r.id != id);
+            if stage.records.len() < len_before {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 // -- Comment --
 
 /// A structured comment with metadata.
@@ -975,6 +1111,9 @@ pub struct Task {
     pub work_branch: Option<String>,
     pub pr_url: Option<String>,
     pub checklist: Vec<ChecklistItem>,
+    /// Structured task context containing stage execution history and records.
+    #[serde(default)]
+    pub context: TaskContext,
     /// Signal for flow control: go_{stage}, call_{pipeline}, return
     pub signal: Option<Signal>,
     /// Call stack for pipeline call/return semantics.
@@ -1247,5 +1386,134 @@ mod tests {
         assert!(State::Running(Pipeline::Main, Stage::from("s")).is_running());
         assert!(!State::Pending(Pipeline::Main).is_running());
         assert!(!State::Done.is_running());
+    }
+
+    fn make_stage_info(pipeline: &str, stage: &str) -> StageInfo {
+        StageInfo {
+            pipeline: pipeline.to_string(),
+            stage: stage.to_string(),
+            tool: None,
+            model: None,
+            prompt_link: None,
+            timestamp: "2026-03-25T00:00:00Z".to_string(),
+        }
+    }
+
+    fn make_record(id: u64, record_type: ContextRecordType, brief: &str) -> ContextRecord {
+        ContextRecord {
+            id,
+            record_type,
+            brief: brief.to_string(),
+            report_link: None,
+        }
+    }
+
+    #[test]
+    fn task_context_default_is_empty() {
+        let ctx = TaskContext::default();
+        assert!(ctx.stages.is_empty());
+        assert_eq!(ctx.next_id(), 1);
+    }
+
+    #[test]
+    fn task_context_next_id() {
+        let mut ctx = TaskContext::default();
+        assert_eq!(ctx.next_id(), 1);
+
+        ctx.stages.push(StageContext {
+            info: make_stage_info("main", "working"),
+            records: vec![
+                make_record(1, ContextRecordType::Checkbox(false), "first"),
+                make_record(3, ContextRecordType::Success, "done"),
+            ],
+            user_comment: None,
+        });
+        assert_eq!(ctx.next_id(), 4);
+
+        ctx.stages.push(StageContext {
+            info: make_stage_info("main", "review"),
+            records: vec![make_record(5, ContextRecordType::Failure, "fail")],
+            user_comment: None,
+        });
+        assert_eq!(ctx.next_id(), 6);
+    }
+
+    #[test]
+    fn task_context_find_record() {
+        let ctx = TaskContext {
+            stages: vec![
+                StageContext {
+                    info: make_stage_info("main", "working"),
+                    records: vec![
+                        make_record(1, ContextRecordType::Checkbox(false), "a"),
+                        make_record(2, ContextRecordType::Success, "b"),
+                    ],
+                    user_comment: None,
+                },
+                StageContext {
+                    info: make_stage_info("main", "review"),
+                    records: vec![make_record(3, ContextRecordType::Question, "c")],
+                    user_comment: None,
+                },
+            ],
+        };
+
+        let (stage_idx, record) = ctx.find_record(2).unwrap();
+        assert_eq!(stage_idx, 0);
+        assert_eq!(record.brief, "b");
+
+        let (stage_idx, record) = ctx.find_record(3).unwrap();
+        assert_eq!(stage_idx, 1);
+        assert_eq!(record.brief, "c");
+
+        assert!(ctx.find_record(99).is_none());
+    }
+
+    #[test]
+    fn task_context_find_record_mut() {
+        let mut ctx = TaskContext {
+            stages: vec![StageContext {
+                info: make_stage_info("main", "working"),
+                records: vec![make_record(1, ContextRecordType::Checkbox(false), "item")],
+                user_comment: None,
+            }],
+        };
+
+        let (_, record) = ctx.find_record_mut(1).unwrap();
+        record.record_type = ContextRecordType::Checkbox(true);
+
+        let (_, record) = ctx.find_record(1).unwrap();
+        assert_eq!(record.record_type, ContextRecordType::Checkbox(true));
+    }
+
+    #[test]
+    fn task_context_delete_record() {
+        let mut ctx = TaskContext {
+            stages: vec![StageContext {
+                info: make_stage_info("main", "working"),
+                records: vec![
+                    make_record(1, ContextRecordType::Checkbox(false), "a"),
+                    make_record(2, ContextRecordType::Success, "b"),
+                ],
+                user_comment: None,
+            }],
+        };
+
+        assert!(ctx.delete_record(1));
+        assert_eq!(ctx.stages[0].records.len(), 1);
+        assert_eq!(ctx.stages[0].records[0].id, 2);
+
+        assert!(!ctx.delete_record(99));
+        assert_eq!(ctx.stages[0].records.len(), 1);
+    }
+
+    #[test]
+    fn context_record_type_display() {
+        assert_eq!(ContextRecordType::Checkbox(true).to_string(), "checkbox(checked)");
+        assert_eq!(ContextRecordType::Checkbox(false).to_string(), "checkbox(unchecked)");
+        assert_eq!(ContextRecordType::Success.to_string(), "success");
+        assert_eq!(ContextRecordType::Failure.to_string(), "failure");
+        assert_eq!(ContextRecordType::Comment.to_string(), "comment");
+        assert_eq!(ContextRecordType::Question.to_string(), "question");
     }
 }
