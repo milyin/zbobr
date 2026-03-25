@@ -1602,40 +1602,41 @@ async fn perform_stash_and_push(
 ) -> anyhow::Result<()> {
     let task_backend = zbobr.task_backend();
 
-    // Skip git operations if work_dir is not a git repository (e.g. preparator
-    // stage that only configured worktree metadata but didn't clone yet).
-    if git_output(work_dir, &["rev-parse", "--is-inside-work-tree"])
+    // Stash uncommitted changes if work_dir is a git repository.
+    // The preparator stage may start without a git repo (identity not yet set),
+    // so we skip stash but still proceed to update_worktree below.
+    let is_git_repo = git_output(work_dir, &["rev-parse", "--is-inside-work-tree"])
         .await
-        .is_err()
-    {
+        .is_ok();
+
+    if is_git_repo {
+        tracing::info!("Checking for uncommitted changes in {}", work_dir.display());
+
+        match git_output(work_dir, &["status", "--porcelain"]).await {
+            Ok(status) => {
+                if !status.is_empty() {
+                    let stash_msg = format!("Stashed by {} agent for task #{}", role, task_id);
+                    tracing::info!("Found uncommitted changes, stashing...");
+                    match git(
+                        work_dir,
+                        &["stash", "push", "--include-untracked", "-m", &stash_msg],
+                    )
+                    .await
+                    {
+                        Ok(_) => tracing::info!("Git stash successful"),
+                        Err(e) => tracing::warn!("Git stash failed: {e}"),
+                    }
+                } else {
+                    tracing::info!("No uncommitted changes found");
+                }
+            }
+            Err(e) => tracing::warn!("Failed to check git status for stash: {e}"),
+        }
+    } else {
         tracing::info!(
-            "Skipping stash/push for task #{task_id}: {} is not a git repository",
+            "Skipping stash for task #{task_id}: {} is not a git repository",
             work_dir.display()
         );
-        return Ok(());
-    }
-
-    tracing::info!("Checking for uncommitted changes in {}", work_dir.display());
-
-    match git_output(work_dir, &["status", "--porcelain"]).await {
-        Ok(status) => {
-            if !status.is_empty() {
-                let stash_msg = format!("Stashed by {} agent for task #{}", role, task_id);
-                tracing::info!("Found uncommitted changes, stashing...");
-                match git(
-                    work_dir,
-                    &["stash", "push", "--include-untracked", "-m", &stash_msg],
-                )
-                .await
-                {
-                    Ok(_) => tracing::info!("Git stash successful"),
-                    Err(e) => tracing::warn!("Git stash failed: {e}"),
-                }
-            } else {
-                tracing::info!("No uncommitted changes found");
-            }
-        }
-        Err(e) => tracing::warn!("Failed to check git status for stash: {e}"),
     }
 
     let task = task_backend
@@ -1650,7 +1651,7 @@ async fn perform_stash_and_push(
             anyhow::bail!("Merge conflict while syncing work branch for task #{task_id}");
         }
         let config = zbobr.config();
-        if config.overwrite_author && is_uptodate {
+        if config.overwrite_author && is_uptodate && is_git_repo {
             let dest_branch = identity.destination_branch.clone();
             zbobr_utility::rewrite_authors_on_worktree(
                 work_dir,
