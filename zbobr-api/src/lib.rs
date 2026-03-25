@@ -2,6 +2,7 @@ extern crate self as zbobr_api;
 
 pub mod backend;
 pub mod checklist_format;
+pub mod context_format;
 pub mod config;
 pub mod config_tools;
 pub mod prompt;

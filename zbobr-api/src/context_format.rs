@@ -1,0 +1,563 @@
+use anyhow::{Context as _, Result, bail};
+
+use crate::task::{
+    Comment, ContextRecord, ContextRecordType, Pipeline, Stage, StageContext, StageInfo,
+    TaskContext,
+};
+
+/// Serialize a `TaskContext` into markdown format, optionally interspersing
+/// user comments (placed by timestamp).
+///
+/// When `for_prompt` is true, prompt links are omitted from stage headers.
+pub fn serialize_context(
+    ctx: &TaskContext,
+    comments: &[Comment],
+    for_prompt: bool,
+) -> String {
+    if ctx.stages.is_empty() && comments.is_empty() {
+        return String::new();
+    }
+
+    let mut result = String::new();
+
+    // Build a timeline of (timestamp, event) where event is either a stage or a comment
+    enum Event<'a> {
+        Stage(&'a StageContext),
+        Comment(&'a Comment),
+    }
+
+    let mut events: Vec<(String, Event)> = Vec::new();
+    for stage in &ctx.stages {
+        events.push((stage.info.timestamp.clone(), Event::Stage(stage)));
+    }
+    for comment in comments {
+        events.push((comment.timestamp.clone(), Event::Comment(comment)));
+    }
+
+    // Sort by timestamp (stable sort preserves insertion order for equal timestamps)
+    events.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (_ts, event) in &events {
+        match event {
+            Event::Stage(stage) => {
+                serialize_stage(&mut result, stage, for_prompt);
+            }
+            Event::Comment(comment) => {
+                serialize_user_comment(&mut result, comment);
+            }
+        }
+    }
+
+    result
+}
+
+fn serialize_stage(out: &mut String, stage: &StageContext, for_prompt: bool) {
+    // Stage header: <!-- Stage: {pipeline} #{run_id} {stage} [{timestamp}] ... -->
+    out.push_str(&format!(
+        "<!-- Stage: {} #{} {} [{}]",
+        stage.info.pipeline, stage.info.run_id, stage.info.stage, stage.info.timestamp,
+    ));
+
+    if let Some(tool) = &stage.info.tool {
+        out.push_str(&format!(" tool={}", tool));
+    }
+    if let Some(model) = &stage.info.model {
+        out.push_str(&format!(" model={}", model));
+    }
+    if !for_prompt {
+        if let Some(prompt_link) = &stage.info.prompt_link {
+            out.push_str(&format!(" prompt={}", prompt_link));
+        }
+    }
+
+    out.push_str(" -->\n");
+
+    // Records
+    for record in &stage.records {
+        serialize_record(out, record);
+    }
+
+    out.push('\n');
+}
+
+fn serialize_record(out: &mut String, record: &ContextRecord) {
+    // Type prefix
+    match &record.record_type {
+        ContextRecordType::Checkbox(false) => out.push_str("- [ ] "),
+        ContextRecordType::Checkbox(true) => out.push_str("- [x] "),
+        ContextRecordType::Success => out.push_str("✅ "),
+        ContextRecordType::Failure => out.push_str("❌ "),
+        ContextRecordType::Comment => out.push_str("💬 "),
+        ContextRecordType::Question => out.push_str("❓ "),
+    }
+
+    // Brief description
+    out.push_str(&record.brief);
+
+    // Optional report link
+    if let Some(link) = &record.report_link {
+        out.push_str(&format!(" [report]({})", link));
+    }
+
+    // Record ID suffix
+    out.push_str(&format!(" <sub>[ctx_rec_{}]</sub>\n", record.id));
+}
+
+fn serialize_user_comment(out: &mut String, comment: &Comment) {
+    // User comments as blockquotes with timestamp
+    out.push_str(&format!("> **[{}]** ", comment.timestamp));
+    for (i, line) in comment.text.lines().enumerate() {
+        if i > 0 {
+            out.push_str("\n> ");
+        }
+        out.push_str(line);
+    }
+    out.push_str("\n\n");
+}
+
+/// Parse markdown-formatted context back into a `TaskContext`.
+///
+/// Blockquote lines (user comments) are ignored during parsing.
+/// Returns `Err` on any parse failure.
+pub fn parse_context(text: &str) -> Result<TaskContext> {
+    let mut stages: Vec<StageContext> = Vec::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+
+        // Skip empty lines
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Skip blockquote lines (user comments)
+        if trimmed.starts_with('>') {
+            continue;
+        }
+
+        // Parse stage header
+        if let Some(header) = trimmed.strip_prefix("<!-- Stage: ") {
+            let stage = parse_stage_header(header)
+                .with_context(|| format!("Failed to parse stage header: {}", trimmed))?;
+            stages.push(stage);
+            continue;
+        }
+
+        // Parse record lines
+        if let Some(record) = parse_record_line(trimmed)? {
+            let current_stage = stages.last_mut().ok_or_else(|| {
+                anyhow::anyhow!("Context record found before any stage header: {}", trimmed)
+            })?;
+            current_stage.records.push(record);
+            continue;
+        }
+
+        // Skip other HTML comments
+        if trimmed.starts_with("<!--") {
+            continue;
+        }
+    }
+
+    Ok(TaskContext { stages })
+}
+
+/// Parse a stage header after the `<!-- Stage: ` prefix.
+/// Expected format: `{pipeline} #{run_id} {stage} [{timestamp}] [key=value...] -->`
+fn parse_stage_header(header: &str) -> Result<StageContext> {
+    let header = header
+        .strip_suffix("-->")
+        .map(|s| s.trim())
+        .ok_or_else(|| anyhow::anyhow!("Stage header missing closing -->"))?;
+
+    // Split into tokens, but we need to handle the [timestamp] specially
+    let hash_pos = header
+        .find('#')
+        .ok_or_else(|| anyhow::anyhow!("Missing # in stage header"))?;
+
+    let pipeline_str = header[..hash_pos].trim();
+    let after_hash = &header[hash_pos + 1..];
+
+    // run_id is the next token
+    let space_after_run = after_hash
+        .find(' ')
+        .ok_or_else(|| anyhow::anyhow!("Missing stage name after run_id"))?;
+    let run_id: u64 = after_hash[..space_after_run]
+        .trim()
+        .parse()
+        .context("Invalid run_id")?;
+
+    let after_run = &after_hash[space_after_run + 1..];
+
+    // Find timestamp in brackets
+    let bracket_open = after_run
+        .find('[')
+        .ok_or_else(|| anyhow::anyhow!("Missing timestamp brackets"))?;
+    let bracket_close = after_run
+        .find(']')
+        .ok_or_else(|| anyhow::anyhow!("Missing closing timestamp bracket"))?;
+
+    let stage_str = after_run[..bracket_open].trim();
+    let timestamp = after_run[bracket_open + 1..bracket_close].trim().to_string();
+
+    // Parse optional key=value pairs after the timestamp
+    let remainder = after_run[bracket_close + 1..].trim();
+    let mut tool = None;
+    let mut model = None;
+    let mut prompt_link = None;
+
+    for token in remainder.split_whitespace() {
+        if let Some(val) = token.strip_prefix("tool=") {
+            tool = Some(val.parse().context("Invalid tool value")?);
+        } else if let Some(val) = token.strip_prefix("model=") {
+            model = Some(val.parse().context("Invalid model value")?);
+        } else if let Some(val) = token.strip_prefix("prompt=") {
+            prompt_link = Some(val.to_string());
+        }
+    }
+
+    Ok(StageContext {
+        info: StageInfo {
+            pipeline: Pipeline::from(pipeline_str),
+            run_id,
+            stage: Stage::new(stage_str),
+            tool,
+            model,
+            prompt_link,
+            timestamp,
+        },
+        records: Vec::new(),
+        user_comment: None,
+    })
+}
+
+/// Parse a single record line. Returns Ok(None) for unrecognized lines.
+fn parse_record_line(line: &str) -> Result<Option<ContextRecord>> {
+    // Determine record type from prefix
+    let (record_type, rest) = if let Some(rest) = line.strip_prefix("- [x] ") {
+        (ContextRecordType::Checkbox(true), rest)
+    } else if let Some(rest) = line.strip_prefix("- [X] ") {
+        (ContextRecordType::Checkbox(true), rest)
+    } else if let Some(rest) = line.strip_prefix("- [ ] ") {
+        (ContextRecordType::Checkbox(false), rest)
+    } else if let Some(rest) = line.strip_prefix("✅ ") {
+        (ContextRecordType::Success, rest)
+    } else if let Some(rest) = line.strip_prefix("❌ ") {
+        (ContextRecordType::Failure, rest)
+    } else if let Some(rest) = line.strip_prefix("💬 ") {
+        (ContextRecordType::Comment, rest)
+    } else if let Some(rest) = line.strip_prefix("❓ ") {
+        (ContextRecordType::Question, rest)
+    } else {
+        return Ok(None);
+    };
+
+    // Extract record ID from suffix: <sub>[ctx_rec_{id}]</sub>
+    let id_marker = "<sub>[ctx_rec_";
+    let id_start = rest
+        .rfind(id_marker)
+        .ok_or_else(|| anyhow::anyhow!("Missing record ID marker in: {}", line))?;
+    let after_marker = &rest[id_start + id_marker.len()..];
+    let id_end = after_marker
+        .find(']')
+        .ok_or_else(|| anyhow::anyhow!("Missing closing ] for record ID in: {}", line))?;
+    let id: u64 = after_marker[..id_end]
+        .parse()
+        .with_context(|| format!("Invalid record ID in: {}", line))?;
+
+    // Content is between type prefix and ID marker
+    let content = rest[..id_start].trim();
+
+    // Extract optional report link: [report](url)
+    let (brief, report_link) = if let Some(link_start) = content.rfind("[report](") {
+        let after_link = &content[link_start + "[report](".len()..];
+        if let Some(paren_close) = after_link.find(')') {
+            let link = after_link[..paren_close].to_string();
+            let brief = content[..link_start].trim().to_string();
+            (brief, Some(link))
+        } else {
+            bail!("Malformed report link in: {}", line);
+        }
+    } else {
+        (content.to_string(), None)
+    };
+
+    Ok(Some(ContextRecord {
+        id,
+        record_type,
+        brief,
+        report_link,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::task::Model;
+
+    fn sample_context() -> TaskContext {
+        TaskContext {
+            stages: vec![
+                StageContext {
+                    info: StageInfo {
+                        pipeline: Pipeline::from("main"),
+                        run_id: 1,
+                        stage: Stage::new("planning"),
+                        tool: Some(crate::task::Tool::Claude),
+                        model: Some(Model::ClaudeOpus4_6),
+                        prompt_link: Some("prompts/plan.md".to_string()),
+                        timestamp: "2024-01-01T00:00:00Z".to_string(),
+                    },
+                    records: vec![
+                        ContextRecord {
+                            id: 1,
+                            record_type: ContextRecordType::Checkbox(false),
+                            brief: "Define API schema".to_string(),
+                            report_link: None,
+                        },
+                        ContextRecord {
+                            id: 2,
+                            record_type: ContextRecordType::Checkbox(true),
+                            brief: "Review requirements".to_string(),
+                            report_link: None,
+                        },
+                        ContextRecord {
+                            id: 3,
+                            record_type: ContextRecordType::Success,
+                            brief: "Plan completed".to_string(),
+                            report_link: Some("reports/plan_success.md".to_string()),
+                        },
+                    ],
+                    user_comment: None,
+                },
+                StageContext {
+                    info: StageInfo {
+                        pipeline: Pipeline::from("main"),
+                        run_id: 1,
+                        stage: Stage::new("working"),
+                        tool: None,
+                        model: None,
+                        prompt_link: None,
+                        timestamp: "2024-01-01T01:00:00Z".to_string(),
+                    },
+                    records: vec![
+                        ContextRecord {
+                            id: 4,
+                            record_type: ContextRecordType::Failure,
+                            brief: "Build failed".to_string(),
+                            report_link: Some("reports/build_fail.md".to_string()),
+                        },
+                        ContextRecord {
+                            id: 5,
+                            record_type: ContextRecordType::Comment,
+                            brief: "Retrying with fix".to_string(),
+                            report_link: None,
+                        },
+                        ContextRecord {
+                            id: 6,
+                            record_type: ContextRecordType::Question,
+                            brief: "Should we use async?".to_string(),
+                            report_link: None,
+                        },
+                    ],
+                    user_comment: None,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn serialize_basic() {
+        let ctx = sample_context();
+        let output = serialize_context(&ctx, &[], false);
+
+        assert!(output.contains("<!-- Stage: main #1 planning [2024-01-01T00:00:00Z]"));
+        assert!(output.contains("tool=claude"));
+        assert!(output.contains("model=claude-opus-4.6"));
+        assert!(output.contains("prompt=prompts/plan.md"));
+        assert!(output.contains("- [ ] Define API schema"));
+        assert!(output.contains("- [x] Review requirements"));
+        assert!(output.contains("✅ Plan completed [report](reports/plan_success.md)"));
+        assert!(output.contains("<sub>[ctx_rec_3]</sub>"));
+        assert!(output.contains("❌ Build failed [report](reports/build_fail.md)"));
+        assert!(output.contains("💬 Retrying with fix"));
+        assert!(output.contains("❓ Should we use async?"));
+    }
+
+    #[test]
+    fn serialize_for_prompt_omits_prompt_link() {
+        let ctx = sample_context();
+        let output = serialize_context(&ctx, &[], true);
+
+        assert!(!output.contains("prompt="));
+        // Other metadata should still be present
+        assert!(output.contains("tool=claude"));
+    }
+
+    #[test]
+    fn parse_basic() {
+        let ctx = sample_context();
+        let serialized = serialize_context(&ctx, &[], false);
+        let parsed = parse_context(&serialized).unwrap();
+
+        assert_eq!(parsed.stages.len(), 2);
+
+        let s0 = &parsed.stages[0];
+        assert_eq!(s0.info.pipeline, Pipeline::from("main"));
+        assert_eq!(s0.info.run_id, 1);
+        assert_eq!(s0.info.stage, Stage::new("planning"));
+        assert_eq!(s0.info.timestamp, "2024-01-01T00:00:00Z");
+        assert!(s0.info.prompt_link.as_deref() == Some("prompts/plan.md"));
+        assert_eq!(s0.records.len(), 3);
+
+        assert_eq!(s0.records[0].id, 1);
+        assert_eq!(s0.records[0].record_type, ContextRecordType::Checkbox(false));
+        assert_eq!(s0.records[0].brief, "Define API schema");
+
+        assert_eq!(s0.records[1].id, 2);
+        assert_eq!(s0.records[1].record_type, ContextRecordType::Checkbox(true));
+
+        assert_eq!(s0.records[2].id, 3);
+        assert_eq!(s0.records[2].record_type, ContextRecordType::Success);
+        assert_eq!(
+            s0.records[2].report_link.as_deref(),
+            Some("reports/plan_success.md")
+        );
+    }
+
+    #[test]
+    fn roundtrip_preserves_data() {
+        let original = sample_context();
+        let serialized = serialize_context(&original, &[], false);
+        let parsed = parse_context(&serialized).unwrap();
+
+        assert_eq!(parsed.stages.len(), original.stages.len());
+        for (orig_stage, parsed_stage) in original.stages.iter().zip(parsed.stages.iter()) {
+            assert_eq!(parsed_stage.info.pipeline, orig_stage.info.pipeline);
+            assert_eq!(parsed_stage.info.run_id, orig_stage.info.run_id);
+            assert_eq!(parsed_stage.info.stage, orig_stage.info.stage);
+            assert_eq!(parsed_stage.info.timestamp, orig_stage.info.timestamp);
+            assert_eq!(parsed_stage.info.tool, orig_stage.info.tool);
+            assert_eq!(parsed_stage.info.model, orig_stage.info.model);
+            assert_eq!(parsed_stage.info.prompt_link, orig_stage.info.prompt_link);
+            assert_eq!(parsed_stage.records.len(), orig_stage.records.len());
+            for (orig_rec, parsed_rec) in
+                orig_stage.records.iter().zip(parsed_stage.records.iter())
+            {
+                assert_eq!(parsed_rec.id, orig_rec.id);
+                assert_eq!(parsed_rec.record_type, orig_rec.record_type);
+                assert_eq!(parsed_rec.brief, orig_rec.brief);
+                assert_eq!(parsed_rec.report_link, orig_rec.report_link);
+            }
+        }
+    }
+
+    #[test]
+    fn roundtrip_for_prompt_loses_prompt_link() {
+        let original = sample_context();
+        let serialized = serialize_context(&original, &[], true);
+        let parsed = parse_context(&serialized).unwrap();
+
+        // prompt_link should be None since for_prompt=true omitted it
+        assert!(parsed.stages[0].info.prompt_link.is_none());
+    }
+
+    #[test]
+    fn parse_ignores_blockquote_comments() {
+        let text = "\
+<!-- Stage: main #1 working [2024-01-01T00:00:00Z] -->
+- [ ] Do work <sub>[ctx_rec_1]</sub>
+
+> **[2024-01-01T00:30:00Z]** User says hello
+> second line of comment
+
+✅ Done [report](r.md) <sub>[ctx_rec_2]</sub>
+";
+        let parsed = parse_context(text).unwrap();
+        assert_eq!(parsed.stages.len(), 1);
+        assert_eq!(parsed.stages[0].records.len(), 2);
+        assert_eq!(parsed.stages[0].records[0].brief, "Do work");
+        assert_eq!(parsed.stages[0].records[1].brief, "Done");
+        assert_eq!(
+            parsed.stages[0].records[1].report_link.as_deref(),
+            Some("r.md")
+        );
+    }
+
+    #[test]
+    fn parse_error_on_record_before_stage() {
+        let text = "- [ ] orphan item <sub>[ctx_rec_1]</sub>\n";
+        let result = parse_context(text);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("before any stage header"));
+    }
+
+    #[test]
+    fn parse_error_on_missing_id() {
+        let text = "\
+<!-- Stage: main #1 working [2024-01-01T00:00:00Z] -->
+- [ ] no id marker
+";
+        let result = parse_context(text);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn serialize_with_interspersed_comments() {
+        let ctx = TaskContext {
+            stages: vec![StageContext {
+                info: StageInfo {
+                    pipeline: Pipeline::from("main"),
+                    run_id: 1,
+                    stage: Stage::new("working"),
+                    tool: None,
+                    model: None,
+                    prompt_link: None,
+                    timestamp: "2024-01-01T00:00:00Z".to_string(),
+                },
+                records: vec![ContextRecord {
+                    id: 1,
+                    record_type: ContextRecordType::Checkbox(false),
+                    brief: "Task A".to_string(),
+                    report_link: None,
+                }],
+                user_comment: None,
+            }],
+        };
+
+        let comments = vec![Comment {
+            timestamp: "2024-01-01T00:30:00Z".to_string(),
+            stage: String::new(),
+            hostname: String::new(),
+            tool: None,
+            model: None,
+            text: "Please hurry up!".to_string(),
+            pipeline: String::new(),
+            pipeline_run_id: 0,
+            caller_pipeline: None,
+            caller_pipeline_run_id: None,
+            report_name: None,
+            prompt_name: None,
+        }];
+
+        let output = serialize_context(&ctx, &comments, false);
+
+        // Stage should come before comment (by timestamp)
+        let stage_pos = output.find("<!-- Stage:").unwrap();
+        let comment_pos = output.find("> **[2024-01-01T00:30:00Z]**").unwrap();
+        assert!(stage_pos < comment_pos);
+        assert!(output.contains("Please hurry up!"));
+    }
+
+    #[test]
+    fn empty_context() {
+        let ctx = TaskContext::default();
+        let output = serialize_context(&ctx, &[], false);
+        assert_eq!(output, "");
+
+        let parsed = parse_context("").unwrap();
+        assert!(parsed.stages.is_empty());
+    }
+}
