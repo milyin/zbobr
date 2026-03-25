@@ -531,13 +531,13 @@ Review the implementation changes and ensure they meet coding standards and task
 1. Read the task description, work plan, worker's report, comments, and checklist provided below in this prompt. Note if the analog solution in the existing code is referenced in the plan.
 2. **Inspect all changes made in this task**: Use `git diff origin/<destination_branch>...HEAD` (three dots) to see ALL changes introduced by this task relative to the base branch. Do NOT checkout the base branch (it may conflict with worktree setup). You can also use `git log origin/<destination_branch>..HEAD` to see all commits in this branch.
 3. **Verify the analog choice and pattern consistency**: Check that the planner chose an appropriate analog for the new functionality. Then verify that the implementation consistently follows the same patterns, conventions, coding style, and architectural approaches as the analog. Flag any deviations — new code should look like it was written by the same author as the existing analogous code. If the analog was poorly chosen, note this as a review finding.
-4. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. **Do not run any tests yourself; testing is handled in a separate Testing stage.**
+4. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. **Do not run any tests yourself; testing is handled separately.**
 5. Verify that all changes are related to the task and are necessary for the implementation. Flag any extraneous changes that do not directly contribute to the task requirements or plan.
 6. Prepare a detailed review report describing any issues found, suggested fixes, and overall assessment. Include your assessment of analog consistency.
 7. Finish the review by calling one of:
-    - `{mcp_report_success}` — the implementation is correct and **all checklist items are completed**. The task advances to testing.
-    - `{mcp_report_intermediate}` — the implementation of completed items looks correct, but **some checklist items remain unchecked**. The task goes back to the worker to continue implementation.
-    - `{mcp_report_failure}` — issues were found in the implementation that the worker must fix. The task goes back to the worker.
+    - `{mcp_report_success}` — the implementation is correct and **all checklist items are completed**.
+    - `{mcp_report_intermediate}` — the implementation of completed items looks correct, but **some checklist items remain unchecked**.
+    - `{mcp_report_failure}` — issues were found in the implementation that must be fixed.
    Pass the review report as a parameter.
 
 ## Review Guidelines
