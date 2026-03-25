@@ -143,7 +143,7 @@ pub async fn run_role_mcp_server(
     model: Model,
     stage_name: String,
     allowed_tools: HashSet<McpTool>,
-    tool_tracker: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    tool_tracker: std::sync::Arc<std::sync::Mutex<Option<McpTool>>>,
     pipeline_name: String,
     pipeline_run_id: u64,
     prompt_holder: std::sync::Arc<std::sync::Mutex<Option<String>>>,

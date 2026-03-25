@@ -104,8 +104,8 @@ pub trait CommonMcpImpl: Send + Sync {
     fn pipeline_run_id(&self) -> u64;
 
     /// Record a tool call for transition mapping.
-    fn record_tool(&self, tool_name: &str) {
-        self.session().record_tool_call(tool_name);
+    fn record_tool(&self, tool: McpTool) {
+        self.session().record_tool_call(tool);
     }
 
     // -- History tools --
@@ -146,7 +146,8 @@ pub trait CommonMcpImpl: Send + Sync {
 
     // -- Report tools --
 
-    async fn report_impl(&self, tool_name: &str, brief: &str, full_report: &str) -> String {
+    async fn report_impl(&self, tool: McpTool, brief: &str, full_report: &str) -> String {
+        let tool_name = tool.as_str();
         tracing::info!(
             "[{}#{}] {}",
             self.role_name(),
@@ -183,7 +184,7 @@ pub trait CommonMcpImpl: Send + Sync {
             return response;
         }
 
-        self.record_tool(tool_name);
+        self.record_tool(tool);
 
         let response = "Report stored".to_string();
         log_mcp_string_response(
@@ -196,17 +197,17 @@ pub trait CommonMcpImpl: Send + Sync {
     }
 
     async fn report_success_impl(&self, brief: &str, full_report: &str) -> String {
-        self.report_impl(McpTool::ReportSuccess.as_str(), brief, full_report)
+        self.report_impl(McpTool::ReportSuccess, brief, full_report)
             .await
     }
 
     async fn report_failure_impl(&self, brief: &str, full_report: &str) -> String {
-        self.report_impl(McpTool::ReportFailure.as_str(), brief, full_report)
+        self.report_impl(McpTool::ReportFailure, brief, full_report)
             .await
     }
 
     async fn report_progress_impl(&self, brief: &str, full_report: &str) -> String {
-        self.report_impl(McpTool::ReportProgress.as_str(), brief, full_report)
+        self.report_impl(McpTool::ReportProgress, brief, full_report)
             .await
     }
 

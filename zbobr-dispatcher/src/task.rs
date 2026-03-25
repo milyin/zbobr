@@ -21,7 +21,7 @@ pub struct RoleSession {
     zbobr: Arc<ZbobrDispatcher>,
     task_id: u64,
     /// Tracks the last MCP tool call that matched a transition key.
-    last_mapped_tool: Arc<std::sync::Mutex<Option<String>>>,
+    last_mapped_tool: Arc<std::sync::Mutex<Option<McpTool>>>,
     /// Pipeline name for this session's comments.
     pipeline_name: String,
     /// Pipeline run ID for this session's comments.
@@ -47,7 +47,7 @@ impl RoleSession {
     pub(crate) fn with_shared_tracker(
         zbobr: Arc<ZbobrDispatcher>,
         task_id: u64,
-        tracker: Arc<std::sync::Mutex<Option<String>>>,
+        tracker: Arc<std::sync::Mutex<Option<McpTool>>>,
         pipeline_name: String,
         pipeline_run_id: u64,
         prompt_holder: Arc<std::sync::Mutex<Option<String>>>,
@@ -405,18 +405,18 @@ impl RoleSession {
 
     /// Record a tool call for transition mapping.
     /// Only `report_success`, `report_failure`, and `report_progress` are meaningful transition triggers.
-    pub fn record_tool_call(&self, tool_name: &str) {
-        if tool_name == McpTool::ReportSuccess.as_str()
-            || tool_name == McpTool::ReportFailure.as_str()
-            || tool_name == McpTool::ReportProgress.as_str()
-        {
-            *self.last_mapped_tool.lock().unwrap() = Some(tool_name.to_string());
+    pub fn record_tool_call(&self, tool: McpTool) {
+        match tool {
+            McpTool::ReportSuccess | McpTool::ReportFailure | McpTool::ReportProgress => {
+                *self.last_mapped_tool.lock().unwrap() = Some(tool);
+            }
+            _ => {}
         }
     }
 
     /// Get the last MCP tool call that matched a transition key.
-    pub fn last_mapped_tool(&self) -> Option<String> {
-        self.last_mapped_tool.lock().unwrap().clone()
+    pub fn last_mapped_tool(&self) -> Option<McpTool> {
+        *self.last_mapped_tool.lock().unwrap()
     }
 }
 
@@ -1119,7 +1119,7 @@ mod comment_model_tests {
         zbobr: &Arc<crate::ZbobrDispatcher>,
         task_id: u64,
     ) -> crate::mcp::unified::UnifiedMcp {
-        let tracker = Arc::new(std::sync::Mutex::new(None::<String>));
+        let tracker = Arc::new(std::sync::Mutex::new(None::<McpTool>));
         let prompt_holder = Arc::new(std::sync::Mutex::new(None::<String>));
         let session = zbobr.role_session_with_tracker(task_id, tracker, "main".to_string(), 1, prompt_holder);
         let allowed_tools: std::collections::HashSet<zbobr_api::config_tools::McpTool> =
@@ -1195,11 +1195,11 @@ mod comment_model_tests {
             .await
             .unwrap();
 
-        let tracker_a = Arc::new(std::sync::Mutex::new(None::<String>));
+        let tracker_a = Arc::new(std::sync::Mutex::new(None::<McpTool>));
         let prompt_a = Arc::new(std::sync::Mutex::new(None::<String>));
         let session_a = zbobr.role_session_with_tracker(id, tracker_a, "main".to_string(), 1, prompt_a);
 
-        let tracker_b = Arc::new(std::sync::Mutex::new(None::<String>));
+        let tracker_b = Arc::new(std::sync::Mutex::new(None::<McpTool>));
         let prompt_b = Arc::new(std::sync::Mutex::new(None::<String>));
         let session_b = zbobr.role_session_with_tracker(id, tracker_b, "main".to_string(), 2, prompt_b);
 
