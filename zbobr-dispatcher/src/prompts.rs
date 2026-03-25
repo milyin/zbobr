@@ -232,13 +232,15 @@ pub fn build_template_variables<'a>(
         vars.insert(Cow::Borrowed(VAR_CHECKLIST), Cow::Owned(checklist_text));
     }
 
-    // last_report: last Success or Failure comment (stripped tool prefix)
+    // last_report: last Success, Failure, or Progress comment (stripped tool prefix)
     let last_report = comments
         .iter()
         .rev()
         .find(|c| {
             let t = classify_comment(&c.text);
-            t == HistoryRecordType::Success || t == HistoryRecordType::Failure
+            t == HistoryRecordType::Success
+                || t == HistoryRecordType::Failure
+                || t == HistoryRecordType::Progress
         })
         .map(|c| strip_tool_prefix(&c.text))
         .unwrap_or("");
@@ -806,11 +808,11 @@ mod tests {
         add_mcp_tool_variables(&mut vars, &allowed);
         assert_eq!(
             vars[&Cow::Borrowed("mcp_report_success") as &Cow<str>].as_ref(),
-            "report_success"
+            McpTool::ReportSuccess.as_str()
         );
         assert_eq!(
             vars[&Cow::Borrowed("mcp_stop_with_error") as &Cow<str>].as_ref(),
-            "stop_with_error"
+            McpTool::StopWithError.as_str()
         );
         assert!(!vars.contains_key(&Cow::Borrowed("mcp_configure_worktree") as &Cow<str>));
     }

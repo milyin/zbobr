@@ -211,7 +211,10 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
         && let Some(plan_comment) = discussion
             .iter()
             .rev()
-            .find(|c| c.text.starts_with("[report_success]") || c.text.starts_with("[post_plan]"))
+            .find(|c| {
+                c.text.starts_with(&format!("[{}]", McpTool::ReportSuccess.as_str()))
+                    || c.text.starts_with("[post_plan]")
+            })
     {
         println!("Plan (from comment):\n{}", plan_comment.text);
     }
@@ -414,7 +417,7 @@ impl<'a> CliStageRunner<'a> {
             .await?;
         let pipeline_run_id = task_snap.pipeline_run_id;
 
-        let tool_tracker = Arc::new(std::sync::Mutex::new(None::<String>));
+        let tool_tracker = Arc::new(std::sync::Mutex::new(None::<McpTool>));
         let prompt_holder = Arc::new(std::sync::Mutex::new(None::<String>));
         let (assigned_port, server_handle) = start_mcp_server(
             Arc::clone(self.zbobr),
@@ -460,7 +463,7 @@ impl<'a> CliStageRunner<'a> {
         .await;
 
         // Read the last mapped tool from the shared tracker.
-        let last_mapped_tool = tool_tracker.lock().unwrap().clone();
+        let last_mapped_tool = *tool_tracker.lock().unwrap();
 
         if let Some(e) = finalize_stage_session(
             self.zbobr,
@@ -469,7 +472,7 @@ impl<'a> CliStageRunner<'a> {
             self.stage_name,
             &work_dir,
             outcome,
-            last_mapped_tool.as_deref(),
+            last_mapped_tool,
         )
         .await?
         {
@@ -487,7 +490,7 @@ impl<'a> CliStageRunner<'a> {
 enum SequentialSignal {
     /// `report_failure` → immediate return from pipeline.
     ReturnFailure,
-    /// `report_success` with a next stage → advance to it.
+    /// `report_success`/`report_intermediate` with a next stage → advance to it.
     Advance(String),
     /// `report_success` at the last stage → pipeline done, return.
     Return,
@@ -503,10 +506,10 @@ fn compute_sequential_signal(
     stage_name: &str,
     stage_def: Option<&zbobr_api::config::StageDefinition>,
     workflow: &crate::workflow::Workflow,
-    last_mapped_tool: Option<&str>,
+    last_mapped_tool: Option<McpTool>,
 ) -> SequentialSignal {
     match last_mapped_tool {
-        Some("report_failure") => {
+        Some(McpTool::ReportFailure) => {
             let transition = stage_def.and_then(|s| s.on_failure());
             let target = transition.and_then(|t| t.next.as_ref());
             let should_pause = transition.map_or(false, |t| t.pause);
@@ -525,7 +528,7 @@ fn compute_sequential_signal(
                 SequentialSignal::ReturnFailure
             }
         }
-        Some("report_success") => {
+        Some(McpTool::ReportSuccess) => {
             let transition = stage_def.and_then(|s| s.on_success());
             let explicit_target = transition.and_then(|t| t.next.as_ref());
             let should_pause = transition.map_or(false, |t| t.pause);
@@ -550,6 +553,28 @@ fn compute_sequential_signal(
                     Some(next) => SequentialSignal::Advance(next),
                     None => SequentialSignal::Return,
                 }
+            }
+        }
+        Some(McpTool::ReportIntermediate) => {
+            let transition = stage_def.and_then(|s| s.on_intermediate());
+            let target = transition.and_then(|t| t.next.as_ref());
+            let should_pause = transition.is_some_and(|t| t.pause);
+
+            let signal = if let Some(target) = target {
+                Signal::go(target.as_str())
+            } else {
+                // Default: re-run the same stage
+                Signal::go(stage_name)
+            };
+
+            if should_pause {
+                SequentialSignal::PauseThenSignal(signal)
+            } else {
+                SequentialSignal::Advance(
+                    target
+                        .map(|t| t.to_string())
+                        .unwrap_or_else(|| stage_name.to_string()),
+                )
             }
         }
         _ => SequentialSignal::Pause,
@@ -1385,7 +1410,7 @@ async fn start_mcp_server(
     model: Model,
     stage_name: String,
     allowed_tools: std::collections::HashSet<McpTool>,
-    tool_tracker: Arc<std::sync::Mutex<Option<String>>>,
+    tool_tracker: Arc<std::sync::Mutex<Option<McpTool>>>,
     pipeline_name: String,
     pipeline_run_id: u64,
     prompt_holder: Arc<std::sync::Mutex<Option<String>>>,
@@ -1478,7 +1503,7 @@ async fn finalize_stage_session(
     stage_name: &str,
     work_dir: &Path,
     outcome: SessionOutcome,
-    last_mapped_tool: Option<&str>,
+    last_mapped_tool: Option<McpTool>,
 ) -> anyhow::Result<Option<anyhow::Error>> {
     let task_session = zbobr.task_session(task_id);
     let pending_state = State::pending(pipeline_name.clone());

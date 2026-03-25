@@ -1,3 +1,5 @@
+use zbobr_api::config_tools::McpTool;
+
 use crate::{
     mcp::common::get_hostname,
     task::{Model, RoleSession, Tool},
@@ -102,8 +104,8 @@ pub trait CommonMcpImpl: Send + Sync {
     fn pipeline_run_id(&self) -> u64;
 
     /// Record a tool call for transition mapping.
-    fn record_tool(&self, tool_name: &str) {
-        self.session().record_tool_call(tool_name);
+    fn record_tool(&self, tool: McpTool) {
+        self.session().record_tool_call(tool);
     }
 
     // -- History tools --
@@ -124,7 +126,7 @@ pub trait CommonMcpImpl: Send + Sync {
                 log_mcp_string_response(
                     self.role_name(),
                     self.session().task_id(),
-                    "get_history",
+                    McpTool::GetHistory.as_str(),
                     &text,
                 );
                 text
@@ -134,7 +136,7 @@ pub trait CommonMcpImpl: Send + Sync {
                 log_mcp_string_response(
                     self.role_name(),
                     self.session().task_id(),
-                    "get_history",
+                    McpTool::GetHistory.as_str(),
                     &response,
                 );
                 response
@@ -144,7 +146,8 @@ pub trait CommonMcpImpl: Send + Sync {
 
     // -- Report tools --
 
-    async fn report_impl(&self, tool_name: &str, brief: &str, full_report: &str) -> String {
+    async fn report_impl(&self, tool: McpTool, brief: &str, full_report: &str) -> String {
+        let tool_name = tool.as_str();
         tracing::info!(
             "[{}#{}] {}",
             self.role_name(),
@@ -181,7 +184,7 @@ pub trait CommonMcpImpl: Send + Sync {
             return response;
         }
 
-        self.record_tool(tool_name);
+        self.record_tool(tool);
 
         let response = "Report stored".to_string();
         log_mcp_string_response(
@@ -194,11 +197,18 @@ pub trait CommonMcpImpl: Send + Sync {
     }
 
     async fn report_success_impl(&self, brief: &str, full_report: &str) -> String {
-        self.report_impl("report_success", brief, full_report).await
+        self.report_impl(McpTool::ReportSuccess, brief, full_report)
+            .await
     }
 
     async fn report_failure_impl(&self, brief: &str, full_report: &str) -> String {
-        self.report_impl("report_failure", brief, full_report).await
+        self.report_impl(McpTool::ReportFailure, brief, full_report)
+            .await
+    }
+
+    async fn report_intermediate_impl(&self, brief: &str, full_report: &str) -> String {
+        self.report_impl(McpTool::ReportIntermediate, brief, full_report)
+            .await
     }
 
     async fn get_full_report_impl(&self, name: &str) -> String {
@@ -216,7 +226,7 @@ pub trait CommonMcpImpl: Send + Sync {
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "get_full_report",
+            McpTool::GetFullReport.as_str(),
             &response,
         );
         response
@@ -242,7 +252,7 @@ pub trait CommonMcpImpl: Send + Sync {
             log_mcp_string_response(
                 self.role_name(),
                 self.session().task_id(),
-                "stop_with_error",
+                McpTool::StopWithError.as_str(),
                 &response,
             );
             return response;
@@ -258,7 +268,7 @@ pub trait CommonMcpImpl: Send + Sync {
             log_mcp_string_response(
                 self.role_name(),
                 self.session().task_id(),
-                "stop_with_error",
+                McpTool::StopWithError.as_str(),
                 &response,
             );
             return response;
@@ -268,7 +278,7 @@ pub trait CommonMcpImpl: Send + Sync {
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "stop_with_error",
+            McpTool::StopWithError.as_str(),
             &response,
         );
         response
@@ -281,7 +291,7 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
         let hostname = get_hostname();
-        let body = format!("[stop_with_question]\n{message}");
+        let body = format!("[{}]\n{message}", McpTool::StopWithQuestion.as_str());
 
         if let Err(e) = self
             .session()
@@ -303,7 +313,7 @@ pub trait CommonMcpImpl: Send + Sync {
             log_mcp_string_response(
                 self.role_name(),
                 self.session().task_id(),
-                "stop_with_question",
+                McpTool::StopWithQuestion.as_str(),
                 &response,
             );
             return response;
@@ -319,7 +329,7 @@ pub trait CommonMcpImpl: Send + Sync {
             log_mcp_string_response(
                 self.role_name(),
                 self.session().task_id(),
-                "stop_with_question",
+                McpTool::StopWithQuestion.as_str(),
                 &response,
             );
             return response;
@@ -329,7 +339,7 @@ pub trait CommonMcpImpl: Send + Sync {
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "stop_with_question",
+            McpTool::StopWithQuestion.as_str(),
             &response,
         );
         response
@@ -406,7 +416,7 @@ pub trait CommonMcpImpl: Send + Sync {
                         log_mcp_string_response(
                             self.role_name(),
                             self.session().task_id(),
-                            "configure_worktree",
+                            McpTool::ConfigureWorktree.as_str(),
                             &response,
                         );
                         return response;
@@ -458,7 +468,7 @@ pub trait CommonMcpImpl: Send + Sync {
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "configure_worktree",
+            McpTool::ConfigureWorktree.as_str(),
             &response,
         );
         response
@@ -474,7 +484,7 @@ pub trait CommonMcpImpl: Send + Sync {
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "configure_worktree",
+            McpTool::ConfigureWorktree.as_str(),
             &response,
         );
         response
@@ -502,7 +512,7 @@ pub trait CommonMcpImpl: Send + Sync {
         log_mcp_json_response(
             self.role_name(),
             self.session().task_id(),
-            "get_checklist",
+            McpTool::GetChecklist.as_str(),
             &response,
         );
         response
@@ -523,7 +533,7 @@ pub trait CommonMcpImpl: Send + Sync {
                     log_mcp_string_response(
                         self.role_name(),
                         self.session().task_id(),
-                        "add_checklist_item",
+                        McpTool::AddChecklistItem.as_str(),
                         &response,
                     );
                     return response;
@@ -534,7 +544,7 @@ pub trait CommonMcpImpl: Send + Sync {
                 log_mcp_string_response(
                     self.role_name(),
                     self.session().task_id(),
-                    "add_checklist_item",
+                    McpTool::AddChecklistItem.as_str(),
                     &response,
                 );
                 return response;
@@ -548,7 +558,7 @@ pub trait CommonMcpImpl: Send + Sync {
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "add_checklist_item",
+            McpTool::AddChecklistItem.as_str(),
             &response,
         );
         response
@@ -569,7 +579,7 @@ pub trait CommonMcpImpl: Send + Sync {
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "check_checklist_item",
+            McpTool::CheckChecklistItem.as_str(),
             &response,
         );
         response
@@ -594,7 +604,7 @@ pub trait CommonMcpImpl: Send + Sync {
                         log_mcp_string_response(
                             self.role_name(),
                             self.session().task_id(),
-                            "delete_checklist_item",
+                            McpTool::DeleteChecklistItem.as_str(),
                             &response,
                         );
                         return response;
@@ -604,7 +614,7 @@ pub trait CommonMcpImpl: Send + Sync {
                     log_mcp_string_response(
                         self.role_name(),
                         self.session().task_id(),
-                        "delete_checklist_item",
+                        McpTool::DeleteChecklistItem.as_str(),
                         &response,
                     );
                     return response;
@@ -615,7 +625,7 @@ pub trait CommonMcpImpl: Send + Sync {
                 log_mcp_string_response(
                     self.role_name(),
                     self.session().task_id(),
-                    "delete_checklist_item",
+                    McpTool::DeleteChecklistItem.as_str(),
                     &response,
                 );
                 return response;
@@ -630,7 +640,7 @@ pub trait CommonMcpImpl: Send + Sync {
         log_mcp_string_response(
             self.role_name(),
             self.session().task_id(),
-            "delete_checklist_item",
+            McpTool::DeleteChecklistItem.as_str(),
             &response,
         );
         response
