@@ -166,7 +166,8 @@ impl ZbobrDispatcher {
             .task_backend
             .create_task(title, description, state.into())
             .await?;
-        // Set promoted fields + confirm flag via modify
+        // Set promoted fields + confirm flag + max_stage_count via modify
+        let max_stage_count = self.config.max_task_stage_count;
         let weak = self.task_backend.get_task(id).await?;
         let mutable = weak.upgrade().await?;
         mutable
@@ -176,6 +177,7 @@ impl ZbobrDispatcher {
                 if confirm {
                     task.confirm = true;
                 }
+                task.max_stage_count = max_stage_count;
                 task
             }))
             .await?;

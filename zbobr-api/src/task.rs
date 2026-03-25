@@ -994,6 +994,10 @@ pub struct Task {
     /// Counter that is automatically incremented on each stage passed.
     #[serde(default)]
     pub stage_count: u64,
+    /// Maximum number of stages this task is allowed to pass before being auto-paused.
+    /// 0 means no limit. Can be set individually per task (overrides the global default).
+    #[serde(default)]
+    pub max_stage_count: u64,
     /// Whether the task is closed (e.g. GitHub issue closed, fs task marked closed).
     /// Closed tasks are not listed by `list_tasks` and their worktrees can be cleaned up.
     #[serde(default)]

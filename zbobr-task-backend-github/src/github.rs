@@ -775,6 +775,10 @@ impl ZbobrTaskBackendGithubImpl {
                 .get("stage_count")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0),
+            max_stage_count: params_map
+                .get("max_stage_count")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
             closed: issue.state == "closed",
             etag: Some(body),
         }
@@ -810,6 +814,12 @@ impl ZbobrTaskBackendGithubImpl {
             params.insert(
                 "stage_count".to_string(),
                 task.stage_count.to_string(),
+            );
+        }
+        if task.max_stage_count > 0 {
+            params.insert(
+                "max_stage_count".to_string(),
+                task.max_stage_count.to_string(),
             );
         }
         params

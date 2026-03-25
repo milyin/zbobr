@@ -347,6 +347,20 @@ impl<'a> CliStageRunner<'a> {
             }
         }
 
+        // Auto-pause if stage count limit reached (before incrementing to avoid wasted increment).
+        {
+            let task_session = self.zbobr.task_session(self.task_id);
+            let task = task_session.get_task().await?;
+            if task.max_stage_count > 0 && task.stage_count >= task.max_stage_count {
+                tracing::warn!(
+                    "Task #{}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
+                    self.task_id, task.stage_count, task.max_stage_count
+                );
+                task_session.set_pause(true).await?;
+                return Ok(());
+            }
+        }
+
         // Increment the stage counter.
         {
             let task_session = self.zbobr.task_session(self.task_id);
@@ -587,12 +601,27 @@ async fn handle_call_stage(
         }
     };
 
+    task_session.allocate_pipeline_run_id().await?;
+    task_session.increment_stage_count().await?;
+
+    // Auto-pause if stage count limit reached (before push_stack to prevent stack duplication on resume).
+    {
+        let task = task_session.get_task().await?;
+        if task.max_stage_count > 0 && task.stage_count >= task.max_stage_count {
+            tracing::warn!(
+                "Task #{task_id}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
+                task.stage_count, task.max_stage_count
+            );
+            task_session.set_pause(true).await?;
+            return Ok(());
+        }
+    }
+
     // Push stack so we return to the right place.
     task_session
         .push_stack(pipeline_name.clone(), return_signal.clone())
         .await?;
-    task_session.allocate_pipeline_run_id().await?;
-    task_session.increment_stage_count().await?;
+
     let call_signal = Signal::call(call_pipeline.clone());
     task_session.set_signal(Some(call_signal.clone())).await?;
     task_session
@@ -809,11 +838,7 @@ pub async fn process_task(
                         .map(|(name, _)| name.to_string())
                         .unwrap_or_default();
                     task_session
-                        .modify_task(move |mut t| {
-                            t.pause = true;
-                            t.signal = Some(Signal::go(first_stage));
-                            t
-                        })
+                        .set_pause_with_signal(Signal::go(first_stage))
                         .await?;
                     tracing::info!("Task #{}: pipeline failed at root — paused", task.id);
                 }
@@ -921,6 +946,8 @@ pub async fn run_manager_loop(
                 Err(e) => tracing::warn!("Failed to snapshot task: {e}"),
             }
         }
+        // Sort by stage_count descending so tasks closest to completion are processed first.
+        all_tasks.sort_by(|a, b| b.stage_count.cmp(&a.stage_count));
 
         let mut session_run = false;
         for task in &all_tasks {
@@ -1068,11 +1095,7 @@ pub async fn run_manager_loop(
                                     .map(|(name, _)| name.to_string())
                                     .unwrap_or_default();
                                 if let Err(e) = task_session
-                                    .modify_task(move |mut t| {
-                                        t.pause = true;
-                                        t.signal = Some(Signal::go(first_stage));
-                                        t
-                                    })
+                                    .set_pause_with_signal(Signal::go(first_stage))
                                     .await
                                 {
                                     tracing::error!("Failed to pause task #{}: {e}", task.id);
@@ -1287,11 +1310,7 @@ async fn handle_merge_conflict(
             .ok();
         let stage = stage_name.to_string();
         task_session
-            .modify_task(move |mut t| {
-                t.pause = true;
-                t.signal = Some(Signal::go(stage));
-                t
-            })
+            .set_pause_with_signal(Signal::go(stage))
             .await?;
         task_session.set_state(pending_state.clone()).await?;
         return Ok(WorktreeResult::Paused);
@@ -1489,11 +1508,7 @@ async fn finalize_stage_session(
         }
         let stage = stage_name.to_string();
         if let Err(pause_err) = task_session
-            .modify_task(move |mut task| {
-                task.pause = true;
-                task.signal = Some(Signal::go(stage));
-                task
-            })
+            .set_pause_with_signal(Signal::go(stage))
             .await
         {
             tracing::error!("Failed to set pause for task #{task_id}: {pause_err}");
@@ -1517,11 +1532,7 @@ async fn finalize_stage_session(
         }
         let stage = stage_name.to_string();
         if let Err(pause_err) = task_session
-            .modify_task(move |mut task| {
-                task.pause = true;
-                task.signal = Some(Signal::go(stage));
-                task
-            })
+            .set_pause_with_signal(Signal::go(stage))
             .await
         {
             tracing::error!(
@@ -1563,21 +1574,11 @@ async fn finalize_stage_session(
             SequentialSignal::Pause => {
                 let stage = stage_name.to_string();
                 task_session
-                    .modify_task(move |mut t| {
-                        t.pause = true;
-                        t.signal = Some(Signal::go(stage));
-                        t
-                    })
+                    .set_pause_with_signal(Signal::go(stage))
                     .await?;
             }
             SequentialSignal::PauseThenSignal(signal) => {
-                task_session
-                    .modify_task(move |mut t| {
-                        t.pause = true;
-                        t.signal = Some(signal);
-                        t
-                    })
-                    .await?;
+                task_session.set_pause_with_signal(signal).await?;
             }
         }
     }
