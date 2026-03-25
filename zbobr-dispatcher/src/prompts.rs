@@ -808,11 +808,11 @@ mod tests {
         add_mcp_tool_variables(&mut vars, &allowed);
         assert_eq!(
             vars[&Cow::Borrowed("mcp_report_success") as &Cow<str>].as_ref(),
-            "report_success"
+            McpTool::ReportSuccess.as_str()
         );
         assert_eq!(
             vars[&Cow::Borrowed("mcp_stop_with_error") as &Cow<str>].as_ref(),
-            "stop_with_error"
+            McpTool::StopWithError.as_str()
         );
         assert!(!vars.contains_key(&Cow::Borrowed("mcp_configure_worktree") as &Cow<str>));
     }

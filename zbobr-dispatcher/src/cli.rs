@@ -211,7 +211,10 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
         && let Some(plan_comment) = discussion
             .iter()
             .rev()
-            .find(|c| c.text.starts_with("[report_success]") || c.text.starts_with("[post_plan]"))
+            .find(|c| {
+                c.text.starts_with(&format!("[{}]", McpTool::ReportSuccess.as_str()))
+                    || c.text.starts_with("[post_plan]")
+            })
     {
         println!("Plan (from comment):\n{}", plan_comment.text);
     }
@@ -506,7 +509,7 @@ fn compute_sequential_signal(
     last_mapped_tool: Option<&str>,
 ) -> SequentialSignal {
     match last_mapped_tool {
-        Some("report_failure") => {
+        Some(x) if x == McpTool::ReportFailure.as_str() => {
             let transition = stage_def.and_then(|s| s.on_failure());
             let target = transition.and_then(|t| t.next.as_ref());
             let should_pause = transition.map_or(false, |t| t.pause);
@@ -525,7 +528,7 @@ fn compute_sequential_signal(
                 SequentialSignal::ReturnFailure
             }
         }
-        Some("report_success") => {
+        Some(x) if x == McpTool::ReportSuccess.as_str() => {
             let transition = stage_def.and_then(|s| s.on_success());
             let explicit_target = transition.and_then(|t| t.next.as_ref());
             let should_pause = transition.map_or(false, |t| t.pause);
@@ -552,7 +555,7 @@ fn compute_sequential_signal(
                 }
             }
         }
-        Some("report_progress") => {
+        Some(x) if x == McpTool::ReportProgress.as_str() => {
             let transition = stage_def.and_then(|s| s.on_progress());
             let target = transition.and_then(|t| t.next.as_ref());
             let should_pause = transition.map_or(false, |t| t.pause);

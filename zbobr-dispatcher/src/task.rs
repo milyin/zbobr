@@ -3,6 +3,7 @@ use std::sync::Arc;
 pub use zbobr_api::task::*;
 
 use zbobr_api::config::ZbobrDispatcherConfig;
+use zbobr_api::config_tools::McpTool;
 
 use crate::{TaskDir, ZbobrDispatcher};
 
@@ -405,7 +406,10 @@ impl RoleSession {
     /// Record a tool call for transition mapping.
     /// Only `report_success`, `report_failure`, and `report_progress` are meaningful transition triggers.
     pub fn record_tool_call(&self, tool_name: &str) {
-        if tool_name == "report_success" || tool_name == "report_failure" || tool_name == "report_progress" {
+        if tool_name == McpTool::ReportSuccess.as_str()
+            || tool_name == McpTool::ReportFailure.as_str()
+            || tool_name == McpTool::ReportProgress.as_str()
+        {
             *self.last_mapped_tool.lock().unwrap() = Some(tool_name.to_string());
         }
     }
