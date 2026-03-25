@@ -15,8 +15,7 @@ use zbobr_api::config_tools::McpTool;
 use crate::{
     mcp::{
         common::{
-            AddChecklistItemParam, CheckChecklistItemParam, ConfigureWorktreeParam,
-            DeleteChecklistItemParam, GetFullReportParam, MessageParam, ReportParam,
+            ConfigureWorktreeParam, GetFullReportParam, MessageParam, ReportParam,
         },
         traits::CommonMcpImpl,
     },
@@ -161,36 +160,6 @@ impl UnifiedMcp {
         .await
     }
 
-    #[tool(description = "Get the task checklist (unchecked items only)")]
-    async fn get_checklist(&self) -> String {
-        self.get_checklist_impl().await
-    }
-
-    #[tool(description = "Add a new checklist item (always appended, always unchecked)")]
-    async fn add_checklist_item(
-        &self,
-        Parameters(params): Parameters<AddChecklistItemParam>,
-    ) -> String {
-        self.add_checklist_item_impl(&params.id, &params.text).await
-    }
-
-    #[tool(description = "Mark a checklist item as checked")]
-    async fn check_checklist_item(
-        &self,
-        Parameters(params): Parameters<CheckChecklistItemParam>,
-    ) -> String {
-        self.check_checklist_item_impl(&params.id).await
-    }
-
-    #[tool(
-        description = "Delete an unchecked checklist item (checked items are preserved as history)"
-    )]
-    async fn delete_checklist_item(
-        &self,
-        Parameters(params): Parameters<DeleteChecklistItemParam>,
-    ) -> String {
-        self.delete_checklist_item_impl(&params.id).await
-    }
 }
 
 // Manual ServerHandler implementation with tool filtering

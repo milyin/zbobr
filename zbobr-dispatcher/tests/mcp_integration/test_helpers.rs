@@ -5,7 +5,6 @@
 
 use std::path::PathBuf;
 
-use zbobr_api::task::ChecklistItem;
 use zbobr_dispatcher::{CommentType, TaskDir};
 
 use super::{env::IntegrationTestEnv, scenarios};
@@ -117,14 +116,7 @@ pub async fn run_working(env: &IntegrationTestEnv) {
     assert_eq!(
         task.signal,
         Some("go_reviewing".to_string()),
-        "[{}] Worker should emit go_review when all checklist items are checked",
-        env.name()
-    );
-    assert!(
-        task.checklist
-            .iter()
-            .any(|i| i.checked && i.text.contains("Implement and validate worker stage")),
-        "[{}] Expected checked checklist item not found",
+        "[{}] Worker should emit go_review signal",
         env.name()
     );
     assert!(
@@ -161,33 +153,7 @@ pub async fn run_reviewing(env: &IntegrationTestEnv) {
     env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
         .await;
 
-    // insert a dummy unchecked checklist item so the reviewer has something to
-    // report and therefore will route back to the planner.  This mirrors the
-    // behaviour of actual workflows where a review usually discovers issues.
-    {
-        let weak = env
-            .task_backend
-            .get_task(task_id)
-            .await
-            .unwrap_or_else(|e| panic!("[{}] failed to get task #{task_id}: {e}", env.name()));
-        let mutable = weak
-            .upgrade()
-            .await
-            .unwrap_or_else(|e| panic!("[{}] failed to upgrade task #{task_id}: {e}", env.name()));
-        mutable
-            .modify_task(Box::new(|mut task| {
-                task.checklist.push(ChecklistItem {
-                    id: "issue".to_string(),
-                    text: "issue found during review".to_string(),
-                    checked: false,
-                });
-                task
-            }))
-            .await
-            .unwrap_or_else(|e| {
-                panic!("[{}] failed to add review checklist item: {e}", env.name())
-            });
-    }
+
 
     env.run_stage(task_id, "reviewer", scenarios::reviewing_scenario())
         .await;

@@ -29,21 +29,6 @@ pub fn extract_repo_name(repo_ref: &str) -> Option<String> {
     Some(repo_ref.to_string())
 }
 
-// -- Checklist item types --
-
-/// A single item in a task's checklist.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
-)]
-pub struct ChecklistItem {
-    #[schemars(description = "Unique identifier for the checklist item")]
-    pub id: String,
-    #[schemars(description = "Checkbox state (true = checked, false = unchecked)")]
-    pub checked: bool,
-    #[schemars(description = "Checklist item text")]
-    pub text: String,
-}
-
 // -- Context types --
 
 /// Type of a context record within a stage.
@@ -1114,7 +1099,6 @@ pub struct Task {
     pub destination_branch: Option<String>,
     pub work_branch: Option<String>,
     pub pr_url: Option<String>,
-    pub checklist: Vec<ChecklistItem>,
     /// Structured task context containing stage execution history and records.
     #[serde(default)]
     pub context: TaskContext,

@@ -218,13 +218,6 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     {
         println!("Plan (from comment):\n{}", plan_comment.text);
     }
-    if !task.checklist.is_empty() {
-        println!("Checklist:");
-        for item in &task.checklist {
-            let mark = if item.checked { "[x]" } else { "[ ]" };
-            println!("  {} {}", mark, item.text);
-        }
-    }
     if !discussion.is_empty() {
         println!("Discussion ({} comment(s)):", discussion.len());
         for (i, c) in discussion.iter().enumerate() {
@@ -282,11 +275,10 @@ impl<'a> CliStageRunner<'a> {
         State::running(self.pipeline_name.clone(), self.stage_name)
     }
 
-    async fn prompt(&self, pipeline_run_id: u64) -> anyhow::Result<String> {
-        let scope = Some((self.pipeline_name.as_str(), pipeline_run_id));
+    async fn prompt(&self, _pipeline_run_id: u64) -> anyhow::Result<String> {
         self.zbobr
             .prompt_builder()
-            .build_for_stage(self.stage_def, self.task_id, self.zbobr.task_backend(), scope)
+            .build_for_stage(self.stage_def, self.task_id, self.zbobr.task_backend())
             .await
     }
 

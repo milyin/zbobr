@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
 use crate::task::{
-    ChecklistItem, Comment, Model, Signal, StackEntry, State, Task, TaskIdentity, Tool,
+    Comment, Model, Signal, StackEntry, State, Task, TaskIdentity, Tool,
 };
 
 /// Read-only handle to a task. Returned by `TaskBackend::get_task()` and `TaskBackend::list_tasks()`.
@@ -117,14 +117,6 @@ pub trait TaskMut: Send + Sync {
     async fn set_description(&self, desc: String) -> anyhow::Result<()> {
         self.modify_task(Box::new(move |mut task| {
             task.description = desc;
-            task
-        }))
-        .await
-    }
-
-    async fn set_checklist(&self, items: Vec<ChecklistItem>) -> anyhow::Result<()> {
-        self.modify_task(Box::new(move |mut task| {
-            task.checklist = items;
             task
         }))
         .await

@@ -1,7 +1,6 @@
 extern crate self as zbobr_api;
 
 pub mod backend;
-pub mod checklist_format;
 pub mod context_format;
 pub mod config;
 pub mod config_tools;
@@ -15,7 +14,7 @@ pub use config::{
     WorkflowToml, ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
 };
 pub use task::{
-    ChecklistItem, Comment, CommentTag, ContextRecord, ContextRecordType, HistoryRecordType,
+    Comment, CommentTag, ContextRecord, ContextRecordType, HistoryRecordType,
     Model, Pipeline, Role, Signal, StackEntry, Stage, StageContext, StageInfo, State, Task,
     TaskContext, TaskIdentity, Tool, classify_comment, comment_tag, extract_repo_name,
     extract_summary, filter_comments_for_run,

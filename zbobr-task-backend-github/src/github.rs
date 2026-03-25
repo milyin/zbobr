@@ -761,7 +761,6 @@ impl ZbobrTaskBackendGithubImpl {
             destination_branch,
             work_branch,
             pr_url,
-            checklist: vec![],
             context,
             signal,
             stack,

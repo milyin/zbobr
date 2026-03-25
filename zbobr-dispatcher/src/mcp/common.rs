@@ -57,28 +57,6 @@ pub struct ConfigureWorktreeParam {
     pub work_branch_postfix: String,
 }
 
-// -- Checklist parameter types --
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct AddChecklistItemParam {
-    #[schemars(description = "Unique identifier for the new checklist item")]
-    pub id: String,
-    #[schemars(description = "Checklist item text")]
-    pub text: String,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct CheckChecklistItemParam {
-    #[schemars(description = "ID of the checklist item to mark as checked")]
-    pub id: String,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct DeleteChecklistItemParam {
-    #[schemars(description = "ID of the checklist item to delete")]
-    pub id: String,
-}
-
 /// Bind to an available port starting from the given base port.
 ///
 /// The old `find_available_port` implementation closed the listener immediately

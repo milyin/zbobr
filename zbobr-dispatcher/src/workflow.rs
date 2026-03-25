@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use indexmap::IndexMap;
 use zbobr_api::{
-    Pipeline, Signal, Stage, State, Task, TaskContext,
+    Pipeline, Signal, Stage, State, Task,
     config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig},
 };
 
@@ -487,7 +487,6 @@ role = "merger"
             destination_branch: None,
             work_branch: None,
             pr_url: None,
-            checklist: vec![],
             context: TaskContext::default(),
             signal: None,
             stack: vec![],

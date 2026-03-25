@@ -389,10 +389,6 @@ const TASK_TEMPLATE: &str = r#"---
 # Last request
 
 {last_request}
-
-# Unchecked checklist items
-
-{checklist}
 "#;
 
 const PREPARATOR_PROMPT: &str = r#"# Preparator Agent
