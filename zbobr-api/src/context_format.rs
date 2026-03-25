@@ -217,7 +217,7 @@ fn parse_stage_header(header: &str) -> Result<StageContext> {
 
     Ok(StageContext {
         info: StageInfo {
-            pipeline: Pipeline::from(pipeline_str),
+            pipeline: pipeline_str.parse().unwrap(),
             run_id,
             stage: Stage::new(stage_str),
             tool,
