@@ -332,6 +332,16 @@ impl RoleSession {
         .await
     }
 
+    /// Set pause to true and assign a signal in a single modify_task call.
+    pub async fn set_pause_with_signal(&self, signal: Signal) -> anyhow::Result<()> {
+        self.modify_task(move |mut task| {
+            task.pause = true;
+            task.signal = Some(signal);
+            task
+        })
+        .await
+    }
+
     /// Set the error message on the task.
     pub async fn set_error(&self, error: Option<String>) -> anyhow::Result<()> {
         self.modify_task(move |mut task| {
@@ -486,6 +496,25 @@ impl TaskSession {
     pub async fn set_signal(&self, signal: Option<Signal>) -> anyhow::Result<()> {
         self.modify_task(move |mut task| {
             task.signal = signal;
+            task
+        })
+        .await
+    }
+
+    /// Set the pause flag on the task.
+    pub async fn set_pause(&self, pause: bool) -> anyhow::Result<()> {
+        self.modify_task(move |mut task| {
+            task.pause = pause;
+            task
+        })
+        .await
+    }
+
+    /// Set pause to true and assign a signal in a single modify_task call.
+    pub async fn set_pause_with_signal(&self, signal: Signal) -> anyhow::Result<()> {
+        self.modify_task(move |mut task| {
+            task.pause = true;
+            task.signal = Some(signal);
             task
         })
         .await

@@ -347,13 +347,7 @@ impl<'a> CliStageRunner<'a> {
             }
         }
 
-        // Increment the stage counter.
-        {
-            let task_session = self.zbobr.task_session(self.task_id);
-            task_session.increment_stage_count().await?;
-        }
-
-        // Auto-pause if stage count limit reached.
+        // Auto-pause if stage count limit reached (before incrementing to avoid wasted increment).
         {
             let task_session = self.zbobr.task_session(self.task_id);
             let task = task_session.get_task().await?;
@@ -362,14 +356,15 @@ impl<'a> CliStageRunner<'a> {
                     "Task #{}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
                     self.task_id, task.stage_count, task.max_stage_count
                 );
-                task_session
-                    .modify_task(|mut t| {
-                        t.pause = true;
-                        t
-                    })
-                    .await?;
+                task_session.set_pause(true).await?;
                 return Ok(());
             }
+        }
+
+        // Increment the stage counter.
+        {
+            let task_session = self.zbobr.task_session(self.task_id);
+            task_session.increment_stage_count().await?;
         }
 
         // Clear the triggering signal before the agent session starts.
@@ -606,14 +601,10 @@ async fn handle_call_stage(
         }
     };
 
-    // Push stack so we return to the right place.
-    task_session
-        .push_stack(pipeline_name.clone(), return_signal.clone())
-        .await?;
     task_session.allocate_pipeline_run_id().await?;
     task_session.increment_stage_count().await?;
 
-    // Auto-pause if stage count limit reached.
+    // Auto-pause if stage count limit reached (before push_stack to prevent stack duplication on resume).
     {
         let task = task_session.get_task().await?;
         if task.max_stage_count > 0 && task.stage_count >= task.max_stage_count {
@@ -621,15 +612,15 @@ async fn handle_call_stage(
                 "Task #{task_id}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
                 task.stage_count, task.max_stage_count
             );
-            task_session
-                .modify_task(|mut t| {
-                    t.pause = true;
-                    t
-                })
-                .await?;
+            task_session.set_pause(true).await?;
             return Ok(());
         }
     }
+
+    // Push stack so we return to the right place.
+    task_session
+        .push_stack(pipeline_name.clone(), return_signal.clone())
+        .await?;
 
     let call_signal = Signal::call(call_pipeline.clone());
     task_session.set_signal(Some(call_signal.clone())).await?;
@@ -847,11 +838,7 @@ pub async fn process_task(
                         .map(|(name, _)| name.to_string())
                         .unwrap_or_default();
                     task_session
-                        .modify_task(move |mut t| {
-                            t.pause = true;
-                            t.signal = Some(Signal::go(first_stage));
-                            t
-                        })
+                        .set_pause_with_signal(Signal::go(first_stage))
                         .await?;
                     tracing::info!("Task #{}: pipeline failed at root — paused", task.id);
                 }
@@ -1108,11 +1095,7 @@ pub async fn run_manager_loop(
                                     .map(|(name, _)| name.to_string())
                                     .unwrap_or_default();
                                 if let Err(e) = task_session
-                                    .modify_task(move |mut t| {
-                                        t.pause = true;
-                                        t.signal = Some(Signal::go(first_stage));
-                                        t
-                                    })
+                                    .set_pause_with_signal(Signal::go(first_stage))
                                     .await
                                 {
                                     tracing::error!("Failed to pause task #{}: {e}", task.id);
@@ -1327,11 +1310,7 @@ async fn handle_merge_conflict(
             .ok();
         let stage = stage_name.to_string();
         task_session
-            .modify_task(move |mut t| {
-                t.pause = true;
-                t.signal = Some(Signal::go(stage));
-                t
-            })
+            .set_pause_with_signal(Signal::go(stage))
             .await?;
         task_session.set_state(pending_state.clone()).await?;
         return Ok(WorktreeResult::Paused);
@@ -1529,11 +1508,7 @@ async fn finalize_stage_session(
         }
         let stage = stage_name.to_string();
         if let Err(pause_err) = task_session
-            .modify_task(move |mut task| {
-                task.pause = true;
-                task.signal = Some(Signal::go(stage));
-                task
-            })
+            .set_pause_with_signal(Signal::go(stage))
             .await
         {
             tracing::error!("Failed to set pause for task #{task_id}: {pause_err}");
@@ -1557,11 +1532,7 @@ async fn finalize_stage_session(
         }
         let stage = stage_name.to_string();
         if let Err(pause_err) = task_session
-            .modify_task(move |mut task| {
-                task.pause = true;
-                task.signal = Some(Signal::go(stage));
-                task
-            })
+            .set_pause_with_signal(Signal::go(stage))
             .await
         {
             tracing::error!(
@@ -1603,21 +1574,11 @@ async fn finalize_stage_session(
             SequentialSignal::Pause => {
                 let stage = stage_name.to_string();
                 task_session
-                    .modify_task(move |mut t| {
-                        t.pause = true;
-                        t.signal = Some(Signal::go(stage));
-                        t
-                    })
+                    .set_pause_with_signal(Signal::go(stage))
                     .await?;
             }
             SequentialSignal::PauseThenSignal(signal) => {
-                task_session
-                    .modify_task(move |mut t| {
-                        t.pause = true;
-                        t.signal = Some(signal);
-                        t
-                    })
-                    .await?;
+                task_session.set_pause_with_signal(signal).await?;
             }
         }
     }
