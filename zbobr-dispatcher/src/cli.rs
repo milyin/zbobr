@@ -558,7 +558,7 @@ fn compute_sequential_signal(
         Some(McpTool::ReportProgress) => {
             let transition = stage_def.and_then(|s| s.on_progress());
             let target = transition.and_then(|t| t.next.as_ref());
-            let should_pause = transition.map_or(false, |t| t.pause);
+            let should_pause = transition.is_some_and(|t| t.pause);
 
             let signal = if let Some(target) = target {
                 Signal::go(target.as_str())
