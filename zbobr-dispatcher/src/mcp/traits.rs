@@ -206,8 +206,8 @@ pub trait CommonMcpImpl: Send + Sync {
             .await
     }
 
-    async fn report_progress_impl(&self, brief: &str, full_report: &str) -> String {
-        self.report_impl(McpTool::ReportProgress, brief, full_report)
+    async fn report_intermediate_impl(&self, brief: &str, full_report: &str) -> String {
+        self.report_impl(McpTool::ReportIntermediate, brief, full_report)
             .await
     }
 

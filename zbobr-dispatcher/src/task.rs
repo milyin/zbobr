@@ -404,10 +404,10 @@ impl RoleSession {
     }
 
     /// Record a tool call for transition mapping.
-    /// Only `report_success`, `report_failure`, and `report_progress` are meaningful transition triggers.
+    /// Only `report_success`, `report_failure`, and `report_intermediate` are meaningful transition triggers.
     pub fn record_tool_call(&self, tool: McpTool) {
         match tool {
-            McpTool::ReportSuccess | McpTool::ReportFailure | McpTool::ReportProgress => {
+            McpTool::ReportSuccess | McpTool::ReportFailure | McpTool::ReportIntermediate => {
                 *self.last_mapped_tool.lock().unwrap() = Some(tool);
             }
             _ => {}

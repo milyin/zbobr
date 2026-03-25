@@ -138,7 +138,7 @@ fn default_config_toml() -> RootConfigToml {
 fn default_workflow() -> WorkflowConfig {
     use McpTool::{
         AddChecklistItem, CheckChecklistItem, ConfigureWorktree, DeleteChecklistItem, GetChecklist,
-        GetHistory, ReportFailure, ReportProgress, ReportSuccess, StopWithError, StopWithQuestion,
+        GetHistory, ReportFailure, ReportIntermediate, ReportSuccess, StopWithError, StopWithQuestion,
     };
 
     let task_prompt = vec![PathBuf::from("task.md")];
@@ -291,7 +291,7 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithError,
                     ReportSuccess,
                     ReportFailure,
-                    ReportProgress,
+                    ReportIntermediate,
                     StopWithQuestion,
                     GetChecklist,
                     AddChecklistItem,
@@ -536,7 +536,7 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 10. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
 11. When your current session's work is done, decide how to finish:
     - If **all checklist items are completed** (the full plan is done), call `{mcp_report_success}` to report final success.
-    - If **some items remain unchecked** (more work is needed in future sessions), call `{mcp_report_progress}` to report what you accomplished so far.
+    - If **some items remain unchecked** (more work is needed in future sessions), call `{mcp_report_intermediate}` to report what you accomplished so far.
     Both calls finish the session. The report is critical context for further agent calls, so it MUST be compact.
 
 ## Coding Guidelines

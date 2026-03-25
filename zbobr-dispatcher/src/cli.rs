@@ -490,7 +490,7 @@ impl<'a> CliStageRunner<'a> {
 enum SequentialSignal {
     /// `report_failure` → immediate return from pipeline.
     ReturnFailure,
-    /// `report_success`/`report_progress` with a next stage → advance to it.
+    /// `report_success`/`report_intermediate` with a next stage → advance to it.
     Advance(String),
     /// `report_success` at the last stage → pipeline done, return.
     Return,
@@ -555,8 +555,8 @@ fn compute_sequential_signal(
                 }
             }
         }
-        Some(McpTool::ReportProgress) => {
-            let transition = stage_def.and_then(|s| s.on_progress());
+        Some(McpTool::ReportIntermediate) => {
+            let transition = stage_def.and_then(|s| s.on_intermediate());
             let target = transition.and_then(|t| t.next.as_ref());
             let should_pause = transition.is_some_and(|t| t.pause);
 

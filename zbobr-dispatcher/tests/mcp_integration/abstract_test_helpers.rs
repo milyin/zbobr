@@ -25,7 +25,7 @@ struct StageDef {
     pipeline: &'static str,
     on_success: Option<StageTransition>,
     on_failure: Option<StageTransition>,
-    on_progress: Option<StageTransition>,
+    on_intermediate: Option<StageTransition>,
 }
 
 impl StageDef {
@@ -36,7 +36,7 @@ impl StageDef {
             pipeline,
             on_success: None,
             on_failure: None,
-            on_progress: None,
+            on_intermediate: None,
         }
     }
 }
@@ -62,7 +62,7 @@ fn build_workflow_with_roles(
                     tool: Some(Tool::McpTester),
                     on_success: s.on_success,
                     on_failure: s.on_failure,
-                    on_progress: s.on_progress,
+                    on_intermediate: s.on_intermediate,
                     ..Default::default()
                 },
             );

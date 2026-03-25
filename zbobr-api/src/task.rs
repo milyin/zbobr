@@ -114,7 +114,7 @@ pub fn classify_comment(text: &str) -> HistoryRecordType {
         "[report_failure]" | "[ask_planner]" | "[review_reject]" | "[test_reject]" => {
             HistoryRecordType::Failure
         }
-        "[report_progress]" => HistoryRecordType::Progress,
+        "[report_intermediate]" => HistoryRecordType::Progress,
         "[ask_user]" | "[stop_with_question]" => HistoryRecordType::Question,
         _ => HistoryRecordType::Other,
     }

@@ -118,7 +118,7 @@ pub struct StageDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_failure: Option<StageTransition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub on_progress: Option<StageTransition>,
+    pub on_intermediate: Option<StageTransition>,
 }
 
 impl StageDefinition {
@@ -142,8 +142,8 @@ impl StageDefinition {
         self.on_failure.as_ref()
     }
 
-    pub fn on_progress(&self) -> Option<&StageTransition> {
-        self.on_progress.as_ref()
+    pub fn on_intermediate(&self) -> Option<&StageTransition> {
+        self.on_intermediate.as_ref()
     }
 }
 
@@ -225,10 +225,10 @@ impl PipelineConfig {
                     );
                 }
             }
-            if let Some(ref target) = stage.on_progress.as_ref().and_then(|t| t.next.as_ref()) {
+            if let Some(ref target) = stage.on_intermediate.as_ref().and_then(|t| t.next.as_ref()) {
                 if !self.stages.contains_key(target.as_str()) {
                     anyhow::bail!(
-                        "Pipeline '{}' stage '{}' on_progress references unknown stage '{}'",
+                        "Pipeline '{}' stage '{}' on_intermediate references unknown stage '{}'",
                         pipeline_name,
                         sname,
                         target
