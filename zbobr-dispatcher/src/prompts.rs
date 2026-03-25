@@ -410,7 +410,18 @@ mod tests {
             destination_branch: None,
             work_branch: None,
             pr_url: None,
-            checklist: vec![],
+            checklist: vec![
+                ChecklistItem {
+                    id: "main__1__understand-request".to_string(),
+                    checked: true,
+                    text: "Understand request".to_string(),
+                },
+                ChecklistItem {
+                    id: "main__1__apply-changes".to_string(),
+                    checked: false,
+                    text: "Apply changes".to_string(),
+                },
+            ],
             signal: None,
             stack: vec![],
             error: None,
