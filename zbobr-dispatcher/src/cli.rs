@@ -487,7 +487,7 @@ impl<'a> CliStageRunner<'a> {
 enum SequentialSignal {
     /// `report_failure` → immediate return from pipeline.
     ReturnFailure,
-    /// `report_success` with a next stage → advance to it.
+    /// `report_success`/`report_progress` with a next stage → advance to it.
     Advance(String),
     /// `report_success` at the last stage → pipeline done, return.
     Return,
@@ -550,6 +550,28 @@ fn compute_sequential_signal(
                     Some(next) => SequentialSignal::Advance(next),
                     None => SequentialSignal::Return,
                 }
+            }
+        }
+        Some("report_progress") => {
+            let transition = stage_def.and_then(|s| s.on_progress());
+            let target = transition.and_then(|t| t.next.as_ref());
+            let should_pause = transition.map_or(false, |t| t.pause);
+
+            let signal = if let Some(target) = target {
+                Signal::go(target.as_str())
+            } else {
+                // Default: re-run the same stage
+                Signal::go(stage_name)
+            };
+
+            if should_pause {
+                SequentialSignal::PauseThenSignal(signal)
+            } else {
+                SequentialSignal::Advance(
+                    target
+                        .map(|t| t.to_string())
+                        .unwrap_or_else(|| stage_name.to_string()),
+                )
             }
         }
         _ => SequentialSignal::Pause,

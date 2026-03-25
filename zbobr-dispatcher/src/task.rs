@@ -403,9 +403,9 @@ impl RoleSession {
     }
 
     /// Record a tool call for transition mapping.
-    /// Only `report_success` and `report_failure` are meaningful transition triggers.
+    /// Only `report_success`, `report_failure`, and `report_progress` are meaningful transition triggers.
     pub fn record_tool_call(&self, tool_name: &str) {
-        if tool_name == "report_success" || tool_name == "report_failure" {
+        if tool_name == "report_success" || tool_name == "report_failure" || tool_name == "report_progress" {
             *self.last_mapped_tool.lock().unwrap() = Some(tool_name.to_string());
         }
     }

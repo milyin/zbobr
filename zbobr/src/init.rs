@@ -138,7 +138,7 @@ fn default_config_toml() -> RootConfigToml {
 fn default_workflow() -> WorkflowConfig {
     use McpTool::{
         AddChecklistItem, CheckChecklistItem, ConfigureWorktree, DeleteChecklistItem, GetChecklist,
-        GetHistory, ReportFailure, ReportSuccess, StopWithError, StopWithQuestion,
+        GetHistory, ReportFailure, ReportProgress, ReportSuccess, StopWithError, StopWithQuestion,
     };
 
     let task_prompt = vec![PathBuf::from("task.md")];
@@ -291,6 +291,7 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithError,
                     ReportSuccess,
                     ReportFailure,
+                    ReportProgress,
                     StopWithQuestion,
                     GetChecklist,
                     AddChecklistItem,
@@ -533,7 +534,10 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 8. When implementation for an item is complete, mark the item done with `{mcp_check_checklist_item}`, and add follow-up items as needed.
 9. If you need human clarification or intervention, call `{mcp_stop_with_question}`. If the plan is unclear or requires adjustment, call `{mcp_report_failure}`. In case of technical errors use `{mcp_stop_with_error}`.
 10. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
-11. Call `{mcp_report_success}` to provide a brief and concise report of your work and finish the session. This report is critical context for further agent calls, so it MUST be compact.
+11. When your current session's work is done, decide how to finish:
+    - If **all checklist items are completed** (the full plan is done), call `{mcp_report_success}` to report final success.
+    - If **some items remain unchecked** (more work is needed in future sessions), call `{mcp_report_progress}` to report what you accomplished so far.
+    Both calls finish the session. The report is critical context for further agent calls, so it MUST be compact.
 
 ## Coding Guidelines
 

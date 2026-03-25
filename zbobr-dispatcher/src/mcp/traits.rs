@@ -201,6 +201,10 @@ pub trait CommonMcpImpl: Send + Sync {
         self.report_impl("report_failure", brief, full_report).await
     }
 
+    async fn report_progress_impl(&self, brief: &str, full_report: &str) -> String {
+        self.report_impl("report_progress", brief, full_report).await
+    }
+
     async fn get_full_report_impl(&self, name: &str) -> String {
         tracing::info!(
             "[{}#{}] get_full_report name={}",
