@@ -61,8 +61,9 @@ fn serialize_stage(
     report_url: Option<&dyn Fn(&str) -> String>,
 ) {
     // Visible stage header as a top-level list item
+    // Escape '#' to prevent GitHub auto-linking to issues
     out.push_str(&format!(
-        "- **{} #{} {}**",
+        "- **{} \\#{} {}**",
         stage.info.pipeline, stage.info.run_id, stage.info.stage,
     ));
 
@@ -72,6 +73,21 @@ fn serialize_stage(
     }
     if let Some(model) = &stage.info.model {
         out.push_str(&format!(" `{}`", model));
+    }
+
+    // Prompt link as visible <sub> element
+    if !for_prompt {
+        if let Some(prompt_link) = &stage.info.prompt_link {
+            let url = if prompt_link.starts_with("http://") || prompt_link.starts_with("https://") {
+                prompt_link.clone()
+            } else {
+                match report_url {
+                    Some(f) => f(prompt_link),
+                    None => prompt_link.clone(),
+                }
+            };
+            out.push_str(&format!(" <sub>[prompt]({})</sub>", url));
+        }
     }
 
     // HTML comment with full metadata for parsing
@@ -122,9 +138,14 @@ fn serialize_record(
     // Record ID suffix (with optional report link)
     let id_tag = format_record_id(record.id);
     if let Some(filename) = &record.report_link {
-        let url = match report_url {
-            Some(f) => f(filename),
-            None => filename.clone(),
+        let url = if filename.starts_with("http://") || filename.starts_with("https://") {
+            // Already a full URL (e.g. from a previous serialization roundtrip)
+            filename.clone()
+        } else {
+            match report_url {
+                Some(f) => f(filename),
+                None => filename.clone(),
+            }
         };
         out.push_str(&format!(" <sub>{}</sub>\n", format_link(&id_tag, &url)));
     } else {
@@ -414,13 +435,15 @@ mod tests {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], false, None);
 
-        // Visible stage header as list item
-        assert!(output.contains("- **main #1 planning** `claude` `claude-opus-4.6`"));
+        // Visible stage header as list item (# escaped to prevent GitHub auto-linking)
+        assert!(output.contains("- **main \\#1 planning** `claude` `claude-opus-4.6`"));
         // HTML comment with full metadata
         assert!(output.contains("<!-- Stage: main #1 planning [2024-01-01T00:00:00Z]"));
         assert!(output.contains("tool=claude"));
         assert!(output.contains("model=claude-opus-4.6"));
         assert!(output.contains("prompt=prompts/plan.md"));
+        // Prompt link visible as <sub> element
+        assert!(output.contains("<sub>[prompt](prompts/plan.md)</sub>"));
         // Records indented as sub-items with list prefix
         assert!(output.contains("  - [ ] Define API schema"));
         assert!(output.contains("  - [x] Review requirements"));
@@ -436,6 +459,7 @@ mod tests {
         let output = serialize_context(&ctx, &[], true, None);
 
         assert!(!output.contains("prompt="));
+        assert!(!output.contains("<sub>[prompt]"));
         // Other metadata should still be present
         assert!(output.contains("tool=claude"));
     }
@@ -606,5 +630,40 @@ mod tests {
 
         let parsed = parse_context("").unwrap();
         assert!(parsed.stages.is_empty());
+    }
+
+    #[test]
+    fn full_url_not_prefixed_again() {
+        // Simulate a roundtrip: report_link already contains a full URL
+        // (as parsed from a previous serialization with report_url applied)
+        let ctx = TaskContext {
+            stages: vec![StageContext {
+                info: StageInfo {
+                    pipeline: Pipeline::from("main"),
+                    run_id: 1,
+                    stage: Stage::new("working"),
+                    tool: None,
+                    model: None,
+                    prompt_link: Some("https://github.com/org/repo/blob/reports/reports/task_1/prompt.md".to_string()),
+                    timestamp: "2024-01-01T00:00:00Z".to_string(),
+                },
+                records: vec![ContextRecord {
+                    id: 1,
+                    record_type: ContextRecordType::Success,
+                    brief: "Done".to_string(),
+                    report_link: Some("https://github.com/org/repo/blob/reports/reports/task_1/report.md".to_string()),
+                }],
+            }],
+        };
+
+        let prefix = "https://github.com/org/repo/blob/reports/reports/task_1/";
+        let make_url = |filename: &str| -> String { format!("{prefix}{filename}") };
+        let output = serialize_context(&ctx, &[], false, Some(&make_url));
+
+        // The URL should appear exactly once, not doubled
+        assert!(output.contains("[ctx_rec_1](https://github.com/org/repo/blob/reports/reports/task_1/report.md)"));
+        assert!(!output.contains("https://github.com/org/repo/blob/reports/reports/task_1/https://"));
+        // Prompt link should also not be doubled
+        assert!(output.contains("[prompt](https://github.com/org/repo/blob/reports/reports/task_1/prompt.md)"));
     }
 }
