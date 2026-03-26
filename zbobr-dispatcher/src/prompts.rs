@@ -5,6 +5,7 @@ use zbobr_api::{
     Comment, HistoryRecordType, Task, classify_comment,
     config::{StageDefinition, WorkflowConfig},
     config_tools::McpTool,
+    context_format::serialize_context,
 };
 
 use crate::{backend::TaskBackend, workflow::Workflow};
@@ -17,6 +18,7 @@ pub const VAR_DESTINATION_BRANCH: &str = "destination_branch";
 pub const VAR_WORK_BRANCH: &str = "work_branch";
 pub const VAR_LAST_REPORT: &str = "last_report";
 pub const VAR_LAST_REQUEST: &str = "last_request";
+pub const VAR_CONTEXT: &str = "context";
 
 #[derive(Clone)]
 pub struct ConfiguredPromptBuilder {
@@ -196,6 +198,10 @@ pub fn build_template_variables<'a>(
     if let Some(ref v) = task.work_branch {
         vars.insert(Cow::Borrowed(VAR_WORK_BRANCH), Cow::Borrowed(v));
     }
+
+    // context: serialized TaskContext for prompt (with for_prompt=true)
+    let context_md = serialize_context(&task.context, comments, true);
+    vars.insert(Cow::Borrowed(VAR_CONTEXT), Cow::Owned(context_md));
 
     // last_report: last Success, Failure, or Progress comment (stripped tool prefix)
     let last_report = comments
