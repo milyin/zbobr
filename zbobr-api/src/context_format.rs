@@ -93,13 +93,12 @@ fn serialize_record(out: &mut String, record: &ContextRecord) {
     // Brief description
     out.push_str(&record.brief);
 
-    // Optional report link
+    // Record ID suffix (with optional report link)
     if let Some(link) = &record.report_link {
-        out.push_str(&format!(" [report]({})", link));
+        out.push_str(&format!(" <sub>[[ctx_rec_{}]({})]</sub>\n", record.id, link));
+    } else {
+        out.push_str(&format!(" <sub>[ctx_rec_{}]</sub>\n", record.id));
     }
-
-    // Record ID suffix
-    out.push_str(&format!(" <sub>[ctx_rec_{}]</sub>\n", record.id));
 }
 
 fn serialize_user_comment(out: &mut String, comment: &Comment) {
@@ -252,35 +251,46 @@ fn parse_record_line(line: &str) -> Result<Option<ContextRecord>> {
         return Ok(None);
     };
 
-    // Extract record ID from suffix: <sub>[ctx_rec_{id}]</sub>
+    // Extract record ID from suffix.
+    // New format: <sub>[[ctx_rec_{id}](url)]</sub>  (with report link)
+    //         or: <sub>[ctx_rec_{id}]</sub>          (without report link)
     let id_marker = "<sub>[ctx_rec_";
-    let id_start = rest
-        .rfind(id_marker)
-        .ok_or_else(|| anyhow::anyhow!("Missing record ID marker in: {}", line))?;
-    let after_marker = &rest[id_start + id_marker.len()..];
-    let id_end = after_marker
-        .find(']')
-        .ok_or_else(|| anyhow::anyhow!("Missing closing ] for record ID in: {}", line))?;
-    let id: u64 = after_marker[..id_end]
-        .parse()
-        .with_context(|| format!("Invalid record ID in: {}", line))?;
+    // Also handle linked variant: <sub>[[ctx_rec_
+    let linked_marker = "<sub>[[ctx_rec_";
+
+    let (id, report_link, id_start) = if let Some(start) = rest.rfind(linked_marker) {
+        // Linked format: <sub>[[ctx_rec_{id}](url)]</sub>
+        let after_marker = &rest[start + linked_marker.len()..];
+        let id_end = after_marker
+            .find(']')
+            .ok_or_else(|| anyhow::anyhow!("Missing closing ] for record ID in: {}", line))?;
+        let id: u64 = after_marker[..id_end]
+            .parse()
+            .with_context(|| format!("Invalid record ID in: {}", line))?;
+        let after_id = &after_marker[id_end + 1..];
+        // Expect (url)]</sub>
+        let url = after_id
+            .strip_prefix('(')
+            .and_then(|s| s.split_once(')'))
+            .map(|(url, _)| url.to_string())
+            .ok_or_else(|| anyhow::anyhow!("Malformed report link in record ID: {}", line))?;
+        (id, Some(url), start)
+    } else if let Some(start) = rest.rfind(id_marker) {
+        // Plain format: <sub>[ctx_rec_{id}]</sub>
+        let after_marker = &rest[start + id_marker.len()..];
+        let id_end = after_marker
+            .find(']')
+            .ok_or_else(|| anyhow::anyhow!("Missing closing ] for record ID in: {}", line))?;
+        let id: u64 = after_marker[..id_end]
+            .parse()
+            .with_context(|| format!("Invalid record ID in: {}", line))?;
+        (id, None, start)
+    } else {
+        bail!("Missing record ID marker in: {}", line);
+    };
 
     // Content is between type prefix and ID marker
-    let content = rest[..id_start].trim();
-
-    // Extract optional report link: [report](url)
-    let (brief, report_link) = if let Some(link_start) = content.rfind("[report](") {
-        let after_link = &content[link_start + "[report](".len()..];
-        if let Some(paren_close) = after_link.find(')') {
-            let link = after_link[..paren_close].to_string();
-            let brief = content[..link_start].trim().to_string();
-            (brief, Some(link))
-        } else {
-            bail!("Malformed report link in: {}", line);
-        }
-    } else {
-        (content.to_string(), None)
-    };
+    let brief = rest[..id_start].trim().to_string();
 
     Ok(Some(ContextRecord {
         id,
@@ -377,9 +387,8 @@ mod tests {
         assert!(output.contains("prompt=prompts/plan.md"));
         assert!(output.contains("- [ ] Define API schema"));
         assert!(output.contains("- [x] Review requirements"));
-        assert!(output.contains("✅ Plan completed [report](reports/plan_success.md)"));
-        assert!(output.contains("<sub>[ctx_rec_3]</sub>"));
-        assert!(output.contains("❌ Build failed [report](reports/build_fail.md)"));
+        assert!(output.contains("✅ Plan completed <sub>[[ctx_rec_3](reports/plan_success.md)]</sub>"));
+        assert!(output.contains("❌ Build failed <sub>[[ctx_rec_4](reports/build_fail.md)]</sub>"));
         assert!(output.contains("💬 Retrying with fix"));
         assert!(output.contains("❓ Should we use async?"));
     }
@@ -471,7 +480,7 @@ mod tests {
 > **[2024-01-01T00:30:00Z]** User says hello
 > second line of comment
 
-✅ Done [report](r.md) <sub>[ctx_rec_2]</sub>
+✅ Done <sub>[[ctx_rec_2](r.md)]</sub>
 ";
         let parsed = parse_context(text).unwrap();
         assert_eq!(parsed.stages.len(), 1);
