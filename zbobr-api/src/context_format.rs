@@ -60,10 +60,13 @@ fn serialize_stage(
     for_prompt: bool,
     report_url: Option<&dyn Fn(&str) -> String>,
 ) {
-    // Visible stage header as a top-level list item
-    // Escape '#' to prevent GitHub auto-linking to issues
+    // Visible stage header as a top-level list item.
+    // Format: YYYY-MM-DD HH:MM:SS pipeline:run_id:**stage** `tool` `model` <sub>[prompt](...)</sub>
+    out.push_str("- ");
+    out.push_str(&display_timestamp(&stage.info.timestamp));
+    out.push(' ');
     out.push_str(&format!(
-        "- **{} \\#{} {}**",
+        "{}:{}:**{}**",
         stage.info.pipeline, stage.info.run_id, stage.info.stage,
     ));
 
@@ -76,37 +79,19 @@ fn serialize_stage(
     }
 
     // Prompt link as visible <sub> element
-    if !for_prompt {
-        if let Some(prompt_link) = &stage.info.prompt_link {
-            let url = if prompt_link.starts_with("http://") || prompt_link.starts_with("https://") {
-                prompt_link.clone()
-            } else {
-                match report_url {
-                    Some(f) => f(prompt_link),
-                    None => prompt_link.clone(),
-                }
-            };
-            out.push_str(&format!(" <sub>[prompt]({})</sub>", url));
-        }
+    if !for_prompt && let Some(prompt_link) = &stage.info.prompt_link {
+        let url = if prompt_link.starts_with("http://") || prompt_link.starts_with("https://") {
+            prompt_link.clone()
+        } else {
+            match report_url {
+                Some(f) => f(prompt_link),
+                None => prompt_link.clone(),
+            }
+        };
+        out.push_str(&format!(" <sub>[prompt]({})</sub>", url));
     }
 
-    // HTML comment with full metadata for parsing
-    out.push_str(&format!(
-        " <!-- Stage: {} #{} {} [{}]",
-        stage.info.pipeline, stage.info.run_id, stage.info.stage, stage.info.timestamp,
-    ));
-    if let Some(tool) = &stage.info.tool {
-        out.push_str(&format!(" tool={}", tool));
-    }
-    if let Some(model) = &stage.info.model {
-        out.push_str(&format!(" model={}", model));
-    }
-    if !for_prompt {
-        if let Some(prompt_link) = &stage.info.prompt_link {
-            out.push_str(&format!(" prompt={}", prompt_link));
-        }
-    }
-    out.push_str(" -->\n");
+    out.push('\n');
 
     // Records (indented as sub-items)
     for record in &stage.records {
@@ -115,6 +100,28 @@ fn serialize_stage(
     }
 
     out.push('\n');
+}
+
+fn display_timestamp(ts: &str) -> String {
+    if ts.len() >= 20 && ts.as_bytes().get(10) == Some(&b'T') && ts.ends_with('Z') {
+        let date = &ts[..10];
+        let time = &ts[11..19];
+        return format!("{} {}", date, time);
+    }
+    ts.to_string()
+}
+
+fn parse_title_timestamp(date: &str, time: &str) -> Result<String> {
+    if date.len() != 10
+        || &date[4..5] != "-"
+        || &date[7..8] != "-"
+        || time.len() != 8
+        || &time[2..3] != ":"
+        || &time[5..6] != ":"
+    {
+        bail!("Invalid stage timestamp, expected YYYY-MM-DD HH:MM:SS");
+    }
+    Ok(format!("{}T{}Z", date, time))
 }
 
 fn serialize_record(
@@ -197,16 +204,6 @@ pub fn parse_context(text: &str) -> Result<TaskContext> {
             continue;
         }
 
-        // Parse stage header — look for <!-- Stage: anywhere in the line
-        // (new format has visible text before the HTML comment)
-        if let Some(pos) = trimmed.find("<!-- Stage: ") {
-            let header = &trimmed[pos + "<!-- Stage: ".len()..];
-            let stage = parse_stage_header(header)
-                .with_context(|| format!("Failed to parse stage header: {}", trimmed))?;
-            stages.push(stage);
-            continue;
-        }
-
         // Parse record lines (may be indented as sub-items in new format)
         if let Some(record) = parse_record_line(trimmed)? {
             let current_stage = stages.last_mut().ok_or_else(|| {
@@ -216,8 +213,11 @@ pub fn parse_context(text: &str) -> Result<TaskContext> {
             continue;
         }
 
-        // Skip other HTML comments
-        if trimmed.starts_with("<!--") {
+        // Parse stage title line.
+        if trimmed.starts_with("- ") {
+            let stage = parse_stage_title(trimmed)
+                .with_context(|| format!("Failed to parse stage title: {}", trimmed))?;
+            stages.push(stage);
             continue;
         }
 
@@ -227,58 +227,91 @@ pub fn parse_context(text: &str) -> Result<TaskContext> {
     Ok(TaskContext { stages })
 }
 
-/// Parse a stage header after the `<!-- Stage: ` prefix.
-/// Expected format: `{pipeline} #{run_id} {stage} [{timestamp}] [key=value...] -->`
-fn parse_stage_header(header: &str) -> Result<StageContext> {
-    let header = header
-        .strip_suffix("-->")
-        .map(|s| s.trim())
-        .ok_or_else(|| anyhow::anyhow!("Stage header missing closing -->"))?;
+/// Parse stage title line.
+/// Expected format:
+/// `- YYYY-MM-DD HH:MM:SS pipeline:run_id:**stage** [\`tool\`] [\`model\`] [<sub>[prompt](url)</sub>]`
+fn parse_stage_title(line: &str) -> Result<StageContext> {
+    let body = line
+        .strip_prefix("- ")
+        .ok_or_else(|| anyhow::anyhow!("Stage title must start with '- '"))?
+        .trim();
 
-    // Split into tokens, but we need to handle the [timestamp] specially
-    let hash_pos = header
-        .find('#')
-        .ok_or_else(|| anyhow::anyhow!("Missing # in stage header"))?;
+    let mut parts = body.splitn(3, ' ');
+    let date = parts
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Missing stage date"))?;
+    let time = parts
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Missing stage time"))?;
+    let mut rest = parts
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Missing stage pipeline/run/stage"))?
+        .trim();
 
-    let pipeline_str = header[..hash_pos].trim();
-    let after_hash = &header[hash_pos + 1..];
+    let timestamp = parse_title_timestamp(date, time)?;
 
-    // run_id is the next token
-    let space_after_run = after_hash
-        .find(' ')
-        .ok_or_else(|| anyhow::anyhow!("Missing stage name after run_id"))?;
-    let run_id: u64 = after_hash[..space_after_run]
+    let stage_marker = ":**";
+    let marker_pos = rest
+        .find(stage_marker)
+        .ok_or_else(|| anyhow::anyhow!("Missing ':**' stage marker"))?;
+    let pipeline_and_run = &rest[..marker_pos];
+    rest = &rest[marker_pos + stage_marker.len()..];
+
+    let sep_pos = pipeline_and_run
+        .rfind(':')
+        .ok_or_else(|| anyhow::anyhow!("Missing ':' between pipeline and run_id"))?;
+    let pipeline_str = pipeline_and_run[..sep_pos].trim();
+    let run_id: u64 = pipeline_and_run[sep_pos + 1..]
         .trim()
         .parse()
         .context("Invalid run_id")?;
 
-    let after_run = &after_hash[space_after_run + 1..];
+    let stage_end = rest
+        .find("**")
+        .ok_or_else(|| anyhow::anyhow!("Missing closing '**' for stage"))?;
+    let stage_str = rest[..stage_end].trim();
+    rest = rest[stage_end + 2..].trim();
 
-    // Find timestamp in brackets
-    let bracket_open = after_run
-        .find('[')
-        .ok_or_else(|| anyhow::anyhow!("Missing timestamp brackets"))?;
-    let bracket_close = after_run
-        .find(']')
-        .ok_or_else(|| anyhow::anyhow!("Missing closing timestamp bracket"))?;
-
-    let stage_str = after_run[..bracket_open].trim();
-    let timestamp = after_run[bracket_open + 1..bracket_close].trim().to_string();
-
-    // Parse optional key=value pairs after the timestamp
-    let remainder = after_run[bracket_close + 1..].trim();
     let mut tool = None;
     let mut model = None;
     let mut prompt_link = None;
 
-    for token in remainder.split_whitespace() {
-        if let Some(val) = token.strip_prefix("tool=") {
-            tool = Some(val.parse().context("Invalid tool value")?);
-        } else if let Some(val) = token.strip_prefix("model=") {
-            model = Some(val.parse().context("Invalid model value")?);
-        } else if let Some(val) = token.strip_prefix("prompt=") {
-            prompt_link = Some(val.to_string());
+    while !rest.is_empty() {
+        if let Some(after_tick) = rest.strip_prefix('`') {
+            let tick_end = after_tick
+                .find('`')
+                .ok_or_else(|| anyhow::anyhow!("Unclosed backtick token in stage title"))?;
+            let value = &after_tick[..tick_end];
+            if tool.is_none() {
+                tool = Some(value.parse().context("Invalid tool value")?);
+            } else if model.is_none() {
+                model = Some(value.parse().context("Invalid model value")?);
+            }
+            rest = after_tick[tick_end + 1..].trim();
+            continue;
         }
+
+        if let Some(after_sub_open) = rest.strip_prefix("<sub>") {
+            let sub_end = after_sub_open
+                .find("</sub>")
+                .ok_or_else(|| anyhow::anyhow!("Unclosed <sub> token in stage title"))?;
+            let inner = &after_sub_open[..sub_end];
+            if let Some((before_link, after_link)) = inner.split_once("](") {
+                let _label = before_link
+                    .strip_prefix('[')
+                    .ok_or_else(|| anyhow::anyhow!("Malformed prompt link label"))?;
+                let url = after_link
+                    .strip_suffix(')')
+                    .ok_or_else(|| anyhow::anyhow!("Malformed prompt link URL"))?;
+                prompt_link = Some(url.to_string());
+            } else if !inner.trim().is_empty() {
+                prompt_link = Some(inner.trim().to_string());
+            }
+            rest = after_sub_open[sub_end + "</sub>".len()..].trim();
+            continue;
+        }
+
+        break;
     }
 
     Ok(StageContext {
@@ -292,7 +325,6 @@ fn parse_stage_header(header: &str) -> Result<StageContext> {
             timestamp,
         },
         records: Vec::new(),
-
     })
 }
 
@@ -435,13 +467,7 @@ mod tests {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], false, None);
 
-        // Visible stage header as list item (# escaped to prevent GitHub auto-linking)
-        assert!(output.contains("- **main \\#1 planning** `claude` `claude-opus-4.6`"));
-        // HTML comment with full metadata
-        assert!(output.contains("<!-- Stage: main #1 planning [2024-01-01T00:00:00Z]"));
-        assert!(output.contains("tool=claude"));
-        assert!(output.contains("model=claude-opus-4.6"));
-        assert!(output.contains("prompt=prompts/plan.md"));
+        assert!(output.contains("- 2024-01-01 00:00:00 main:1:**planning** `claude` `claude-opus-4.6`"));
         // Prompt link visible as <sub> element
         assert!(output.contains("<sub>[prompt](prompts/plan.md)</sub>"));
         // Records indented as sub-items with list prefix
@@ -458,10 +484,8 @@ mod tests {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], true, None);
 
-        assert!(!output.contains("prompt="));
         assert!(!output.contains("<sub>[prompt]"));
-        // Other metadata should still be present
-        assert!(output.contains("tool=claude"));
+        assert!(output.contains("`claude` `claude-opus-4.6`"));
     }
 
     #[test]
@@ -535,7 +559,7 @@ mod tests {
     #[test]
     fn parse_ignores_blockquote_comments() {
         let text = "\
-- **main #1 working** <!-- Stage: main #1 working [2024-01-01T00:00:00Z] -->
+- 2024-01-01 00:00:00 main:1:**working**
   - [ ] Do work <sub>ctx_rec_1</sub>
 
 > **[2024-01-01T00:30:00Z]** User says hello
@@ -568,7 +592,7 @@ mod tests {
     #[test]
     fn parse_error_on_missing_id() {
         let text = "\
-- **main #1 working** <!-- Stage: main #1 working [2024-01-01T00:00:00Z] -->
+- 2024-01-01 00:00:00 main:1:**working**
   - [ ] no id marker
 ";
         let result = parse_context(text);
@@ -616,7 +640,7 @@ mod tests {
         let output = serialize_context(&ctx, &comments, false, None);
 
         // Stage should come before comment (by timestamp)
-        let stage_pos = output.find("<!-- Stage:").unwrap();
+        let stage_pos = output.find("- 2024-01-01 00:00:00 main:1:**working**").unwrap();
         let comment_pos = output.find("> **[2024-01-01T00:30:00Z]**").unwrap();
         assert!(stage_pos < comment_pos);
         assert!(output.contains("Please hurry up!"));

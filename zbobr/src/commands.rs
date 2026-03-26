@@ -186,16 +186,11 @@ pub enum TaskSubcommand {
 impl Command {
     /// Whether this command requires backend connectivity (GitHub token, etc.).
     fn needs_backends(&self) -> bool {
-        match self {
-            Command::Init { .. } => false,
-            Command::Task {
+        !matches!(self, Command::Init { .. } | Command::Task {
                 subcommand: TaskSubcommand::Prompt { id: None, .. },
-            } => false,
-            Command::Task {
+            } | Command::Task {
                 subcommand: TaskSubcommand::Show { id: None },
-            } => false,
-            _ => true,
-        }
+            })
     }
 }
 
