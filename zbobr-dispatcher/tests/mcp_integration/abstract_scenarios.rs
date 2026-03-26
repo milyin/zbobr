@@ -4,25 +4,13 @@
 //! to test the pipeline machinery independently of specific naming conventions.
 
 /// Scenario that exercises all available MCP tools.
-pub fn all_mcp_tools_scenario(repo_path: &str) -> String {
-    format!(
-        r#"name: All MCP Tools Test
+pub fn all_mcp_tools_scenario(_repo_path: &str) -> String {
+    r#"name: All MCP Tools Test
 description: Exercise every MCP tool in a single session
 timeout: 60
 stop_on_failure: true
 
 steps:
-- name: configure_worktree
-  operation:
-    type: tool_call
-    tool: configure_worktree
-    arguments:
-      destination_repository: "{repo_path}"
-      destination_branch: "main"
-      work_branch_postfix: "test-all-tools"
-  assertions:
-    - type: success
-
 - name: add_checklist_item
   operation:
     type: tool_call
@@ -79,9 +67,8 @@ steps:
       full_report: "Detailed report: all MCP tools were tested successfully."
   assertions:
     - type: success
-"#,
-        repo_path = repo_path,
-    )
+"#
+    .to_string()
 }
 
 /// Scenario that calls configure_worktree twice with identical values.
