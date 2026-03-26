@@ -1371,7 +1371,20 @@ async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Re
             return Err(anyhow::anyhow!(msg));
         }
     };
-    match zbobr.repo_backend().ensure_pr_url(&identity).await {
+    let issue_body = zbobr
+        .task_backend()
+        .task_repo_name()
+        .map(|repo_name| {
+            format!(
+                "Resolves https://github.com/{}/issues/{}",
+                repo_name, task_id
+            )
+        });
+    match zbobr
+        .repo_backend()
+        .ensure_pr_url(&identity, issue_body.as_deref())
+        .await
+    {
         Ok(pr_url) => {
             role_session
                 .modify_task(move |mut task| {
