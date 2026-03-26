@@ -1,6 +1,6 @@
-/// Returns the current time as an ISO 8601 UTC timestamp string (`YYYY-MM-DDTHH:MM:SSZ`).
-pub fn now_iso_timestamp() -> String {
-    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+/// Returns the current UTC time.
+pub fn now_utc() -> chrono::DateTime<chrono::Utc> {
+    chrono::Utc::now()
 }
 
 // -- TaskIdentity --
@@ -97,8 +97,8 @@ pub struct StageInfo {
     /// Link to the prompt used for this stage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_link: Option<String>,
-    /// Timestamp when the stage was created.
-    pub timestamp: String,
+    /// Timestamp when the stage was created (UTC).
+    pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
 /// Context for a single stage execution, containing stage metadata and records.
@@ -1386,7 +1386,7 @@ mod tests {
             tool: None,
             model: None,
             prompt_link: None,
-            timestamp: "2026-03-25T00:00:00Z".to_string(),
+            timestamp: "2026-03-25T00:00:00Z".parse().unwrap(),
         }
     }
 

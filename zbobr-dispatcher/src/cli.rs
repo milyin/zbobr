@@ -416,7 +416,7 @@ impl<'a> CliStageRunner<'a> {
             let stage_name = Stage::new(self.stage_name);
             let tool_val = Some(cli_tool);
             let model_val = Some(model.clone());
-            let timestamp = zbobr_api::task::now_iso_timestamp();
+            let timestamp = zbobr_api::task::now_utc();
             let role_session = self.zbobr.role_session(self.task_id);
             role_session
                 .modify_task(move |mut task| {

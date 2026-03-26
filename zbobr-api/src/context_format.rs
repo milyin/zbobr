@@ -31,7 +31,10 @@ pub fn serialize_context(
 
     let mut events: Vec<(String, Event)> = Vec::new();
     for stage in &ctx.stages {
-        events.push((stage.info.timestamp.clone(), Event::Stage(stage)));
+        events.push((
+            stage.info.timestamp.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+            Event::Stage(stage),
+        ));
     }
     for comment in comments {
         events.push((comment.timestamp.clone(), Event::Comment(comment)));
@@ -61,9 +64,9 @@ fn serialize_stage(
     report_url: Option<&dyn Fn(&str) -> String>,
 ) {
     // Visible stage header as a top-level list item.
-    // Format: YYYY-MM-DD HH:MM:SS pipeline:run_id:**stage** `tool` `model` <sub>[prompt](...)</sub>
+    // Format: YYYY-MM-DD HH:MM:SS <sub>+HHMM</sub> pipeline:run_id:**stage** `tool` `model` <sub>[prompt](...)</sub>
     out.push_str("- ");
-    out.push_str(&display_timestamp(&stage.info.timestamp));
+    out.push_str(&report_display_time(&stage.info.timestamp));
     out.push(' ');
     out.push_str(&format!(
         "{}:{}:**{}**",
@@ -102,16 +105,25 @@ fn serialize_stage(
     out.push('\n');
 }
 
-fn display_timestamp(ts: &str) -> String {
-    // Try to parse as ISO 8601 UTC and convert to local timezone for display.
-    if let Ok(utc) = ts.parse::<chrono::DateTime<chrono::Utc>>() {
-        let local = utc.with_timezone(&chrono::Local);
-        return local.format("%Y-%m-%d %H:%M:%S %z").to_string();
-    }
-    ts.to_string()
+/// Format a UTC timestamp for report display: `YYYY-MM-DD HH:MM:SS <sub>+HHMM</sub>`
+/// in the system's local timezone.
+pub fn report_display_time(ts: &chrono::DateTime<chrono::Utc>) -> String {
+    let local = ts.with_timezone(&chrono::Local);
+    format!(
+        "{} <sub>{}</sub>",
+        local.format("%Y-%m-%d %H:%M:%S"),
+        local.format("%z"),
+    )
 }
 
-fn parse_title_timestamp(date: &str, time: &str, tz: Option<&str>) -> Result<String> {
+/// Parse a report-formatted timestamp back to UTC `DateTime`.
+/// Accepts `YYYY-MM-DD HH:MM:SS` optionally followed by a timezone offset.
+/// Without timezone, assumes UTC for backward compatibility.
+pub fn report_parse_time(
+    date: &str,
+    time: &str,
+    tz: Option<&str>,
+) -> Result<chrono::DateTime<chrono::Utc>> {
     if date.len() != 10
         || &date[4..5] != "-"
         || &date[7..8] != "-"
@@ -121,15 +133,16 @@ fn parse_title_timestamp(date: &str, time: &str, tz: Option<&str>) -> Result<Str
     {
         bail!("Invalid stage timestamp, expected YYYY-MM-DD HH:MM:SS");
     }
-    // If timezone offset is provided, parse as local time and convert to UTC.
     if let Some(tz_str) = tz {
         let local_str = format!("{} {} {}", date, time, tz_str);
-        if let Ok(local) = chrono::DateTime::parse_from_str(&local_str, "%Y-%m-%d %H:%M:%S %z") {
-            return Ok(local.to_utc().format("%Y-%m-%dT%H:%M:%SZ").to_string());
-        }
+        let local = chrono::DateTime::parse_from_str(&local_str, "%Y-%m-%d %H:%M:%S %z")
+            .context("Invalid timestamp with timezone")?;
+        return Ok(local.to_utc());
     }
     // No timezone — assume UTC (backward compatibility).
-    Ok(format!("{}T{}Z", date, time))
+    let s = format!("{}T{}Z", date, time);
+    s.parse::<chrono::DateTime<chrono::Utc>>()
+        .context("Invalid UTC timestamp")
 }
 
 fn serialize_record(
@@ -244,30 +257,32 @@ fn parse_stage_title(line: &str) -> Result<StageContext> {
         .ok_or_else(|| anyhow::anyhow!("Stage title must start with '- '"))?
         .trim();
 
-    let mut parts = body.splitn(4, ' ');
+    let mut parts = body.splitn(3, ' ');
     let date = parts
         .next()
         .ok_or_else(|| anyhow::anyhow!("Missing stage date"))?;
     let time = parts
         .next()
         .ok_or_else(|| anyhow::anyhow!("Missing stage time"))?;
-    let third = parts
+    let mut rest = parts
         .next()
         .ok_or_else(|| anyhow::anyhow!("Missing stage pipeline/run/stage"))?
         .trim();
 
-    // Third token may be a timezone offset (e.g. +0300) or the pipeline:run:**stage** part.
-    let (tz, mut rest) = if third.starts_with('+') || third.starts_with('-') {
-        let rest = parts
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Missing stage pipeline/run/stage after timezone"))?
-            .trim();
-        (Some(third), rest)
+    // Extract optional timezone from <sub>+HHMM</sub> before pipeline token.
+    let tz = if let Some(after_sub) = rest.strip_prefix("<sub>") {
+        if let Some(sub_end) = after_sub.find("</sub>") {
+            let tz_str = &after_sub[..sub_end];
+            rest = after_sub[sub_end + "</sub>".len()..].trim();
+            Some(tz_str)
+        } else {
+            None
+        }
     } else {
-        (None, third)
+        None
     };
 
-    let timestamp = parse_title_timestamp(date, time, tz)?;
+    let timestamp = report_parse_time(date, time, tz)?;
 
     let stage_marker = ":**";
     let marker_pos = rest
@@ -323,8 +338,8 @@ fn parse_stage_title(line: &str) -> Result<StageContext> {
                     .strip_suffix(')')
                     .ok_or_else(|| anyhow::anyhow!("Malformed prompt link URL"))?;
                 prompt_link = Some(url.to_string());
-            } else if !inner.trim().is_empty() {
-                prompt_link = Some(inner.trim().to_string());
+            } else {
+                // Non-link <sub> content (e.g. timezone offset) — skip.
             }
             rest = after_sub_open[sub_end + "</sub>".len()..].trim();
             continue;
@@ -410,6 +425,10 @@ mod tests {
     use super::*;
     use crate::task::{Model, Pipeline};
 
+    fn utc(s: &str) -> chrono::DateTime<chrono::Utc> {
+        s.parse().unwrap()
+    }
+
     fn sample_context() -> TaskContext {
         TaskContext {
             stages: vec![
@@ -421,7 +440,7 @@ mod tests {
                         tool: Some(crate::task::Tool::Claude),
                         model: Some(Model::ClaudeOpus4_6),
                         prompt_link: Some("prompts/plan.md".to_string()),
-                        timestamp: "2024-01-01T00:00:00Z".to_string(),
+                        timestamp: utc("2024-01-01T00:00:00Z"),
                     },
                     records: vec![
                         ContextRecord {
@@ -453,7 +472,7 @@ mod tests {
                         tool: None,
                         model: None,
                         prompt_link: None,
-                        timestamp: "2024-01-01T01:00:00Z".to_string(),
+                        timestamp: utc("2024-01-01T01:00:00Z"),
                     },
                     records: vec![
                         ContextRecord {
@@ -520,7 +539,7 @@ mod tests {
         assert_eq!(s0.info.pipeline, Pipeline::from("main"));
         assert_eq!(s0.info.run_id, 1);
         assert_eq!(s0.info.stage, Stage::new("planning"));
-        assert_eq!(s0.info.timestamp, "2024-01-01T00:00:00Z");
+        assert_eq!(s0.info.timestamp, utc("2024-01-01T00:00:00Z"));
         assert!(s0.info.prompt_link.as_deref() == Some("prompts/plan.md"));
         assert_eq!(s0.records.len(), 3);
 
@@ -630,7 +649,7 @@ mod tests {
                     tool: None,
                     model: None,
                     prompt_link: None,
-                    timestamp: "2024-01-01T00:00:00Z".to_string(),
+                    timestamp: utc("2024-01-01T00:00:00Z"),
                 },
                 records: vec![ContextRecord {
                     id: 1,
@@ -689,7 +708,7 @@ mod tests {
                     tool: None,
                     model: None,
                     prompt_link: Some("https://github.com/org/repo/blob/reports/reports/task_1/prompt.md".to_string()),
-                    timestamp: "2024-01-01T00:00:00Z".to_string(),
+                    timestamp: utc("2024-01-01T00:00:00Z"),
                 },
                 records: vec![ContextRecord {
                     id: 1,
