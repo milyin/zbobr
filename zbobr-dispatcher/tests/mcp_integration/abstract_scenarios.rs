@@ -12,16 +12,6 @@ timeout: 60
 stop_on_failure: true
 
 steps:
-- name: get_history
-  operation:
-    type: tool_call
-    tool: get_history
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "task"
-
 - name: configure_worktree
   operation:
     type: tool_call
@@ -38,46 +28,40 @@ steps:
     type: tool_call
     tool: add_checklist_item
     arguments:
-      id: "c1"
       text: "First item"
-  assertions:
-    - type: success
-
-- name: get_checklist
-  operation:
-    type: tool_call
-    tool: get_checklist
   assertions:
     - type: success
     - type: contains
       path: result
-      value: "First item"
+      value: "ctx_rec_"
 
 - name: check_checklist_item
   operation:
     type: tool_call
     tool: check_checklist_item
     arguments:
-      id: "c1"
+      id: "1"
   assertions:
     - type: success
+    - type: contains
+      path: result
+      value: "checked"
 
 - name: add then delete
   operation:
     type: tool_call
     tool: add_checklist_item
     arguments:
-      id: "c2"
       text: "Temp item"
   assertions:
     - type: success
 
-- name: delete_checklist_item
+- name: delete_ctx_rec
   operation:
     type: tool_call
-    tool: delete_checklist_item
+    tool: delete_ctx_rec
     arguments:
-      id: "c2"
+      id: "ctx_rec_2"
   assertions:
     - type: success
     - type: contains
