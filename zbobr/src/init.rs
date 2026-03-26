@@ -376,6 +376,10 @@ const TASK_TEMPLATE: &str = r#"---
 
 # Work branch: {work_branch}
 
+# Context
+
+{context}
+
 # Last report
 
 {last_report}

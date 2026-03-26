@@ -99,19 +99,6 @@ impl RoleSession {
         Ok(self.get_task().await?.description)
     }
 
-    /// Get the full discussion history for the current pipeline run.
-    pub async fn get_history_for_run(&self, target_run_id: u64) -> anyhow::Result<String> {
-        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
-        let comments = weak.get_comments().await?;
-        let task = weak.snapshot(false).await?;
-        let filtered = zbobr_api::filter_comments_for_run(&comments, target_run_id);
-        let mut parts = vec![format!("[task]\n{}", task.description)];
-        for comment in filtered {
-            parts.push(format!("[{}]\n{}", comment.stage, comment.text));
-        }
-        Ok(parts.join("\n\n---\n\n"))
-    }
-
     /// Get pipeline name for this session.
     pub fn pipeline_name(&self) -> &str {
         &self.pipeline_name
