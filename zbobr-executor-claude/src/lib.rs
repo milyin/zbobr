@@ -28,6 +28,7 @@ impl ToolExecutor for ClaudeExecutor {
         task_id: u64,
         role: &str,
         _port: u16,
+        system_prompt: Option<&str>,
         prompt: &str,
         work_dir: &Path,
         mcp_url: &str,
@@ -69,7 +70,7 @@ impl ToolExecutor for ClaudeExecutor {
             "acceptEdits"
         };
 
-        let args = [
+        let mut args: Vec<&str> = vec![
             "--model",
             model_name,
             "--mcp-config",
@@ -81,12 +82,18 @@ impl ToolExecutor for ClaudeExecutor {
             "--tools",
             "default",
             "--verbose",
-            "-p",
-            prompt,
         ];
 
+        if let Some(sp) = system_prompt {
+            args.push("--system-prompt");
+            args.push(sp);
+        }
+
+        args.push("-p");
+        args.push(prompt);
+
         let mut cmd = tokio::process::Command::new("claude");
-        cmd.args(args)
+        cmd.args(&args)
             .current_dir(work_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
