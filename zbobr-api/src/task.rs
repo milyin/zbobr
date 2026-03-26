@@ -181,7 +181,7 @@ impl TaskContext {
 )]
 pub struct Comment {
     #[schemars(description = "Timestamp when comment was created")]
-    pub timestamp: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
     #[schemars(description = "Stage that posted this comment")]
     pub stage: String,
     #[schemars(description = "Hostname of the system posting the comment")]
@@ -1177,7 +1177,7 @@ mod tests {
 
     fn make_comment(text: &str, pipeline: &str, run_id: u64) -> Comment {
         Comment {
-            timestamp: String::new(),
+            timestamp: chrono::DateTime::default(),
             stage: "s".into(),
             hostname: "h".into(),
             tool: None,
@@ -1194,7 +1194,7 @@ mod tests {
 
     fn make_comment_for(text: &str, pipeline: &str, run_id: u64, caller_run_id: u64) -> Comment {
         Comment {
-            timestamp: String::new(),
+            timestamp: chrono::DateTime::default(),
             stage: "s".into(),
             hostname: "h".into(),
             tool: None,

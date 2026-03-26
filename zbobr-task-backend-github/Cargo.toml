@@ -16,6 +16,7 @@ async-trait = { workspace = true }
 clap = { workspace = true }
 paste = { workspace = true }
 base64 = "0.22"
+chrono = { workspace = true }
 
 [dev-dependencies]
 rustls = { workspace = true }

@@ -489,7 +489,7 @@ impl TaskMut for FsTaskMut {
         let mut comments = self.backend.read_comments_structured(self.id).await?;
 
         let new_comment = Comment {
-            timestamp: zbobr_api::task::now_utc().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+            timestamp: zbobr_api::task::now_utc(),
             stage: stage.to_string(),
             hostname: hostname.to_string(),
             tool,

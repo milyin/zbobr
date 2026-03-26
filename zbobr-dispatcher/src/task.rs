@@ -826,7 +826,7 @@ mod comment_model_tests {
 
             let mut comments = self.backend.comments.lock().await;
             comments.entry(self.id).or_default().push(Comment {
-                timestamp: String::new(),
+                timestamp: zbobr_api::task::now_utc(),
                 stage: stage.to_string(),
                 hostname: hostname.to_string(),
                 tool,

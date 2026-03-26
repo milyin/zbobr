@@ -1010,7 +1010,12 @@ impl ZbobrTaskBackendGithubImpl {
             .into_iter()
             .map(|c| {
                 let body = c.body.unwrap_or_default();
-                let timestamp = c.created_at.unwrap_or_default();
+                let timestamp: chrono::DateTime<chrono::Utc> = c
+                    .created_at
+                    .as_deref()
+                    .unwrap_or("1970-01-01T00:00:00Z")
+                    .parse()
+                    .unwrap_or_default();
 
                 let mut parts = body.splitn(2, '\n');
                 let tag_line = parts.next().unwrap_or("");

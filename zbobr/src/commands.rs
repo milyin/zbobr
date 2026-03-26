@@ -297,7 +297,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
     };
     let comments = vec![
         Comment {
-            timestamp: "2025-01-01T00:00:00Z".to_string(),
+            timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
             stage: "planning".to_string(),
             hostname: "dummy".to_string(),
             tool: None,
@@ -311,7 +311,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
             prompt_name: None,
         },
         Comment {
-            timestamp: "2025-01-01T01:00:00Z".to_string(),
+            timestamp: "2025-01-01T01:00:00Z".parse().unwrap(),
             stage: "planning".to_string(),
             hostname: "dummy".to_string(),
             tool: None,

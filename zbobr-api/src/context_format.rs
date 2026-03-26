@@ -29,15 +29,12 @@ pub fn serialize_context(
         Comment(&'a Comment),
     }
 
-    let mut events: Vec<(String, Event)> = Vec::new();
+    let mut events: Vec<(chrono::DateTime<chrono::Utc>, Event)> = Vec::new();
     for stage in &ctx.stages {
-        events.push((
-            stage.info.timestamp.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
-            Event::Stage(stage),
-        ));
+        events.push((stage.info.timestamp, Event::Stage(stage)));
     }
     for comment in comments {
-        events.push((comment.timestamp.clone(), Event::Comment(comment)));
+        events.push((comment.timestamp, Event::Comment(comment)));
     }
 
     // Sort by timestamp (stable sort preserves insertion order for equal timestamps)
@@ -122,7 +119,7 @@ pub fn report_display_time(ts: &chrono::DateTime<chrono::Utc>) -> String {
 pub fn report_parse_time(
     date: &str,
     time: &str,
-    tz: Option<&str>,
+    tz: &str,
 ) -> Result<chrono::DateTime<chrono::Utc>> {
     if date.len() != 10
         || &date[4..5] != "-"
@@ -133,16 +130,10 @@ pub fn report_parse_time(
     {
         bail!("Invalid stage timestamp, expected YYYY-MM-DD HH:MM:SS");
     }
-    if let Some(tz_str) = tz {
-        let local_str = format!("{} {} {}", date, time, tz_str);
-        let local = chrono::DateTime::parse_from_str(&local_str, "%Y-%m-%d %H:%M:%S %z")
-            .context("Invalid timestamp with timezone")?;
-        return Ok(local.to_utc());
-    }
-    // No timezone — assume UTC (backward compatibility).
-    let s = format!("{}T{}Z", date, time);
-    s.parse::<chrono::DateTime<chrono::Utc>>()
-        .context("Invalid UTC timestamp")
+    let local_str = format!("{} {} {}", date, time, tz);
+    let local = chrono::DateTime::parse_from_str(&local_str, "%Y-%m-%d %H:%M:%S %z")
+        .context("Invalid timestamp with timezone")?;
+    Ok(local.to_utc())
 }
 
 fn serialize_record(
@@ -195,7 +186,7 @@ fn format_link(text: &str, url: &str) -> String {
 
 fn serialize_user_comment(out: &mut String, comment: &Comment) {
     // User comments as blockquotes with timestamp
-    out.push_str(&format!("> **[{}]** ", comment.timestamp));
+    out.push_str(&format!("> **[{}]** ", report_display_time(&comment.timestamp)));
     for (i, line) in comment.text.lines().enumerate() {
         if i > 0 {
             out.push_str("\n> ");
@@ -269,17 +260,16 @@ fn parse_stage_title(line: &str) -> Result<StageContext> {
         .ok_or_else(|| anyhow::anyhow!("Missing stage pipeline/run/stage"))?
         .trim();
 
-    // Extract optional timezone from <sub>+HHMM</sub> before pipeline token.
+    // Extract timezone from <sub>+HHMM</sub> before pipeline token.
     let tz = if let Some(after_sub) = rest.strip_prefix("<sub>") {
-        if let Some(sub_end) = after_sub.find("</sub>") {
-            let tz_str = &after_sub[..sub_end];
-            rest = after_sub[sub_end + "</sub>".len()..].trim();
-            Some(tz_str)
-        } else {
-            None
-        }
+        let sub_end = after_sub
+            .find("</sub>")
+            .ok_or_else(|| anyhow::anyhow!("Missing </sub> for timezone"))?;
+        let tz_str = &after_sub[..sub_end];
+        rest = after_sub[sub_end + "</sub>".len()..].trim();
+        tz_str
     } else {
-        None
+        bail!("Missing timezone <sub> after timestamp");
     };
 
     let timestamp = report_parse_time(date, time, tz)?;
@@ -598,7 +588,7 @@ mod tests {
     #[test]
     fn parse_ignores_blockquote_comments() {
         let text = "\
-- 2024-01-01 00:00:00 main:1:**working**
+- 2024-01-01 00:00:00 <sub>+0000</sub> main:1:**working**
   - [ ] Do work <sub>ctx_rec_1</sub>
 
 > **[2024-01-01T00:30:00Z]** User says hello
@@ -631,7 +621,7 @@ mod tests {
     #[test]
     fn parse_error_on_missing_id() {
         let text = "\
-- 2024-01-01 00:00:00 main:1:**working**
+- 2024-01-01 00:00:00 <sub>+0000</sub> main:1:**working**
   - [ ] no id marker
 ";
         let result = parse_context(text);
@@ -662,7 +652,7 @@ mod tests {
         };
 
         let comments = vec![Comment {
-            timestamp: "2024-01-01T00:30:00Z".to_string(),
+            timestamp: utc("2024-01-01T00:30:00Z"),
             stage: String::new(),
             hostname: String::new(),
             tool: None,
@@ -680,7 +670,7 @@ mod tests {
 
         // Stage should come before comment (by timestamp)
         let stage_pos = output.find("main:1:**working**").unwrap();
-        let comment_pos = output.find("> **[2024-01-01T00:30:00Z]**").unwrap();
+        let comment_pos = output.find("Please hurry up!").unwrap();
         assert!(stage_pos < comment_pos);
         assert!(output.contains("Please hurry up!"));
     }
