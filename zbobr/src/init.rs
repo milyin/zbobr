@@ -189,14 +189,6 @@ fn default_workflow() -> WorkflowConfig {
                 ..Default::default()
             },
         ),
-        (
-            Stage::from("merging"),
-            StageDefinition {
-                role: Some("merger".into()),
-                prompts: task_prompt.clone(),
-                ..Default::default()
-            },
-        ),
     ]);
 
     let merge_stages = IndexMap::from([(
