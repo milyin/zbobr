@@ -28,7 +28,8 @@ steps:
     type: tool_call
     tool: add_checklist_item
     arguments:
-      text: "First item"
+      brief: "First item"
+      full_report: "Detailed description of the first checklist item."
   assertions:
     - type: success
     - type: contains
@@ -52,7 +53,8 @@ steps:
     type: tool_call
     tool: add_checklist_item
     arguments:
-      text: "Temp item"
+      brief: "Temp item"
+      full_report: "Temporary item to be deleted."
   assertions:
     - type: success
 

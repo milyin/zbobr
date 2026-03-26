@@ -125,13 +125,13 @@ impl UnifiedMcp {
     }
 
     #[tool(
-        description = "Add a new unchecked checklist item to the current stage context. Optionally stores a long description as a file."
+        description = "Add a new unchecked checklist item to the current stage context. Brief summary is stored as context record text; full report is stored as a file."
     )]
     async fn add_checklist_item(
         &self,
         Parameters(params): Parameters<AddChecklistItemParam>,
     ) -> String {
-        self.add_checklist_item_impl(&params.text, params.long_description.as_deref())
+        self.add_checklist_item_impl(&params.brief, &params.full_report)
             .await
     }
 

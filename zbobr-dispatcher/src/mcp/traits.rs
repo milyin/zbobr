@@ -155,8 +155,8 @@ pub trait CommonMcpImpl: Send + Sync {
 
     async fn add_checklist_item_impl(
         &self,
-        text: &str,
-        long_description: Option<&str>,
+        brief: &str,
+        full_report: &str,
     ) -> String {
         let tool_name = McpTool::AddChecklistItem.as_str();
         tracing::info!(
@@ -166,33 +166,29 @@ pub trait CommonMcpImpl: Send + Sync {
             tool_name,
         );
 
-        let report_link = if let Some(desc) = long_description {
-            let base_name = format!(
-                "checklist_{}_{}_{}_item",
-                self.pipeline_name(),
-                self.pipeline_run_id(),
-                self.stage_name(),
-            );
-            match self.session().store_report(&base_name, desc).await {
-                Ok(filename) => Some(filename),
-                Err(e) => {
-                    let response = format!("Error storing long description: {e}");
-                    log_mcp_string_response(
-                        self.role_name(),
-                        self.session().task_id(),
-                        tool_name,
-                        &response,
-                    );
-                    return response;
-                }
+        let base_name = format!(
+            "checklist_{}_{}_{}_item",
+            self.pipeline_name(),
+            self.pipeline_run_id(),
+            self.stage_name(),
+        );
+        let report_link = match self.session().store_report(&base_name, full_report).await {
+            Ok(filename) => Some(filename),
+            Err(e) => {
+                let response = format!("Error storing full report: {e}");
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                return response;
             }
-        } else {
-            None
         };
 
         match self
             .session()
-            .add_checkbox_record(text.to_string(), report_link)
+            .add_checkbox_record(brief.to_string(), report_link)
             .await
         {
             Ok(id) => {

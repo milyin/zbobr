@@ -35,13 +35,12 @@ pub struct ReportParam {
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct AddChecklistItemParam {
-    #[schemars(description = "Brief text describing the checklist item")]
-    pub text: String,
+    #[schemars(description = "Brief, concise summary of the checklist item (stored as context record text)")]
+    pub brief: String,
     #[schemars(
-        description = "Optional long description content (stored as a file, link added to the record)"
+        description = "Full detailed description of the checklist item (stored as a file in the task repository)"
     )]
-    #[serde(default)]
-    pub long_description: Option<String>,
+    pub full_report: String,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]

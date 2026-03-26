@@ -437,7 +437,7 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
    - Only if the plan is clear and no questions were posted, proceed to step 7.
 7. **Prepare checklist items for the worker** (only when plan is clear):
    - Review the unchecked checklist items in the context below (if any).
-   - Use `{mcp_add_checklist_item}` to add implementation steps for the worker
+   - Use `{mcp_add_checklist_item}` to add implementation steps for the worker. Each item has two parts: a **brief** summary (shown inline in the context) and a **full_report** with detailed implementation instructions (stored as a linked file). Put concise step title in brief; put file paths, code snippets, specific changes, and rationale in full_report.
    - Use `{mcp_delete_ctx_rec}` to remove unnecessary unchecked items
    - The checklist items ARE the plan — they should fully describe what the worker needs to do
 8. **Finish by calling `{mcp_report_success}`** with a brief rationale (why this approach was chosen, key design decisions, important constraints). Mention the chosen analog and why it's the right one to follow. Do NOT repeat the checklist items — the plan details are already captured there. This call finishes the session."#;
@@ -451,10 +451,10 @@ Implement an approved plan by writing code and progressing checklist items.
 The checklist is your persistent memory for this task. It survives across sessions and tells you exactly where to continue if the work is interrupted.
 
 **Key principles:**
-- The current unchecked checklist items are provided below in the context section of this prompt.
+- The current unchecked checklist items are provided below in the context section of this prompt. Each item has a brief summary shown inline and a linked file with detailed implementation instructions — read the linked files to understand what exactly needs to be done.
 - Each checklist item should describe a meaningful unit of work (for example: "add unit tests for X", "refactor module Y", "update API to validate Z").
 - Use `{mcp_check_checklist_item}` to mark items as checked when you complete them to record progress.
-- Use `{mcp_add_checklist_item}` to add new items during work if you discover additional steps needed.
+- Use `{mcp_add_checklist_item}` to add new items during work if you discover additional steps needed. Provide a brief summary and a full_report with detailed instructions.
 - Use `{mcp_delete_ctx_rec}` to remove items only if they become unnecessary (keep most items for history). **Note:** You cannot delete checked items—this prevents accidental loss of completed work history.
 
 ## Access Model
