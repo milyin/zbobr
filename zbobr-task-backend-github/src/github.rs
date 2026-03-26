@@ -1485,6 +1485,10 @@ impl TaskBackend for TaskBackendGithub {
             self.inner.backend_config.github_repo
         )
     }
+
+    fn task_repo_name(&self) -> Option<String> {
+        Some(self.inner.backend_config.github_repo.clone())
+    }
 }
 
 /*
