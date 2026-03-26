@@ -94,11 +94,24 @@ fn serialize_record(out: &mut String, record: &ContextRecord) {
     out.push_str(&record.brief);
 
     // Record ID suffix (with optional report link)
+    let id_tag = format_record_id(record.id);
     if let Some(link) = &record.report_link {
-        out.push_str(&format!(" <sub>[[ctx_rec_{}]({})]</sub>\n", record.id, link));
+        out.push_str(&format!(" <sub>{}</sub>\n", format_link(&id_tag, link)));
     } else {
-        out.push_str(&format!(" <sub>[ctx_rec_{}]</sub>\n", record.id));
+        out.push_str(&format!(" <sub>{}</sub>\n", id_tag));
     }
+}
+
+fn format_record_id(id: u64) -> String {
+    format!("ctx_rec_{}", id)
+}
+
+fn parse_record_id(s: &str) -> Option<u64> {
+    s.strip_prefix("ctx_rec_")?.parse().ok()
+}
+
+fn format_link(text: &str, url: &str) -> String {
+    format!("[{}]({})", text, url)
 }
 
 fn serialize_user_comment(out: &mut String, comment: &Comment) {
@@ -251,46 +264,33 @@ fn parse_record_line(line: &str) -> Result<Option<ContextRecord>> {
         return Ok(None);
     };
 
-    // Extract record ID from suffix.
-    // New format: <sub>[[ctx_rec_{id}](url)]</sub>  (with report link)
-    //         or: <sub>[ctx_rec_{id}]</sub>          (without report link)
-    let id_marker = "<sub>[ctx_rec_";
-    // Also handle linked variant: <sub>[[ctx_rec_
-    let linked_marker = "<sub>[[ctx_rec_";
+    // Extract <sub>...</sub> suffix containing the record ID (and optional report link)
+    let sub_start = rest
+        .rfind("<sub>")
+        .ok_or_else(|| anyhow::anyhow!("Missing <sub> marker in: {}", line))?;
+    let inner = rest[sub_start..]
+        .strip_prefix("<sub>")
+        .and_then(|s| s.strip_suffix("</sub>"))
+        .ok_or_else(|| anyhow::anyhow!("Malformed <sub>...</sub> in: {}", line))?;
 
-    let (id, report_link, id_start) = if let Some(start) = rest.rfind(linked_marker) {
-        // Linked format: <sub>[[ctx_rec_{id}](url)]</sub>
-        let after_marker = &rest[start + linked_marker.len()..];
-        let id_end = after_marker
-            .find(']')
-            .ok_or_else(|| anyhow::anyhow!("Missing closing ] for record ID in: {}", line))?;
-        let id: u64 = after_marker[..id_end]
-            .parse()
-            .with_context(|| format!("Invalid record ID in: {}", line))?;
-        let after_id = &after_marker[id_end + 1..];
-        // Expect (url)]</sub>
-        let url = after_id
-            .strip_prefix('(')
-            .and_then(|s| s.split_once(')'))
-            .map(|(url, _)| url.to_string())
-            .ok_or_else(|| anyhow::anyhow!("Malformed report link in record ID: {}", line))?;
-        (id, Some(url), start)
-    } else if let Some(start) = rest.rfind(id_marker) {
-        // Plain format: <sub>[ctx_rec_{id}]</sub>
-        let after_marker = &rest[start + id_marker.len()..];
-        let id_end = after_marker
-            .find(']')
-            .ok_or_else(|| anyhow::anyhow!("Missing closing ] for record ID in: {}", line))?;
-        let id: u64 = after_marker[..id_end]
-            .parse()
-            .with_context(|| format!("Invalid record ID in: {}", line))?;
-        (id, None, start)
+    // Inner is either a markdown link `[id_tag](url)` or a plain `id_tag`
+    let (id_tag, report_link) = if let Some((before_link, after_link)) = inner.split_once("](") {
+        // [id_tag](url)
+        let tag = before_link
+            .strip_prefix('[')
+            .ok_or_else(|| anyhow::anyhow!("Malformed link in <sub> in: {}", line))?;
+        let url = after_link
+            .strip_suffix(')')
+            .ok_or_else(|| anyhow::anyhow!("Malformed link in <sub> in: {}", line))?;
+        (tag, Some(url.to_string()))
     } else {
-        bail!("Missing record ID marker in: {}", line);
+        (inner, None)
     };
 
-    // Content is between type prefix and ID marker
-    let brief = rest[..id_start].trim().to_string();
+    let id = parse_record_id(id_tag)
+        .ok_or_else(|| anyhow::anyhow!("Invalid record ID '{}' in: {}", id_tag, line))?;
+
+    let brief = rest[..sub_start].trim().to_string();
 
     Ok(Some(ContextRecord {
         id,
@@ -387,8 +387,8 @@ mod tests {
         assert!(output.contains("prompt=prompts/plan.md"));
         assert!(output.contains("- [ ] Define API schema"));
         assert!(output.contains("- [x] Review requirements"));
-        assert!(output.contains("✅ Plan completed <sub>[[ctx_rec_3](reports/plan_success.md)]</sub>"));
-        assert!(output.contains("❌ Build failed <sub>[[ctx_rec_4](reports/build_fail.md)]</sub>"));
+        assert!(output.contains("✅ Plan completed <sub>[ctx_rec_3](reports/plan_success.md)</sub>"));
+        assert!(output.contains("❌ Build failed <sub>[ctx_rec_4](reports/build_fail.md)</sub>"));
         assert!(output.contains("💬 Retrying with fix"));
         assert!(output.contains("❓ Should we use async?"));
     }
@@ -475,12 +475,12 @@ mod tests {
     fn parse_ignores_blockquote_comments() {
         let text = "\
 <!-- Stage: main #1 working [2024-01-01T00:00:00Z] -->
-- [ ] Do work <sub>[ctx_rec_1]</sub>
+- [ ] Do work <sub>ctx_rec_1</sub>
 
 > **[2024-01-01T00:30:00Z]** User says hello
 > second line of comment
 
-✅ Done <sub>[[ctx_rec_2](r.md)]</sub>
+✅ Done <sub>[ctx_rec_2](r.md)</sub>
 ";
         let parsed = parse_context(text).unwrap();
         assert_eq!(parsed.stages.len(), 1);
@@ -495,7 +495,7 @@ mod tests {
 
     #[test]
     fn parse_error_on_record_before_stage() {
-        let text = "- [ ] orphan item <sub>[ctx_rec_1]</sub>\n";
+        let text = "- [ ] orphan item <sub>ctx_rec_1</sub>\n";
         let result = parse_context(text);
         assert!(result.is_err());
         assert!(result
