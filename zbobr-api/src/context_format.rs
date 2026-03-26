@@ -277,7 +277,7 @@ fn parse_stage_header(header: &str) -> Result<StageContext> {
 
 /// Parse a single record line. Returns Ok(None) for unrecognized lines.
 fn parse_record_line(line: &str) -> Result<Option<ContextRecord>> {
-    // Determine record type from prefix (supports both old and new formats)
+    // Determine record type from prefix
     let (record_type, rest) = if let Some(rest) = line
         .strip_prefix("- [x] ")
         .or_else(|| line.strip_prefix("- [X] "))
@@ -285,25 +285,13 @@ fn parse_record_line(line: &str) -> Result<Option<ContextRecord>> {
         (ContextRecordType::Checkbox(true), rest)
     } else if let Some(rest) = line.strip_prefix("- [ ] ") {
         (ContextRecordType::Checkbox(false), rest)
-    } else if let Some(rest) = line
-        .strip_prefix("- ✅ ")
-        .or_else(|| line.strip_prefix("✅ "))
-    {
+    } else if let Some(rest) = line.strip_prefix("- ✅ ") {
         (ContextRecordType::Success, rest)
-    } else if let Some(rest) = line
-        .strip_prefix("- ❌ ")
-        .or_else(|| line.strip_prefix("❌ "))
-    {
+    } else if let Some(rest) = line.strip_prefix("- ❌ ") {
         (ContextRecordType::Failure, rest)
-    } else if let Some(rest) = line
-        .strip_prefix("- 💬 ")
-        .or_else(|| line.strip_prefix("💬 "))
-    {
+    } else if let Some(rest) = line.strip_prefix("- 💬 ") {
         (ContextRecordType::Comment, rest)
-    } else if let Some(rest) = line
-        .strip_prefix("- ❓ ")
-        .or_else(|| line.strip_prefix("❓ "))
-    {
+    } else if let Some(rest) = line.strip_prefix("- ❓ ") {
         (ContextRecordType::Question, rest)
     } else {
         return Ok(None);
