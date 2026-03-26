@@ -9,6 +9,7 @@ use anyhow::Context;
 use clap::{Args, Parser};
 use zbobr_api::{
     CommentTag, Pipeline, Signal, StackEntry, State, config::StageDefinition, config_tools::McpTool,
+    task::{Stage, StageContext, StageInfo},
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 // bring in the generic git helpers from utility crate
@@ -408,6 +409,33 @@ impl<'a> CliStageRunner<'a> {
             .snapshot(false)
             .await?;
         let pipeline_run_id = task_snap.pipeline_run_id;
+
+        // Add a new StageContext to the task's context for this stage execution.
+        {
+            let pipeline_name = self.pipeline_name.clone();
+            let stage_name = Stage::new(self.stage_name);
+            let tool_val = Some(cli_tool);
+            let model_val = Some(model.clone());
+            let timestamp = format!("{:?}", std::time::SystemTime::now());
+            let role_session = self.zbobr.role_session(self.task_id);
+            role_session
+                .modify_task(move |mut task| {
+                    task.context.stages.push(StageContext {
+                        info: StageInfo {
+                            pipeline: pipeline_name,
+                            run_id: pipeline_run_id,
+                            stage: stage_name,
+                            tool: tool_val,
+                            model: model_val,
+                            prompt_link: None,
+                            timestamp,
+                        },
+                        records: Vec::new(),
+                    });
+                    task
+                })
+                .await?;
+        }
 
         let tool_tracker = Arc::new(std::sync::Mutex::new(None::<McpTool>));
         let prompt_holder = Arc::new(std::sync::Mutex::new(None::<String>));
