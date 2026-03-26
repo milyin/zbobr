@@ -222,7 +222,7 @@ fn default_workflow() -> WorkflowConfig {
         },
     );
 
-    let roles = HashMap::from([
+    let roles = IndexMap::from([
         (
             "preparator".into(),
             RoleDefinition {

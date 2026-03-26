@@ -43,7 +43,7 @@ impl Default for Workflow {
             config: WorkflowConfig {
                 prompts_dir: None,
                 pipelines,
-                roles: HashMap::new(),
+                roles: IndexMap::new(),
             },
         }
     }
@@ -112,7 +112,7 @@ impl Workflow {
         self.config.prompts_dir.as_ref()
     }
 
-    pub fn roles(&self) -> &HashMap<String, RoleDefinition> {
+    pub fn roles(&self) -> &IndexMap<String, RoleDefinition> {
         &self.config.roles
     }
 
