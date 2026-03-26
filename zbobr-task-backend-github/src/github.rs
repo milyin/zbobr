@@ -1419,12 +1419,18 @@ impl TaskBackend for TaskBackendGithub {
         for issue in issues {
             let id = issue.number;
             // Reuse list payload as the saved snapshot until a caller asks for refresh.
-            let task = ZbobrTaskBackendGithubImpl::issue_to_task(issue)?;
-            result.push(Box::new(GithubTaskWeak {
-                id,
-                backend: self.inner.clone(),
-                saved_snapshot: Arc::new(std::sync::Mutex::new(Some(task))),
-            }));
+            match ZbobrTaskBackendGithubImpl::issue_to_task(issue) {
+                Ok(task) => {
+                    result.push(Box::new(GithubTaskWeak {
+                        id,
+                        backend: self.inner.clone(),
+                        saved_snapshot: Arc::new(std::sync::Mutex::new(Some(task))),
+                    }));
+                }
+                Err(e) => {
+                    tracing::warn!("Skipping issue #{id}: failed to parse task: {e}");
+                }
+            }
         }
         Ok(result)
     }
