@@ -103,15 +103,15 @@ fn serialize_stage(
 }
 
 fn display_timestamp(ts: &str) -> String {
-    if ts.len() >= 20 && ts.as_bytes().get(10) == Some(&b'T') && ts.ends_with('Z') {
-        let date = &ts[..10];
-        let time = &ts[11..19];
-        return format!("{} {}", date, time);
+    // Try to parse as ISO 8601 UTC and convert to local timezone for display.
+    if let Ok(utc) = ts.parse::<chrono::DateTime<chrono::Utc>>() {
+        let local = utc.with_timezone(&chrono::Local);
+        return local.format("%Y-%m-%d %H:%M:%S %z").to_string();
     }
     ts.to_string()
 }
 
-fn parse_title_timestamp(date: &str, time: &str) -> Result<String> {
+fn parse_title_timestamp(date: &str, time: &str, tz: Option<&str>) -> Result<String> {
     if date.len() != 10
         || &date[4..5] != "-"
         || &date[7..8] != "-"
@@ -121,6 +121,14 @@ fn parse_title_timestamp(date: &str, time: &str) -> Result<String> {
     {
         bail!("Invalid stage timestamp, expected YYYY-MM-DD HH:MM:SS");
     }
+    // If timezone offset is provided, parse as local time and convert to UTC.
+    if let Some(tz_str) = tz {
+        let local_str = format!("{} {} {}", date, time, tz_str);
+        if let Ok(local) = chrono::DateTime::parse_from_str(&local_str, "%Y-%m-%d %H:%M:%S %z") {
+            return Ok(local.to_utc().format("%Y-%m-%dT%H:%M:%SZ").to_string());
+        }
+    }
+    // No timezone — assume UTC (backward compatibility).
     Ok(format!("{}T{}Z", date, time))
 }
 
@@ -236,19 +244,30 @@ fn parse_stage_title(line: &str) -> Result<StageContext> {
         .ok_or_else(|| anyhow::anyhow!("Stage title must start with '- '"))?
         .trim();
 
-    let mut parts = body.splitn(3, ' ');
+    let mut parts = body.splitn(4, ' ');
     let date = parts
         .next()
         .ok_or_else(|| anyhow::anyhow!("Missing stage date"))?;
     let time = parts
         .next()
         .ok_or_else(|| anyhow::anyhow!("Missing stage time"))?;
-    let mut rest = parts
+    let third = parts
         .next()
         .ok_or_else(|| anyhow::anyhow!("Missing stage pipeline/run/stage"))?
         .trim();
 
-    let timestamp = parse_title_timestamp(date, time)?;
+    // Third token may be a timezone offset (e.g. +0300) or the pipeline:run:**stage** part.
+    let (tz, mut rest) = if third.starts_with('+') || third.starts_with('-') {
+        let rest = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Missing stage pipeline/run/stage after timezone"))?
+            .trim();
+        (Some(third), rest)
+    } else {
+        (None, third)
+    };
+
+    let timestamp = parse_title_timestamp(date, time, tz)?;
 
     let stage_marker = ":**";
     let marker_pos = rest
@@ -467,7 +486,8 @@ mod tests {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], false, None);
 
-        assert!(output.contains("- 2024-01-01 00:00:00 main:1:**planning** `claude` `claude-opus-4.6`"));
+        // Timestamp includes local timezone offset, so match the pipeline/stage part.
+        assert!(output.contains("main:1:**planning** `claude` `claude-opus-4.6`"));
         // Prompt link visible as <sub> element
         assert!(output.contains("<sub>[prompt](prompts/plan.md)</sub>"));
         // Records indented as sub-items with list prefix
@@ -640,7 +660,7 @@ mod tests {
         let output = serialize_context(&ctx, &comments, false, None);
 
         // Stage should come before comment (by timestamp)
-        let stage_pos = output.find("- 2024-01-01 00:00:00 main:1:**working**").unwrap();
+        let stage_pos = output.find("main:1:**working**").unwrap();
         let comment_pos = output.find("> **[2024-01-01T00:30:00Z]**").unwrap();
         assert!(stage_pos < comment_pos);
         assert!(output.contains("Please hurry up!"));
