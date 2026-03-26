@@ -2,7 +2,7 @@ use std::{borrow::Cow, collections::HashMap, path::PathBuf, sync::Arc};
 
 use simpleinterpolation::Interpolation;
 use zbobr_api::{
-    Comment, HistoryRecordType, Task, classify_comment,
+    Comment, Task,
     config::{StageDefinition, WorkflowConfig},
     config_tools::McpTool,
     context_format::serialize_context,
@@ -16,8 +16,6 @@ pub const VAR_DESCRIPTION: &str = "description";
 pub const VAR_DESTINATION_REPOSITORY: &str = "destination_repository";
 pub const VAR_DESTINATION_BRANCH: &str = "destination_branch";
 pub const VAR_WORK_BRANCH: &str = "work_branch";
-pub const VAR_LAST_REPORT: &str = "last_report";
-pub const VAR_LAST_REQUEST: &str = "last_request";
 pub const VAR_CONTEXT: &str = "context";
 
 #[derive(Clone)]
@@ -164,18 +162,6 @@ pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::R
     Ok(combined)
 }
 
-/// Strip `[tool_name]\n` prefix line from comment text if present.
-pub fn strip_tool_prefix(text: &str) -> &str {
-    let first_line = text.lines().next().unwrap_or("");
-    if first_line.starts_with('[') && first_line.ends_with(']') {
-        // Skip the prefix line and the following newline
-        let rest = &text[first_line.len()..];
-        rest.strip_prefix('\n').unwrap_or(rest)
-    } else {
-        text
-    }
-}
-
 /// Build template variables from task and comments.
 pub fn build_template_variables<'a>(
     task: &'a Task,
@@ -202,29 +188,6 @@ pub fn build_template_variables<'a>(
     // context: serialized TaskContext for prompt (with for_prompt=true)
     let context_md = serialize_context(&task.context, comments, true, None);
     vars.insert(Cow::Borrowed(VAR_CONTEXT), Cow::Owned(context_md));
-
-    // last_report: last Success, Failure, or Progress comment (stripped tool prefix)
-    let last_report = comments
-        .iter()
-        .rev()
-        .find(|c| {
-            let t = classify_comment(&c.text);
-            t == HistoryRecordType::Success
-                || t == HistoryRecordType::Failure
-                || t == HistoryRecordType::Progress
-        })
-        .map(|c| strip_tool_prefix(&c.text))
-        .unwrap_or("");
-    vars.insert(Cow::Borrowed(VAR_LAST_REPORT), Cow::Borrowed(last_report));
-
-    // last_request: last user comment (Other type), fallback to task.description
-    let last_request = comments
-        .iter()
-        .rev()
-        .find(|c| classify_comment(&c.text) == HistoryRecordType::Other)
-        .map(|c| c.text.as_str())
-        .unwrap_or(&task.description);
-    vars.insert(Cow::Borrowed(VAR_LAST_REQUEST), Cow::Borrowed(last_request));
 
     vars
 }
@@ -395,23 +358,6 @@ mod tests {
         }
     }
 
-    fn dummy_comment(text: &str) -> Comment {
-        Comment {
-            timestamp: "2025-01-01T00:00:00Z".to_string(),
-            stage: "working".to_string(),
-            hostname: "test".to_string(),
-            tool: None,
-            model: None,
-            text: text.to_string(),
-            pipeline: String::new(),
-            pipeline_run_id: 0,
-            caller_pipeline: None,
-            caller_pipeline_run_id: None,
-            report_name: None,
-            prompt_name: None,
-        }
-    }
-
     fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
         let path = dir.path().join(name);
         let mut f = fs::File::create(&path).unwrap();
@@ -474,28 +420,6 @@ mod tests {
         assert_eq!(result, "absolute content");
     }
 
-    // --- strip_tool_prefix ---
-
-    #[test]
-    fn strip_tool_prefix_removes_prefix() {
-        assert_eq!(strip_tool_prefix("[report_success]\nAll good"), "All good");
-    }
-
-    #[test]
-    fn strip_tool_prefix_no_prefix() {
-        assert_eq!(strip_tool_prefix("Just text"), "Just text");
-    }
-
-    #[test]
-    fn strip_tool_prefix_empty() {
-        assert_eq!(strip_tool_prefix(""), "");
-    }
-
-    #[test]
-    fn strip_tool_prefix_prefix_only() {
-        assert_eq!(strip_tool_prefix("[report_success]"), "");
-    }
-
     // --- build_template_variables ---
 
     #[test]
@@ -507,8 +431,7 @@ mod tests {
         for expected in &[
             VAR_TITLE,
             VAR_DESCRIPTION,
-            VAR_LAST_REPORT,
-            VAR_LAST_REQUEST,
+            VAR_CONTEXT,
         ] {
             assert!(keys.contains(expected), "missing key: {expected}");
         }
@@ -553,57 +476,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn build_template_variables_last_report() {
-        let task = dummy_task("T");
-        let comments = vec![
-            dummy_comment("user request"),
-            dummy_comment("[report_success]\nAll tests passed"),
-            dummy_comment("another user msg"),
-        ];
-        let vars = build_template_variables(&task, &comments);
-        assert_eq!(
-            vars[&Cow::Borrowed(VAR_LAST_REPORT) as &Cow<str>].as_ref(),
-            "All tests passed"
-        );
-    }
-
-    #[test]
-    fn build_template_variables_last_report_failure() {
-        let task = dummy_task("T");
-        let comments = vec![dummy_comment("[report_failure]\nBuild failed")];
-        let vars = build_template_variables(&task, &comments);
-        assert_eq!(
-            vars[&Cow::Borrowed(VAR_LAST_REPORT) as &Cow<str>].as_ref(),
-            "Build failed"
-        );
-    }
-
-    #[test]
-    fn build_template_variables_last_request_from_comments() {
-        let task = dummy_task("T");
-        let comments = vec![
-            dummy_comment("Please fix the bug"),
-            dummy_comment("[report_success]\nDone"),
-        ];
-        let vars = build_template_variables(&task, &comments);
-        assert_eq!(
-            vars[&Cow::Borrowed(VAR_LAST_REQUEST) as &Cow<str>].as_ref(),
-            "Please fix the bug"
-        );
-    }
-
-    #[test]
-    fn build_template_variables_last_request_fallback_to_description() {
-        let mut task = dummy_task("T");
-        task.description = "Implement feature X".to_string();
-        let comments = vec![dummy_comment("[report_success]\nDone")];
-        let vars = build_template_variables(&task, &comments);
-        assert_eq!(
-            vars[&Cow::Borrowed(VAR_LAST_REQUEST) as &Cow<str>].as_ref(),
-            "Implement feature X"
-        );
-    }
 
     // --- template rendering ---
 

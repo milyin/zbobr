@@ -371,14 +371,6 @@ const TASK_TEMPLATE: &str = r#"---
 # Context
 
 {context}
-
-# Last report
-
-{last_report}
-
-# Last request
-
-{last_request}
 "#;
 
 const PREPARATOR_PROMPT: &str = r#"# Preparator Agent
