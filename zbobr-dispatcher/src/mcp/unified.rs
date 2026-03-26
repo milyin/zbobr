@@ -15,7 +15,8 @@ use zbobr_api::config_tools::McpTool;
 use crate::{
     mcp::{
         common::{
-            ConfigureWorktreeParam, GetFullReportParam, MessageParam, ReportParam,
+            AddChecklistItemParam, CheckChecklistItemParam, ConfigureWorktreeParam,
+            DeleteCtxRecParam, MessageParam, ReportParam,
         },
         traits::CommonMcpImpl,
     },
@@ -99,13 +100,8 @@ impl UnifiedMcp {
 
     // -- All tools defined here. Filtering happens in ServerHandler impl. --
 
-    #[tool(description = "Get the full discussion history for the current pipeline run.")]
-    async fn get_history(&self) -> String {
-        self.get_history_impl().await
-    }
-
     #[tool(
-        description = "Report successful completion of the given task. Use when all assigned work is fully done. The brief summary is stored as a comment; the full report is stored as a file for later retrieval."
+        description = "Report successful completion of the given task. Use when all assigned work is fully done. The brief summary is stored as a context record; the full report is stored as a file."
     )]
     async fn report_success(&self, Parameters(params): Parameters<ReportParam>) -> String {
         self.report_success_impl(&params.brief, &params.full_report)
@@ -113,7 +109,7 @@ impl UnifiedMcp {
     }
 
     #[tool(
-        description = "Report a failure of implementing the task. Use when work cannot be completed or results are unacceptable. The brief summary is stored as a comment; the full report is stored as a file for later retrieval."
+        description = "Report a failure of implementing the task. Use when work cannot be completed or results are unacceptable. The brief summary is stored as a context record; the full report is stored as a file."
     )]
     async fn report_failure(&self, Parameters(params): Parameters<ReportParam>) -> String {
         self.report_failure_impl(&params.brief, &params.full_report)
@@ -121,16 +117,39 @@ impl UnifiedMcp {
     }
 
     #[tool(
-        description = "Report intermediate progress of the task. Use when some work is done and some remains. The brief summary is stored as a comment; the full report is stored as a file for later retrieval."
+        description = "Report intermediate progress of the task. Use when some work is done and some remains. The brief summary is stored as a context record; the full report is stored as a file."
     )]
     async fn report_intermediate(&self, Parameters(params): Parameters<ReportParam>) -> String {
         self.report_intermediate_impl(&params.brief, &params.full_report)
             .await
     }
 
-    #[tool(description = "Retrieve the full content of a stored report file by name.")]
-    async fn get_full_report(&self, Parameters(params): Parameters<GetFullReportParam>) -> String {
-        self.get_full_report_impl(&params.name).await
+    #[tool(
+        description = "Add a new unchecked checklist item to the current stage context. Optionally stores a long description as a file."
+    )]
+    async fn add_checklist_item(
+        &self,
+        Parameters(params): Parameters<AddChecklistItemParam>,
+    ) -> String {
+        self.add_checklist_item_impl(&params.text, params.long_description.as_deref())
+            .await
+    }
+
+    #[tool(
+        description = "Mark a checklist item as checked (done). Accepts either a numeric id or a string like 'ctx_rec_5'."
+    )]
+    async fn check_checklist_item(
+        &self,
+        Parameters(params): Parameters<CheckChecklistItemParam>,
+    ) -> String {
+        self.check_checklist_item_impl(&params.id).await
+    }
+
+    #[tool(
+        description = "Delete a context record by its id. Accepts either a numeric id or a string like 'ctx_rec_5'."
+    )]
+    async fn delete_ctx_rec(&self, Parameters(params): Parameters<DeleteCtxRecParam>) -> String {
+        self.delete_ctx_rec_impl(&params.id).await
     }
 
     #[tool(description = "Report an error to the user and pause task processing")]
@@ -277,7 +296,7 @@ mod tests {
     #[test]
     fn filtering_works() {
         let router = UnifiedMcp::tool_router();
-        let allowed: HashSet<McpTool> = [McpTool::GetHistory, McpTool::StopWithError]
+        let allowed: HashSet<McpTool> = [McpTool::AddChecklistItem, McpTool::StopWithError]
             .into_iter()
             .collect();
         let all_tools = router.list_all();

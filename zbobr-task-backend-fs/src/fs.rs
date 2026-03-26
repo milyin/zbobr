@@ -449,6 +449,10 @@ impl TaskMut for FsTaskMut {
         Ok(())
     }
 
+    async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String> {
+        self.backend.store_report(self.id, base_name, content).await
+    }
+
     async fn post_comment(
         &self,
         stage: &str,

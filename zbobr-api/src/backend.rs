@@ -141,6 +141,10 @@ pub trait TaskMut: Send + Sync {
         prompt_text: Option<&str>,
     ) -> anyhow::Result<()>;
 
+    /// Store a report file, deduplicating with `_N` suffix if needed.
+    /// Returns the actual filename (without directory prefix).
+    async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String>;
+
     /// Release exclusive access, return read-only handle.
     fn downgrade(self: Box<Self>) -> Box<dyn TaskWeak>;
 }

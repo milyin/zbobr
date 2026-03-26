@@ -137,8 +137,8 @@ fn default_config_toml() -> RootConfigToml {
 /// Build the default workflow configuration with predefined pipelines and roles.
 fn default_workflow() -> WorkflowConfig {
     use McpTool::{
-        ConfigureWorktree, GetHistory, ReportFailure, ReportIntermediate, ReportSuccess,
-        StopWithError, StopWithQuestion,
+        AddChecklistItem, CheckChecklistItem, ConfigureWorktree, DeleteCtxRec, ReportFailure,
+        ReportIntermediate, ReportSuccess, StopWithError, StopWithQuestion,
     };
 
     let task_prompt = vec![PathBuf::from("task.md")];
@@ -241,10 +241,11 @@ fn default_workflow() -> WorkflowConfig {
             "planner".into(),
             RoleDefinition {
                 mcp: vec![
-                    GetHistory,
                     StopWithError,
                     StopWithQuestion,
                     ReportSuccess,
+                    AddChecklistItem,
+                    DeleteCtxRec,
                 ],
                 prompt: Some(PathBuf::from("planner.md")),
                 default_tool: None,
@@ -255,12 +256,14 @@ fn default_workflow() -> WorkflowConfig {
             "worker".into(),
             RoleDefinition {
                 mcp: vec![
-                    GetHistory,
                     StopWithError,
                     ReportSuccess,
                     ReportFailure,
                     ReportIntermediate,
                     StopWithQuestion,
+                    AddChecklistItem,
+                    CheckChecklistItem,
+                    DeleteCtxRec,
                 ],
                 prompt: Some(PathBuf::from("worker.md")),
                 default_tool: None,
@@ -271,7 +274,6 @@ fn default_workflow() -> WorkflowConfig {
             "reviewer".into(),
             RoleDefinition {
                 mcp: vec![
-                    GetHistory,
                     StopWithError,
                     ReportSuccess,
                     ReportFailure,
@@ -287,7 +289,6 @@ fn default_workflow() -> WorkflowConfig {
             "tester".into(),
             RoleDefinition {
                 mcp: vec![
-                    GetHistory,
                     StopWithError,
                     ReportSuccess,
                     ReportFailure,
@@ -301,7 +302,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             "merger".into(),
             RoleDefinition {
-                mcp: vec![GetHistory, StopWithError, ReportSuccess, StopWithQuestion],
+                mcp: vec![StopWithError, ReportSuccess, StopWithQuestion],
                 prompt: Some(PathBuf::from("merger.md")),
                 default_tool: None,
                 default_model: None,
@@ -438,7 +439,7 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 
 ## Workflow
 
-1. Read the task description, comments, and checklist provided below in this prompt. Use `{mcp_get_history}` to see the full discussion history for more context.
+1. Read the task description, context, and comments provided below in this prompt. The full history and checklist are available in the context section.
 2. If need to compare the work already done with the initial codebase, use git diff or equivalent to compare the work branch with the destination branch.
 3. **Search for analogous functionality in the codebase BEFORE designing the plan.** Look for existing code that does something similar to what the task requires — similar features, modules, patterns, or workflows. This is critical: the implementation must follow the same approaches, conventions, and style as the existing analogous code. Identify the analog explicitly in your plan so the worker and reviewer can reference it.
 4. Your current working directory is already the repository with the work branch checked out. Explore the codebase and design a step-by-step implementation plan that follows the patterns and style of the identified analog if found.
@@ -447,9 +448,9 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
    - If something is unclear or you have doubts, use `{mcp_stop_with_question}` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet. Finish the session after asking.
    - Only if the plan is clear and no questions were posted, proceed to step 7.
 7. **Prepare checklist items for the worker** (only when plan is clear):
-   - Review the unchecked checklist items provided below (if any). Use `{mcp_get_checklist}` to see the full checklist state if necessary.
+   - Review the unchecked checklist items in the context below (if any).
    - Use `{mcp_add_checklist_item}` to add implementation steps for the worker
-   - Use `{mcp_delete_checklist_item}` to remove unnecessary unchecked items
+   - Use `{mcp_delete_ctx_rec}` to remove unnecessary unchecked items
    - The checklist items ARE the plan — they should fully describe what the worker needs to do
 8. **Finish by calling `{mcp_report_success}`** with a brief rationale (why this approach was chosen, key design decisions, important constraints). Mention the chosen analog and why it's the right one to follow. Do NOT repeat the checklist items — the plan details are already captured there. This call finishes the session."#;
 
@@ -462,11 +463,11 @@ Implement an approved plan by writing code and progressing checklist items.
 The checklist is your persistent memory for this task. It survives across sessions and tells you exactly where to continue if the work is interrupted.
 
 **Key principles:**
-- The current unchecked checklist items are provided below in this prompt. Use `{mcp_get_checklist}` to refresh the checklist state during work.
+- The current unchecked checklist items are provided below in the context section of this prompt.
 - Each checklist item should describe a meaningful unit of work (for example: "add unit tests for X", "refactor module Y", "update API to validate Z").
 - Use `{mcp_check_checklist_item}` to mark items as checked when you complete them to record progress.
 - Use `{mcp_add_checklist_item}` to add new items during work if you discover additional steps needed.
-- Use `{mcp_delete_checklist_item}` to remove items only if they become unnecessary (keep most items for history). **Note:** You cannot delete checked items—this prevents accidental loss of completed work history.
+- Use `{mcp_delete_ctx_rec}` to remove items only if they become unnecessary (keep most items for history). **Note:** You cannot delete checked items—this prevents accidental loss of completed work history.
 
 ## Access Model
 
@@ -485,14 +486,14 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 
 ## Workflow
 
-1. Read the task description, work plan, comments, and checklist provided below in this prompt. Use `{mcp_get_history}` to see the full discussion history for more context.
+1. Read the task description, context, and comments provided below in this prompt. The full history and checklist are available in the context section.
 2. **Identify the analog referenced in the plan.** Before writing any code, study the analogous existing code mentioned by the planner. Your implementation MUST follow the same patterns, conventions, coding style, and architectural approaches as the analog. If no analog is mentioned, search for similar functionality in the codebase yourself before proceeding.
 3. **Work through unchecked checklist items in order.** Assume checked items were completed in previous sessions. If you sense your context window is getting close to its limit, finish your current item to a buildable state, commit your work, mark completed items as done, and call `{mcp_report_intermediate}` with a summary of what you accomplished and what remains. Never leave the code in a non-buildable state.
 4. Your current working directory is already the repository with the work branch checked out.
 5. Implement the plan in your working directory. **Follow the same patterns and style as the identified analog.** Do not invent new approaches when existing code already establishes a convention for the same kind of functionality.
 6. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality.
 7. Commit all your changes locally to the work branch with clear messages (describe what the change does, why, and reference relevant checklist item). ALWAYS ensure that you have no uncommitted changes before marking your checklist items as done.
-8. When implementation for an item is complete, mark the item done with `{mcp_check_checklist_item}`, and add follow-up items as needed.
+8. When implementation for an item is complete, mark the item done with `{mcp_check_checklist_item}` (pass the ctx_rec_N id), and add follow-up items as needed.
 9. If you need human clarification or intervention, call `{mcp_stop_with_question}`. If the plan is unclear or requires adjustment, call `{mcp_report_failure}`. In case of technical errors use `{mcp_stop_with_error}`.
 10. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
 11. When your current session's work is done, decide how to finish:
@@ -511,13 +512,14 @@ Review the implementation changes and ensure they meet coding standards and task
 ## Access Model
 
     You have read-only access to the task plan and access to the repository for inspection:
-    - The task description, work plan, worker's report, comments, and checklist are provided below in this prompt. Use `{mcp_get_history}` to read the full discussion history if needed for more context.
+    - The task description, work plan, worker's reports, and context are provided below in this prompt. The full history and checklist are available in the context section.
     - Your current working directory is already the repository with the work branch checked out — examine changes directly
     - Use `{mcp_stop_with_error}` only to report technical errors
+    - You can send multiple success or failure reports to provide detailed feedback on different aspects.
 
 ## Workflow
 
-1. Read the task description, work plan, worker's report, comments, and checklist provided below in this prompt. Note if the analog solution in the existing code is referenced in the plan.
+1. Read the task description, work plan, worker's reports, and context provided below in this prompt. Note if the analog solution in the existing code is referenced in the plan.
 2. **Inspect all changes made in this task**: Use `git diff origin/<destination_branch>...HEAD` (three dots) to see ALL changes introduced by this task relative to the base branch. Do NOT checkout the base branch (it may conflict with worktree setup). You can also use `git log origin/<destination_branch>..HEAD` to see all commits in this branch.
 3. **Verify the analog choice and pattern consistency**: Check that the planner chose an appropriate analog for the new functionality. Then verify that the implementation consistently follows the same patterns, conventions, coding style, and architectural approaches as the analog. Flag any deviations — new code should look like it was written by the same author as the existing analogous code. If the analog was poorly chosen, note this as a review finding.
 4. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. **Do not run any tests yourself; testing is handled separately.**
@@ -542,13 +544,14 @@ Run comprehensive tests to verify the implementation meets all testing requireme
 ## Access Model
 
 You have read-only access to the task plan and the repository for testing:
-- The task description, work plan, worker's report, comments, and checklist are provided below in this prompt. Use `{mcp_get_history}` to read the full discussion history if needed for more context.
+- The task description, work plan, worker's reports, and context are provided below in this prompt. The full history and checklist are available in the context section.
 - Your current working directory is the repository with the work branch checked out
 - Use `{mcp_stop_with_error}` only to report technical errors
+- You can send multiple success or failure reports to provide detailed feedback on different aspects.
 
 ## Workflow
 
-1. Read the task description, work plan, worker's report, comments, and checklist provided below in this prompt.
+1. Read the task description, work plan, worker's reports, and context provided below in this prompt.
 2. **Independently discover testing infrastructure:**
    - Examine CI and build configuration files (`.github/workflows/`, `Makefile`, `Cargo.toml`, `tox.ini`, `CMakeLists.txt`, or equivalent)
    - Identify test frameworks and commands (cargo test, npm test, pytest, etc.)
@@ -590,7 +593,7 @@ The framework attempted to merge changes into the work branch and encountered co
 ## Access Model
 
 You have read access to the task and repository:
-- The task description, work plan, reports, comments, and checklist are provided below in this prompt.
+- The task description, work plan, reports, and context are provided below in this prompt.
 - Your current working directory is already the repository with the work branch checked out and the merge in progress (conflict markers present)
 - Use `{mcp_stop_with_question}` to ask the user for clarification on conflict resolution
 - Use `{mcp_stop_with_error}` to report when conflicts cannot be resolved
@@ -601,7 +604,7 @@ You have read access to the task and repository:
 
 ## Workflow
 
-1. Read the task description, work plan, reports, comments, and checklist provided below in this prompt. Use `{mcp_get_history}` to see the full discussion history for more context.
+1. Read the task description, work plan, reports, and context provided below in this prompt. The full history and checklist are available in the context section.
 2. Your current working directory is the repository in a mid-merge conflict state. Examine the conflicts:
    - `git status` to see which files have conflicts
    - `git diff` to examine conflict markers and understand what changed in each branch

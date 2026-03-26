@@ -1,7 +1,8 @@
 use zbobr_api::config_tools::McpTool;
+use zbobr_api::task::ContextRecordType;
 
 use crate::{
-    mcp::common::get_hostname,
+    mcp::common::{get_hostname, parse_ctx_rec_id},
     task::{Model, RoleSession, Tool},
 };
 
@@ -67,42 +68,6 @@ pub trait CommonMcpImpl: Send + Sync {
         self.session().record_tool_call(tool);
     }
 
-    // -- History tools --
-
-    async fn get_history_impl(&self) -> String {
-        tracing::info!(
-            "[{}#{}] get_history",
-            self.role_name(),
-            self.session().task_id(),
-        );
-
-        match self
-            .session()
-            .get_history_for_run(self.pipeline_run_id())
-            .await
-        {
-            Ok(text) => {
-                log_mcp_string_response(
-                    self.role_name(),
-                    self.session().task_id(),
-                    McpTool::GetHistory.as_str(),
-                    &text,
-                );
-                text
-            }
-            Err(e) => {
-                let response = format!("Error: {e}");
-                log_mcp_string_response(
-                    self.role_name(),
-                    self.session().task_id(),
-                    McpTool::GetHistory.as_str(),
-                    &response,
-                );
-                response
-            }
-        }
-    }
-
     // -- Report tools --
 
     async fn report_impl(&self, tool: McpTool, brief: &str, full_report: &str) -> String {
@@ -114,26 +79,42 @@ pub trait CommonMcpImpl: Send + Sync {
             tool_name,
         );
 
-        let hostname = get_hostname();
-        let body = format!("[{tool_name}]\n{brief}");
+        // Determine context record type from the tool
+        let record_type = match tool {
+            McpTool::ReportSuccess => ContextRecordType::Success,
+            McpTool::ReportFailure => ContextRecordType::Failure,
+            _ => ContextRecordType::Comment,
+        };
 
+        // Store the report file and get the link
+        let base_name = format!(
+            "report_{}_{}_{}_{}",
+            self.pipeline_name(),
+            self.pipeline_run_id(),
+            self.stage_name(),
+            tool_name,
+        );
+        let report_link = match self.session().store_report(&base_name, full_report).await {
+            Ok(filename) => Some(filename),
+            Err(e) => {
+                let response = format!("Error storing report: {e}");
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                return response;
+            }
+        };
+
+        // Add context record (results stored in context, not as comments)
         if let Err(e) = self
             .session()
-            .post_comment(
-                &body,
-                self.stage_name(),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-                Some(full_report),
-            )
+            .add_context_record(record_type, brief.to_string(), report_link)
             .await
         {
-            tracing::error!(
-                "Failed to post {tool_name} message for task {}: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Error posting {tool_name} message: {e}");
+            let response = format!("Error adding context record: {e}");
             log_mcp_string_response(
                 self.role_name(),
                 self.session().task_id(),
@@ -170,25 +151,220 @@ pub trait CommonMcpImpl: Send + Sync {
             .await
     }
 
-    async fn get_full_report_impl(&self, name: &str) -> String {
+    // -- Checklist / context record tools --
+
+    async fn add_checklist_item_impl(
+        &self,
+        text: &str,
+        long_description: Option<&str>,
+    ) -> String {
+        let tool_name = McpTool::AddChecklistItem.as_str();
         tracing::info!(
-            "[{}#{}] get_full_report name={}",
+            "[{}#{}] {}",
             self.role_name(),
             self.session().task_id(),
-            name,
+            tool_name,
         );
 
-        let response = match self.session().read_report(name).await {
-            Ok(content) => content,
-            Err(e) => format!("Error: {e}"),
+        let report_link = if let Some(desc) = long_description {
+            let base_name = format!(
+                "checklist_{}_{}_{}_item",
+                self.pipeline_name(),
+                self.pipeline_run_id(),
+                self.stage_name(),
+            );
+            match self.session().store_report(&base_name, desc).await {
+                Ok(filename) => Some(filename),
+                Err(e) => {
+                    let response = format!("Error storing long description: {e}");
+                    log_mcp_string_response(
+                        self.role_name(),
+                        self.session().task_id(),
+                        tool_name,
+                        &response,
+                    );
+                    return response;
+                }
+            }
+        } else {
+            None
         };
-        log_mcp_string_response(
+
+        match self
+            .session()
+            .add_checkbox_record(text.to_string(), report_link)
+            .await
+        {
+            Ok(id) => {
+                let response = format!("Checklist item added (ctx_rec_{id})");
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                response
+            }
+            Err(e) => {
+                let response = format!("Error: {e}");
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                response
+            }
+        }
+    }
+
+    async fn check_checklist_item_impl(&self, id_str: &str) -> String {
+        let tool_name = McpTool::CheckChecklistItem.as_str();
+        tracing::info!(
+            "[{}#{}] {} id={}",
             self.role_name(),
             self.session().task_id(),
-            McpTool::GetFullReport.as_str(),
-            &response,
+            tool_name,
+            id_str,
         );
-        response
+
+        let record_id = match parse_ctx_rec_id(id_str) {
+            Ok(id) => id,
+            Err(e) => {
+                let response = format!("Error: {e}");
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                return response;
+            }
+        };
+
+        // Verify the record exists and is a checkbox
+        let task = match self.session().get_task().await {
+            Ok(t) => t,
+            Err(e) => {
+                let response = format!("Error: {e}");
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                return response;
+            }
+        };
+
+        match task.context.find_record(record_id) {
+            Some((_, record)) => {
+                if !matches!(record.record_type, ContextRecordType::Checkbox(_)) {
+                    let response = format!(
+                        "Error: record ctx_rec_{} is not a checkbox (it is a {})",
+                        record_id, record.record_type
+                    );
+                    log_mcp_string_response(
+                        self.role_name(),
+                        self.session().task_id(),
+                        tool_name,
+                        &response,
+                    );
+                    return response;
+                }
+            }
+            None => {
+                let response = format!("Error: record ctx_rec_{} not found", record_id);
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                return response;
+            }
+        }
+
+        match self.session().check_checkbox_record(record_id).await {
+            Ok(()) => {
+                let response = format!("Checklist item ctx_rec_{} checked", record_id);
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                response
+            }
+            Err(e) => {
+                let response = format!("Error: {e}");
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                response
+            }
+        }
+    }
+
+    async fn delete_ctx_rec_impl(&self, id_str: &str) -> String {
+        let tool_name = McpTool::DeleteCtxRec.as_str();
+        tracing::info!(
+            "[{}#{}] {} id={}",
+            self.role_name(),
+            self.session().task_id(),
+            tool_name,
+            id_str,
+        );
+
+        let record_id = match parse_ctx_rec_id(id_str) {
+            Ok(id) => id,
+            Err(e) => {
+                let response = format!("Error: {e}");
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                return response;
+            }
+        };
+
+        match self.session().delete_context_record(record_id).await {
+            Ok(true) => {
+                let response = format!("Record ctx_rec_{} deleted", record_id);
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                response
+            }
+            Ok(false) => {
+                let response = format!("Error: record ctx_rec_{} not found", record_id);
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                response
+            }
+            Err(e) => {
+                let response = format!("Error: {e}");
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                response
+            }
+        }
     }
 
     async fn stop_with_error_impl(&self, message: &str) -> String {

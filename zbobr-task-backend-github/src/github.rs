@@ -1276,6 +1276,10 @@ impl TaskMut for GithubTaskMut {
         self.backend.close_task_internal(self.id).await
     }
 
+    async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String> {
+        self.backend.store_report(self.id, base_name, content).await
+    }
+
     async fn post_comment(
         &self,
         stage: &str,

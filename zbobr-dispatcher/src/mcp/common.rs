@@ -34,9 +34,46 @@ pub struct ReportParam {
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct GetFullReportParam {
-    #[schemars(description = "Report filename (as shown in the history)")]
-    pub name: String,
+pub struct AddChecklistItemParam {
+    #[schemars(description = "Brief text describing the checklist item")]
+    pub text: String,
+    #[schemars(
+        description = "Optional long description content (stored as a file, link added to the record)"
+    )]
+    #[serde(default)]
+    pub long_description: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct CheckChecklistItemParam {
+    #[schemars(
+        description = "Context record ID to check — either a numeric id or a string like 'ctx_rec_5'"
+    )]
+    pub id: String,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct DeleteCtxRecParam {
+    #[schemars(
+        description = "Context record ID to delete — either a numeric id or a string like 'ctx_rec_5'"
+    )]
+    pub id: String,
+}
+
+/// Parse a context record ID from either a numeric string or `ctx_rec_N` format.
+pub fn parse_ctx_rec_id(id: &str) -> Result<u64, String> {
+    if let Ok(n) = id.parse::<u64>() {
+        return Ok(n);
+    }
+    if let Some(n_str) = id.strip_prefix("ctx_rec_") {
+        if let Ok(n) = n_str.parse::<u64>() {
+            return Ok(n);
+        }
+    }
+    Err(format!(
+        "Invalid context record ID '{}': expected a number or 'ctx_rec_N'",
+        id
+    ))
 }
 
 // -- Worktree configuration --

@@ -290,6 +290,104 @@ impl RoleSession {
         weak.read_report(name).await
     }
 
+    /// Store a report file via the task backend. Returns the stored filename.
+    pub async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String> {
+        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
+        let mutable = weak.upgrade().await?;
+        mutable.store_report(base_name, content).await
+    }
+
+    /// Add a checkbox context record to the current stage.
+    /// Returns the assigned record id.
+    pub async fn add_checkbox_record(
+        &self,
+        brief: String,
+        report_link: Option<String>,
+    ) -> anyhow::Result<u64> {
+        self.modify_task(move |mut task| {
+            let id = task.context.next_id();
+            if let Some(stage) = task.context.stages.last_mut() {
+                stage.records.push(ContextRecord {
+                    id,
+                    record_type: ContextRecordType::Checkbox(false),
+                    brief,
+                    report_link,
+                });
+            }
+            task
+        })
+        .await?;
+        // Re-read to get the actual assigned id
+        let task = self.get_task().await?;
+        let last_id = task
+            .context
+            .stages
+            .last()
+            .and_then(|s| s.records.last())
+            .map(|r| r.id)
+            .unwrap_or(0);
+        Ok(last_id)
+    }
+
+    /// Check (mark as done) a checkbox context record by id.
+    pub async fn check_checkbox_record(&self, record_id: u64) -> anyhow::Result<()> {
+        self.modify_task(move |mut task| {
+            if let Some((_, record)) = task.context.find_record_mut(record_id) {
+                if let ContextRecordType::Checkbox(_) = record.record_type {
+                    record.record_type = ContextRecordType::Checkbox(true);
+                }
+            }
+            task
+        })
+        .await
+    }
+
+    /// Delete a context record by id.
+    pub async fn delete_context_record(&self, record_id: u64) -> anyhow::Result<bool> {
+        let task_before = self.get_task().await?;
+        let exists = task_before.context.find_record(record_id).is_some();
+        if exists {
+            self.modify_task(move |mut task| {
+                task.context.delete_record(record_id);
+                task
+            })
+            .await?;
+        }
+        Ok(exists)
+    }
+
+    /// Add a context record of a specific type to the current stage.
+    /// Returns the assigned record id.
+    pub async fn add_context_record(
+        &self,
+        record_type: ContextRecordType,
+        brief: String,
+        report_link: Option<String>,
+    ) -> anyhow::Result<u64> {
+        self.modify_task(move |mut task| {
+            let id = task.context.next_id();
+            if let Some(stage) = task.context.stages.last_mut() {
+                stage.records.push(ContextRecord {
+                    id,
+                    record_type,
+                    brief,
+                    report_link,
+                });
+            }
+            task
+        })
+        .await?;
+        let task = self.get_task().await?;
+        let last_id = task
+            .context
+            .stages
+            .last()
+            .and_then(|s| s.records.last())
+            .map(|r| r.id)
+            .unwrap_or(0);
+        Ok(last_id)
+    }
+
     /// Record a tool call for transition mapping.
     /// Only `report_success`, `report_failure`, and `report_intermediate` are meaningful transition triggers.
     pub fn record_tool_call(&self, tool: McpTool) {
@@ -702,6 +800,10 @@ mod comment_model_tests {
             Ok(())
         }
 
+        async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String> {
+            Ok(self.mock_store_report(base_name, content).await)
+        }
+
         async fn post_comment(
             &self,
             stage: &str,
@@ -891,7 +993,7 @@ mod comment_model_tests {
 
         let session = zbobr.role_session(id);
         let allowed_tools: std::collections::HashSet<zbobr_api::config_tools::McpTool> = [
-            zbobr_api::config_tools::McpTool::GetHistory,
+            zbobr_api::config_tools::McpTool::AddChecklistItem,
             zbobr_api::config_tools::McpTool::StopWithError,
             zbobr_api::config_tools::McpTool::ReportSuccess,
         ]
@@ -1022,12 +1124,35 @@ mod comment_model_tests {
     }
 
     #[tokio::test]
-    async fn report_success_posts_comment_to_backend() {
+    async fn report_success_stores_context_records() {
         let (zbobr, task_backend) = make_test_parts();
         let id = zbobr
             .create_task("t", "desc", "READY", None, None)
             .await
             .unwrap();
+
+        // Add a stage context so records can be attached
+        {
+            let session = zbobr.role_session(id);
+            session
+                .modify_task(|mut task| {
+                    task.context.stages.push(StageContext {
+                        info: StageInfo {
+                            pipeline: Pipeline::Main,
+                            run_id: 1,
+                            stage: Stage::new("working"),
+                            tool: Some(Tool::Copilot),
+                            model: Some(Model::Gpt5Mini),
+                            prompt_link: None,
+                            timestamp: "2025-01-01T00:00:00Z".to_string(),
+                        },
+                        records: Vec::new(),
+                    });
+                    task
+                })
+                .await
+                .unwrap();
+        }
 
         let mcp = make_test_mcp(&zbobr, id);
 
@@ -1038,32 +1163,26 @@ mod comment_model_tests {
             .report_failure_impl("needs work", "detailed failure report")
             .await;
 
+        // Reports are stored as context records, not comments
         let weak = task_backend.get_task(id).await.unwrap();
-        let backend_comments = weak.get_comments().await.unwrap();
-        assert_eq!(
-            backend_comments.len(),
-            2,
-            "each comment must be posted separately"
-        );
-        assert!(backend_comments[0].text.starts_with("[report_success]"));
-        assert_eq!(
-            backend_comments[0].report_name.as_deref(),
-            Some("report_main_1_working_success.md")
-        );
-        assert!(backend_comments[1].text.starts_with("[report_failure]"));
-        assert_eq!(
-            backend_comments[1].report_name.as_deref(),
-            Some("report_main_1_working_failure.md")
-        );
+        let task = weak.snapshot(false).await.unwrap();
+        let records = &task.context.stages[0].records;
+        assert_eq!(records.len(), 2, "two context records should be added");
+        assert_eq!(records[0].record_type, ContextRecordType::Success);
+        assert_eq!(records[0].brief, "result one");
+        assert!(records[0].report_link.is_some());
+        assert_eq!(records[1].record_type, ContextRecordType::Failure);
+        assert_eq!(records[1].brief, "needs work");
+        assert!(records[1].report_link.is_some());
 
         // Verify reports were stored and are readable
         let success_report = weak
-            .read_report("report_main_1_working_success.md")
+            .read_report(records[0].report_link.as_ref().unwrap())
             .await
             .unwrap();
         assert_eq!(success_report, "detailed success report");
         let failure_report = weak
-            .read_report("report_main_1_working_failure.md")
+            .read_report(records[1].report_link.as_ref().unwrap())
             .await
             .unwrap();
         assert_eq!(failure_report, "detailed failure report");
