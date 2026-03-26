@@ -324,7 +324,7 @@ pub fn pipeline_from_state(state: &State) -> Option<Pipeline> {
 
 #[cfg(test)]
 mod tests {
-    use zbobr_api::config::{PipelineConfig, StageDefinition, WorkflowConfig};
+    use zbobr_api::{TaskContext, config::{PipelineConfig, StageDefinition, WorkflowConfig}};
 
     use super::*;
 

@@ -1,8 +1,7 @@
 use anyhow::{Context as _, Result, bail};
 
 use crate::task::{
-    Comment, ContextRecord, ContextRecordType, Pipeline, Stage, StageContext, StageInfo,
-    TaskContext,
+    Comment, ContextRecord, ContextRecordType, Stage, StageContext, StageInfo, TaskContext,
 };
 
 /// Serialize a `TaskContext` into markdown format, optionally interspersing
@@ -156,6 +155,8 @@ pub fn parse_context(text: &str) -> Result<TaskContext> {
         if trimmed.starts_with("<!--") {
             continue;
         }
+
+        bail!("Unrecognized line in context: {}", trimmed);
     }
 
     Ok(TaskContext { stages })
@@ -292,7 +293,7 @@ fn parse_record_line(line: &str) -> Result<Option<ContextRecord>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task::Model;
+    use crate::task::{Model, Pipeline};
 
     fn sample_context() -> TaskContext {
         TaskContext {

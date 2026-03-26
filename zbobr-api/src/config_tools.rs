@@ -12,10 +12,6 @@ pub enum McpTool {
     StopWithError,
     StopWithQuestion,
     ConfigureWorktree,
-    GetChecklist,
-    AddChecklistItem,
-    CheckChecklistItem,
-    DeleteChecklistItem,
 }
 
 impl McpTool {
@@ -29,10 +25,6 @@ impl McpTool {
             Self::StopWithError => "stop_with_error",
             Self::StopWithQuestion => "stop_with_question",
             Self::ConfigureWorktree => "configure_worktree",
-            Self::GetChecklist => "get_checklist",
-            Self::AddChecklistItem => "add_checklist_item",
-            Self::CheckChecklistItem => "check_checklist_item",
-            Self::DeleteChecklistItem => "delete_checklist_item",
         }
     }
 
@@ -60,10 +52,6 @@ impl FromStr for McpTool {
             "stop_with_error" => Ok(Self::StopWithError),
             "stop_with_question" => Ok(Self::StopWithQuestion),
             "configure_worktree" => Ok(Self::ConfigureWorktree),
-            "get_checklist" => Ok(Self::GetChecklist),
-            "add_checklist_item" => Ok(Self::AddChecklistItem),
-            "check_checklist_item" => Ok(Self::CheckChecklistItem),
-            "delete_checklist_item" => Ok(Self::DeleteChecklistItem),
             other => Err(format!("unknown MCP tool: {other}")),
         }
     }
@@ -78,10 +66,6 @@ pub const ALL_TOOLS: &[McpTool] = &[
     McpTool::StopWithError,
     McpTool::StopWithQuestion,
     McpTool::ConfigureWorktree,
-    McpTool::GetChecklist,
-    McpTool::AddChecklistItem,
-    McpTool::CheckChecklistItem,
-    McpTool::DeleteChecklistItem,
 ];
 
 /// All possible static MCP tool names across all roles.
@@ -94,8 +78,4 @@ pub const ALL_TOOL_NAMES: &[&str] = &[
     McpTool::StopWithError.as_str(),
     McpTool::StopWithQuestion.as_str(),
     McpTool::ConfigureWorktree.as_str(),
-    McpTool::GetChecklist.as_str(),
-    McpTool::AddChecklistItem.as_str(),
-    McpTool::CheckChecklistItem.as_str(),
-    McpTool::DeleteChecklistItem.as_str(),
 ];

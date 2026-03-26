@@ -137,8 +137,8 @@ fn default_config_toml() -> RootConfigToml {
 /// Build the default workflow configuration with predefined pipelines and roles.
 fn default_workflow() -> WorkflowConfig {
     use McpTool::{
-        AddChecklistItem, CheckChecklistItem, ConfigureWorktree, DeleteChecklistItem, GetChecklist,
-        GetHistory, ReportFailure, ReportIntermediate, ReportSuccess, StopWithError, StopWithQuestion,
+        ConfigureWorktree, GetHistory, ReportFailure, ReportIntermediate, ReportSuccess,
+        StopWithError, StopWithQuestion,
     };
 
     let task_prompt = vec![PathBuf::from("task.md")];
@@ -245,9 +245,6 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithError,
                     StopWithQuestion,
                     ReportSuccess,
-                    GetChecklist,
-                    AddChecklistItem,
-                    DeleteChecklistItem,
                 ],
                 prompt: Some(PathBuf::from("planner.md")),
                 default_tool: None,
@@ -264,10 +261,6 @@ fn default_workflow() -> WorkflowConfig {
                     ReportFailure,
                     ReportIntermediate,
                     StopWithQuestion,
-                    GetChecklist,
-                    AddChecklistItem,
-                    CheckChecklistItem,
-                    DeleteChecklistItem,
                 ],
                 prompt: Some(PathBuf::from("worker.md")),
                 default_tool: None,
