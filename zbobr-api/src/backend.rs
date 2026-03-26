@@ -184,6 +184,11 @@ pub trait TaskBackend: Send + Sync {
 
     /// Return a debug string of the backend state.
     fn debug_state(&self) -> String;
+
+    /// Return the "owner/repo" name of the task repository, if available.
+    fn task_repo_name(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Extension trait for higher-level operations built on TaskBackend + TaskWeak/TaskMut.
@@ -232,7 +237,11 @@ pub trait WorktreeBackend: Send + Sync {
     ) -> anyhow::Result<bool>;
 
     /// Ensure a PR exists for the work branch (no push). Returns PR URL.
-    async fn ensure_pr_url(&self, identity: &TaskIdentity) -> anyhow::Result<String>;
+    async fn ensure_pr_url(
+        &self,
+        identity: &TaskIdentity,
+        body: Option<&str>,
+    ) -> anyhow::Result<String>;
 
     /// Validate connectivity to the repo hosting service.
     async fn validate_connectivity(&self) -> anyhow::Result<()>;

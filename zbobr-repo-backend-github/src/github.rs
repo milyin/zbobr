@@ -905,6 +905,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
     async fn ensure_pr_url(
         &self,
         identity: &zbobr_api::task::TaskIdentity,
+        body: Option<&str>,
     ) -> anyhow::Result<String> {
         let work_branch = &identity.work_branch;
         let destination_repo = &identity.destination_repository;
@@ -937,7 +938,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             "title": work_branch,
             "head": work_branch,
             "base": base_branch,
-            "body": "",
+            "body": body.unwrap_or(""),
         });
 
         let create_result: Result<PrResponse, octocrab::Error> =
