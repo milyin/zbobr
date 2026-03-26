@@ -200,7 +200,7 @@ pub fn build_template_variables<'a>(
     }
 
     // context: serialized TaskContext for prompt (with for_prompt=true)
-    let context_md = serialize_context(&task.context, comments, true);
+    let context_md = serialize_context(&task.context, comments, true, None);
     vars.insert(Cow::Borrowed(VAR_CONTEXT), Cow::Owned(context_md));
 
     // last_report: last Success, Failure, or Progress comment (stripped tool prefix)

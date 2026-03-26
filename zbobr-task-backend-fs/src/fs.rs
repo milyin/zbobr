@@ -453,6 +453,10 @@ impl TaskMut for FsTaskMut {
         self.backend.store_report(self.id, base_name, content).await
     }
 
+    fn report_url(&self, filename: &str) -> String {
+        filename.to_string()
+    }
+
     async fn post_comment(
         &self,
         stage: &str,

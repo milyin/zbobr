@@ -338,6 +338,17 @@ impl ZbobrTaskBackendGithubImpl {
         self.backend_config.parse_repo()
     }
 
+    /// Build a URL prefix for report files of the given task, usable as a closure
+    /// for `serialize_context` / `serialize_description_full`.
+    fn report_url_prefix(&self, task_id: u64) -> Option<String> {
+        let (owner, repo) = self.parse_repo().ok()?;
+        let branch = self.reports_branch().unwrap_or("main");
+        let reports_path = self.reports_path();
+        Some(format!(
+            "https://github.com/{owner}/{repo}/blob/{branch}/{reports_path}/task_{task_id}/"
+        ))
+    }
+
     /// Returns the configured reports branch, if any.
     fn reports_branch(&self) -> Option<&str> {
         self.backend_config.reports_branch.as_deref()
@@ -919,16 +930,23 @@ impl ZbobrTaskBackendGithubImpl {
         let original_signal = task.signal.clone();
         let original_pause = task.pause;
         let original_confirm = task.confirm;
+        let url_prefix = self.report_url_prefix(id);
+        let make_url = |filename: &str| -> String {
+            match &url_prefix {
+                Some(prefix) => format!("{prefix}{filename}"),
+                None => filename.to_string(),
+            }
+        };
         let expected_description = task.etag.clone().unwrap_or_else(|| {
             let string_params = Self::task_to_string_params(&task);
-            serialize_description_full(&task.description, &string_params, &task.error, &task.context)
+            serialize_description_full(&task.description, &string_params, &task.error, &task.context, Some(&make_url))
         });
 
         let task = mutate(task);
 
         let string_params = Self::task_to_string_params(&task);
         let new_description =
-            serialize_description_full(&task.description, &string_params, &task.error, &task.context);
+            serialize_description_full(&task.description, &string_params, &task.error, &task.context, Some(&make_url));
 
         // Write description with retry and conflict detection
         const MAX_RETRIES: u32 = 3;
@@ -950,6 +968,7 @@ impl ZbobrTaskBackendGithubImpl {
                         &sp,
                         &current_task.error,
                         &current_task.context,
+                        Some(&make_url),
                     )
                 }
             };
@@ -1280,6 +1299,13 @@ impl TaskMut for GithubTaskMut {
         self.backend.store_report(self.id, base_name, content).await
     }
 
+    fn report_url(&self, filename: &str) -> String {
+        match self.backend.report_url_prefix(self.id) {
+            Some(prefix) => format!("{prefix}{filename}"),
+            None => filename.to_string(),
+        }
+    }
+
     async fn post_comment(
         &self,
         stage: &str,
@@ -1410,7 +1436,7 @@ impl TaskBackend for TaskBackendGithub {
         state: State,
     ) -> anyhow::Result<u64> {
         let (owner, repo) = self.inner.parse_repo()?;
-        let body = serialize_description_full(description, &HashMap::new(), &None, &TaskContext::default());
+        let body = serialize_description_full(description, &HashMap::new(), &None, &TaskContext::default(), None);
 
         let issue = retry_github("create issue", || async {
             let issues = self.inner.octocrab.issues(owner, repo);

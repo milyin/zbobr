@@ -8,10 +8,14 @@ use crate::task::{
 /// user comments (placed by timestamp).
 ///
 /// When `for_prompt` is true, prompt links are omitted from stage headers.
+///
+/// `report_url` converts a report filename into a display URL for the link.
+/// Pass `None` to use the filename as-is.
 pub fn serialize_context(
     ctx: &TaskContext,
     comments: &[Comment],
     for_prompt: bool,
+    report_url: Option<&dyn Fn(&str) -> String>,
 ) -> String {
     if ctx.stages.is_empty() && comments.is_empty() {
         return String::new();
@@ -39,7 +43,7 @@ pub fn serialize_context(
     for (_ts, event) in &events {
         match event {
             Event::Stage(stage) => {
-                serialize_stage(&mut result, stage, for_prompt);
+                serialize_stage(&mut result, stage, for_prompt, report_url);
             }
             Event::Comment(comment) => {
                 serialize_user_comment(&mut result, comment);
@@ -50,7 +54,12 @@ pub fn serialize_context(
     result
 }
 
-fn serialize_stage(out: &mut String, stage: &StageContext, for_prompt: bool) {
+fn serialize_stage(
+    out: &mut String,
+    stage: &StageContext,
+    for_prompt: bool,
+    report_url: Option<&dyn Fn(&str) -> String>,
+) {
     // Stage header: <!-- Stage: {pipeline} #{run_id} {stage} [{timestamp}] ... -->
     out.push_str(&format!(
         "<!-- Stage: {} #{} {} [{}]",
@@ -73,13 +82,17 @@ fn serialize_stage(out: &mut String, stage: &StageContext, for_prompt: bool) {
 
     // Records
     for record in &stage.records {
-        serialize_record(out, record);
+        serialize_record(out, record, report_url);
     }
 
     out.push('\n');
 }
 
-fn serialize_record(out: &mut String, record: &ContextRecord) {
+fn serialize_record(
+    out: &mut String,
+    record: &ContextRecord,
+    report_url: Option<&dyn Fn(&str) -> String>,
+) {
     // Type prefix
     match &record.record_type {
         ContextRecordType::Checkbox(false) => out.push_str("- [ ] "),
@@ -95,8 +108,12 @@ fn serialize_record(out: &mut String, record: &ContextRecord) {
 
     // Record ID suffix (with optional report link)
     let id_tag = format_record_id(record.id);
-    if let Some(link) = &record.report_link {
-        out.push_str(&format!(" <sub>{}</sub>\n", format_link(&id_tag, link)));
+    if let Some(filename) = &record.report_link {
+        let url = match report_url {
+            Some(f) => f(filename),
+            None => filename.clone(),
+        };
+        out.push_str(&format!(" <sub>{}</sub>\n", format_link(&id_tag, &url)));
     } else {
         out.push_str(&format!(" <sub>{}</sub>\n", id_tag));
     }
@@ -379,7 +396,7 @@ mod tests {
     #[test]
     fn serialize_basic() {
         let ctx = sample_context();
-        let output = serialize_context(&ctx, &[], false);
+        let output = serialize_context(&ctx, &[], false, None);
 
         assert!(output.contains("<!-- Stage: main #1 planning [2024-01-01T00:00:00Z]"));
         assert!(output.contains("tool=claude"));
@@ -396,7 +413,7 @@ mod tests {
     #[test]
     fn serialize_for_prompt_omits_prompt_link() {
         let ctx = sample_context();
-        let output = serialize_context(&ctx, &[], true);
+        let output = serialize_context(&ctx, &[], true, None);
 
         assert!(!output.contains("prompt="));
         // Other metadata should still be present
@@ -406,7 +423,7 @@ mod tests {
     #[test]
     fn parse_basic() {
         let ctx = sample_context();
-        let serialized = serialize_context(&ctx, &[], false);
+        let serialized = serialize_context(&ctx, &[], false, None);
         let parsed = parse_context(&serialized).unwrap();
 
         assert_eq!(parsed.stages.len(), 2);
@@ -437,7 +454,7 @@ mod tests {
     #[test]
     fn roundtrip_preserves_data() {
         let original = sample_context();
-        let serialized = serialize_context(&original, &[], false);
+        let serialized = serialize_context(&original, &[], false, None);
         let parsed = parse_context(&serialized).unwrap();
 
         assert_eq!(parsed.stages.len(), original.stages.len());
@@ -464,7 +481,7 @@ mod tests {
     #[test]
     fn roundtrip_for_prompt_loses_prompt_link() {
         let original = sample_context();
-        let serialized = serialize_context(&original, &[], true);
+        let serialized = serialize_context(&original, &[], true, None);
         let parsed = parse_context(&serialized).unwrap();
 
         // prompt_link should be None since for_prompt=true omitted it
@@ -552,7 +569,7 @@ mod tests {
             prompt_name: None,
         }];
 
-        let output = serialize_context(&ctx, &comments, false);
+        let output = serialize_context(&ctx, &comments, false, None);
 
         // Stage should come before comment (by timestamp)
         let stage_pos = output.find("<!-- Stage:").unwrap();
@@ -564,7 +581,7 @@ mod tests {
     #[test]
     fn empty_context() {
         let ctx = TaskContext::default();
-        let output = serialize_context(&ctx, &[], false);
+        let output = serialize_context(&ctx, &[], false, None);
         assert_eq!(output, "");
 
         let parsed = parse_context("").unwrap();

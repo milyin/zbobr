@@ -145,6 +145,11 @@ pub trait TaskMut: Send + Sync {
     /// Returns the actual filename (without directory prefix).
     async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String>;
 
+    /// Convert a report filename into a browsable URL.
+    /// For GitHub: full `https://github.com/…/blob/…` URL.
+    /// For local fs: returns the filename as-is.
+    fn report_url(&self, filename: &str) -> String;
+
     /// Release exclusive access, return read-only handle.
     fn downgrade(self: Box<Self>) -> Box<dyn TaskWeak>;
 }
