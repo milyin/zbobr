@@ -32,6 +32,7 @@ pub trait ToolExecutor: Send + Sync {
     /// * `role` - The role (Planner or Worker)
     /// * `model` - The AI model to use
     /// * `port` - The MCP server port
+    /// * `system_prompt` - Optional system prompt (role prompt) for tools that support it
     /// * `prompt` - The prompt text for the tool
     /// * `work_dir` - The agent working directory (repo subdirectory for non-Preparator roles)
     /// * `mcp_url` - The MCP server URL
@@ -45,6 +46,7 @@ pub trait ToolExecutor: Send + Sync {
         task_id: u64,
         role: &str,
         port: u16,
+        system_prompt: Option<&str>,
         prompt: &str,
         work_dir: &Path,
         mcp_url: &str,

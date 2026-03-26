@@ -10,6 +10,13 @@ use zbobr_api::{
 
 use crate::{backend::TaskBackend, workflow::Workflow};
 
+/// A prompt split into an optional system (role) part and a main (task) part.
+/// Claude receives the system part via `--system-prompt`; Copilot concatenates both.
+pub struct SplitPrompt {
+    pub system_prompt: Option<String>,
+    pub prompt: String,
+}
+
 // Template placeholder names used in prompt .md files.
 pub const VAR_TITLE: &str = "title";
 pub const VAR_DESCRIPTION: &str = "description";
@@ -98,6 +105,80 @@ impl ConfiguredPromptBuilder {
             pipeline_scope,
         )
     }
+
+    /// Build a split prompt for a stage definition (system/role prompt separate from task prompt).
+    pub async fn build_for_stage_split(
+        &self,
+        stage_def: &StageDefinition,
+        task_id: u64,
+        task_backend: &dyn TaskBackend,
+        pipeline_scope: Option<(&str, u64)>,
+    ) -> anyhow::Result<SplitPrompt> {
+        let weak = task_backend.get_task(task_id).await?;
+        let task = weak.snapshot(false).await?;
+        let comments = weak.get_comments().await?;
+        self.build_for_stage_split_with_task(stage_def, &task, &comments, pipeline_scope)
+    }
+
+    /// Build a split prompt using provided task and comments.
+    pub fn build_for_stage_split_with_task(
+        &self,
+        stage_def: &StageDefinition,
+        task: &Task,
+        comments: &[Comment],
+        pipeline_scope: Option<(&str, u64)>,
+    ) -> anyhow::Result<SplitPrompt> {
+        let role_name = stage_def.role_name().unwrap_or("");
+        let mut vars = build_template_variables(task, comments, pipeline_scope);
+
+        let allowed_tools: Vec<McpTool> = self
+            .workflow
+            .config()
+            .role_definition(role_name)
+            .map(|d| d.mcp.clone())
+            .unwrap_or_else(|| McpTool::all().to_vec());
+        add_mcp_tool_variables(&mut vars, &allowed_tools);
+
+        for (k, v) in &self.extra_vars {
+            vars.insert(Cow::Owned(k.clone()), Cow::Owned(v.clone()));
+        }
+
+        let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
+            .into_iter()
+            .map(|(k, v)| (k, Cow::Owned(v.into_owned())))
+            .collect();
+
+        let role_files =
+            role_prompt_files_for_stage(stage_def, self.workflow.config());
+        let role_text = load_prompts(&role_files, self.base_path.as_ref())?;
+        let system_prompt = if role_text.is_empty() {
+            None
+        } else {
+            Some(render_prompt(&role_text, &owned_vars)?)
+        };
+
+        let task_files =
+            task_prompt_files_for_stage(stage_def, self.workflow.config());
+        let task_text = load_prompts(&task_files, self.base_path.as_ref())?;
+        let prompt = render_prompt(&task_text, &owned_vars)?;
+
+        Ok(SplitPrompt {
+            system_prompt,
+            prompt,
+        })
+    }
+}
+
+/// Render a prompt template with the given variables.
+fn render_prompt(
+    template_str: &str,
+    vars: &HashMap<Cow<str>, Cow<str>>,
+) -> anyhow::Result<String> {
+    let template = Interpolation::new(template_str)
+        .map_err(|e| anyhow::anyhow!("Failed to parse prompt template: {e}"))?;
+    template
+        .try_render(vars)
+        .map_err(|e| anyhow::anyhow!("Failed to render prompt template: {e}"))
 }
 
 /// Collect prompt file paths from a StageDefinition.
@@ -132,6 +213,52 @@ pub fn prompt_files_for_stage(
             .collect();
     }
     files
+}
+
+/// Collect role prompt file paths from a StageDefinition.
+/// Returns the single role prompt file (from `role_prompt` or from the role definition).
+pub fn role_prompt_files_for_stage(
+    stage_def: &StageDefinition,
+    workflow: &WorkflowConfig,
+) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    if let Some(ref main) = stage_def.role_prompt {
+        files.push(main.clone());
+    } else if let Some(role_def) = stage_def
+        .role_name()
+        .and_then(|r| workflow.role_definition(r))
+    {
+        if let Some(ref prompt_path) = role_def.prompt {
+            files.push(prompt_path.clone());
+        }
+    }
+    resolve_prompt_paths(files, workflow)
+}
+
+/// Collect task (non-role) prompt file paths from a StageDefinition.
+pub fn task_prompt_files_for_stage(
+    stage_def: &StageDefinition,
+    workflow: &WorkflowConfig,
+) -> Vec<PathBuf> {
+    resolve_prompt_paths(stage_def.prompts.clone(), workflow)
+}
+
+/// Resolve relative prompt paths using the workflow's `prompts_dir`.
+fn resolve_prompt_paths(files: Vec<PathBuf>, workflow: &WorkflowConfig) -> Vec<PathBuf> {
+    if let Some(ref prompts_dir) = workflow.prompts_dir {
+        files
+            .into_iter()
+            .map(|p| {
+                if p.is_relative() {
+                    prompts_dir.join(&p)
+                } else {
+                    p
+                }
+            })
+            .collect()
+    } else {
+        files
+    }
 }
 
 /// Load and concatenate multiple prompt files.
@@ -865,5 +992,85 @@ mod tests {
             err.to_string().contains("mcp_configure_worktree"),
             "error should name the unavailable tool: {err}"
         );
+    }
+
+    // --- split prompt helpers ---
+
+    #[test]
+    fn role_prompt_files_for_stage_returns_role_prompt() {
+        let workflow = WorkflowConfig::default();
+        let stage = StageDefinition {
+            role_prompt: Some(PathBuf::from("role.md")),
+            prompts: vec![PathBuf::from("task.md")],
+            ..Default::default()
+        };
+        let role_files = role_prompt_files_for_stage(&stage, &workflow);
+        assert_eq!(role_files, vec![PathBuf::from("role.md")]);
+    }
+
+    #[test]
+    fn task_prompt_files_for_stage_returns_task_prompts() {
+        let workflow = WorkflowConfig::default();
+        let stage = StageDefinition {
+            role_prompt: Some(PathBuf::from("role.md")),
+            prompts: vec![PathBuf::from("task1.md"), PathBuf::from("task2.md")],
+            ..Default::default()
+        };
+        let task_files = task_prompt_files_for_stage(&stage, &workflow);
+        assert_eq!(
+            task_files,
+            vec![PathBuf::from("task1.md"), PathBuf::from("task2.md")]
+        );
+    }
+
+    #[test]
+    fn split_prompt_builder_splits_role_and_task() {
+        let dir = TempDir::new().unwrap();
+        write_file(&dir, "role.md", "You are a {title} expert");
+        write_file(&dir, "task.md", "Do the work on {title}");
+
+        let workflow = WorkflowConfig::default();
+        let workflow = crate::workflow::Workflow::from_config(workflow);
+        let builder =
+            ConfiguredPromptBuilder::new(Some(dir.path().to_path_buf()), Arc::new(workflow));
+
+        let stage = StageDefinition {
+            role_prompt: Some(PathBuf::from("role.md")),
+            prompts: vec![PathBuf::from("task.md")],
+            ..Default::default()
+        };
+        let task = dummy_task("Rust");
+        let split = builder
+            .build_for_stage_split_with_task(&stage, &task, &[], None)
+            .unwrap();
+
+        assert_eq!(
+            split.system_prompt.as_deref(),
+            Some("You are a Rust expert")
+        );
+        assert_eq!(split.prompt, "Do the work on Rust");
+    }
+
+    #[test]
+    fn split_prompt_builder_no_role_gives_none_system_prompt() {
+        let dir = TempDir::new().unwrap();
+        write_file(&dir, "task.md", "Do the work on {title}");
+
+        let workflow = WorkflowConfig::default();
+        let workflow = crate::workflow::Workflow::from_config(workflow);
+        let builder =
+            ConfiguredPromptBuilder::new(Some(dir.path().to_path_buf()), Arc::new(workflow));
+
+        let stage = StageDefinition {
+            prompts: vec![PathBuf::from("task.md")],
+            ..Default::default()
+        };
+        let task = dummy_task("Rust");
+        let split = builder
+            .build_for_stage_split_with_task(&stage, &task, &[], None)
+            .unwrap();
+
+        assert!(split.system_prompt.is_none());
+        assert_eq!(split.prompt, "Do the work on Rust");
     }
 }

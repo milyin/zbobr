@@ -28,6 +28,7 @@ impl ToolExecutor for CopilotExecutor {
         task_id: u64,
         role: &str,
         _port: u16,
+        system_prompt: Option<&str>,
         prompt: &str,
         work_dir: &Path,
         mcp_url: &str,
@@ -63,6 +64,16 @@ impl ToolExecutor for CopilotExecutor {
         tracing::info!("MCP endpoint: {mcp_url}");
         tracing::debug!("MCP config JSON: {}", mcp_config_str);
 
+        // Copilot does not support a separate system prompt flag, so prepend it to the prompt.
+        let combined_prompt;
+        let effective_prompt = match system_prompt {
+            Some(sp) => {
+                combined_prompt = format!("{sp}\n\n{prompt}");
+                combined_prompt.as_str()
+            }
+            None => prompt,
+        };
+
         let args = [
             "--model",
             model_name,
@@ -72,7 +83,7 @@ impl ToolExecutor for CopilotExecutor {
             "--allow-all-tools",
             "--allow-all-urls",
             "-p",
-            prompt,
+            effective_prompt,
         ];
 
         let mut cmd = tokio::process::Command::new("copilot");

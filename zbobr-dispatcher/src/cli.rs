@@ -282,11 +282,19 @@ impl<'a> CliStageRunner<'a> {
         State::running(self.pipeline_name.clone(), self.stage_name)
     }
 
-    async fn prompt(&self, pipeline_run_id: u64) -> anyhow::Result<String> {
+    async fn split_prompt(
+        &self,
+        pipeline_run_id: u64,
+    ) -> anyhow::Result<crate::prompts::SplitPrompt> {
         let scope = Some((self.pipeline_name.as_str(), pipeline_run_id));
         self.zbobr
             .prompt_builder()
-            .build_for_stage(self.stage_def, self.task_id, self.zbobr.task_backend(), scope)
+            .build_for_stage_split(
+                self.stage_def,
+                self.task_id,
+                self.zbobr.task_backend(),
+                scope,
+            )
             .await
     }
 
@@ -439,8 +447,13 @@ impl<'a> CliStageRunner<'a> {
             assigned_port, role, self.task_id,
         );
 
-        let prompt_text = self.prompt(pipeline_run_id).await?;
-        *prompt_holder.lock().unwrap() = Some(prompt_text.clone());
+        let split = self.split_prompt(pipeline_run_id).await?;
+        // Store combined prompt for debugging (used by MCP prompt holder).
+        let combined_for_debug = match &split.system_prompt {
+            Some(sp) => format!("{sp}\n\n{}", split.prompt),
+            None => split.prompt.clone(),
+        };
+        *prompt_holder.lock().unwrap() = Some(combined_for_debug);
         let executor = self
             .zbobr
             .build_executor(cli_tool, model.clone(), self.mcp_tester_override);
@@ -455,7 +468,8 @@ impl<'a> CliStageRunner<'a> {
             self.task_id,
             role,
             assigned_port,
-            &prompt_text,
+            split.system_prompt.as_deref(),
+            &split.prompt,
             &work_dir,
             &mcp_url,
             self.zbobr,
@@ -1476,6 +1490,7 @@ async fn execute_tool(
     task_id: u64,
     role: &str,
     assigned_port: u16,
+    system_prompt: Option<&str>,
     prompt: &str,
     work_dir: &Path,
     mcp_url: &str,
@@ -1484,7 +1499,7 @@ async fn execute_tool(
     let agent_token = &zbobr.config().agent_github_token;
 
     tokio::select! {
-        result = executor.execute(task_id, role, assigned_port, prompt, work_dir, mcp_url, agent_token, copilot_token) => {
+        result = executor.execute(task_id, role, assigned_port, system_prompt, prompt, work_dir, mcp_url, agent_token, copilot_token) => {
             match result {
                 Ok(()) => SessionOutcome {
                     execution_interrupted: false,
