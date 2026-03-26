@@ -60,12 +60,25 @@ fn serialize_stage(
     for_prompt: bool,
     report_url: Option<&dyn Fn(&str) -> String>,
 ) {
-    // Stage header: <!-- Stage: {pipeline} #{run_id} {stage} [{timestamp}] ... -->
+    // Visible stage header as a top-level list item
     out.push_str(&format!(
-        "<!-- Stage: {} #{} {} [{}]",
-        stage.info.pipeline, stage.info.run_id, stage.info.stage, stage.info.timestamp,
+        "- **{} #{} {}**",
+        stage.info.pipeline, stage.info.run_id, stage.info.stage,
     ));
 
+    // Show tool and model visibly
+    if let Some(tool) = &stage.info.tool {
+        out.push_str(&format!(" `{}`", tool));
+    }
+    if let Some(model) = &stage.info.model {
+        out.push_str(&format!(" `{}`", model));
+    }
+
+    // HTML comment with full metadata for parsing
+    out.push_str(&format!(
+        " <!-- Stage: {} #{} {} [{}]",
+        stage.info.pipeline, stage.info.run_id, stage.info.stage, stage.info.timestamp,
+    ));
     if let Some(tool) = &stage.info.tool {
         out.push_str(&format!(" tool={}", tool));
     }
@@ -77,11 +90,11 @@ fn serialize_stage(
             out.push_str(&format!(" prompt={}", prompt_link));
         }
     }
-
     out.push_str(" -->\n");
 
-    // Records
+    // Records (indented as sub-items)
     for record in &stage.records {
+        out.push_str("  ");
         serialize_record(out, record, report_url);
     }
 
@@ -93,14 +106,14 @@ fn serialize_record(
     record: &ContextRecord,
     report_url: Option<&dyn Fn(&str) -> String>,
 ) {
-    // Type prefix
+    // Type prefix (all records are list items for proper nesting)
     match &record.record_type {
         ContextRecordType::Checkbox(false) => out.push_str("- [ ] "),
         ContextRecordType::Checkbox(true) => out.push_str("- [x] "),
-        ContextRecordType::Success => out.push_str("✅ "),
-        ContextRecordType::Failure => out.push_str("❌ "),
-        ContextRecordType::Comment => out.push_str("💬 "),
-        ContextRecordType::Question => out.push_str("❓ "),
+        ContextRecordType::Success => out.push_str("- ✅ "),
+        ContextRecordType::Failure => out.push_str("- ❌ "),
+        ContextRecordType::Comment => out.push_str("- 💬 "),
+        ContextRecordType::Question => out.push_str("- ❓ "),
     }
 
     // Brief description
@@ -163,15 +176,17 @@ pub fn parse_context(text: &str) -> Result<TaskContext> {
             continue;
         }
 
-        // Parse stage header
-        if let Some(header) = trimmed.strip_prefix("<!-- Stage: ") {
+        // Parse stage header — look for <!-- Stage: anywhere in the line
+        // (new format has visible text before the HTML comment)
+        if let Some(pos) = trimmed.find("<!-- Stage: ") {
+            let header = &trimmed[pos + "<!-- Stage: ".len()..];
             let stage = parse_stage_header(header)
                 .with_context(|| format!("Failed to parse stage header: {}", trimmed))?;
             stages.push(stage);
             continue;
         }
 
-        // Parse record lines
+        // Parse record lines (may be indented as sub-items in new format)
         if let Some(record) = parse_record_line(trimmed)? {
             let current_stage = stages.last_mut().ok_or_else(|| {
                 anyhow::anyhow!("Context record found before any stage header: {}", trimmed)
@@ -262,20 +277,33 @@ fn parse_stage_header(header: &str) -> Result<StageContext> {
 
 /// Parse a single record line. Returns Ok(None) for unrecognized lines.
 fn parse_record_line(line: &str) -> Result<Option<ContextRecord>> {
-    // Determine record type from prefix
-    let (record_type, rest) = if let Some(rest) = line.strip_prefix("- [x] ") {
-        (ContextRecordType::Checkbox(true), rest)
-    } else if let Some(rest) = line.strip_prefix("- [X] ") {
+    // Determine record type from prefix (supports both old and new formats)
+    let (record_type, rest) = if let Some(rest) = line
+        .strip_prefix("- [x] ")
+        .or_else(|| line.strip_prefix("- [X] "))
+    {
         (ContextRecordType::Checkbox(true), rest)
     } else if let Some(rest) = line.strip_prefix("- [ ] ") {
         (ContextRecordType::Checkbox(false), rest)
-    } else if let Some(rest) = line.strip_prefix("✅ ") {
+    } else if let Some(rest) = line
+        .strip_prefix("- ✅ ")
+        .or_else(|| line.strip_prefix("✅ "))
+    {
         (ContextRecordType::Success, rest)
-    } else if let Some(rest) = line.strip_prefix("❌ ") {
+    } else if let Some(rest) = line
+        .strip_prefix("- ❌ ")
+        .or_else(|| line.strip_prefix("❌ "))
+    {
         (ContextRecordType::Failure, rest)
-    } else if let Some(rest) = line.strip_prefix("💬 ") {
+    } else if let Some(rest) = line
+        .strip_prefix("- 💬 ")
+        .or_else(|| line.strip_prefix("💬 "))
+    {
         (ContextRecordType::Comment, rest)
-    } else if let Some(rest) = line.strip_prefix("❓ ") {
+    } else if let Some(rest) = line
+        .strip_prefix("- ❓ ")
+        .or_else(|| line.strip_prefix("❓ "))
+    {
         (ContextRecordType::Question, rest)
     } else {
         return Ok(None);
@@ -398,16 +426,20 @@ mod tests {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], false, None);
 
+        // Visible stage header as list item
+        assert!(output.contains("- **main #1 planning** `claude` `claude-opus-4.6`"));
+        // HTML comment with full metadata
         assert!(output.contains("<!-- Stage: main #1 planning [2024-01-01T00:00:00Z]"));
         assert!(output.contains("tool=claude"));
         assert!(output.contains("model=claude-opus-4.6"));
         assert!(output.contains("prompt=prompts/plan.md"));
-        assert!(output.contains("- [ ] Define API schema"));
-        assert!(output.contains("- [x] Review requirements"));
-        assert!(output.contains("✅ Plan completed <sub>[ctx_rec_3](reports/plan_success.md)</sub>"));
-        assert!(output.contains("❌ Build failed <sub>[ctx_rec_4](reports/build_fail.md)</sub>"));
-        assert!(output.contains("💬 Retrying with fix"));
-        assert!(output.contains("❓ Should we use async?"));
+        // Records indented as sub-items with list prefix
+        assert!(output.contains("  - [ ] Define API schema"));
+        assert!(output.contains("  - [x] Review requirements"));
+        assert!(output.contains("  - ✅ Plan completed <sub>[ctx_rec_3](reports/plan_success.md)</sub>"));
+        assert!(output.contains("  - ❌ Build failed <sub>[ctx_rec_4](reports/build_fail.md)</sub>"));
+        assert!(output.contains("  - 💬 Retrying with fix"));
+        assert!(output.contains("  - ❓ Should we use async?"));
     }
 
     #[test]
@@ -491,13 +523,13 @@ mod tests {
     #[test]
     fn parse_ignores_blockquote_comments() {
         let text = "\
-<!-- Stage: main #1 working [2024-01-01T00:00:00Z] -->
-- [ ] Do work <sub>ctx_rec_1</sub>
+- **main #1 working** <!-- Stage: main #1 working [2024-01-01T00:00:00Z] -->
+  - [ ] Do work <sub>ctx_rec_1</sub>
 
 > **[2024-01-01T00:30:00Z]** User says hello
 > second line of comment
 
-✅ Done <sub>[ctx_rec_2](r.md)</sub>
+  - ✅ Done <sub>[ctx_rec_2](r.md)</sub>
 ";
         let parsed = parse_context(text).unwrap();
         assert_eq!(parsed.stages.len(), 1);
@@ -512,7 +544,7 @@ mod tests {
 
     #[test]
     fn parse_error_on_record_before_stage() {
-        let text = "- [ ] orphan item <sub>ctx_rec_1</sub>\n";
+        let text = "  - [ ] orphan item <sub>ctx_rec_1</sub>\n";
         let result = parse_context(text);
         assert!(result.is_err());
         assert!(result
@@ -524,8 +556,8 @@ mod tests {
     #[test]
     fn parse_error_on_missing_id() {
         let text = "\
-<!-- Stage: main #1 working [2024-01-01T00:00:00Z] -->
-- [ ] no id marker
+- **main #1 working** <!-- Stage: main #1 working [2024-01-01T00:00:00Z] -->
+  - [ ] no id marker
 ";
         let result = parse_context(text);
         assert!(result.is_err());
