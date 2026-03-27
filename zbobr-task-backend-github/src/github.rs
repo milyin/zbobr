@@ -26,6 +26,13 @@ const STATE_LABEL_READY: &str = "ready";
 const STATE_LABEL_PENDING: &str = "pending";
 const STATE_LABEL_RUNNING: &str = "running";
 
+// -- Flag name constants --
+
+const FLAG_PAUSE: &str = "pause";
+const FLAG_CONFIRM: &str = "confirm";
+
+const ALL_FLAG_NAMES: &[&str] = &[FLAG_PAUSE, FLAG_CONFIRM];
+
 const ALL_STATE_LABEL_NAMES: &[&str] = &[
     STATE_LABEL_DONE,
     STATE_LABEL_PAUSE,
@@ -393,7 +400,7 @@ impl ZbobrTaskBackendGithubImpl {
     async fn apply_flag_change(&self, id: u64, pause: bool, confirm: bool) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        for (flag_name, desired) in [("pause", pause), ("confirm", confirm)] {
+        for (flag_name, desired) in [(FLAG_PAUSE, pause), (FLAG_CONFIRM, confirm)] {
             let label = Self::flag_to_label(flag_name);
             if desired {
                 let labels: Vec<String> = vec![label];
@@ -570,7 +577,7 @@ impl ZbobrTaskBackendGithubImpl {
 
         const FLAG_LABEL_COLOR: &str = "f9d0c4";
 
-        for flag_name in ["pause", "confirm"] {
+        for flag_name in ALL_FLAG_NAMES {
             let flag_label = Self::flag_to_label(flag_name);
             let flag_desc = format!("Flag: {}", flag_name);
             if !existing_labels.contains(&flag_label) {
@@ -609,6 +616,25 @@ impl ZbobrTaskBackendGithubImpl {
             }
         }
 
+        // Delete obsolete managed labels (state:* or flag:* not in the expected set)
+        let flag_labels: Vec<String> = ALL_FLAG_NAMES
+            .iter()
+            .map(|f| Self::flag_to_label(f))
+            .collect();
+        let expected_labels: std::collections::HashSet<&str> = state_labels
+            .iter()
+            .map(|s| s.as_str())
+            .chain(flag_labels.iter().map(|s| s.as_str()))
+            .collect();
+        for label in &existing_labels {
+            if (label.starts_with(STATE_PREFIX) || label.starts_with(FLAG_PREFIX))
+                && !expected_labels.contains(label.as_str())
+            {
+                tracing::info!("Deleting obsolete label '{label}'");
+                self.delete_label(label).await?;
+            }
+        }
+
         tracing::info!(
             "GitHub setup complete for {}",
             self.backend_config.github_repo
@@ -644,12 +670,12 @@ impl ZbobrTaskBackendGithubImpl {
         let pause = issue
             .labels
             .iter()
-            .any(|l| Self::label_to_flag(&l.name) == Some("pause"));
+            .any(|l| Self::label_to_flag(&l.name) == Some(FLAG_PAUSE));
 
         let confirm = issue
             .labels
             .iter()
-            .any(|l| Self::label_to_flag(&l.name) == Some("confirm"));
+            .any(|l| Self::label_to_flag(&l.name) == Some(FLAG_CONFIRM));
 
         Ok(Task {
             id: issue.number,
