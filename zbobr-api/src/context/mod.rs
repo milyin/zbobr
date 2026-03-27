@@ -767,7 +767,7 @@ mod tests {
         let output = serialize_context(&ctx, &[], false, None);
 
         assert!(output.contains("main:1:**planning** `claude` `claude-opus-4.6`"));
-        assert!(output.contains("<sub>[prompt](prompts/plan.md)</sub>"));
+        assert!(output.contains("<sub>[2024-01-01 00:00:00 +0000](prompts/plan.md)</sub>"));
         assert!(output.contains("  - [ ] Define API schema"));
         assert!(output.contains("  - [x] Review requirements"));
         assert!(output.contains(
@@ -784,7 +784,7 @@ mod tests {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], true, None);
 
-        assert!(!output.contains("<sub>[prompt]"));
+        assert!(!output.contains("](prompts/plan.md)"));
         assert!(output.contains("`claude` `claude-opus-4.6`"));
     }
 
@@ -865,10 +865,10 @@ mod tests {
     #[test]
     fn parse_ignores_blockquote_comments() {
         let text = "\
-- 2024-01-01 00:00:00 <sub>+0000</sub> main:1:**working**
+- main:1:**working** <sub>2024-01-01 00:00:00 +0000</sub>
   - [ ] Do work <sub>ctx_rec_1</sub>
 
-> **[2024-01-01T00:30:00Z]** User says hello
+> **[2024-01-01 00:00:30 <sub>+0000</sub>]** User says hello
 > second line of comment
 
   - ✅ Done <sub>[ctx_rec_2](r.md)</sub>
@@ -898,7 +898,7 @@ mod tests {
     #[test]
     fn parse_error_on_missing_id() {
         let text = "\
-- 2024-01-01 00:00:00 <sub>+0000</sub> main:1:**working**
+- main:1:**working** <sub>2024-01-01 00:00:00 +0000</sub>
   - [ ] no id marker
 ";
         let result = parse_context(text);
@@ -1000,7 +1000,7 @@ mod tests {
         assert!(!output
             .contains("https://github.com/org/repo/blob/reports/reports/task_1/https://"));
         assert!(output.contains(
-            "[prompt](https://github.com/org/repo/blob/reports/reports/task_1/prompt.md)"
+            "](https://github.com/org/repo/blob/reports/reports/task_1/prompt.md)"
         ));
     }
 

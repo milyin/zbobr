@@ -2,7 +2,12 @@
 //!
 //! The stage title is a markdown line with the format:
 //! ```text
-//! YYYY-MM-DD HH:MM:SS <sub>+HHMM</sub> pipeline:run_id:**stage** `tool` `model` <sub>[prompt](url)</sub>
+//! pipeline:run_id:**stage** `tool` `model` <sub>[YYYY-MM-DD HH:MM:SS +HHMM](prompt_url)</sub>
+//! ```
+//!
+//! When there is no prompt link the trailing `<sub>` contains just the timestamp:
+//! ```text
+//! pipeline:run_id:**stage** `tool` `model` <sub>YYYY-MM-DD HH:MM:SS +HHMM</sub>
 //! ```
 //!
 //! This module provides [`MdStageTitle`] which can be converted to/from a string
@@ -59,20 +64,6 @@ impl From<MdStageTitle> for StageInfo {
 
 // -- Display (serialization) -------------------------------------------------
 
-/// Wrapper: `YYYY-MM-DD HH:MM:SS <sub>+HHMM</sub>`
-struct ReportTime<'a>(&'a chrono::DateTime<chrono::FixedOffset>);
-
-impl fmt::Display for ReportTime<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} <sub>{}</sub>",
-            self.0.format("%Y-%m-%d %H:%M:%S"),
-            self.0.format("%z"),
-        )
-    }
-}
-
 /// Wrapper: `pipeline:run_id:**stage**`
 struct PipelineStage<'a> {
     pipeline: &'a Pipeline,
@@ -95,21 +86,16 @@ impl<T: fmt::Display> fmt::Display for Backtick<T> {
     }
 }
 
-/// Wrapper: `<sub>[prompt](url)</sub>`
-struct PromptLink<'a>(&'a str);
-
-impl fmt::Display for PromptLink<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<sub>[prompt]({})</sub>", self.0)
-    }
+/// Format a timestamp as `YYYY-MM-DD HH:MM:SS +HHMM`.
+fn format_timestamp(ts: &chrono::DateTime<chrono::FixedOffset>) -> String {
+    format!("{} {}", ts.format("%Y-%m-%d %H:%M:%S"), ts.format("%z"))
 }
 
 impl fmt::Display for MdStageTitle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} {}",
-            ReportTime(&self.timestamp),
+            "{}",
             PipelineStage {
                 pipeline: &self.pipeline,
                 run_id: self.run_id,
@@ -122,8 +108,11 @@ impl fmt::Display for MdStageTitle {
         if let Some(model) = &self.model {
             write!(f, " {}", Backtick(model))?;
         }
+        let ts = format_timestamp(&self.timestamp);
         if let Some(link) = &self.prompt_link {
-            write!(f, " {}", PromptLink(link))?;
+            write!(f, " <sub>[{}]({})</sub>", ts, link)?;
+        } else {
+            write!(f, " <sub>{}</sub>", ts)?;
         }
         Ok(())
     }
@@ -138,16 +127,12 @@ impl FromStr for MdStageTitle {
         let s = s.strip_prefix("- ").unwrap_or(s).trim();
         let mut rest = s;
 
-        // 1. Timestamp: everything up to and including first </sub>
-        let timestamp = parse_next_report_time(&mut rest)?;
-
-        // 2. pipeline:run_id:**stage**
+        // 1. pipeline:run_id:**stage**
         let (pipeline, run_id, stage) = parse_next_pipeline_stage(&mut rest)?;
 
-        // 3. Optional backtick tokens (tool, model) and <sub> elements
+        // 2. Optional backtick tokens (tool, model)
         let mut tool = None;
         let mut model = None;
-        let mut prompt_link = None;
 
         while !rest.is_empty() {
             if let Some(value) = try_parse_next_backtick(&mut rest) {
@@ -158,15 +143,11 @@ impl FromStr for MdStageTitle {
                 }
                 continue;
             }
-            if let Some(inner) = try_parse_next_sub(&mut rest) {
-                if let Some(url) = parse_markdown_link(&inner) {
-                    prompt_link = Some(url);
-                }
-                // Non-link <sub> content — skip.
-                continue;
-            }
             break;
         }
+
+        // 3. Trailing <sub>...</sub> with timestamp and optional prompt link
+        let (timestamp, prompt_link) = parse_trailing_timestamp_sub(&mut rest)?;
 
         Ok(MdStageTitle {
             timestamp,
@@ -196,27 +177,6 @@ impl<'de> serde::Deserialize<'de> for MdStageTitle {
 }
 
 // -- Parsing helpers ----------------------------------------------------------
-
-fn parse_next_report_time(
-    rest: &mut &str,
-) -> Result<chrono::DateTime<chrono::FixedOffset>> {
-    let sub_end_tag = "</sub>";
-    let pos = rest
-        .find(sub_end_tag)
-        .ok_or_else(|| anyhow::anyhow!("Missing </sub> timezone in stage title"))?;
-    let ts_str = &rest[..pos + sub_end_tag.len()];
-    *rest = rest[pos + sub_end_tag.len()..].trim();
-
-    // Extract timezone from <sub>...</sub>
-    let sub_start = ts_str
-        .find("<sub>")
-        .ok_or_else(|| anyhow::anyhow!("Missing <sub> in timestamp"))?;
-    let datetime_part = ts_str[..sub_start].trim();
-    let tz = &ts_str[sub_start + "<sub>".len()..ts_str.len() - sub_end_tag.len()];
-    let full = format!("{} {}", datetime_part, tz);
-    chrono::DateTime::parse_from_str(&full, "%Y-%m-%d %H:%M:%S %z")
-        .with_context(|| format!("Invalid timestamp: {}", ts_str))
-}
 
 fn parse_next_pipeline_stage(rest: &mut &str) -> Result<(Pipeline, u64, Stage)> {
     let stage_marker = ":**";
@@ -262,12 +222,36 @@ fn try_parse_next_sub(rest: &mut &str) -> Option<String> {
     Some(inner)
 }
 
-/// Parse a markdown link `[label](url)` and return the url.
-fn parse_markdown_link(s: &str) -> Option<String> {
+/// Parse a markdown link `[label](url)` and return `(label, url)`.
+fn parse_markdown_link(s: &str) -> Option<(&str, &str)> {
     let (before, after) = s.split_once("](")?;
-    let _label = before.strip_prefix('[')?;
+    let label = before.strip_prefix('[')?;
     let url = after.strip_suffix(')')?;
-    Some(url.to_string())
+    Some((label, url))
+}
+
+/// Parse the trailing `<sub>` element that contains the timestamp
+/// and an optional prompt link.
+///
+/// Formats:
+/// - `<sub>[YYYY-MM-DD HH:MM:SS +HHMM](url)</sub>` — timestamp as link text
+/// - `<sub>YYYY-MM-DD HH:MM:SS +HHMM</sub>` — plain timestamp
+fn parse_trailing_timestamp_sub(
+    rest: &mut &str,
+) -> Result<(chrono::DateTime<chrono::FixedOffset>, Option<String>)> {
+    let inner = try_parse_next_sub(rest)
+        .ok_or_else(|| anyhow::anyhow!("Missing trailing <sub> timestamp element"))?;
+
+    if let Some((ts_str, url)) = parse_markdown_link(&inner) {
+        let timestamp = chrono::DateTime::parse_from_str(ts_str, "%Y-%m-%d %H:%M:%S %z")
+            .with_context(|| format!("Invalid timestamp in link: {}", ts_str))?;
+        Ok((timestamp, Some(url.to_string())))
+    } else {
+        let timestamp =
+            chrono::DateTime::parse_from_str(inner.trim(), "%Y-%m-%d %H:%M:%S %z")
+                .with_context(|| format!("Invalid timestamp: {}", inner))?;
+        Ok((timestamp, None))
+    }
 }
 
 // -- Display variant without prompt link (for prompts) ------------------------
@@ -281,8 +265,7 @@ impl fmt::Display for MdMdStageTitleForPrompt<'_> {
         let t = self.0;
         write!(
             f,
-            "{} {}",
-            ReportTime(&t.timestamp),
+            "{}",
             PipelineStage {
                 pipeline: &t.pipeline,
                 run_id: t.run_id,
@@ -295,7 +278,7 @@ impl fmt::Display for MdMdStageTitleForPrompt<'_> {
         if let Some(model) = &t.model {
             write!(f, " {}", Backtick(model))?;
         }
-        Ok(())
+        write!(f, " <sub>{}</sub>", format_timestamp(&t.timestamp))
     }
 }
 
@@ -327,11 +310,10 @@ mod tests {
     fn display_format() {
         let title = make_title();
         let s = title.to_string();
-        assert!(s.contains("2024-06-15 10:30:00 <sub>+0300</sub>"));
-        assert!(s.contains("main:2:**working**"));
-        assert!(s.contains("`claude`"));
-        assert!(s.contains("`claude-opus-4.6`"));
-        assert!(s.contains("<sub>[prompt](prompts/work.md)</sub>"));
+        assert_eq!(
+            s,
+            "main:2:**working** `claude` `claude-opus-4.6` <sub>[2024-06-15 10:30:00 +0300](prompts/work.md)</sub>"
+        );
     }
 
     #[test]
@@ -354,7 +336,7 @@ mod tests {
             prompt_link: None,
         };
         let s = title.to_string();
-        assert_eq!(s, "2024-01-01 00:00:00 <sub>+0000</sub> merge:1:**review**");
+        assert_eq!(s, "merge:1:**review** <sub>2024-01-01 00:00:00 +0000</sub>");
         let parsed: MdStageTitle = s.parse().unwrap();
         assert_eq!(parsed, title);
     }
@@ -364,7 +346,10 @@ mod tests {
         let title = make_title();
         let full = title.to_string();
         let prompt = MdMdStageTitleForPrompt(&title).to_string();
-        assert!(full.contains("<sub>[prompt]"));
-        assert!(!prompt.contains("<sub>[prompt]"));
+        // Full version has the prompt URL in the link
+        assert!(full.contains("](prompts/work.md)"));
+        // Prompt version has timestamp but no link
+        assert!(!prompt.contains("](prompts/work.md)"));
+        assert!(prompt.contains("<sub>2024-06-15 10:30:00 +0300</sub>"));
     }
 }
