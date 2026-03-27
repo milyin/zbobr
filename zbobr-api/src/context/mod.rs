@@ -494,8 +494,8 @@ impl fmt::Display for MdContext {
         for entry in &self.entries {
             match entry {
                 MdEntry::Stage(stage) => {
-                    // Stage display already ends with \n; add one more for blank line
-                    write!(f, "{}\n", stage)?;
+                    // Stage display already ends with \n via writeln!
+                    write!(f, "{}", stage)?;
                 }
                 MdEntry::Comment(comment) => {
                     write!(f, "{}\n\n", comment)?;

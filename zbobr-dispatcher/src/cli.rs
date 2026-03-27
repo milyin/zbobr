@@ -461,6 +461,26 @@ impl<'a> CliStageRunner<'a> {
 
         let prompt_text = self.prompt(pipeline_run_id).await?;
         *prompt_holder.lock().unwrap() = Some(prompt_text.clone());
+
+        // Store the prompt and link it to the stage context entry.
+        {
+            let role_session = self.zbobr.role_session(self.task_id);
+            let base_name = format!(
+                "prompt_{}_{}_{}_start",
+                self.pipeline_name, pipeline_run_id, self.stage_name
+            );
+            let prompt_link = role_session
+                .store_report(&base_name, &prompt_text)
+                .await?;
+            role_session
+                .modify_task(move |mut task| {
+                    if let Some(stage) = task.context.stages.last_mut() {
+                        stage.info.prompt_link = Some(prompt_link);
+                    }
+                    task
+                })
+                .await?;
+        }
         let executor = self
             .zbobr
             .build_executor(cli_tool, model.clone(), self.mcp_tester_override);
