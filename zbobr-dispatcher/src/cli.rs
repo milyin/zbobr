@@ -17,7 +17,6 @@ use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
     Comment, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
-    mcp::common::get_hostname,
     task::{Model, Tool},
 };
 
@@ -1102,14 +1101,8 @@ pub async fn run_manager_loop(
                             pipeline_name, stage_name, task.id
                         );
                         tracing::error!("{msg}");
-                        let hostname = get_hostname();
-                        if let Err(post_err) = zbobr
-                            .task_session(task.id)
-                            .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
-                            .await
-                        {
-                            tracing::warn!("Failed to post error to task discussion: {post_err}");
-                        }
+                        set_task_error_with_log(zbobr, task.id, "stage run failure", &msg)
+                            .await;
                     }
                     session_run = true;
                     break;
@@ -1291,14 +1284,7 @@ async fn detect_and_handle_worktree(
         Err(e) => {
             let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
             tracing::error!("{msg}");
-            let hostname = get_hostname();
-            if let Err(post_err) = zbobr
-                .task_session(task_id)
-                .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
-                .await
-            {
-                tracing::warn!("Failed to post error to task discussion: {post_err}");
-            }
+            set_task_error_with_log(zbobr, task_id, "workspace preparation", &msg).await;
             return Err(anyhow::anyhow!(msg));
         }
     };
@@ -1367,12 +1353,14 @@ async fn handle_merge_conflict(
     // Recursion guard: if already inside the merge pipeline, pause
     if pipeline_name.as_str() == Pipeline::MERGE {
         tracing::error!("Task #{task_id}: merge conflict inside merge pipeline — pausing");
-        let hostname = get_hostname();
         let msg = "Merge conflict inside merge pipeline. Manual intervention required.".to_string();
-        task_session
-            .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
-            .await
-            .ok();
+        set_task_error_with_log(
+            zbobr,
+            task_id,
+            "merge conflict recursion guard",
+            &msg,
+        )
+        .await;
         let stage = stage_name.to_string();
         task_session
             .set_pause_with_signal(Signal::go(stage))
@@ -1393,6 +1381,18 @@ async fn handle_merge_conflict(
 
     tracing::info!("Task #{task_id}: merge conflict — calling merge pipeline");
     Ok(WorktreeResult::HandlerCalled)
+}
+
+async fn set_task_error_with_log(
+    zbobr: &Arc<ZbobrDispatcher>,
+    task_id: u64,
+    context: &str,
+    message: &str,
+) {
+    let role_session = zbobr.role_session(task_id);
+    if let Err(set_err) = role_session.set_error(Some(message.to_string())).await {
+        tracing::warn!("Failed to set task error for task #{task_id} ({context}): {set_err}");
+    }
 }
 
 async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Result<()> {
@@ -1437,14 +1437,7 @@ async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Re
         Err(e) => {
             let msg = format!("Could not ensure PR URL for task #{task_id}: {e}");
             tracing::error!("{msg}");
-            let hostname = get_hostname();
-            let task_session = zbobr.task_session(task_id);
-            if let Err(post_err) = task_session
-                .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
-                .await
-            {
-                tracing::warn!("Failed to post error to task discussion: {post_err}");
-            }
+            set_task_error_with_log(zbobr, task_id, "ensure PR URL", &msg).await;
             Err(anyhow::anyhow!(msg))
         }
     }
@@ -1454,7 +1447,6 @@ async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Re
 /// Only sets a parameter if it is not already present, so a previously
 /// prepared task keeps its values unchanged. Called unconditionally at
 /// the start of every stage run.
-
 async fn start_mcp_server(
     zbobr: Arc<ZbobrDispatcher>,
     role_name: &str,
@@ -1575,15 +1567,7 @@ async fn finalize_stage_session(
             tracing::warn!("Stash/push failed during error handling for task #{task_id}: {e}");
         }
         let error_msg = format!("Execution failed: {e}");
-        let hostname = get_hostname();
-        if let Err(post_err) = task_session
-            .post_comment(
-                "error", &hostname, None, None, &error_msg, "", 0, None, None,
-            )
-            .await
-        {
-            tracing::error!("Failed to post error to task #{task_id}: {post_err}");
-        }
+        set_task_error_with_log(zbobr, task_id, "tool execution", &error_msg).await;
         let stage = stage_name.to_string();
         if let Err(pause_err) = task_session
             .set_pause_with_signal(Signal::go(stage))
@@ -1600,14 +1584,8 @@ async fn finalize_stage_session(
 
     if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name, pipeline_name).await {
         tracing::error!("Stash/push failed for task #{task_id}: {e}");
-        let hostname = get_hostname();
         let msg = format!("Stash/push failed: {e}");
-        if let Err(post_err) = task_session
-            .post_comment("error", &hostname, None, None, &msg, "", 0, None, None)
-            .await
-        {
-            tracing::error!("Failed to post stash/push error for task #{task_id}: {post_err}");
-        }
+        set_task_error_with_log(zbobr, task_id, "stash/push", &msg).await;
         let stage = stage_name.to_string();
         if let Err(pause_err) = task_session
             .set_pause_with_signal(Signal::go(stage))
