@@ -34,8 +34,7 @@ use typesafe_builder::{_TypesafeBuilderEmpty, _TypesafeBuilderFilled, Builder};
 pub use workflow::{StateAction, Workflow};
 use zbobr_api::State;
 
-/// Label prefix for signal labels (e.g. "signal:go_working").
-const SIGNAL_PREFIX: &str = "signal:";
+
 pub use zbobr_api::config::Config;
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
@@ -199,20 +198,7 @@ impl ZbobrDispatcher {
             self.config.workspaces.display()
         );
 
-        // Compute required signal labels from workflow config
-        let mut signal_labels: Vec<String> = Vec::new();
-        for (_pipeline, stage_name, _stage_def) in self.workflow.all_stages() {
-            signal_labels.push(format!("{SIGNAL_PREFIX}go_{stage_name}"));
-        }
-        for pipeline_name in self.workflow.pipeline_names() {
-            signal_labels.push(format!("{SIGNAL_PREFIX}call_{pipeline_name}"));
-        }
-        signal_labels.push(format!("{SIGNAL_PREFIX}return"));
-        signal_labels.push(format!("{SIGNAL_PREFIX}return_failure"));
-        signal_labels.sort();
-        signal_labels.dedup();
-
-        self.task_backend.setup(force, &signal_labels).await
+        self.task_backend.setup(force).await
     }
 
     /// Extract repo name from a remote repo path (last path component).

@@ -574,7 +574,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
         Ok(id)
     }
 
-    async fn setup(&self, _force: bool, _signal_labels: &[String]) -> anyhow::Result<()> {
+    async fn setup(&self, _force: bool) -> anyhow::Result<()> {
         fs::create_dir_all(&self.config.tasks_dir)
             .await
             .context("Failed to create tasks directory")?;
@@ -688,8 +688,8 @@ impl TaskBackend for ArcTaskBackendFs {
         self.inner.create_task(title, description, state).await
     }
 
-    async fn setup(&self, force: bool, signal_labels: &[String]) -> anyhow::Result<()> {
-        self.inner.setup(force, signal_labels).await
+    async fn setup(&self, force: bool) -> anyhow::Result<()> {
+        self.inner.setup(force).await
     }
 
     async fn validate_connectivity(&self) -> anyhow::Result<()> {
