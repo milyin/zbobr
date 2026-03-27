@@ -237,6 +237,7 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithError,
                     StopWithQuestion,
                     ReportSuccess,
+                    ReportIntermediate,
                     AddChecklistItem,
                     DeleteCtxRec,
                 ],
@@ -417,7 +418,8 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 ## Access Model
 
     You can access the internet and run local commands. Your restrictions:
-    - Use MCP `{mcp_report_success}` to finalize the plan and finish your session
+    - Use MCP `{mcp_report_intermediate}` to present the completed plan for user review
+    - Use MCP `{mcp_report_success}` to confirm the plan is approved — only after the user explicitly confirms it (via a comment), or if the task description explicitly states that confirmation is not needed
     - Use MCP `{mcp_stop_with_question}` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
     - Use MCP `{mcp_stop_with_error}` only to report technical errors
     - NEVER use git/gh for writing, pushing, or sending data to GitHub
@@ -430,8 +432,8 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 
 1. Read the task description, context, and comments provided below in this prompt. The full history and checklist are available in the context section.
 2. If need to compare the work already done with the initial codebase, use git diff or equivalent to compare the work branch with the destination branch.
-3. **Search for analogous functionality in the codebase BEFORE designing the plan.** Look for existing code that does something similar to what the task requires — similar features, modules, patterns, or workflows. This is critical: the implementation must follow the same approaches, conventions, and style as the existing analogous code. Identify the analog explicitly in your plan so the worker and reviewer can reference it.
-4. Your current working directory is already the repository with the work branch checked out. Explore the codebase and design a step-by-step implementation plan that follows the patterns and style of the identified analog if found.
+3. **Identify the closest analog in the codebase BEFORE designing the plan.** Find the existing module, struct, or pattern most similar to what the task requires. Name the analog (file and module/type) explicitly — do not explore implementation details beyond what is needed to confirm the analogy. This is critical: the implementation must follow the same approaches, conventions, and style as the analog.
+4. **Design an architecture-level plan.** Describe which components or modules need to be added or changed, what interfaces or data flows are affected, and which patterns from the analog to follow. Focus on *what* changes and *why* — avoid code snippets and low-level file details. The worker will look up the details; the plan should give clear direction without prescribing exact implementation.
 5. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
 6. **Determine if the plan is clear and ready**:
    - If something is unclear or you have doubts, use `{mcp_stop_with_question}` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet. Finish the session after asking.
@@ -441,7 +443,8 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
    - Use `{mcp_add_checklist_item}` to add implementation steps for the worker. Each item has two parts: a **brief** summary (shown inline in the context) and a **full_report** with detailed implementation instructions (stored as a linked file). Put concise step title in brief; put file paths, code snippets, specific changes, and rationale in full_report.
    - Use `{mcp_delete_ctx_rec}` to remove unnecessary unchecked items
    - The checklist items ARE the plan — they should fully describe what the worker needs to do
-8. **Finish by calling `{mcp_report_success}`** with a brief rationale (why this approach was chosen, key design decisions, important constraints). Mention the chosen analog and why it's the right one to follow. Do NOT repeat the checklist items — the plan details are already captured there. This call finishes the session."#;
+8. **Present the plan by calling `{mcp_report_intermediate}`** with a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog). Do NOT repeat the checklist items — the plan details are already captured there. Wait for the user to review.
+9. **Finalize with `{mcp_report_success}`** only after the user explicitly confirms the plan (e.g., via a comment), OR if the task description explicitly states that confirmation is not needed."#;
 
 const WORKER_PROMPT: &str = r#"# Worker Agent
 
