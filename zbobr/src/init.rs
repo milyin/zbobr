@@ -410,15 +410,15 @@ const PREPARATOR_TASK_TEMPLATE: &str = r#"---
 
 const PLANNER_PROMPT: &str = r#"# Planner Agent
 
-Read the task description and comments provided below in this prompt. Design an implementation plan for the task. Prepare checklist items for the worker. See more detailed workflow instructions below.
+Read the task description and comments provided below in this prompt. Design an implementation plan for the task. See more detailed workflow instructions below.
 
 Work autonomously, try to solve problems independently. But don't hesitate to ask the user for help if you find something unclear in the task description or need clarification to create a good plan. Use `{mcp_stop_with_question}` for this purpose.
 
 ## Access Model
 
     You can access the internet and run local commands. Your restrictions:
-    - Use MCP `{mcp_report_intermediate}` to present the completed plan for user review
-    - Use MCP `{mcp_report_success}` to confirm the plan is approved — only after the user explicitly confirms it (via a comment), or if the task description explicitly states that confirmation is not needed
+    - Use MCP `{mcp_report_intermediate}` to present the plan for user review (only when plan is not yet approved)
+    - Use MCP `{mcp_report_success}` to finalize and proceed with implementation — call this only after creating checklist items (see workflow step 7)
     - Use MCP `{mcp_stop_with_question}` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
     - Use MCP `{mcp_stop_with_error}` only to report technical errors
     - NEVER use git/gh for writing, pushing, or sending data to GitHub
@@ -437,13 +437,23 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 6. **Determine if the plan is clear and ready**:
    - If something is unclear or you have doubts, use `{mcp_stop_with_question}` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet. Finish the session after asking.
    - Only if the plan is clear and no questions were posted, proceed to step 7.
-7. **Prepare checklist items for the worker** (only when plan is clear):
+7. **Check for user approval**:
+   - Review the comments below to determine if the user has already approved this plan (or an earlier variant of it)
+   - Check the task description to see if it explicitly states that confirmation is not needed (e.g., "plan is preapproved")
+   - If approval is confirmed (in comments or task description):
+     - Proceed to step 8: create checklist items
+     - Then call `{mcp_report_success}` to finalize and proceed to implementation
+   - If approval is NOT confirmed:
+     - Proceed to step 8.5: present the plan for review
+     - Call `{mcp_report_intermediate}` and wait for user feedback
+     - Do NOT create checklist items yet (to avoid noise if plan is rejected)
+8. **Prepare checklist items for the worker** (only when plan is approved):
    - Review the unchecked checklist items in the context below (if any).
    - Use `{mcp_add_checklist_item}` to add implementation steps for the worker. Each item has two parts: a **brief** summary (shown inline in the context) and a **full_report** with detailed instructions (stored as a linked file). Put concise step title in brief; put the *what* and *why* in full_report — which components or modules to change, which interfaces or data flows are affected, which patterns from the analog to follow. Do NOT include code snippets, exact file paths, or prescriptive implementation details — the worker will look those up.
    - Use `{mcp_delete_ctx_rec}` to remove unnecessary unchecked items
    - The checklist items ARE the plan — they should fully describe what the worker needs to do
-8. **Present the plan by calling `{mcp_report_intermediate}`** with a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog). Do NOT repeat the checklist items — the plan details are already captured there. Wait for the user to review.
-9. **Finalize with `{mcp_report_success}`** only after the user explicitly confirms the plan (e.g., via a comment), OR if the task description explicitly states that confirmation is not needed."#;
+   - After creating checklist items, call `{mcp_report_success}` with a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog).
+8.5. **If approval is NOT confirmed**: Present the plan by calling `{mcp_report_intermediate}` with a brief description of the proposed approach (why this approach was chosen, key design decisions, important constraints, chosen analog). Do NOT include checklist items yet — present only the plan structure and rationale. Wait for the user to review and approve."#;
 
 const WORKER_PROMPT: &str = r#"# Worker Agent
 
