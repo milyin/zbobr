@@ -547,7 +547,7 @@ impl TaskSession {
         Ok(popped)
     }
 
-    /// Finish the task: delete placeholder commit, push branch, post Done comment,
+    /// Finish the task: delete placeholder commit, push branch,
     /// then set state to DONE and clear signal.
     pub async fn finish(&self) -> anyhow::Result<()> {
         let task_id = self.task_id;
@@ -579,26 +579,6 @@ impl TaskSession {
                     }
                 }
             }
-        }
-
-        // Post DONE marker comment.
-        let hostname = crate::mcp::common::get_hostname();
-        let task = self.get_task().await?;
-        if let Err(e) = self
-            .post_comment(
-                "done",
-                &hostname,
-                None,
-                None,
-                "",
-                "",
-                task.pipeline_run_id,
-                None,
-                None,
-            )
-            .await
-        {
-            tracing::warn!("Failed to post DONE boundary for task #{task_id}: {e}");
         }
 
         self.modify_task(move |mut task| {

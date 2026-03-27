@@ -159,6 +159,7 @@ fn default_workflow() -> WorkflowConfig {
             StageDefinition {
                 role: Some("planner".into()),
                 prompts: task_prompt.clone(),
+                on_intermediate: Some(StageTransition::pause()),
                 ..Default::default()
             },
         ),
