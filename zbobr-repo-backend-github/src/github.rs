@@ -257,33 +257,51 @@ impl ZbobrRepoBackendGithub {
 
     /// Build environment variables that configure git token auth via
     /// `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_*` / `GIT_CONFIG_VALUE_*`.
-    /// The token never appears in command-line args or on-disk config.
+    /// Uses `http.extraheader` with a base64-encoded Authorization header so
+    /// the token never appears in URLs, command-line args, or on-disk config.
     fn token_auth_env(&self) -> [(&str, String); 3] {
+        use base64::Engine as _;
         let token = &self.backend_config.github_token;
+        let credentials =
+            base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
         [
             ("GIT_CONFIG_COUNT", "1".into()),
             (
                 "GIT_CONFIG_KEY_0",
-                format!("url.https://x-access-token:{token}@github.com/.insteadOf"),
+                "http.https://github.com/.extraheader".into(),
             ),
-            ("GIT_CONFIG_VALUE_0", "https://github.com/".into()),
+            (
+                "GIT_CONFIG_VALUE_0",
+                format!("Authorization: basic {credentials}"),
+            ),
         ]
     }
 
     /// Remove legacy insteadOf entries that embedded the token in git config.
-    async fn cleanup_legacy_token_config(&self, bare_dir: &Path) {
-        if let Ok(output) = git_output(
+    async fn cleanup_legacy_token_config(&self, bare_dir: &Path) -> anyhow::Result<()> {
+        let output = match git_output(
             bare_dir,
             &["config", "--get-regexp", r"url\..*github\.com.*\.insteadOf"],
         )
         .await
         {
-            for line in output.lines() {
-                if let Some(key) = line.split_whitespace().next() {
-                    let _ = git(bare_dir, &["config", "--unset", key]).await;
+            Ok(output) => output,
+            Err(_) => return Ok(()), // No matching entries found
+        };
+
+        for line in output.lines() {
+            if let Some(key) = line.split_whitespace().next() {
+                if let Err(e) = git(bare_dir, &["config", "--unset", key]).await {
+                    tracing::warn!(
+                        "Failed to remove legacy token config key '{}' in {}: {}",
+                        key,
+                        bare_dir.display(),
+                        e
+                    );
                 }
             }
         }
+        Ok(())
     }
 
     /// Ensure a bare clone exists at `repos_dir/{owner}__{repo_name}.git` with token auth configured.
@@ -315,7 +333,7 @@ impl ZbobrRepoBackendGithub {
         }
 
         // Remove legacy token-in-config entries from existing repos
-        self.cleanup_legacy_token_config(&bare_dir).await;
+        self.cleanup_legacy_token_config(&bare_dir).await?;
 
         // Configure fetch refspec so worktrees get proper origin/* refs
         git(
