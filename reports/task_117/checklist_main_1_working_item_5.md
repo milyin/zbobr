@@ -1,0 +1,1 @@
+The reviewer noted that base64 = "0.22" was added as a direct dependency in zbobr-repo-backend-github/Cargo.toml, but this project centralizes dependency versions in workspace Cargo.toml. Add base64 to [workspace.dependencies] and use `base64.workspace = true` in crate Cargo.toml files. Also fix zbobr-task-backend-github which has the same issue (pre-existing).
