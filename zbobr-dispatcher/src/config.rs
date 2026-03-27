@@ -325,6 +325,7 @@ mod tests {
                 prompt: None,
                 tool: None,
                 model: None,
+                default_plan_mode: Some(true),
             },
         );
         let workflow = WorkflowConfig {
@@ -352,6 +353,8 @@ mod tests {
             Model::ClaudeOpus4_5
         );
         assert_eq!(cfg.model_for_stage(&plan_stage, &workflow), Model::Gpt5);
+        assert_eq!(cfg.plan_mode_for_stage(&prep_stage, &workflow), false);
+        assert_eq!(cfg.plan_mode_for_stage(&plan_stage, &workflow), true);
     }
 
     #[test]

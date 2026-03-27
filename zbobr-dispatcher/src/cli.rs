@@ -295,6 +295,10 @@ impl<'a> CliStageRunner<'a> {
             .zbobr
             .config()
             .model_for_stage(self.stage_def, self.zbobr.workflow().config());
+        let plan_mode = self
+            .zbobr
+            .config()
+            .plan_mode_for_stage(self.stage_def, self.zbobr.workflow().config());
 
         // Set state to running
         self.zbobr
@@ -497,6 +501,7 @@ impl<'a> CliStageRunner<'a> {
             &prompt_text,
             &work_dir,
             &mcp_url,
+            plan_mode,
             self.zbobr,
         )
         .await;
@@ -1511,12 +1516,13 @@ async fn execute_tool(
     prompt: &str,
     work_dir: &Path,
     mcp_url: &str,
+    plan_mode: bool,
     zbobr: &ZbobrDispatcher,
 ) -> SessionOutcome {
     let agent_token = &zbobr.config().agent_github_token;
 
     tokio::select! {
-        result = executor.execute(task_id, role, assigned_port, prompt, work_dir, mcp_url, agent_token, copilot_token) => {
+        result = executor.execute(task_id, role, assigned_port, prompt, work_dir, mcp_url, plan_mode, agent_token, copilot_token) => {
             match result {
                 Ok(()) => SessionOutcome {
                     execution_interrupted: false,

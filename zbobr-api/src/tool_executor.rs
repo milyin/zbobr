@@ -48,6 +48,7 @@ pub trait ToolExecutor: Send + Sync {
         prompt: &str,
         work_dir: &Path,
         mcp_url: &str,
+        plan_mode: bool,
         agent_github_token: &str,
         copilot_github_token: &str,
     ) -> anyhow::Result<()>;
