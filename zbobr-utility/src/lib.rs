@@ -30,11 +30,12 @@ pub fn resolve_path(path: PathBuf, base: &Path) -> PathBuf {
     }
 }
 
-/// Run a git command in `dir`, returning an error with context on failure.
-pub async fn git(dir: &Path, args: &[&str]) -> Result<()> {
+/// Run a git command in `dir` with extra environment variables, returning an error on failure.
+pub async fn git_env(dir: &Path, args: &[&str], envs: &[(&str, &str)]) -> Result<()> {
     let status = tokio::process::Command::new("git")
         .args(args)
         .current_dir(dir)
+        .envs(envs.iter().copied())
         .status()
         .await
         .with_context(|| format!("Failed to spawn: git {}", args.join(" ")))?;
@@ -42,6 +43,11 @@ pub async fn git(dir: &Path, args: &[&str]) -> Result<()> {
         anyhow::bail!("git {} failed in {}", args.join(" "), dir.display());
     }
     Ok(())
+}
+
+/// Run a git command in `dir`, returning an error with context on failure.
+pub async fn git(dir: &Path, args: &[&str]) -> Result<()> {
+    git_env(dir, args, &[]).await
 }
 
 /// Run a git command in `dir` and capture stdout (trimmed).
@@ -58,19 +64,27 @@ pub async fn git_output(dir: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Run a git command in `dir`, returning `Ok(true)` if exit code 0, `Ok(false)` otherwise.
-/// Stderr is suppressed so that expected failures (e.g. checking if a ref exists) don't
+/// Run a git command in `dir` with extra environment variables, returning `Ok(true)` if exit
+/// code 0, `Ok(false)` otherwise. Stderr is suppressed so that expected failures don't
 /// produce noisy output.
-pub async fn git_check(dir: &Path, args: &[&str]) -> Result<bool> {
+pub async fn git_check_env(dir: &Path, args: &[&str], envs: &[(&str, &str)]) -> Result<bool> {
     let status = tokio::process::Command::new("git")
         .args(args)
         .current_dir(dir)
+        .envs(envs.iter().copied())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
         .await
         .with_context(|| format!("Failed to spawn: git {}", args.join(" ")))?;
     Ok(status.success())
+}
+
+/// Run a git command in `dir`, returning `Ok(true)` if exit code 0, `Ok(false)` otherwise.
+/// Stderr is suppressed so that expected failures (e.g. checking if a ref exists) don't
+/// produce noisy output.
+pub async fn git_check(dir: &Path, args: &[&str]) -> Result<bool> {
+    git_check_env(dir, args, &[]).await
 }
 
 /// Configure git user settings for a repository.

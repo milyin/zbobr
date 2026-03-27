@@ -7,7 +7,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use tokio::fs;
 use zbobr_api::backend::WorktreeBackend;
-use zbobr_utility::{git, git_check, git_output};
+use zbobr_utility::{git, git_check, git_check_env, git_env, git_output};
 
 use crate::config::ZbobrRepoBackendGithubConfig;
 
@@ -255,10 +255,23 @@ impl ZbobrRepoBackendGithub {
         Ok(fork_repo)
     }
 
-    /// Configure token-based auth on a bare clone via URL rewrite in git config.
-    async fn configure_token_auth(&self, bare_dir: &Path) -> anyhow::Result<()> {
-        // Remove any existing insteadOf entries for github.com to avoid stale tokens
-        // accumulating as separate config keys (the token is part of the key).
+    /// Build environment variables that configure git token auth via
+    /// `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_*` / `GIT_CONFIG_VALUE_*`.
+    /// The token never appears in command-line args or on-disk config.
+    fn token_auth_env(&self) -> [(&str, String); 3] {
+        let token = &self.backend_config.github_token;
+        [
+            ("GIT_CONFIG_COUNT", "1".into()),
+            (
+                "GIT_CONFIG_KEY_0",
+                format!("url.https://x-access-token:{token}@github.com/.insteadOf"),
+            ),
+            ("GIT_CONFIG_VALUE_0", "https://github.com/".into()),
+        ]
+    }
+
+    /// Remove legacy insteadOf entries that embedded the token in git config.
+    async fn cleanup_legacy_token_config(&self, bare_dir: &Path) {
         if let Ok(output) = git_output(
             bare_dir,
             &["config", "--get-regexp", r"url\..*github\.com.*\.insteadOf"],
@@ -271,17 +284,6 @@ impl ZbobrRepoBackendGithub {
                 }
             }
         }
-
-        let token = &self.backend_config.github_token;
-        git(
-            bare_dir,
-            &[
-                "config",
-                &format!("url.https://x-access-token:{token}@github.com/.insteadOf"),
-                "https://github.com/",
-            ],
-        )
-        .await
     }
 
     /// Ensure a bare clone exists at `repos_dir/{owner}__{repo_name}.git` with token auth configured.
@@ -293,32 +295,27 @@ impl ZbobrRepoBackendGithub {
 
         fs::create_dir_all(&self.backend_config.repos_dir).await?;
 
+        let owned_env = self.token_auth_env();
+        let env: Vec<(&str, &str)> = owned_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+
         if !bare_dir.exists() {
-            let token = &self.backend_config.github_token;
-            let clone_url = format!(
-                "https://x-access-token:{token}@github.com/{}.git",
-                repo.full_name
-            );
+            let clone_url = format!("https://github.com/{}.git", repo.full_name);
             let bare_name = format!("{}.git", repo.bare_dir_name());
             tracing::info!(
                 "Creating bare clone of {} at {}",
                 repo.full_name,
                 bare_dir.display()
             );
-            git(
+            git_env(
                 &self.backend_config.repos_dir,
                 &["clone", "--bare", &clone_url, &bare_name],
+                &env,
             )
             .await?;
-
-            // Normalize origin URL to remove embedded token
-            let clean_url = format!("https://github.com/{}.git", repo.full_name);
-            git(&bare_dir, &["config", "remote.origin.url", &clean_url]).await?;
         }
 
-        // Configure URL rewrite for subsequent operations (unconditionally,
-        // so token auth is refreshed even when the bare clone already exists)
-        self.configure_token_auth(&bare_dir).await?;
+        // Remove legacy token-in-config entries from existing repos
+        self.cleanup_legacy_token_config(&bare_dir).await;
 
         // Configure fetch refspec so worktrees get proper origin/* refs
         git(
@@ -332,7 +329,7 @@ impl ZbobrRepoBackendGithub {
         .await?;
 
         tracing::info!("Fetching origin in {}", bare_dir.display());
-        git(&bare_dir, &["fetch", "origin"]).await?;
+        git_env(&bare_dir, &["fetch", "origin"], &env).await?;
 
         Ok(bare_dir)
     }
@@ -355,7 +352,9 @@ impl ZbobrRepoBackendGithub {
             git(bare_dir, &["remote", "add", "fork", &fork_url]).await?;
         }
 
-        git(bare_dir, &["fetch", "fork"]).await?;
+        let owned_env = self.token_auth_env();
+        let env: Vec<(&str, &str)> = owned_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        git_env(bare_dir, &["fetch", "fork"], &env).await?;
 
         Ok(("fork".to_string(), fork_repo))
     }
@@ -542,7 +541,9 @@ impl ZbobrRepoBackendGithub {
         }
 
         // Re-fetch fork so local refs are updated
-        git(bare_dir, &["fetch", "fork"]).await?;
+        let owned_env = self.token_auth_env();
+        let env: Vec<(&str, &str)> = owned_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        git_env(bare_dir, &["fetch", "fork"], &env).await?;
 
         Ok(())
     }
@@ -597,10 +598,11 @@ impl ZbobrRepoBackendGithub {
         bare_dir: &Path,
         push_remote: &str,
         work_branch: &str,
+        envs: &[(&str, &str)],
     ) -> anyhow::Result<bool> {
         let refspec = format!("refs/heads/{work_branch}:refs/remotes/{push_remote}/{work_branch}");
 
-        let ok = git_check(bare_dir, &["fetch", push_remote, &refspec]).await?;
+        let ok = git_check_env(bare_dir, &["fetch", push_remote, &refspec], envs).await?;
 
         if ok {
             tracing::info!("Fetched {push_remote}/{work_branch}");
@@ -671,11 +673,13 @@ impl ZbobrRepoBackendGithub {
         worktree_path: &Path,
         push_remote: &str,
         work_branch: &str,
+        envs: &[(&str, &str)],
     ) -> anyhow::Result<()> {
         tracing::info!("Pushing {work_branch} to {push_remote} (no force)");
-        git(
+        git_env(
             worktree_path,
             &["push", push_remote, &format!("HEAD:{work_branch}")],
+            envs,
         )
         .await
     }
@@ -775,6 +779,9 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             );
         }
 
+        let owned_env = self.token_auth_env();
+        let env: Vec<(&str, &str)> = owned_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+
         // Phase 1: Setup
         let repo = parse_github_repo(remote_repo)?;
         let bare_dir = self.ensure_bare_clone_github(&repo).await?;
@@ -801,7 +808,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
 
         // Phase 3: Fetch remote work branch
         let remote_exists =
-            Self::fetch_remote_work_branch(&bare_dir, &push_remote, work_branch).await?;
+            Self::fetch_remote_work_branch(&bare_dir, &push_remote, work_branch, &env).await?;
 
         // Phase 4: Create worktree
         self.ensure_worktree_github(
@@ -837,7 +844,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             }
 
             // Regular push (not force) — branch is new, so no conflict possible
-            Self::push_worktree_to_remote(workspace_path, &push_remote, work_branch).await?;
+            Self::push_worktree_to_remote(workspace_path, &push_remote, work_branch, &env).await?;
 
             // Now create the PR
             self.ensure_pr_exists(&pr_repo, work_branch, base_branch)
@@ -896,7 +903,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         }
 
         // Phase 10: Push result back (no --force)
-        Self::push_worktree_to_remote(workspace_path, &push_remote, work_branch).await?;
+        Self::push_worktree_to_remote(workspace_path, &push_remote, work_branch, &env).await?;
 
         tracing::info!("Worktree {work_branch}: up-to-date, all merges succeeded, pushed");
         Ok(true)

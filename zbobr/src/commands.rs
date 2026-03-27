@@ -14,7 +14,7 @@ use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
 use zbobr_repo_backend_github::{ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig};
 use zbobr_task_backend_github::{TaskBackendGithub, ZbobrTaskBackendGithubConfig};
-use zbobr_utility::{git, git_output};
+use zbobr_utility::git_output;
 
 // ---------------------------------------------------------------------------
 // CLI types
@@ -695,8 +695,6 @@ async fn overwrite_author(
             id
         ));
     }
-
-    git(&repo_dir, &["fetch", "origin", dest_branch]).await?;
 
     if !dry_run {
         let config = zbobr.config();
