@@ -453,7 +453,7 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
    - Use `{mcp_delete_ctx_rec}` to remove unnecessary unchecked items
    - The checklist items ARE the plan — they should fully describe what the worker needs to do
    - After creating checklist items, call `{mcp_report_success}` with a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog).
-8.5. **If approval is NOT confirmed**: Present the plan by calling `{mcp_report_intermediate}` with a brief description of the proposed approach (why this approach was chosen, key design decisions, important constraints, chosen analog). Do NOT include checklist items yet — present only the plan structure and rationale. Wait for the user to review and approve."#;
+8.5. **If approval is NOT confirmed**: Present the plan by calling `{mcp_report_intermediate}` with a brief description of the proposed approach. Do NOT include checklist items yet — present only the plan structure and rationale."#;
 
 const WORKER_PROMPT: &str = r#"# Worker Agent
 
