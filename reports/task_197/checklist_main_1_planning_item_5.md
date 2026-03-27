@@ -1,0 +1,1 @@
+The implementation is complete. Verify by running `cargo check` in the repository root to confirm the Rust code compiles cleanly after adding `ReportIntermediate` to the planner's allowed MCP tool list and updating the PLANNER_PROMPT string in `zbobr/src/init.rs`.
