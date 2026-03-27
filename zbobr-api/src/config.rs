@@ -515,6 +515,9 @@ pub struct ZbobrDispatcherConfig {
     /// Set to 0 to disable the limit. Default: 20.
     #[arg(default_value = "20")]
     pub max_task_stage_count: u64,
+    /// Timezone for timestamps (e.g. "+0300", "-0500", "+03:00").
+    /// If not set, the operating system's local timezone is used.
+    pub timezone: Option<crate::task::FixedOffsetTz>,
 }
 
 impl Default for ZbobrDispatcherConfig {
@@ -532,6 +535,7 @@ impl Default for ZbobrDispatcherConfig {
             git_user_email: String::new(),
             overwrite_author: false,
             max_task_stage_count: 20,
+            timezone: None,
         }
     }
 }
@@ -546,6 +550,14 @@ impl ZbobrDispatcherConfig {
             ZbobrDispatcherArgs::default(),
             &cwd,
         ))
+    }
+
+    /// Returns the configured timezone offset, or the system's local timezone if not set.
+    pub fn fixed_offset(&self) -> chrono::FixedOffset {
+        match &self.timezone {
+            Some(tz) => **tz,
+            None => *chrono::Local::now().offset(),
+        }
     }
 
     /// Validate that global tool/model are compatible.

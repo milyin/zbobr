@@ -15,6 +15,7 @@ async-trait = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 paste = { workspace = true }
+chrono = { workspace = true }
 
 [dev-dependencies]
 zbobr-api = { workspace = true }

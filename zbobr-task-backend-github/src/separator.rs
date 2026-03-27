@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use zbobr_api::{
-    context_format::{parse_context, serialize_context},
+    context::{parse_context, serialize_context},
     task::TaskContext,
 };
 

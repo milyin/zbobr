@@ -23,6 +23,7 @@ clap = { workspace = true, features = ["derive"] }
 paste.workspace = true
 toml = { workspace = true }
 typesafe_builder = { workspace = true }
+chrono = { workspace = true }
 simpleinterpolation = { workspace = true }
 indexmap = { workspace = true }
 

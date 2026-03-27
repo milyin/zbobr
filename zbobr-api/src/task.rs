@@ -1,6 +1,69 @@
-/// Returns the current UTC time.
-pub fn now_utc() -> chrono::DateTime<chrono::Utc> {
-    chrono::Utc::now()
+// -- FixedOffsetTz --
+
+/// Transparent wrapper around `chrono::FixedOffset` with serde/clap support.
+/// Accepts `+HHMM` or `+HH:MM` format (e.g. `"+0300"`, `"-05:00"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FixedOffsetTz(pub chrono::FixedOffset);
+
+impl std::ops::Deref for FixedOffsetTz {
+    type Target = chrono::FixedOffset;
+    fn deref(&self) -> &chrono::FixedOffset {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for FixedOffsetTz {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for FixedOffsetTz {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Err("empty timezone string".to_string());
+        }
+        let sign: i32 = match s.as_bytes()[0] {
+            b'+' => 1,
+            b'-' => -1,
+            _ => return Err(format!("timezone must start with '+' or '-': {s}")),
+        };
+        let digits = &s[1..];
+        let (hours, minutes) = if digits.contains(':') {
+            let parts: Vec<&str> = digits.splitn(2, ':').collect();
+            (
+                parts[0].parse::<i32>().map_err(|e| e.to_string())?,
+                parts[1].parse::<i32>().map_err(|e| e.to_string())?,
+            )
+        } else if digits.len() == 4 {
+            (
+                digits[..2].parse::<i32>().map_err(|e| e.to_string())?,
+                digits[2..].parse::<i32>().map_err(|e| e.to_string())?,
+            )
+        } else {
+            return Err(format!("expected +HHMM or +HH:MM: {s}"));
+        };
+        let total_seconds = sign * (hours * 3600 + minutes * 60);
+        chrono::FixedOffset::east_opt(total_seconds)
+            .map(FixedOffsetTz)
+            .ok_or_else(|| format!("timezone offset out of range: {s}"))
+    }
+}
+
+impl serde::Serialize for FixedOffsetTz {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for FixedOffsetTz {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
 }
 
 // -- TaskIdentity --
@@ -97,8 +160,9 @@ pub struct StageInfo {
     /// Link to the prompt used for this stage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_link: Option<String>,
-    /// Timestamp when the stage was created (UTC).
-    pub timestamp: chrono::DateTime<chrono::Utc>,
+    /// Timestamp when the stage was created.
+    #[schemars(with = "String")]
+    pub timestamp: chrono::DateTime<chrono::FixedOffset>,
 }
 
 /// Context for a single stage execution, containing stage metadata and records.
@@ -180,8 +244,8 @@ impl TaskContext {
     Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
 pub struct Comment {
-    #[schemars(description = "Timestamp when comment was created")]
-    pub timestamp: chrono::DateTime<chrono::Utc>,
+    #[schemars(description = "Timestamp when comment was created", with = "String")]
+    pub timestamp: chrono::DateTime<chrono::FixedOffset>,
     #[schemars(description = "Stage that posted this comment")]
     pub stage: String,
     #[schemars(description = "Hostname of the system posting the comment")]
@@ -1177,7 +1241,7 @@ mod tests {
 
     fn make_comment(text: &str, pipeline: &str, run_id: u64) -> Comment {
         Comment {
-            timestamp: chrono::DateTime::default(),
+            timestamp: chrono::DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z").unwrap(),
             stage: "s".into(),
             hostname: "h".into(),
             tool: None,
@@ -1194,7 +1258,7 @@ mod tests {
 
     fn make_comment_for(text: &str, pipeline: &str, run_id: u64, caller_run_id: u64) -> Comment {
         Comment {
-            timestamp: chrono::DateTime::default(),
+            timestamp: chrono::DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z").unwrap(),
             stage: "s".into(),
             hostname: "h".into(),
             tool: None,

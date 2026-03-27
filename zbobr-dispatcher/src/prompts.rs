@@ -5,7 +5,7 @@ use zbobr_api::{
     Comment, Task,
     config::{StageDefinition, WorkflowConfig},
     config_tools::McpTool,
-    context_format::serialize_context,
+    context::serialize_context,
 };
 
 use crate::{backend::TaskBackend, workflow::Workflow};
