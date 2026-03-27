@@ -141,6 +141,7 @@ struct MdRecord {
     brief: String,
     id: u64,
     report_link: Option<String>,
+    parent_record_id: Option<u64>,
 }
 
 impl fmt::Display for MdRecord {
@@ -194,6 +195,7 @@ impl FromStr for MdRecord {
             brief,
             id,
             report_link,
+            parent_record_id: None,
         })
     }
 }
@@ -240,6 +242,7 @@ impl MdRecord {
             brief: r.brief.clone(),
             id: r.id,
             report_link,
+            parent_record_id: r.parent_record_id,
         }
     }
 
@@ -250,6 +253,7 @@ impl MdRecord {
             record_type: ContextRecordType::from(&self.record_type),
             brief: self.brief,
             report_link: self.report_link,
+            parent_record_id: self.parent_record_id,
         }
     }
 }
@@ -382,8 +386,20 @@ struct MdStage {
 impl fmt::Display for MdStage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "- {}", self.title)?;
+
+        // Group records by parent_record_id for hierarchical display
         for record in &self.records {
-            writeln!(f, "  {}", record)?;
+            if record.parent_record_id.is_none() {
+                // Top-level record
+                writeln!(f, "  {}", record)?;
+
+                // Display all child records (those with this record's id as parent)
+                for child in &self.records {
+                    if child.parent_record_id == Some(record.id) {
+                        writeln!(f, "    {}", child)?;
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -399,12 +415,26 @@ impl FromStr for MdStage {
             .ok_or_else(|| anyhow::anyhow!("Empty stage"))?;
         let title: MdStageTitle = first.parse()?;
         let mut records = Vec::new();
+        let mut last_top_level_id: Option<u64> = None;
+
         for line in lines {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
+            if line.trim().is_empty() {
                 continue;
             }
+
+            // Count leading spaces to determine indentation level
+            let leading_spaces = line.len() - line.trim_start().len();
+            let trimmed = line.trim();
+
             if let Some(record) = MdRecord::try_parse(trimmed)? {
+                let mut record = record;
+                // If indented by 4 spaces (child level), set parent to last top-level record
+                if leading_spaces >= 4 && last_top_level_id.is_some() {
+                    record.parent_record_id = last_top_level_id;
+                } else {
+                    // Top-level record (less indentation)
+                    last_top_level_id = Some(record.id);
+                }
                 records.push(record);
             }
         }
@@ -711,18 +741,21 @@ mod tests {
                             record_type: ContextRecordType::Checkbox(false),
                             brief: "Define API schema".to_string(),
                             report_link: None,
+                            parent_record_id: None,
                         },
                         ContextRecord {
                             id: 2,
                             record_type: ContextRecordType::Checkbox(true),
                             brief: "Review requirements".to_string(),
                             report_link: None,
+                            parent_record_id: None,
                         },
                         ContextRecord {
                             id: 3,
                             record_type: ContextRecordType::Success,
                             brief: "Plan completed".to_string(),
                             report_link: Some("reports/plan_success.md".to_string()),
+                            parent_record_id: None,
                         },
                     ],
                 },
@@ -742,18 +775,21 @@ mod tests {
                             record_type: ContextRecordType::Failure,
                             brief: "Build failed".to_string(),
                             report_link: Some("reports/build_fail.md".to_string()),
+                            parent_record_id: None,
                         },
                         ContextRecord {
                             id: 5,
                             record_type: ContextRecordType::Comment,
                             brief: "Retrying with fix".to_string(),
                             report_link: None,
+                            parent_record_id: None,
                         },
                         ContextRecord {
                             id: 6,
                             record_type: ContextRecordType::Question,
                             brief: "Should we use async?".to_string(),
                             report_link: None,
+                            parent_record_id: None,
                         },
                     ],
                 },
@@ -923,6 +959,7 @@ mod tests {
                     record_type: ContextRecordType::Checkbox(false),
                     brief: "Task A".to_string(),
                     report_link: None,
+                    parent_record_id: None,
                 }],
             }],
         };
@@ -985,6 +1022,7 @@ mod tests {
                         "https://github.com/org/repo/blob/reports/reports/task_1/report.md"
                             .to_string(),
                     ),
+                    parent_record_id: None,
                 }],
             }],
         };
@@ -1013,6 +1051,7 @@ mod tests {
             brief: "All tests passed".to_string(),
             id: 42,
             report_link: Some("reports/test.md".to_string()),
+            parent_record_id: None,
         };
         let s = record.to_string();
         let parsed: MdRecord = s.parse().unwrap();
@@ -1029,6 +1068,7 @@ mod tests {
             brief: "Todo item".to_string(),
             id: 1,
             report_link: None,
+            parent_record_id: None,
         };
         let s = record.to_string();
         let parsed: MdRecord = s.parse().unwrap();
@@ -1080,12 +1120,14 @@ mod tests {
                     brief: "Item 1".to_string(),
                     id: 1,
                     report_link: None,
+                    parent_record_id: None,
                 },
                 MdRecord {
                     record_type: MdRecordType::Success,
                     brief: "Done".to_string(),
                     id: 2,
                     report_link: Some("r.md".to_string()),
+                    parent_record_id: None,
                 },
             ],
         };
