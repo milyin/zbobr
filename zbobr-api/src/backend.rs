@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
 use crate::task::{
-    ChecklistItem, Comment, Model, Signal, StackEntry, State, Task, TaskIdentity, Tool,
+    Comment, Model, Signal, StackEntry, State, Task, TaskIdentity, Tool,
 };
 
 /// Read-only handle to a task. Returned by `TaskBackend::get_task()` and `TaskBackend::list_tasks()`.
@@ -122,14 +122,6 @@ pub trait TaskMut: Send + Sync {
         .await
     }
 
-    async fn set_checklist(&self, items: Vec<ChecklistItem>) -> anyhow::Result<()> {
-        self.modify_task(Box::new(move |mut task| {
-            task.checklist = items;
-            task
-        }))
-        .await
-    }
-
     /// Post a structured comment (requires exclusive access).
     /// If `report_text` is provided, stores it as a report file and sets `report_name`
     /// on the comment. The filename is generated from the comment's pipeline, run id,
@@ -148,6 +140,15 @@ pub trait TaskMut: Send + Sync {
         report_text: Option<&str>,
         prompt_text: Option<&str>,
     ) -> anyhow::Result<()>;
+
+    /// Store a report file, deduplicating with `_N` suffix if needed.
+    /// Returns the actual filename (without directory prefix).
+    async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String>;
+
+    /// Convert a report filename into a browsable URL.
+    /// For GitHub: full `https://github.com/…/blob/…` URL.
+    /// For local fs: returns the filename as-is.
+    fn report_url(&self, filename: &str) -> String;
 
     /// Release exclusive access, return read-only handle.
     fn downgrade(self: Box<Self>) -> Box<dyn TaskWeak>;

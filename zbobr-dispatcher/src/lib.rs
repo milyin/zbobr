@@ -27,7 +27,7 @@ pub use prompts::{
     ConfiguredPromptBuilder, add_mcp_tool_variables, build_full_prompt, load_prompts,
     validate_stage_prompts,
 };
-pub use task::{ChecklistItem, Comment, Model, RoleSession, StackEntry, Task, TaskSession, Tool};
+pub use task::{Comment, Model, RoleSession, StackEntry, Task, TaskSession, Tool};
 pub use task_dir::TaskDir;
 pub use tool_executor::ToolExecutor;
 use typesafe_builder::{_TypesafeBuilderEmpty, _TypesafeBuilderFilled, Builder};

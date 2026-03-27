@@ -11,7 +11,7 @@ use crate::{TaskDir, ZbobrDispatcher};
 // RoleSession — restricted access for MCP tools during agent sessions.
 //
 // Cannot modify: stage, conflict, confirm (those are dispatcher-only transitions).
-// Can modify: description, checklist, parameters, signal, pause.
+// Can modify: description, context, parameters, signal, pause.
 // ---------------------------------------------------------------------------
 
 /// Restricted task session for MCP tool operations.
@@ -31,8 +31,6 @@ pub struct RoleSession {
 }
 
 impl RoleSession {
-    const CHECKLIST_SCOPE_DELIMITER: &str = "__";
-
     pub(crate) fn new(zbobr: Arc<ZbobrDispatcher>, task_id: u64) -> Self {
         Self {
             zbobr,
@@ -101,19 +99,6 @@ impl RoleSession {
         Ok(self.get_task().await?.description)
     }
 
-    /// Get the full discussion history for the current pipeline run.
-    pub async fn get_history_for_run(&self, target_run_id: u64) -> anyhow::Result<String> {
-        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
-        let comments = weak.get_comments().await?;
-        let task = weak.snapshot(false).await?;
-        let filtered = zbobr_api::filter_comments_for_run(&comments, target_run_id);
-        let mut parts = vec![format!("[task]\n{}", task.description)];
-        for comment in filtered {
-            parts.push(format!("[{}]\n{}", comment.stage, comment.text));
-        }
-        Ok(parts.join("\n\n---\n\n"))
-    }
-
     /// Get pipeline name for this session.
     pub fn pipeline_name(&self) -> &str {
         &self.pipeline_name
@@ -124,121 +109,10 @@ impl RoleSession {
         self.pipeline_run_id
     }
 
-    /// Get the current task checklist.
-    pub async fn get_checklist(&self) -> anyhow::Result<Vec<ChecklistItem>> {
-        let task = self.get_task().await?;
-        let Some(prefix) = self.checklist_scope_prefix() else {
-            return Ok(task.checklist);
-        };
-
-        let scoped = task
-            .checklist
-            .into_iter()
-            .filter_map(|item| Self::strip_checklist_scope(item, &prefix))
-            .collect();
-        Ok(scoped)
-    }
-
-    /// Add a checklist item scoped to the current pipeline run.
-    pub async fn add_checklist_item(&self, id: &str, text: &str) -> anyhow::Result<()> {
-        let item_id = id.to_string();
-        let item_text = text.to_string();
-        let scope_prefix = self.checklist_scope_prefix();
-
-        self.modify_task(move |mut task| {
-            let scoped_id = if let Some(ref prefix) = scope_prefix {
-                format!("{prefix}{item_id}")
-            } else {
-                item_id
-            };
-            task.checklist.push(ChecklistItem {
-                id: scoped_id,
-                checked: false,
-                text: item_text,
-            });
-            task
-        })
-        .await
-    }
-
-    /// Mark a scoped checklist item as checked.
-    /// Returns true when an item was found and updated.
-    pub async fn check_checklist_item(&self, id: &str) -> anyhow::Result<bool> {
-        let item_id = id.to_string();
-        let scope_prefix = self.checklist_scope_prefix();
-
-        let found = Arc::new(std::sync::Mutex::new(false));
-        let found_ref = Arc::clone(&found);
-
-        self.modify_task(move |mut task| {
-            let target_id = if let Some(ref prefix) = scope_prefix {
-                format!("{prefix}{item_id}")
-            } else {
-                item_id
-            };
-
-            if let Some(item) = task.checklist.iter_mut().find(|item| item.id == target_id) {
-                item.checked = true;
-                *found_ref.lock().unwrap() = true;
-            }
-            task
-        })
-        .await?;
-
-        Ok(*found.lock().unwrap())
-    }
-
-    /// Delete a scoped checklist item.
-    /// Returns true when an item was removed.
-    pub async fn delete_checklist_item(&self, id: &str) -> anyhow::Result<bool> {
-        let item_id = id.to_string();
-        let scope_prefix = self.checklist_scope_prefix();
-
-        let removed = Arc::new(std::sync::Mutex::new(false));
-        let removed_ref = Arc::clone(&removed);
-
-        self.modify_task(move |mut task| {
-            let target_id = if let Some(ref prefix) = scope_prefix {
-                format!("{prefix}{item_id}")
-            } else {
-                item_id
-            };
-
-            let before = task.checklist.len();
-            task.checklist.retain(|item| item.id != target_id);
-            *removed_ref.lock().unwrap() = task.checklist.len() != before;
-            task
-        })
-        .await?;
-
-        Ok(*removed.lock().unwrap())
-    }
-
-    fn checklist_scope_prefix(&self) -> Option<String> {
-        if self.pipeline_name.is_empty() || self.pipeline_run_id == 0 {
-            return None;
-        }
-        Some(format!(
-            "{}{}{}{}",
-            self.pipeline_name,
-            Self::CHECKLIST_SCOPE_DELIMITER,
-            self.pipeline_run_id,
-            Self::CHECKLIST_SCOPE_DELIMITER
-        ))
-    }
-
-    fn strip_checklist_scope(item: ChecklistItem, scope_prefix: &str) -> Option<ChecklistItem> {
-        item.id.strip_prefix(scope_prefix).map(|id| ChecklistItem {
-            id: id.to_string(),
-            checked: item.checked,
-            text: item.text,
-        })
-    }
-
     /// Atomically read-modify-write the task body via transient upgrade.
     ///
     /// The closure receives a mutable `Task` reference and may modify `description`,
-    /// `parameters`, `checklist`, `signal`, and `pause`.
+    /// `parameters`, `context`, `signal`, and `pause`.
     ///
     /// **Protected fields**: `state` and `stack` are saved before the mutation
     /// and restored afterwards, so MCP tools cannot change them.
@@ -403,6 +277,104 @@ impl RoleSession {
         weak.read_report(name).await
     }
 
+    /// Store a report file via the task backend. Returns the stored filename.
+    pub async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String> {
+        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
+        let mutable = weak.upgrade().await?;
+        mutable.store_report(base_name, content).await
+    }
+
+    /// Add a checkbox context record to the current stage.
+    /// Returns the assigned record id.
+    pub async fn add_checkbox_record(
+        &self,
+        brief: String,
+        report_link: Option<String>,
+    ) -> anyhow::Result<u64> {
+        self.modify_task(move |mut task| {
+            let id = task.context.next_id();
+            if let Some(stage) = task.context.stages.last_mut() {
+                stage.records.push(ContextRecord {
+                    id,
+                    record_type: ContextRecordType::Checkbox(false),
+                    brief,
+                    report_link,
+                });
+            }
+            task
+        })
+        .await?;
+        // Re-read to get the actual assigned id
+        let task = self.get_task().await?;
+        let last_id = task
+            .context
+            .stages
+            .last()
+            .and_then(|s| s.records.last())
+            .map(|r| r.id)
+            .unwrap_or(0);
+        Ok(last_id)
+    }
+
+    /// Check (mark as done) a checkbox context record by id.
+    pub async fn check_checkbox_record(&self, record_id: u64) -> anyhow::Result<()> {
+        self.modify_task(move |mut task| {
+            if let Some((_, record)) = task.context.find_record_mut(record_id) {
+                if let ContextRecordType::Checkbox(_) = record.record_type {
+                    record.record_type = ContextRecordType::Checkbox(true);
+                }
+            }
+            task
+        })
+        .await
+    }
+
+    /// Delete a context record by id.
+    pub async fn delete_context_record(&self, record_id: u64) -> anyhow::Result<bool> {
+        let task_before = self.get_task().await?;
+        let exists = task_before.context.find_record(record_id).is_some();
+        if exists {
+            self.modify_task(move |mut task| {
+                task.context.delete_record(record_id);
+                task
+            })
+            .await?;
+        }
+        Ok(exists)
+    }
+
+    /// Add a context record of a specific type to the current stage.
+    /// Returns the assigned record id.
+    pub async fn add_context_record(
+        &self,
+        record_type: ContextRecordType,
+        brief: String,
+        report_link: Option<String>,
+    ) -> anyhow::Result<u64> {
+        self.modify_task(move |mut task| {
+            let id = task.context.next_id();
+            if let Some(stage) = task.context.stages.last_mut() {
+                stage.records.push(ContextRecord {
+                    id,
+                    record_type,
+                    brief,
+                    report_link,
+                });
+            }
+            task
+        })
+        .await?;
+        let task = self.get_task().await?;
+        let last_id = task
+            .context
+            .stages
+            .last()
+            .and_then(|s| s.records.last())
+            .map(|r| r.id)
+            .unwrap_or(0);
+        Ok(last_id)
+    }
+
     /// Record a tool call for transition mapping.
     /// Only `report_success`, `report_failure`, and `report_intermediate` are meaningful transition triggers.
     pub fn record_tool_call(&self, tool: McpTool) {
@@ -452,11 +424,6 @@ impl TaskSession {
     pub async fn get_task(&self) -> anyhow::Result<Task> {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         weak.snapshot(false).await
-    }
-
-    /// Get the current task checklist.
-    pub async fn get_checklist(&self) -> anyhow::Result<Vec<ChecklistItem>> {
-        Ok(self.get_task().await?.checklist)
     }
 
     /// Atomically read-modify-write the task with unrestricted access via transient upgrade.
@@ -820,6 +787,14 @@ mod comment_model_tests {
             Ok(())
         }
 
+        async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String> {
+            Ok(self.mock_store_report(base_name, content).await)
+        }
+
+        fn report_url(&self, filename: &str) -> String {
+            filename.to_string()
+        }
+
         async fn post_comment(
             &self,
             stage: &str,
@@ -851,7 +826,7 @@ mod comment_model_tests {
 
             let mut comments = self.backend.comments.lock().await;
             comments.entry(self.id).or_default().push(Comment {
-                timestamp: String::new(),
+                timestamp: chrono::Utc::now().with_timezone(chrono::Local::now().offset()),
                 stage: stage.to_string(),
                 hostname: hostname.to_string(),
                 tool,
@@ -918,7 +893,7 @@ mod comment_model_tests {
                 destination_branch: None,
                 work_branch: None,
                 pr_url: None,
-                checklist: vec![],
+                context: TaskContext::default(),
                 signal: None,
                 stack: vec![],
                 error: None,
@@ -1009,7 +984,7 @@ mod comment_model_tests {
 
         let session = zbobr.role_session(id);
         let allowed_tools: std::collections::HashSet<zbobr_api::config_tools::McpTool> = [
-            zbobr_api::config_tools::McpTool::GetHistory,
+            zbobr_api::config_tools::McpTool::AddChecklistItem,
             zbobr_api::config_tools::McpTool::StopWithError,
             zbobr_api::config_tools::McpTool::ReportSuccess,
         ]
@@ -1140,12 +1115,35 @@ mod comment_model_tests {
     }
 
     #[tokio::test]
-    async fn report_success_posts_comment_to_backend() {
+    async fn report_success_stores_context_records() {
         let (zbobr, task_backend) = make_test_parts();
         let id = zbobr
             .create_task("t", "desc", "READY", None, None)
             .await
             .unwrap();
+
+        // Add a stage context so records can be attached
+        {
+            let session = zbobr.role_session(id);
+            session
+                .modify_task(|mut task| {
+                    task.context.stages.push(StageContext {
+                        info: StageInfo {
+                            pipeline: Pipeline::Main,
+                            run_id: 1,
+                            stage: Stage::new("working"),
+                            tool: Some(Tool::Copilot),
+                            model: Some(Model::Gpt5Mini),
+                            prompt_link: None,
+                            timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
+                        },
+                        records: Vec::new(),
+                    });
+                    task
+                })
+                .await
+                .unwrap();
+        }
 
         let mcp = make_test_mcp(&zbobr, id);
 
@@ -1156,110 +1154,29 @@ mod comment_model_tests {
             .report_failure_impl("needs work", "detailed failure report")
             .await;
 
+        // Reports are stored as context records, not comments
         let weak = task_backend.get_task(id).await.unwrap();
-        let backend_comments = weak.get_comments().await.unwrap();
-        assert_eq!(
-            backend_comments.len(),
-            2,
-            "each comment must be posted separately"
-        );
-        assert!(backend_comments[0].text.starts_with("[report_success]"));
-        assert_eq!(
-            backend_comments[0].report_name.as_deref(),
-            Some("report_main_1_working_success.md")
-        );
-        assert!(backend_comments[1].text.starts_with("[report_failure]"));
-        assert_eq!(
-            backend_comments[1].report_name.as_deref(),
-            Some("report_main_1_working_failure.md")
-        );
+        let task = weak.snapshot(false).await.unwrap();
+        let records = &task.context.stages[0].records;
+        assert_eq!(records.len(), 2, "two context records should be added");
+        assert_eq!(records[0].record_type, ContextRecordType::Success);
+        assert_eq!(records[0].brief, "result one");
+        assert!(records[0].report_link.is_some());
+        assert_eq!(records[1].record_type, ContextRecordType::Failure);
+        assert_eq!(records[1].brief, "needs work");
+        assert!(records[1].report_link.is_some());
 
         // Verify reports were stored and are readable
         let success_report = weak
-            .read_report("report_main_1_working_success.md")
+            .read_report(records[0].report_link.as_ref().unwrap())
             .await
             .unwrap();
         assert_eq!(success_report, "detailed success report");
         let failure_report = weak
-            .read_report("report_main_1_working_failure.md")
+            .read_report(records[1].report_link.as_ref().unwrap())
             .await
             .unwrap();
         assert_eq!(failure_report, "detailed failure report");
     }
 
-    #[tokio::test]
-    async fn checklist_is_scoped_by_pipeline_run_id() {
-        let (zbobr, task_backend) = make_test_parts();
-        let id = zbobr
-            .create_task("t", "desc", "READY", None, None)
-            .await
-            .unwrap();
-
-        let tracker_a = Arc::new(std::sync::Mutex::new(None::<McpTool>));
-        let prompt_a = Arc::new(std::sync::Mutex::new(None::<String>));
-        let session_a = zbobr.role_session_with_tracker(id, tracker_a, "main".to_string(), 1, prompt_a);
-
-        let tracker_b = Arc::new(std::sync::Mutex::new(None::<McpTool>));
-        let prompt_b = Arc::new(std::sync::Mutex::new(None::<String>));
-        let session_b = zbobr.role_session_with_tracker(id, tracker_b, "main".to_string(), 2, prompt_b);
-
-        session_a
-            .add_checklist_item("same-id", "run-1 item")
-            .await
-            .unwrap();
-        session_b
-            .add_checklist_item("same-id", "run-2 item")
-            .await
-            .unwrap();
-
-        let run1_items = session_a.get_checklist().await.unwrap();
-        assert_eq!(run1_items.len(), 1);
-        assert_eq!(run1_items[0].id, "same-id");
-        assert_eq!(run1_items[0].text, "run-1 item");
-        assert!(!run1_items[0].checked);
-
-        let run2_items = session_b.get_checklist().await.unwrap();
-        assert_eq!(run2_items.len(), 1);
-        assert_eq!(run2_items[0].id, "same-id");
-        assert_eq!(run2_items[0].text, "run-2 item");
-        assert!(!run2_items[0].checked);
-
-        session_a.check_checklist_item("same-id").await.unwrap();
-
-        let run1_after_check = session_a.get_checklist().await.unwrap();
-        let run2_after_check = session_b.get_checklist().await.unwrap();
-        assert!(run1_after_check[0].checked);
-        assert!(!run2_after_check[0].checked);
-
-        let weak = task_backend.get_task(id).await.unwrap();
-        let task = weak.snapshot(false).await.unwrap();
-        assert_eq!(task.checklist.len(), 2);
-        assert!(task.checklist.iter().any(|i| i.id == "main__1__same-id"));
-        assert!(task.checklist.iter().any(|i| i.id == "main__2__same-id"));
-    }
-
-    #[tokio::test]
-    async fn checklist_without_pipeline_context_remains_unscoped() {
-        let (zbobr, task_backend) = make_test_parts();
-        let id = zbobr
-            .create_task("t", "desc", "READY", None, None)
-            .await
-            .unwrap();
-
-        let session = zbobr.role_session(id);
-        session
-            .add_checklist_item("plain", "legacy item")
-            .await
-            .unwrap();
-
-        let items = session.get_checklist().await.unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].id, "plain");
-        assert_eq!(items[0].text, "legacy item");
-
-        let weak = task_backend.get_task(id).await.unwrap();
-        let task = weak.snapshot(false).await.unwrap();
-        assert_eq!(task.checklist.len(), 1);
-        assert_eq!(task.checklist[0].id, "plain");
-    }
 }

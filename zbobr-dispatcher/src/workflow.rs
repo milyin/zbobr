@@ -43,7 +43,7 @@ impl Default for Workflow {
             config: WorkflowConfig {
                 prompts_dir: None,
                 pipelines,
-                roles: HashMap::new(),
+                roles: IndexMap::new(),
             },
         }
     }
@@ -112,7 +112,7 @@ impl Workflow {
         self.config.prompts_dir.as_ref()
     }
 
-    pub fn roles(&self) -> &HashMap<String, RoleDefinition> {
+    pub fn roles(&self) -> &IndexMap<String, RoleDefinition> {
         &self.config.roles
     }
 
@@ -324,7 +324,7 @@ pub fn pipeline_from_state(state: &State) -> Option<Pipeline> {
 
 #[cfg(test)]
 mod tests {
-    use zbobr_api::config::{PipelineConfig, StageDefinition, WorkflowConfig};
+    use zbobr_api::{TaskContext, config::{PipelineConfig, StageDefinition, WorkflowConfig}};
 
     use super::*;
 
@@ -487,7 +487,7 @@ role = "merger"
             destination_branch: None,
             work_branch: None,
             pr_url: None,
-            checklist: vec![],
+            context: TaskContext::default(),
             signal: None,
             stack: vec![],
             error: None,

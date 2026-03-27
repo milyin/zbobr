@@ -3,7 +3,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Subcommand;
-use zbobr_api::{ChecklistItem, Comment, Pipeline, Stage, State, Task, config::WorkflowConfig};
+use zbobr_api::{Comment, Pipeline, Stage, State, Task, config::WorkflowConfig, task::TaskContext};
 use zbobr_dispatcher::{
     ConfiguredPromptBuilder, TaskDir, Workflow, ZbobrDispatcher,
     config::{ZbobrDispatcherConfig, ZbobrExecutorConfig},
@@ -186,16 +186,11 @@ pub enum TaskSubcommand {
 impl Command {
     /// Whether this command requires backend connectivity (GitHub token, etc.).
     fn needs_backends(&self) -> bool {
-        match self {
-            Command::Init { .. } => false,
-            Command::Task {
+        !matches!(self, Command::Init { .. } | Command::Task {
                 subcommand: TaskSubcommand::Prompt { id: None, .. },
-            } => false,
-            Command::Task {
+            } | Command::Task {
                 subcommand: TaskSubcommand::Show { id: None },
-            } => false,
-            _ => true,
-        }
+            })
     }
 }
 
@@ -263,7 +258,7 @@ fn run_without_backends(
             let stage_def = resolve_stage_def(workflow, &stage, &role, &pipeline)?;
             let (task, comments) = dummy_task_and_comments();
             let prompt =
-                prompt_builder.build_for_stage_with_task(stage_def, &task, &comments, None)?;
+                prompt_builder.build_for_stage_with_task(stage_def, &task, &comments)?;
             println!("{}", prompt);
             Ok(())
         }
@@ -288,23 +283,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
         destination_branch: Some("DESTINATION_BRANCH".to_string()),
         work_branch: Some("WORK_BRANCH".to_string()),
         pr_url: None,
-        checklist: vec![
-            ChecklistItem {
-                id: "main__1__collect-context".to_string(),
-                checked: true,
-                text: "Collect context".to_string(),
-            },
-            ChecklistItem {
-                id: "main__1__implement-change".to_string(),
-                checked: false,
-                text: "Implement change".to_string(),
-            },
-            ChecklistItem {
-                id: "main__1__run-tests".to_string(),
-                checked: false,
-                text: "Run tests".to_string(),
-            },
-        ],
+        context: TaskContext::default(),
         signal: None,
         stack: vec![],
         error: None,
@@ -318,7 +297,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
     };
     let comments = vec![
         Comment {
-            timestamp: "2025-01-01T00:00:00Z".to_string(),
+            timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
             stage: "planning".to_string(),
             hostname: "dummy".to_string(),
             tool: None,
@@ -332,7 +311,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
             prompt_name: None,
         },
         Comment {
-            timestamp: "2025-01-01T01:00:00Z".to_string(),
+            timestamp: "2025-01-01T01:00:00Z".parse().unwrap(),
             stage: "planning".to_string(),
             hostname: "dummy".to_string(),
             tool: None,
@@ -552,13 +531,13 @@ async fn run_task_subcommand(
             let prompt = if let Some(task_id) = id {
                 zbobr
                     .prompt_builder()
-                    .build_for_stage(stage_def, task_id, zbobr.task_backend(), None)
+                    .build_for_stage(stage_def, task_id, zbobr.task_backend())
                     .await?
             } else {
                 let (task, comments) = dummy_task_and_comments();
                 zbobr
                     .prompt_builder()
-                    .build_for_stage_with_task(stage_def, &task, &comments, None)?
+                    .build_for_stage_with_task(stage_def, &task, &comments)?
             };
             println!("{}", prompt);
         }
