@@ -1,0 +1,1 @@
+The reviewer found that cleanup_legacy_token_config() logs the git config key directly, which may contain an embedded token (e.g. `url.https://x-access-token:TOKEN@github.com/.insteadOf`). This defeats the security goal. Fix: redact any token-like content from the key before logging it.
