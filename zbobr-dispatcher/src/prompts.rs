@@ -2,10 +2,10 @@ use std::{borrow::Cow, collections::HashMap, path::PathBuf, sync::Arc};
 
 use simpleinterpolation::Interpolation;
 use zbobr_api::{
-    Comment, HistoryRecordType, Task, classify_comment,
-    checklist_format::filter_and_strip_scope,
+    Comment, Task,
     config::{StageDefinition, WorkflowConfig},
     config_tools::McpTool,
+    context::serialize_context,
 };
 
 use crate::{backend::TaskBackend, workflow::Workflow};
@@ -16,9 +16,7 @@ pub const VAR_DESCRIPTION: &str = "description";
 pub const VAR_DESTINATION_REPOSITORY: &str = "destination_repository";
 pub const VAR_DESTINATION_BRANCH: &str = "destination_branch";
 pub const VAR_WORK_BRANCH: &str = "work_branch";
-pub const VAR_CHECKLIST: &str = "checklist";
-pub const VAR_LAST_REPORT: &str = "last_report";
-pub const VAR_LAST_REQUEST: &str = "last_request";
+pub const VAR_CONTEXT: &str = "context";
 
 #[derive(Clone)]
 pub struct ConfiguredPromptBuilder {
@@ -51,16 +49,11 @@ impl ConfiguredPromptBuilder {
     }
 
     /// Build full prompt for a stage definition.
-    ///
-    /// When `pipeline_scope` is provided, checklist items in the prompt are
-    /// filtered to the given pipeline run and their IDs are stripped of the
-    /// scope prefix, matching what the MCP `get_checklist` tool returns.
     pub async fn build_for_stage(
         &self,
         stage_def: &StageDefinition,
         task_id: u64,
         task_backend: &dyn TaskBackend,
-        pipeline_scope: Option<(&str, u64)>,
     ) -> anyhow::Result<String> {
         let prompt_files = prompt_files_for_stage(stage_def, self.workflow.config());
         let base_prompt = load_prompts(&prompt_files, self.base_path.as_ref())?;
@@ -71,7 +64,6 @@ impl ConfiguredPromptBuilder {
             task_backend,
             self.workflow.config(),
             &self.extra_vars,
-            pipeline_scope,
         )
         .await
     }
@@ -83,7 +75,6 @@ impl ConfiguredPromptBuilder {
         stage_def: &StageDefinition,
         task: &Task,
         comments: &[Comment],
-        pipeline_scope: Option<(&str, u64)>,
     ) -> anyhow::Result<String> {
         let prompt_files = prompt_files_for_stage(stage_def, self.workflow.config());
         let base_prompt = load_prompts(&prompt_files, self.base_path.as_ref())?;
@@ -95,7 +86,6 @@ impl ConfiguredPromptBuilder {
             comments,
             self.workflow.config(),
             &self.extra_vars,
-            pipeline_scope,
         )
     }
 }
@@ -172,28 +162,10 @@ pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::R
     Ok(combined)
 }
 
-/// Strip `[tool_name]\n` prefix line from comment text if present.
-pub fn strip_tool_prefix(text: &str) -> &str {
-    let first_line = text.lines().next().unwrap_or("");
-    if first_line.starts_with('[') && first_line.ends_with(']') {
-        // Skip the prefix line and the following newline
-        let rest = &text[first_line.len()..];
-        rest.strip_prefix('\n').unwrap_or(rest)
-    } else {
-        text
-    }
-}
-
 /// Build template variables from task and comments.
-///
-/// When `pipeline_scope` is provided, checklist items are filtered to the
-/// given pipeline run and their IDs are stripped of the scope prefix.
-/// This ensures prompt IDs match the unscoped IDs returned by the MCP
-/// `get_checklist` tool (and expected by `check_checklist_item`).
 pub fn build_template_variables<'a>(
     task: &'a Task,
     comments: &'a [Comment],
-    pipeline_scope: Option<(&str, u64)>,
 ) -> HashMap<Cow<'static, str>, Cow<'a, str>> {
     let mut vars: HashMap<Cow<'static, str>, Cow<'a, str>> = HashMap::new();
 
@@ -213,47 +185,9 @@ pub fn build_template_variables<'a>(
         vars.insert(Cow::Borrowed(VAR_WORK_BRANCH), Cow::Borrowed(v));
     }
 
-    // Checklist: unchecked items, scoped to current pipeline run
-    let scoped_items = match pipeline_scope {
-        Some((name, run_id)) => filter_and_strip_scope(&task.checklist, name, run_id),
-        None => task.checklist.clone(),
-    };
-    let unchecked: Vec<_> = scoped_items.iter().filter(|item| !item.checked).collect();
-    if unchecked.is_empty() {
-        vars.insert(Cow::Borrowed(VAR_CHECKLIST), Cow::Borrowed(""));
-    } else {
-        let mut checklist_text = String::new();
-        for item in &unchecked {
-            if !checklist_text.is_empty() {
-                checklist_text.push('\n');
-            }
-            checklist_text.push_str(&format!("- [ ] [id: {}] {}", item.id, item.text));
-        }
-        vars.insert(Cow::Borrowed(VAR_CHECKLIST), Cow::Owned(checklist_text));
-    }
-
-    // last_report: last Success, Failure, or Progress comment (stripped tool prefix)
-    let last_report = comments
-        .iter()
-        .rev()
-        .find(|c| {
-            let t = classify_comment(&c.text);
-            t == HistoryRecordType::Success
-                || t == HistoryRecordType::Failure
-                || t == HistoryRecordType::Progress
-        })
-        .map(|c| strip_tool_prefix(&c.text))
-        .unwrap_or("");
-    vars.insert(Cow::Borrowed(VAR_LAST_REPORT), Cow::Borrowed(last_report));
-
-    // last_request: last user comment (Other type), fallback to task.description
-    let last_request = comments
-        .iter()
-        .rev()
-        .find(|c| classify_comment(&c.text) == HistoryRecordType::Other)
-        .map(|c| c.text.as_str())
-        .unwrap_or(&task.description);
-    vars.insert(Cow::Borrowed(VAR_LAST_REQUEST), Cow::Borrowed(last_request));
+    // context: serialized TaskContext for prompt (with for_prompt=true)
+    let context_md = serialize_context(&task.context, comments, true, None);
+    vars.insert(Cow::Borrowed(VAR_CONTEXT), Cow::Owned(context_md));
 
     vars
 }
@@ -279,12 +213,11 @@ pub async fn build_full_prompt(
     task_backend: &dyn TaskBackend,
     workflow: &WorkflowConfig,
     extra_vars: &HashMap<String, String>,
-    pipeline_scope: Option<(&str, u64)>,
 ) -> anyhow::Result<String> {
     let weak = task_backend.get_task(task_id).await?;
     let task = weak.snapshot(false).await?;
     let comments = weak.get_comments().await?;
-    let mut vars = build_template_variables(&task, &comments, pipeline_scope);
+    let mut vars = build_template_variables(&task, &comments);
 
     // Look up allowed tools for this role; fall back to all static tools.
     let allowed_tools: Vec<McpTool> = workflow
@@ -318,9 +251,8 @@ pub fn build_prompt_with_task(
     comments: &[Comment],
     workflow: &WorkflowConfig,
     extra_vars: &HashMap<String, String>,
-    pipeline_scope: Option<(&str, u64)>,
 ) -> anyhow::Result<String> {
-    let mut vars = build_template_variables(task, comments, pipeline_scope);
+    let mut vars = build_template_variables(task, comments);
 
     let allowed_tools: Vec<McpTool> = workflow
         .role_definition(role_name)
@@ -398,7 +330,7 @@ mod tests {
     use std::{fs, io::Write};
 
     use tempfile::TempDir;
-    use zbobr_api::ChecklistItem;
+    use zbobr_api::task::TaskContext;
 
     use super::*;
 
@@ -412,18 +344,7 @@ mod tests {
             destination_branch: None,
             work_branch: None,
             pr_url: None,
-            checklist: vec![
-                ChecklistItem {
-                    id: "main__1__understand-request".to_string(),
-                    checked: true,
-                    text: "Understand request".to_string(),
-                },
-                ChecklistItem {
-                    id: "main__1__apply-changes".to_string(),
-                    checked: false,
-                    text: "Apply changes".to_string(),
-                },
-            ],
+            context: TaskContext::default(),
             signal: None,
             stack: vec![],
             error: None,
@@ -434,23 +355,6 @@ mod tests {
             max_stage_count: 0,
             closed: false,
             etag: None,
-        }
-    }
-
-    fn dummy_comment(text: &str) -> Comment {
-        Comment {
-            timestamp: "2025-01-01T00:00:00Z".to_string(),
-            stage: "working".to_string(),
-            hostname: "test".to_string(),
-            tool: None,
-            model: None,
-            text: text.to_string(),
-            pipeline: String::new(),
-            pipeline_run_id: 0,
-            caller_pipeline: None,
-            caller_pipeline_run_id: None,
-            report_name: None,
-            prompt_name: None,
         }
     }
 
@@ -516,42 +420,18 @@ mod tests {
         assert_eq!(result, "absolute content");
     }
 
-    // --- strip_tool_prefix ---
-
-    #[test]
-    fn strip_tool_prefix_removes_prefix() {
-        assert_eq!(strip_tool_prefix("[report_success]\nAll good"), "All good");
-    }
-
-    #[test]
-    fn strip_tool_prefix_no_prefix() {
-        assert_eq!(strip_tool_prefix("Just text"), "Just text");
-    }
-
-    #[test]
-    fn strip_tool_prefix_empty() {
-        assert_eq!(strip_tool_prefix(""), "");
-    }
-
-    #[test]
-    fn strip_tool_prefix_prefix_only() {
-        assert_eq!(strip_tool_prefix("[report_success]"), "");
-    }
-
     // --- build_template_variables ---
 
     #[test]
     fn build_template_variables_has_all_keys() {
         let task = dummy_task("Test");
-        let vars = build_template_variables(&task, &[], None);
+        let vars = build_template_variables(&task, &[]);
         let keys: Vec<&str> = vars.keys().map(|k| k.as_ref()).collect();
         // Always-present keys
         for expected in &[
             VAR_TITLE,
             VAR_DESCRIPTION,
-            VAR_CHECKLIST,
-            VAR_LAST_REPORT,
-            VAR_LAST_REQUEST,
+            VAR_CONTEXT,
         ] {
             assert!(keys.contains(expected), "missing key: {expected}");
         }
@@ -573,7 +453,7 @@ mod tests {
         task.destination_branch = Some("main".to_string());
         task.work_branch = Some("feature-x".to_string());
 
-        let vars = build_template_variables(&task, &[], None);
+        let vars = build_template_variables(&task, &[]);
         assert_eq!(
             vars[&Cow::Borrowed(VAR_TITLE) as &Cow<str>].as_ref(),
             "My Task"
@@ -596,125 +476,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn build_template_variables_checklist() {
-        let mut task = dummy_task("T");
-        task.checklist = vec![
-            ChecklistItem {
-                id: "1".to_string(),
-                checked: true,
-                text: "Done item".to_string(),
-            },
-            ChecklistItem {
-                id: "2".to_string(),
-                checked: false,
-                text: "Todo item".to_string(),
-            },
-            ChecklistItem {
-                id: "3".to_string(),
-                checked: false,
-                text: "Another".to_string(),
-            },
-        ];
-        let vars = build_template_variables(&task, &[], None);
-        let checklist = vars[&Cow::Borrowed(VAR_CHECKLIST) as &Cow<str>].as_ref();
-        assert!(checklist.contains("- [ ] [id: 2] Todo item"));
-        assert!(checklist.contains("- [ ] [id: 3] Another"));
-        assert!(!checklist.contains("Done item"));
-    }
-
-    #[test]
-    fn build_template_variables_checklist_scoped() {
-        let mut task = dummy_task("T");
-        task.checklist = vec![
-            ChecklistItem {
-                id: "main__1__task-a".to_string(),
-                checked: false,
-                text: "First task".to_string(),
-            },
-            ChecklistItem {
-                id: "main__1__task-b".to_string(),
-                checked: true,
-                text: "Done task".to_string(),
-            },
-            ChecklistItem {
-                id: "main__2__task-c".to_string(),
-                checked: false,
-                text: "Other run".to_string(),
-            },
-        ];
-        // With pipeline scope: only run 1 items, IDs stripped
-        let vars = build_template_variables(&task, &[], Some(("main", 1)));
-        let checklist = vars[&Cow::Borrowed(VAR_CHECKLIST) as &Cow<str>].as_ref();
-        assert!(
-            checklist.contains("- [ ] [id: task-a] First task"),
-            "should contain stripped id; got: {checklist}"
-        );
-        assert!(
-            !checklist.contains("main__1__"),
-            "scope prefix should be stripped; got: {checklist}"
-        );
-        assert!(
-            !checklist.contains("Done task"),
-            "checked items should be excluded"
-        );
-        assert!(
-            !checklist.contains("Other run"),
-            "items from other runs should be excluded"
-        );
-    }
-
-    #[test]
-    fn build_template_variables_last_report() {
-        let task = dummy_task("T");
-        let comments = vec![
-            dummy_comment("user request"),
-            dummy_comment("[report_success]\nAll tests passed"),
-            dummy_comment("another user msg"),
-        ];
-        let vars = build_template_variables(&task, &comments, None);
-        assert_eq!(
-            vars[&Cow::Borrowed(VAR_LAST_REPORT) as &Cow<str>].as_ref(),
-            "All tests passed"
-        );
-    }
-
-    #[test]
-    fn build_template_variables_last_report_failure() {
-        let task = dummy_task("T");
-        let comments = vec![dummy_comment("[report_failure]\nBuild failed")];
-        let vars = build_template_variables(&task, &comments, None);
-        assert_eq!(
-            vars[&Cow::Borrowed(VAR_LAST_REPORT) as &Cow<str>].as_ref(),
-            "Build failed"
-        );
-    }
-
-    #[test]
-    fn build_template_variables_last_request_from_comments() {
-        let task = dummy_task("T");
-        let comments = vec![
-            dummy_comment("Please fix the bug"),
-            dummy_comment("[report_success]\nDone"),
-        ];
-        let vars = build_template_variables(&task, &comments, None);
-        assert_eq!(
-            vars[&Cow::Borrowed(VAR_LAST_REQUEST) as &Cow<str>].as_ref(),
-            "Please fix the bug"
-        );
-    }
-
-    #[test]
-    fn build_template_variables_last_request_fallback_to_description() {
-        let mut task = dummy_task("T");
-        task.description = "Implement feature X".to_string();
-        let comments = vec![dummy_comment("[report_success]\nDone")];
-        let vars = build_template_variables(&task, &comments, None);
-        assert_eq!(
-            vars[&Cow::Borrowed(VAR_LAST_REQUEST) as &Cow<str>].as_ref(),
-            "Implement feature X"
-        );
-    }
 
     // --- template rendering ---
 
@@ -722,7 +483,7 @@ mod tests {
     fn template_with_placeholder_renders() {
         let template_str = "Task: {title}\nDesc: {description}";
         let task = dummy_task("My Task");
-        let vars = build_template_variables(&task, &[], None);
+        let vars = build_template_variables(&task, &[]);
         let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
             .into_iter()
             .map(|(k, v)| (k, Cow::Owned(v.into_owned())))
@@ -736,7 +497,7 @@ mod tests {
     fn template_no_placeholders_passthrough() {
         let template_str = "No placeholders here";
         let task = dummy_task("T");
-        let vars = build_template_variables(&task, &[], None);
+        let vars = build_template_variables(&task, &[]);
         let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
             .into_iter()
             .map(|(k, v)| (k, Cow::Owned(v.into_owned())))
@@ -755,7 +516,7 @@ mod tests {
         let loaded = load_prompts(&[path], None).unwrap();
         let mut task = dummy_task("Feature X");
         task.description = "Build it".to_string();
-        let vars = build_template_variables(&task, &[], None);
+        let vars = build_template_variables(&task, &[]);
         let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
             .into_iter()
             .map(|(k, v)| (k, Cow::Owned(v.into_owned())))
@@ -769,7 +530,7 @@ mod tests {
     fn no_prompt_files_gives_empty_template() {
         let loaded = load_prompts(&[] as &[PathBuf], None).unwrap();
         let task = dummy_task("T");
-        let vars = build_template_variables(&task, &[], None);
+        let vars = build_template_variables(&task, &[]);
         let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
             .into_iter()
             .map(|(k, v)| (k, Cow::Owned(v.into_owned())))
@@ -790,7 +551,7 @@ mod tests {
         .unwrap();
         let template = Interpolation::new(&loaded).unwrap();
         let task = dummy_task("PR-42");
-        let vars = build_template_variables(&task, &[], None);
+        let vars = build_template_variables(&task, &[]);
         let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
             .into_iter()
             .map(|(k, v)| (k, Cow::Owned(v.into_owned())))

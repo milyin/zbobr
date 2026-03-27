@@ -8,9 +8,10 @@ use tokio::{
     sync::{Mutex, OwnedMutexGuard},
 };
 use zbobr_api::{
-    ChecklistItem, Comment, Model, Signal, StackEntry, State, Task, Tool,
+    Comment, Model, Signal, StackEntry, State, Task, Tool,
     backend::{TaskBackend, TaskMut, TaskWeak},
     comment_tag,
+    task::TaskContext,
 };
 
 use crate::config::ZbobrTaskBackendFsConfig;
@@ -40,7 +41,8 @@ struct TaskFile {
     pause: bool,
     #[serde(default)]
     confirm: bool,
-    checklist: Vec<ChecklistItem>,
+    #[serde(default)]
+    context: TaskContext,
     signal: Option<Signal>,
     #[serde(default)]
     stack: Vec<StackEntry>,
@@ -79,7 +81,8 @@ impl TaskFile {
             destination_branch: self.destination_branch.clone(),
             work_branch: self.work_branch.clone(),
             pr_url,
-            checklist: self.checklist.clone(),
+
+            context: self.context.clone(),
             signal: self.signal.clone(),
             stack: self.stack.clone(),
             error: self.error.clone(),
@@ -112,7 +115,7 @@ impl TaskFile {
             },
             pause: task.pause,
             confirm: task.confirm,
-            checklist: task.checklist.clone(),
+            context: task.context.clone(),
             signal: task.signal.clone(),
             stack: task.stack.clone(),
             error: task.error.clone(),
@@ -446,6 +449,14 @@ impl TaskMut for FsTaskMut {
         Ok(())
     }
 
+    async fn store_report(&self, base_name: &str, content: &str) -> anyhow::Result<String> {
+        self.backend.store_report(self.id, base_name, content).await
+    }
+
+    fn report_url(&self, filename: &str) -> String {
+        filename.to_string()
+    }
+
     async fn post_comment(
         &self,
         stage: &str,
@@ -478,7 +489,7 @@ impl TaskMut for FsTaskMut {
         let mut comments = self.backend.read_comments_structured(self.id).await?;
 
         let new_comment = Comment {
-            timestamp: format!("{:?}", std::time::SystemTime::now()),
+            timestamp: chrono::Utc::now().with_timezone(chrono::Local::now().offset()),
             stage: stage.to_string(),
             hostname: hostname.to_string(),
             tool,
@@ -542,7 +553,8 @@ impl TaskBackend for ZbobrTaskBackendFs {
             destination_branch: None,
             work_branch: None,
             pr_url: None,
-            checklist: vec![],
+
+            context: TaskContext::default(),
             signal: None,
             stack: vec![],
             error: None,
@@ -752,108 +764,3 @@ mod parse_tests {
     }
 }
 
-#[cfg(test)]
-mod checklist_format_tests {
-    use zbobr_api::checklist_format::{parse_grouped_checklist, serialize_grouped_checklist};
-
-    use super::*;
-
-    #[test]
-    fn fs_backend_checklist_serialize_grouped() {
-        let items = vec![
-            ChecklistItem {
-                id: "main__1__task1".to_string(),
-                checked: false,
-                text: "first run work".to_string(),
-            },
-            ChecklistItem {
-                id: "main__1__task2".to_string(),
-                checked: true,
-                text: "first run done".to_string(),
-            },
-            ChecklistItem {
-                id: "main__2__task1".to_string(),
-                checked: false,
-                text: "second run work".to_string(),
-            },
-        ];
-
-        let serialized = serialize_grouped_checklist(&items);
-
-        // Verify grouping headers
-        assert!(serialized.contains("<!-- Run: main #1 -->"));
-        assert!(serialized.contains("<!-- Run: main #2 -->"));
-
-        // Verify display IDs are clean (no scope prefix)
-        assert!(serialized.contains("- [ ] task1: first run work"));
-        assert!(serialized.contains("- [x] task2: first run done"));
-        assert!(serialized.contains("- [ ] task1: second run work"));
-
-        // Scoped IDs should not appear
-        assert!(!serialized.contains("main__1__"));
-        assert!(!serialized.contains("main__2__"));
-    }
-
-    #[test]
-    fn fs_backend_checklist_parse_grouped() {
-        let text = "<!-- Run: main #1 -->\n\
-            - [ ] task1: first run\n\
-            - [x] task2: checked\n\
-            \n\
-            <!-- Run: main #2 -->\n\
-            - [ ] task1: second run\n";
-
-        let items = parse_grouped_checklist(text);
-
-        assert_eq!(items.len(), 3);
-
-        // Verify scoped IDs reconstructed
-        assert_eq!(items[0].id, "main__1__task1");
-        assert_eq!(items[0].checked, false);
-        assert_eq!(items[0].text, "first run");
-
-        assert_eq!(items[1].id, "main__1__task2");
-        assert_eq!(items[1].checked, true);
-        assert_eq!(items[1].text, "checked");
-
-        assert_eq!(items[2].id, "main__2__task1");
-        assert_eq!(items[2].checked, false);
-        assert_eq!(items[2].text, "second run");
-    }
-
-    #[test]
-    fn fs_backend_checklist_roundtrip() {
-        let original_items = vec![
-            ChecklistItem {
-                id: "main__1__a".to_string(),
-                checked: false,
-                text: "work a".to_string(),
-            },
-            ChecklistItem {
-                id: "init__2__b".to_string(),
-                checked: true,
-                text: "work b".to_string(),
-            },
-        ];
-
-        let serialized = serialize_grouped_checklist(&original_items);
-        let parsed = parse_grouped_checklist(&serialized);
-
-        assert_eq!(parsed.len(), original_items.len());
-        for (orig, parsed_item) in original_items.iter().zip(parsed.iter()) {
-            assert_eq!(parsed_item.id, orig.id);
-            assert_eq!(parsed_item.checked, orig.checked);
-            assert_eq!(parsed_item.text, orig.text);
-        }
-    }
-
-    #[test]
-    fn fs_backend_checklist_unscoped_not_parsed() {
-        let legacy_text = "- [ ] task1: legacy\n\
-            - [x] task2: old\n";
-
-        let items = parse_grouped_checklist(legacy_text);
-
-        assert_eq!(items.len(), 0);
-    }
-}

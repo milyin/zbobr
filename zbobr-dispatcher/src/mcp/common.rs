@@ -34,9 +34,45 @@ pub struct ReportParam {
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct GetFullReportParam {
-    #[schemars(description = "Report filename (as shown in the history)")]
-    pub name: String,
+pub struct AddChecklistItemParam {
+    #[schemars(description = "Brief, concise summary of the checklist item (stored as context record text)")]
+    pub brief: String,
+    #[schemars(
+        description = "Full detailed description of the checklist item (stored as a file in the task repository)"
+    )]
+    pub full_report: String,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct CheckChecklistItemParam {
+    #[schemars(
+        description = "Context record ID to check — either a numeric id or a string like 'ctx_rec_5'"
+    )]
+    pub id: String,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct DeleteCtxRecParam {
+    #[schemars(
+        description = "Context record ID to delete — either a numeric id or a string like 'ctx_rec_5'"
+    )]
+    pub id: String,
+}
+
+/// Parse a context record ID from either a numeric string or `ctx_rec_N` format.
+pub fn parse_ctx_rec_id(id: &str) -> Result<u64, String> {
+    if let Ok(n) = id.parse::<u64>() {
+        return Ok(n);
+    }
+    if let Some(n_str) = id.strip_prefix("ctx_rec_") {
+        if let Ok(n) = n_str.parse::<u64>() {
+            return Ok(n);
+        }
+    }
+    Err(format!(
+        "Invalid context record ID '{}': expected a number or 'ctx_rec_N'",
+        id
+    ))
 }
 
 // -- Worktree configuration --
@@ -55,28 +91,6 @@ pub struct ConfigureWorktreeParam {
         description = "Short but meaningful name related to the task (e.g. 'fix-login-bug', 'add-retry-logic'). Combined with prefix and task ID to form the full work branch name."
     )]
     pub work_branch_postfix: String,
-}
-
-// -- Checklist parameter types --
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct AddChecklistItemParam {
-    #[schemars(description = "Unique identifier for the new checklist item")]
-    pub id: String,
-    #[schemars(description = "Checklist item text")]
-    pub text: String,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct CheckChecklistItemParam {
-    #[schemars(description = "ID of the checklist item to mark as checked")]
-    pub id: String,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct DeleteChecklistItemParam {
-    #[schemars(description = "ID of the checklist item to delete")]
-    pub id: String,
 }
 
 /// Bind to an available port starting from the given base port.

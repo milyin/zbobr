@@ -1,3 +1,71 @@
+// -- FixedOffsetTz --
+
+/// Transparent wrapper around `chrono::FixedOffset` with serde/clap support.
+/// Accepts `+HHMM` or `+HH:MM` format (e.g. `"+0300"`, `"-05:00"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FixedOffsetTz(pub chrono::FixedOffset);
+
+impl std::ops::Deref for FixedOffsetTz {
+    type Target = chrono::FixedOffset;
+    fn deref(&self) -> &chrono::FixedOffset {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for FixedOffsetTz {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for FixedOffsetTz {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Err("empty timezone string".to_string());
+        }
+        let sign: i32 = match s.as_bytes()[0] {
+            b'+' => 1,
+            b'-' => -1,
+            _ => return Err(format!("timezone must start with '+' or '-': {s}")),
+        };
+        let digits = &s[1..];
+        let (hours, minutes) = if digits.contains(':') {
+            let parts: Vec<&str> = digits.splitn(2, ':').collect();
+            (
+                parts[0].parse::<i32>().map_err(|e| e.to_string())?,
+                parts[1].parse::<i32>().map_err(|e| e.to_string())?,
+            )
+        } else if digits.len() == 4 {
+            (
+                digits[..2].parse::<i32>().map_err(|e| e.to_string())?,
+                digits[2..].parse::<i32>().map_err(|e| e.to_string())?,
+            )
+        } else {
+            return Err(format!("expected +HHMM or +HH:MM: {s}"));
+        };
+        let total_seconds = sign * (hours * 3600 + minutes * 60);
+        chrono::FixedOffset::east_opt(total_seconds)
+            .map(FixedOffsetTz)
+            .ok_or_else(|| format!("timezone offset out of range: {s}"))
+    }
+}
+
+impl serde::Serialize for FixedOffsetTz {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for FixedOffsetTz {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 // -- TaskIdentity --
 
 /// Bundles task routing info for worktree operations.
@@ -29,19 +97,140 @@ pub fn extract_repo_name(repo_ref: &str) -> Option<String> {
     Some(repo_ref.to_string())
 }
 
-// -- Checklist item types --
+// -- Context types --
 
-/// A single item in a task's checklist.
+/// Type of a context record within a stage.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextRecordType {
+    /// A checkbox item with checked/unchecked state.
+    Checkbox(bool),
+    /// A success report.
+    Success,
+    /// A failure report.
+    Failure,
+    /// A comment.
+    Comment,
+    /// A question requiring human input.
+    Question,
+}
+
+impl std::fmt::Display for ContextRecordType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContextRecordType::Checkbox(true) => write!(f, "checkbox(checked)"),
+            ContextRecordType::Checkbox(false) => write!(f, "checkbox(unchecked)"),
+            ContextRecordType::Success => write!(f, "success"),
+            ContextRecordType::Failure => write!(f, "failure"),
+            ContextRecordType::Comment => write!(f, "comment"),
+            ContextRecordType::Question => write!(f, "question"),
+        }
+    }
+}
+
+/// A single record within a stage context.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct ContextRecord {
+    /// Unique numeric id, generated as max records id + 1.
+    pub id: u64,
+    /// Type of this context record.
+    pub record_type: ContextRecordType,
+    /// Brief description of this record.
+    pub brief: String,
+    /// Optional link to a long description or report.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_link: Option<String>,
+}
+
+/// Metadata about a stage execution.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct StageInfo {
+    /// Pipeline that owns this stage.
+    pub pipeline: Pipeline,
+    /// Run identifier within the pipeline (monotonically increasing per pipeline).
+    pub run_id: u64,
+    /// Stage name within the pipeline.
+    pub stage: Stage,
+    /// Tool used for execution (e.g. copilot, claude).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<Tool>,
+    /// Model used by the tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<Model>,
+    /// Link to the prompt used for this stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_link: Option<String>,
+    /// Timestamp when the stage was created.
+    #[schemars(with = "String")]
+    pub timestamp: chrono::DateTime<chrono::FixedOffset>,
+}
+
+/// Context for a single stage execution, containing stage metadata and records.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct StageContext {
+    /// Stage execution metadata.
+    pub info: StageInfo,
+    /// Context records produced during this stage.
+    #[serde(default)]
+    pub records: Vec<ContextRecord>,
+}
+
+/// Full task context containing all stage contexts.
 #[derive(
-    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+    Debug, Clone, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
-pub struct ChecklistItem {
-    #[schemars(description = "Unique identifier for the checklist item")]
-    pub id: String,
-    #[schemars(description = "Checkbox state (true = checked, false = unchecked)")]
-    pub checked: bool,
-    #[schemars(description = "Checklist item text")]
-    pub text: String,
+pub struct TaskContext {
+    /// Ordered list of stage contexts.
+    #[serde(default)]
+    pub stages: Vec<StageContext>,
+}
+
+impl TaskContext {
+    /// Returns the next available record id (max existing id + 1).
+    pub fn next_id(&self) -> u64 {
+        self.stages
+            .iter()
+            .flat_map(|s| s.records.iter())
+            .map(|r| r.id)
+            .max()
+            .map(|max| max + 1)
+            .unwrap_or(1)
+    }
+
+    /// Find a context record by its numeric id across all stages.
+    /// Returns a reference to the record and its stage index.
+    pub fn find_record(&self, id: u64) -> Option<(usize, &ContextRecord)> {
+        for (stage_idx, stage) in self.stages.iter().enumerate() {
+            if let Some(record) = stage.records.iter().find(|r| r.id == id) {
+                return Some((stage_idx, record));
+            }
+        }
+        None
+    }
+
+    /// Find a mutable reference to a context record by its numeric id.
+    /// Returns a mutable reference to the record and its stage index.
+    pub fn find_record_mut(&mut self, id: u64) -> Option<(usize, &mut ContextRecord)> {
+        for (stage_idx, stage) in self.stages.iter_mut().enumerate() {
+            if let Some(record) = stage.records.iter_mut().find(|r| r.id == id) {
+                return Some((stage_idx, record));
+            }
+        }
+        None
+    }
+
+    /// Delete a context record by its numeric id.
+    /// Returns true if the record was found and deleted.
+    pub fn delete_record(&mut self, id: u64) -> bool {
+        for stage in &mut self.stages {
+            let len_before = stage.records.len();
+            stage.records.retain(|r| r.id != id);
+            if stage.records.len() < len_before {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 // -- Comment --
@@ -55,8 +244,8 @@ pub struct ChecklistItem {
     Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
 pub struct Comment {
-    #[schemars(description = "Timestamp when comment was created")]
-    pub timestamp: String,
+    #[schemars(description = "Timestamp when comment was created", with = "String")]
+    pub timestamp: chrono::DateTime<chrono::FixedOffset>,
     #[schemars(description = "Stage that posted this comment")]
     pub stage: String,
     #[schemars(description = "Hostname of the system posting the comment")]
@@ -673,6 +862,10 @@ pub enum Model {
     Gpt5_2,
     #[serde(rename = "gpt-5.2-codex")]
     Gpt5_2Codex,
+    #[serde(rename = "gpt-5.4")]
+    Gpt5_4,
+    #[serde(rename = "gpt-5.3-codex")]
+    Gpt5_3Codex,
     #[serde(rename = "gpt-4.1")]
     Gpt4_1,
     #[serde(rename = "claude-sonnet-4")]
@@ -704,6 +897,8 @@ impl Model {
             Model::Gpt5_1CodexMax,
             Model::Gpt5_2,
             Model::Gpt5_2Codex,
+            Model::Gpt5_4,
+            Model::Gpt5_3Codex,
             Model::Gpt4_1,
             Model::ClaudeSonnet4,
             Model::ClaudeHaiku4_5,
@@ -731,6 +926,8 @@ impl Model {
                 Model::Gpt5_1CodexMax => Some("gpt-5.1-codex-max"),
                 Model::Gpt5_2 => Some("gpt-5.2"),
                 Model::Gpt5_2Codex => Some("gpt-5.2-codex"),
+                Model::Gpt5_4 => Some("gpt-5.4"),
+                Model::Gpt5_3Codex => Some("gpt-5.3-codex"),
                 Model::Gpt4_1 => Some("gpt-4.1"),
                 Model::ClaudeSonnet4 => Some("claude-sonnet-4"),
                 Model::ClaudeHaiku4_5 => Some("claude-haiku-4.5"),
@@ -773,6 +970,8 @@ impl std::fmt::Display for Model {
             Model::Gpt5_1CodexMax => "gpt-5.1-codex-max",
             Model::Gpt5_2 => "gpt-5.2",
             Model::Gpt5_2Codex => "gpt-5.2-codex",
+            Model::Gpt5_4 => "gpt-5.4",
+            Model::Gpt5_3Codex => "gpt-5.3-codex",
             Model::Gpt4_1 => "gpt-4.1",
             Model::ClaudeSonnet4 => "claude-sonnet-4",
             Model::ClaudeHaiku4_5 => "claude-haiku-4.5",
@@ -802,6 +1001,8 @@ impl std::str::FromStr for Model {
             "gpt-5-1-codex-max" => Ok(Model::Gpt5_1CodexMax),
             "gpt-5-2" => Ok(Model::Gpt5_2),
             "gpt-5-2-codex" => Ok(Model::Gpt5_2Codex),
+            "gpt-5-4" => Ok(Model::Gpt5_4),
+            "gpt-5-3-codex" => Ok(Model::Gpt5_3Codex),
             "gpt-4-1" => Ok(Model::Gpt4_1),
             "claude-sonnet-4" => Ok(Model::ClaudeSonnet4),
             "claude-haiku-4-5" => Ok(Model::ClaudeHaiku4_5),
@@ -976,7 +1177,9 @@ pub struct Task {
     pub destination_branch: Option<String>,
     pub work_branch: Option<String>,
     pub pr_url: Option<String>,
-    pub checklist: Vec<ChecklistItem>,
+    /// Structured task context containing stage execution history and records.
+    #[serde(default)]
+    pub context: TaskContext,
     /// Signal for flow control: go_{stage}, call_{pipeline}, return
     pub signal: Option<Signal>,
     /// Call stack for pipeline call/return semantics.
@@ -1050,7 +1253,7 @@ mod tests {
 
     fn make_comment(text: &str, pipeline: &str, run_id: u64) -> Comment {
         Comment {
-            timestamp: String::new(),
+            timestamp: chrono::DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z").unwrap(),
             stage: "s".into(),
             hostname: "h".into(),
             tool: None,
@@ -1067,7 +1270,7 @@ mod tests {
 
     fn make_comment_for(text: &str, pipeline: &str, run_id: u64, caller_run_id: u64) -> Comment {
         Comment {
-            timestamp: String::new(),
+            timestamp: chrono::DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z").unwrap(),
             stage: "s".into(),
             hostname: "h".into(),
             tool: None,
@@ -1249,5 +1452,135 @@ mod tests {
         assert!(State::Running(Pipeline::Main, Stage::from("s")).is_running());
         assert!(!State::Pending(Pipeline::Main).is_running());
         assert!(!State::Done.is_running());
+    }
+
+    fn make_stage_info(pipeline: &str, stage: &str) -> StageInfo {
+        StageInfo {
+            pipeline: Pipeline::from(pipeline),
+            run_id: 1,
+            stage: Stage::from(stage),
+            tool: None,
+            model: None,
+            prompt_link: None,
+            timestamp: "2026-03-25T00:00:00Z".parse().unwrap(),
+        }
+    }
+
+    fn make_record(id: u64, record_type: ContextRecordType, brief: &str) -> ContextRecord {
+        ContextRecord {
+            id,
+            record_type,
+            brief: brief.to_string(),
+            report_link: None,
+        }
+    }
+
+    #[test]
+    fn task_context_default_is_empty() {
+        let ctx = TaskContext::default();
+        assert!(ctx.stages.is_empty());
+        assert_eq!(ctx.next_id(), 1);
+    }
+
+    #[test]
+    fn task_context_next_id() {
+        let mut ctx = TaskContext::default();
+        assert_eq!(ctx.next_id(), 1);
+
+        ctx.stages.push(StageContext {
+            info: make_stage_info("main", "working"),
+            records: vec![
+                make_record(1, ContextRecordType::Checkbox(false), "first"),
+                make_record(3, ContextRecordType::Success, "done"),
+            ],
+
+        });
+        assert_eq!(ctx.next_id(), 4);
+
+        ctx.stages.push(StageContext {
+            info: make_stage_info("main", "review"),
+            records: vec![make_record(5, ContextRecordType::Failure, "fail")],
+
+        });
+        assert_eq!(ctx.next_id(), 6);
+    }
+
+    #[test]
+    fn task_context_find_record() {
+        let ctx = TaskContext {
+            stages: vec![
+                StageContext {
+                    info: make_stage_info("main", "working"),
+                    records: vec![
+                        make_record(1, ContextRecordType::Checkbox(false), "a"),
+                        make_record(2, ContextRecordType::Success, "b"),
+                    ],
+
+                },
+                StageContext {
+                    info: make_stage_info("main", "review"),
+                    records: vec![make_record(3, ContextRecordType::Question, "c")],
+
+                },
+            ],
+        };
+
+        let (stage_idx, record) = ctx.find_record(2).unwrap();
+        assert_eq!(stage_idx, 0);
+        assert_eq!(record.brief, "b");
+
+        let (stage_idx, record) = ctx.find_record(3).unwrap();
+        assert_eq!(stage_idx, 1);
+        assert_eq!(record.brief, "c");
+
+        assert!(ctx.find_record(99).is_none());
+    }
+
+    #[test]
+    fn task_context_find_record_mut() {
+        let mut ctx = TaskContext {
+            stages: vec![StageContext {
+                info: make_stage_info("main", "working"),
+                records: vec![make_record(1, ContextRecordType::Checkbox(false), "item")],
+    
+            }],
+        };
+
+        let (_, record) = ctx.find_record_mut(1).unwrap();
+        record.record_type = ContextRecordType::Checkbox(true);
+
+        let (_, record) = ctx.find_record(1).unwrap();
+        assert_eq!(record.record_type, ContextRecordType::Checkbox(true));
+    }
+
+    #[test]
+    fn task_context_delete_record() {
+        let mut ctx = TaskContext {
+            stages: vec![StageContext {
+                info: make_stage_info("main", "working"),
+                records: vec![
+                    make_record(1, ContextRecordType::Checkbox(false), "a"),
+                    make_record(2, ContextRecordType::Success, "b"),
+                ],
+    
+            }],
+        };
+
+        assert!(ctx.delete_record(1));
+        assert_eq!(ctx.stages[0].records.len(), 1);
+        assert_eq!(ctx.stages[0].records[0].id, 2);
+
+        assert!(!ctx.delete_record(99));
+        assert_eq!(ctx.stages[0].records.len(), 1);
+    }
+
+    #[test]
+    fn context_record_type_display() {
+        assert_eq!(ContextRecordType::Checkbox(true).to_string(), "checkbox(checked)");
+        assert_eq!(ContextRecordType::Checkbox(false).to_string(), "checkbox(unchecked)");
+        assert_eq!(ContextRecordType::Success.to_string(), "success");
+        assert_eq!(ContextRecordType::Failure.to_string(), "failure");
+        assert_eq!(ContextRecordType::Comment.to_string(), "comment");
+        assert_eq!(ContextRecordType::Question.to_string(), "question");
     }
 }

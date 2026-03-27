@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 
+use anyhow::Result;
 use zbobr_api::{
-    checklist_format::{parse_grouped_checklist, serialize_grouped_checklist},
-    task::ChecklistItem,
+    context::{parse_context, serialize_context},
+    task::TaskContext,
 };
 
-// -- Checklist parsing and serialization helpers --
+// -- Context parsing and serialization helpers --
 
 pub(crate) const PARAMETERS_SEPARATOR: &str = "\n\n---PARAMETERS---\n";
 pub(crate) const ERROR_SEPARATOR: &str = "\n\n---ERROR---\n";
-pub(crate) const CHECKLIST_SEPARATOR: &str = "\n\n---CHECKLIST---\n";
+pub(crate) const CONTEXT_SEPARATOR: &str = "\n\n---CONTEXT---\n";
 
 /// Parse parameters from the PARAMETERS section.
 /// Returns a map of parameter names to values.
@@ -38,11 +39,11 @@ pub(crate) fn serialize_parameters(params: &HashMap<String, String>) -> String {
     result
 }
 
-/// Parse a task description into (description, parameters, error, checklist).
-/// Section order: description → PARAMETERS → ERROR → CHECKLIST.
+/// Parse a task description into (description, parameters, error, context).
+/// Section order: description → PARAMETERS → ERROR → CONTEXT.
 pub(crate) fn parse_description_full(
     full_text: &str,
-) -> (String, HashMap<String, String>, Option<String>, Vec<ChecklistItem>) {
+) -> Result<(String, HashMap<String, String>, Option<String>, TaskContext)> {
     // Normalize line endings so separators match regardless of \r\n vs \n.
     let normalized = if full_text.contains("\r\n") {
         full_text.replace("\r\n", "\n")
@@ -50,21 +51,24 @@ pub(crate) fn parse_description_full(
         full_text.to_string()
     };
 
-    // First split by checklist
-    let parts: Vec<&str> = normalized.split(CHECKLIST_SEPARATOR).collect();
+    // First split by context separator
+    let parts: Vec<&str> = normalized.split(CONTEXT_SEPARATOR).collect();
 
-    let (before_checklist, checklist_text) = match parts.len() {
+    let (before_context, context_text) = match parts.len() {
         1 => (parts[0], ""),
         _ => (parts[0], parts[1]),
     };
 
     // Split by error separator
-    let error_parts: Vec<&str> = before_checklist.split(ERROR_SEPARATOR).collect();
+    let error_parts: Vec<&str> = before_context.split(ERROR_SEPARATOR).collect();
     let (before_error, error_text) = match error_parts.len() {
         1 => (error_parts[0], None),
         _ => {
             let text = error_parts[1].trim();
-            (error_parts[0], if text.is_empty() { None } else { Some(text) })
+            (
+                error_parts[0],
+                if text.is_empty() { None } else { Some(text) },
+            )
         }
     };
 
@@ -80,24 +84,25 @@ pub(crate) fn parse_description_full(
 
     let error = error_text.map(|s| s.to_string());
 
-    // Parse checklist items using shared format
-    let items = parse_grouped_checklist(checklist_text);
+    // Parse context using shared format
+    let context = parse_context(context_text)?;
 
-    (description, parameters, error, items)
+    Ok((description, parameters, error, context))
 }
 
-/// Serialize description, parameters, error, and checklist items back into the full format.
-/// Items are grouped by pipeline run with visual headers for clarity.
-/// Legacy plan sections are not included; they should be managed via Plan comments.
-/// Section order: description → PARAMETERS → ERROR → CHECKLIST.
+/// Serialize description, parameters, error, and context back into the full format.
+/// Section order: description → PARAMETERS → ERROR → CONTEXT.
 pub(crate) fn serialize_description_full(
     original_description: &str,
     parameters: &HashMap<String, String>,
     error: &Option<String>,
-    items: &[ChecklistItem],
+    context: &TaskContext,
+    report_url: Option<&dyn Fn(&str) -> String>,
 ) -> String {
     // Strip everything from the description first
-    let (clean_description, _, _, _) = parse_description_full(original_description);
+    let clean_description = parse_description_full(original_description)
+        .map(|(desc, _, _, _)| desc)
+        .unwrap_or_else(|_| original_description.to_string());
 
     let mut result = clean_description;
 
@@ -114,10 +119,11 @@ pub(crate) fn serialize_description_full(
         result.push('\n');
     }
 
-    // Add checklist if present using shared format
-    if !items.is_empty() {
-        result.push_str(CHECKLIST_SEPARATOR);
-        result.push_str(&serialize_grouped_checklist(items));
+    // Add context if non-empty
+    let context_str = serialize_context(context, &[], false, report_url);
+    if !context_str.is_empty() {
+        result.push_str(CONTEXT_SEPARATOR);
+        result.push_str(&context_str);
     }
 
     result
@@ -126,7 +132,7 @@ pub(crate) fn serialize_description_full(
 /// Merge concurrent updates to a task description.
 ///
 /// This function handles the case where two concurrent updates have been made to different
-/// sections of the task description (description, parameters, plan, checklist).
+/// sections of the task description (description, parameters, error, context).
 ///
 /// Given:
 /// - `original`: The description as it was when we first read it
@@ -140,22 +146,24 @@ pub(crate) fn serialize_description_full(
 ///
 /// The strategy is to parse all three versions, detect what changed in each,
 /// and prefer newer values while preserving non-conflicting changes.
+///
+/// Returns `Err` if any of the three descriptions fail to parse.
 pub(crate) fn merge_concurrent_description_updates(
     original: &str,
     current: &str,
     our_new: &str,
-) -> String {
+) -> Result<String> {
     // Parse all three versions
-    let (orig_desc, orig_params, orig_error, orig_checklist) = parse_description_full(original);
-    let (curr_desc, curr_params, curr_error, curr_checklist) = parse_description_full(current);
-    let (new_desc, new_params, new_error, new_checklist) = parse_description_full(our_new);
+    let (orig_desc, orig_params, orig_error, orig_context) = parse_description_full(original)?;
+    let (curr_desc, curr_params, curr_error, curr_context) = parse_description_full(current)?;
+    let (new_desc, new_params, new_error, new_context) = parse_description_full(our_new)?;
 
     // Determine what we changed
     let we_changed_desc = new_desc != orig_desc;
     let we_changed_params = new_params != orig_params;
     let we_changed_error = new_error != orig_error;
-    let we_changed_checklist = serde_json::to_string(&new_checklist).unwrap_or_default()
-        != serde_json::to_string(&orig_checklist).unwrap_or_default();
+    let we_changed_context = serde_json::to_string(&new_context).unwrap_or_default()
+        != serde_json::to_string(&orig_context).unwrap_or_default();
 
     // Merge: prefer our changes if we made them, otherwise prefer their changes
     let merged_desc = if we_changed_desc { new_desc } else { curr_desc };
@@ -169,67 +177,111 @@ pub(crate) fn merge_concurrent_description_updates(
     } else {
         curr_error
     };
-    let merged_checklist = if we_changed_checklist {
-        new_checklist
+    let merged_context = if we_changed_context {
+        new_context
     } else {
-        curr_checklist
+        curr_context
     };
 
-    // Serialize back with the merged content
-    serialize_description_full(&merged_desc, &merged_params, &merged_error, &merged_checklist)
+    // Serialize back with the merged content (no URL builder — will be re-serialized by caller)
+    Ok(serialize_description_full(
+        &merged_desc,
+        &merged_params,
+        &merged_error,
+        &merged_context,
+        None,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zbobr_api::task::{
+        ContextRecord, ContextRecordType, Model, Pipeline, Stage, StageContext, StageInfo,
+    };
 
-    #[test]
-    fn roundtrip_preserves_grouped_items() {
-        let orig_items = vec![
-            ChecklistItem {
-                id: "main__1__task1".to_string(),
-                checked: false,
-                text: "work".to_string(),
-            },
-            ChecklistItem {
-                id: "main__1__task2".to_string(),
-                checked: true,
-                text: "done".to_string(),
-            },
-            ChecklistItem {
-                id: "merge__3__other".to_string(),
-                checked: false,
-                text: "other pipeline".to_string(),
-            },
-        ];
+    fn sample_context() -> TaskContext {
+        TaskContext {
+            stages: vec![StageContext {
+                info: StageInfo {
+                    pipeline: Pipeline::from("main"),
+                    run_id: 1,
+                    stage: Stage::new("working"),
+                    tool: Some(zbobr_api::task::Tool::Claude),
+                    model: Some(Model::ClaudeOpus4_6),
+                    prompt_link: Some("prompts/work.md".to_string()),
+                    timestamp: "2024-01-01T00:00:00Z".parse().unwrap(),
+                },
+                records: vec![
+                    ContextRecord {
+                        id: 1,
+                        record_type: ContextRecordType::Checkbox(false),
+                        brief: "implement feature".to_string(),
+                        report_link: None,
+                    },
+                    ContextRecord {
+                        id: 2,
+                        record_type: ContextRecordType::Checkbox(true),
+                        brief: "write tests".to_string(),
+                        report_link: None,
+                    },
+                    ContextRecord {
+                        id: 3,
+                        record_type: ContextRecordType::Success,
+                        brief: "All done".to_string(),
+                        report_link: Some("reports/success.md".to_string()),
+                    },
+                ],
 
-        let serialized = serialize_description_full("my task", &HashMap::new(), &None, &orig_items);
-        let (desc, _, _, parsed_items) = parse_description_full(&serialized);
-
-        assert_eq!(desc, "my task");
-        assert_eq!(parsed_items.len(), 3);
-
-        // Verify IDs match after roundtrip
-        assert_eq!(parsed_items[0].id, orig_items[0].id);
-        assert_eq!(parsed_items[1].id, orig_items[1].id);
-        assert_eq!(parsed_items[2].id, orig_items[2].id);
-
-        // Verify states match
-        assert_eq!(parsed_items[0].checked, false);
-        assert_eq!(parsed_items[1].checked, true);
-        assert_eq!(parsed_items[2].checked, false);
+            }],
+        }
     }
 
     #[test]
-    fn unscoped_checklist_items_are_not_parsed() {
-        let legacy = "description\n\n---CHECKLIST---\n\
-            - [ ] task1: legacy item\n\
-            - [x] task2: old format\n";
+    fn roundtrip_preserves_context() {
+        let ctx = sample_context();
 
-        let (desc, _, _, items) = parse_description_full(legacy);
+        let serialized =
+            serialize_description_full("my task", &HashMap::new(), &None, &ctx, None);
+        let (desc, _, _, parsed_ctx) = parse_description_full(&serialized).unwrap();
+
+        assert_eq!(desc, "my task");
+        assert_eq!(parsed_ctx.stages.len(), 1);
+        assert_eq!(parsed_ctx.stages[0].records.len(), 3);
+
+        // Verify IDs match after roundtrip
+        assert_eq!(parsed_ctx.stages[0].records[0].id, 1);
+        assert_eq!(parsed_ctx.stages[0].records[1].id, 2);
+        assert_eq!(parsed_ctx.stages[0].records[2].id, 3);
+
+        // Verify states match
+        assert_eq!(
+            parsed_ctx.stages[0].records[0].record_type,
+            ContextRecordType::Checkbox(false)
+        );
+        assert_eq!(
+            parsed_ctx.stages[0].records[1].record_type,
+            ContextRecordType::Checkbox(true)
+        );
+        assert_eq!(
+            parsed_ctx.stages[0].records[2].record_type,
+            ContextRecordType::Success
+        );
+        assert_eq!(
+            parsed_ctx.stages[0].records[2].report_link.as_deref(),
+            Some("reports/success.md")
+        );
+    }
+
+    #[test]
+    fn empty_context_not_serialized() {
+        let serialized =
+            serialize_description_full("description", &HashMap::new(), &None, &TaskContext::default(), None);
+        let (desc, _, _, ctx) = parse_description_full(&serialized).unwrap();
 
         assert_eq!(desc, "description");
-        assert_eq!(items.len(), 0);
+        assert!(ctx.stages.is_empty());
+        assert!(!serialized.contains("---CONTEXT---"));
     }
 
     #[test]
@@ -237,38 +289,161 @@ mod tests {
         let mut params = HashMap::new();
         params.insert("key".to_string(), "value".to_string());
         let error = Some("Something went wrong\ndetails here".to_string());
-        let items = vec![ChecklistItem {
-            id: "main__1__task1".to_string(),
-            checked: false,
-            text: "work".to_string(),
-        }];
+        let ctx = sample_context();
 
-        let serialized = serialize_description_full("my task", &params, &error, &items);
-        let (desc, parsed_params, parsed_error, parsed_items) =
-            parse_description_full(&serialized);
+        let serialized = serialize_description_full("my task", &params, &error, &ctx, None);
+        let (desc, parsed_params, parsed_error, parsed_ctx) =
+            parse_description_full(&serialized).unwrap();
 
         assert_eq!(desc, "my task");
         assert_eq!(parsed_params.get("key").unwrap(), "value");
         assert_eq!(parsed_error, error);
-        assert_eq!(parsed_items.len(), 1);
-        assert_eq!(parsed_items[0].id, "main__1__task1");
+        assert_eq!(parsed_ctx.stages.len(), 1);
+        assert_eq!(parsed_ctx.stages[0].records.len(), 3);
 
         // Verify section order in serialized output
         let params_pos = serialized.find("---PARAMETERS---").unwrap();
         let error_pos = serialized.find("---ERROR---").unwrap();
-        let checklist_pos = serialized.find("---CHECKLIST---").unwrap();
+        let context_pos = serialized.find("---CONTEXT---").unwrap();
         assert!(params_pos < error_pos);
-        assert!(error_pos < checklist_pos);
+        assert!(error_pos < context_pos);
     }
 
     #[test]
     fn roundtrip_no_error_section() {
-        let serialized = serialize_description_full("desc", &HashMap::new(), &None, &[]);
-        let (desc, _, error, items) = parse_description_full(&serialized);
+        let serialized = serialize_description_full(
+            "desc",
+            &HashMap::new(),
+            &None,
+            &TaskContext::default(),
+            None,
+        );
+        let (desc, _, error, ctx) = parse_description_full(&serialized).unwrap();
 
         assert_eq!(desc, "desc");
         assert_eq!(error, None);
-        assert!(items.is_empty());
+        assert!(ctx.stages.is_empty());
         assert!(!serialized.contains("---ERROR---"));
+    }
+
+    #[test]
+    fn merge_preserves_non_conflicting_changes() {
+        let original = serialize_description_full(
+            "original desc",
+            &HashMap::new(),
+            &None,
+            &TaskContext::default(),
+            None,
+        );
+
+        // They changed the error
+        let current = serialize_description_full(
+            "original desc",
+            &HashMap::new(),
+            &Some("their error".to_string()),
+            &TaskContext::default(),
+            None,
+        );
+
+        // We changed the context
+        let our_new = serialize_description_full(
+            "original desc",
+            &HashMap::new(),
+            &None,
+            &sample_context(),
+            None,
+        );
+
+        let merged = merge_concurrent_description_updates(&original, &current, &our_new).unwrap();
+        let (desc, _, error, ctx) = parse_description_full(&merged).unwrap();
+
+        assert_eq!(desc, "original desc");
+        assert_eq!(error, Some("their error".to_string()));
+        assert_eq!(ctx.stages.len(), 1);
+    }
+
+    #[test]
+    fn merge_our_change_wins_on_conflict() {
+        let ctx1 = TaskContext {
+            stages: vec![StageContext {
+                info: StageInfo {
+                    pipeline: Pipeline::from("main"),
+                    run_id: 1,
+                    stage: Stage::new("planning"),
+                    tool: None,
+                    model: None,
+                    prompt_link: None,
+                    timestamp: "2024-01-01T00:00:00Z".parse().unwrap(),
+                },
+                records: vec![ContextRecord {
+                    id: 1,
+                    record_type: ContextRecordType::Checkbox(false),
+                    brief: "original item".to_string(),
+                    report_link: None,
+                }],
+
+            }],
+        };
+
+        let original =
+            serialize_description_full("desc", &HashMap::new(), &None, &ctx1, None);
+
+        // They changed the context
+        let ctx_theirs = TaskContext {
+            stages: vec![StageContext {
+                info: StageInfo {
+                    pipeline: Pipeline::from("main"),
+                    run_id: 1,
+                    stage: Stage::new("planning"),
+                    tool: None,
+                    model: None,
+                    prompt_link: None,
+                    timestamp: "2024-01-01T00:00:00Z".parse().unwrap(),
+                },
+                records: vec![ContextRecord {
+                    id: 1,
+                    record_type: ContextRecordType::Checkbox(false),
+                    brief: "their change".to_string(),
+                    report_link: None,
+                }],
+
+            }],
+        };
+        let current =
+            serialize_description_full("desc", &HashMap::new(), &None, &ctx_theirs, None);
+
+        // We also changed the context
+        let ctx_ours = TaskContext {
+            stages: vec![StageContext {
+                info: StageInfo {
+                    pipeline: Pipeline::from("main"),
+                    run_id: 1,
+                    stage: Stage::new("planning"),
+                    tool: None,
+                    model: None,
+                    prompt_link: None,
+                    timestamp: "2024-01-01T00:00:00Z".parse().unwrap(),
+                },
+                records: vec![ContextRecord {
+                    id: 1,
+                    record_type: ContextRecordType::Checkbox(true),
+                    brief: "our change".to_string(),
+                    report_link: None,
+                }],
+
+            }],
+        };
+        let our_new =
+            serialize_description_full("desc", &HashMap::new(), &None, &ctx_ours, None);
+
+        let merged = merge_concurrent_description_updates(&original, &current, &our_new).unwrap();
+        let (_, _, _, ctx) = parse_description_full(&merged).unwrap();
+
+        // Our change should win
+        assert_eq!(ctx.stages[0].records[0].brief, "our change");
+        assert_eq!(
+            ctx.stages[0].records[0].record_type,
+            ContextRecordType::Checkbox(true)
+        );
     }
 }

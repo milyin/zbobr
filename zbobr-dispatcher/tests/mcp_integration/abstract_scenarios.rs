@@ -4,80 +4,54 @@
 //! to test the pipeline machinery independently of specific naming conventions.
 
 /// Scenario that exercises all available MCP tools.
-pub fn all_mcp_tools_scenario(repo_path: &str) -> String {
-    format!(
-        r#"name: All MCP Tools Test
+pub fn all_mcp_tools_scenario(_repo_path: &str) -> String {
+    r#"name: All MCP Tools Test
 description: Exercise every MCP tool in a single session
 timeout: 60
 stop_on_failure: true
 
 steps:
-- name: get_history
-  operation:
-    type: tool_call
-    tool: get_history
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "task"
-
-- name: configure_worktree
-  operation:
-    type: tool_call
-    tool: configure_worktree
-    arguments:
-      destination_repository: "{repo_path}"
-      destination_branch: "main"
-      work_branch_postfix: "test-all-tools"
-  assertions:
-    - type: success
-
 - name: add_checklist_item
   operation:
     type: tool_call
     tool: add_checklist_item
     arguments:
-      id: "c1"
-      text: "First item"
-  assertions:
-    - type: success
-
-- name: get_checklist
-  operation:
-    type: tool_call
-    tool: get_checklist
+      brief: "First item"
+      full_report: "Detailed description of the first checklist item."
   assertions:
     - type: success
     - type: contains
       path: result
-      value: "First item"
+      value: "ctx_rec_"
 
 - name: check_checklist_item
   operation:
     type: tool_call
     tool: check_checklist_item
     arguments:
-      id: "c1"
+      id: "1"
   assertions:
     - type: success
+    - type: contains
+      path: result
+      value: "checked"
 
 - name: add then delete
   operation:
     type: tool_call
     tool: add_checklist_item
     arguments:
-      id: "c2"
-      text: "Temp item"
+      brief: "Temp item"
+      full_report: "Temporary item to be deleted."
   assertions:
     - type: success
 
-- name: delete_checklist_item
+- name: delete_ctx_rec
   operation:
     type: tool_call
-    tool: delete_checklist_item
+    tool: delete_ctx_rec
     arguments:
-      id: "c2"
+      id: "ctx_rec_2"
   assertions:
     - type: success
     - type: contains
@@ -93,9 +67,8 @@ steps:
       full_report: "Detailed report: all MCP tools were tested successfully."
   assertions:
     - type: success
-"#,
-        repo_path = repo_path,
-    )
+"#
+    .to_string()
 }
 
 /// Scenario that calls configure_worktree twice with identical values.
