@@ -439,9 +439,9 @@ Your working directory is already the repository with the work branch checked ou
    - If something is unclear or you have doubts, use `{mcp_stop_with_question}` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet. Finish the session after asking.
    - Only if the plan is clear and no questions were posted, proceed to step 7.
 7. **Check for user approval**:
-   - Review the comments below to determine if the user has already approved this plan (or an earlier variant of it)
+   - Review the most recent (last) comment below to determine if the user explicitly approves this plan
    - Check the task description to see if it explicitly states that confirmation is not needed (e.g., "plan is preapproved")
-   - If approval is confirmed (in comments or task description):
+   - If approval is confirmed (in the last comment or task description):
      - Proceed to step 8: create checklist items
      - Then call `{mcp_report_success}` to finalize and proceed to implementation
    - If approval is NOT confirmed:
@@ -454,7 +454,7 @@ Your working directory is already the repository with the work branch checked ou
    - Use `{mcp_delete_ctx_rec}` to remove unnecessary unchecked items
    - The checklist items ARE the plan — they should fully describe what the worker needs to do
    - After creating checklist items, call `{mcp_report_success}` with a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog).
-8.5. **If approval is NOT confirmed**: Present the plan by calling `{mcp_report_intermediate}` with a brief description of the proposed approach (why this approach was chosen, key design decisions, important constraints, chosen analog). Do NOT include checklist items yet — present only the plan structure and rationale. Wait for the user to review and approve."#;
+8.5. **If approval is NOT confirmed**: Present the plan by calling `{mcp_report_intermediate}` with a brief description of the proposed approach. Do NOT include checklist items yet — present only the plan structure and rationale."#;
 
 const WORKER_PROMPT: &str = r#"# Worker Agent
 
