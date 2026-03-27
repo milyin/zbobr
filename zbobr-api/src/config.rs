@@ -16,7 +16,7 @@ pub trait Config: Sized {
 }
 
 /// Definition of a role: which MCP tools it can access, an optional prompt file, and default tool/model.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RoleDefinition {
     pub mcp: Vec<McpTool>,
@@ -26,6 +26,8 @@ pub struct RoleDefinition {
     pub default_tool: Option<Tool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<Model>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_plan_mode: Option<bool>,
 }
 
 /// A stage transition descriptor with an optional target stage and pause flag.
@@ -109,6 +111,8 @@ pub struct StageDefinition {
     pub model: Option<Model>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<Tool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_mode: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role_prompt: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -607,6 +611,26 @@ impl ZbobrDispatcherConfig {
             }
         } else {
             self.model.clone()
+        }
+    }
+
+    /// Determine whether to run claude in plan mode for this stage.
+    ///
+    /// Precedence:
+    /// 1. Stage-level `plan_mode`
+    /// 2. Role-level `default_plan_mode`
+    /// 3. Default false.
+    pub fn plan_mode_for_stage(&self, stage_def: &StageDefinition, workflow: &WorkflowConfig) -> bool {
+        if let Some(plan_mode) = stage_def.plan_mode {
+            plan_mode
+        } else if let Some(role_name) = stage_def.role_name() {
+            if let Some(role_def) = workflow.role_definition(role_name) {
+                role_def.default_plan_mode.unwrap_or(false)
+            } else {
+                false
+            }
+        } else {
+            false
         }
     }
 }

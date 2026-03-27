@@ -31,6 +31,7 @@ impl ToolExecutor for ClaudeExecutor {
         prompt: &str,
         work_dir: &Path,
         mcp_url: &str,
+        plan_mode: bool,
         agent_github_token: &str,
         copilot_github_token: &str,
     ) -> anyhow::Result<()> {
@@ -63,11 +64,7 @@ impl ToolExecutor for ClaudeExecutor {
         tracing::info!("MCP endpoint: {mcp_url}");
         tracing::debug!("MCP config JSON: {}", mcp_config_str);
 
-        let permission_mode = if role == "planner" {
-            "plan"
-        } else {
-            "acceptEdits"
-        };
+        let permission_mode = if plan_mode { "plan" } else { "acceptEdits" };
 
         let args = [
             "--model",

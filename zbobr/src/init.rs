@@ -229,6 +229,7 @@ fn default_workflow() -> WorkflowConfig {
                 prompt: Some(PathBuf::from("preparator.md")),
                 default_tool: None,
                 default_model: None,
+                default_plan_mode: Some(true),
             },
         ),
         (
@@ -245,6 +246,7 @@ fn default_workflow() -> WorkflowConfig {
                 prompt: Some(PathBuf::from("planner.md")),
                 default_tool: None,
                 default_model: None,
+                default_plan_mode: Some(true),
             },
         ),
         (
@@ -261,8 +263,7 @@ fn default_workflow() -> WorkflowConfig {
                     DeleteCtxRec,
                 ],
                 prompt: Some(PathBuf::from("worker.md")),
-                default_tool: None,
-                default_model: None,
+                ..Default::default()
             },
         ),
         (
@@ -276,8 +277,7 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithQuestion,
                 ],
                 prompt: Some(PathBuf::from("reviewer.md")),
-                default_tool: None,
-                default_model: None,
+                ..Default::default()
             },
         ),
         (
@@ -290,8 +290,7 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithQuestion,
                 ],
                 prompt: Some(PathBuf::from("tester.md")),
-                default_tool: None,
-                default_model: None,
+                ..Default::default()
             },
         ),
         (
@@ -299,8 +298,7 @@ fn default_workflow() -> WorkflowConfig {
             RoleDefinition {
                 mcp: vec![StopWithError, ReportSuccess, StopWithQuestion],
                 prompt: Some(PathBuf::from("merger.md")),
-                default_tool: None,
-                default_model: None,
+                ..Default::default()
             },
         ),
     ]);
