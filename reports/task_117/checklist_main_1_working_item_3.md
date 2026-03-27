@@ -1,0 +1,1 @@
+Run `cargo build` and `cargo test` to ensure all changes compile and tests pass.
