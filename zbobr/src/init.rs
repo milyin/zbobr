@@ -440,7 +440,7 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
    - Only if the plan is clear and no questions were posted, proceed to step 7.
 7. **Prepare checklist items for the worker** (only when plan is clear):
    - Review the unchecked checklist items in the context below (if any).
-   - Use `{mcp_add_checklist_item}` to add implementation steps for the worker. Each item has two parts: a **brief** summary (shown inline in the context) and a **full_report** with detailed implementation instructions (stored as a linked file). Put concise step title in brief; put file paths, code snippets, specific changes, and rationale in full_report.
+   - Use `{mcp_add_checklist_item}` to add implementation steps for the worker. Each item has two parts: a **brief** summary (shown inline in the context) and a **full_report** with detailed instructions (stored as a linked file). Put concise step title in brief; put the *what* and *why* in full_report — which components or modules to change, which interfaces or data flows are affected, which patterns from the analog to follow. Do NOT include code snippets, exact file paths, or prescriptive implementation details — the worker will look those up.
    - Use `{mcp_delete_ctx_rec}` to remove unnecessary unchecked items
    - The checklist items ARE the plan — they should fully describe what the worker needs to do
 8. **Present the plan by calling `{mcp_report_intermediate}`** with a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog). Do NOT repeat the checklist items — the plan details are already captured there. Wait for the user to review.
