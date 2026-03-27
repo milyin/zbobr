@@ -358,11 +358,36 @@ impl RoleSession {
             if let Some(stage) = task.context.stages.last_mut() {
                 stage.records.push(ContextRecord {
                     id,
-                    record_type,
+                    record_type: record_type.clone(),
                     brief,
                     report_link,
                     parent_record_id: None,
                 });
+
+                // If this is a report record (Success, Failure, or Comment),
+                // reparent all orphaned checkboxes that come before it
+                if matches!(record_type, ContextRecordType::Success | ContextRecordType::Failure | ContextRecordType::Comment) {
+                    let orphaned_indices: Vec<usize> = stage
+                        .records
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, r)| {
+                            if idx < stage.records.len() - 1 && // Don't check the newly added record
+                                r.parent_record_id.is_none() &&
+                                matches!(r.record_type, ContextRecordType::Checkbox(_))
+                            {
+                                Some(idx)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    // Reparent orphaned checkboxes to the new report
+                    for idx in orphaned_indices {
+                        stage.records[idx].parent_record_id = Some(id);
+                    }
+                }
             }
             task
         })
