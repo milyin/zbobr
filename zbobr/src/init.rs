@@ -418,7 +418,7 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 
     You can access the internet and run local commands. Your restrictions:
     - Use MCP `{mcp_report_intermediate}` to present the plan for user review (only when plan is not yet approved)
-    - Use MCP `{mcp_report_success}` to finalize and proceed with implementation — call this only after creating checklist items (see workflow step 7)
+    - Use MCP `{mcp_report_success}` to finalize and proceed with implementation — call this only after creating checklist items (see workflow step 8)
     - Use MCP `{mcp_stop_with_question}` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
     - Use MCP `{mcp_stop_with_error}` only to report technical errors
     - NEVER use git/gh for writing, pushing, or sending data to GitHub
@@ -438,9 +438,9 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
    - If something is unclear or you have doubts, use `{mcp_stop_with_question}` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet. Finish the session after asking.
    - Only if the plan is clear and no questions were posted, proceed to step 7.
 7. **Check for user approval**:
-   - Review the comments below to determine if the user has already approved this plan (or an earlier variant of it)
+   - Review the most recent (last) comment below to determine if the user explicitly approves this plan
    - Check the task description to see if it explicitly states that confirmation is not needed (e.g., "plan is preapproved")
-   - If approval is confirmed (in comments or task description):
+   - If approval is confirmed (in the last comment or task description):
      - Proceed to step 8: create checklist items
      - Then call `{mcp_report_success}` to finalize and proceed to implementation
    - If approval is NOT confirmed:
