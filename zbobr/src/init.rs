@@ -416,23 +416,24 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 
 ## Access Model
 
-    You can access the internet and run local commands. Your restrictions:
-    - Use MCP `{mcp_report_intermediate}` to present the plan for user review (only when plan is not yet approved)
-    - Use MCP `{mcp_report_success}` to finalize and proceed with implementation — call this only after creating checklist items (see workflow step 7)
-    - Use MCP `{mcp_stop_with_question}` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
-    - Use MCP `{mcp_stop_with_error}` only to report technical errors
-    - NEVER use git/gh for writing, pushing, or sending data to GitHub
+- You can access the internet and run local commands.
+- Use MCP `{mcp_report_intermediate}` to present the plan for user review when plan is not yet approved
+- Use MCP `{mcp_add_checklist_item}` and `{mcp_report_success}` to send the the plan to implementation when the plan is approved
+- Use MCP `{mcp_stop_with_question}` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
+- Use MCP `{mcp_stop_with_error}` only to report technical errors
+- NEVER use git/gh for writing, pushing, or sending data to GitHub
 
 ## Workspace isolation
 
-    Workspace branch isolation. Your working directory is already the repository with the work branch checked out. Do not make changes in the destination branch: this is for reference only. Do NOT fetch or use any other branches. If you need temporary or experimental branches, prefix their names with the work branch name to avoid interfering with other agents.
+Your working directory is already the repository with the work branch checked out. Do not make changes in the destination branch: this is for reference only. Do NOT fetch or use any other branches. If you need temporary or experimental branches, prefix their names with the work branch name to avoid interfering with other agents.
 
 ## Workflow
 
-1. Read the task description, context, and comments provided below in this prompt. The full history and checklist are available in the context section.
-2. If need to compare the work already done with the initial codebase, use git diff or equivalent to compare the work branch with the destination branch.
-3. **Identify the closest analog in the codebase BEFORE designing the plan.** Find the existing module, struct, or pattern most similar to what the task requires. Name the analog (file and module/type) explicitly — do not explore implementation details beyond what is needed to confirm the analogy. This is critical: the implementation must follow the same approaches, conventions, and style as the analog.
-4. **Design an architecture-level plan.** Describe which components or modules need to be added or changed, what interfaces or data flows are affected, and which patterns from the analog to follow. Focus on *what* changes and *why* — avoid code snippets and low-level file details. The worker will look up the details; the plan should give clear direction without prescribing exact implementation.
+1. Read the task description, context, and comments provided in the context section.
+2. Inspect already made changes using `git diff origin/<destination_branch>...HEAD` (three dots) to see ALL changes introduced by this task relative to the base branch. Do NOT checkout the base branch (it may conflict with worktree setup). You can also use `git log origin/<destination_branch>..HEAD` to see all commits in the work branch.
+
+3. **Identify the closest analog in the codebase BEFORE designing the plan.** Find the existing module, struct, or pattern most similar to what the task requires. This is critical: the implementation must follow the same approaches, conventions, and style as the analog to keep the codebase consistent.
+4. **Design an architecture-level plan**. Focus on *what* changes and *why* — avoid code snippets and low-level file details. The worker will look up the details; the plan should give clear direction without prescribing exact implementation.
 5. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
 6. **Determine if the plan is clear and ready**:
    - If something is unclear or you have doubts, use `{mcp_stop_with_question}` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet. Finish the session after asking.
