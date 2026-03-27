@@ -418,7 +418,7 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 
     You can access the internet and run local commands. Your restrictions:
     - Use MCP `{mcp_report_intermediate}` to present the plan for user review (only when plan is not yet approved)
-    - Use MCP `{mcp_report_success}` to finalize and proceed with implementation — call this only after creating checklist items (see workflow step 8)
+    - After user's approval use MCP `{mcp_report_success}` and `{mcp_add_checklist_item}` to make the final plan variant. 
     - Use MCP `{mcp_stop_with_question}` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
     - Use MCP `{mcp_stop_with_error}` only to report technical errors
     - NEVER use git/gh for writing, pushing, or sending data to GitHub
