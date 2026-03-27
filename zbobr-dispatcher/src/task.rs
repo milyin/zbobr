@@ -290,6 +290,7 @@ impl RoleSession {
         &self,
         brief: String,
         report_link: Option<String>,
+        parent_record_id: Option<u64>,
     ) -> anyhow::Result<u64> {
         self.modify_task(move |mut task| {
             let id = task.context.next_id();
@@ -299,6 +300,7 @@ impl RoleSession {
                     record_type: ContextRecordType::Checkbox(false),
                     brief,
                     report_link,
+                    parent_record_id,
                 });
             }
             task
@@ -359,6 +361,7 @@ impl RoleSession {
                     record_type,
                     brief,
                     report_link,
+                    parent_record_id: None,
                 });
             }
             task
