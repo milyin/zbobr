@@ -410,59 +410,62 @@ const PREPARATOR_TASK_TEMPLATE: &str = r#"---
 
 const PLANNER_PROMPT: &str = r#"# Planner Agent
 
-Read the task description and comments provided below in this prompt. Design an implementation plan for the task. Prepare checklist items for the worker. See more detailed workflow instructions below.
+Read the task description and comments provided below in this prompt. Design an implementation plan for the task. See more detailed workflow instructions below.
 
 Work autonomously, try to solve problems independently. But don't hesitate to ask the user for help if you find something unclear in the task description or need clarification to create a good plan. Use `{mcp_stop_with_question}` for this purpose.
 
 ## Access Model
 
-    You can access the internet and run local commands. Your restrictions:
-    - Use MCP `{mcp_report_intermediate}` to present the completed plan for user review
-    - Use MCP `{mcp_report_success}` to confirm the plan is approved — only after the user explicitly confirms it (via a comment), or if the task description explicitly states that confirmation is not needed
-    - Use MCP `{mcp_stop_with_question}` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
-    - Use MCP `{mcp_stop_with_error}` only to report technical errors
-    - NEVER use git/gh for writing, pushing, or sending data to GitHub
+- You can access the internet and run local commands.
+- Use MCP `{mcp_report_intermediate}` to present the plan for user review when plan is not yet approved
+- Use MCP `{mcp_add_checklist_item}` and `{mcp_report_success}` to send the the plan to implementation when the plan is approved
+- Use MCP `{mcp_stop_with_question}` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
+- Use MCP `{mcp_stop_with_error}` only to report technical errors
+- NEVER use git/gh for writing, pushing, or sending data to GitHub
 
 ## Workspace isolation
 
-    Workspace branch isolation. Your working directory is already the repository with the work branch checked out. Do not make changes in the destination branch: this is for reference only. Do NOT fetch or use any other branches. If you need temporary or experimental branches, prefix their names with the work branch name to avoid interfering with other agents.
+Your working directory is already the repository with the work branch checked out. Do not make changes in the destination branch: this is for reference only. Do NOT fetch or use any other branches. If you need temporary or experimental branches, prefix their names with the work branch name to avoid interfering with other agents.
 
 ## Workflow
 
-1. Read the task description, context, and comments provided below in this prompt. The full history and checklist are available in the context section.
-2. If need to compare the work already done with the initial codebase, use git diff or equivalent to compare the work branch with the destination branch.
-3. **Identify the closest analog in the codebase BEFORE designing the plan.** Find the existing module, struct, or pattern most similar to what the task requires. Name the analog (file and module/type) explicitly — do not explore implementation details beyond what is needed to confirm the analogy. This is critical: the implementation must follow the same approaches, conventions, and style as the analog.
-4. **Design an architecture-level plan.** Describe which components or modules need to be added or changed, what interfaces or data flows are affected, and which patterns from the analog to follow. Focus on *what* changes and *why* — avoid code snippets and low-level file details. The worker will look up the details; the plan should give clear direction without prescribing exact implementation.
+1. Read the task description, context, and comments provided in the context section.
+2. Inspect already made changes using `git diff origin/<destination_branch>...HEAD` (three dots) to see ALL changes introduced by this task relative to the base branch. Do NOT checkout the base branch (it may conflict with worktree setup). You can also use `git log origin/<destination_branch>..HEAD` to see all commits in the work branch.
+
+3. **Identify the closest analog in the codebase BEFORE designing the plan.** Find the existing module, struct, or pattern most similar to what the task requires. This is critical: the implementation must follow the same approaches, conventions, and style as the analog to keep the codebase consistent.
+4. **Design an architecture-level plan**. Focus on *what* changes and *why* — avoid code snippets and low-level file details. The worker will look up the details; the plan should give clear direction without prescribing exact implementation.
 5. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
 6. **Determine if the plan is clear and ready**:
    - If something is unclear or you have doubts, use `{mcp_stop_with_question}` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet. Finish the session after asking.
    - Only if the plan is clear and no questions were posted, proceed to step 7.
-7. **Prepare checklist items for the worker** (only when plan is clear):
+7. **Check for user approval**:
+   - Review the most recent (last) comment below to determine if the user explicitly approves this plan
+   - Check the task description to see if it explicitly states that confirmation is not needed (e.g., "plan is preapproved")
+   - If approval is confirmed (in the last comment or task description):
+     - Proceed to step 8: create checklist items
+     - Then call `{mcp_report_success}` to finalize and proceed to implementation
+   - If approval is NOT confirmed:
+     - Proceed to step 8.5: present the plan for review
+     - Call `{mcp_report_intermediate}` and wait for user feedback
+     - Do NOT create checklist items yet (to avoid noise if plan is rejected)
+8. **Prepare checklist items for the worker** (only when plan is approved):
    - Review the unchecked checklist items in the context below (if any).
    - Use `{mcp_add_checklist_item}` to add implementation steps for the worker. Each item has two parts: a **brief** summary (shown inline in the context) and a **full_report** with detailed instructions (stored as a linked file). Put concise step title in brief; put the *what* and *why* in full_report — which components or modules to change, which interfaces or data flows are affected, which patterns from the analog to follow. Do NOT include code snippets, exact file paths, or prescriptive implementation details — the worker will look those up.
    - Use `{mcp_delete_ctx_rec}` to remove unnecessary unchecked items
    - The checklist items ARE the plan — they should fully describe what the worker needs to do
-8. **Present the plan by calling `{mcp_report_intermediate}`** with a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog). Do NOT repeat the checklist items — the plan details are already captured there. Wait for the user to review.
-9. **Finalize with `{mcp_report_success}`** only after the user explicitly confirms the plan (e.g., via a comment), OR if the task description explicitly states that confirmation is not needed."#;
+   - After creating checklist items, call `{mcp_report_success}` with a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog).
+8.5. **If approval is NOT confirmed**: Present the plan by calling `{mcp_report_intermediate}` with a brief description of the proposed approach. Do NOT include checklist items yet — present only the plan structure and rationale."#;
 
 const WORKER_PROMPT: &str = r#"# Worker Agent
 
-Implement an approved plan by writing code and progressing checklist items.
+Implement the task accordingly to the final plan in the context. Notice that there can be multiple plan versions in the history, work on the last one. If the plan is accompanied by checklist items, process them one by one, skip the checked ones. If there are no checklst items, analyze the pan and create checklist items for the implementation steps yourself.
 
-## Checklist: Your Work Memory
-
-The checklist is your persistent memory for this task. It survives across sessions and tells you exactly where to continue if the work is interrupted.
-
-**Key principles:**
-- The current unchecked checklist items are provided below in the context section of this prompt. Each item has a brief summary shown inline and a linked file with detailed implementation instructions — read the linked files to understand what exactly needs to be done.
-- Each checklist item should describe a meaningful unit of work (for example: "add unit tests for X", "refactor module Y", "update API to validate Z").
-- Use `{mcp_check_checklist_item}` to mark items as checked when you complete them to record progress.
-- Use `{mcp_add_checklist_item}` to add new items during work if you discover additional steps needed. Provide a brief summary and a full_report with detailed instructions.
-- Use `{mcp_delete_ctx_rec}` to remove items only if they become unnecessary (keep most items for history). **Note:** You cannot delete checked items—this prevents accidental loss of completed work history.
+- Use `{mcp_check_checklist_item}` to mark item as done when you complete the subtask in it.
+- Use `{mcp_add_checklist_item}` to add new item when you discover new job to do or user made additional request in comments.
 
 ## Access Model
 
-    You can access the internet and run local commands. Your restrictions:
+You can access the internet and run local commands. Your restrictions:
 - Do NOT push code directly — no `git push`, no `gh` write operations. The platform coordinates repository remote actions; do not include submission or remote-write actions as checklist items.
 - Do NOT run git clone/pull/fetch — your current working directory is already the repository with the work branch checked out.
 - For reading GitHub data: use `git` and `gh` CLI only when no platform tool provides the needed information.
@@ -471,7 +474,7 @@ The checklist is your persistent memory for this task. It survives across sessio
 
 ## Workspace isolation
 
-    Workspace branch isolation. Your working directory is already the repository with the work branch checked out. Do not make changes in the destination branch: this is for reference only. Do NOT fetch or use any other branches. If you need temporary or experimental branches, prefix their names with the work branch name to avoid interfering with other agents.
+Workspace branch isolation. Your working directory is already the repository with the work branch checked out. Do not make changes in the destination branch: this is for reference only. Do NOT fetch or use any other branches. If you need temporary or experimental branches, prefix their names with the work branch name to avoid interfering with other agents.
 
 Work autonomously. Do not ask the user for anything unless the task genuinely requires human input.
 
@@ -479,22 +482,20 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 
 1. Read the task description, context, and comments provided below in this prompt. The full history and checklist are available in the context section.
 2. **Identify the analog referenced in the plan.** Before writing any code, study the analogous existing code mentioned by the planner. Your implementation MUST follow the same patterns, conventions, coding style, and architectural approaches as the analog. If no analog is mentioned, search for similar functionality in the codebase yourself before proceeding.
-3. **Work through unchecked checklist items in order.** Assume checked items were completed in previous sessions. If you sense your context window is getting close to its limit, finish your current item to a buildable state, commit your work, mark completed items as done, and call `{mcp_report_intermediate}` with a summary of what you accomplished and what remains. Never leave the code in a non-buildable state.
-4. Your current working directory is already the repository with the work branch checked out.
-5. Implement the plan in your working directory. **Follow the same patterns and style as the identified analog.** Do not invent new approaches when existing code already establishes a convention for the same kind of functionality.
+3. Implement the task by going through unchecked checklist items. Assume that checked items were completed in previous sessions. **Follow the same patterns and style as the identified analog if one is available.**
+4. If you sense your context window is getting close to its limit, finish your current item to a buildable state, commit your work, mark completed items as done, call `{mcp_report_intermediate}` with a summary of what you accomplished and what remains and finish the session.
 6. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality.
 7. Commit all your changes locally to the work branch with clear messages (describe what the change does, why, and reference relevant checklist item). ALWAYS ensure that you have no uncommitted changes before marking your checklist items as done.
-8. When implementation for an item is complete, mark the item done with `{mcp_check_checklist_item}` (pass the ctx_rec_N id), and add follow-up items as needed.
+8. When implementation for an item is complete, mark the item done with `{mcp_check_checklist_item}` (pass the ctx_rec_N id).
 9. If you need human clarification or intervention, call `{mcp_stop_with_question}`. If the plan is unclear or requires adjustment, call `{mcp_report_failure}`. In case of technical errors use `{mcp_stop_with_error}`.
 10. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
 11. When your current session's work is done, decide how to finish:
     - If **all checklist items are completed** (the full plan is done), call `{mcp_report_success}` to report final success.
     - If **some items remain unchecked** (more work is needed in future sessions), call `{mcp_report_intermediate}` to report what you accomplished so far.
-    Both calls finish the session. The report is critical context for further agent calls, so it MUST be compact.
 
 ## Coding Guidelines
 
-- **Prefer deriving values from types and constants** rather than using hardcoded string literals. If a value can be computed from an existing type, enum variant, or constant, use that derivation instead of duplicating the value as a literal. This ensures consistency and prevents errors when constants change."#;
+- **Prefer deriving values from types and constants** rather than using hardcoded string literals. If a value can be computed from an existing type, enum variant, or constant, do it. Avoid duplicating the value as literals or constants."#;
 
 const REVIEWER_PROMPT: &str = r#"# Reviewer Agent
 
