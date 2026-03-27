@@ -291,7 +291,18 @@ impl ZbobrRepoBackendGithub {
 
         for line in output.lines() {
             if let Some(key) = line.split_whitespace().next() {
-                if let Err(e) = git(bare_dir, &["config", "--unset", key]).await {
+                // Use tokio::process::Command directly instead of git() helper to
+                // avoid leaking the token through the error message (git() embeds
+                // the full args, which include the legacy key containing the token).
+                let status = tokio::process::Command::new("git")
+                    .args(["config", "--unset", key])
+                    .current_dir(bare_dir)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .await;
+                let success = status.as_ref().map_or(false, |s| s.success());
+                if !success {
                     // Redact any embedded credentials from the key before logging
                     let redacted_key = if let Some(proto_end) = key.find("://") {
                         if let Some(at_pos) = key[proto_end..].find('@') {
@@ -306,11 +317,15 @@ impl ZbobrRepoBackendGithub {
                     } else {
                         key.to_string()
                     };
+                    let exit_info = match status {
+                        Ok(s) => format!("exit code {}", s.code().unwrap_or(-1)),
+                        Err(e) => format!("spawn error: {e}"),
+                    };
                     tracing::warn!(
                         "Failed to remove legacy token config key '{}' in {}: {}",
                         redacted_key,
                         bare_dir.display(),
-                        e
+                        exit_info
                     );
                 }
             }
@@ -939,6 +954,18 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
 
         tracing::info!("Worktree {work_branch}: up-to-date, all merges succeeded, pushed");
         Ok(true)
+    }
+
+    async fn fetch_refs(
+        &self,
+        identity: &zbobr_api::task::TaskIdentity,
+    ) -> anyhow::Result<()> {
+        let repo = parse_github_repo(&identity.destination_repository)?;
+        let bare_dir = self.ensure_bare_clone_github(&repo).await?;
+        let owned_env = self.token_auth_env();
+        let env: Vec<(&str, &str)> = owned_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        git_env(&bare_dir, &["fetch", "origin"], &env).await?;
+        Ok(())
     }
 
     async fn ensure_pr_url(

@@ -220,6 +220,15 @@ impl ZbobrDispatcher {
         remote_repo.rsplit('/').next().unwrap_or(remote_repo)
     }
 
+    /// Fetch latest refs from origin with authentication.
+    /// Unlike `update_worktree`, this only fetches — no merges, pushes, or PR side effects.
+    pub async fn fetch_refs(
+        &self,
+        identity: &zbobr_api::TaskIdentity,
+    ) -> anyhow::Result<()> {
+        self.repo_backend.fetch_refs(identity).await
+    }
+
     /// Prepare a worktree for the given task. Constructs workspace_path as
     /// `TaskDir::new(workspaces, task_id)/repo_name` and delegates to the backend.
     pub async fn update_worktree(

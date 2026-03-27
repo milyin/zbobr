@@ -236,6 +236,10 @@ pub trait WorktreeBackend: Send + Sync {
         git_user_email: &str,
     ) -> anyhow::Result<bool>;
 
+    /// Fetch latest refs from origin with authentication.
+    /// Unlike `update_worktree`, this only fetches — no merges, pushes, or PR side effects.
+    async fn fetch_refs(&self, identity: &TaskIdentity) -> anyhow::Result<()>;
+
     /// Ensure a PR exists for the work branch (no push). Returns PR URL.
     async fn ensure_pr_url(
         &self,

@@ -169,6 +169,15 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
         Ok(is_uptodate)
     }
 
+    async fn fetch_refs(&self, identity: &TaskIdentity) -> anyhow::Result<()> {
+        let remote_repo = &identity.destination_repository;
+        let repo_name = Self::repo_name_from_path(remote_repo)?;
+        let bare_dir = self.config.repos_dir.join(format!("{}.git", repo_name));
+        self.ensure_bare_clone(remote_repo, &bare_dir).await?;
+        zbobr_utility::git(&bare_dir, &["fetch", "origin"]).await?;
+        Ok(())
+    }
+
     async fn ensure_pr_url(&self, identity: &TaskIdentity, _body: Option<&str>) -> anyhow::Result<String> {
         let work_branch = &identity.work_branch;
         if !self.config.repos_dir.exists() {

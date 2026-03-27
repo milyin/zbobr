@@ -966,6 +966,10 @@ mod comment_model_tests {
             Ok(true)
         }
 
+        async fn fetch_refs(&self, _identity: &zbobr_api::TaskIdentity) -> anyhow::Result<()> {
+            Ok(())
+        }
+
         async fn ensure_pr_url(&self, _identity: &zbobr_api::TaskIdentity, _body: Option<&str>) -> anyhow::Result<String> {
             Ok("mock-pr-url".to_string())
         }

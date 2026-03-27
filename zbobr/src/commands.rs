@@ -698,7 +698,9 @@ async fn overwrite_author(
 
     // Fetch latest refs (including dest_branch) via the auth-aware backend
     // so that filter-branch range and dry-run log are accurate.
-    zbobr.update_worktree(&identity).await?;
+    // Uses fetch_refs (fetch-only) instead of update_worktree to avoid
+    // side effects (merges, pushes, PR creation) that violate dry-run expectations.
+    zbobr.fetch_refs(&identity).await?;
 
     if !dry_run {
         let config = zbobr.config();
