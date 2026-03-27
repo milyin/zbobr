@@ -757,13 +757,14 @@ impl schemars::JsonSchema for Signal {
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct StackEntry {
+    /// Caller's pipeline to return to after sub-pipeline completion.
     pub pipeline: Pipeline,
-    /// Signal to emit when returning to this pipeline.
-    #[serde(alias = "stage")]
-    pub signal: Signal,
     /// Caller's pipeline_run_id to restore on return.
     #[serde(default)]
     pub pipeline_run_id: u64,
+    /// Signal to emit when returning to this pipeline.
+    #[serde(alias = "stage")]
+    pub signal: Signal,
 }
 
 /// A worktree problem detected before stage execution.
