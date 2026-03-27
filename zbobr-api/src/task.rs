@@ -757,13 +757,14 @@ impl schemars::JsonSchema for Signal {
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct StackEntry {
+    /// Caller's pipeline to return to after sub-pipeline completion.
     pub pipeline: Pipeline,
-    /// Signal to emit when returning to this pipeline.
-    #[serde(alias = "stage")]
-    pub signal: Signal,
     /// Caller's pipeline_run_id to restore on return.
     #[serde(default)]
     pub pipeline_run_id: u64,
+    /// Signal to emit when returning to this pipeline.
+    #[serde(alias = "stage")]
+    pub signal: Signal,
 }
 
 /// A worktree problem detected before stage execution.
@@ -876,6 +877,8 @@ pub enum Model {
     ClaudeOpus4_5,
     #[serde(rename = "claude-sonnet-4.5")]
     ClaudeSonnet4_5,
+    #[serde(rename = "claude-sonnet-4.6")]
+    ClaudeSonnet4_6,
     #[serde(rename = "claude-opus-4.6")]
     ClaudeOpus4_6,
     #[serde(rename = "claude-opus-4.6-fast")]
@@ -904,6 +907,7 @@ impl Model {
             Model::ClaudeHaiku4_5,
             Model::ClaudeOpus4_5,
             Model::ClaudeSonnet4_5,
+            Model::ClaudeSonnet4_6,
             Model::ClaudeOpus4_6,
             Model::ClaudeOpus4_6Fast,
             Model::Gemini3ProPreview,
@@ -933,6 +937,7 @@ impl Model {
                 Model::ClaudeHaiku4_5 => Some("claude-haiku-4.5"),
                 Model::ClaudeOpus4_5 => Some("claude-opus-4.5"),
                 Model::ClaudeSonnet4_5 => Some("claude-sonnet-4.5"),
+                Model::ClaudeSonnet4_6 => Some("claude-sonnet-4.6"),
                 Model::ClaudeOpus4_6 => Some("claude-opus-4.6"),
                 Model::ClaudeOpus4_6Fast => Some("claude-opus-4.6-fast"),
                 Model::Gemini3ProPreview => Some("gemini-3-pro-preview"),
@@ -945,6 +950,7 @@ impl Model {
                 Model::ClaudeSonnet4_5 => Some("claude-sonnet-4-5"),
                 Model::ClaudeHaiku4_5 => Some("claude-haiku-4-5"),
                 Model::ClaudeOpus4_5 => Some("claude-opus-4-5"),
+                Model::ClaudeSonnet4_6 => Some("claude-sonnet-4-6"),
                 Model::ClaudeOpus4_6 => Some("claude-opus-4-6"),
                 Model::ClaudeOpus4_6Fast => Some("claude-opus-4-6"),
                 Model::ClaudeSonnet4 => Some("claude-sonnet-4"),
@@ -977,6 +983,7 @@ impl std::fmt::Display for Model {
             Model::ClaudeHaiku4_5 => "claude-haiku-4.5",
             Model::ClaudeOpus4_5 => "claude-opus-4.5",
             Model::ClaudeSonnet4_5 => "claude-sonnet-4.5",
+            Model::ClaudeSonnet4_6 => "claude-sonnet-4.6",
             Model::ClaudeOpus4_6 => "claude-opus-4.6",
             Model::ClaudeOpus4_6Fast => "claude-opus-4.6-fast",
             Model::Gemini3ProPreview => "gemini-3-pro-preview",
@@ -1008,6 +1015,7 @@ impl std::str::FromStr for Model {
             "claude-haiku-4-5" => Ok(Model::ClaudeHaiku4_5),
             "claude-opus-4-5" => Ok(Model::ClaudeOpus4_5),
             "claude-sonnet-4-5" => Ok(Model::ClaudeSonnet4_5),
+            "claude-sonnet-4-6" => Ok(Model::ClaudeSonnet4_6),
             "claude-opus-4-6" => Ok(Model::ClaudeOpus4_6),
             "claude-opus-4-6-fast" => Ok(Model::ClaudeOpus4_6Fast),
             "gemini-3-pro-preview" => Ok(Model::Gemini3ProPreview),
