@@ -229,6 +229,7 @@ fn default_workflow() -> WorkflowConfig {
                 prompt: Some(PathBuf::from("preparator.md")),
                 default_tool: None,
                 default_model: None,
+                default_plan_mode: Some(true),
             },
         ),
         (
@@ -245,6 +246,7 @@ fn default_workflow() -> WorkflowConfig {
                 prompt: Some(PathBuf::from("planner.md")),
                 default_tool: None,
                 default_model: None,
+                default_plan_mode: Some(true),
             },
         ),
         (

@@ -31,6 +31,7 @@ impl ToolExecutor for CopilotExecutor {
         prompt: &str,
         work_dir: &Path,
         mcp_url: &str,
+        _plan_mode: bool,
         agent_github_token: &str,
         copilot_github_token: &str,
     ) -> anyhow::Result<()> {

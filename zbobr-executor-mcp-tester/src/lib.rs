@@ -30,6 +30,7 @@ impl ToolExecutor for McpTesterExecutor {
         _prompt: &str,
         work_dir: &Path,
         mcp_url: &str,
+        _plan_mode: bool,
         _agent_github_token: &str,
         _copilot_github_token: &str,
     ) -> anyhow::Result<()> {
@@ -144,6 +145,7 @@ mod tests {
                 "",
                 Path::new("."),
                 "http://example.com",
+                false,
                 "",
                 "",
             )
