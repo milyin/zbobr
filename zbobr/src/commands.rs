@@ -14,7 +14,7 @@ use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
 use zbobr_repo_backend_github::{ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig};
 use zbobr_task_backend_github::{TaskBackendGithub, ZbobrTaskBackendGithubConfig};
-use zbobr_utility::{git, git_output};
+use zbobr_utility::git_output;
 
 // ---------------------------------------------------------------------------
 // CLI types
@@ -675,7 +675,11 @@ async fn overwrite_author(
         ));
     }
 
-    git(&repo_dir, &["fetch", "origin", dest_branch]).await?;
+    // Fetch latest refs (including dest_branch) via the auth-aware backend
+    // so that filter-branch range and dry-run log are accurate.
+    // Uses fetch_refs (fetch-only) instead of update_worktree to avoid
+    // side effects (merges, pushes, PR creation) that violate dry-run expectations.
+    zbobr.fetch_refs(&identity).await?;
 
     if !dry_run {
         let config = zbobr.config();
