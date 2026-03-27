@@ -217,6 +217,7 @@ Zbobr supports 14+ models. Common options include:
 
 - `gpt-5-mini` (default)
 - `claude-sonnet-4.5`, `claude-opus-4.6`
+- `gpt-5.4`, `gpt-5.3-codex`
 - `gpt-5.2`, `gpt-5.2-codex`
 - `gemini-3-pro-preview`
 

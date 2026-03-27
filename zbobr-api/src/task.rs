@@ -862,6 +862,10 @@ pub enum Model {
     Gpt5_2,
     #[serde(rename = "gpt-5.2-codex")]
     Gpt5_2Codex,
+    #[serde(rename = "gpt-5.4")]
+    Gpt5_4,
+    #[serde(rename = "gpt-5.3-codex")]
+    Gpt5_3Codex,
     #[serde(rename = "gpt-4.1")]
     Gpt4_1,
     #[serde(rename = "claude-sonnet-4")]
@@ -893,6 +897,8 @@ impl Model {
             Model::Gpt5_1CodexMax,
             Model::Gpt5_2,
             Model::Gpt5_2Codex,
+            Model::Gpt5_4,
+            Model::Gpt5_3Codex,
             Model::Gpt4_1,
             Model::ClaudeSonnet4,
             Model::ClaudeHaiku4_5,
@@ -920,6 +926,8 @@ impl Model {
                 Model::Gpt5_1CodexMax => Some("gpt-5.1-codex-max"),
                 Model::Gpt5_2 => Some("gpt-5.2"),
                 Model::Gpt5_2Codex => Some("gpt-5.2-codex"),
+                Model::Gpt5_4 => Some("gpt-5.4"),
+                Model::Gpt5_3Codex => Some("gpt-5.3-codex"),
                 Model::Gpt4_1 => Some("gpt-4.1"),
                 Model::ClaudeSonnet4 => Some("claude-sonnet-4"),
                 Model::ClaudeHaiku4_5 => Some("claude-haiku-4.5"),
@@ -962,6 +970,8 @@ impl std::fmt::Display for Model {
             Model::Gpt5_1CodexMax => "gpt-5.1-codex-max",
             Model::Gpt5_2 => "gpt-5.2",
             Model::Gpt5_2Codex => "gpt-5.2-codex",
+            Model::Gpt5_4 => "gpt-5.4",
+            Model::Gpt5_3Codex => "gpt-5.3-codex",
             Model::Gpt4_1 => "gpt-4.1",
             Model::ClaudeSonnet4 => "claude-sonnet-4",
             Model::ClaudeHaiku4_5 => "claude-haiku-4.5",
@@ -991,6 +1001,8 @@ impl std::str::FromStr for Model {
             "gpt-5-1-codex-max" => Ok(Model::Gpt5_1CodexMax),
             "gpt-5-2" => Ok(Model::Gpt5_2),
             "gpt-5-2-codex" => Ok(Model::Gpt5_2Codex),
+            "gpt-5-4" => Ok(Model::Gpt5_4),
+            "gpt-5-3-codex" => Ok(Model::Gpt5_3Codex),
             "gpt-4-1" => Ok(Model::Gpt4_1),
             "claude-sonnet-4" => Ok(Model::ClaudeSonnet4),
             "claude-haiku-4-5" => Ok(Model::ClaudeHaiku4_5),
