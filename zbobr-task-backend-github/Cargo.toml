@@ -15,7 +15,7 @@ tracing = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true }
 paste = { workspace = true }
-base64 = "0.22"
+base64 = { workspace = true }
 
 [dev-dependencies]
 rustls = { workspace = true }

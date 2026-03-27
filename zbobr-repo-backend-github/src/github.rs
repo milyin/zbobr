@@ -292,9 +292,23 @@ impl ZbobrRepoBackendGithub {
         for line in output.lines() {
             if let Some(key) = line.split_whitespace().next() {
                 if let Err(e) = git(bare_dir, &["config", "--unset", key]).await {
+                    // Redact any embedded credentials from the key before logging
+                    let redacted_key = if let Some(proto_end) = key.find("://") {
+                        if let Some(at_pos) = key[proto_end..].find('@') {
+                            format!(
+                                "{}://[REDACTED]{}",
+                                &key[..proto_end],
+                                &key[proto_end + at_pos..]
+                            )
+                        } else {
+                            key.to_string()
+                        }
+                    } else {
+                        key.to_string()
+                    };
                     tracing::warn!(
                         "Failed to remove legacy token config key '{}' in {}: {}",
-                        key,
+                        redacted_key,
                         bare_dir.display(),
                         e
                     );
