@@ -1,0 +1,3 @@
+The previous implementation removed the `git fetch origin dest_branch` call in `overwrite_author` without replacing it with an auth-safe alternative. This leaves `dest_branch` potentially stale, affecting dry-run accuracy.
+
+Fix: Restore the fetch call but route it through the repo backend's `update_worktree` or add an env-based fetch. Since `overwrite_author` already calls `zbobr.update_worktree(&identity)` which does a full fetch+merge cycle, the fetch before `rewrite_authors_on_worktree` is needed to ensure the dest_branch ref is current for the `filter-branch` range computation.
