@@ -1292,17 +1292,37 @@ impl TaskBackend for TaskBackendGithub {
         self.inner.await_all_cooling().await;
 
         let (owner, repo) = self.inner.parse_repo()?;
-        let params = vec![
-            ("state", "open".to_string()),
-            ("per_page", "100".to_string()),
-        ];
 
-        let issues: Vec<IssueResponse> = retry_github("list issues", || {
-            self.inner
-                .octocrab
-                .get(format!("/repos/{owner}/{repo}/issues"), Some(&params))
-        })
-        .await?;
+        let issues: Vec<IssueResponse> =
+            if let Some(usernames) = self.inner.backend_config.allowed_usernames.as_deref() {
+                let mut all_issues: Vec<IssueResponse> = Vec::new();
+                for username in usernames {
+                    let params = vec![
+                        ("state", "open".to_string()),
+                        ("per_page", "100".to_string()),
+                        ("creator", username.clone()),
+                    ];
+                    let mut user_issues: Vec<IssueResponse> = retry_github("list issues", || {
+                        self.inner
+                            .octocrab
+                            .get(format!("/repos/{owner}/{repo}/issues"), Some(&params))
+                    })
+                    .await?;
+                    all_issues.append(&mut user_issues);
+                }
+                all_issues
+            } else {
+                let params = vec![
+                    ("state", "open".to_string()),
+                    ("per_page", "100".to_string()),
+                ];
+                retry_github("list issues", || {
+                    self.inner
+                        .octocrab
+                        .get(format!("/repos/{owner}/{repo}/issues"), Some(&params))
+                })
+                .await?
+            };
 
         let mut result: Vec<Box<dyn TaskWeak>> = Vec::new();
         for issue in issues {
