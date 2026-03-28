@@ -779,7 +779,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
     ///
     /// Phase 5 – Ensure PR exists:
     ///   If remote work branch doesn't exist: create placeholder commit, regular push, create PR.
-    ///   If remote work branch exists: just ensure_pr_exists (API only).
+    ///   If remote work branch exists: call ensure_pr_url (API only).
     ///
     /// Phase 6 – Abort any in-progress merge from a previous failed run.
     ///
