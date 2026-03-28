@@ -290,6 +290,9 @@ pub struct Comment {
     #[schemars(description = "Optional prompt filename stored via task backend (logging only)")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_name: Option<String>,
+    #[schemars(description = "URL of this comment (e.g. GitHub comment HTML URL)")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 // -- History helper types --
@@ -1287,6 +1290,7 @@ mod tests {
             caller_pipeline_run_id: None,
             report_name: None,
             prompt_name: None,
+            url: None,
         }
     }
 
@@ -1304,6 +1308,7 @@ mod tests {
             caller_pipeline_run_id: Some(caller_run_id),
             report_name: None,
             prompt_name: None,
+            url: None,
         }
     }
 

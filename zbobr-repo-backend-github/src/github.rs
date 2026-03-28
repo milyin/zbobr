@@ -964,7 +964,10 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         // Find existing PR or create a new one
         if let Ok(existing) = self.find_existing_pr(&pr_repo, work_branch, None).await {
             if let Some(body) = body {
-                tracing::info!("Updating body of existing PR #{} for {work_branch}", existing.number);
+                tracing::info!(
+                    "Updating body of existing PR #{} for {work_branch}",
+                    existing.number
+                );
                 self.update_pr_body(&pr_repo, existing.number, body).await?;
             }
             return Ok(existing.html_url);
@@ -998,7 +1001,10 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
                     .find_existing_pr(&pr_repo, work_branch, Some(base_branch))
                     .await?;
                 if let Some(body) = body {
-                    tracing::info!("Updating body of existing PR #{} for {work_branch}", existing.number);
+                    tracing::info!(
+                        "Updating body of existing PR #{} for {work_branch}",
+                        existing.number
+                    );
                     self.update_pr_body(&pr_repo, existing.number, body).await?;
                 }
                 Ok(existing.html_url)

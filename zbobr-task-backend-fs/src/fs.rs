@@ -494,6 +494,7 @@ impl TaskMut for FsTaskMut {
             caller_pipeline_run_id,
             report_name,
             prompt_name,
+            url: None,
         };
 
         comments.push(new_comment);

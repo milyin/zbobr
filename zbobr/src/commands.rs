@@ -310,6 +310,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
             caller_pipeline_run_id: None,
             report_name: None,
             prompt_name: None,
+            url: None,
         },
         Comment {
             timestamp: "2025-01-01T01:00:00Z".parse().unwrap(),
@@ -324,6 +325,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
             caller_pipeline_run_id: None,
             report_name: None,
             prompt_name: None,
+            url: None,
         },
     ];
     (task, comments)

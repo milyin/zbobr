@@ -880,6 +880,7 @@ mod comment_model_tests {
                 caller_pipeline_run_id,
                 report_name,
                 prompt_name,
+                url: None,
             });
             Ok(())
         }
