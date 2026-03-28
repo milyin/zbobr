@@ -254,113 +254,6 @@ impl MdRecord {
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
-// Markdown user comment
-// ────────────────────────────────────────────────────────────────────────────────
-
-/// A user comment as it appears in markdown blockquote format.
-///
-/// Format:
-/// ```text
-/// > **[YYYY-MM-DD HH:MM:SS <sub>+HHMM</sub>]** first line
-/// > continued line
-/// ```
-#[derive(Debug, Clone)]
-struct MdUserComment {
-    timestamp: chrono::DateTime<chrono::FixedOffset>,
-    text: String,
-}
-
-impl fmt::Display for MdUserComment {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "> **[{} <sub>{}</sub>]** ",
-            self.timestamp.format("%Y-%m-%d %H:%M:%S"),
-            self.timestamp.format("%z"),
-        )?;
-        for (i, line) in self.text.lines().enumerate() {
-            if i > 0 {
-                write!(f, "\n> ")?;
-            }
-            write!(f, "{}", line)?;
-        }
-        Ok(())
-    }
-}
-
-impl FromStr for MdUserComment {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        let mut lines = s.lines();
-        let first = lines
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Empty comment"))?;
-        let first = first.trim_start_matches('>').trim();
-
-        // Parse: **[YYYY-MM-DD HH:MM:SS <sub>+HHMM</sub>]** text
-        let inner = first
-            .strip_prefix("**[")
-            .ok_or_else(|| anyhow::anyhow!("Invalid comment header: {}", first))?;
-        let bracket_end = inner
-            .find("]**")
-            .ok_or_else(|| anyhow::anyhow!("Missing ]** in comment header"))?;
-        let ts_part = &inner[..bracket_end];
-        let text_start = inner[bracket_end + 3..].trim();
-
-        // Parse timestamp: "YYYY-MM-DD HH:MM:SS <sub>+HHMM</sub>"
-        let sub_start = ts_part
-            .find("<sub>")
-            .ok_or_else(|| anyhow::anyhow!("Missing <sub> in comment timestamp"))?;
-        let sub_end = ts_part
-            .find("</sub>")
-            .ok_or_else(|| anyhow::anyhow!("Missing </sub> in comment timestamp"))?;
-        let datetime_part = ts_part[..sub_start].trim();
-        let tz = &ts_part[sub_start + 5..sub_end];
-        let full = format!("{} {}", datetime_part, tz);
-        let timestamp = chrono::DateTime::parse_from_str(&full, "%Y-%m-%d %H:%M:%S %z")
-            .with_context(|| format!("Invalid comment timestamp: {}", ts_part))?;
-
-        // Collect text from all lines
-        let mut text = text_start.to_string();
-        for line in lines {
-            let content = line.trim_start_matches('>');
-            let content = if content.starts_with(' ') {
-                &content[1..]
-            } else {
-                content
-            };
-            text.push('\n');
-            text.push_str(content);
-        }
-
-        Ok(MdUserComment { timestamp, text })
-    }
-}
-
-impl serde::Serialize for MdUserComment {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for MdUserComment {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
-    }
-}
-
-impl From<&Comment> for MdUserComment {
-    fn from(c: &Comment) -> Self {
-        MdUserComment {
-            timestamp: c.timestamp,
-            text: c.text.clone(),
-        }
-    }
-}
-
-// ────────────────────────────────────────────────────────────────────────────────
 // Compact comment (user-display mode)
 // ────────────────────────────────────────────────────────────────────────────────
 
@@ -545,7 +438,6 @@ impl MdStage {
 #[derive(Debug, Clone)]
 enum MdEntry {
     Stage(MdStage),
-    Comment(MdUserComment),
     CompactComment(MdCompactComment),
 }
 
@@ -575,9 +467,6 @@ impl fmt::Display for MdContext {
                     // Stage display already ends with \n via writeln!
                     write!(f, "{}", stage)?;
                 }
-                MdEntry::Comment(comment) => {
-                    write!(f, "{}\n\n", comment)?;
-                }
                 MdEntry::CompactComment(c) => {
                     writeln!(f, "{}", c)?;
                 }
@@ -593,36 +482,12 @@ impl FromStr for MdContext {
     fn from_str(text: &str) -> Result<Self> {
         let mut entries: Vec<MdEntry> = Vec::new();
         let mut current_stage: Option<MdStage> = None;
-        let mut comment_lines: Vec<&str> = Vec::new();
 
         for line in text.lines() {
             let trimmed = line.trim();
 
             if trimmed.is_empty() {
-                // Flush accumulated comment lines (lenient: skip on parse failure)
-                if !comment_lines.is_empty() {
-                    let joined = comment_lines.join("\n");
-                    if let Ok(comment) = joined.parse::<MdUserComment>() {
-                        entries.push(MdEntry::Comment(comment));
-                    }
-                    comment_lines.clear();
-                }
                 continue;
-            }
-
-            // Accumulate blockquote lines
-            if trimmed.starts_with('>') {
-                comment_lines.push(trimmed);
-                continue;
-            }
-
-            // Flush pending comment lines
-            if !comment_lines.is_empty() {
-                let joined = comment_lines.join("\n");
-                if let Ok(comment) = joined.parse::<MdUserComment>() {
-                    entries.push(MdEntry::Comment(comment));
-                }
-                comment_lines.clear();
             }
 
             // Skip <!-- stage --> markers (inserted before stage titles in user-display mode)
@@ -658,13 +523,7 @@ impl FromStr for MdContext {
             bail!("Unrecognized line in context: {}", trimmed);
         }
 
-        // Flush remaining
-        if !comment_lines.is_empty() {
-            let joined = comment_lines.join("\n");
-            if let Ok(comment) = joined.parse::<MdUserComment>() {
-                entries.push(MdEntry::Comment(comment));
-            }
-        }
+        // Flush remaining stage
         if let Some(stage) = current_stage {
             entries.push(MdEntry::Stage(stage));
         }
@@ -726,7 +585,7 @@ impl MdContext {
             .into_iter()
             .filter_map(|e| match e {
                 MdEntry::Stage(s) => Some(s.into_stage_context()),
-                MdEntry::Comment(_) | MdEntry::CompactComment(_) => None,
+                MdEntry::CompactComment(_) => None,
             })
             .collect();
         TaskContext { stages }
@@ -1007,28 +866,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_ignores_blockquote_comments() {
-        let text = "\
-- main:1:**working** `2024-01-01 00:00:00 +0000`
-  - [ ] Do work <sub>ctx_rec_1</sub>
-
-> **[2024-01-01 00:00:30 <sub>+0000</sub>]** User says hello
-> second line of comment
-
-  - ✅ Done <sub>[ctx_rec_2](r.md)</sub>
-";
-        let parsed = parse_context(text).unwrap();
-        assert_eq!(parsed.stages.len(), 1);
-        assert_eq!(parsed.stages[0].records.len(), 2);
-        assert_eq!(parsed.stages[0].records[0].brief, "Do work");
-        assert_eq!(parsed.stages[0].records[1].brief, "Done");
-        assert_eq!(
-            parsed.stages[0].records[1].report_link.as_deref(),
-            Some("r.md")
-        );
-    }
-
-    #[test]
     fn parse_error_on_record_before_stage() {
         let text = "  - [ ] orphan item <sub>ctx_rec_1</sub>\n";
         let result = parse_context(text);
@@ -1188,29 +1025,6 @@ mod tests {
         assert!(parsed.report_link.is_none());
     }
 
-    #[test]
-    fn md_user_comment_display_roundtrip() {
-        let comment = MdUserComment {
-            timestamp: utc("2024-06-15T10:30:00+03:00"),
-            text: "Hello world".to_string(),
-        };
-        let s = comment.to_string();
-        let parsed: MdUserComment = s.parse().unwrap();
-        assert_eq!(parsed.timestamp, comment.timestamp);
-        assert_eq!(parsed.text, "Hello world");
-    }
-
-    #[test]
-    fn md_user_comment_multiline_roundtrip() {
-        let comment = MdUserComment {
-            timestamp: utc("2024-01-01T00:00:00Z"),
-            text: "First line\nSecond line\nThird line".to_string(),
-        };
-        let s = comment.to_string();
-        let parsed: MdUserComment = s.parse().unwrap();
-        assert_eq!(parsed.timestamp, comment.timestamp);
-        assert_eq!(parsed.text, "First line\nSecond line\nThird line");
-    }
 
     #[test]
     fn md_stage_display_roundtrip() {
