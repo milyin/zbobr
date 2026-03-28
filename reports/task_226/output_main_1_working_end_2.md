@@ -1,0 +1,1 @@
+The fix is complete. The `TaskSession::set_state()` method now sets a formatted status message (`⏸ <timestamp> Awaiting confirmation`) atomically alongside `pause = true` whenever the confirmation flag triggers a pause, enforcing the API constraint that pause cannot be set without an explanation.
