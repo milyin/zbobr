@@ -763,4 +763,3 @@ mod parse_tests {
         assert_eq!(parsed3, tag3);
     }
 }
-

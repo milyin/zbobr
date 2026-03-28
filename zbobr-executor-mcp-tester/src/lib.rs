@@ -2,7 +2,7 @@ use std::{path::Path, process::Stdio};
 
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use zbobr_api::tool_executor::{ToolExecutor, format_command_for_log};
+use zbobr_api::tool_executor::{ExecutorOutput, ToolExecutor, format_command_for_log};
 
 pub mod config;
 pub use config::{
@@ -33,7 +33,7 @@ impl ToolExecutor for McpTesterExecutor {
         _plan_mode: bool,
         _agent_github_token: &str,
         _copilot_github_token: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<ExecutorOutput> {
         let scenario_path = self.config.scenario_for_stage(role).ok_or_else(|| {
             anyhow::anyhow!(
                 "No scenario file configured for stage '{}' in [executor.mcp-tester]",
@@ -72,53 +72,62 @@ impl ToolExecutor for McpTesterExecutor {
         let stdout = child.stdout.take().expect("stdout was piped");
         let stderr = child.stderr.take().expect("stderr was piped");
 
-        let stdout_buf = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
-        let stderr_buf = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
-
         // Spawn tasks to stream stdout and stderr
-        let stdout_buf2 = stdout_buf.clone();
         let stdout_task = tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
+            let mut collected = Vec::new();
             while let Ok(Some(line)) = lines.next_line().await {
                 tracing::info!("[mcp-tester] {}", line);
-                stdout_buf2.lock().await.push(line);
+                collected.push(line);
             }
+            collected
         });
 
-        let stderr_buf2 = stderr_buf.clone();
         let stderr_task = tokio::spawn(async move {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
+            let mut collected = Vec::new();
             while let Ok(Some(line)) = lines.next_line().await {
                 tracing::warn!("[mcp-tester] {}", line);
-                stderr_buf2.lock().await.push(line);
+                collected.push(line);
             }
+            collected
         });
 
         // Wait for process to complete
         let status = child.wait().await?;
 
         // Wait for output tasks to finish
-        let _ = tokio::join!(stdout_task, stderr_task);
+        let (stdout_result, stderr_result) = tokio::join!(stdout_task, stderr_task);
 
         tracing::debug!("mcp-tester finished execution with status: {status}");
 
-        if !status.success() {
-            tracing::error!("mcp-tester exited with status: {status}");
-            eprintln!("=== mcp-tester stdout ===");
-            for line in stdout_buf.lock().await.iter() {
-                eprintln!("{line}");
-            }
-            eprintln!("=== mcp-tester stderr ===");
-            for line in stderr_buf.lock().await.iter() {
-                eprintln!("{line}");
-            }
-            anyhow::bail!("mcp-tester exited with status: {status}");
-        }
+        let stdout_lines = stdout_result.unwrap_or_default();
+        let stderr_lines = stderr_result.unwrap_or_default();
+        let output = combine_output(stdout_lines, stderr_lines);
 
-        Ok(())
+        Ok(ExecutorOutput {
+            output,
+            exit_ok: status.success(),
+        })
     }
+}
+
+/// Combine stdout and stderr lines into a single string.
+/// Stderr lines are appended after stdout with a separator if non-empty.
+fn combine_output(stdout: Vec<String>, stderr: Vec<String>) -> String {
+    if stderr.is_empty() {
+        return stdout.join("\n");
+    }
+    if stdout.is_empty() {
+        return stderr.join("\n");
+    }
+    format!(
+        "{}\n--- stderr ---\n{}",
+        stdout.join("\n"),
+        stderr.join("\n")
+    )
 }
 
 // ---------------------------------------------------------------------------

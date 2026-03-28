@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use zbobr_api::{
     task::Tool,
-    tool_executor::{ToolExecutor, format_command_for_log},
+    tool_executor::{ExecutorOutput, ToolExecutor, format_command_for_log},
 };
 
 pub mod config;
@@ -34,7 +34,7 @@ impl ToolExecutor for ClaudeExecutor {
         plan_mode: bool,
         agent_github_token: &str,
         copilot_github_token: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<ExecutorOutput> {
         // Build MCP config for claude
         let mcp_config = serde_json::json!({
             "mcpServers": {
@@ -108,9 +108,12 @@ impl ToolExecutor for ClaudeExecutor {
         let stdout_task = tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
+            let mut collected = Vec::new();
             while let Ok(Some(line)) = lines.next_line().await {
                 tracing::info!("[claude] {}", line);
+                collected.push(line);
             }
+            collected
         });
 
         let stderr_task = tokio::spawn(async move {
@@ -128,20 +131,33 @@ impl ToolExecutor for ClaudeExecutor {
         let status = child.wait().await?;
 
         // Wait for output tasks to finish
-        let (_, stderr_result) = tokio::join!(stdout_task, stderr_task);
+        let (stdout_result, stderr_result) = tokio::join!(stdout_task, stderr_task);
 
         tracing::debug!("Claude finished execution with status: {status}");
 
-        if !status.success() {
-            let error_context = match stderr_result {
-                Ok(lines) if !lines.is_empty() => {
-                    format!("\nClaude output:\n{}", lines.join("\n"))
-                }
-                _ => String::new(),
-            };
-            anyhow::bail!("claude exited with status: {status}{error_context}");
-        }
+        let stdout_lines = stdout_result.unwrap_or_default();
+        let stderr_lines = stderr_result.unwrap_or_default();
+        let output = combine_output(stdout_lines, stderr_lines);
 
-        Ok(())
+        Ok(ExecutorOutput {
+            output,
+            exit_ok: status.success(),
+        })
     }
+}
+
+/// Combine stdout and stderr lines into a single string.
+/// Stderr lines are appended after stdout with a separator if non-empty.
+fn combine_output(stdout: Vec<String>, stderr: Vec<String>) -> String {
+    if stderr.is_empty() {
+        return stdout.join("\n");
+    }
+    if stdout.is_empty() {
+        return stderr.join("\n");
+    }
+    format!(
+        "{}\n--- stderr ---\n{}",
+        stdout.join("\n"),
+        stderr.join("\n")
+    )
 }

@@ -13,7 +13,7 @@ pub use stage_title::format_timestamp;
 use std::fmt;
 use std::str::FromStr;
 
-use anyhow::{bail, Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 
 use crate::task::{Comment, ContextRecord, ContextRecordType, StageContext, TaskContext};
 use stage_title::MdStageTitle;
@@ -225,10 +225,7 @@ impl MdRecord {
     }
 
     /// Convert from a domain `ContextRecord`, optionally transforming report URLs.
-    fn from_context_record(
-        r: &ContextRecord,
-        report_url: Option<&dyn Fn(&str) -> String>,
-    ) -> Self {
+    fn from_context_record(r: &ContextRecord, report_url: Option<&dyn Fn(&str) -> String>) -> Self {
         let report_link = r.report_link.as_ref().map(|filename| {
             if filename.starts_with("http://") || filename.starts_with("https://") {
                 filename.clone()
@@ -412,9 +409,7 @@ impl FromStr for MdStage {
 
     fn from_str(s: &str) -> Result<Self> {
         let mut lines = s.lines();
-        let first = lines
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Empty stage"))?;
+        let first = lines.next().ok_or_else(|| anyhow::anyhow!("Empty stage"))?;
         let title: MdStageTitle = first.parse()?;
         let mut records = Vec::new();
         let mut last_top_level_id: Option<u64> = None;
@@ -466,8 +461,11 @@ impl MdStage {
     ) -> Self {
         let mut title = MdStageTitle::from(&stage.info);
 
-        // Transform prompt link URL if needed
-        if let Some(link) = &mut title.prompt_link {
+        // Transform prompt/output link URLs if needed
+        for link in [&mut title.prompt_link, &mut title.output_link]
+            .into_iter()
+            .flatten()
+        {
             if !link.starts_with("http://") && !link.starts_with("https://") {
                 if let Some(f) = report_url {
                     *link = f(link);
@@ -475,9 +473,10 @@ impl MdStage {
             }
         }
 
-        // Omit prompt link for agent prompts
+        // Omit prompt and output links for agent prompts
         if for_prompt {
             title.prompt_link = None;
+            title.output_link = None;
         }
 
         let records = stage
@@ -735,6 +734,7 @@ mod tests {
                         tool: Some(crate::task::Tool::Claude),
                         model: Some(Model::ClaudeOpus4_6),
                         prompt_link: Some("prompts/plan.md".to_string()),
+                        output_link: None,
                         timestamp: utc("2024-01-01T00:00:00Z"),
                     },
                     records: vec![
@@ -769,6 +769,7 @@ mod tests {
                         tool: None,
                         model: None,
                         prompt_link: None,
+                        output_link: None,
                         timestamp: utc("2024-01-01T01:00:00Z"),
                     },
                     records: vec![
@@ -805,14 +806,18 @@ mod tests {
         let output = serialize_context(&ctx, &[], false, None);
 
         assert!(output.contains("main:1:**planning** `claude` `claude-opus-4.6`"));
-        assert!(output.contains("<sub>[2024-01-01 00:00:00 +0000](prompts/plan.md)</sub>"));
+        assert!(
+            output.contains("`2024-01-01 00:00:00 +0000` <sub>[prompt](prompts/plan.md)</sub>")
+        );
         assert!(output.contains("  - [ ] Define API schema"));
         assert!(output.contains("  - [x] Review requirements"));
-        assert!(output.contains(
-            "  - ✅ Plan completed <sub>[ctx_rec_3](reports/plan_success.md)</sub>"
-        ));
-        assert!(output
-            .contains("  - ❌ Build failed <sub>[ctx_rec_4](reports/build_fail.md)</sub>"));
+        assert!(
+            output
+                .contains("  - ✅ Plan completed <sub>[ctx_rec_3](reports/plan_success.md)</sub>")
+        );
+        assert!(
+            output.contains("  - ❌ Build failed <sub>[ctx_rec_4](reports/build_fail.md)</sub>")
+        );
         assert!(output.contains("  - 💬 Retrying with fix"));
         assert!(output.contains("  - ❓ Should we use async?"));
     }
@@ -850,10 +855,7 @@ mod tests {
         assert_eq!(s0.records[0].brief, "Define API schema");
 
         assert_eq!(s0.records[1].id, 2);
-        assert_eq!(
-            s0.records[1].record_type,
-            ContextRecordType::Checkbox(true)
-        );
+        assert_eq!(s0.records[1].record_type, ContextRecordType::Checkbox(true));
 
         assert_eq!(s0.records[2].id, 3);
         assert_eq!(s0.records[2].record_type, ContextRecordType::Success);
@@ -879,8 +881,7 @@ mod tests {
             assert_eq!(parsed_stage.info.model, orig_stage.info.model);
             assert_eq!(parsed_stage.info.prompt_link, orig_stage.info.prompt_link);
             assert_eq!(parsed_stage.records.len(), orig_stage.records.len());
-            for (orig_rec, parsed_rec) in
-                orig_stage.records.iter().zip(parsed_stage.records.iter())
+            for (orig_rec, parsed_rec) in orig_stage.records.iter().zip(parsed_stage.records.iter())
             {
                 assert_eq!(parsed_rec.id, orig_rec.id);
                 assert_eq!(parsed_rec.record_type, orig_rec.record_type);
@@ -901,9 +902,45 @@ mod tests {
     }
 
     #[test]
+    fn for_prompt_also_omits_output_link() {
+        let mut ctx = sample_context();
+        ctx.stages[0].info.output_link = Some("outputs/plan_output.md".to_string());
+        let serialized = serialize_context(&ctx, &[], true, None);
+        let parsed = parse_context(&serialized).unwrap();
+
+        assert!(parsed.stages[0].info.prompt_link.is_none());
+        assert!(parsed.stages[0].info.output_link.is_none());
+    }
+
+    #[test]
+    fn output_link_url_mapped_via_report_url() {
+        let ctx = TaskContext {
+            stages: vec![StageContext {
+                info: StageInfo {
+                    pipeline: Pipeline::from("main"),
+                    run_id: 1,
+                    stage: Stage::new("working"),
+                    tool: None,
+                    model: None,
+                    prompt_link: None,
+                    output_link: Some("output_main_1_working_end.md".to_string()),
+                    timestamp: utc("2024-01-01T00:00:00Z"),
+                },
+                records: vec![],
+            }],
+        };
+
+        let prefix = "https://github.com/org/repo/blob/reports/reports/task_1/";
+        let make_url = |filename: &str| -> String { format!("{prefix}{filename}") };
+        let output = serialize_context(&ctx, &[], false, Some(&make_url));
+
+        assert!(output.contains(&format!("[output]({prefix}output_main_1_working_end.md)")));
+    }
+
+    #[test]
     fn parse_ignores_blockquote_comments() {
         let text = "\
-- main:1:**working** <sub>2024-01-01 00:00:00 +0000</sub>
+- main:1:**working** `2024-01-01 00:00:00 +0000`
   - [ ] Do work <sub>ctx_rec_1</sub>
 
 > **[2024-01-01 00:00:30 <sub>+0000</sub>]** User says hello
@@ -927,16 +964,18 @@ mod tests {
         let text = "  - [ ] orphan item <sub>ctx_rec_1</sub>\n";
         let result = parse_context(text);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("before any stage header"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("before any stage header")
+        );
     }
 
     #[test]
     fn parse_error_on_missing_id() {
         let text = "\
-- main:1:**working** <sub>2024-01-01 00:00:00 +0000</sub>
+- main:1:**working** `2024-01-01 00:00:00 +0000`
   - [ ] no id marker
 ";
         let result = parse_context(text);
@@ -954,6 +993,7 @@ mod tests {
                     tool: None,
                     model: None,
                     prompt_link: None,
+                    output_link: None,
                     timestamp: utc("2024-01-01T00:00:00Z"),
                 },
                 records: vec![ContextRecord {
@@ -1014,6 +1054,7 @@ mod tests {
                         "https://github.com/org/repo/blob/reports/reports/task_1/prompt.md"
                             .to_string(),
                     ),
+                    output_link: None,
                     timestamp: utc("2024-01-01T00:00:00Z"),
                 },
                 records: vec![ContextRecord {
@@ -1037,11 +1078,12 @@ mod tests {
         assert!(output.contains(
             "[ctx_rec_1](https://github.com/org/repo/blob/reports/reports/task_1/report.md)"
         ));
-        assert!(!output
-            .contains("https://github.com/org/repo/blob/reports/reports/task_1/https://"));
-        assert!(output.contains(
-            "](https://github.com/org/repo/blob/reports/reports/task_1/prompt.md)"
-        ));
+        assert!(
+            !output.contains("https://github.com/org/repo/blob/reports/reports/task_1/https://")
+        );
+        assert!(
+            output.contains("](https://github.com/org/repo/blob/reports/reports/task_1/prompt.md)")
+        );
     }
 
     // -- Serde roundtrip tests for wrapper types --
@@ -1115,6 +1157,7 @@ mod tests {
                 tool: None,
                 model: None,
                 prompt_link: None,
+                output_link: None,
             },
             records: vec![
                 MdRecord {

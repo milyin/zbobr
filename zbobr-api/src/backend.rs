@@ -1,8 +1,6 @@
 use async_trait::async_trait;
 
-use crate::task::{
-    Comment, Model, Signal, StackEntry, State, Task, TaskIdentity, Tool,
-};
+use crate::task::{Comment, Model, Signal, StackEntry, State, Task, TaskIdentity, Tool};
 
 /// Unicode symbol prepended to every formatted error message.
 pub const ERROR_PREFIX: char = '\u{274C}';
@@ -91,7 +89,12 @@ pub trait TaskMut: Send + Sync {
     async fn set_error(&self, error: Option<String>) -> anyhow::Result<()> {
         let error = error.map(|msg| {
             let ts = chrono::Utc::now().fixed_offset();
-            format!("{} {} {}", ERROR_PREFIX, crate::context::format_timestamp(&ts), msg)
+            format!(
+                "{} {} {}",
+                ERROR_PREFIX,
+                crate::context::format_timestamp(&ts),
+                msg
+            )
         });
         self.modify_task(Box::new(move |mut task| {
             task.error = error;

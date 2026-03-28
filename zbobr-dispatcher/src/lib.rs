@@ -34,7 +34,6 @@ use typesafe_builder::{_TypesafeBuilderEmpty, _TypesafeBuilderFilled, Builder};
 pub use workflow::{StateAction, Workflow};
 use zbobr_api::State;
 
-
 pub use zbobr_api::config::Config;
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
@@ -208,10 +207,7 @@ impl ZbobrDispatcher {
 
     /// Fetch latest refs from origin with authentication.
     /// Unlike `update_worktree`, this only fetches — no merges, pushes, or PR side effects.
-    pub async fn fetch_refs(
-        &self,
-        identity: &zbobr_api::TaskIdentity,
-    ) -> anyhow::Result<()> {
+    pub async fn fetch_refs(&self, identity: &zbobr_api::TaskIdentity) -> anyhow::Result<()> {
         self.repo_backend.fetch_refs(identity).await
     }
 

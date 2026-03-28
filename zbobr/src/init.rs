@@ -6,7 +6,10 @@ use std::{
 use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Stage,
-    config::{PipelineConfig, RoleDefinition, StageDefinition, StageTransition, WorkflowConfig, WorkflowToml},
+    config::{
+        PipelineConfig, RoleDefinition, StageDefinition, StageTransition, WorkflowConfig,
+        WorkflowToml,
+    },
     config_tools::McpTool,
     task::{Model, Tool},
 };
