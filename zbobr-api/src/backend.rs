@@ -4,6 +4,9 @@ use crate::task::{
     Comment, Model, Signal, StackEntry, State, Task, TaskIdentity, Tool,
 };
 
+/// Unicode symbol prepended to every formatted error message.
+pub const ERROR_PREFIX: char = '\u{274C}';
+
 /// Read-only handle to a task. Returned by `TaskBackend::get_task()` and `TaskBackend::list_tasks()`.
 #[async_trait]
 pub trait TaskWeak: Send + Sync {
@@ -44,6 +47,9 @@ pub trait TaskMut: Send + Sync {
 
     async fn set_state(&self, state: State) -> anyhow::Result<()> {
         self.modify_task(Box::new(move |mut task| {
+            if !task.state.is_running() && state.is_running() {
+                task.error = None;
+            }
             task.state = state;
             task
         }))
@@ -83,6 +89,10 @@ pub trait TaskMut: Send + Sync {
     }
 
     async fn set_error(&self, error: Option<String>) -> anyhow::Result<()> {
+        let error = error.map(|msg| {
+            let ts = chrono::Utc::now().fixed_offset();
+            format!("{} {} {}", ERROR_PREFIX, crate::context::format_timestamp(&ts), msg)
+        });
         self.modify_task(Box::new(move |mut task| {
             task.error = error;
             task
