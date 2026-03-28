@@ -143,7 +143,6 @@ struct MdRecord {
     brief: String,
     id: u64,
     report_link: Option<String>,
-    parent_record_id: Option<u64>,
 }
 
 impl fmt::Display for MdRecord {
@@ -197,7 +196,6 @@ impl FromStr for MdRecord {
             brief,
             id,
             report_link,
-            parent_record_id: None,
         })
     }
 }
@@ -241,7 +239,6 @@ impl MdRecord {
             brief: r.brief.clone(),
             id: r.id,
             report_link,
-            parent_record_id: r.parent_record_id,
         }
     }
 
@@ -252,7 +249,6 @@ impl MdRecord {
             record_type: ContextRecordType::from(&self.record_type),
             brief: self.brief,
             report_link: self.report_link,
-            parent_record_id: self.parent_record_id,
         }
     }
 }
@@ -430,20 +426,27 @@ impl fmt::Display for MdStage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "- {}", self.title)?;
 
-        // Group records by parent_record_id for hierarchical display
-        for record in &self.records {
-            if record.parent_record_id.is_none() {
-                // Top-level record (4 spaces = sub-item of the stage header)
-                writeln!(f, "    {}", record)?;
-
-                // Display all child records (those with this record's id as parent)
-                for child in &self.records {
-                    if child.parent_record_id == Some(record.id) {
-                        writeln!(f, "        {}", child)?;
-                    }
-                }
+        // Flatten output: all records on the same level
+        // Reorder so first non-checkbox item is first in output
+        let mut ordered = self.records.clone();
+        if let Some(non_checkbox_idx) = ordered
+            .iter()
+            .position(|r| !matches!(r.record_type, MdRecordType::CheckboxUnchecked | MdRecordType::CheckboxChecked))
+        {
+            if non_checkbox_idx != 0 {
+                let non_checkbox = ordered.remove(non_checkbox_idx);
+                ordered.insert(0, non_checkbox);
             }
         }
+
+        for record in ordered {
+            let indent = match record.record_type {
+                MdRecordType::CheckboxUnchecked | MdRecordType::CheckboxChecked => "    ",
+                _ => "  ",
+            };
+            writeln!(f, "{}{}", indent, record)?;
+        }
+
         Ok(())
     }
 }
@@ -456,26 +459,15 @@ impl FromStr for MdStage {
         let first = lines.next().ok_or_else(|| anyhow::anyhow!("Empty stage"))?;
         let title: MdStageTitle = first.parse()?;
         let mut records = Vec::new();
-        let mut last_top_level_id: Option<u64> = None;
 
         for line in lines {
             if line.trim().is_empty() {
                 continue;
             }
 
-            // Count leading spaces to determine indentation level
-            let leading_spaces = line.len() - line.trim_start().len();
             let trimmed = line.trim();
 
             if let Some(record) = MdRecord::try_parse(trimmed)? {
-                let mut record = record;
-                // If indented by 8 spaces (child level), set parent to last top-level record
-                if leading_spaces >= 8 && last_top_level_id.is_some() {
-                    record.parent_record_id = last_top_level_id;
-                } else {
-                    // Top-level record (less indentation)
-                    last_top_level_id = Some(record.id);
-                }
                 records.push(record);
             }
         }
@@ -808,21 +800,18 @@ mod tests {
                             record_type: ContextRecordType::Checkbox(false),
                             brief: "Define API schema".to_string(),
                             report_link: None,
-                            parent_record_id: None,
                         },
                         ContextRecord {
                             id: 2,
                             record_type: ContextRecordType::Checkbox(true),
                             brief: "Review requirements".to_string(),
                             report_link: None,
-                            parent_record_id: None,
                         },
                         ContextRecord {
                             id: 3,
                             record_type: ContextRecordType::Success,
                             brief: "Plan completed".to_string(),
                             report_link: Some("reports/plan_success.md".to_string()),
-                            parent_record_id: None,
                         },
                     ],
                 },
@@ -843,21 +832,18 @@ mod tests {
                             record_type: ContextRecordType::Failure,
                             brief: "Build failed".to_string(),
                             report_link: Some("reports/build_fail.md".to_string()),
-                            parent_record_id: None,
                         },
                         ContextRecord {
                             id: 5,
                             record_type: ContextRecordType::Comment,
                             brief: "Retrying with fix".to_string(),
                             report_link: None,
-                            parent_record_id: None,
                         },
                         ContextRecord {
                             id: 6,
                             record_type: ContextRecordType::Question,
                             brief: "Should we use async?".to_string(),
                             report_link: None,
-                            parent_record_id: None,
                         },
                     ],
                 },
@@ -874,18 +860,18 @@ mod tests {
         assert!(
             output.contains("`2024-01-01 00:00:00 +0000` <sub>[prompt](prompts/plan.md)</sub>")
         );
-        assert!(output.contains("    - [ ] Define API schema"));
-        assert!(output.contains("    - [x] Review requirements"));
+        assert!(output.contains("  - [ ] Define API schema"));
+        assert!(output.contains("  - [x] Review requirements"));
         assert!(
             output.contains(
-                "    - ✅ Plan completed <sub>[ctx_rec_3](reports/plan_success.md)</sub>"
+                "  - ✅ Plan completed <sub>[ctx_rec_3](reports/plan_success.md)</sub>"
             )
         );
         assert!(
-            output.contains("    - ❌ Build failed <sub>[ctx_rec_4](reports/build_fail.md)</sub>")
+            output.contains("  - ❌ Build failed <sub>[ctx_rec_4](reports/build_fail.md)</sub>")
         );
-        assert!(output.contains("    - 💬 Retrying with fix"));
-        assert!(output.contains("    - ❓ Should we use async?"));
+        assert!(output.contains("  - 💬 Retrying with fix"));
+        assert!(output.contains("  - ❓ Should we use async?"));
     }
 
     #[test]
@@ -913,22 +899,21 @@ mod tests {
         assert!(s0.info.prompt_link.as_deref() == Some("prompts/plan.md"));
         assert_eq!(s0.records.len(), 3);
 
-        assert_eq!(s0.records[0].id, 1);
+        // Output reorders first non-checkbox to the first slot.
+        assert_eq!(s0.records[0].id, 3);
+        assert_eq!(s0.records[0].record_type, ContextRecordType::Success);
+        assert_eq!(s0.records[0].brief, "Plan completed");
         assert_eq!(
-            s0.records[0].record_type,
-            ContextRecordType::Checkbox(false)
-        );
-        assert_eq!(s0.records[0].brief, "Define API schema");
-
-        assert_eq!(s0.records[1].id, 2);
-        assert_eq!(s0.records[1].record_type, ContextRecordType::Checkbox(true));
-
-        assert_eq!(s0.records[2].id, 3);
-        assert_eq!(s0.records[2].record_type, ContextRecordType::Success);
-        assert_eq!(
-            s0.records[2].report_link.as_deref(),
+            s0.records[0].report_link.as_deref(),
             Some("reports/plan_success.md")
         );
+
+        assert_eq!(s0.records[1].id, 1);
+        assert_eq!(s0.records[1].record_type, ContextRecordType::Checkbox(false));
+        assert_eq!(s0.records[1].brief, "Define API schema");
+
+        assert_eq!(s0.records[2].id, 2);
+        assert_eq!(s0.records[2].record_type, ContextRecordType::Checkbox(true));
     }
 
     #[test]
@@ -947,9 +932,28 @@ mod tests {
             assert_eq!(parsed_stage.info.model, orig_stage.info.model);
             assert_eq!(parsed_stage.info.prompt_link, orig_stage.info.prompt_link);
             assert_eq!(parsed_stage.records.len(), orig_stage.records.len());
-            for (orig_rec, parsed_rec) in orig_stage.records.iter().zip(parsed_stage.records.iter())
+
+            let mut expected_ids: Vec<u64> = orig_stage.records.iter().map(|r| r.id).collect();
+            if let Some(pos) = orig_stage
+                .records
+                .iter()
+                .position(|r| !matches!(r.record_type, ContextRecordType::Checkbox(_)))
             {
-                assert_eq!(parsed_rec.id, orig_rec.id);
+                if pos != 0 {
+                    let id = expected_ids.remove(pos);
+                    expected_ids.insert(0, id);
+                }
+            }
+
+            let parsed_ids: Vec<u64> = parsed_stage.records.iter().map(|r| r.id).collect();
+            assert_eq!(parsed_ids, expected_ids);
+
+            for parsed_rec in &parsed_stage.records {
+                let orig_rec = orig_stage
+                    .records
+                    .iter()
+                    .find(|r| r.id == parsed_rec.id)
+                    .unwrap();
                 assert_eq!(parsed_rec.record_type, orig_rec.record_type);
                 assert_eq!(parsed_rec.brief, orig_rec.brief);
                 assert_eq!(parsed_rec.report_link, orig_rec.report_link);
@@ -1067,7 +1071,6 @@ mod tests {
                     record_type: ContextRecordType::Checkbox(false),
                     brief: "Task A".to_string(),
                     report_link: None,
-                    parent_record_id: None,
                 }],
             }],
         };
@@ -1132,7 +1135,6 @@ mod tests {
                         "https://github.com/org/repo/blob/reports/reports/task_1/report.md"
                             .to_string(),
                     ),
-                    parent_record_id: None,
                 }],
             }],
         };
@@ -1162,7 +1164,6 @@ mod tests {
             brief: "All tests passed".to_string(),
             id: 42,
             report_link: Some("reports/test.md".to_string()),
-            parent_record_id: None,
         };
         let s = record.to_string();
         let parsed: MdRecord = s.parse().unwrap();
@@ -1179,7 +1180,6 @@ mod tests {
             brief: "Todo item".to_string(),
             id: 1,
             report_link: None,
-            parent_record_id: None,
         };
         let s = record.to_string();
         let parsed: MdRecord = s.parse().unwrap();
@@ -1232,14 +1232,12 @@ mod tests {
                     brief: "Item 1".to_string(),
                     id: 1,
                     report_link: None,
-                    parent_record_id: None,
                 },
                 MdRecord {
                     record_type: MdRecordType::Success,
                     brief: "Done".to_string(),
                     id: 2,
                     report_link: Some("r.md".to_string()),
-                    parent_record_id: None,
                 },
             ],
         };
@@ -1247,8 +1245,9 @@ mod tests {
         let parsed: MdStage = s.parse().unwrap();
         assert_eq!(parsed.title, stage.title);
         assert_eq!(parsed.records.len(), 2);
-        assert_eq!(parsed.records[0].id, 1);
-        assert_eq!(parsed.records[1].id, 2);
+        // Output reorders first non-checkbox record to the front
+        assert_eq!(parsed.records[0].id, 2);
+        assert_eq!(parsed.records[1].id, 1);
     }
 
     #[test]

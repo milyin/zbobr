@@ -144,9 +144,6 @@ pub struct ContextRecord {
     /// Optional link to a long description or report.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_link: Option<String>,
-    /// Optional reference to parent record id (used for checklist items nested under reports).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_record_id: Option<u64>,
 }
 
 /// Metadata about a stage execution.
@@ -1485,7 +1482,6 @@ mod tests {
             record_type,
             brief: brief.to_string(),
             report_link: None,
-            parent_record_id: None,
         }
     }
 
