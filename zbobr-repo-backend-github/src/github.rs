@@ -956,10 +956,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         Ok(true)
     }
 
-    async fn fetch_refs(
-        &self,
-        identity: &zbobr_api::task::TaskIdentity,
-    ) -> anyhow::Result<()> {
+    async fn fetch_refs(&self, identity: &zbobr_api::task::TaskIdentity) -> anyhow::Result<()> {
         let repo = parse_github_repo(&identity.destination_repository)?;
         let bare_dir = self.ensure_bare_clone_github(&repo).await?;
         let owned_env = self.token_auth_env();

@@ -8,7 +8,9 @@ use std::{
 use anyhow::Context;
 use clap::{Args, Parser};
 use zbobr_api::{
-    CommentTag, Pipeline, Signal, StackEntry, State, config::StageDefinition, config_tools::McpTool,
+    CommentTag, Pipeline, Signal, StackEntry, State,
+    config::StageDefinition,
+    config_tools::McpTool,
     task::{Stage, StageContext, StageInfo},
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
@@ -17,8 +19,10 @@ use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
     Comment, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
-    task::{Model, Tool}, workflow::SequentialSignal,
+    task::{Model, Tool},
+    workflow::SequentialSignal,
 };
+use zbobr_api::tool_executor::ExecutorOutput;
 
 // ---------------------------------------------------------------------------
 // CLI types
@@ -208,13 +212,11 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     }
     // show latest plan comment if present (look for [report_success] or legacy [post_plan] marker)
     if !discussion.is_empty()
-        && let Some(plan_comment) = discussion
-            .iter()
-            .rev()
-            .find(|c| {
-                c.text.starts_with(&format!("[{}]", McpTool::ReportSuccess.as_str()))
-                    || c.text.starts_with("[post_plan]")
-            })
+        && let Some(plan_comment) = discussion.iter().rev().find(|c| {
+            c.text
+                .starts_with(&format!("[{}]", McpTool::ReportSuccess.as_str()))
+                || c.text.starts_with("[post_plan]")
+        })
     {
         println!("Plan (from comment):\n{}", plan_comment.text);
     }
@@ -353,7 +355,9 @@ impl<'a> CliStageRunner<'a> {
             if task.max_stage_count > 0 && task.stage_count >= task.max_stage_count {
                 tracing::warn!(
                     "Task #{}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
-                    self.task_id, task.stage_count, task.max_stage_count
+                    self.task_id,
+                    task.stage_count,
+                    task.max_stage_count
                 );
                 task_session.set_pause(true).await?;
                 return Ok(());
@@ -431,6 +435,7 @@ impl<'a> CliStageRunner<'a> {
                             tool: tool_val,
                             model: model_val,
                             prompt_link: None,
+                            output_link: None,
                             timestamp,
                         },
                         records: Vec::new(),
@@ -472,9 +477,7 @@ impl<'a> CliStageRunner<'a> {
                 "prompt_{}_{}_{}_start",
                 self.pipeline_name, pipeline_run_id, self.stage_name
             );
-            let prompt_link = role_session
-                .store_report(&base_name, &prompt_text)
-                .await?;
+            let prompt_link = role_session.store_report(&base_name, &prompt_text).await?;
             role_session
                 .modify_task(move |mut task| {
                     if let Some(stage) = task.context.stages.last_mut() {
@@ -505,6 +508,36 @@ impl<'a> CliStageRunner<'a> {
             self.zbobr,
         )
         .await;
+
+        // Store the captured output and link it to the stage context entry.
+        if let Some(ref output) = outcome.execution_output {
+            let role_session = self.zbobr.role_session(self.task_id);
+            let base_name = format!(
+                "output_{}_{}_{}_end",
+                self.pipeline_name, pipeline_run_id, self.stage_name
+            );
+            match role_session.store_report(&base_name, output).await {
+                Ok(output_link) => {
+                    if let Err(e) = role_session
+                        .modify_task(move |mut task| {
+                            if let Some(stage) = task.context.stages.last_mut() {
+                                stage.info.output_link = Some(output_link);
+                            }
+                            task
+                        })
+                        .await
+                    {
+                        tracing::warn!("Failed to set output_link for task #{}: {e}", self.task_id);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to store output report for task #{}: {e}",
+                        self.task_id
+                    );
+                }
+            }
+        }
 
         // Read the last mapped tool from the shared tracker.
         let last_mapped_tool = *tool_tracker.lock().unwrap();
@@ -585,7 +618,8 @@ async fn handle_call_stage(
         if task.max_stage_count > 0 && task.stage_count >= task.max_stage_count {
             tracing::warn!(
                 "Task #{task_id}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
-                task.stage_count, task.max_stage_count
+                task.stage_count,
+                task.max_stage_count
             );
             task_session.set_pause(true).await?;
             return Ok(());
@@ -1012,8 +1046,7 @@ pub async fn run_manager_loop(
                             pipeline_name, stage_name, task.id
                         );
                         tracing::error!("{msg}");
-                        set_task_error_with_log(zbobr, task.id, "stage run failure", &msg)
-                            .await;
+                        set_task_error_with_log(zbobr, task.id, "stage run failure", &msg).await;
                     }
                     session_run = true;
                     break;
@@ -1265,13 +1298,7 @@ async fn handle_merge_conflict(
     if pipeline_name.as_str() == Pipeline::MERGE {
         tracing::error!("Task #{task_id}: merge conflict inside merge pipeline — pausing");
         let msg = "Merge conflict inside merge pipeline. Manual intervention required.".to_string();
-        set_task_error_with_log(
-            zbobr,
-            task_id,
-            "merge conflict recursion guard",
-            &msg,
-        )
-        .await;
+        set_task_error_with_log(zbobr, task_id, "merge conflict recursion guard", &msg).await;
         let stage = stage_name.to_string();
         task_session
             .set_pause_with_signal(Signal::go(stage))
@@ -1322,15 +1349,12 @@ async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Re
             return Err(anyhow::anyhow!(msg));
         }
     };
-    let issue_body = zbobr
-        .task_backend()
-        .task_repo_name()
-        .map(|repo_name| {
-            format!(
-                "Resolves https://github.com/{}/issues/{}",
-                repo_name, task_id
-            )
-        });
+    let issue_body = zbobr.task_backend().task_repo_name().map(|repo_name| {
+        format!(
+            "Resolves https://github.com/{}/issues/{}",
+            repo_name, task_id
+        )
+    });
     match zbobr
         .repo_backend()
         .ensure_pr_url(&identity, issue_body.as_deref())
@@ -1410,6 +1434,7 @@ async fn start_mcp_server(
 struct SessionOutcome {
     execution_interrupted: bool,
     execution_error: Option<anyhow::Error>,
+    execution_output: Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1430,15 +1455,26 @@ async fn execute_tool(
     tokio::select! {
         result = executor.execute(task_id, role, assigned_port, prompt, work_dir, mcp_url, plan_mode, agent_token, copilot_token) => {
             match result {
-                Ok(()) => SessionOutcome {
+                Ok(ExecutorOutput { output, exit_ok: true }) => SessionOutcome {
                     execution_interrupted: false,
                     execution_error: None,
+                    execution_output: Some(output),
                 },
+                Ok(ExecutorOutput { output, exit_ok: false }) => {
+                    let e = anyhow::anyhow!("Tool exited with non-zero status");
+                    tracing::error!("Tool execution failed: {e}");
+                    SessionOutcome {
+                        execution_interrupted: false,
+                        execution_error: Some(e),
+                        execution_output: Some(output),
+                    }
+                }
                 Err(e) => {
                     tracing::error!("Tool execution failed: {e}");
                     SessionOutcome {
                         execution_interrupted: false,
                         execution_error: Some(e),
+                        execution_output: None,
                     }
                 }
             }
@@ -1448,6 +1484,7 @@ async fn execute_tool(
             SessionOutcome {
                 execution_interrupted: true,
                 execution_error: None,
+                execution_output: None,
             }
         }
     }
@@ -1466,7 +1503,9 @@ async fn finalize_stage_session(
     let pending_state = State::pending(pipeline_name.clone());
 
     if outcome.execution_interrupted {
-        if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name, pipeline_name).await {
+        if let Err(e) =
+            perform_stash_and_push(zbobr, task_id, work_dir, stage_name, pipeline_name).await
+        {
             tracing::warn!("Stash/push failed during interruption for task #{task_id}: {e}");
         }
         task_session.set_state(pending_state.clone()).await?;
@@ -1475,16 +1514,15 @@ async fn finalize_stage_session(
     }
 
     if let Some(e) = outcome.execution_error.as_ref() {
-        if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name, pipeline_name).await {
+        if let Err(e) =
+            perform_stash_and_push(zbobr, task_id, work_dir, stage_name, pipeline_name).await
+        {
             tracing::warn!("Stash/push failed during error handling for task #{task_id}: {e}");
         }
         let error_msg = format!("Execution failed: {e}");
         set_task_error_with_log(zbobr, task_id, "tool execution", &error_msg).await;
         let stage = stage_name.to_string();
-        if let Err(pause_err) = task_session
-            .set_pause_with_signal(Signal::go(stage))
-            .await
-        {
+        if let Err(pause_err) = task_session.set_pause_with_signal(Signal::go(stage)).await {
             tracing::error!("Failed to set pause for task #{task_id}: {pause_err}");
         }
         task_session.set_state(pending_state.clone()).await?;
@@ -1494,15 +1532,14 @@ async fn finalize_stage_session(
 
     tracing::info!("Session complete for task #{task_id}");
 
-    if let Err(e) = perform_stash_and_push(zbobr, task_id, work_dir, stage_name, pipeline_name).await {
+    if let Err(e) =
+        perform_stash_and_push(zbobr, task_id, work_dir, stage_name, pipeline_name).await
+    {
         tracing::error!("Stash/push failed for task #{task_id}: {e}");
         let msg = format!("Stash/push failed: {e}");
         set_task_error_with_log(zbobr, task_id, "stash/push", &msg).await;
         let stage = stage_name.to_string();
-        if let Err(pause_err) = task_session
-            .set_pause_with_signal(Signal::go(stage))
-            .await
-        {
+        if let Err(pause_err) = task_session.set_pause_with_signal(Signal::go(stage)).await {
             tracing::error!(
                 "Failed to pause task #{task_id} after stash/push failure: {pause_err}"
             );
@@ -1522,9 +1559,12 @@ async fn finalize_stage_session(
         .await?;
     if !current_task.pause && current_task.signal.is_none() {
         let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
-        let seq_signal = zbobr
-            .workflow()
-            .sequential_signal(pipeline_name, stage_name, stage_def, last_mapped_tool);
+        let seq_signal = zbobr.workflow().sequential_signal(
+            pipeline_name,
+            stage_name,
+            stage_def,
+            last_mapped_tool,
+        );
         match seq_signal {
             SequentialSignal::ReturnFailure => {
                 task_session.set_signal(Some(Signal::ReturnFailure)).await?;
@@ -1622,9 +1662,7 @@ async fn perform_stash_and_push(
             // Push rewritten commits
             let is_uptodate = zbobr.update_worktree(&identity).await?;
             if !is_uptodate {
-                anyhow::bail!(
-                    "Merge conflict while pushing rewritten commits for task #{task_id}"
-                );
+                anyhow::bail!("Merge conflict while pushing rewritten commits for task #{task_id}");
             }
         }
     } else {

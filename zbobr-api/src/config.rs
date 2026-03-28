@@ -626,7 +626,11 @@ impl ZbobrDispatcherConfig {
     /// 1. Stage-level `plan_mode`
     /// 2. Role-level `default_plan_mode`
     /// 3. Default false.
-    pub fn plan_mode_for_stage(&self, stage_def: &StageDefinition, workflow: &WorkflowConfig) -> bool {
+    pub fn plan_mode_for_stage(
+        &self,
+        stage_def: &StageDefinition,
+        workflow: &WorkflowConfig,
+    ) -> bool {
         if let Some(plan_mode) = stage_def.plan_mode {
             plan_mode
         } else if let Some(role_name) = stage_def.role_name() {

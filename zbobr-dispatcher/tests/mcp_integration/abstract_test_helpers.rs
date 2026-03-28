@@ -361,7 +361,11 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert!(task.pause, "stop_with_error should set pause flag");
-    assert_eq!(task.state, State::Pending(Pipeline::Main), "Should be pending, not DONE");
+    assert_eq!(
+        task.state,
+        State::Pending(Pipeline::Main),
+        "Should be pending, not DONE"
+    );
     assert_eq!(
         task.signal,
         Some(Signal::go("work")),
@@ -405,7 +409,8 @@ pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert_eq!(
-        task.state, State::Done,
+        task.state,
+        State::Done,
         "READY task should dispatch and complete"
     );
 }
@@ -654,7 +659,8 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
         .await;
     let task = env.get_task(task_id).await;
     assert_eq!(
-        task.state, State::Done,
+        task.state,
+        State::Done,
         "Task should complete after call stage returns and finish stage runs"
     );
     assert!(
@@ -778,7 +784,8 @@ pub async fn run_pause_resume_cycle(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert_eq!(
-        task.state, State::Done,
+        task.state,
+        State::Done,
         "Task should complete after pause/resume cycle"
     );
     assert!(
@@ -815,7 +822,8 @@ pub async fn run_ready_fresh_start(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert_eq!(
-        task.state, State::Done,
+        task.state,
+        State::Done,
         "READY with empty stack should start fresh and complete"
     );
 }
@@ -894,7 +902,8 @@ pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert_eq!(
-        task.state, State::Done,
+        task.state,
+        State::Done,
         "Task should complete after pause/resume with stage advance"
     );
     assert!(

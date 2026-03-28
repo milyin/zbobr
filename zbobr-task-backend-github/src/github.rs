@@ -43,7 +43,6 @@ const STATE_LABEL_READY: &str = "ready";
 const STATE_LABEL_PENDING: &str = "pending";
 const STATE_LABEL_RUNNING: &str = "running";
 
-
 const ALL_STATE_LABEL_NAMES: &[&str] = &[
     STATE_LABEL_DONE,
     STATE_LABEL_PAUSE,
@@ -51,7 +50,6 @@ const ALL_STATE_LABEL_NAMES: &[&str] = &[
     STATE_LABEL_PENDING,
     STATE_LABEL_RUNNING,
 ];
-
 
 use crate::{
     config::ZbobrTaskBackendGithubConfig,
@@ -263,7 +261,11 @@ impl ZbobrTaskBackendGithubImpl {
 
     /// Parse a State from GitHub issue labels and params.
     /// Pipeline and stage are passed as params (no longer stored in labels).
-    fn labels_to_state(labels: &[IssueLabel], pipeline_param: Option<&str>, stage_param: Option<&str>) -> State {
+    fn labels_to_state(
+        labels: &[IssueLabel],
+        pipeline_param: Option<&str>,
+        stage_param: Option<&str>,
+    ) -> State {
         let mut state_value: Option<&str> = None;
 
         for label in labels {
@@ -282,15 +284,15 @@ impl ZbobrTaskBackendGithubImpl {
                 None => State::Unknown(format!("{}{}", STATE_PREFIX, STATE_LABEL_PENDING)),
             },
             Some(v) if v == STATE_LABEL_RUNNING => match (pipeline_param, stage_param) {
-                (Some(p), Some(s)) => {
-                    State::Running(Pipeline::from(p), Stage::from(s))
-                }
-                (None, Some(s)) => {
-                    State::Unknown(format!("{}{}; stage:{s}", STATE_PREFIX, STATE_LABEL_RUNNING))
-                }
-                (Some(p), None) => {
-                    State::Unknown(format!("{}{}; pipeline:{p}", STATE_PREFIX, STATE_LABEL_RUNNING))
-                }
+                (Some(p), Some(s)) => State::Running(Pipeline::from(p), Stage::from(s)),
+                (None, Some(s)) => State::Unknown(format!(
+                    "{}{}; stage:{s}",
+                    STATE_PREFIX, STATE_LABEL_RUNNING
+                )),
+                (Some(p), None) => State::Unknown(format!(
+                    "{}{}; pipeline:{p}",
+                    STATE_PREFIX, STATE_LABEL_RUNNING
+                )),
                 (None, None) => State::Unknown(format!("{}{}", STATE_PREFIX, STATE_LABEL_RUNNING)),
             },
             Some(other) => State::Unknown(format!("{}{other}", STATE_PREFIX)),
@@ -445,9 +447,7 @@ impl ZbobrTaskBackendGithubImpl {
                 tracing::debug!("Created label '{name}'");
                 Ok(())
             }
-            Err(octocrab::Error::GitHub { source, .. })
-                if source.status_code.as_u16() == 422 =>
-            {
+            Err(octocrab::Error::GitHub { source, .. }) if source.status_code.as_u16() == 422 => {
                 tracing::debug!("Label '{name}' already exists");
                 Ok(())
             }
@@ -554,10 +554,7 @@ impl ZbobrTaskBackendGithubImpl {
 
         for label_name in &state_labels {
             let color = Self::state_label_color(label_name);
-            let desc = format!(
-                "State: {}",
-                label_name
-            );
+            let desc = format!("State: {}", label_name);
             if !existing_labels.contains(label_name) {
                 tracing::info!("Creating label '{label_name}'");
                 self.create_label(label_name, color, &desc).await?;
@@ -570,14 +567,10 @@ impl ZbobrTaskBackendGithubImpl {
         }
 
         // Delete obsolete managed labels (state:* not in the expected set)
-        let expected_labels: std::collections::HashSet<&str> = state_labels
-            .iter()
-            .map(|s| s.as_str())
-            .collect();
+        let expected_labels: std::collections::HashSet<&str> =
+            state_labels.iter().map(|s| s.as_str()).collect();
         for label in &existing_labels {
-            if label.starts_with(STATE_PREFIX)
-                && !expected_labels.contains(label.as_str())
-            {
+            if label.starts_with(STATE_PREFIX) && !expected_labels.contains(label.as_str()) {
                 tracing::info!("Deleting obsolete label '{label}'");
                 self.delete_label(label).await?;
             }
@@ -615,8 +608,14 @@ impl ZbobrTaskBackendGithubImpl {
         // state is stored as label; pipeline/stage come from params
         let state = Self::labels_to_state(&issue.labels, pipeline_param, stage_param);
 
-        let pause = params_map.get(PARAM_FLAG_PAUSE).map(|s| s == PARAM_FLAG_VALUE_TRUE).unwrap_or(false);
-        let confirm = params_map.get(PARAM_FLAG_CONFIRM).map(|s| s == PARAM_FLAG_VALUE_TRUE).unwrap_or(false);
+        let pause = params_map
+            .get(PARAM_FLAG_PAUSE)
+            .map(|s| s == PARAM_FLAG_VALUE_TRUE)
+            .unwrap_or(false);
+        let confirm = params_map
+            .get(PARAM_FLAG_CONFIRM)
+            .map(|s| s == PARAM_FLAG_VALUE_TRUE)
+            .unwrap_or(false);
 
         Ok(Task {
             id: issue.number,
@@ -692,10 +691,7 @@ impl ZbobrTaskBackendGithubImpl {
             );
         }
         if task.stage_count > 0 {
-            params.insert(
-                PARAM_STAGE_COUNT.to_string(),
-                task.stage_count.to_string(),
-            );
+            params.insert(PARAM_STAGE_COUNT.to_string(), task.stage_count.to_string());
         }
         if task.max_stage_count > 0 {
             params.insert(
@@ -704,10 +700,16 @@ impl ZbobrTaskBackendGithubImpl {
             );
         }
         if task.pause {
-            params.insert(PARAM_FLAG_PAUSE.to_string(), PARAM_FLAG_VALUE_TRUE.to_string());
+            params.insert(
+                PARAM_FLAG_PAUSE.to_string(),
+                PARAM_FLAG_VALUE_TRUE.to_string(),
+            );
         }
         if task.confirm {
-            params.insert(PARAM_FLAG_CONFIRM.to_string(), PARAM_FLAG_VALUE_TRUE.to_string());
+            params.insert(
+                PARAM_FLAG_CONFIRM.to_string(),
+                PARAM_FLAG_VALUE_TRUE.to_string(),
+            );
         }
         params
     }
@@ -811,14 +813,25 @@ impl ZbobrTaskBackendGithubImpl {
         };
         let expected_description = task.etag.clone().unwrap_or_else(|| {
             let string_params = Self::task_to_string_params(&task);
-            serialize_description_full(&task.description, &string_params, &task.error, &task.context, Some(&make_url))
+            serialize_description_full(
+                &task.description,
+                &string_params,
+                &task.error,
+                &task.context,
+                Some(&make_url),
+            )
         });
 
         let task = mutate(task);
 
         let string_params = Self::task_to_string_params(&task);
-        let new_description =
-            serialize_description_full(&task.description, &string_params, &task.error, &task.context, Some(&make_url));
+        let new_description = serialize_description_full(
+            &task.description,
+            &string_params,
+            &task.error,
+            &task.context,
+            Some(&make_url),
+        );
 
         // Write description with retry and conflict detection
         const MAX_RETRIES: u32 = 3;
@@ -998,8 +1011,7 @@ impl ZbobrTaskBackendGithubImpl {
         let dir = format!("{reports_path}/task_{task_id}");
 
         // When checking existence on a non-default branch, pass ?ref=
-        let ref_query: Option<Vec<(&str, &str)>> =
-            reports_branch.map(|b| vec![("ref", b)]);
+        let ref_query: Option<Vec<(&str, &str)>> = reports_branch.map(|b| vec![("ref", b)]);
 
         let mut n = 0u32;
         let filename = loop {
@@ -1058,8 +1070,7 @@ impl ZbobrTaskBackendGithubImpl {
         let (owner, repo) = self.parse_repo()?;
         let reports_path = self.reports_path();
         let path = format!("{reports_path}/task_{task_id}/{name}");
-        let ref_query: Option<Vec<(&str, &str)>> =
-            self.reports_branch().map(|b| vec![("ref", b)]);
+        let ref_query: Option<Vec<(&str, &str)>> = self.reports_branch().map(|b| vec![("ref", b)]);
 
         let resp: ContentResponse = retry_github("read report file", || {
             self.octocrab.get(
@@ -1314,7 +1325,13 @@ impl TaskBackend for TaskBackendGithub {
         state: State,
     ) -> anyhow::Result<u64> {
         let (owner, repo) = self.inner.parse_repo()?;
-        let body = serialize_description_full(description, &HashMap::new(), &None, &TaskContext::default(), None);
+        let body = serialize_description_full(
+            description,
+            &HashMap::new(),
+            &None,
+            &TaskContext::default(),
+            None,
+        );
 
         let issue = retry_github("create issue", || async {
             let issues = self.inner.octocrab.issues(owner, repo);
@@ -1427,8 +1444,14 @@ mod flag_tests {
             etag: None,
         };
         let params = ZbobrTaskBackendGithubImpl::task_to_string_params(&task);
-        assert_eq!(params.get(PARAM_FLAG_PAUSE).map(|s| s.as_str()), Some(PARAM_FLAG_VALUE_TRUE));
-        assert_eq!(params.get(PARAM_FLAG_CONFIRM).map(|s| s.as_str()), Some(PARAM_FLAG_VALUE_TRUE));
+        assert_eq!(
+            params.get(PARAM_FLAG_PAUSE).map(|s| s.as_str()),
+            Some(PARAM_FLAG_VALUE_TRUE)
+        );
+        assert_eq!(
+            params.get(PARAM_FLAG_CONFIRM).map(|s| s.as_str()),
+            Some(PARAM_FLAG_VALUE_TRUE)
+        );
     }
 }
 

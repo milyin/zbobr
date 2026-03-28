@@ -428,11 +428,7 @@ mod tests {
         let vars = build_template_variables(&task, &[]);
         let keys: Vec<&str> = vars.keys().map(|k| k.as_ref()).collect();
         // Always-present keys
-        for expected in &[
-            VAR_TITLE,
-            VAR_DESCRIPTION,
-            VAR_CONTEXT,
-        ] {
+        for expected in &[VAR_TITLE, VAR_DESCRIPTION, VAR_CONTEXT] {
             assert!(keys.contains(expected), "missing key: {expected}");
         }
         // Optional keys absent when task fields are None
@@ -475,7 +471,6 @@ mod tests {
             "feature-x"
         );
     }
-
 
     // --- template rendering ---
 

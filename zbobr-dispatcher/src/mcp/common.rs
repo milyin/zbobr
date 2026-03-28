@@ -35,7 +35,9 @@ pub struct ReportParam {
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct AddChecklistItemParam {
-    #[schemars(description = "Brief, concise summary of the checklist item (stored as context record text)")]
+    #[schemars(
+        description = "Brief, concise summary of the checklist item (stored as context record text)"
+    )]
     pub brief: String,
     #[schemars(
         description = "Full detailed description of the checklist item (stored as a file in the task repository)"

@@ -100,7 +100,9 @@ pub fn extract_repo_name(repo_ref: &str) -> Option<String> {
 // -- Context types --
 
 /// Type of a context record within a stage.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextRecordType {
     /// A checkbox item with checked/unchecked state.
@@ -129,7 +131,9 @@ impl std::fmt::Display for ContextRecordType {
 }
 
 /// A single record within a stage context.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 pub struct ContextRecord {
     /// Unique numeric id, generated as max records id + 1.
     pub id: u64,
@@ -146,7 +150,9 @@ pub struct ContextRecord {
 }
 
 /// Metadata about a stage execution.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 pub struct StageInfo {
     /// Pipeline that owns this stage.
     pub pipeline: Pipeline,
@@ -163,13 +169,18 @@ pub struct StageInfo {
     /// Link to the prompt used for this stage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_link: Option<String>,
+    /// Link to the captured output of this stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_link: Option<String>,
     /// Timestamp when the stage was created.
     #[schemars(with = "String")]
     pub timestamp: chrono::DateTime<chrono::FixedOffset>,
 }
 
 /// Context for a single stage execution, containing stage metadata and records.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 pub struct StageContext {
     /// Stage execution metadata.
     pub info: StageInfo,
@@ -477,7 +488,6 @@ impl State {
             _ => None,
         }
     }
-
 }
 
 impl State {
@@ -1381,10 +1391,7 @@ mod tests {
             State::Running(Pipeline::Main, Stage::from("working")).to_serde_string(),
             "running:main:working"
         );
-        assert_eq!(
-            State::Unknown("custom".into()).to_serde_string(),
-            "custom"
-        );
+        assert_eq!(State::Unknown("custom".into()).to_serde_string(), "custom");
     }
 
     #[test]
@@ -1393,10 +1400,7 @@ mod tests {
         assert_eq!(State::from("done"), State::Done);
         assert_eq!(State::from("pause"), State::Pause);
         assert_eq!(State::from("ready"), State::Ready);
-        assert_eq!(
-            State::from("pending:main"),
-            State::Pending(Pipeline::Main)
-        );
+        assert_eq!(State::from("pending:main"), State::Pending(Pipeline::Main));
         assert_eq!(
             State::from("pending:foo"),
             State::Pending(Pipeline::Custom("foo".into()))
@@ -1410,24 +1414,15 @@ mod tests {
     #[test]
     fn state_parse_incomplete_is_unknown() {
         // pending without pipeline
-        assert_eq!(
-            State::from("pending"),
-            State::Unknown("pending".into())
-        );
-        assert_eq!(
-            State::from("pending:"),
-            State::Unknown("pending:".into())
-        );
+        assert_eq!(State::from("pending"), State::Unknown("pending".into()));
+        assert_eq!(State::from("pending:"), State::Unknown("pending:".into()));
         // running without stage
         assert_eq!(
             State::from("running:main"),
             State::Unknown("running:main".into())
         );
         // running without pipeline or stage
-        assert_eq!(
-            State::from("running"),
-            State::Unknown("running".into())
-        );
+        assert_eq!(State::from("running"), State::Unknown("running".into()));
     }
 
     #[test]
@@ -1473,6 +1468,7 @@ mod tests {
             tool: None,
             model: None,
             prompt_link: None,
+            output_link: None,
             timestamp: "2026-03-25T00:00:00Z".parse().unwrap(),
         }
     }
@@ -1505,14 +1501,12 @@ mod tests {
                 make_record(1, ContextRecordType::Checkbox(false), "first"),
                 make_record(3, ContextRecordType::Success, "done"),
             ],
-
         });
         assert_eq!(ctx.next_id(), 4);
 
         ctx.stages.push(StageContext {
             info: make_stage_info("main", "review"),
             records: vec![make_record(5, ContextRecordType::Failure, "fail")],
-
         });
         assert_eq!(ctx.next_id(), 6);
     }
@@ -1527,12 +1521,10 @@ mod tests {
                         make_record(1, ContextRecordType::Checkbox(false), "a"),
                         make_record(2, ContextRecordType::Success, "b"),
                     ],
-
                 },
                 StageContext {
                     info: make_stage_info("main", "review"),
                     records: vec![make_record(3, ContextRecordType::Question, "c")],
-
                 },
             ],
         };
@@ -1554,7 +1546,6 @@ mod tests {
             stages: vec![StageContext {
                 info: make_stage_info("main", "working"),
                 records: vec![make_record(1, ContextRecordType::Checkbox(false), "item")],
-    
             }],
         };
 
@@ -1574,7 +1565,6 @@ mod tests {
                     make_record(1, ContextRecordType::Checkbox(false), "a"),
                     make_record(2, ContextRecordType::Success, "b"),
                 ],
-    
             }],
         };
 
@@ -1588,8 +1578,14 @@ mod tests {
 
     #[test]
     fn context_record_type_display() {
-        assert_eq!(ContextRecordType::Checkbox(true).to_string(), "checkbox(checked)");
-        assert_eq!(ContextRecordType::Checkbox(false).to_string(), "checkbox(unchecked)");
+        assert_eq!(
+            ContextRecordType::Checkbox(true).to_string(),
+            "checkbox(checked)"
+        );
+        assert_eq!(
+            ContextRecordType::Checkbox(false).to_string(),
+            "checkbox(unchecked)"
+        );
         assert_eq!(ContextRecordType::Success.to_string(), "success");
         assert_eq!(ContextRecordType::Failure.to_string(), "failure");
         assert_eq!(ContextRecordType::Comment.to_string(), "comment");

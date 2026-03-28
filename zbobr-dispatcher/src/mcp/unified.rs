@@ -178,7 +178,6 @@ impl UnifiedMcp {
         )
         .await
     }
-
 }
 
 // Manual ServerHandler implementation with tool filtering

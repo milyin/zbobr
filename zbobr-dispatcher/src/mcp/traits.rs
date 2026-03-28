@@ -153,11 +153,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
     // -- Checklist / context record tools --
 
-    async fn add_checklist_item_impl(
-        &self,
-        brief: &str,
-        full_report: &str,
-    ) -> String {
+    async fn add_checklist_item_impl(&self, brief: &str, full_report: &str) -> String {
         let tool_name = McpTool::AddChecklistItem.as_str();
         tracing::info!(
             "[{}#{}] {}",
@@ -188,26 +184,21 @@ pub trait CommonMcpImpl: Send + Sync {
 
         // Find the most recent report record to use as parent
         let parent_record_id = match self.session().get_task().await {
-            Ok(task) => {
-                task.context
-                    .stages
-                    .last()
-                    .and_then(|stage| {
-                        stage
-                            .records
-                            .iter()
-                            .rev()
-                            .find(|r| {
-                                matches!(
-                                    r.record_type,
-                                    ContextRecordType::Success
-                                        | ContextRecordType::Failure
-                                        | ContextRecordType::Comment
-                                )
-                            })
-                            .map(|r| r.id)
+            Ok(task) => task.context.stages.last().and_then(|stage| {
+                stage
+                    .records
+                    .iter()
+                    .rev()
+                    .find(|r| {
+                        matches!(
+                            r.record_type,
+                            ContextRecordType::Success
+                                | ContextRecordType::Failure
+                                | ContextRecordType::Comment
+                        )
                     })
-            }
+                    .map(|r| r.id)
+            }),
             Err(_) => None,
         };
 
@@ -395,11 +386,7 @@ pub trait CommonMcpImpl: Send + Sync {
             self.session().task_id()
         );
 
-        if let Err(e) = self
-            .session()
-            .set_error(Some(message.to_string()))
-            .await
-        {
+        if let Err(e) = self.session().set_error(Some(message.to_string())).await {
             tracing::error!(
                 "Failed to set error for task {}: {e}",
                 self.session().task_id()
@@ -530,10 +517,10 @@ pub trait CommonMcpImpl: Send + Sync {
         let config = session.dispatcher_config();
 
         // Apply defaults from config when agent doesn't provide values
-        let effective_repo = destination_repository
-            .or_else(|| config.default_destination_repository.clone());
-        let effective_branch = destination_branch
-            .or_else(|| config.default_destination_branch.clone());
+        let effective_repo =
+            destination_repository.or_else(|| config.default_destination_repository.clone());
+        let effective_branch =
+            destination_branch.or_else(|| config.default_destination_branch.clone());
         let work_branch = Some(session.create_branch_name(&work_branch_postfix));
 
         // Validate work_branch_postfix: if provided and work_branch is already set,
@@ -612,9 +599,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
     async fn configure_worktree_error(&self, error: String) -> String {
         if let Err(pause_err) = self.session().set_pause(true).await {
-            tracing::error!(
-                "Failed to pause task after configure_worktree error: {pause_err}"
-            );
+            tracing::error!("Failed to pause task after configure_worktree error: {pause_err}");
         }
         let response = format!("Error: {error}");
         log_mcp_string_response(
@@ -625,5 +610,4 @@ pub trait CommonMcpImpl: Send + Sync {
         );
         response
     }
-
 }
