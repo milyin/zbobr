@@ -1,0 +1,1 @@
+Fixed the rustfmt formatting violations by running `cargo fmt` on the 3 affected files. All tests pass and the formatting check is now clean.
