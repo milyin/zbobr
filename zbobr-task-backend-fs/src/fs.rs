@@ -8,7 +8,7 @@ use tokio::{
     sync::{Mutex, OwnedMutexGuard},
 };
 use zbobr_api::{
-    Comment, Model, Signal, StackEntry, State, Task, Tool,
+    Comment, Model, PARAM_PR_URL, Signal, StackEntry, State, Task, Tool,
     backend::{TaskBackend, TaskMut, TaskWeak},
     comment_tag,
     task::TaskContext,
@@ -70,7 +70,7 @@ impl TaskFile {
             self.state.clone()
         };
 
-        let pr_url = self.parameters.get("pr_url").cloned();
+        let pr_url = self.parameters.get(PARAM_PR_URL).cloned();
 
         Ok(Task {
             id: self.id,
@@ -109,7 +109,7 @@ impl TaskFile {
             parameters: {
                 let mut p = HashMap::new();
                 if let Some(ref url) = task.pr_url {
-                    p.insert("pr_url".to_string(), url.clone());
+                    p.insert(PARAM_PR_URL.to_string(), url.clone());
                 }
                 p
             },
