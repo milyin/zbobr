@@ -570,7 +570,7 @@ role = "merger"
             context: TaskContext::default(),
             signal: None,
             stack: vec![],
-            error: None,
+            status: None,
             pause: false,
             confirm: false,
             pipeline_run_id: 0,
