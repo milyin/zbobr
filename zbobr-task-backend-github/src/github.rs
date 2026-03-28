@@ -130,18 +130,12 @@ where
 // -- Shared response types --
 
 #[derive(Debug, serde::Deserialize)]
-struct IssueUser {
-    login: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
 struct IssueResponse {
     number: u64,
     title: String,
     body: Option<String>,
     state: String,
     labels: Vec<IssueLabel>,
-    user: Option<IssueUser>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -1298,27 +1292,40 @@ impl TaskBackend for TaskBackendGithub {
         self.inner.await_all_cooling().await;
 
         let (owner, repo) = self.inner.parse_repo()?;
-        let params = vec![
-            ("state", "open".to_string()),
-            ("per_page", "100".to_string()),
-        ];
 
-        let issues: Vec<IssueResponse> = retry_github("list issues", || {
-            self.inner
-                .octocrab
-                .get(format!("/repos/{owner}/{repo}/issues"), Some(&params))
-        })
-        .await?;
+        let issues: Vec<IssueResponse> =
+            if let Some(usernames) = self.inner.backend_config.allowed_usernames.as_deref() {
+                let mut all_issues: Vec<IssueResponse> = Vec::new();
+                for username in usernames {
+                    let params = vec![
+                        ("state", "open".to_string()),
+                        ("per_page", "100".to_string()),
+                        ("creator", username.clone()),
+                    ];
+                    let mut user_issues: Vec<IssueResponse> = retry_github("list issues", || {
+                        self.inner
+                            .octocrab
+                            .get(format!("/repos/{owner}/{repo}/issues"), Some(&params))
+                    })
+                    .await?;
+                    all_issues.append(&mut user_issues);
+                }
+                all_issues
+            } else {
+                let params = vec![
+                    ("state", "open".to_string()),
+                    ("per_page", "100".to_string()),
+                ];
+                retry_github("list issues", || {
+                    self.inner
+                        .octocrab
+                        .get(format!("/repos/{owner}/{repo}/issues"), Some(&params))
+                })
+                .await?
+            };
 
-        let allowed_usernames = self.inner.backend_config.allowed_usernames.as_deref();
         let mut result: Vec<Box<dyn TaskWeak>> = Vec::new();
         for issue in issues {
-            if let Some(allowed) = allowed_usernames {
-                let login = issue.user.as_ref().map(|u| u.login.as_str()).unwrap_or("");
-                if !allowed.iter().any(|u| u == login) {
-                    continue;
-                }
-            }
             let id = issue.number;
             // Reuse list payload as the saved snapshot until a caller asks for refresh.
             match ZbobrTaskBackendGithubImpl::issue_to_task(issue) {
@@ -1419,7 +1426,6 @@ mod flag_tests {
             body: Some(body),
             state: "open".to_string(),
             labels: vec![],
-            user: None,
         }
     }
 
