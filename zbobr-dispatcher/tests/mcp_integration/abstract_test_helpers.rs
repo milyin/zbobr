@@ -373,11 +373,11 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
     );
 
     assert!(
-        task.error
+        task.status
             .as_ref()
             .map(|e| e.contains("Something went wrong"))
             .unwrap_or(false),
-        "Error message should be stored in task.error"
+        "Error message should be stored in task.status"
     );
 }
 
