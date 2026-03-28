@@ -221,8 +221,11 @@ impl RoleSession {
     pub async fn set_error(&self, error: Option<String>) -> anyhow::Result<()> {
         let error = error.map(|msg| {
             let ts = chrono::Utc::now().with_timezone(&self.zbobr.config().fixed_offset());
-            let ts_str = format!("{} {}", ts.format("%Y-%m-%d %H:%M:%S"), ts.format("%z"));
-            format!("\u{274C} {} {}", ts_str, msg)
+            format!(
+                "\u{274C} {} {}",
+                zbobr_api::format_timestamp(&ts),
+                msg
+            )
         });
         self.modify_task(move |mut task| {
             task.error = error;
@@ -481,7 +484,7 @@ impl TaskSession {
             if task.confirm && task.state != state {
                 task.pause = true;
             }
-            if task.state != state && state.is_running() {
+            if !task.state.is_running() && state.is_running() {
                 task.error = None;
             }
             task.state = state;
@@ -1028,8 +1031,18 @@ mod comment_model_tests {
         let task = weak.snapshot(false).await.unwrap();
         let error = task.error.as_deref().expect("error should be set");
         assert!(
-            error.starts_with('\u{274C}') && error.contains("oops"),
-            "error should be formatted with ❌ and contain 'oops', got: {error:?}"
+            error.starts_with('\u{274C}'),
+            "error should start with ❌, got: {error:?}"
+        );
+        assert!(
+            error.contains("oops"),
+            "error should contain 'oops', got: {error:?}"
+        );
+        // timestamp is the token immediately after ❌: starts with a digit (YYYY-...)
+        let after_icon = error.trim_start_matches('\u{274C}').trim_start();
+        assert!(
+            after_icon.starts_with(|c: char| c.is_ascii_digit()),
+            "error should contain a timestamp after ❌, got: {error:?}"
         );
         assert!(task.pause, "stop_with_error should set pause flag");
     }

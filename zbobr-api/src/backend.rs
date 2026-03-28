@@ -84,9 +84,8 @@ pub trait TaskMut: Send + Sync {
 
     async fn set_error(&self, error: Option<String>) -> anyhow::Result<()> {
         let error = error.map(|msg| {
-            let ts = chrono::Utc::now();
-            let ts_str = format!("{} {}", ts.format("%Y-%m-%d %H:%M:%S"), ts.format("%z"));
-            format!("\u{274C} {} {}", ts_str, msg)
+            let ts = chrono::Utc::now().fixed_offset();
+            format!("\u{274C} {} {}", crate::context::format_timestamp(&ts), msg)
         });
         self.modify_task(Box::new(move |mut task| {
             task.error = error;
