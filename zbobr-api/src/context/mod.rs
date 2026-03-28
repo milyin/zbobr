@@ -733,6 +733,7 @@ mod tests {
                         tool: Some(crate::task::Tool::Claude),
                         model: Some(Model::ClaudeOpus4_6),
                         prompt_link: Some("prompts/plan.md".to_string()),
+                        output_link: None,
                         timestamp: utc("2024-01-01T00:00:00Z"),
                     },
                     records: vec![
@@ -767,6 +768,7 @@ mod tests {
                         tool: None,
                         model: None,
                         prompt_link: None,
+                        output_link: None,
                         timestamp: utc("2024-01-01T01:00:00Z"),
                     },
                     records: vec![
@@ -803,7 +805,7 @@ mod tests {
         let output = serialize_context(&ctx, &[], false, None);
 
         assert!(output.contains("main:1:**planning** `claude` `claude-opus-4.6`"));
-        assert!(output.contains("<sub>[2024-01-01 00:00:00 +0000](prompts/plan.md)</sub>"));
+        assert!(output.contains("`2024-01-01 00:00:00 +0000` <sub>[prompt](prompts/plan.md)</sub>"));
         assert!(output.contains("  - [ ] Define API schema"));
         assert!(output.contains("  - [x] Review requirements"));
         assert!(output.contains(
@@ -952,6 +954,7 @@ mod tests {
                     tool: None,
                     model: None,
                     prompt_link: None,
+                    output_link: None,
                     timestamp: utc("2024-01-01T00:00:00Z"),
                 },
                 records: vec![ContextRecord {
@@ -1012,6 +1015,7 @@ mod tests {
                         "https://github.com/org/repo/blob/reports/reports/task_1/prompt.md"
                             .to_string(),
                     ),
+                    output_link: None,
                     timestamp: utc("2024-01-01T00:00:00Z"),
                 },
                 records: vec![ContextRecord {
@@ -1113,6 +1117,7 @@ mod tests {
                 tool: None,
                 model: None,
                 prompt_link: None,
+                output_link: None,
             },
             records: vec![
                 MdRecord {

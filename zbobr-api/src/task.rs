@@ -163,6 +163,9 @@ pub struct StageInfo {
     /// Link to the prompt used for this stage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_link: Option<String>,
+    /// Link to the captured output of this stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_link: Option<String>,
     /// Timestamp when the stage was created.
     #[schemars(with = "String")]
     pub timestamp: chrono::DateTime<chrono::FixedOffset>,
@@ -1473,6 +1476,7 @@ mod tests {
             tool: None,
             model: None,
             prompt_link: None,
+            output_link: None,
             timestamp: "2026-03-25T00:00:00Z".parse().unwrap(),
         }
     }

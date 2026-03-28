@@ -1147,6 +1147,7 @@ mod comment_model_tests {
                             tool: Some(Tool::Copilot),
                             model: Some(Model::Gpt5Mini),
                             prompt_link: None,
+                            output_link: None,
                             timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
                         },
                         records: Vec::new(),

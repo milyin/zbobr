@@ -33,7 +33,7 @@ impl ToolExecutor for McpTesterExecutor {
         _plan_mode: bool,
         _agent_github_token: &str,
         _copilot_github_token: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<String> {
         let scenario_path = self.config.scenario_for_stage(role).ok_or_else(|| {
             anyhow::anyhow!(
                 "No scenario file configured for stage '{}' in [executor.mcp-tester]",
@@ -117,7 +117,8 @@ impl ToolExecutor for McpTesterExecutor {
             anyhow::bail!("mcp-tester exited with status: {status}");
         }
 
-        Ok(())
+        let output = stdout_buf.lock().await.join("\n");
+        Ok(output)
     }
 }
 

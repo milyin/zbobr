@@ -431,6 +431,7 @@ impl<'a> CliStageRunner<'a> {
                             tool: tool_val,
                             model: model_val,
                             prompt_link: None,
+                            output_link: None,
                             timestamp,
                         },
                         records: Vec::new(),
@@ -505,6 +506,36 @@ impl<'a> CliStageRunner<'a> {
             self.zbobr,
         )
         .await;
+
+        // Store the captured output and link it to the stage context entry.
+        if let Some(ref output) = outcome.execution_output {
+            let role_session = self.zbobr.role_session(self.task_id);
+            let base_name = format!(
+                "output_{}_{}_{}_end",
+                self.pipeline_name, pipeline_run_id, self.stage_name
+            );
+            match role_session.store_report(&base_name, output).await {
+                Ok(output_link) => {
+                    if let Err(e) = role_session
+                        .modify_task(move |mut task| {
+                            if let Some(stage) = task.context.stages.last_mut() {
+                                stage.info.output_link = Some(output_link);
+                            }
+                            task
+                        })
+                        .await
+                    {
+                        tracing::warn!("Failed to set output_link for task #{}: {e}", self.task_id);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to store output report for task #{}: {e}",
+                        self.task_id
+                    );
+                }
+            }
+        }
 
         // Read the last mapped tool from the shared tracker.
         let last_mapped_tool = *tool_tracker.lock().unwrap();
@@ -1410,6 +1441,7 @@ async fn start_mcp_server(
 struct SessionOutcome {
     execution_interrupted: bool,
     execution_error: Option<anyhow::Error>,
+    execution_output: Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1430,15 +1462,17 @@ async fn execute_tool(
     tokio::select! {
         result = executor.execute(task_id, role, assigned_port, prompt, work_dir, mcp_url, plan_mode, agent_token, copilot_token) => {
             match result {
-                Ok(()) => SessionOutcome {
+                Ok(output) => SessionOutcome {
                     execution_interrupted: false,
                     execution_error: None,
+                    execution_output: Some(output),
                 },
                 Err(e) => {
                     tracing::error!("Tool execution failed: {e}");
                     SessionOutcome {
                         execution_interrupted: false,
                         execution_error: Some(e),
+                        execution_output: None,
                     }
                 }
             }
@@ -1448,6 +1482,7 @@ async fn execute_tool(
             SessionOutcome {
                 execution_interrupted: true,
                 execution_error: None,
+                execution_output: None,
             }
         }
     }

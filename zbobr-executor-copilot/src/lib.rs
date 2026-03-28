@@ -34,7 +34,7 @@ impl ToolExecutor for CopilotExecutor {
         _plan_mode: bool,
         agent_github_token: &str,
         copilot_github_token: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<String> {
         // Build MCP config for copilot
         let mcp_config = serde_json::json!({
             "mcpServers": {
@@ -102,9 +102,12 @@ impl ToolExecutor for CopilotExecutor {
         let stdout_task = tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
+            let mut collected = Vec::new();
             while let Ok(Some(line)) = lines.next_line().await {
                 tracing::info!("[copilot] {}", line);
+                collected.push(line);
             }
+            collected
         });
 
         let stderr_task = tokio::spawn(async move {
@@ -122,7 +125,7 @@ impl ToolExecutor for CopilotExecutor {
         let status = child.wait().await?;
 
         // Wait for output tasks to finish
-        let (_, stderr_result) = tokio::join!(stdout_task, stderr_task);
+        let (stdout_result, stderr_result) = tokio::join!(stdout_task, stderr_task);
 
         tracing::debug!("Copilot finished execution with status: {status}");
 
@@ -136,6 +139,7 @@ impl ToolExecutor for CopilotExecutor {
             anyhow::bail!("copilot exited with status: {status}{error_context}");
         }
 
-        Ok(())
+        let output = stdout_result.unwrap_or_default().join("\n");
+        Ok(output)
     }
 }

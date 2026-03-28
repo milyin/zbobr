@@ -210,6 +210,7 @@ mod tests {
                     tool: Some(zbobr_api::task::Tool::Claude),
                     model: Some(Model::ClaudeOpus4_6),
                     prompt_link: Some("prompts/work.md".to_string()),
+                    output_link: None,
                     timestamp: "2024-01-01T00:00:00Z".parse().unwrap(),
                 },
                 records: vec![
@@ -376,6 +377,7 @@ mod tests {
                     tool: None,
                     model: None,
                     prompt_link: None,
+                    output_link: None,
                     timestamp: "2024-01-01T00:00:00Z".parse().unwrap(),
                 },
                 records: vec![ContextRecord {
@@ -402,6 +404,7 @@ mod tests {
                     tool: None,
                     model: None,
                     prompt_link: None,
+                    output_link: None,
                     timestamp: "2024-01-01T00:00:00Z".parse().unwrap(),
                 },
                 records: vec![ContextRecord {
@@ -427,6 +430,7 @@ mod tests {
                     tool: None,
                     model: None,
                     prompt_link: None,
+                    output_link: None,
                     timestamp: "2024-01-01T00:00:00Z".parse().unwrap(),
                 },
                 records: vec![ContextRecord {

@@ -51,5 +51,5 @@ pub trait ToolExecutor: Send + Sync {
         plan_mode: bool,
         agent_github_token: &str,
         copilot_github_token: &str,
-    ) -> anyhow::Result<()>;
+    ) -> anyhow::Result<String>;
 }
