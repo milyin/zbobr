@@ -8,7 +8,7 @@ pub mod prompt;
 pub mod task;
 pub mod tool_executor;
 
-pub use backend::{TaskBackend, TaskBackendExt, TaskMut, TaskWeak, WorktreeBackend};
+pub use backend::{TaskBackend, TaskBackendExt, TaskMut, TaskWeak, WorktreeBackend, ERROR_PREFIX};
 pub use config::{
     Config, PipelineConfig, StageDefinition, StageTransition, WorkflowArgs, WorkflowConfig,
     WorkflowToml, ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
@@ -22,4 +22,5 @@ pub use task::{
     StageInfo, State, Task, TaskContext, TaskIdentity, Tool, classify_comment, comment_tag,
     extract_repo_name, extract_summary, filter_comments_for_run,
 };
+pub use context::format_timestamp;
 pub use tool_executor::{ExecutorOutput, ToolExecutor, format_command_for_log};

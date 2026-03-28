@@ -95,7 +95,7 @@ impl<T: fmt::Display> fmt::Display for Backtick<T> {
 }
 
 /// Format a timestamp as `YYYY-MM-DD HH:MM:SS +HHMM`.
-fn format_timestamp(ts: &chrono::DateTime<chrono::FixedOffset>) -> String {
+pub fn format_timestamp(ts: &chrono::DateTime<chrono::FixedOffset>) -> String {
     format!("{} {}", ts.format("%Y-%m-%d %H:%M:%S"), ts.format("%z"))
 }
 
