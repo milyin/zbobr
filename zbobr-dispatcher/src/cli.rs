@@ -8,7 +8,7 @@ use std::{
 use anyhow::Context;
 use clap::{Args, Parser};
 use zbobr_api::{
-    CommentTag, Pipeline, Signal, StackEntry, State, config::{StageDefinition, StageTransition}, config_tools::McpTool,
+    CommentTag, Pipeline, Signal, StackEntry, State, config::StageDefinition, config_tools::McpTool,
     task::{Stage, StageContext, StageInfo},
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
@@ -17,7 +17,7 @@ use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
     Comment, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
-    task::{Model, Tool}, workflow::Workflow,
+    task::{Model, Tool}, workflow::SequentialSignal,
 };
 
 // ---------------------------------------------------------------------------
@@ -531,83 +531,6 @@ impl<'a> CliStageRunner<'a> {
 }
 
 /// Result of computing the post-stage signal in the sequential pipeline model.
-enum SequentialSignal {
-    /// `report_failure` → immediate return from pipeline.
-    ReturnFailure,
-    /// `report_success`/`report_intermediate`/`on_no_report` with a next stage → advance to it.
-    Advance(String),
-    /// `report_success`/`on_no_report` at the last stage → pipeline done, return.
-    Return,
-    /// Stage-configured pause → set pause flag, emit given signal on resume.
-    PauseThenSignal(Signal),
-}
-
-/// Convert a stage transition config + default target into a [`SequentialSignal`].
-///
-/// `no_target` is the signal to emit when neither the transition nor `default_target`
-/// provides a stage; must be `Signal::Return` or `Signal::ReturnFailure`.
-fn apply_transition(
-    transition: Option<&StageTransition>,
-    default_target: Option<String>,
-    no_target: Signal,
-) -> SequentialSignal {
-    let target = transition
-        .and_then(|t| t.next.as_ref())
-        .map(|n: &zbobr_api::Stage| n.to_string())
-        .or(default_target);
-    if transition.is_some_and(|t| t.pause) {
-        SequentialSignal::PauseThenSignal(target.as_deref().map_or(no_target, Signal::go))
-    } else {
-        match target {
-            Some(t) => SequentialSignal::Advance(t),
-            None => match no_target {
-                Signal::Return => SequentialSignal::Return,
-                Signal::ReturnFailure => SequentialSignal::ReturnFailure,
-                _ => unreachable!(),
-            },
-        }
-    }
-}
-
-/// Compute the post-execution signal for the sequential pipeline model.
-fn compute_sequential_signal(
-    pipeline_name: &Pipeline,
-    stage_name: &str,
-    stage_def: Option<&StageDefinition>,
-    workflow: &Workflow,
-    last_mapped_tool: Option<McpTool>,
-) -> SequentialSignal {
-    let next_stage = || {
-        workflow
-            .pipeline(pipeline_name)
-            .and_then(|p| p.next_stage(stage_name))
-            .map(|(n, _)| n.to_string())
-    };
-    match last_mapped_tool {
-        Some(McpTool::ReportFailure) => apply_transition(
-            stage_def.and_then(|s| s.on_failure()),
-            None,
-            Signal::ReturnFailure,
-        ),
-        Some(McpTool::ReportSuccess) => apply_transition(
-            stage_def.and_then(|s| s.on_success()),
-            next_stage(),
-            Signal::Return,
-        ),
-        Some(McpTool::ReportIntermediate) => apply_transition(
-            stage_def.and_then(|s| s.on_intermediate()),
-            Some(stage_name.to_string()),
-            Signal::Return,
-        ),
-        // No report tool called — use on_no_report if configured, else advance (same as on_success).
-        _ => apply_transition(
-            stage_def.and_then(|s| s.on_no_report()),
-            next_stage(),
-            Signal::Return,
-        ),
-    }
-}
-
 /// Result of worktree detection before a stage runs.
 enum WorktreeResult {
     /// Worktree is ready; proceed with stage execution at this path.
@@ -1599,13 +1522,9 @@ async fn finalize_stage_session(
         .await?;
     if !current_task.pause && current_task.signal.is_none() {
         let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
-        let seq_signal = compute_sequential_signal(
-            pipeline_name,
-            stage_name,
-            stage_def,
-            zbobr.workflow(),
-            last_mapped_tool,
-        );
+        let seq_signal = zbobr
+            .workflow()
+            .sequential_signal(pipeline_name, stage_name, stage_def, last_mapped_tool);
         match seq_signal {
             SequentialSignal::ReturnFailure => {
                 task_session.set_signal(Some(Signal::ReturnFailure)).await?;
