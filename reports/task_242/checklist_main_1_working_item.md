@@ -1,0 +1,1 @@
+When allowed_usernames is specified, use the GitHub API `creator` query parameter to filter issues server-side instead of fetching all issues and filtering client-side. Since the API only supports one creator at a time, make one API call per allowed username and merge the results.
