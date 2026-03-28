@@ -1,0 +1,1 @@
+Make format_timestamp pub in zbobr-api/src/context/stage_title.rs, re-export it from context/mod.rs and zbobr-api lib. Then use it in TaskMut::set_error default impl (backend.rs) and RoleSession::set_error (task.rs) instead of duplicating the format string.
