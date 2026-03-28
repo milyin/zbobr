@@ -254,15 +254,15 @@ impl MdRecord {
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
-// Compact comment (user-display mode)
+// Compact comment (shared prompt/no-prompt mode)
 // ────────────────────────────────────────────────────────────────────────────────
 
 /// Maximum character length for the truncated comment text in compact form.
 const COMPACT_COMMENT_MAX_LEN: usize = 80;
 
-/// A compact (single-line) representation of a user comment for user-display mode.
+/// A compact (single-line) representation of a comment used in serialized context.
 ///
-/// Format: `- comment text \`YYYY-MM-DD HH:MM:SS +HHMM\` <sub>[link](url)</sub>`
+/// Format: `- comment text `YYYY-MM-DD HH:MM:SS +HHMM` <sub>[link](url)</sub>`
 #[derive(Debug, Clone)]
 struct MdCompactComment {
     text: String,
