@@ -959,8 +959,7 @@ pub async fn run_manager_loop(
             last_cleanup = std::time::Instant::now();
         }
 
-        let allowed_users = zbobr.config().effective_allowed_users();
-        let all_weak = match task_backend.list_tasks(&allowed_users).await {
+        let all_weak = match task_backend.list_tasks().await {
             Ok(tasks) => tasks,
             Err(e) => {
                 tracing::error!("Failed to list tasks: {e}");

@@ -528,10 +528,6 @@ pub struct ZbobrDispatcherConfig {
     /// Timezone for timestamps (e.g. "+0300", "-0500", "+03:00").
     /// If not set, the operating system's local timezone is used.
     pub timezone: Option<crate::task::FixedOffsetTz>,
-    /// List of user identifiers (e.g. emails or logins) whose tasks the dispatcher
-    /// is allowed to pick up. When not set, defaults to `git_user_email`.
-    #[arg(long)]
-    pub allowed_users: Option<Vec<String>>,
 }
 
 impl Default for ZbobrDispatcherConfig {
@@ -550,7 +546,6 @@ impl Default for ZbobrDispatcherConfig {
             overwrite_author: false,
             max_task_stage_count: 20,
             timezone: None,
-            allowed_users: None,
         }
     }
 }
@@ -565,22 +560,6 @@ impl ZbobrDispatcherConfig {
             ZbobrDispatcherArgs::default(),
             &cwd,
         ))
-    }
-
-    /// Returns the effective list of allowed users.
-    /// If `allowed_users` is not configured, falls back to a single-element list
-    /// containing `git_user_email`.
-    pub fn effective_allowed_users(&self) -> Vec<String> {
-        match &self.allowed_users {
-            Some(users) => users.clone(),
-            None => {
-                if self.git_user_email.is_empty() {
-                    vec![]
-                } else {
-                    vec![self.git_user_email.clone()]
-                }
-            }
-        }
     }
 
     /// Returns the configured timezone offset, or the system's local timezone if not set.
