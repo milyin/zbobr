@@ -912,10 +912,7 @@ mod comment_model_tests {
             }
         }
 
-        async fn list_tasks(
-            &self,
-            _allowed_users: &[String],
-        ) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+        async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
             Ok(vec![])
         }
 

@@ -210,9 +210,7 @@ pub trait TaskBackend: Send + Sync {
     async fn get_task(&self, id: u64) -> anyhow::Result<Box<dyn TaskWeak>>;
 
     /// List all open tasks (state != "DONE").
-    /// `allowed_users` restricts results to tasks created by those users.
-    /// An empty slice means no filtering.
-    async fn list_tasks(&self, allowed_users: &[String]) -> anyhow::Result<Vec<Box<dyn TaskWeak>>>;
+    async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>>;
 
     /// Create a new task. Returns the task ID.
     async fn create_task(
