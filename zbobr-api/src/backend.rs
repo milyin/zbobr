@@ -2,8 +2,21 @@ use async_trait::async_trait;
 
 use crate::task::{Comment, Model, Signal, StackEntry, State, Task, TaskIdentity, Tool};
 
-/// Unicode symbol prepended to every formatted error message.
+/// Unicode symbol prepended to every formatted error status message.
 pub const ERROR_PREFIX: char = '\u{274C}';
+
+/// Unicode symbol prepended to every formatted question status message.
+pub const QUESTION_PREFIX: char = '\u{2753}';
+
+/// Format a status message with icon, timestamp, and message text.
+/// Used for both error and question statuses placed in the STATUS section.
+pub fn format_status(
+    icon: char,
+    ts: &chrono::DateTime<chrono::FixedOffset>,
+    message: &str,
+) -> String {
+    format!("{} {} {}", icon, crate::context::format_timestamp(ts), message)
+}
 
 /// Read-only handle to a task. Returned by `TaskBackend::get_task()` and `TaskBackend::list_tasks()`.
 #[async_trait]
@@ -46,7 +59,7 @@ pub trait TaskMut: Send + Sync {
     async fn set_state(&self, state: State) -> anyhow::Result<()> {
         self.modify_task(Box::new(move |mut task| {
             if !task.state.is_running() && state.is_running() {
-                task.error = None;
+                task.status = None;
             }
             task.state = state;
             task
@@ -70,9 +83,37 @@ pub trait TaskMut: Send + Sync {
         .await
     }
 
-    async fn set_pause(&self, pause: bool) -> anyhow::Result<()> {
+    /// Set the status field directly (pre-formatted string or None to clear).
+    async fn set_status(&self, status: Option<String>) -> anyhow::Result<()> {
         self.modify_task(Box::new(move |mut task| {
-            task.pause = pause;
+            task.status = status;
+            task
+        }))
+        .await
+    }
+
+    /// Pause the task and set a status message atomically.
+    /// It is not possible to set pause without an explanation.
+    async fn set_pause_with_status(&self, status: String) -> anyhow::Result<()> {
+        self.modify_task(Box::new(move |mut task| {
+            task.status = Some(status);
+            task.pause = true;
+            task
+        }))
+        .await
+    }
+
+    /// Pause the task, set a status message, and assign a signal — all atomically.
+    /// It is not possible to set pause without an explanation.
+    async fn set_pause_with_status_and_signal(
+        &self,
+        status: String,
+        signal: Signal,
+    ) -> anyhow::Result<()> {
+        self.modify_task(Box::new(move |mut task| {
+            task.status = Some(status);
+            task.pause = true;
+            task.signal = Some(signal);
             task
         }))
         .await
@@ -81,23 +122,6 @@ pub trait TaskMut: Send + Sync {
     async fn set_confirm(&self, confirm: bool) -> anyhow::Result<()> {
         self.modify_task(Box::new(move |mut task| {
             task.confirm = confirm;
-            task
-        }))
-        .await
-    }
-
-    async fn set_error(&self, error: Option<String>) -> anyhow::Result<()> {
-        let error = error.map(|msg| {
-            let ts = chrono::Utc::now().fixed_offset();
-            format!(
-                "{} {} {}",
-                ERROR_PREFIX,
-                crate::context::format_timestamp(&ts),
-                msg
-            )
-        });
-        self.modify_task(Box::new(move |mut task| {
-            task.error = error;
             task
         }))
         .await

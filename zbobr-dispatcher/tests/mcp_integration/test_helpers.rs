@@ -591,11 +591,11 @@ pub async fn run_report_error_preserves_signal(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert!(
-        task.error
+        task.status
             .as_ref()
             .map(|e| e.contains("Something went wrong during work"))
             .unwrap_or(false),
-        "[{}] report_error message should appear in task.error",
+        "[{}] report_error message should appear in task.status",
         env.name()
     );
     assert!(
