@@ -489,6 +489,9 @@ impl WorkflowConfig {
 #[derive(Clone)]
 #[config_struct]
 pub struct ZbobrDispatcherConfig {
+    /// Name of this zbobr instance. Used to label tasks (zbobr:<instance>) so that
+    /// multiple instances can run against the same repository without interfering.
+    pub instance: String,
     /// Workspaces directory; each task gets a separate subdirectory.
     #[config(path)]
     pub workspaces: std::path::PathBuf,
@@ -533,6 +536,7 @@ pub struct ZbobrDispatcherConfig {
 impl Default for ZbobrDispatcherConfig {
     fn default() -> Self {
         Self {
+            instance: "default".to_string(),
             workspaces: std::path::PathBuf::from("./workspaces"),
             base_port: 3000,
             agent_github_token: "not-configured".to_string(),
