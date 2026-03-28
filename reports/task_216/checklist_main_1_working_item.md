@@ -1,0 +1,1 @@
+The reviewer noted that legacy flag label cleanup only ran on state changes. Fixed by removing the `if task.state != original_state` guard and always calling `apply_state_change`, which removes both `state:` and `flag:` labels and re-applies the correct state labels. Also removed the now-unused `original_state` variable.
