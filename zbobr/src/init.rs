@@ -108,7 +108,6 @@ fn default_config_toml() -> RootConfigToml {
             overwrite_author: Some(false),
             max_task_stage_count: None,
             timezone: None,
-            allowed_users: None,
         }),
         tasks: Some(ZbobrTaskBackendGithubToml {
             github_repo: Some("owner/repo".into()),

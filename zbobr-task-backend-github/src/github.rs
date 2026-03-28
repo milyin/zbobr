@@ -136,13 +136,6 @@ struct IssueResponse {
     body: Option<String>,
     state: String,
     labels: Vec<IssueLabel>,
-    #[serde(default)]
-    user: Option<IssueUser>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct IssueUser {
-    login: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -1295,7 +1288,7 @@ impl TaskBackend for TaskBackendGithub {
         }))
     }
 
-    async fn list_tasks(&self, allowed_users: &[String]) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+    async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
         self.inner.await_all_cooling().await;
 
         let (owner, repo) = self.inner.parse_repo()?;
@@ -1313,13 +1306,6 @@ impl TaskBackend for TaskBackendGithub {
 
         let mut result: Vec<Box<dyn TaskWeak>> = Vec::new();
         for issue in issues {
-            // Filter by allowed_users (matched against issue author login).
-            if !allowed_users.is_empty() {
-                let author = issue.user.as_ref().map(|u| u.login.as_str()).unwrap_or("");
-                if !allowed_users.iter().any(|u| u == author) {
-                    continue;
-                }
-            }
             let id = issue.number;
             // Reuse list payload as the saved snapshot until a caller asks for refresh.
             match ZbobrTaskBackendGithubImpl::issue_to_task(issue) {
@@ -1420,7 +1406,6 @@ mod flag_tests {
             body: Some(body),
             state: "open".to_string(),
             labels: vec![],
-            user: None,
         }
     }
 
