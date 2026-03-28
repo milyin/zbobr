@@ -16,6 +16,7 @@ use zbobr_api::{
 // -- Label prefix constants (GitHub-backend-specific) --
 
 const STATE_PREFIX: &str = "state:";
+const FLAG_LABEL_PREFIX: &str = "flag:";
 
 // -- State label name constants --
 
@@ -29,6 +30,7 @@ const STATE_LABEL_RUNNING: &str = "running";
 
 const FLAG_PAUSE: &str = "pause";
 const FLAG_CONFIRM: &str = "confirm";
+const FLAG_VALUE_TRUE: &str = "true";
 
 const ALL_STATE_LABEL_NAMES: &[&str] = &[
     STATE_LABEL_DONE,
@@ -344,14 +346,14 @@ impl ZbobrTaskBackendGithubImpl {
     async fn apply_state_change(&self, id: u64, state: &State) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        // Fetch current labels and remove all existing state:/pipeline:/stage: labels
+        // Fetch current labels and remove all existing state: and legacy flag: labels
         let issue: IssueResponse = retry_github("get issue labels", || {
             self.octocrab
                 .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
         })
         .await?;
         for label in &issue.labels {
-            if label.name.starts_with(STATE_PREFIX) {
+            if label.name.starts_with(STATE_PREFIX) || label.name.starts_with(FLAG_LABEL_PREFIX) {
                 let _ = retry_github("remove state label", || async {
                     self.octocrab
                         .issues(owner, repo)
@@ -601,8 +603,8 @@ impl ZbobrTaskBackendGithubImpl {
         // state is stored as label; pipeline/stage come from params
         let state = Self::labels_to_state(&issue.labels, pipeline_param, stage_param);
 
-        let pause = params_map.get(FLAG_PAUSE).map(|s| s == "true").unwrap_or(false);
-        let confirm = params_map.get(FLAG_CONFIRM).map(|s| s == "true").unwrap_or(false);
+        let pause = params_map.get(FLAG_PAUSE).map(|s| s == FLAG_VALUE_TRUE).unwrap_or(false);
+        let confirm = params_map.get(FLAG_CONFIRM).map(|s| s == FLAG_VALUE_TRUE).unwrap_or(false);
 
         Ok(Task {
             id: issue.number,
@@ -690,10 +692,10 @@ impl ZbobrTaskBackendGithubImpl {
             );
         }
         if task.pause {
-            params.insert(FLAG_PAUSE.to_string(), "true".to_string());
+            params.insert(FLAG_PAUSE.to_string(), FLAG_VALUE_TRUE.to_string());
         }
         if task.confirm {
-            params.insert(FLAG_CONFIRM.to_string(), "true".to_string());
+            params.insert(FLAG_CONFIRM.to_string(), FLAG_VALUE_TRUE.to_string());
         }
         params
     }
@@ -1375,7 +1377,7 @@ mod flag_tests {
 
     #[test]
     fn issue_to_task_reads_pause_from_params() {
-        let issue = make_issue_with_params(FLAG_PAUSE, "true");
+        let issue = make_issue_with_params(FLAG_PAUSE, FLAG_VALUE_TRUE);
         let task = ZbobrTaskBackendGithubImpl::issue_to_task(issue).unwrap();
         assert!(task.pause);
         assert!(!task.confirm);
@@ -1383,7 +1385,7 @@ mod flag_tests {
 
     #[test]
     fn issue_to_task_reads_confirm_from_params() {
-        let issue = make_issue_with_params(FLAG_CONFIRM, "true");
+        let issue = make_issue_with_params(FLAG_CONFIRM, FLAG_VALUE_TRUE);
         let task = ZbobrTaskBackendGithubImpl::issue_to_task(issue).unwrap();
         assert!(!task.pause);
         assert!(task.confirm);
@@ -1415,8 +1417,8 @@ mod flag_tests {
             etag: None,
         };
         let params = ZbobrTaskBackendGithubImpl::task_to_string_params(&task);
-        assert_eq!(params.get(FLAG_PAUSE).map(|s| s.as_str()), Some("true"));
-        assert_eq!(params.get(FLAG_CONFIRM).map(|s| s.as_str()), Some("true"));
+        assert_eq!(params.get(FLAG_PAUSE).map(|s| s.as_str()), Some(FLAG_VALUE_TRUE));
+        assert_eq!(params.get(FLAG_CONFIRM).map(|s| s.as_str()), Some(FLAG_VALUE_TRUE));
     }
 }
 
