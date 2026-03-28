@@ -1,0 +1,1 @@
+Done. Fixed the integration test compilation failure and switched to server-side filtering via the GitHub API `creator` param — one request per allowed username instead of fetching all issues and filtering client-side. The now-unused `IssueUser` struct was also removed.
