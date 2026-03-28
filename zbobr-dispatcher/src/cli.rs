@@ -550,104 +550,49 @@ fn compute_sequential_signal(
     workflow: &crate::workflow::Workflow,
     last_mapped_tool: Option<McpTool>,
 ) -> SequentialSignal {
+    let next_stage = || {
+        workflow
+            .pipeline(pipeline_name)
+            .and_then(|p| p.next_stage(stage_name))
+            .map(|(n, _)| n.to_string())
+    };
+
+    // Convert a transition + default target into a SequentialSignal.
+    // `default_target`: stage to advance to when the transition has no explicit next;
+    // None means end-of-pipeline (Return).
+    let advance = |transition: Option<&zbobr_api::config::StageTransition>,
+                   default_target: Option<String>| {
+        let target = transition
+            .and_then(|t| t.next.as_ref())
+            .map(|n: &zbobr_api::Stage| n.to_string())
+            .or(default_target);
+        if transition.is_some_and(|t| t.pause) {
+            SequentialSignal::PauseThenSignal(
+                target.as_deref().map_or(Signal::Return, Signal::go),
+            )
+        } else {
+            target.map_or(SequentialSignal::Return, SequentialSignal::Advance)
+        }
+    };
+
     match last_mapped_tool {
         Some(McpTool::ReportFailure) => {
             let transition = stage_def.and_then(|s| s.on_failure());
-            let target = transition.and_then(|t| t.next.as_ref());
-            let should_pause = transition.map_or(false, |t| t.pause);
-
-            let signal = if let Some(target) = target {
-                Signal::go(target.as_str())
-            } else {
-                Signal::ReturnFailure
-            };
-
-            if should_pause {
-                SequentialSignal::PauseThenSignal(signal)
-            } else if target.is_some() {
-                SequentialSignal::Advance(target.unwrap().to_string())
-            } else {
-                SequentialSignal::ReturnFailure
-            }
-        }
-        Some(McpTool::ReportSuccess) => {
-            let transition = stage_def.and_then(|s| s.on_success());
-            let explicit_target = transition.and_then(|t| t.next.as_ref());
-            let should_pause = transition.map_or(false, |t| t.pause);
-
-            let advance_target = if let Some(target) = explicit_target {
-                Some(target.to_string())
-            } else {
-                workflow
-                    .pipeline(pipeline_name)
-                    .and_then(|p| p.next_stage(stage_name))
-                    .map(|(next, _)| next.to_string())
-            };
-
-            if should_pause {
-                let signal = match advance_target {
-                    Some(next) => Signal::go(next),
-                    None => Signal::Return,
-                };
-                SequentialSignal::PauseThenSignal(signal)
-            } else {
-                match advance_target {
-                    Some(next) => SequentialSignal::Advance(next),
-                    None => SequentialSignal::Return,
-                }
-            }
-        }
-        Some(McpTool::ReportIntermediate) => {
-            let transition = stage_def.and_then(|s| s.on_intermediate());
-            let target = transition.and_then(|t| t.next.as_ref());
-            let should_pause = transition.is_some_and(|t| t.pause);
-
-            let signal = if let Some(target) = target {
-                Signal::go(target.as_str())
-            } else {
-                // Default: re-run the same stage
-                Signal::go(stage_name)
-            };
-
-            if should_pause {
-                SequentialSignal::PauseThenSignal(signal)
-            } else {
-                SequentialSignal::Advance(
-                    target
-                        .map(|t| t.to_string())
-                        .unwrap_or_else(|| stage_name.to_string()),
+            let target = transition.and_then(|t| t.next.as_ref()).map(|n| n.to_string());
+            if transition.is_some_and(|t| t.pause) {
+                SequentialSignal::PauseThenSignal(
+                    target.as_deref().map_or(Signal::ReturnFailure, Signal::go),
                 )
+            } else {
+                target.map_or(SequentialSignal::ReturnFailure, SequentialSignal::Advance)
             }
         }
-        _ => {
-            // No report tool called — use `on_no_report` transition if configured,
-            // otherwise default to advancing to the next stage (same as on_success).
-            let transition = stage_def.and_then(|s| s.on_no_report());
-            let explicit_target = transition.and_then(|t| t.next.as_ref());
-            let should_pause = transition.map_or(false, |t| t.pause);
-
-            let advance_target = if let Some(target) = explicit_target {
-                Some(target.to_string())
-            } else {
-                workflow
-                    .pipeline(pipeline_name)
-                    .and_then(|p| p.next_stage(stage_name))
-                    .map(|(next, _)| next.to_string())
-            };
-
-            if should_pause {
-                let signal = match advance_target {
-                    Some(next) => Signal::go(next),
-                    None => Signal::Return,
-                };
-                SequentialSignal::PauseThenSignal(signal)
-            } else {
-                match advance_target {
-                    Some(next) => SequentialSignal::Advance(next),
-                    None => SequentialSignal::Return,
-                }
-            }
+        Some(McpTool::ReportSuccess) => advance(stage_def.and_then(|s| s.on_success()), next_stage()),
+        Some(McpTool::ReportIntermediate) => {
+            advance(stage_def.and_then(|s| s.on_intermediate()), Some(stage_name.to_string()))
         }
+        // No report tool called — use on_no_report if configured, else advance (same as on_success).
+        _ => advance(stage_def.and_then(|s| s.on_no_report()), next_stage()),
     }
 }
 
