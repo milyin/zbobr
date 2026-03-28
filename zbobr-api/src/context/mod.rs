@@ -8,6 +8,8 @@
 
 mod stage_title;
 
+pub use stage_title::format_timestamp;
+
 use std::fmt;
 use std::str::FromStr;
 
