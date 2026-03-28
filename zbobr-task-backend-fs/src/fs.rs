@@ -8,7 +8,7 @@ use tokio::{
     sync::{Mutex, OwnedMutexGuard},
 };
 use zbobr_api::{
-    Comment, Model, PARAM_PR_URL, Signal, StackEntry, State, Task, Tool,
+    Comment, Model, Signal, StackEntry, State, Task, Tool,
     backend::{TaskBackend, TaskMut, TaskWeak},
     comment_tag,
     task::TaskContext,
@@ -36,7 +36,8 @@ struct TaskFile {
     #[serde(default)]
     work_branch: Option<String>,
 
-    parameters: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pr_url: Option<String>,
     #[serde(default)]
     pause: bool,
     #[serde(default)]
@@ -70,8 +71,6 @@ impl TaskFile {
             self.state.clone()
         };
 
-        let pr_url = self.parameters.get(PARAM_PR_URL).cloned();
-
         Ok(Task {
             id: self.id,
             title: self.title.clone(),
@@ -80,7 +79,7 @@ impl TaskFile {
             destination_repository: self.destination_repository.clone(),
             destination_branch: self.destination_branch.clone(),
             work_branch: self.work_branch.clone(),
-            pr_url,
+            pr_url: self.pr_url.clone(),
 
             context: self.context.clone(),
             signal: self.signal.clone(),
@@ -106,13 +105,7 @@ impl TaskFile {
             destination_repository: task.destination_repository.clone(),
             destination_branch: task.destination_branch.clone(),
             work_branch: task.work_branch.clone(),
-            parameters: {
-                let mut p = HashMap::new();
-                if let Some(ref url) = task.pr_url {
-                    p.insert(PARAM_PR_URL.to_string(), url.clone());
-                }
-                p
-            },
+            pr_url: task.pr_url.clone(),
             pause: task.pause,
             confirm: task.confirm,
             context: task.context.clone(),

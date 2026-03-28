@@ -7,14 +7,28 @@ use std::{
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use zbobr_api::{
-    Comment, CommentTag, Model, PARAM_DESTINATION_BRANCH, PARAM_DESTINATION_REPOSITORY,
-    PARAM_FLAG_CONFIRM, PARAM_FLAG_PAUSE, PARAM_FLAG_VALUE_TRUE, PARAM_MAX_STAGE_COUNT,
-    PARAM_PIPELINE, PARAM_PIPELINE_RUN_ID, PARAM_PR_URL, PARAM_SIGNAL, PARAM_STACK, PARAM_STAGE,
-    PARAM_STAGE_COUNT, PARAM_WORK_BRANCH, Signal, Task, Tool,
+    Comment, CommentTag, Model, Signal, Task, Tool,
     backend::TaskBackend,
     comment_tag,
     task::{Pipeline, StackEntry, Stage, State, TaskContext},
 };
+
+// -- Parameter name constants (GitHub issue body parameter keys) --
+
+const PARAM_DESTINATION_REPOSITORY: &str = "destination_repository";
+const PARAM_DESTINATION_BRANCH: &str = "destination_branch";
+const PARAM_WORK_BRANCH: &str = "work_branch";
+const PARAM_PR_URL: &str = "pr_url";
+const PARAM_STACK: &str = "stack";
+const PARAM_PIPELINE: &str = "pipeline";
+const PARAM_STAGE: &str = "stage";
+const PARAM_SIGNAL: &str = "signal";
+const PARAM_PIPELINE_RUN_ID: &str = "pipeline_run_id";
+const PARAM_STAGE_COUNT: &str = "stage_count";
+const PARAM_MAX_STAGE_COUNT: &str = "max_stage_count";
+const PARAM_FLAG_PAUSE: &str = "pause";
+const PARAM_FLAG_CONFIRM: &str = "confirm";
+const PARAM_FLAG_VALUE_TRUE: &str = "true";
 
 // -- Label prefix constants (GitHub-backend-specific) --
 
