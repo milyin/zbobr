@@ -219,6 +219,11 @@ impl RoleSession {
 
     /// Set the error message on the task.
     pub async fn set_error(&self, error: Option<String>) -> anyhow::Result<()> {
+        let error = error.map(|msg| {
+            let ts = chrono::Utc::now().with_timezone(&self.zbobr.config().fixed_offset());
+            let ts_str = format!("{} {}", ts.format("%Y-%m-%d %H:%M:%S"), ts.format("%z"));
+            format!("\u{274C} {} {}", ts_str, msg)
+        });
         self.modify_task(move |mut task| {
             task.error = error;
             task
@@ -475,6 +480,9 @@ impl TaskSession {
         self.modify_task(move |mut task| {
             if task.confirm && task.state != state {
                 task.pause = true;
+            }
+            if state.is_running() {
+                task.error = None;
             }
             task.state = state;
             task
