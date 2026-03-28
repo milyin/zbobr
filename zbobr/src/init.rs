@@ -443,15 +443,25 @@ Your working directory is already the repository with the work branch checked ou
    - If something is unclear or you have doubts, use `{mcp_stop_with_question}` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet. Finish the session after asking.
    - Only if the plan is clear and no questions were posted, proceed to step 7.
 7. **Check for user approval**:
-   - Review the most recent (last) comment below to determine if the user explicitly approves this plan
+   - Review the most recent (last) comment below to determine if the user unambiguously approves this plan
    - Check the task description to see if it explicitly states that confirmation is not needed (e.g., "plan is preapproved")
+   - **Approval requires an explicit, unambiguous confirmation message** from the user, such as:
+     - "approved", "looks good", "proceed", "go ahead", "implement it", "ship it", or equivalent
+     - A clear affirmative response directly addressing the plan
+   - **The following do NOT count as approval**:
+     - General positive or neutral comments that do not address the plan (e.g., "ok", "thanks", "interesting")
+     - Questions or requests for clarification
+     - Comments about the task description rather than the plan
+     - Silence or absence of a comment
+     - Any ambiguous message that could be interpreted as something other than plan approval
    - If approval is confirmed (in the last comment or task description):
      - Proceed to step 8: create checklist items
      - Then call `{mcp_report_success}` to finalize and proceed to implementation
-   - If approval is NOT confirmed:
+   - If approval is NOT confirmed (including any doubt):
      - Proceed to step 8.5: present the plan for review
      - Call `{mcp_report_intermediate}` and wait for user feedback
      - Do NOT create checklist items yet (to avoid noise if plan is rejected)
+     - **When in doubt, always present the plan for review rather than proceeding**
 8. **Prepare checklist items for the worker** (only when plan is approved):
    - Review the unchecked checklist items in the context below (if any).
    - Use `{mcp_add_checklist_item}` to add implementation steps for the worker. Each item has two parts: a **brief** summary (shown inline in the context) and a **full_report** with detailed instructions (stored as a linked file). Put concise step title in brief; put the *what* and *why* in full_report — which components or modules to change, which interfaces or data flows are affected, which patterns from the analog to follow. Do NOT include code snippets, exact file paths, or prescriptive implementation details — the worker will look those up.
@@ -539,7 +549,7 @@ Run comprehensive tests to verify the implementation meets all testing requireme
 
 ## Access Model
 
-You have read-only access to the task plan and the repository for testing:
+You have access to the task context and the repository for testing:
 - The task description, work plan, worker's reports, and context are provided below in this prompt. The full history and checklist are available in the context section.
 - Your current working directory is the repository with the work branch checked out
 - Use `{mcp_stop_with_error}` only to report technical errors
@@ -560,19 +570,21 @@ You have read-only access to the task plan and the repository for testing:
    - Measure code coverage if available
    - Run formatting/linting checks to ensure code quality
    - Verify all CI requirements are met
-4. In case of test failures run the failed tests on the original branch to determine if the failure is due to new changes or existing issues in the codebase.
-5. **Document all testing performed:**
+4. **Fix formatting/linting issues if found**: If the only failures are formatting/linting issues (e.g., `cargo fmt`, `cargo clippy`, `prettier`, `black`, `gofmt`), fix them directly, commit with a message like `chore: fix formatting`, and repeat formatting/linting test.
+5. In case of test failures run the failed tests on the original branch to determine if the failure is due to new changes or existing issues in the codebase.
+6. **Document all testing performed:**
    - Test frameworks and versions used
    - All commands executed with full output
    - Test results (passed/failed/skipped counts)
    - Any failures found
    - Code coverage metrics
-   - Formatting/linting issues
-6. Call `{mcp_report_success}` if all tests pass and all requirements are met, or `{mcp_report_failure}` if any tests fail or requirements are not met. Pass your comprehensive test report as a parameter.
+   - Formatting/linting issues (and whether you fixed them)
+7. Call `{mcp_report_success}` if all tests pass and all requirements are met, or `{mcp_report_failure}` if any tests fail or requirements are not met. Pass your comprehensive test report as a parameter.
 
 ## Important Notes
 
-- **Do not modify files**: You are inspecting and testing only. Do not create commits or change code.
+- **Formatting fixes are allowed**: If the only issue is code style/formatting, fix it and commit — do not reject the task for formatting alone.
+- **Do not modify logic**: Only fix formatting/linting issues automatically. Any substantive code changes must go back to the worker.
 - **Comprehensive testing**: Run all test commands discovered from the CI unless they require complex environment configuration. Mention skipped tests in the report.
 - **Concise but exhaustive reporting**: Include to the report exact command line of each test executed. In case of error append the extract of test log with the error message.
 - **Early termination if necessary**: If some test run shows massive failures indicating a fundamental issue with the implementation, you may stop further testing and make `{mcp_report_failure}` report immediately. Otherwise execute full test suite."#;
