@@ -481,7 +481,7 @@ impl TaskSession {
             if task.confirm && task.state != state {
                 task.pause = true;
             }
-            if state.is_running() {
+            if task.state != state && state.is_running() {
                 task.error = None;
             }
             task.state = state;
