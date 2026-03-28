@@ -34,6 +34,7 @@ const PARAM_FLAG_VALUE_TRUE: &str = "true";
 
 const STATE_PREFIX: &str = "state:";
 const FLAG_LABEL_PREFIX: &str = "flag:";
+const INSTANCE_LABEL_PREFIX: &str = "zbobr:";
 
 // -- State label name constants --
 
@@ -574,6 +575,33 @@ impl ZbobrTaskBackendGithubImpl {
             if label.starts_with(STATE_PREFIX) && !expected_labels.contains(label.as_str()) {
                 tracing::info!("Deleting obsolete label '{label}'");
                 self.delete_label(label).await?;
+            }
+        }
+
+        // Create zbobr:<instance> label for this instance
+        let instance_label =
+            format!("{}{}", INSTANCE_LABEL_PREFIX, self.backend_config.instance);
+        let instance_color = "1d76db"; // blue
+        let instance_desc = format!("Zbobr instance: {}", self.backend_config.instance);
+        if !existing_labels.contains(&instance_label) {
+            tracing::info!("Creating instance label '{instance_label}'");
+            self.create_label(&instance_label, instance_color, &instance_desc)
+                .await?;
+        } else if force {
+            tracing::info!("Updating instance label '{instance_label}' (force)");
+            self.update_label(&instance_label, instance_color, &instance_desc)
+                .await?;
+        } else {
+            tracing::info!("Instance label '{instance_label}' already exists");
+        }
+
+        // With force: clean up zbobr:* labels belonging to other instances
+        if force {
+            for label in &existing_labels {
+                if label.starts_with(INSTANCE_LABEL_PREFIX) && label != &instance_label {
+                    tracing::info!("Deleting other-instance label '{label}' (force)");
+                    self.delete_label(label).await?;
+                }
             }
         }
 
@@ -1293,6 +1321,9 @@ impl TaskBackend for TaskBackendGithub {
 
         let (owner, repo) = self.inner.parse_repo()?;
 
+        let instance_label =
+            format!("{}{}", INSTANCE_LABEL_PREFIX, self.inner.backend_config.instance);
+
         let issues: Vec<IssueResponse> =
             if let Some(usernames) = self.inner.backend_config.allowed_usernames.as_deref() {
                 let mut all_issues: Vec<IssueResponse> = Vec::new();
@@ -1300,6 +1331,7 @@ impl TaskBackend for TaskBackendGithub {
                     let params = vec![
                         ("state", "open".to_string()),
                         ("per_page", "100".to_string()),
+                        ("labels", instance_label.clone()),
                         ("creator", username.clone()),
                     ];
                     let mut user_issues: Vec<IssueResponse> = retry_github("list issues", || {
@@ -1315,6 +1347,7 @@ impl TaskBackend for TaskBackendGithub {
                 let params = vec![
                     ("state", "open".to_string()),
                     ("per_page", "100".to_string()),
+                    ("labels", instance_label),
                 ];
                 retry_github("list issues", || {
                     self.inner
