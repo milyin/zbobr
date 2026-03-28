@@ -7,7 +7,10 @@ use std::{
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use zbobr_api::{
-    Comment, CommentTag, Model, Signal, Task, Tool,
+    Comment, CommentTag, Model, PARAM_DESTINATION_BRANCH, PARAM_DESTINATION_REPOSITORY,
+    PARAM_FLAG_CONFIRM, PARAM_FLAG_PAUSE, PARAM_FLAG_VALUE_TRUE, PARAM_MAX_STAGE_COUNT,
+    PARAM_PIPELINE, PARAM_PIPELINE_RUN_ID, PARAM_PR_URL, PARAM_SIGNAL, PARAM_STACK, PARAM_STAGE,
+    PARAM_STAGE_COUNT, PARAM_WORK_BRANCH, Signal, Task, Tool,
     backend::TaskBackend,
     comment_tag,
     task::{Pipeline, StackEntry, Stage, State, TaskContext},
@@ -16,7 +19,7 @@ use zbobr_api::{
 // -- Label prefix constants (GitHub-backend-specific) --
 
 const STATE_PREFIX: &str = "state:";
-const FLAG_PREFIX: &str = "flag:";
+const FLAG_LABEL_PREFIX: &str = "flag:";
 
 // -- State label name constants --
 
@@ -26,12 +29,6 @@ const STATE_LABEL_READY: &str = "ready";
 const STATE_LABEL_PENDING: &str = "pending";
 const STATE_LABEL_RUNNING: &str = "running";
 
-// -- Flag name constants --
-
-const FLAG_PAUSE: &str = "pause";
-const FLAG_CONFIRM: &str = "confirm";
-
-const ALL_FLAG_NAMES: &[&str] = &[FLAG_PAUSE, FLAG_CONFIRM];
 
 const ALL_STATE_LABEL_NAMES: &[&str] = &[
     STATE_LABEL_DONE,
@@ -302,16 +299,6 @@ impl ZbobrTaskBackendGithubImpl {
         }
     }
 
-    /// Convert a flag name to its GitHub label representation.
-    fn flag_to_label(name: &str) -> String {
-        format!("{FLAG_PREFIX}{name}")
-    }
-
-    /// Parse a GitHub label string back to a flag name.
-    fn label_to_flag(label: &str) -> Option<&str> {
-        label.strip_prefix(FLAG_PREFIX)
-    }
-
     fn parse_repo(&self) -> anyhow::Result<(&str, &str)> {
         self.backend_config.parse_repo()
     }
@@ -357,14 +344,14 @@ impl ZbobrTaskBackendGithubImpl {
     async fn apply_state_change(&self, id: u64, state: &State) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        // Fetch current labels and remove all existing state:/pipeline:/stage: labels
+        // Fetch current labels and remove all existing state: and legacy flag: labels
         let issue: IssueResponse = retry_github("get issue labels", || {
             self.octocrab
                 .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
         })
         .await?;
         for label in &issue.labels {
-            if label.name.starts_with(STATE_PREFIX) {
+            if label.name.starts_with(STATE_PREFIX) || label.name.starts_with(FLAG_LABEL_PREFIX) {
                 let _ = retry_github("remove state label", || async {
                     self.octocrab
                         .issues(owner, repo)
@@ -391,35 +378,6 @@ impl ZbobrTaskBackendGithubImpl {
                     .await
             })
             .await?;
-        }
-
-        Ok(())
-    }
-
-    /// Apply flag changes on a GitHub issue (sync pause/confirm labels).
-    async fn apply_flag_change(&self, id: u64, pause: bool, confirm: bool) -> anyhow::Result<()> {
-        let (owner, repo) = self.parse_repo()?;
-
-        for (flag_name, desired) in [(FLAG_PAUSE, pause), (FLAG_CONFIRM, confirm)] {
-            let label = Self::flag_to_label(flag_name);
-            if desired {
-                let labels: Vec<String> = vec![label];
-                let _ = retry_github("add flag label", || async {
-                    self.octocrab
-                        .issues(owner, repo)
-                        .add_labels(id, &labels)
-                        .await
-                })
-                .await;
-            } else {
-                let _ = retry_github("remove flag label", || async {
-                    self.octocrab
-                        .issues(owner, repo)
-                        .remove_label(id, &label)
-                        .await
-                })
-                .await;
-            }
         }
 
         Ok(())
@@ -572,26 +530,7 @@ impl ZbobrTaskBackendGithubImpl {
         // Ensure the task repo exists
         self.ensure_task_repo_exists().await?;
 
-        // Create flag labels
         let existing_labels = self.list_labels().await?;
-
-        const FLAG_LABEL_COLOR: &str = "f9d0c4";
-
-        for flag_name in ALL_FLAG_NAMES {
-            let flag_label = Self::flag_to_label(flag_name);
-            let flag_desc = format!("Flag: {}", flag_name);
-            if !existing_labels.contains(&flag_label) {
-                tracing::info!("Creating label '{flag_label}'");
-                self.create_label(&flag_label, FLAG_LABEL_COLOR, &flag_desc)
-                    .await?;
-            } else if force {
-                tracing::info!("Updating label '{flag_label}' (force)");
-                self.update_label(&flag_label, FLAG_LABEL_COLOR, &flag_desc)
-                    .await?;
-            } else {
-                tracing::info!("Label '{flag_label}' already exists");
-            }
-        }
 
         // Create state labels programmatically from type constants
         let state_labels: Vec<String> = ALL_STATE_LABEL_NAMES
@@ -616,18 +555,13 @@ impl ZbobrTaskBackendGithubImpl {
             }
         }
 
-        // Delete obsolete managed labels (state:* or flag:* not in the expected set)
-        let flag_labels: Vec<String> = ALL_FLAG_NAMES
-            .iter()
-            .map(|f| Self::flag_to_label(f))
-            .collect();
+        // Delete obsolete managed labels (state:* not in the expected set)
         let expected_labels: std::collections::HashSet<&str> = state_labels
             .iter()
             .map(|s| s.as_str())
-            .chain(flag_labels.iter().map(|s| s.as_str()))
             .collect();
         for label in &existing_labels {
-            if (label.starts_with(STATE_PREFIX) || label.starts_with(FLAG_PREFIX))
+            if label.starts_with(STATE_PREFIX)
                 && !expected_labels.contains(label.as_str())
             {
                 tracing::info!("Deleting obsolete label '{label}'");
@@ -648,34 +582,27 @@ impl ZbobrTaskBackendGithubImpl {
         let (description, params_map, error, context) = parse_description_full(&body)?;
 
         // Promoted fields: read from params_map where they were stored
-        let destination_repository = params_map.get("destination_repository").cloned();
-        let destination_branch = params_map.get("destination_branch").cloned();
-        let work_branch = params_map.get("work_branch").cloned();
-        let pr_url = params_map.get("pr_url").cloned();
+        let destination_repository = params_map.get(PARAM_DESTINATION_REPOSITORY).cloned();
+        let destination_branch = params_map.get(PARAM_DESTINATION_BRANCH).cloned();
+        let work_branch = params_map.get(PARAM_WORK_BRANCH).cloned();
+        let pr_url = params_map.get(PARAM_PR_URL).cloned();
 
         // stack is stored as JSON in params_map
         let stack: Vec<StackEntry> = params_map
-            .get("stack")
+            .get(PARAM_STACK)
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
 
         // pipeline, stage, and signal are stored as params
-        let pipeline_param = params_map.get("pipeline").map(|s| s.as_str());
-        let stage_param = params_map.get("stage").map(|s| s.as_str());
-        let signal: Option<Signal> = params_map.get("signal").and_then(|s| s.parse().ok());
+        let pipeline_param = params_map.get(PARAM_PIPELINE).map(|s| s.as_str());
+        let stage_param = params_map.get(PARAM_STAGE).map(|s| s.as_str());
+        let signal: Option<Signal> = params_map.get(PARAM_SIGNAL).and_then(|s| s.parse().ok());
 
         // state is stored as label; pipeline/stage come from params
         let state = Self::labels_to_state(&issue.labels, pipeline_param, stage_param);
 
-        let pause = issue
-            .labels
-            .iter()
-            .any(|l| Self::label_to_flag(&l.name) == Some(FLAG_PAUSE));
-
-        let confirm = issue
-            .labels
-            .iter()
-            .any(|l| Self::label_to_flag(&l.name) == Some(FLAG_CONFIRM));
+        let pause = params_map.get(PARAM_FLAG_PAUSE).map(|s| s == PARAM_FLAG_VALUE_TRUE).unwrap_or(false);
+        let confirm = params_map.get(PARAM_FLAG_CONFIRM).map(|s| s == PARAM_FLAG_VALUE_TRUE).unwrap_or(false);
 
         Ok(Task {
             id: issue.number,
@@ -693,15 +620,15 @@ impl ZbobrTaskBackendGithubImpl {
             pause,
             confirm,
             pipeline_run_id: params_map
-                .get("pipeline_run_id")
+                .get(PARAM_PIPELINE_RUN_ID)
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0),
             stage_count: params_map
-                .get("stage_count")
+                .get(PARAM_STAGE_COUNT)
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0),
             max_stage_count: params_map
-                .get("max_stage_count")
+                .get(PARAM_MAX_STAGE_COUNT)
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0),
             closed: issue.state == "closed",
@@ -713,54 +640,60 @@ impl ZbobrTaskBackendGithubImpl {
     fn task_to_string_params(task: &Task) -> HashMap<String, String> {
         let mut params: HashMap<String, String> = HashMap::new();
         if let Some(ref v) = task.pr_url {
-            params.insert("pr_url".to_string(), v.clone());
+            params.insert(PARAM_PR_URL.to_string(), v.clone());
         }
         if let Some(ref v) = task.destination_repository {
-            params.insert("destination_repository".to_string(), v.clone());
+            params.insert(PARAM_DESTINATION_REPOSITORY.to_string(), v.clone());
         }
         if let Some(ref v) = task.destination_branch {
-            params.insert("destination_branch".to_string(), v.clone());
+            params.insert(PARAM_DESTINATION_BRANCH.to_string(), v.clone());
         }
         if let Some(ref v) = task.work_branch {
-            params.insert("work_branch".to_string(), v.clone());
+            params.insert(PARAM_WORK_BRANCH.to_string(), v.clone());
         }
         if !task.stack.is_empty() {
             if let Ok(json) = serde_json::to_string(&task.stack) {
-                params.insert("stack".to_string(), json);
+                params.insert(PARAM_STACK.to_string(), json);
             }
         }
         // Store pipeline and stage as params (not labels)
         match &task.state {
             State::Pending(pipeline) => {
-                params.insert("pipeline".to_string(), pipeline.as_str().to_string());
+                params.insert(PARAM_PIPELINE.to_string(), pipeline.as_str().to_string());
             }
             State::Running(pipeline, stage) => {
-                params.insert("pipeline".to_string(), pipeline.as_str().to_string());
-                params.insert("stage".to_string(), stage.as_str().to_string());
+                params.insert(PARAM_PIPELINE.to_string(), pipeline.as_str().to_string());
+                params.insert(PARAM_STAGE.to_string(), stage.as_str().to_string());
             }
             _ => {}
         }
         // Store signal as param (not label)
         if let Some(ref signal) = task.signal {
-            params.insert("signal".to_string(), signal.to_string());
+            params.insert(PARAM_SIGNAL.to_string(), signal.to_string());
         }
         if task.pipeline_run_id > 0 {
             params.insert(
-                "pipeline_run_id".to_string(),
+                PARAM_PIPELINE_RUN_ID.to_string(),
                 task.pipeline_run_id.to_string(),
             );
         }
         if task.stage_count > 0 {
             params.insert(
-                "stage_count".to_string(),
+                PARAM_STAGE_COUNT.to_string(),
                 task.stage_count.to_string(),
             );
         }
         if task.max_stage_count > 0 {
             params.insert(
-                "max_stage_count".to_string(),
+                PARAM_MAX_STAGE_COUNT.to_string(),
                 task.max_stage_count.to_string(),
             );
+        }
+        if task.pause {
+            params.insert(PARAM_FLAG_PAUSE.to_string(), PARAM_FLAG_VALUE_TRUE.to_string());
+        }
+        if task.confirm {
+            params.insert(PARAM_FLAG_CONFIRM.to_string(), PARAM_FLAG_VALUE_TRUE.to_string());
         }
         params
     }
@@ -855,9 +788,6 @@ impl ZbobrTaskBackendGithubImpl {
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
     ) -> anyhow::Result<Task> {
         let task = self.fetch_task(id).await?;
-        let original_state = task.state.clone();
-        let original_pause = task.pause;
-        let original_confirm = task.confirm;
         let url_prefix = self.report_url_prefix(id);
         let make_url = |filename: &str| -> String {
             match &url_prefix {
@@ -907,12 +837,8 @@ impl ZbobrTaskBackendGithubImpl {
             }
         }
 
-        if task.state != original_state {
-            self.apply_state_change(id, &task.state).await?;
-        }
-        if task.pause != original_pause || task.confirm != original_confirm {
-            self.apply_flag_change(id, task.pause, task.confirm).await?;
-        }
+        // Always apply state change to ensure legacy flag: labels are removed even when state is unchanged.
+        self.apply_state_change(id, &task.state).await?;
 
         self.record_cooling(id);
         let mut saved_task = task;
@@ -1429,48 +1355,68 @@ impl TaskBackend for TaskBackendGithub {
     }
 }
 
-/*
 #[cfg(test)]
-mod tests {
+mod flag_tests {
     use super::*;
-    use zbobr_api::{Model, Parameter, Signal, Stage, Tool};
+    use crate::separator::PARAMETERS_SEPARATOR;
+
+    fn make_issue_with_params(key: &str, value: &str) -> IssueResponse {
+        let body = format!("desc{PARAMETERS_SEPARATOR}{key}: {value}\n");
+        IssueResponse {
+            number: 1,
+            title: "test".to_string(),
+            body: Some(body),
+            state: "open".to_string(),
+            labels: vec![],
+        }
+    }
 
     #[test]
-    fn issue_to_task_includes_confirm_flag() {
-        let issue = IssueResponse {
-            number: 10,
-            title: "foo".to_string(),
-            body: Some("".to_string()),
-            state: "open".to_string(),
-            labels: vec![IssueLabel {
-                name: format!("{FLAG_PREFIX}confirm"),
-            }],
-        };
-
-        let task = ZbobrTaskBackendGithub::issue_to_task(issue);
-        assert!(task.confirm, "confirm flag should be parsed from labels");
+    fn issue_to_task_reads_pause_from_params() {
+        let issue = make_issue_with_params(PARAM_FLAG_PAUSE, PARAM_FLAG_VALUE_TRUE);
+        let task = ZbobrTaskBackendGithubImpl::issue_to_task(issue).unwrap();
+        assert!(task.pause);
+        assert!(!task.confirm);
     }
 
-    #[tokio::test]
-    async fn apply_flag_change_adds_and_removes_confirm_label() {
-        // Install TLS provider required by octocrab.
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        // This test just exercises the label loop; we don't hit GitHub.
-        let config = crate::config::ZbobrTaskBackendGithubConfig {
-            github_repo: "dummy/repo".to_string(),
-            github_token: "dummy-token".to_string(),
-        };
-        let backend = ZbobrTaskBackendGithub::from_config(config).expect("backend init");
+    #[test]
+    fn issue_to_task_reads_confirm_from_params() {
+        let issue = make_issue_with_params(PARAM_FLAG_CONFIRM, PARAM_FLAG_VALUE_TRUE);
+        let task = ZbobrTaskBackendGithubImpl::issue_to_task(issue).unwrap();
+        assert!(!task.pause);
+        assert!(task.confirm);
+    }
 
-        // the method returns Result<(), _>; call with dummy values to ensure no panics
-        // since actual network calls are inside retry_github we simply drop the future.
-        // We cannot easily verify labels without mocking; ensure the code compiles and runs
-        // the loop by invoking with both true/false combinations.
-        let _ = backend.apply_flag_change(1, true, false, true).await;
-        let _ = backend.apply_flag_change(1, false, true, false).await;
+    #[test]
+    fn task_to_string_params_includes_flags_when_set() {
+        use zbobr_api::task::State;
+        use zbobr_api::task::TaskContext;
+        let task = Task {
+            id: 1,
+            title: "t".to_string(),
+            description: "d".to_string(),
+            state: State::Done,
+            destination_repository: None,
+            destination_branch: None,
+            work_branch: None,
+            pr_url: None,
+            context: TaskContext::default(),
+            signal: None,
+            stack: vec![],
+            error: None,
+            pause: true,
+            confirm: true,
+            pipeline_run_id: 0,
+            stage_count: 0,
+            max_stage_count: 0,
+            closed: false,
+            etag: None,
+        };
+        let params = ZbobrTaskBackendGithubImpl::task_to_string_params(&task);
+        assert_eq!(params.get(PARAM_FLAG_PAUSE).map(|s| s.as_str()), Some(PARAM_FLAG_VALUE_TRUE));
+        assert_eq!(params.get(PARAM_FLAG_CONFIRM).map(|s| s.as_str()), Some(PARAM_FLAG_VALUE_TRUE));
     }
 }
-*/
 
 #[cfg(test)]
 mod parse_tests {
