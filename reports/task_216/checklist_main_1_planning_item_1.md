@@ -1,0 +1,3 @@
+In `github.rs`, the `task_to_string_params` function builds the params map for serialization. Currently it does NOT include `pause` or `confirm` (those were written as labels separately).
+
+Add serialization of both flags using the `PARAM_PAUSE` and `PARAM_CONFIRM` constants: insert "true" when the flag is set, omit the key entirely when false (consistent with how optional fields like `pr_url` are handled — only present when set).
