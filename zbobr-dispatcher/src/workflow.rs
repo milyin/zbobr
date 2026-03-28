@@ -3,8 +3,48 @@ use std::{collections::HashMap, path::PathBuf};
 use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Signal, Stage, State, Task,
-    config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig},
+    config::{PipelineConfig, RoleDefinition, StageDefinition, StageTransition, WorkflowConfig},
+    config_tools::McpTool,
 };
+
+/// Signal produced by the sequential pipeline model after a stage completes.
+pub(crate) enum SequentialSignal {
+    /// `report_failure` → immediate return from pipeline.
+    ReturnFailure,
+    /// `report_success`/`report_intermediate`/`on_no_report` with a next stage → advance to it.
+    Advance(String),
+    /// `report_success`/`on_no_report` at the last stage → pipeline done, return.
+    Return,
+    /// Stage-configured pause → set pause flag, emit given signal on resume.
+    PauseThenSignal(Signal),
+}
+
+/// Convert a stage transition config + default target into a [`SequentialSignal`].
+///
+/// `no_target` is the signal to emit when neither the transition nor `default_target`
+/// provides a stage; must be `Signal::Return` or `Signal::ReturnFailure`.
+fn apply_transition(
+    transition: Option<&StageTransition>,
+    default_target: Option<String>,
+    no_target: Signal,
+) -> SequentialSignal {
+    let target = transition
+        .and_then(|t| t.next.as_ref())
+        .map(|n: &Stage| n.to_string())
+        .or(default_target);
+    if transition.is_some_and(|t| t.pause) {
+        SequentialSignal::PauseThenSignal(target.as_deref().map_or(no_target, Signal::go))
+    } else {
+        match target {
+            Some(t) => SequentialSignal::Advance(t),
+            None => match no_target {
+                Signal::Return => SequentialSignal::Return,
+                Signal::ReturnFailure => SequentialSignal::ReturnFailure,
+                _ => unreachable!(),
+            },
+        }
+    }
+}
 
 /// Workflow wraps a `WorkflowConfig` and exposes state machine logic as methods.
 #[derive(Clone, Debug)]
@@ -118,6 +158,46 @@ impl Workflow {
 
     pub fn pipelines(&self) -> &HashMap<Pipeline, PipelineConfig> {
         &self.config.pipelines
+    }
+
+    // -- Sequential pipeline model --
+
+    /// Compute the post-execution signal for the sequential pipeline model.
+    pub(crate) fn sequential_signal(
+        &self,
+        pipeline_name: &Pipeline,
+        stage_name: &str,
+        stage_def: Option<&StageDefinition>,
+        last_mapped_tool: Option<McpTool>,
+    ) -> SequentialSignal {
+        let next_stage = || {
+            self.pipeline(pipeline_name)
+                .and_then(|p| p.next_stage(stage_name))
+                .map(|(n, _)| n.to_string())
+        };
+        match last_mapped_tool {
+            Some(McpTool::ReportFailure) => apply_transition(
+                stage_def.and_then(|s| s.on_failure()),
+                None,
+                Signal::ReturnFailure,
+            ),
+            Some(McpTool::ReportSuccess) => apply_transition(
+                stage_def.and_then(|s| s.on_success()),
+                next_stage(),
+                Signal::Return,
+            ),
+            Some(McpTool::ReportIntermediate) => apply_transition(
+                stage_def.and_then(|s| s.on_intermediate()),
+                Some(stage_name.to_string()),
+                Signal::Return,
+            ),
+            // No report tool called — use on_no_report if configured, else advance (same as on_success).
+            _ => apply_transition(
+                stage_def.and_then(|s| s.on_no_report()),
+                next_stage(),
+                Signal::Return,
+            ),
+        }
     }
 
     // -- State machine --
