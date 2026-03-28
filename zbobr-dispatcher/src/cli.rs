@@ -8,7 +8,7 @@ use std::{
 use anyhow::Context;
 use clap::{Args, Parser};
 use zbobr_api::{
-    CommentTag, Pipeline, Signal, StackEntry, State, config::StageDefinition, config_tools::McpTool,
+    CommentTag, Pipeline, Signal, StackEntry, State, config::{StageDefinition, StageTransition}, config_tools::McpTool,
     task::{Stage, StageContext, StageInfo},
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
@@ -17,7 +17,7 @@ use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
     Comment, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
-    task::{Model, Tool},
+    task::{Model, Tool}, workflow::Workflow,
 };
 
 // ---------------------------------------------------------------------------
@@ -542,12 +542,39 @@ enum SequentialSignal {
     PauseThenSignal(Signal),
 }
 
+/// Convert a stage transition config + default target into a [`SequentialSignal`].
+///
+/// `no_target` is the signal to emit when neither the transition nor `default_target`
+/// provides a stage; must be `Signal::Return` or `Signal::ReturnFailure`.
+fn apply_transition(
+    transition: Option<&StageTransition>,
+    default_target: Option<String>,
+    no_target: Signal,
+) -> SequentialSignal {
+    let target = transition
+        .and_then(|t| t.next.as_ref())
+        .map(|n: &zbobr_api::Stage| n.to_string())
+        .or(default_target);
+    if transition.is_some_and(|t| t.pause) {
+        SequentialSignal::PauseThenSignal(target.as_deref().map_or(no_target, Signal::go))
+    } else {
+        match target {
+            Some(t) => SequentialSignal::Advance(t),
+            None => match no_target {
+                Signal::Return => SequentialSignal::Return,
+                Signal::ReturnFailure => SequentialSignal::ReturnFailure,
+                _ => unreachable!(),
+            },
+        }
+    }
+}
+
 /// Compute the post-execution signal for the sequential pipeline model.
 fn compute_sequential_signal(
     pipeline_name: &Pipeline,
     stage_name: &str,
-    stage_def: Option<&zbobr_api::config::StageDefinition>,
-    workflow: &crate::workflow::Workflow,
+    stage_def: Option<&StageDefinition>,
+    workflow: &Workflow,
     last_mapped_tool: Option<McpTool>,
 ) -> SequentialSignal {
     let next_stage = || {
@@ -556,43 +583,28 @@ fn compute_sequential_signal(
             .and_then(|p| p.next_stage(stage_name))
             .map(|(n, _)| n.to_string())
     };
-
-    // Convert a transition + default target into a SequentialSignal.
-    // `default_target`: stage to advance to when the transition has no explicit next;
-    // None means end-of-pipeline (Return).
-    let advance = |transition: Option<&zbobr_api::config::StageTransition>,
-                   default_target: Option<String>| {
-        let target = transition
-            .and_then(|t| t.next.as_ref())
-            .map(|n: &zbobr_api::Stage| n.to_string())
-            .or(default_target);
-        if transition.is_some_and(|t| t.pause) {
-            SequentialSignal::PauseThenSignal(
-                target.as_deref().map_or(Signal::Return, Signal::go),
-            )
-        } else {
-            target.map_or(SequentialSignal::Return, SequentialSignal::Advance)
-        }
-    };
-
     match last_mapped_tool {
-        Some(McpTool::ReportFailure) => {
-            let transition = stage_def.and_then(|s| s.on_failure());
-            let target = transition.and_then(|t| t.next.as_ref()).map(|n| n.to_string());
-            if transition.is_some_and(|t| t.pause) {
-                SequentialSignal::PauseThenSignal(
-                    target.as_deref().map_or(Signal::ReturnFailure, Signal::go),
-                )
-            } else {
-                target.map_or(SequentialSignal::ReturnFailure, SequentialSignal::Advance)
-            }
-        }
-        Some(McpTool::ReportSuccess) => advance(stage_def.and_then(|s| s.on_success()), next_stage()),
-        Some(McpTool::ReportIntermediate) => {
-            advance(stage_def.and_then(|s| s.on_intermediate()), Some(stage_name.to_string()))
-        }
+        Some(McpTool::ReportFailure) => apply_transition(
+            stage_def.and_then(|s| s.on_failure()),
+            None,
+            Signal::ReturnFailure,
+        ),
+        Some(McpTool::ReportSuccess) => apply_transition(
+            stage_def.and_then(|s| s.on_success()),
+            next_stage(),
+            Signal::Return,
+        ),
+        Some(McpTool::ReportIntermediate) => apply_transition(
+            stage_def.and_then(|s| s.on_intermediate()),
+            Some(stage_name.to_string()),
+            Signal::Return,
+        ),
         // No report tool called — use on_no_report if configured, else advance (same as on_success).
-        _ => advance(stage_def.and_then(|s| s.on_no_report()), next_stage()),
+        _ => apply_transition(
+            stage_def.and_then(|s| s.on_no_report()),
+            next_stage(),
+            Signal::Return,
+        ),
     }
 }
 
