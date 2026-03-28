@@ -1,0 +1,1 @@
+Fixed the formatting issue. The previous session had introduced a test assertion with improper line wrapping that failed `cargo fmt --check`. The fix reformats the assertion to the rustfmt-compliant style. All tests pass and formatting check succeeds.
