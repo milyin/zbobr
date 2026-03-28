@@ -1,0 +1,1 @@
+Fixed the parser threshold from `>= 6` to `>= 8` in `zbobr-api/src/context/mod.rs:429`. This maintains scaling consistency — top-level records are indented 4 spaces, child records 8 spaces, so the child detection threshold should be `>= 8`. All tests pass and formatting is clean.
