@@ -77,6 +77,14 @@ async fn test_github_github_abstract_configure_worktree_idempotent() {
 #[tokio::test]
 #[serial]
 #[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
+async fn test_github_github_abstract_configure_worktree_ignore_requested_postfix() {
+    let env = get_env().await;
+    abstract_test_helpers::run_configure_worktree_ignore_requested_postfix(&env).await;
+}
+
+#[tokio::test]
+#[serial]
+#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
 async fn test_github_github_abstract_stage_transfer() {
     let env = get_env().await;
     abstract_test_helpers::run_stage_transfer(&env).await;
