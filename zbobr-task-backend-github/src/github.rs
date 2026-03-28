@@ -147,6 +147,7 @@ struct IssueLabel {
 struct CommentResponse {
     body: Option<String>,
     created_at: Option<String>,
+    html_url: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -804,6 +805,7 @@ impl ZbobrTaskBackendGithubImpl {
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
     ) -> anyhow::Result<Task> {
         let task = self.fetch_task(id).await?;
+        let comments = self.get_task_comments_internal(id).await?;
         let url_prefix = self.report_url_prefix(id);
         let make_url = |filename: &str| -> String {
             match &url_prefix {
@@ -818,6 +820,7 @@ impl ZbobrTaskBackendGithubImpl {
                 &string_params,
                 &task.status,
                 &task.context,
+                &comments,
                 Some(&make_url),
             )
         });
@@ -830,6 +833,7 @@ impl ZbobrTaskBackendGithubImpl {
             &string_params,
             &task.status,
             &task.context,
+            &comments,
             Some(&make_url),
         );
 
@@ -853,6 +857,7 @@ impl ZbobrTaskBackendGithubImpl {
                         &sp,
                         &current_task.status,
                         &current_task.context,
+                        &comments,
                         Some(&make_url),
                     )
                 }
@@ -927,6 +932,7 @@ impl ZbobrTaskBackendGithubImpl {
                     caller_pipeline_run_id: tag.caller_pipeline_run_id,
                     report_name,
                     prompt_name: None,
+                    url: c.html_url,
                 }
             })
             .collect())
@@ -1330,6 +1336,7 @@ impl TaskBackend for TaskBackendGithub {
             &HashMap::new(),
             &None,
             &TaskContext::default(),
+            &[],
             None,
         );
 

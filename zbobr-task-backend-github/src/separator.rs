@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use zbobr_api::{
+    Comment,
     context::{parse_context, serialize_context},
     task::TaskContext,
 };
@@ -92,11 +93,13 @@ pub(crate) fn parse_description_full(
 
 /// Serialize description, parameters, status, and context back into the full format.
 /// Section order: description → PARAMETERS → STATUS → CONTEXT.
+/// `comments` are interspersed into the context section as compact titles for user display.
 pub(crate) fn serialize_description_full(
     original_description: &str,
     parameters: &HashMap<String, String>,
     status: &Option<String>,
     context: &TaskContext,
+    comments: &[Comment],
     report_url: Option<&dyn Fn(&str) -> String>,
 ) -> String {
     // Strip everything from the description first
@@ -120,7 +123,7 @@ pub(crate) fn serialize_description_full(
     }
 
     // Add context if non-empty
-    let context_str = serialize_context(context, &[], false, report_url);
+    let context_str = serialize_context(context, comments, false, report_url);
     if !context_str.is_empty() {
         result.push_str(CONTEXT_SEPARATOR);
         result.push_str(&context_str);
@@ -184,11 +187,13 @@ pub(crate) fn merge_concurrent_description_updates(
     };
 
     // Serialize back with the merged content (no URL builder — will be re-serialized by caller)
+    // No compact comments during merge — they are re-added when the caller re-serializes.
     Ok(serialize_description_full(
         &merged_desc,
         &merged_params,
         &merged_status,
         &merged_context,
+        &[],
         None,
     ))
 }
@@ -244,7 +249,7 @@ mod tests {
     fn roundtrip_preserves_context() {
         let ctx = sample_context();
 
-        let serialized = serialize_description_full("my task", &HashMap::new(), &None, &ctx, None);
+        let serialized = serialize_description_full("my task", &HashMap::new(), &None, &ctx, &[], None);
         let (desc, _, _, parsed_ctx) = parse_description_full(&serialized).unwrap();
 
         assert_eq!(desc, "my task");
@@ -282,6 +287,7 @@ mod tests {
             &HashMap::new(),
             &None,
             &TaskContext::default(),
+            &[],
             None,
         );
         let (desc, _, _, ctx) = parse_description_full(&serialized).unwrap();
@@ -298,7 +304,7 @@ mod tests {
         let status = Some("Something went wrong\ndetails here".to_string());
         let ctx = sample_context();
 
-        let serialized = serialize_description_full("my task", &params, &status, &ctx, None);
+        let serialized = serialize_description_full("my task", &params, &status, &ctx, &[], None);
         let (desc, parsed_params, parsed_status, parsed_ctx) =
             parse_description_full(&serialized).unwrap();
 
@@ -323,6 +329,7 @@ mod tests {
             &HashMap::new(),
             &None,
             &TaskContext::default(),
+            &[],
             None,
         );
         let (desc, _, status, ctx) = parse_description_full(&serialized).unwrap();
@@ -340,6 +347,7 @@ mod tests {
             &HashMap::new(),
             &None,
             &TaskContext::default(),
+            &[],
             None,
         );
 
@@ -349,6 +357,7 @@ mod tests {
             &HashMap::new(),
             &Some("their error".to_string()),
             &TaskContext::default(),
+            &[],
             None,
         );
 
@@ -358,6 +367,7 @@ mod tests {
             &HashMap::new(),
             &None,
             &sample_context(),
+            &[],
             None,
         );
 
@@ -393,7 +403,7 @@ mod tests {
             }],
         };
 
-        let original = serialize_description_full("desc", &HashMap::new(), &None, &ctx1, None);
+        let original = serialize_description_full("desc", &HashMap::new(), &None, &ctx1, &[], None);
 
         // They changed the context
         let ctx_theirs = TaskContext {
@@ -417,7 +427,7 @@ mod tests {
                 }],
             }],
         };
-        let current = serialize_description_full("desc", &HashMap::new(), &None, &ctx_theirs, None);
+        let current = serialize_description_full("desc", &HashMap::new(), &None, &ctx_theirs, &[], None);
 
         // We also changed the context
         let ctx_ours = TaskContext {
@@ -441,7 +451,7 @@ mod tests {
                 }],
             }],
         };
-        let our_new = serialize_description_full("desc", &HashMap::new(), &None, &ctx_ours, None);
+        let our_new = serialize_description_full("desc", &HashMap::new(), &None, &ctx_ours, &[], None);
 
         let merged = merge_concurrent_description_updates(&original, &current, &our_new).unwrap();
         let (_, _, _, ctx) = parse_description_full(&merged).unwrap();

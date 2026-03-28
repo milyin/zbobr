@@ -365,6 +365,50 @@ impl From<&Comment> for MdUserComment {
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
+// Compact comment (user-display mode)
+// ────────────────────────────────────────────────────────────────────────────────
+
+/// Maximum character length for the truncated comment text in compact form.
+const COMPACT_COMMENT_MAX_LEN: usize = 80;
+
+/// A compact (single-line) representation of a user comment for user-display mode.
+///
+/// Format: `- comment text \`YYYY-MM-DD HH:MM:SS +HHMM\` <sub>[link](url)</sub>`
+#[derive(Debug, Clone)]
+struct MdCompactComment {
+    text: String,
+    timestamp: chrono::DateTime<chrono::FixedOffset>,
+    url: Option<String>,
+}
+
+impl MdCompactComment {
+    fn from_comment(c: &Comment) -> Self {
+        let first_line = c.text.lines().next().unwrap_or("").trim();
+        let text = if first_line.chars().count() > COMPACT_COMMENT_MAX_LEN {
+            let truncated: String = first_line.chars().take(COMPACT_COMMENT_MAX_LEN).collect();
+            format!("{}...", truncated)
+        } else {
+            first_line.to_string()
+        };
+        MdCompactComment {
+            text,
+            timestamp: c.timestamp,
+            url: c.url.clone(),
+        }
+    }
+}
+
+impl fmt::Display for MdCompactComment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "- {} `{}`", self.text, format_timestamp(&self.timestamp))?;
+        if let Some(url) = &self.url {
+            write!(f, " <sub>[link]({})</sub>", url)?;
+        }
+        Ok(())
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
 // Markdown stage
 // ────────────────────────────────────────────────────────────────────────────────
 
@@ -510,6 +554,7 @@ impl MdStage {
 enum MdEntry {
     Stage(MdStage),
     Comment(MdUserComment),
+    CompactComment(MdCompactComment),
 }
 
 /// The complete context document in markdown format.
@@ -522,14 +567,27 @@ struct MdContext {
 
 impl fmt::Display for MdContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Add <!-- stage --> markers before stage entries when compact comments are present
+        // so parsers can distinguish stage lines from compact comment lines.
+        let has_compact = self
+            .entries
+            .iter()
+            .any(|e| matches!(e, MdEntry::CompactComment(_)));
+
         for entry in &self.entries {
             match entry {
                 MdEntry::Stage(stage) => {
+                    if has_compact {
+                        writeln!(f, "<!-- stage -->")?;
+                    }
                     // Stage display already ends with \n via writeln!
                     write!(f, "{}", stage)?;
                 }
                 MdEntry::Comment(comment) => {
                     write!(f, "{}\n\n", comment)?;
+                }
+                MdEntry::CompactComment(c) => {
+                    writeln!(f, "{}", c)?;
                 }
             }
         }
@@ -575,6 +633,11 @@ impl FromStr for MdContext {
                 comment_lines.clear();
             }
 
+            // Skip <!-- stage --> markers (inserted before stage titles in user-display mode)
+            if trimmed == "<!-- stage -->" {
+                continue;
+            }
+
             // Try parsing as record (add to current stage)
             if let Some(record) = MdRecord::try_parse(trimmed)? {
                 let stage = current_stage.as_mut().ok_or_else(|| {
@@ -584,19 +647,19 @@ impl FromStr for MdContext {
                 continue;
             }
 
-            // Parse as stage title
+            // Parse as stage title — try first to avoid flushing current_stage on failure
             if trimmed.starts_with("- ") {
-                // Flush previous stage
-                if let Some(stage) = current_stage.take() {
-                    entries.push(MdEntry::Stage(stage));
+                if let Ok(title) = trimmed.parse::<MdStageTitle>() {
+                    // Valid stage title: flush previous stage
+                    if let Some(stage) = current_stage.take() {
+                        entries.push(MdEntry::Stage(stage));
+                    }
+                    current_stage = Some(MdStage {
+                        title,
+                        records: Vec::new(),
+                    });
                 }
-                let title: MdStageTitle = trimmed
-                    .parse()
-                    .with_context(|| format!("Failed to parse stage title: {}", trimmed))?;
-                current_stage = Some(MdStage {
-                    title,
-                    records: Vec::new(),
-                });
+                // else: compact comment line or unknown `- ` line — skip silently
                 continue;
             }
 
@@ -649,10 +712,12 @@ impl MdContext {
         }
 
         for comment in comments {
-            events.push((
-                comment.timestamp,
-                MdEntry::Comment(MdUserComment::from(comment)),
-            ));
+            let entry = if for_prompt {
+                MdEntry::Comment(MdUserComment::from(comment))
+            } else {
+                MdEntry::CompactComment(MdCompactComment::from_comment(comment))
+            };
+            events.push((comment.timestamp, entry));
         }
 
         // Sort by timestamp (stable sort preserves insertion order for equal timestamps)
@@ -670,7 +735,7 @@ impl MdContext {
             .into_iter()
             .filter_map(|e| match e {
                 MdEntry::Stage(s) => Some(s.into_stage_context()),
-                MdEntry::Comment(_) => None,
+                MdEntry::Comment(_) | MdEntry::CompactComment(_) => None,
             })
             .collect();
         TaskContext { stages }
@@ -1020,6 +1085,7 @@ mod tests {
             caller_pipeline_run_id: None,
             report_name: None,
             prompt_name: None,
+            url: None,
         }];
 
         let output = serialize_context(&ctx, &comments, false, None);
@@ -1199,5 +1265,113 @@ mod tests {
             assert_eq!(parsed.info.stage, orig.info.stage);
             assert_eq!(parsed.records.len(), orig.records.len());
         }
+    }
+
+    fn make_comment(text: &str, ts: &str, url: Option<&str>) -> crate::task::Comment {
+        crate::task::Comment {
+            timestamp: utc(ts),
+            stage: String::new(),
+            hostname: String::new(),
+            tool: None,
+            model: None,
+            text: text.to_string(),
+            pipeline: String::new(),
+            pipeline_run_id: 0,
+            caller_pipeline: None,
+            caller_pipeline_run_id: None,
+            report_name: None,
+            prompt_name: None,
+            url: url.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn compact_comment_appears_as_list_item() {
+        let ctx = TaskContext::default();
+        let comments = vec![make_comment(
+            "hello world",
+            "2024-01-01T00:00:00Z",
+            Some("https://example.com/comment/1"),
+        )];
+        let output = serialize_context(&ctx, &comments, false, None);
+        assert!(output.contains("- hello world `2024-01-01 00:00:00 +0000` <sub>[link](https://example.com/comment/1)</sub>"));
+    }
+
+    #[test]
+    fn compact_comment_without_url() {
+        let ctx = TaskContext::default();
+        let comments = vec![make_comment("short text", "2024-01-01T00:00:00Z", None)];
+        let output = serialize_context(&ctx, &comments, false, None);
+        assert!(output.contains("- short text `2024-01-01 00:00:00 +0000`"));
+        assert!(!output.contains("<sub>"));
+    }
+
+    #[test]
+    fn compact_comment_truncates_long_text() {
+        let long_text = "a".repeat(100);
+        let ctx = TaskContext::default();
+        let comments = vec![make_comment(&long_text, "2024-01-01T00:00:00Z", None)];
+        let output = serialize_context(&ctx, &comments, false, None);
+        assert!(output.contains("..."));
+        // 80 chars of 'a' followed by '...'
+        assert!(output.contains(&format!("{}...", "a".repeat(COMPACT_COMMENT_MAX_LEN))));
+    }
+
+    #[test]
+    fn compact_comment_uses_first_line_only() {
+        let ctx = TaskContext::default();
+        let comments = vec![make_comment(
+            "first line\nsecond line\nthird line",
+            "2024-01-01T00:00:00Z",
+            None,
+        )];
+        let output = serialize_context(&ctx, &comments, false, None);
+        assert!(output.contains("- first line"));
+        assert!(!output.contains("second line"));
+    }
+
+    #[test]
+    fn stage_marker_added_before_stages_when_compact_comments_present() {
+        let ctx = sample_context();
+        let comments = vec![make_comment("a comment", "2024-01-01T00:30:00Z", None)];
+        let output = serialize_context(&ctx, &comments, false, None);
+        assert!(output.contains("<!-- stage -->"));
+    }
+
+    #[test]
+    fn stage_marker_not_added_without_comments() {
+        let ctx = sample_context();
+        let output = serialize_context(&ctx, &[], false, None);
+        assert!(!output.contains("<!-- stage -->"));
+    }
+
+    #[test]
+    fn compact_comment_roundtrip_preserves_context() {
+        // When compact comments are present, the TaskContext should still be parsed correctly
+        let ctx = sample_context();
+        let comments = vec![
+            make_comment("comment before stage 2", "2024-01-01T00:30:00Z", None),
+        ];
+        let serialized = serialize_context(&ctx, &comments, false, None);
+        // Parse back — compact comments should be skipped, stages preserved
+        let parsed = parse_context(&serialized).unwrap();
+        assert_eq!(parsed.stages.len(), ctx.stages.len());
+        assert_eq!(
+            parsed.stages[0].info.stage,
+            ctx.stages[0].info.stage
+        );
+    }
+
+    #[test]
+    fn for_prompt_true_uses_blockquote_not_compact() {
+        let ctx = TaskContext::default();
+        let comments = vec![make_comment("a user comment", "2024-01-01T00:00:00Z", None)];
+        let output = serialize_context(&ctx, &comments, true, None);
+        // Prompt mode: full blockquote format
+        assert!(output.contains("> **["));
+        assert!(output.contains("a user comment"));
+        // No compact format
+        assert!(!output.contains("<!-- stage -->"));
+        assert!(!output.contains("- a user comment"));
     }
 }
