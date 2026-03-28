@@ -817,8 +817,7 @@ mod tests {
             )
         );
         assert!(
-            output
-                .contains("    - ❌ Build failed <sub>[ctx_rec_4](reports/build_fail.md)</sub>")
+            output.contains("    - ❌ Build failed <sub>[ctx_rec_4](reports/build_fail.md)</sub>")
         );
         assert!(output.contains("    - 💬 Retrying with fix"));
         assert!(output.contains("    - ❓ Should we use async?"));
