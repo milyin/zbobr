@@ -526,7 +526,10 @@ impl TaskBackend for ZbobrTaskBackendFs {
         anyhow::bail!("ZbobrTaskBackendFs must be wrapped in Arc and accessed via ArcTaskBackendFs")
     }
 
-    async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+    async fn list_tasks(
+        &self,
+        _allowed_users: &[String],
+    ) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
         anyhow::bail!("ZbobrTaskBackendFs must be wrapped in Arc and accessed via ArcTaskBackendFs")
     }
 
@@ -639,7 +642,10 @@ impl TaskBackend for ArcTaskBackendFs {
         }))
     }
 
-    async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+    async fn list_tasks(
+        &self,
+        _allowed_users: &[String],
+    ) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
         let task_ids = self.inner.list_task_files().await?;
         let mut result: Vec<Box<dyn TaskWeak>> = Vec::new();
 
