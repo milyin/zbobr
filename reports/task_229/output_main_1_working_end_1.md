@@ -1,0 +1,1 @@
+Fixed the stale comment in Phase 5 of `update_worktree`'s documentation — changed the reference from the removed `ensure_pr_exists` to `ensure_pr_url`. Build passes cleanly.
