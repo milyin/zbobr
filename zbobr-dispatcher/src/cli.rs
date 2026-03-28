@@ -17,7 +17,7 @@ use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
     Comment, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
-    task::{Model, Tool},
+    task::{Model, Tool}, workflow::SequentialSignal,
 };
 
 // ---------------------------------------------------------------------------
@@ -531,100 +531,6 @@ impl<'a> CliStageRunner<'a> {
 }
 
 /// Result of computing the post-stage signal in the sequential pipeline model.
-enum SequentialSignal {
-    /// `report_failure` → immediate return from pipeline.
-    ReturnFailure,
-    /// `report_success`/`report_intermediate` with a next stage → advance to it.
-    Advance(String),
-    /// `report_success` at the last stage → pipeline done, return.
-    Return,
-    /// No report tool called (crash/timeout/stop_with_error) → pause.
-    Pause,
-    /// Stage-configured pause → set pause flag, emit given signal on resume.
-    PauseThenSignal(Signal),
-}
-
-/// Compute the post-execution signal for the sequential pipeline model.
-fn compute_sequential_signal(
-    pipeline_name: &Pipeline,
-    stage_name: &str,
-    stage_def: Option<&zbobr_api::config::StageDefinition>,
-    workflow: &crate::workflow::Workflow,
-    last_mapped_tool: Option<McpTool>,
-) -> SequentialSignal {
-    match last_mapped_tool {
-        Some(McpTool::ReportFailure) => {
-            let transition = stage_def.and_then(|s| s.on_failure());
-            let target = transition.and_then(|t| t.next.as_ref());
-            let should_pause = transition.map_or(false, |t| t.pause);
-
-            let signal = if let Some(target) = target {
-                Signal::go(target.as_str())
-            } else {
-                Signal::ReturnFailure
-            };
-
-            if should_pause {
-                SequentialSignal::PauseThenSignal(signal)
-            } else if target.is_some() {
-                SequentialSignal::Advance(target.unwrap().to_string())
-            } else {
-                SequentialSignal::ReturnFailure
-            }
-        }
-        Some(McpTool::ReportSuccess) => {
-            let transition = stage_def.and_then(|s| s.on_success());
-            let explicit_target = transition.and_then(|t| t.next.as_ref());
-            let should_pause = transition.map_or(false, |t| t.pause);
-
-            let advance_target = if let Some(target) = explicit_target {
-                Some(target.to_string())
-            } else {
-                workflow
-                    .pipeline(pipeline_name)
-                    .and_then(|p| p.next_stage(stage_name))
-                    .map(|(next, _)| next.to_string())
-            };
-
-            if should_pause {
-                let signal = match advance_target {
-                    Some(next) => Signal::go(next),
-                    None => Signal::Return,
-                };
-                SequentialSignal::PauseThenSignal(signal)
-            } else {
-                match advance_target {
-                    Some(next) => SequentialSignal::Advance(next),
-                    None => SequentialSignal::Return,
-                }
-            }
-        }
-        Some(McpTool::ReportIntermediate) => {
-            let transition = stage_def.and_then(|s| s.on_intermediate());
-            let target = transition.and_then(|t| t.next.as_ref());
-            let should_pause = transition.is_some_and(|t| t.pause);
-
-            let signal = if let Some(target) = target {
-                Signal::go(target.as_str())
-            } else {
-                // Default: re-run the same stage
-                Signal::go(stage_name)
-            };
-
-            if should_pause {
-                SequentialSignal::PauseThenSignal(signal)
-            } else {
-                SequentialSignal::Advance(
-                    target
-                        .map(|t| t.to_string())
-                        .unwrap_or_else(|| stage_name.to_string()),
-                )
-            }
-        }
-        _ => SequentialSignal::Pause,
-    }
-}
-
 /// Result of worktree detection before a stage runs.
 enum WorktreeResult {
     /// Worktree is ready; proceed with stage execution at this path.
@@ -1616,13 +1522,9 @@ async fn finalize_stage_session(
         .await?;
     if !current_task.pause && current_task.signal.is_none() {
         let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
-        let seq_signal = compute_sequential_signal(
-            pipeline_name,
-            stage_name,
-            stage_def,
-            zbobr.workflow(),
-            last_mapped_tool,
-        );
+        let seq_signal = zbobr
+            .workflow()
+            .sequential_signal(pipeline_name, stage_name, stage_def, last_mapped_tool);
         match seq_signal {
             SequentialSignal::ReturnFailure => {
                 task_session.set_signal(Some(Signal::ReturnFailure)).await?;
@@ -1632,12 +1534,6 @@ async fn finalize_stage_session(
             }
             SequentialSignal::Return => {
                 task_session.set_signal(Some(Signal::Return)).await?;
-            }
-            SequentialSignal::Pause => {
-                let stage = stage_name.to_string();
-                task_session
-                    .set_pause_with_signal(Signal::go(stage))
-                    .await?;
             }
             SequentialSignal::PauseThenSignal(signal) => {
                 task_session.set_pause_with_signal(signal).await?;

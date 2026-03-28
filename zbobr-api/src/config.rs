@@ -123,6 +123,8 @@ pub struct StageDefinition {
     pub on_failure: Option<StageTransition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_intermediate: Option<StageTransition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_no_report: Option<StageTransition>,
 }
 
 impl StageDefinition {
@@ -148,6 +150,10 @@ impl StageDefinition {
 
     pub fn on_intermediate(&self) -> Option<&StageTransition> {
         self.on_intermediate.as_ref()
+    }
+
+    pub fn on_no_report(&self) -> Option<&StageTransition> {
+        self.on_no_report.as_ref()
     }
 }
 
