@@ -1,0 +1,1 @@
+Fixed the 3 files with rustfmt formatting issues. All tests (105/105) still pass. The fix was simply running `cargo fmt` — the previous implementation had correct logic but didn't run the formatter before committing.
