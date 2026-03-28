@@ -1,0 +1,1 @@
+The background build task completed successfully (exit code 0). The implementation is done.
