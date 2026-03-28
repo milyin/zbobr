@@ -549,7 +549,7 @@ Run comprehensive tests to verify the implementation meets all testing requireme
 
 ## Access Model
 
-You have access to the task plan and the repository for testing:
+You have access to the task context and the repository for testing:
 - The task description, work plan, worker's reports, and context are provided below in this prompt. The full history and checklist are available in the context section.
 - Your current working directory is the repository with the work branch checked out
 - Use `{mcp_stop_with_error}` only to report technical errors
