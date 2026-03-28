@@ -373,8 +373,8 @@ impl From<&Comment> for MdUserComment {
 /// Format:
 /// ```text
 /// - YYYY-MM-DD HH:MM:SS <sub>+HHMM</sub> pipeline:run_id:**stage** ...
-///   - [ ] record 1 <sub>ctx_rec_1</sub>
-///   - ✅ record 2 <sub>ctx_rec_2</sub>
+///     - [ ] record 1 <sub>ctx_rec_1</sub>
+///     - ✅ record 2 <sub>ctx_rec_2</sub>
 /// ```
 #[derive(Debug, Clone)]
 struct MdStage {
@@ -389,13 +389,13 @@ impl fmt::Display for MdStage {
         // Group records by parent_record_id for hierarchical display
         for record in &self.records {
             if record.parent_record_id.is_none() {
-                // Top-level record
-                writeln!(f, "  {}", record)?;
+                // Top-level record (4 spaces = sub-item of the stage header)
+                writeln!(f, "    {}", record)?;
 
                 // Display all child records (those with this record's id as parent)
                 for child in &self.records {
                     if child.parent_record_id == Some(record.id) {
-                        writeln!(f, "    {}", child)?;
+                        writeln!(f, "        {}", child)?;
                     }
                 }
             }
@@ -425,8 +425,8 @@ impl FromStr for MdStage {
 
             if let Some(record) = MdRecord::try_parse(trimmed)? {
                 let mut record = record;
-                // If indented by 4 spaces (child level), set parent to last top-level record
-                if leading_spaces >= 4 && last_top_level_id.is_some() {
+                // If indented by 8 spaces (child level), set parent to last top-level record
+                if leading_spaces >= 6 && last_top_level_id.is_some() {
                     record.parent_record_id = last_top_level_id;
                 } else {
                     // Top-level record (less indentation)
@@ -809,17 +809,19 @@ mod tests {
         assert!(
             output.contains("`2024-01-01 00:00:00 +0000` <sub>[prompt](prompts/plan.md)</sub>")
         );
-        assert!(output.contains("  - [ ] Define API schema"));
-        assert!(output.contains("  - [x] Review requirements"));
+        assert!(output.contains("    - [ ] Define API schema"));
+        assert!(output.contains("    - [x] Review requirements"));
+        assert!(
+            output.contains(
+                "    - ✅ Plan completed <sub>[ctx_rec_3](reports/plan_success.md)</sub>"
+            )
+        );
         assert!(
             output
-                .contains("  - ✅ Plan completed <sub>[ctx_rec_3](reports/plan_success.md)</sub>")
+                .contains("    - ❌ Build failed <sub>[ctx_rec_4](reports/build_fail.md)</sub>")
         );
-        assert!(
-            output.contains("  - ❌ Build failed <sub>[ctx_rec_4](reports/build_fail.md)</sub>")
-        );
-        assert!(output.contains("  - 💬 Retrying with fix"));
-        assert!(output.contains("  - ❓ Should we use async?"));
+        assert!(output.contains("    - 💬 Retrying with fix"));
+        assert!(output.contains("    - ❓ Should we use async?"));
     }
 
     #[test]
