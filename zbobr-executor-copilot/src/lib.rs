@@ -149,5 +149,9 @@ fn combine_output(stdout: Vec<String>, stderr: Vec<String>) -> String {
     if stdout.is_empty() {
         return stderr.join("\n");
     }
-    format!("{}\n--- stderr ---\n{}", stdout.join("\n"), stderr.join("\n"))
+    format!(
+        "{}\n--- stderr ---\n{}",
+        stdout.join("\n"),
+        stderr.join("\n")
+    )
 }

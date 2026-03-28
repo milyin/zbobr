@@ -90,5 +90,14 @@ async fn main() -> anyhow::Result<()> {
 
     let config = RootConfig::build(root_toml, cli.settings, &location.config_dir);
 
-    commands::run(config.dispatcher, config.tasks, config.repo, config.executor, config.workflow, location.config_dir, cli.command).await
+    commands::run(
+        config.dispatcher,
+        config.tasks,
+        config.repo,
+        config.executor,
+        config.workflow,
+        location.config_dir,
+        cli.command,
+    )
+    .await
 }

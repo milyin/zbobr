@@ -186,11 +186,16 @@ pub enum TaskSubcommand {
 impl Command {
     /// Whether this command requires backend connectivity (GitHub token, etc.).
     fn needs_backends(&self) -> bool {
-        !matches!(self, Command::Init { .. } | Command::Task {
-                subcommand: TaskSubcommand::Prompt { id: None, .. },
-            } | Command::Task {
-                subcommand: TaskSubcommand::Show { id: None },
-            })
+        !matches!(
+            self,
+            Command::Init { .. }
+                | Command::Task {
+                    subcommand: TaskSubcommand::Prompt { id: None, .. },
+                }
+                | Command::Task {
+                    subcommand: TaskSubcommand::Show { id: None },
+                }
+        )
     }
 }
 
@@ -205,10 +210,7 @@ pub async fn run(
     command: Command,
 ) -> anyhow::Result<()> {
     let workflow = Workflow::new(workflow_config)?;
-    let prompt_builder = ConfiguredPromptBuilder::new(
-        Some(config_dir),
-        Arc::new(workflow.clone()),
-    );
+    let prompt_builder = ConfiguredPromptBuilder::new(Some(config_dir), Arc::new(workflow.clone()));
 
     if !command.needs_backends() {
         return run_without_backends(command, &prompt_builder);
@@ -257,8 +259,7 @@ fn run_without_backends(
             let workflow = prompt_builder.workflow_config();
             let stage_def = resolve_stage_def(workflow, &stage, &role, &pipeline)?;
             let (task, comments) = dummy_task_and_comments();
-            let prompt =
-                prompt_builder.build_for_stage_with_task(stage_def, &task, &comments)?;
+            let prompt = prompt_builder.build_for_stage_with_task(stage_def, &task, &comments)?;
             println!("{}", prompt);
             Ok(())
         }
@@ -571,11 +572,7 @@ fn resolve_stage_def<'a>(
                 workflow
                     .stage(p.clone(), stage_name.as_str())
                     .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "Stage '{}' not found in pipeline '{}'",
-                            stage_name,
-                            p
-                        )
+                        anyhow::anyhow!("Stage '{}' not found in pipeline '{}'", stage_name, p)
                     })
             } else {
                 let matches: Vec<_> = workflow
@@ -618,9 +615,7 @@ fn resolve_stage_def<'a>(
                 workflow
                     .find_stage_by_role(role_name)
                     .map(|(_, _, def)| def)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("No stage with role '{}' found", role_name)
-                    })
+                    .ok_or_else(|| anyhow::anyhow!("No stage with role '{}' found", role_name))
             }
         }
     }

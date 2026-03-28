@@ -236,7 +236,6 @@ mod tests {
                         parent_record_id: None,
                     },
                 ],
-
             }],
         }
     }
@@ -245,8 +244,7 @@ mod tests {
     fn roundtrip_preserves_context() {
         let ctx = sample_context();
 
-        let serialized =
-            serialize_description_full("my task", &HashMap::new(), &None, &ctx, None);
+        let serialized = serialize_description_full("my task", &HashMap::new(), &None, &ctx, None);
         let (desc, _, _, parsed_ctx) = parse_description_full(&serialized).unwrap();
 
         assert_eq!(desc, "my task");
@@ -279,8 +277,13 @@ mod tests {
 
     #[test]
     fn empty_context_not_serialized() {
-        let serialized =
-            serialize_description_full("description", &HashMap::new(), &None, &TaskContext::default(), None);
+        let serialized = serialize_description_full(
+            "description",
+            &HashMap::new(),
+            &None,
+            &TaskContext::default(),
+            None,
+        );
         let (desc, _, _, ctx) = parse_description_full(&serialized).unwrap();
 
         assert_eq!(desc, "description");
@@ -387,12 +390,10 @@ mod tests {
                     report_link: None,
                     parent_record_id: None,
                 }],
-
             }],
         };
 
-        let original =
-            serialize_description_full("desc", &HashMap::new(), &None, &ctx1, None);
+        let original = serialize_description_full("desc", &HashMap::new(), &None, &ctx1, None);
 
         // They changed the context
         let ctx_theirs = TaskContext {
@@ -414,11 +415,9 @@ mod tests {
                     report_link: None,
                     parent_record_id: None,
                 }],
-
             }],
         };
-        let current =
-            serialize_description_full("desc", &HashMap::new(), &None, &ctx_theirs, None);
+        let current = serialize_description_full("desc", &HashMap::new(), &None, &ctx_theirs, None);
 
         // We also changed the context
         let ctx_ours = TaskContext {
@@ -440,11 +439,9 @@ mod tests {
                     report_link: None,
                     parent_record_id: None,
                 }],
-
             }],
         };
-        let our_new =
-            serialize_description_full("desc", &HashMap::new(), &None, &ctx_ours, None);
+        let our_new = serialize_description_full("desc", &HashMap::new(), &None, &ctx_ours, None);
 
         let merged = merge_concurrent_description_updates(&original, &current, &our_new).unwrap();
         let (_, _, _, ctx) = parse_description_full(&merged).unwrap();

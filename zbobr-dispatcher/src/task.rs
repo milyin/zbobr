@@ -375,7 +375,12 @@ impl RoleSession {
 
                 // If this is a report record (Success, Failure, or Comment),
                 // reparent all orphaned checkboxes that come before it
-                if matches!(record_type, ContextRecordType::Success | ContextRecordType::Failure | ContextRecordType::Comment) {
+                if matches!(
+                    record_type,
+                    ContextRecordType::Success
+                        | ContextRecordType::Failure
+                        | ContextRecordType::Comment
+                ) {
                     let orphaned_indices: Vec<usize> = stage
                         .records
                         .iter()
@@ -965,7 +970,11 @@ mod comment_model_tests {
             Ok(())
         }
 
-        async fn ensure_pr_url(&self, _identity: &zbobr_api::TaskIdentity, _body: Option<&str>) -> anyhow::Result<String> {
+        async fn ensure_pr_url(
+            &self,
+            _identity: &zbobr_api::TaskIdentity,
+            _body: Option<&str>,
+        ) -> anyhow::Result<String> {
             Ok("mock-pr-url".to_string())
         }
 
@@ -1040,7 +1049,9 @@ mod comment_model_tests {
             "error should contain 'oops', got: {error:?}"
         );
         // timestamp is the token immediately after ❌: starts with a digit (YYYY-...)
-        let after_icon = error.trim_start_matches(zbobr_api::ERROR_PREFIX).trim_start();
+        let after_icon = error
+            .trim_start_matches(zbobr_api::ERROR_PREFIX)
+            .trim_start();
         assert!(
             after_icon.starts_with(|c: char| c.is_ascii_digit()),
             "error should contain a timestamp after ❌, got: {error:?}"
@@ -1134,7 +1145,8 @@ mod comment_model_tests {
     ) -> crate::mcp::unified::UnifiedMcp {
         let tracker = Arc::new(std::sync::Mutex::new(None::<McpTool>));
         let prompt_holder = Arc::new(std::sync::Mutex::new(None::<String>));
-        let session = zbobr.role_session_with_tracker(task_id, tracker, "main".to_string(), 1, prompt_holder);
+        let session =
+            zbobr.role_session_with_tracker(task_id, tracker, "main".to_string(), 1, prompt_holder);
         let allowed_tools: std::collections::HashSet<zbobr_api::config_tools::McpTool> =
             zbobr_api::config_tools::McpTool::all()
                 .iter()
@@ -1217,5 +1229,4 @@ mod comment_model_tests {
             .unwrap();
         assert_eq!(failure_report, "detailed failure report");
     }
-
 }

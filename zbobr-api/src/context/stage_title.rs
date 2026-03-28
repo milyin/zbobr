@@ -148,9 +148,7 @@ impl FromStr for MdStageTitle {
             if let Some(value) = try_parse_next_backtick(&mut rest) {
                 // A backtick containing a space is a timestamp (dates look like
                 // "2024-01-01 00:00:00 +0000"); tools and models never have spaces.
-                if let Ok(ts) =
-                    chrono::DateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S %z")
-                {
+                if let Ok(ts) = chrono::DateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S %z") {
                     timestamp_from_backtick = Some(ts);
                     break;
                 }
