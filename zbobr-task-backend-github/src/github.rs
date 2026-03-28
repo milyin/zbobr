@@ -790,7 +790,6 @@ impl ZbobrTaskBackendGithubImpl {
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
     ) -> anyhow::Result<Task> {
         let task = self.fetch_task(id).await?;
-        let original_state = task.state.clone();
         let url_prefix = self.report_url_prefix(id);
         let make_url = |filename: &str| -> String {
             match &url_prefix {
@@ -840,9 +839,8 @@ impl ZbobrTaskBackendGithubImpl {
             }
         }
 
-        if task.state != original_state {
-            self.apply_state_change(id, &task.state).await?;
-        }
+        // Always apply state change to ensure legacy flag: labels are removed even when state is unchanged.
+        self.apply_state_change(id, &task.state).await?;
 
         self.record_cooling(id);
         let mut saved_task = task;
