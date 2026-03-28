@@ -1,0 +1,1 @@
+In zbobr-dispatcher/src/task.rs, TaskSession::set_state currently uses `task.state != state && state.is_running()` which clears error on any Running→Running transition (e.g., working→reviewing). It should use `!task.state.is_running() && state.is_running()` to only clear on transition INTO Running from a non-running state.
