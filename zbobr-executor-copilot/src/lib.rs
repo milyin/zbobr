@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use zbobr_api::{
     task::Tool,
-    tool_executor::{ToolExecutor, format_command_for_log},
+    tool_executor::{ExecutorOutput, ToolExecutor, format_command_for_log},
 };
 
 pub mod config;
@@ -34,7 +34,7 @@ impl ToolExecutor for CopilotExecutor {
         _plan_mode: bool,
         agent_github_token: &str,
         copilot_github_token: &str,
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<ExecutorOutput> {
         // Build MCP config for copilot
         let mcp_config = serde_json::json!({
             "mcpServers": {
@@ -129,17 +129,25 @@ impl ToolExecutor for CopilotExecutor {
 
         tracing::debug!("Copilot finished execution with status: {status}");
 
-        if !status.success() {
-            let error_context = match stderr_result {
-                Ok(lines) if !lines.is_empty() => {
-                    format!("\nCopilot output:\n{}", lines.join("\n"))
-                }
-                _ => String::new(),
-            };
-            anyhow::bail!("copilot exited with status: {status}{error_context}");
-        }
+        let stdout_lines = stdout_result.unwrap_or_default();
+        let stderr_lines = stderr_result.unwrap_or_default();
+        let output = combine_output(stdout_lines, stderr_lines);
 
-        let output = stdout_result.unwrap_or_default().join("\n");
-        Ok(output)
+        Ok(ExecutorOutput {
+            output,
+            exit_ok: status.success(),
+        })
     }
+}
+
+/// Combine stdout and stderr lines into a single string.
+/// Stderr lines are appended after stdout with a separator if non-empty.
+fn combine_output(stdout: Vec<String>, stderr: Vec<String>) -> String {
+    if stderr.is_empty() {
+        return stdout.join("\n");
+    }
+    if stdout.is_empty() {
+        return stderr.join("\n");
+    }
+    format!("{}\n--- stderr ---\n{}", stdout.join("\n"), stderr.join("\n"))
 }

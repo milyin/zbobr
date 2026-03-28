@@ -19,6 +19,7 @@ use crate::{
     Comment, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
     task::{Model, Tool}, workflow::SequentialSignal,
 };
+use zbobr_api::tool_executor::ExecutorOutput;
 
 // ---------------------------------------------------------------------------
 // CLI types
@@ -1462,11 +1463,20 @@ async fn execute_tool(
     tokio::select! {
         result = executor.execute(task_id, role, assigned_port, prompt, work_dir, mcp_url, plan_mode, agent_token, copilot_token) => {
             match result {
-                Ok(output) => SessionOutcome {
+                Ok(ExecutorOutput { output, exit_ok: true }) => SessionOutcome {
                     execution_interrupted: false,
                     execution_error: None,
                     execution_output: Some(output),
                 },
+                Ok(ExecutorOutput { output, exit_ok: false }) => {
+                    let e = anyhow::anyhow!("Tool exited with non-zero status");
+                    tracing::error!("Tool execution failed: {e}");
+                    SessionOutcome {
+                        execution_interrupted: false,
+                        execution_error: Some(e),
+                        execution_output: Some(output),
+                    }
+                }
                 Err(e) => {
                     tracing::error!("Tool execution failed: {e}");
                     SessionOutcome {

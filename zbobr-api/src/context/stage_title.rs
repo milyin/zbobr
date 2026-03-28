@@ -26,6 +26,11 @@ use std::str::FromStr;
 
 use anyhow::{Context as _, Result};
 
+/// Label used for the prompt sub-link in the stage title markdown.
+const PROMPT_LABEL: &str = "prompt";
+/// Label used for the output sub-link in the stage title markdown.
+const OUTPUT_LABEL: &str = "output";
+
 use crate::task::{Model, Pipeline, Stage, StageInfo, Tool};
 
 /// A parsed stage title line, mapping 1:1 to the markdown format.
@@ -119,10 +124,10 @@ impl fmt::Display for MdStageTitle {
         }
         write!(f, " {}", Backtick(format_timestamp(&self.timestamp)))?;
         if let Some(link) = &self.prompt_link {
-            write!(f, " <sub>[prompt]({})</sub>", link)?;
+            write!(f, " <sub>[{PROMPT_LABEL}]({})</sub>", link)?;
         }
         if let Some(link) = &self.output_link {
-            write!(f, " <sub>[output]({})</sub>", link)?;
+            write!(f, " <sub>[{OUTPUT_LABEL}]({})</sub>", link)?;
         }
         Ok(())
     }
@@ -175,8 +180,8 @@ impl FromStr for MdStageTitle {
                 if let Some(inner) = try_parse_next_sub(&mut rest) {
                     if let Some((label, url)) = parse_markdown_link(&inner) {
                         match label {
-                            "prompt" => prompt_link = Some(url.to_string()),
-                            "output" => output_link = Some(url.to_string()),
+                            PROMPT_LABEL => prompt_link = Some(url.to_string()),
+                            OUTPUT_LABEL => output_link = Some(url.to_string()),
                             _ => {}
                         }
                     }

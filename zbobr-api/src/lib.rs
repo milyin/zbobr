@@ -19,4 +19,4 @@ pub use task::{
     TaskContext, TaskIdentity, Tool, classify_comment, comment_tag, extract_repo_name,
     extract_summary, filter_comments_for_run,
 };
-pub use tool_executor::{ToolExecutor, format_command_for_log};
+pub use tool_executor::{ExecutorOutput, ToolExecutor, format_command_for_log};
