@@ -44,6 +44,15 @@ async fn test_fs_fs_abstract_configure_worktree_idempotent() {
 }
 
 #[tokio::test]
+async fn test_fs_fs_abstract_configure_worktree_ignore_requested_postfix() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(env) = get_env().await else {
+        return;
+    };
+    abstract_test_helpers::run_configure_worktree_ignore_requested_postfix(&env).await;
+}
+
+#[tokio::test]
 async fn test_fs_fs_abstract_stage_transfer() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(env) = get_env().await else {

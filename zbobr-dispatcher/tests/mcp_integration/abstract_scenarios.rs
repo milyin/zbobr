@@ -104,7 +104,7 @@ steps:
     - type: success
     - type: contains
       path: result
-      value: "values were already set"
+      value: "already configured"
 
 - name: report_success
   operation:
@@ -120,6 +120,56 @@ steps:
         postfix = postfix,
     )
 }
+
+/// Scenario that calls configure_worktree twice with different work_branch_postfix values.
+/// The second call should still succeed and report existing configuration is preserved.
+pub fn configure_worktree_work_branch_ignored_scenario(repo_path: &str) -> String {
+    format!(
+        r#"name: Configure Worktree Ignore Requested Work Branch
+description: Existing work_branch should take precedence and requests to change it should be ignored
+timeout: 60
+stop_on_failure: true
+
+steps:
+- name: configure_worktree first call
+  operation:
+    type: tool_call
+    tool: configure_worktree
+    arguments:
+      destination_repository: "{repo_path}"
+      destination_branch: "main"
+      work_branch_postfix: "first"
+  assertions:
+    - type: success
+
+- name: configure_worktree second call with different postfix
+  operation:
+    type: tool_call
+    tool: configure_worktree
+    arguments:
+      destination_repository: "{repo_path}"
+      destination_branch: "main"
+      work_branch_postfix: "second"
+  assertions:
+    - type: success
+    - type: contains
+      path: result
+      value: "already configured"
+
+- name: report_success
+  operation:
+    type: tool_call
+    tool: report_success
+    arguments:
+      brief: "Worktree request ignored and existing configuration remains."
+      full_report: "configure_worktree second call ignored requested work_branch_postfix and returned existing settings."
+  assertions:
+    - type: success
+"#,
+        repo_path = repo_path,
+    )
+}
+
 
 /// Minimal scenario that just reports success (used for default-transition stages).
 pub fn report_and_finish_scenario() -> String {
