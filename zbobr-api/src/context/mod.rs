@@ -378,13 +378,13 @@ struct MdCompactComment {
 }
 
 impl MdCompactComment {
-    fn from_comment(c: &Comment) -> Self {
+    fn from_comment(c: &Comment, for_prompt: bool) -> Self {
         let first_line = c.text.lines().next().unwrap_or("").trim();
-        let text = if first_line.chars().count() > COMPACT_COMMENT_MAX_LEN {
+        let text = if for_prompt || first_line.chars().count() <= COMPACT_COMMENT_MAX_LEN {
+            first_line.to_string()
+        } else {
             let truncated: String = first_line.chars().take(COMPACT_COMMENT_MAX_LEN).collect();
             format!("{}...", truncated)
-        } else {
-            first_line.to_string()
         };
         MdCompactComment {
             text,
@@ -704,11 +704,10 @@ impl MdContext {
         }
 
         for comment in comments {
-            let entry = if for_prompt {
-                MdEntry::Comment(MdUserComment::from(comment))
-            } else {
-                MdEntry::CompactComment(MdCompactComment::from_comment(comment))
-            };
+            let entry = MdEntry::CompactComment(MdCompactComment::from_comment(
+                comment,
+                for_prompt,
+            ));
             events.push((comment.timestamp, entry));
         }
 
@@ -1361,15 +1360,22 @@ mod tests {
     }
 
     #[test]
-    fn for_prompt_true_uses_blockquote_not_compact() {
+    fn for_prompt_true_uses_compact_comment_format() {
         let ctx = TaskContext::default();
         let comments = vec![make_comment("a user comment", "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, true, None);
-        // Prompt mode: full blockquote format
-        assert!(output.contains("> **["));
-        assert!(output.contains("a user comment"));
-        // No compact format
-        assert!(!output.contains("<!-- stage -->"));
-        assert!(!output.contains("- a user comment"));
+        // Prompt mode now shares compact comment format, not blockquote.
+        assert!(!output.contains("> **["));
+        assert!(output.contains("- a user comment `2024-01-01 00:00:00 +0000`"));
+    }
+
+    #[test]
+    fn for_prompt_true_does_not_truncate_long_comment_text() {
+        let long_text = "a".repeat(100);
+        let ctx = TaskContext::default();
+        let comments = vec![make_comment(&long_text, "2024-01-01T00:00:00Z", None)];
+        let output = serialize_context(&ctx, &comments, true, None);
+        assert!(output.contains(&format!("- {} `2024-01-01 00:00:00 +0000`", long_text)));
+        assert!(!output.contains("..."));
     }
 }
