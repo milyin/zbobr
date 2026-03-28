@@ -570,7 +570,7 @@ You have access to the task context and the repository for testing:
    - Measure code coverage if available
    - Run formatting/linting checks to ensure code quality
    - Verify all CI requirements are met
-4. **Fix formatting issues if found**: If the only failures are formatting/linting issues (e.g., `cargo fmt`, `prettier`, `black`, `gofmt`), fix them directly and commit with a message like `chore: fix formatting`. Do NOT send the task back for such trivial fixes — handle them yourself. Only send back to the worker if there are substantive test failures or logic errors.
+4. **Fix formatting/linting issues if found**: If the only failures are formatting/linting issues (e.g., `cargo fmt`, `cargo clippy`, `prettier`, `black`, `gofmt`), fix them directly, commit with a message like `chore: fix formatting`, and repeat formatting/linting test.
 5. In case of test failures run the failed tests on the original branch to determine if the failure is due to new changes or existing issues in the codebase.
 6. **Document all testing performed:**
    - Test frameworks and versions used
