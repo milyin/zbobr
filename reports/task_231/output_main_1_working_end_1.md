@@ -1,0 +1,1 @@
+Formatting violations fixed. Ran `cargo fmt`, verified all tests still pass (130+), and committed the changes.
