@@ -15,8 +15,11 @@ pub use config::{
 };
 pub use task::{
     Comment, CommentTag, ContextRecord, ContextRecordType, HistoryRecordType,
-    Model, Pipeline, Role, Signal, StackEntry, Stage, StageContext, StageInfo, State, Task,
-    TaskContext, TaskIdentity, Tool, classify_comment, comment_tag, extract_repo_name,
-    extract_summary, filter_comments_for_run,
+    Model, PARAM_DESTINATION_BRANCH, PARAM_DESTINATION_REPOSITORY, PARAM_FLAG_CONFIRM,
+    PARAM_FLAG_PAUSE, PARAM_FLAG_VALUE_TRUE, PARAM_MAX_STAGE_COUNT, PARAM_PIPELINE,
+    PARAM_PIPELINE_RUN_ID, PARAM_PR_URL, PARAM_SIGNAL, PARAM_STACK, PARAM_STAGE,
+    PARAM_STAGE_COUNT, PARAM_WORK_BRANCH, Pipeline, Role, Signal, StackEntry, Stage, StageContext,
+    StageInfo, State, Task, TaskContext, TaskIdentity, Tool, classify_comment, comment_tag,
+    extract_repo_name, extract_summary, filter_comments_for_run,
 };
 pub use tool_executor::{ToolExecutor, format_command_for_log};
