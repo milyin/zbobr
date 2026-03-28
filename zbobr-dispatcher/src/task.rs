@@ -222,7 +222,8 @@ impl RoleSession {
         let error = error.map(|msg| {
             let ts = chrono::Utc::now().with_timezone(&self.zbobr.config().fixed_offset());
             format!(
-                "\u{274C} {} {}",
+                "{} {} {}",
+                zbobr_api::ERROR_PREFIX,
                 zbobr_api::format_timestamp(&ts),
                 msg
             )
@@ -1031,7 +1032,7 @@ mod comment_model_tests {
         let task = weak.snapshot(false).await.unwrap();
         let error = task.error.as_deref().expect("error should be set");
         assert!(
-            error.starts_with('\u{274C}'),
+            error.starts_with(zbobr_api::ERROR_PREFIX),
             "error should start with ❌, got: {error:?}"
         );
         assert!(
@@ -1039,7 +1040,7 @@ mod comment_model_tests {
             "error should contain 'oops', got: {error:?}"
         );
         // timestamp is the token immediately after ❌: starts with a digit (YYYY-...)
-        let after_icon = error.trim_start_matches('\u{274C}').trim_start();
+        let after_icon = error.trim_start_matches(zbobr_api::ERROR_PREFIX).trim_start();
         assert!(
             after_icon.starts_with(|c: char| c.is_ascii_digit()),
             "error should contain a timestamp after ❌, got: {error:?}"

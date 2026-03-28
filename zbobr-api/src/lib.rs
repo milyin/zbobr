@@ -8,7 +8,7 @@ pub mod prompt;
 pub mod task;
 pub mod tool_executor;
 
-pub use backend::{TaskBackend, TaskBackendExt, TaskMut, TaskWeak, WorktreeBackend};
+pub use backend::{TaskBackend, TaskBackendExt, TaskMut, TaskWeak, WorktreeBackend, ERROR_PREFIX};
 pub use config::{
     Config, PipelineConfig, StageDefinition, StageTransition, WorkflowArgs, WorkflowConfig,
     WorkflowToml, ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
