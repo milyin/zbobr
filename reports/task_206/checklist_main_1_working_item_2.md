@@ -1,0 +1,1 @@
+The test in task.rs currently checks `error.starts_with('❌') && error.contains("oops")` but doesn't verify a timestamp is present. Add an assertion that the error string also contains a date/timestamp pattern.
