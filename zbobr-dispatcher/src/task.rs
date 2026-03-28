@@ -490,9 +490,14 @@ impl TaskSession {
     /// Set the task state (dispatcher only).
     pub async fn set_state(&self, state: impl Into<State>) -> anyhow::Result<()> {
         let state = state.into();
+        let confirm_status = {
+            let ts = chrono::Utc::now().with_timezone(&self.zbobr.config().fixed_offset());
+            zbobr_api::format_status(zbobr_api::PAUSE_PREFIX, &ts, "Awaiting confirmation")
+        };
         self.modify_task(move |mut task| {
             if task.confirm && task.state != state {
                 task.pause = true;
+                task.status = Some(confirm_status);
             }
             if !task.state.is_running() && state.is_running() {
                 task.status = None;

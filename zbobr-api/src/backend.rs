@@ -8,6 +8,9 @@ pub const ERROR_PREFIX: char = '\u{274C}';
 /// Unicode symbol prepended to every formatted question status message.
 pub const QUESTION_PREFIX: char = '\u{2753}';
 
+/// Unicode symbol prepended to every formatted pause/confirmation status message.
+pub const PAUSE_PREFIX: char = '\u{23F8}';
+
 /// Format a status message with icon, timestamp, and message text.
 /// Used for both error and question statuses placed in the STATUS section.
 pub fn format_status(
