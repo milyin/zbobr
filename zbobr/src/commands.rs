@@ -287,7 +287,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
         context: TaskContext::default(),
         signal: None,
         stack: vec![],
-        error: None,
+        status: None,
         pause: false,
         confirm: false,
         pipeline_run_id: 0,
