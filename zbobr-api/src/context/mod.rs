@@ -426,7 +426,7 @@ impl FromStr for MdStage {
             if let Some(record) = MdRecord::try_parse(trimmed)? {
                 let mut record = record;
                 // If indented by 8 spaces (child level), set parent to last top-level record
-                if leading_spaces >= 6 && last_top_level_id.is_some() {
+                if leading_spaces >= 8 && last_top_level_id.is_some() {
                     record.parent_record_id = last_top_level_id;
                 } else {
                     // Top-level record (less indentation)
