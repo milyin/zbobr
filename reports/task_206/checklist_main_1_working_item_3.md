@@ -1,0 +1,1 @@
+The ❌ unicode literal \u{274C} is hardcoded in two places: zbobr-api/src/backend.rs (TaskMut::set_error) and zbobr-dispatcher/src/task.rs (RoleSession::set_error). Add a pub const ERROR_PREFIX: char = '\u{274C}'; in zbobr-api (near format_timestamp) and use it in both places and in the test.
