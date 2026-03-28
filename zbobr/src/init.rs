@@ -114,6 +114,7 @@ fn default_config_toml() -> RootConfigToml {
             github_token: Some(String::new()),
             reports_branch: None,
             reports_path: None,
+            allowed_usernames: None,
         }),
         repo: Some(ZbobrRepoBackendGithubToml {
             fork_owner: Some(String::new()),

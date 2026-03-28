@@ -17,6 +17,9 @@ pub struct ZbobrTaskBackendGithubConfig {
     /// Path prefix for report files (default: "reports").
     #[arg(long)]
     pub reports_path: Option<String>,
+    /// If specified, only process tasks created by these GitHub usernames.
+    #[arg(long)]
+    pub allowed_usernames: Option<Vec<String>>,
 }
 
 impl ZbobrTaskBackendGithubConfig {
