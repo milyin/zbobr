@@ -464,8 +464,11 @@ impl MdStage {
     ) -> Self {
         let mut title = MdStageTitle::from(&stage.info);
 
-        // Transform prompt link URL if needed
-        if let Some(link) = &mut title.prompt_link {
+        // Transform prompt/output link URLs if needed
+        for link in [&mut title.prompt_link, &mut title.output_link]
+            .into_iter()
+            .flatten()
+        {
             if !link.starts_with("http://") && !link.starts_with("https://") {
                 if let Some(f) = report_url {
                     *link = f(link);
@@ -473,9 +476,10 @@ impl MdStage {
             }
         }
 
-        // Omit prompt link for agent prompts
+        // Omit prompt and output links for agent prompts
         if for_prompt {
             title.prompt_link = None;
+            title.output_link = None;
         }
 
         let records = stage
@@ -898,6 +902,44 @@ mod tests {
 
         // prompt_link should be None since for_prompt=true omitted it
         assert!(parsed.stages[0].info.prompt_link.is_none());
+    }
+
+    #[test]
+    fn for_prompt_also_omits_output_link() {
+        let mut ctx = sample_context();
+        ctx.stages[0].info.output_link = Some("outputs/plan_output.md".to_string());
+        let serialized = serialize_context(&ctx, &[], true, None);
+        let parsed = parse_context(&serialized).unwrap();
+
+        assert!(parsed.stages[0].info.prompt_link.is_none());
+        assert!(parsed.stages[0].info.output_link.is_none());
+    }
+
+    #[test]
+    fn output_link_url_mapped_via_report_url() {
+        let ctx = TaskContext {
+            stages: vec![StageContext {
+                info: StageInfo {
+                    pipeline: Pipeline::from("main"),
+                    run_id: 1,
+                    stage: Stage::new("working"),
+                    tool: None,
+                    model: None,
+                    prompt_link: None,
+                    output_link: Some("output_main_1_working_end.md".to_string()),
+                    timestamp: utc("2024-01-01T00:00:00Z"),
+                },
+                records: vec![],
+            }],
+        };
+
+        let prefix = "https://github.com/org/repo/blob/reports/reports/task_1/";
+        let make_url = |filename: &str| -> String { format!("{prefix}{filename}") };
+        let output = serialize_context(&ctx, &[], false, Some(&make_url));
+
+        assert!(output.contains(&format!(
+            "[output]({prefix}output_main_1_working_end.md)"
+        )));
     }
 
     #[test]
