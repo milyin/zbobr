@@ -130,12 +130,18 @@ where
 // -- Shared response types --
 
 #[derive(Debug, serde::Deserialize)]
+struct IssueUser {
+    login: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
 struct IssueResponse {
     number: u64,
     title: String,
     body: Option<String>,
     state: String,
     labels: Vec<IssueLabel>,
+    user: Option<IssueUser>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -1304,8 +1310,15 @@ impl TaskBackend for TaskBackendGithub {
         })
         .await?;
 
+        let allowed_usernames = self.inner.backend_config.allowed_usernames.as_deref();
         let mut result: Vec<Box<dyn TaskWeak>> = Vec::new();
         for issue in issues {
+            if let Some(allowed) = allowed_usernames {
+                let login = issue.user.as_ref().map(|u| u.login.as_str()).unwrap_or("");
+                if !allowed.iter().any(|u| u == login) {
+                    continue;
+                }
+            }
             let id = issue.number;
             // Reuse list payload as the saved snapshot until a caller asks for refresh.
             match ZbobrTaskBackendGithubImpl::issue_to_task(issue) {
@@ -1406,6 +1419,7 @@ mod flag_tests {
             body: Some(body),
             state: "open".to_string(),
             labels: vec![],
+            user: None,
         }
     }
 
