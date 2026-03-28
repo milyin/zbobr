@@ -390,8 +390,7 @@ pub trait CommonMcpImpl: Send + Sync {
         message: &str,
         add_context_record: bool,
     ) -> String {
-        let ts = chrono::Utc::now()
-            .with_timezone(&self.session().config().fixed_offset());
+        let ts = chrono::Utc::now().with_timezone(&self.session().config().fixed_offset());
         let status = zbobr_api::format_status(icon, &ts, message);
 
         if let Err(e) = self.session().set_pause_with_status(status).await {
@@ -454,8 +453,13 @@ pub trait CommonMcpImpl: Send + Sync {
             self.role_name(),
             self.session().task_id()
         );
-        self.pause_with_status_impl(McpTool::StopWithError, zbobr_api::ERROR_PREFIX, message, false)
-            .await
+        self.pause_with_status_impl(
+            McpTool::StopWithError,
+            zbobr_api::ERROR_PREFIX,
+            message,
+            false,
+        )
+        .await
     }
 
     async fn stop_with_question_impl(&self, message: &str) -> String {
@@ -583,8 +587,7 @@ pub trait CommonMcpImpl: Send + Sync {
     }
 
     async fn configure_worktree_error(&self, error: String) -> String {
-        let ts = chrono::Utc::now()
-            .with_timezone(&self.session().config().fixed_offset());
+        let ts = chrono::Utc::now().with_timezone(&self.session().config().fixed_offset());
         let status = zbobr_api::format_status(zbobr_api::ERROR_PREFIX, &ts, &error);
         if let Err(pause_err) = self.session().set_pause_with_status(status).await {
             tracing::error!("Failed to pause task after configure_worktree error: {pause_err}");

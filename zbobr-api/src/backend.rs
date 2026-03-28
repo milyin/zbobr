@@ -15,7 +15,12 @@ pub fn format_status(
     ts: &chrono::DateTime<chrono::FixedOffset>,
     message: &str,
 ) -> String {
-    format!("{} {} {}", icon, crate::context::format_timestamp(ts), message)
+    format!(
+        "{} {} {}",
+        icon,
+        crate::context::format_timestamp(ts),
+        message
+    )
 }
 
 /// Read-only handle to a task. Returned by `TaskBackend::get_task()` and `TaskBackend::list_tasks()`.
