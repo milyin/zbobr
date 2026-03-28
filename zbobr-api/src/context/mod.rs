@@ -945,7 +945,7 @@ mod tests {
     #[test]
     fn parse_ignores_blockquote_comments() {
         let text = "\
-- main:1:**working** <sub>2024-01-01 00:00:00 +0000</sub>
+- main:1:**working** `2024-01-01 00:00:00 +0000`
   - [ ] Do work <sub>ctx_rec_1</sub>
 
 > **[2024-01-01 00:00:30 <sub>+0000</sub>]** User says hello
@@ -978,7 +978,7 @@ mod tests {
     #[test]
     fn parse_error_on_missing_id() {
         let text = "\
-- main:1:**working** <sub>2024-01-01 00:00:00 +0000</sub>
+- main:1:**working** `2024-01-01 00:00:00 +0000`
   - [ ] no id marker
 ";
         let result = parse_context(text);

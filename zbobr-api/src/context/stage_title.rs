@@ -10,12 +10,6 @@
 //! pipeline:run_id:**stage** `tool` `model` `YYYY-MM-DD HH:MM:SS +HHMM`
 //! ```
 //!
-//! For backwards compatibility, the old format with `<sub>` timestamp is also parsed:
-//! ```text
-//! pipeline:run_id:**stage** `tool` `model` <sub>[YYYY-MM-DD HH:MM:SS +HHMM](prompt_url)</sub>
-//! pipeline:run_id:**stage** `tool` `model` <sub>YYYY-MM-DD HH:MM:SS +HHMM</sub>
-//! ```
-//!
 //! This module provides [`MdStageTitle`] which can be converted to/from a string
 //! via `Display`/`FromStr`, and to/from [`StageInfo`] for use in the rest of the codebase.
 //!
@@ -171,30 +165,23 @@ impl FromStr for MdStageTitle {
         }
 
         // 3. Parse timestamp and optional links
-        let (timestamp, prompt_link, output_link) = if let Some(ts) = timestamp_from_backtick {
-            // New format: timestamp was in backtick, parse optional <sub>[prompt](url)</sub>
-            // and <sub>[output](url)</sub>
-            let mut prompt_link = None;
-            let mut output_link = None;
-            while !rest.is_empty() {
-                if let Some(inner) = try_parse_next_sub(&mut rest) {
-                    if let Some((label, url)) = parse_markdown_link(&inner) {
-                        match label {
-                            PROMPT_LABEL => prompt_link = Some(url.to_string()),
-                            OUTPUT_LABEL => output_link = Some(url.to_string()),
-                            _ => {}
-                        }
+        let timestamp = timestamp_from_backtick
+            .ok_or_else(|| anyhow::anyhow!("Missing backtick timestamp in stage title"))?;
+        let mut prompt_link = None;
+        let mut output_link = None;
+        while !rest.is_empty() {
+            if let Some(inner) = try_parse_next_sub(&mut rest) {
+                if let Some((label, url)) = parse_markdown_link(&inner) {
+                    match label {
+                        PROMPT_LABEL => prompt_link = Some(url.to_string()),
+                        OUTPUT_LABEL => output_link = Some(url.to_string()),
+                        _ => {}
                     }
-                    continue;
                 }
-                break;
+                continue;
             }
-            (ts, prompt_link, output_link)
-        } else {
-            // Old format: trailing <sub>...</sub> with timestamp and optional prompt link
-            let (ts, prompt_link) = parse_trailing_timestamp_sub(&mut rest)?;
-            (ts, prompt_link, None)
-        };
+            break;
+        }
 
         Ok(MdStageTitle {
             timestamp,
@@ -276,30 +263,6 @@ fn parse_markdown_link(s: &str) -> Option<(&str, &str)> {
     let label = before.strip_prefix('[')?;
     let url = after.strip_suffix(')')?;
     Some((label, url))
-}
-
-/// Parse the trailing `<sub>` element that contains the timestamp
-/// and an optional prompt link (old format, for backwards compatibility).
-///
-/// Formats:
-/// - `<sub>[YYYY-MM-DD HH:MM:SS +HHMM](url)</sub>` — timestamp as link text
-/// - `<sub>YYYY-MM-DD HH:MM:SS +HHMM</sub>` — plain timestamp
-fn parse_trailing_timestamp_sub(
-    rest: &mut &str,
-) -> Result<(chrono::DateTime<chrono::FixedOffset>, Option<String>)> {
-    let inner = try_parse_next_sub(rest)
-        .ok_or_else(|| anyhow::anyhow!("Missing trailing <sub> timestamp element"))?;
-
-    if let Some((ts_str, url)) = parse_markdown_link(&inner) {
-        let timestamp = chrono::DateTime::parse_from_str(ts_str, "%Y-%m-%d %H:%M:%S %z")
-            .with_context(|| format!("Invalid timestamp in link: {}", ts_str))?;
-        Ok((timestamp, Some(url.to_string())))
-    } else {
-        let timestamp =
-            chrono::DateTime::parse_from_str(inner.trim(), "%Y-%m-%d %H:%M:%S %z")
-                .with_context(|| format!("Invalid timestamp: {}", inner))?;
-        Ok((timestamp, None))
-    }
 }
 
 // -- Display variant without prompt link (for prompts) ------------------------
@@ -410,32 +373,6 @@ mod tests {
         );
         let parsed: MdStageTitle = s.parse().unwrap();
         assert_eq!(parsed, title);
-    }
-
-    #[test]
-    fn parse_old_format_with_link() {
-        // Old format: timestamp as link label in <sub>
-        let s = "main:2:**working** `claude` `claude-opus-4.6` <sub>[2024-06-15 10:30:00 +0300](prompts/work.md)</sub>";
-        let parsed: MdStageTitle = s.parse().unwrap();
-        assert_eq!(
-            parsed.timestamp,
-            chrono::DateTime::parse_from_rfc3339("2024-06-15T10:30:00+03:00").unwrap()
-        );
-        assert_eq!(parsed.prompt_link, Some("prompts/work.md".to_string()));
-        assert_eq!(parsed.output_link, None);
-    }
-
-    #[test]
-    fn parse_old_format_plain_timestamp() {
-        // Old format: plain timestamp in <sub>
-        let s = "merge:1:**review** <sub>2024-01-01 00:00:00 +0000</sub>";
-        let parsed: MdStageTitle = s.parse().unwrap();
-        assert_eq!(
-            parsed.timestamp,
-            chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").unwrap()
-        );
-        assert_eq!(parsed.prompt_link, None);
-        assert_eq!(parsed.output_link, None);
     }
 
     #[test]
