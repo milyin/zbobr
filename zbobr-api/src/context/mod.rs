@@ -1349,17 +1349,16 @@ mod tests {
     fn compact_comment_roundtrip_preserves_context() {
         // When compact comments are present, the TaskContext should still be parsed correctly
         let ctx = sample_context();
-        let comments = vec![
-            make_comment("comment before stage 2", "2024-01-01T00:30:00Z", None),
-        ];
+        let comments = vec![make_comment(
+            "comment before stage 2",
+            "2024-01-01T00:30:00Z",
+            None,
+        )];
         let serialized = serialize_context(&ctx, &comments, false, None);
         // Parse back — compact comments should be skipped, stages preserved
         let parsed = parse_context(&serialized).unwrap();
         assert_eq!(parsed.stages.len(), ctx.stages.len());
-        assert_eq!(
-            parsed.stages[0].info.stage,
-            ctx.stages[0].info.stage
-        );
+        assert_eq!(parsed.stages[0].info.stage, ctx.stages[0].info.stage);
     }
 
     #[test]
