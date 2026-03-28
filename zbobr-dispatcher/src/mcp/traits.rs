@@ -538,7 +538,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         // Validate work_branch_postfix: if provided and work_branch is already set,
         // treat identical repeated setup as a successful no-op.
-        if let Some(requested_work_branch) = work_branch.as_deref() {
+        if let Some(_requested_work_branch) = work_branch.as_deref() {
             match session.get_work_branch().await {
                 Ok(Some(existing_work_branch)) => {
                     let existing_repo = match session.get_destination_repository().await {
@@ -550,40 +550,20 @@ pub trait CommonMcpImpl: Send + Sync {
                         Err(e) => return self.configure_worktree_error(e.to_string()).await,
                     };
 
-                    let repo_matches = effective_repo
-                        .as_ref()
-                        .map(|v| Some(v) == existing_repo.as_ref())
-                        .unwrap_or(true);
-                    let branch_matches = effective_branch
-                        .as_ref()
-                        .map(|v| Some(v) == existing_branch.as_ref())
-                        .unwrap_or(true);
-
-                    if existing_work_branch == requested_work_branch
-                        && repo_matches
-                        && branch_matches
-                    {
-                        let response = format!(
-                            "Worktree configured: destination_repository={}, destination_branch={}, work_branch={} (values were already set)",
-                            existing_repo.as_deref().unwrap_or("(not set)"),
-                            existing_branch.as_deref().unwrap_or("(not set)"),
-                            existing_work_branch,
-                        );
-                        log_mcp_string_response(
-                            self.role_name(),
-                            self.session().task_id(),
-                            McpTool::ConfigureWorktree.as_str(),
-                            &response,
-                        );
-                        return response;
-                    }
-
-                    return self
-                        .configure_worktree_error(
-                            "work_branch is already set and differs from requested values"
-                                .to_string(),
-                        )
-                        .await;
+                    // If work_branch is already set, ignore requested values and return current config.
+                    let response = format!(
+                        "Worktree already configured: destination_repository={}, destination_branch={}, work_branch={} (requested values ignored)",
+                        existing_repo.as_deref().unwrap_or("(not set)"),
+                        existing_branch.as_deref().unwrap_or("(not set)"),
+                        existing_work_branch,
+                    );
+                    log_mcp_string_response(
+                        self.role_name(),
+                        self.session().task_id(),
+                        McpTool::ConfigureWorktree.as_str(),
+                        &response,
+                    );
+                    return response;
                 }
                 Err(e) => {
                     return self.configure_worktree_error(e.to_string()).await;

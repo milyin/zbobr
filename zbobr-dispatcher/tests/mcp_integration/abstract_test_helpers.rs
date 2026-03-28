@@ -172,6 +172,34 @@ pub async fn run_configure_worktree_idempotent(env: &IntegrationTestEnv) {
 }
 
 // ===========================================================================
+// Test 1c: configure_worktree should ignore requested work_branch when existing is set
+// ===========================================================================
+pub async fn run_configure_worktree_ignore_requested_postfix(env: &IntegrationTestEnv) {
+    let repo_path = env.create_git_repo("repo_worktree_ignore_requested").await;
+    let task_id = env
+        .create_task(
+            "Worktree ignore requested postfix test",
+            "configure_worktree should preserve existing work_branch",
+            "READY",
+        )
+        .await;
+
+    let workflow = build_workflow(vec![StageDef::new("alpha", "alpha", "main")]);
+    let dest_repo = env.dest_repo(&repo_path);
+    let scenarios = scenarios_map(vec![(
+        "alpha",
+        abstract_scenarios::configure_worktree_work_branch_ignored_scenario(&dest_repo),
+    )]);
+
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
+    env.run_to_completion(task_id, &workflow, &scenarios, 5)
+        .await;
+
+    let task = env.get_task(task_id).await;
+    assert_eq!(task.state, State::Done, "Should complete as DONE");
+}
+
+// ===========================================================================
 // Test 2: Sequential stage advancement within a pipeline
 // ===========================================================================
 
