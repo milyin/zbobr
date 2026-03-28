@@ -2,7 +2,7 @@ use std::{borrow::Cow, collections::HashMap, path::PathBuf, sync::Arc};
 
 use simpleinterpolation::Interpolation;
 use zbobr_api::{
-    Comment, PARAM_DESTINATION_BRANCH, PARAM_DESTINATION_REPOSITORY, PARAM_WORK_BRANCH, Task,
+    Comment, Task,
     config::{StageDefinition, WorkflowConfig},
     config_tools::McpTool,
     context::serialize_context,
@@ -13,9 +13,9 @@ use crate::{backend::TaskBackend, workflow::Workflow};
 // Template placeholder names used in prompt .md files.
 pub const VAR_TITLE: &str = "title";
 pub const VAR_DESCRIPTION: &str = "description";
-pub const VAR_DESTINATION_REPOSITORY: &str = PARAM_DESTINATION_REPOSITORY;
-pub const VAR_DESTINATION_BRANCH: &str = PARAM_DESTINATION_BRANCH;
-pub const VAR_WORK_BRANCH: &str = PARAM_WORK_BRANCH;
+pub const VAR_DESTINATION_REPOSITORY: &str = "destination_repository";
+pub const VAR_DESTINATION_BRANCH: &str = "destination_branch";
+pub const VAR_WORK_BRANCH: &str = "work_branch";
 pub const VAR_CONTEXT: &str = "context";
 
 #[derive(Clone)]

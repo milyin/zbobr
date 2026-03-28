@@ -1,34 +1,3 @@
-// -- Parameter name constants --
-
-/// Parameter key for the task's destination repository.
-pub const PARAM_DESTINATION_REPOSITORY: &str = "destination_repository";
-/// Parameter key for the task's destination branch.
-pub const PARAM_DESTINATION_BRANCH: &str = "destination_branch";
-/// Parameter key for the task's work branch.
-pub const PARAM_WORK_BRANCH: &str = "work_branch";
-/// Parameter key for the task's pull-request URL.
-pub const PARAM_PR_URL: &str = "pr_url";
-/// Parameter key for the task's stack (serialized JSON).
-pub const PARAM_STACK: &str = "stack";
-/// Parameter key for the pipeline name.
-pub const PARAM_PIPELINE: &str = "pipeline";
-/// Parameter key for the stage name.
-pub const PARAM_STAGE: &str = "stage";
-/// Parameter key for the signal value.
-pub const PARAM_SIGNAL: &str = "signal";
-/// Parameter key for the pipeline run ID.
-pub const PARAM_PIPELINE_RUN_ID: &str = "pipeline_run_id";
-/// Parameter key for the stage count.
-pub const PARAM_STAGE_COUNT: &str = "stage_count";
-/// Parameter key for the maximum stage count.
-pub const PARAM_MAX_STAGE_COUNT: &str = "max_stage_count";
-/// Parameter key for the pause flag.
-pub const PARAM_FLAG_PAUSE: &str = "pause";
-/// Parameter key for the confirm flag.
-pub const PARAM_FLAG_CONFIRM: &str = "confirm";
-/// Canonical string value used for boolean `true` flag parameters.
-pub const PARAM_FLAG_VALUE_TRUE: &str = "true";
-
 // -- FixedOffsetTz --
 
 /// Transparent wrapper around `chrono::FixedOffset` with serde/clap support.
