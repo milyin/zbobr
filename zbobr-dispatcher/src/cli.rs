@@ -227,7 +227,7 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
                 c.pipeline.clone(),
                 c.pipeline_run_id,
                 c.stage.clone(),
-                c.hostname.clone(),
+                c.username.clone(),
                 c.tool,
                 c.model.clone(),
             );

@@ -484,7 +484,7 @@ impl TaskMut for FsTaskMut {
         let new_comment = Comment {
             timestamp: chrono::Utc::now().with_timezone(chrono::Local::now().offset()),
             stage: stage.to_string(),
-            hostname: hostname.to_string(),
+            username: hostname.to_string(),
             tool,
             model,
             text: body.to_string(),

@@ -155,6 +155,7 @@ struct CommentResponse {
     body: Option<String>,
     created_at: Option<String>,
     html_url: Option<String>,
+    user: Option<IssueUser>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -926,10 +927,16 @@ impl ZbobrTaskBackendGithubImpl {
 
                 let (text, report_name) = extract_report_link(&raw_text);
 
+                let username = c
+                    .user
+                    .as_ref()
+                    .map(|u| u.login.clone())
+                    .unwrap_or_else(|| tag.hostname.clone());
+
                 Comment {
                     timestamp,
                     stage: tag.stage,
-                    hostname: tag.hostname,
+                    username,
                     tool: tag.tool,
                     model: tag.model,
                     text,

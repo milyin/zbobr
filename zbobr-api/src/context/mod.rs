@@ -273,12 +273,20 @@ struct MdCompactComment {
 impl MdCompactComment {
     fn from_comment(c: &Comment, for_prompt: bool) -> Self {
         let first_line = c.text.lines().next().unwrap_or("").trim();
-        let text = if for_prompt || first_line.chars().count() <= COMPACT_COMMENT_MAX_LEN {
+        let comment_text = if for_prompt || first_line.chars().count() <= COMPACT_COMMENT_MAX_LEN {
             first_line.to_string()
         } else {
             let truncated: String = first_line.chars().take(COMPACT_COMMENT_MAX_LEN).collect();
             format!("{}...", truncated)
         };
+
+        let username = if c.username.is_empty() {
+            "unknown"
+        } else {
+            &c.username
+        };
+        let text = format!("user:**{}** {}", username, comment_text);
+
         MdCompactComment {
             text,
             timestamp: c.timestamp,
@@ -914,7 +922,7 @@ mod tests {
         let comments = vec![Comment {
             timestamp: utc("2024-01-01T00:30:00Z"),
             stage: String::new(),
-            hostname: String::new(),
+            username: String::new(),
             tool: None,
             model: None,
             text: "Please hurry up!".to_string(),
@@ -1083,7 +1091,7 @@ mod tests {
         crate::task::Comment {
             timestamp: utc(ts),
             stage: String::new(),
-            hostname: String::new(),
+            username: String::new(),
             tool: None,
             model: None,
             text: text.to_string(),
@@ -1106,7 +1114,7 @@ mod tests {
             Some("https://example.com/comment/1"),
         )];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- hello world `2024-01-01 00:00:00 +0000` <sub>[link](https://example.com/comment/1)</sub>"));
+        assert!(output.contains("- user:**unknown** hello world `2024-01-01 00:00:00 +0000` <sub>[link](https://example.com/comment/1)</sub>"));
     }
 
     #[test]
@@ -1114,7 +1122,7 @@ mod tests {
         let ctx = TaskContext::default();
         let comments = vec![make_comment("short text", "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- short text `2024-01-01 00:00:00 +0000`"));
+        assert!(output.contains("- user:**unknown** short text `2024-01-01 00:00:00 +0000`"));
         assert!(!output.contains("<sub>"));
     }
 
@@ -1138,8 +1146,24 @@ mod tests {
             None,
         )];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- first line"));
+        assert!(output.contains("- user:**unknown** first line"));
         assert!(!output.contains("second line"));
+    }
+
+    #[test]
+    fn compact_comment_prefixes_user() {
+        let ctx = TaskContext::default();
+        let comments = vec![make_comment("hello world", "2024-01-01T00:00:00Z", None)];
+        let output = serialize_context(&ctx, &comments, false, None);
+        assert!(output.contains("- user:**unknown** hello world `2024-01-01 00:00:00 +0000`"));
+    }
+
+    #[test]
+    fn compact_comment_no_extra_cr_after_comment() {
+        let ctx = TaskContext::default();
+        let comments = vec![make_comment("hello world", "2024-01-01T00:00:00Z", None)];
+        let output = serialize_context(&ctx, &comments, false, None);
+        assert_eq!(output.lines().count(), 1);
     }
 
     #[test]
@@ -1180,7 +1204,7 @@ mod tests {
         let output = serialize_context(&ctx, &comments, true, None);
         // Prompt mode now shares compact comment format, not blockquote.
         assert!(!output.contains("> **["));
-        assert!(output.contains("- a user comment `2024-01-01 00:00:00 +0000`"));
+        assert!(output.contains("- user:**unknown** a user comment `2024-01-01 00:00:00 +0000`"));
     }
 
     #[test]
@@ -1189,7 +1213,7 @@ mod tests {
         let ctx = TaskContext::default();
         let comments = vec![make_comment(&long_text, "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, true, None);
-        assert!(output.contains(&format!("- {} `2024-01-01 00:00:00 +0000`", long_text)));
+        assert!(output.contains(&format!("- user:**unknown** {} `2024-01-01 00:00:00 +0000`", long_text)));
         assert!(!output.contains("..."));
     }
 }

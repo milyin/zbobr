@@ -259,8 +259,8 @@ pub struct Comment {
     pub timestamp: chrono::DateTime<chrono::FixedOffset>,
     #[schemars(description = "Stage that posted this comment")]
     pub stage: String,
-    #[schemars(description = "Hostname of the system posting the comment")]
-    pub hostname: String,
+    #[schemars(description = "Username of the user posting the comment")]
+    pub username: String,
     #[schemars(description = "Tool that executed this comment (e.g. copilot, claude)")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<Tool>,
@@ -1277,7 +1277,7 @@ mod tests {
         Comment {
             timestamp: chrono::DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z").unwrap(),
             stage: "s".into(),
-            hostname: "h".into(),
+            username: "h".into(),
             tool: None,
             model: None,
             text: text.into(),
@@ -1295,7 +1295,7 @@ mod tests {
         Comment {
             timestamp: chrono::DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z").unwrap(),
             stage: "s".into(),
-            hostname: "h".into(),
+            username: "h".into(),
             tool: None,
             model: None,
             text: text.into(),

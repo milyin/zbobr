@@ -300,7 +300,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
         Comment {
             timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
             stage: "planning".to_string(),
-            hostname: "dummy".to_string(),
+            username: "dummy".to_string(),
             tool: None,
             model: None,
             text: "USER_REQUEST".to_string(),
@@ -315,7 +315,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
         Comment {
             timestamp: "2025-01-01T01:00:00Z".parse().unwrap(),
             stage: "planning".to_string(),
-            hostname: "dummy".to_string(),
+            username: "dummy".to_string(),
             tool: None,
             model: None,
             text: "[report_success]\nREPORT".to_string(),
