@@ -1026,7 +1026,11 @@ mod comment_model_tests {
 
         let weak = task_backend.get_task(id).await.unwrap();
         let task = weak.snapshot(false).await.unwrap();
-        assert_eq!(task.error.as_deref(), Some("oops"));
+        let error = task.error.as_deref().expect("error should be set");
+        assert!(
+            error.starts_with('\u{274C}') && error.contains("oops"),
+            "error should be formatted with ❌ and contain 'oops', got: {error:?}"
+        );
         assert!(task.pause, "stop_with_error should set pause flag");
     }
 
