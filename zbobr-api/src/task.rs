@@ -290,6 +290,9 @@ pub struct Comment {
     #[schemars(description = "Optional prompt filename stored via task backend (logging only)")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_name: Option<String>,
+    #[schemars(description = "URL of this comment (e.g. GitHub comment HTML URL)")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 // -- History helper types --
@@ -1206,9 +1209,10 @@ pub struct Task {
     /// Call stack for pipeline call/return semantics.
     #[serde(default)]
     pub stack: Vec<StackEntry>,
-    /// Error message stored in the ERROR section of the task body.
+    /// Status message stored in the STATUS section of the task body.
+    /// Contains the last error or question with icon, timestamp, and message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
+    pub status: Option<String>,
     pub pause: bool,
     /// When true the dispatcher will automatically set the pause flag any time
     /// the task's state is changed.  This gives human operators an opportunity to
@@ -1286,6 +1290,7 @@ mod tests {
             caller_pipeline_run_id: None,
             report_name: None,
             prompt_name: None,
+            url: None,
         }
     }
 
@@ -1303,6 +1308,7 @@ mod tests {
             caller_pipeline_run_id: Some(caller_run_id),
             report_name: None,
             prompt_name: None,
+            url: None,
         }
     }
 

@@ -2,7 +2,7 @@ use zbobr_api::config_tools::McpTool;
 use zbobr_api::task::ContextRecordType;
 
 use crate::{
-    mcp::common::{get_hostname, parse_ctx_rec_id},
+    mcp::common::parse_ctx_rec_id,
     task::{Model, RoleSession, Tool},
 };
 
@@ -379,52 +379,87 @@ pub trait CommonMcpImpl: Send + Sync {
         }
     }
 
+    /// Shared implementation: format a status message, pause the task, and optionally add a
+    /// context record (for questions). For errors (`add_context_record = false`), only the
+    /// STATUS field is set. For questions (`add_context_record = true`), a Question context
+    /// record is also added so the question appears in the agent report.
+    async fn pause_with_status_impl(
+        &self,
+        tool: McpTool,
+        icon: char,
+        message: &str,
+        add_context_record: bool,
+    ) -> String {
+        let ts = chrono::Utc::now().with_timezone(&self.session().config().fixed_offset());
+        let status = zbobr_api::format_status(icon, &ts, message);
+
+        if let Err(e) = self.session().set_pause_with_status(status).await {
+            tracing::error!(
+                "Failed to set pause+status for task {}: {e}",
+                self.session().task_id()
+            );
+            let response = format!("Error setting status on task: {e}");
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                tool.as_str(),
+                &response,
+            );
+            return response;
+        }
+
+        if add_context_record {
+            if let Err(e) = self
+                .session()
+                .add_context_record(
+                    zbobr_api::task::ContextRecordType::Question,
+                    message.to_string(),
+                    None,
+                )
+                .await
+            {
+                tracing::error!(
+                    "Failed to add question context record for task {}: {e}",
+                    self.session().task_id()
+                );
+                let response = format!("Error adding question to context: {e}");
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool.as_str(),
+                    &response,
+                );
+                return response;
+            }
+        }
+
+        let response = if add_context_record {
+            "Question recorded - task paused pending user response".to_string()
+        } else {
+            "Error reported - task paused pending response".to_string()
+        };
+        log_mcp_string_response(
+            self.role_name(),
+            self.session().task_id(),
+            tool.as_str(),
+            &response,
+        );
+        response
+    }
+
     async fn stop_with_error_impl(&self, message: &str) -> String {
         tracing::info!(
             "[{}#{}] stop_with_error",
             self.role_name(),
             self.session().task_id()
         );
-
-        if let Err(e) = self.session().set_error(Some(message.to_string())).await {
-            tracing::error!(
-                "Failed to set error for task {}: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Error setting error on task: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                McpTool::StopWithError.as_str(),
-                &response,
-            );
-            return response;
-        }
-
-        // Set pause flag to stop task processing and wait for user response.
-        if let Err(e) = self.session().set_pause(true).await {
-            tracing::error!(
-                "Failed to set pause for task {} after reporting error: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Error reporting error but error pausing task: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                McpTool::StopWithError.as_str(),
-                &response,
-            );
-            return response;
-        }
-
-        let response = "Error reported to user - task paused pending response".to_string();
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            McpTool::StopWithError.as_str(),
-            &response,
-        );
-        response
+        self.pause_with_status_impl(
+            McpTool::StopWithError,
+            zbobr_api::ERROR_PREFIX,
+            message,
+            false,
+        )
+        .await
     }
 
     async fn stop_with_question_impl(&self, message: &str) -> String {
@@ -433,59 +468,13 @@ pub trait CommonMcpImpl: Send + Sync {
             self.role_name(),
             self.session().task_id()
         );
-        let hostname = get_hostname();
-        let body = format!("[{}]\n{message}", McpTool::StopWithQuestion.as_str());
-
-        if let Err(e) = self
-            .session()
-            .post_comment(
-                &body,
-                self.stage_name(),
-                &hostname,
-                Some(self.mcp_tool()),
-                Some(self.mcp_model()),
-                None,
-            )
-            .await
-        {
-            tracing::error!(
-                "Failed to post question for task {}: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Error posting question: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                McpTool::StopWithQuestion.as_str(),
-                &response,
-            );
-            return response;
-        }
-
-        // Set pause flag to stop task processing and wait for user response.
-        if let Err(e) = self.session().set_pause(true).await {
-            tracing::error!(
-                "Failed to set pause for task {} after asking user: {e}",
-                self.session().task_id()
-            );
-            let response = format!("Error asking user but error pausing task: {e}");
-            log_mcp_string_response(
-                self.role_name(),
-                self.session().task_id(),
-                McpTool::StopWithQuestion.as_str(),
-                &response,
-            );
-            return response;
-        }
-
-        let response = "Question posted - task paused pending user response".to_string();
-        log_mcp_string_response(
-            self.role_name(),
-            self.session().task_id(),
-            McpTool::StopWithQuestion.as_str(),
-            &response,
-        );
-        response
+        self.pause_with_status_impl(
+            McpTool::StopWithQuestion,
+            zbobr_api::QUESTION_PREFIX,
+            message,
+            true,
+        )
+        .await
     }
 
     // -- Worktree configuration --
@@ -598,7 +587,9 @@ pub trait CommonMcpImpl: Send + Sync {
     }
 
     async fn configure_worktree_error(&self, error: String) -> String {
-        if let Err(pause_err) = self.session().set_pause(true).await {
+        let ts = chrono::Utc::now().with_timezone(&self.session().config().fixed_offset());
+        let status = zbobr_api::format_status(zbobr_api::ERROR_PREFIX, &ts, &error);
+        if let Err(pause_err) = self.session().set_pause_with_status(status).await {
             tracing::error!("Failed to pause task after configure_worktree error: {pause_err}");
         }
         let response = format!("Error: {error}");

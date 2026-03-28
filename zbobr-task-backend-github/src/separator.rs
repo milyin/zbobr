@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use zbobr_api::{
+    Comment,
     context::{parse_context, serialize_context},
     task::TaskContext,
 };
@@ -9,7 +10,7 @@ use zbobr_api::{
 // -- Context parsing and serialization helpers --
 
 pub(crate) const PARAMETERS_SEPARATOR: &str = "\n\n---PARAMETERS---\n";
-pub(crate) const ERROR_SEPARATOR: &str = "\n\n---ERROR---\n";
+pub(crate) const STATUS_SEPARATOR: &str = "\n\n---STATUS---\n";
 pub(crate) const CONTEXT_SEPARATOR: &str = "\n\n---CONTEXT---\n";
 
 /// Parse parameters from the PARAMETERS section.
@@ -39,8 +40,8 @@ pub(crate) fn serialize_parameters(params: &HashMap<String, String>) -> String {
     result
 }
 
-/// Parse a task description into (description, parameters, error, context).
-/// Section order: description → PARAMETERS → ERROR → CONTEXT.
+/// Parse a task description into (description, parameters, status, context).
+/// Section order: description → PARAMETERS → STATUS → CONTEXT.
 pub(crate) fn parse_description_full(
     full_text: &str,
 ) -> Result<(String, HashMap<String, String>, Option<String>, TaskContext)> {
@@ -59,21 +60,21 @@ pub(crate) fn parse_description_full(
         _ => (parts[0], parts[1]),
     };
 
-    // Split by error separator
-    let error_parts: Vec<&str> = before_context.split(ERROR_SEPARATOR).collect();
-    let (before_error, error_text) = match error_parts.len() {
-        1 => (error_parts[0], None),
+    // Split by status separator
+    let status_parts: Vec<&str> = before_context.split(STATUS_SEPARATOR).collect();
+    let (before_status, status_text) = match status_parts.len() {
+        1 => (status_parts[0], None),
         _ => {
-            let text = error_parts[1].trim();
+            let text = status_parts[1].trim();
             (
-                error_parts[0],
+                status_parts[0],
                 if text.is_empty() { None } else { Some(text) },
             )
         }
     };
 
     // Now split by parameters separator
-    let param_parts: Vec<&str> = before_error.split(PARAMETERS_SEPARATOR).collect();
+    let param_parts: Vec<&str> = before_status.split(PARAMETERS_SEPARATOR).collect();
     let (description, params_text) = match param_parts.len() {
         1 => (param_parts[0].to_string(), ""),
         _ => (param_parts[0].to_string(), param_parts[1].trim()),
@@ -82,21 +83,23 @@ pub(crate) fn parse_description_full(
     // Parse parameters
     let parameters = parse_parameters(params_text);
 
-    let error = error_text.map(|s| s.to_string());
+    let status = status_text.map(|s| s.to_string());
 
     // Parse context using shared format
     let context = parse_context(context_text)?;
 
-    Ok((description, parameters, error, context))
+    Ok((description, parameters, status, context))
 }
 
-/// Serialize description, parameters, error, and context back into the full format.
-/// Section order: description → PARAMETERS → ERROR → CONTEXT.
+/// Serialize description, parameters, status, and context back into the full format.
+/// Section order: description → PARAMETERS → STATUS → CONTEXT.
+/// `comments` are interspersed into the context section as compact titles for user display.
 pub(crate) fn serialize_description_full(
     original_description: &str,
     parameters: &HashMap<String, String>,
-    error: &Option<String>,
+    status: &Option<String>,
     context: &TaskContext,
+    comments: &[Comment],
     report_url: Option<&dyn Fn(&str) -> String>,
 ) -> String {
     // Strip everything from the description first
@@ -112,15 +115,15 @@ pub(crate) fn serialize_description_full(
         result.push_str(&serialize_parameters(parameters));
     }
 
-    // Add error if present
-    if let Some(err) = error {
-        result.push_str(ERROR_SEPARATOR);
-        result.push_str(err);
+    // Add status if present
+    if let Some(status_msg) = status {
+        result.push_str(STATUS_SEPARATOR);
+        result.push_str(status_msg);
         result.push('\n');
     }
 
     // Add context if non-empty
-    let context_str = serialize_context(context, &[], false, report_url);
+    let context_str = serialize_context(context, comments, false, report_url);
     if !context_str.is_empty() {
         result.push_str(CONTEXT_SEPARATOR);
         result.push_str(&context_str);
@@ -132,7 +135,7 @@ pub(crate) fn serialize_description_full(
 /// Merge concurrent updates to a task description.
 ///
 /// This function handles the case where two concurrent updates have been made to different
-/// sections of the task description (description, parameters, error, context).
+/// sections of the task description (description, parameters, status, context).
 ///
 /// Given:
 /// - `original`: The description as it was when we first read it
@@ -154,14 +157,14 @@ pub(crate) fn merge_concurrent_description_updates(
     our_new: &str,
 ) -> Result<String> {
     // Parse all three versions
-    let (orig_desc, orig_params, orig_error, orig_context) = parse_description_full(original)?;
-    let (curr_desc, curr_params, curr_error, curr_context) = parse_description_full(current)?;
-    let (new_desc, new_params, new_error, new_context) = parse_description_full(our_new)?;
+    let (orig_desc, orig_params, orig_status, orig_context) = parse_description_full(original)?;
+    let (curr_desc, curr_params, curr_status, curr_context) = parse_description_full(current)?;
+    let (new_desc, new_params, new_status, new_context) = parse_description_full(our_new)?;
 
     // Determine what we changed
     let we_changed_desc = new_desc != orig_desc;
     let we_changed_params = new_params != orig_params;
-    let we_changed_error = new_error != orig_error;
+    let we_changed_status = new_status != orig_status;
     let we_changed_context = serde_json::to_string(&new_context).unwrap_or_default()
         != serde_json::to_string(&orig_context).unwrap_or_default();
 
@@ -172,10 +175,10 @@ pub(crate) fn merge_concurrent_description_updates(
     } else {
         curr_params
     };
-    let merged_error = if we_changed_error {
-        new_error
+    let merged_status = if we_changed_status {
+        new_status
     } else {
-        curr_error
+        curr_status
     };
     let merged_context = if we_changed_context {
         new_context
@@ -184,11 +187,13 @@ pub(crate) fn merge_concurrent_description_updates(
     };
 
     // Serialize back with the merged content (no URL builder — will be re-serialized by caller)
+    // No compact comments during merge — they are re-added when the caller re-serializes.
     Ok(serialize_description_full(
         &merged_desc,
         &merged_params,
-        &merged_error,
+        &merged_status,
         &merged_context,
+        &[],
         None,
     ))
 }
@@ -244,7 +249,8 @@ mod tests {
     fn roundtrip_preserves_context() {
         let ctx = sample_context();
 
-        let serialized = serialize_description_full("my task", &HashMap::new(), &None, &ctx, None);
+        let serialized =
+            serialize_description_full("my task", &HashMap::new(), &None, &ctx, &[], None);
         let (desc, _, _, parsed_ctx) = parse_description_full(&serialized).unwrap();
 
         assert_eq!(desc, "my task");
@@ -282,6 +288,7 @@ mod tests {
             &HashMap::new(),
             &None,
             &TaskContext::default(),
+            &[],
             None,
         );
         let (desc, _, _, ctx) = parse_description_full(&serialized).unwrap();
@@ -292,45 +299,46 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_preserves_error_section() {
+    fn roundtrip_preserves_status_section() {
         let mut params = HashMap::new();
         params.insert("key".to_string(), "value".to_string());
-        let error = Some("Something went wrong\ndetails here".to_string());
+        let status = Some("Something went wrong\ndetails here".to_string());
         let ctx = sample_context();
 
-        let serialized = serialize_description_full("my task", &params, &error, &ctx, None);
-        let (desc, parsed_params, parsed_error, parsed_ctx) =
+        let serialized = serialize_description_full("my task", &params, &status, &ctx, &[], None);
+        let (desc, parsed_params, parsed_status, parsed_ctx) =
             parse_description_full(&serialized).unwrap();
 
         assert_eq!(desc, "my task");
         assert_eq!(parsed_params.get("key").unwrap(), "value");
-        assert_eq!(parsed_error, error);
+        assert_eq!(parsed_status, status);
         assert_eq!(parsed_ctx.stages.len(), 1);
         assert_eq!(parsed_ctx.stages[0].records.len(), 3);
 
         // Verify section order in serialized output
         let params_pos = serialized.find("---PARAMETERS---").unwrap();
-        let error_pos = serialized.find("---ERROR---").unwrap();
+        let status_pos = serialized.find("---STATUS---").unwrap();
         let context_pos = serialized.find("---CONTEXT---").unwrap();
-        assert!(params_pos < error_pos);
-        assert!(error_pos < context_pos);
+        assert!(params_pos < status_pos);
+        assert!(status_pos < context_pos);
     }
 
     #[test]
-    fn roundtrip_no_error_section() {
+    fn roundtrip_no_status_section() {
         let serialized = serialize_description_full(
             "desc",
             &HashMap::new(),
             &None,
             &TaskContext::default(),
+            &[],
             None,
         );
-        let (desc, _, error, ctx) = parse_description_full(&serialized).unwrap();
+        let (desc, _, status, ctx) = parse_description_full(&serialized).unwrap();
 
         assert_eq!(desc, "desc");
-        assert_eq!(error, None);
+        assert_eq!(status, None);
         assert!(ctx.stages.is_empty());
-        assert!(!serialized.contains("---ERROR---"));
+        assert!(!serialized.contains("---STATUS---"));
     }
 
     #[test]
@@ -340,15 +348,17 @@ mod tests {
             &HashMap::new(),
             &None,
             &TaskContext::default(),
+            &[],
             None,
         );
 
-        // They changed the error
+        // They changed the status
         let current = serialize_description_full(
             "original desc",
             &HashMap::new(),
             &Some("their error".to_string()),
             &TaskContext::default(),
+            &[],
             None,
         );
 
@@ -358,14 +368,15 @@ mod tests {
             &HashMap::new(),
             &None,
             &sample_context(),
+            &[],
             None,
         );
 
         let merged = merge_concurrent_description_updates(&original, &current, &our_new).unwrap();
-        let (desc, _, error, ctx) = parse_description_full(&merged).unwrap();
+        let (desc, _, status, ctx) = parse_description_full(&merged).unwrap();
 
         assert_eq!(desc, "original desc");
-        assert_eq!(error, Some("their error".to_string()));
+        assert_eq!(status, Some("their error".to_string()));
         assert_eq!(ctx.stages.len(), 1);
     }
 
@@ -393,7 +404,7 @@ mod tests {
             }],
         };
 
-        let original = serialize_description_full("desc", &HashMap::new(), &None, &ctx1, None);
+        let original = serialize_description_full("desc", &HashMap::new(), &None, &ctx1, &[], None);
 
         // They changed the context
         let ctx_theirs = TaskContext {
@@ -417,7 +428,8 @@ mod tests {
                 }],
             }],
         };
-        let current = serialize_description_full("desc", &HashMap::new(), &None, &ctx_theirs, None);
+        let current =
+            serialize_description_full("desc", &HashMap::new(), &None, &ctx_theirs, &[], None);
 
         // We also changed the context
         let ctx_ours = TaskContext {
@@ -441,7 +453,8 @@ mod tests {
                 }],
             }],
         };
-        let our_new = serialize_description_full("desc", &HashMap::new(), &None, &ctx_ours, None);
+        let our_new =
+            serialize_description_full("desc", &HashMap::new(), &None, &ctx_ours, &[], None);
 
         let merged = merge_concurrent_description_updates(&original, &current, &our_new).unwrap();
         let (_, _, _, ctx) = parse_description_full(&merged).unwrap();
