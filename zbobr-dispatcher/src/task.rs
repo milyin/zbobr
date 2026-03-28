@@ -99,6 +99,11 @@ impl RoleSession {
         Ok(self.get_task().await?.description)
     }
 
+    /// Get the dispatcher config (for timezone, etc).
+    pub fn config(&self) -> &zbobr_api::config::ZbobrDispatcherConfig {
+        self.zbobr.config()
+    }
+
     /// Get pipeline name for this session.
     pub fn pipeline_name(&self) -> &str {
         &self.pipeline_name
@@ -198,38 +203,37 @@ impl RoleSession {
         .await
     }
 
-    /// Set the pause flag on the task.
-    pub async fn set_pause(&self, pause: bool) -> anyhow::Result<()> {
+    /// Set the status field directly (pre-formatted string or None to clear).
+    pub async fn set_status(&self, status: Option<String>) -> anyhow::Result<()> {
         self.modify_task(move |mut task| {
-            task.pause = pause;
+            task.status = status;
             task
         })
         .await
     }
 
-    /// Set pause to true and assign a signal in a single modify_task call.
-    pub async fn set_pause_with_signal(&self, signal: Signal) -> anyhow::Result<()> {
+    /// Pause the task and set a status message atomically.
+    /// It is not possible to set pause without an explanation.
+    pub async fn set_pause_with_status(&self, status: String) -> anyhow::Result<()> {
         self.modify_task(move |mut task| {
+            task.status = Some(status);
+            task.pause = true;
+            task
+        })
+        .await
+    }
+
+    /// Pause the task, set a status message, and assign a signal — all atomically.
+    /// It is not possible to set pause without an explanation.
+    pub async fn set_pause_with_status_and_signal(
+        &self,
+        status: String,
+        signal: Signal,
+    ) -> anyhow::Result<()> {
+        self.modify_task(move |mut task| {
+            task.status = Some(status);
             task.pause = true;
             task.signal = Some(signal);
-            task
-        })
-        .await
-    }
-
-    /// Set the error message on the task.
-    pub async fn set_error(&self, error: Option<String>) -> anyhow::Result<()> {
-        let error = error.map(|msg| {
-            let ts = chrono::Utc::now().with_timezone(&self.zbobr.config().fixed_offset());
-            format!(
-                "{} {} {}",
-                zbobr_api::ERROR_PREFIX,
-                zbobr_api::format_timestamp(&ts),
-                msg
-            )
-        });
-        self.modify_task(move |mut task| {
-            task.error = error;
             task
         })
         .await
@@ -486,12 +490,17 @@ impl TaskSession {
     /// Set the task state (dispatcher only).
     pub async fn set_state(&self, state: impl Into<State>) -> anyhow::Result<()> {
         let state = state.into();
+        let confirm_status = {
+            let ts = chrono::Utc::now().with_timezone(&self.zbobr.config().fixed_offset());
+            zbobr_api::format_status(zbobr_api::PAUSE_PREFIX, &ts, "Awaiting confirmation")
+        };
         self.modify_task(move |mut task| {
             if task.confirm && task.state != state {
                 task.pause = true;
+                task.status = Some(confirm_status);
             }
             if !task.state.is_running() && state.is_running() {
-                task.error = None;
+                task.status = None;
             }
             task.state = state;
             task
@@ -517,18 +526,26 @@ impl TaskSession {
         .await
     }
 
-    /// Set the pause flag on the task.
-    pub async fn set_pause(&self, pause: bool) -> anyhow::Result<()> {
+    /// Pause the task and set a status message atomically.
+    /// It is not possible to set pause without an explanation.
+    pub async fn set_pause_with_status(&self, status: String) -> anyhow::Result<()> {
         self.modify_task(move |mut task| {
-            task.pause = pause;
+            task.status = Some(status);
+            task.pause = true;
             task
         })
         .await
     }
 
-    /// Set pause to true and assign a signal in a single modify_task call.
-    pub async fn set_pause_with_signal(&self, signal: Signal) -> anyhow::Result<()> {
+    /// Pause the task, set a status message, and assign a signal — all atomically.
+    /// It is not possible to set pause without an explanation.
+    pub async fn set_pause_with_status_and_signal(
+        &self,
+        status: String,
+        signal: Signal,
+    ) -> anyhow::Result<()> {
         self.modify_task(move |mut task| {
+            task.status = Some(status);
             task.pause = true;
             task.signal = Some(signal);
             task
@@ -863,6 +880,7 @@ mod comment_model_tests {
                 caller_pipeline_run_id,
                 report_name,
                 prompt_name,
+                url: None,
             });
             Ok(())
         }
@@ -894,7 +912,10 @@ mod comment_model_tests {
             }
         }
 
-        async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+        async fn list_tasks(
+            &self,
+            _allowed_users: &[String],
+        ) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
             Ok(vec![])
         }
 
@@ -921,7 +942,7 @@ mod comment_model_tests {
                 context: TaskContext::default(),
                 signal: None,
                 stack: vec![],
-                error: None,
+                status: None,
                 pause: false,
                 confirm: false,
                 pipeline_run_id: 0,
@@ -1034,27 +1055,27 @@ mod comment_model_tests {
             1,
         );
 
-        // stop_with_error stores the error in the task's error field
+        // stop_with_error stores the status in the task's status field
         let _ = planner.stop_with_error_impl("oops").await;
 
         let weak = task_backend.get_task(id).await.unwrap();
         let task = weak.snapshot(false).await.unwrap();
-        let error = task.error.as_deref().expect("error should be set");
+        let status = task.status.as_deref().expect("status should be set");
         assert!(
-            error.starts_with(zbobr_api::ERROR_PREFIX),
-            "error should start with ❌, got: {error:?}"
+            status.starts_with(zbobr_api::ERROR_PREFIX),
+            "status should start with ❌, got: {status:?}"
         );
         assert!(
-            error.contains("oops"),
-            "error should contain 'oops', got: {error:?}"
+            status.contains("oops"),
+            "status should contain 'oops', got: {status:?}"
         );
         // timestamp is the token immediately after ❌: starts with a digit (YYYY-...)
-        let after_icon = error
+        let after_icon = status
             .trim_start_matches(zbobr_api::ERROR_PREFIX)
             .trim_start();
         assert!(
             after_icon.starts_with(|c: char| c.is_ascii_digit()),
-            "error should contain a timestamp after ❌, got: {error:?}"
+            "status should contain a timestamp after ❌, got: {status:?}"
         );
         assert!(task.pause, "stop_with_error should set pause flag");
     }

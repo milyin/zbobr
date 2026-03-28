@@ -136,6 +136,13 @@ struct IssueResponse {
     body: Option<String>,
     state: String,
     labels: Vec<IssueLabel>,
+    #[serde(default)]
+    user: Option<IssueUser>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct IssueUser {
+    login: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -147,6 +154,7 @@ struct IssueLabel {
 struct CommentResponse {
     body: Option<String>,
     created_at: Option<String>,
+    html_url: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -586,7 +594,7 @@ impl ZbobrTaskBackendGithubImpl {
     /// Parse an IssueResponse into a Task.
     fn issue_to_task(issue: IssueResponse) -> anyhow::Result<Task> {
         let body = issue.body.unwrap_or_default();
-        let (description, params_map, error, context) = parse_description_full(&body)?;
+        let (description, params_map, status, context) = parse_description_full(&body)?;
 
         // Promoted fields: read from params_map where they were stored
         let destination_repository = params_map.get(PARAM_DESTINATION_REPOSITORY).cloned();
@@ -629,7 +637,7 @@ impl ZbobrTaskBackendGithubImpl {
             context,
             signal,
             stack,
-            error,
+            status,
             pause,
             confirm,
             pipeline_run_id: params_map
@@ -804,6 +812,7 @@ impl ZbobrTaskBackendGithubImpl {
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
     ) -> anyhow::Result<Task> {
         let task = self.fetch_task(id).await?;
+        let comments = self.get_task_comments_internal(id).await?;
         let url_prefix = self.report_url_prefix(id);
         let make_url = |filename: &str| -> String {
             match &url_prefix {
@@ -816,8 +825,9 @@ impl ZbobrTaskBackendGithubImpl {
             serialize_description_full(
                 &task.description,
                 &string_params,
-                &task.error,
+                &task.status,
                 &task.context,
+                &comments,
                 Some(&make_url),
             )
         });
@@ -828,8 +838,9 @@ impl ZbobrTaskBackendGithubImpl {
         let new_description = serialize_description_full(
             &task.description,
             &string_params,
-            &task.error,
+            &task.status,
             &task.context,
+            &comments,
             Some(&make_url),
         );
 
@@ -851,8 +862,9 @@ impl ZbobrTaskBackendGithubImpl {
                     serialize_description_full(
                         &current_task.description,
                         &sp,
-                        &current_task.error,
+                        &current_task.status,
                         &current_task.context,
+                        &comments,
                         Some(&make_url),
                     )
                 }
@@ -927,6 +939,7 @@ impl ZbobrTaskBackendGithubImpl {
                     caller_pipeline_run_id: tag.caller_pipeline_run_id,
                     report_name,
                     prompt_name: None,
+                    url: c.html_url,
                 }
             })
             .collect())
@@ -1282,7 +1295,7 @@ impl TaskBackend for TaskBackendGithub {
         }))
     }
 
-    async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+    async fn list_tasks(&self, allowed_users: &[String]) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
         self.inner.await_all_cooling().await;
 
         let (owner, repo) = self.inner.parse_repo()?;
@@ -1300,6 +1313,13 @@ impl TaskBackend for TaskBackendGithub {
 
         let mut result: Vec<Box<dyn TaskWeak>> = Vec::new();
         for issue in issues {
+            // Filter by allowed_users (matched against issue author login).
+            if !allowed_users.is_empty() {
+                let author = issue.user.as_ref().map(|u| u.login.as_str()).unwrap_or("");
+                if !allowed_users.iter().any(|u| u == author) {
+                    continue;
+                }
+            }
             let id = issue.number;
             // Reuse list payload as the saved snapshot until a caller asks for refresh.
             match ZbobrTaskBackendGithubImpl::issue_to_task(issue) {
@@ -1330,6 +1350,7 @@ impl TaskBackend for TaskBackendGithub {
             &HashMap::new(),
             &None,
             &TaskContext::default(),
+            &[],
             None,
         );
 
@@ -1399,6 +1420,7 @@ mod flag_tests {
             body: Some(body),
             state: "open".to_string(),
             labels: vec![],
+            user: None,
         }
     }
 
@@ -1434,7 +1456,7 @@ mod flag_tests {
             context: TaskContext::default(),
             signal: None,
             stack: vec![],
-            error: None,
+            status: None,
             pause: true,
             confirm: true,
             pipeline_run_id: 0,

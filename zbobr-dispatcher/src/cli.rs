@@ -359,7 +359,14 @@ impl<'a> CliStageRunner<'a> {
                     task.stage_count,
                     task.max_stage_count
                 );
-                task_session.set_pause(true).await?;
+                let status = format_error_status(
+                    &self.zbobr,
+                    &format!(
+                        "Stage count limit ({}) reached - auto-paused",
+                        task.max_stage_count
+                    ),
+                );
+                task_session.set_pause_with_status(status).await?;
                 return Ok(());
             }
         }
@@ -621,7 +628,14 @@ async fn handle_call_stage(
                 task.stage_count,
                 task.max_stage_count
             );
-            task_session.set_pause(true).await?;
+            let status = format_error_status(
+                zbobr,
+                &format!(
+                    "Stage count limit ({}) reached - auto-paused",
+                    task.max_stage_count
+                ),
+            );
+            task_session.set_pause_with_status(status).await?;
             return Ok(());
         }
     }
@@ -846,8 +860,12 @@ pub async fn process_task(
                         .start_stage_for_pipeline(&pipeline)
                         .map(|(name, _)| name.to_string())
                         .unwrap_or_default();
+                    let status = format_error_status(
+                        zbobr,
+                        "Pipeline failed at root — manual intervention required",
+                    );
                     task_session
-                        .set_pause_with_signal(Signal::go(first_stage))
+                        .set_pause_with_status_and_signal(status, Signal::go(first_stage))
                         .await?;
                     tracing::info!("Task #{}: pipeline failed at root — paused", task.id);
                 }
@@ -941,7 +959,8 @@ pub async fn run_manager_loop(
             last_cleanup = std::time::Instant::now();
         }
 
-        let all_weak = match task_backend.list_tasks().await {
+        let allowed_users = zbobr.config().effective_allowed_users();
+        let all_weak = match task_backend.list_tasks(&allowed_users).await {
             Ok(tasks) => tasks,
             Err(e) => {
                 tracing::error!("Failed to list tasks: {e}");
@@ -1046,7 +1065,7 @@ pub async fn run_manager_loop(
                             pipeline_name, stage_name, task.id
                         );
                         tracing::error!("{msg}");
-                        set_task_error_with_log(zbobr, task.id, "stage run failure", &msg).await;
+                        set_task_status_with_log(zbobr, task.id, "stage run failure", &msg).await;
                     }
                     session_run = true;
                     break;
@@ -1096,8 +1115,15 @@ pub async fn run_manager_loop(
                                     .start_stage_for_pipeline(&pipeline)
                                     .map(|(name, _)| name.to_string())
                                     .unwrap_or_default();
+                                let status = format_error_status(
+                                    zbobr,
+                                    "Pipeline failed at root — manual intervention required",
+                                );
                                 if let Err(e) = task_session
-                                    .set_pause_with_signal(Signal::go(first_stage))
+                                    .set_pause_with_status_and_signal(
+                                        status,
+                                        Signal::go(first_stage),
+                                    )
                                     .await
                                 {
                                     tracing::error!("Failed to pause task #{}: {e}", task.id);
@@ -1228,7 +1254,7 @@ async fn detect_and_handle_worktree(
         Err(e) => {
             let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
             tracing::error!("{msg}");
-            set_task_error_with_log(zbobr, task_id, "workspace preparation", &msg).await;
+            set_task_status_with_log(zbobr, task_id, "workspace preparation", &msg).await;
             return Err(anyhow::anyhow!(msg));
         }
     };
@@ -1297,11 +1323,11 @@ async fn handle_merge_conflict(
     // Recursion guard: if already inside the merge pipeline, pause
     if pipeline_name.as_str() == Pipeline::MERGE {
         tracing::error!("Task #{task_id}: merge conflict inside merge pipeline — pausing");
-        let msg = "Merge conflict inside merge pipeline. Manual intervention required.".to_string();
-        set_task_error_with_log(zbobr, task_id, "merge conflict recursion guard", &msg).await;
+        let msg = "Merge conflict inside merge pipeline. Manual intervention required.";
+        let status = format_error_status(zbobr, msg);
         let stage = stage_name.to_string();
         task_session
-            .set_pause_with_signal(Signal::go(stage))
+            .set_pause_with_status_and_signal(status, Signal::go(stage))
             .await?;
         task_session.set_state(pending_state.clone()).await?;
         return Ok(WorktreeResult::Paused);
@@ -1321,15 +1347,21 @@ async fn handle_merge_conflict(
     Ok(WorktreeResult::HandlerCalled)
 }
 
-async fn set_task_error_with_log(
+fn format_error_status(zbobr: &ZbobrDispatcher, message: &str) -> String {
+    let ts = chrono::Utc::now().with_timezone(&zbobr.config().fixed_offset());
+    zbobr_api::format_status(zbobr_api::ERROR_PREFIX, &ts, message)
+}
+
+async fn set_task_status_with_log(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
     context: &str,
     message: &str,
 ) {
     let role_session = zbobr.role_session(task_id);
-    if let Err(set_err) = role_session.set_error(Some(message.to_string())).await {
-        tracing::warn!("Failed to set task error for task #{task_id} ({context}): {set_err}");
+    let status = format_error_status(zbobr, message);
+    if let Err(set_err) = role_session.set_status(Some(status)).await {
+        tracing::warn!("Failed to set task status for task #{task_id} ({context}): {set_err}");
     }
 }
 
@@ -1372,7 +1404,7 @@ async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Re
         Err(e) => {
             let msg = format!("Could not ensure PR URL for task #{task_id}: {e}");
             tracing::error!("{msg}");
-            set_task_error_with_log(zbobr, task_id, "ensure PR URL", &msg).await;
+            set_task_status_with_log(zbobr, task_id, "ensure PR URL", &msg).await;
             Err(anyhow::anyhow!(msg))
         }
     }
@@ -1520,9 +1552,12 @@ async fn finalize_stage_session(
             tracing::warn!("Stash/push failed during error handling for task #{task_id}: {e}");
         }
         let error_msg = format!("Execution failed: {e}");
-        set_task_error_with_log(zbobr, task_id, "tool execution", &error_msg).await;
+        let status = format_error_status(zbobr, &error_msg);
         let stage = stage_name.to_string();
-        if let Err(pause_err) = task_session.set_pause_with_signal(Signal::go(stage)).await {
+        if let Err(pause_err) = task_session
+            .set_pause_with_status_and_signal(status, Signal::go(stage))
+            .await
+        {
             tracing::error!("Failed to set pause for task #{task_id}: {pause_err}");
         }
         task_session.set_state(pending_state.clone()).await?;
@@ -1537,9 +1572,12 @@ async fn finalize_stage_session(
     {
         tracing::error!("Stash/push failed for task #{task_id}: {e}");
         let msg = format!("Stash/push failed: {e}");
-        set_task_error_with_log(zbobr, task_id, "stash/push", &msg).await;
+        let status = format_error_status(zbobr, &msg);
         let stage = stage_name.to_string();
-        if let Err(pause_err) = task_session.set_pause_with_signal(Signal::go(stage)).await {
+        if let Err(pause_err) = task_session
+            .set_pause_with_status_and_signal(status, Signal::go(stage))
+            .await
+        {
             tracing::error!(
                 "Failed to pause task #{task_id} after stash/push failure: {pause_err}"
             );
@@ -1576,7 +1614,10 @@ async fn finalize_stage_session(
                 task_session.set_signal(Some(Signal::Return)).await?;
             }
             SequentialSignal::PauseThenSignal(signal) => {
-                task_session.set_pause_with_signal(signal).await?;
+                let status = format_error_status(zbobr, "Auto-pause: stage completed");
+                task_session
+                    .set_pause_with_status_and_signal(status, signal)
+                    .await?;
             }
         }
     }

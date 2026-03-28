@@ -48,7 +48,7 @@ struct TaskFile {
     #[serde(default)]
     stack: Vec<StackEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
+    status: Option<String>,
     #[serde(default)]
     pipeline_run_id: u64,
     #[serde(default)]
@@ -84,7 +84,7 @@ impl TaskFile {
             context: self.context.clone(),
             signal: self.signal.clone(),
             stack: self.stack.clone(),
-            error: self.error.clone(),
+            status: self.status.clone(),
             pause: self.pause,
             confirm: self.confirm,
             pipeline_run_id: self.pipeline_run_id,
@@ -111,7 +111,7 @@ impl TaskFile {
             context: task.context.clone(),
             signal: task.signal.clone(),
             stack: task.stack.clone(),
-            error: task.error.clone(),
+            status: task.status.clone(),
             pipeline_run_id: task.pipeline_run_id,
             stage_count: task.stage_count,
             max_stage_count: task.max_stage_count,
@@ -494,6 +494,7 @@ impl TaskMut for FsTaskMut {
             caller_pipeline_run_id,
             report_name,
             prompt_name,
+            url: None,
         };
 
         comments.push(new_comment);
@@ -525,7 +526,10 @@ impl TaskBackend for ZbobrTaskBackendFs {
         anyhow::bail!("ZbobrTaskBackendFs must be wrapped in Arc and accessed via ArcTaskBackendFs")
     }
 
-    async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+    async fn list_tasks(
+        &self,
+        _allowed_users: &[String],
+    ) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
         anyhow::bail!("ZbobrTaskBackendFs must be wrapped in Arc and accessed via ArcTaskBackendFs")
     }
 
@@ -550,7 +554,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             context: TaskContext::default(),
             signal: None,
             stack: vec![],
-            error: None,
+            status: None,
             pause: false,
             confirm: false,
             pipeline_run_id: 0,
@@ -638,7 +642,10 @@ impl TaskBackend for ArcTaskBackendFs {
         }))
     }
 
-    async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
+    async fn list_tasks(
+        &self,
+        _allowed_users: &[String],
+    ) -> anyhow::Result<Vec<Box<dyn TaskWeak>>> {
         let task_ids = self.inner.list_task_files().await?;
         let mut result: Vec<Box<dyn TaskWeak>> = Vec::new();
 

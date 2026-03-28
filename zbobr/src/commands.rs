@@ -287,7 +287,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
         context: TaskContext::default(),
         signal: None,
         stack: vec![],
-        error: None,
+        status: None,
         pause: false,
         confirm: false,
         pipeline_run_id: 0,
@@ -310,6 +310,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
             caller_pipeline_run_id: None,
             report_name: None,
             prompt_name: None,
+            url: None,
         },
         Comment {
             timestamp: "2025-01-01T01:00:00Z".parse().unwrap(),
@@ -324,6 +325,7 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
             caller_pipeline_run_id: None,
             report_name: None,
             prompt_name: None,
+            url: None,
         },
     ];
     (task, comments)
@@ -386,7 +388,7 @@ async fn run_task_subcommand(
                 .as_deref()
                 .map(str::parse::<zbobr_api::State>)
                 .transpose()?;
-            let weak_tasks = task_backend.list_tasks().await?;
+            let weak_tasks = task_backend.list_tasks(&[]).await?;
             let mut tasks = Vec::new();
             for w in &weak_tasks {
                 let task = w.snapshot(false).await?;
@@ -415,7 +417,7 @@ async fn run_task_subcommand(
                 let discussion = weak.get_comments().await?;
                 print_task(&task, &discussion);
             } else {
-                let weak_tasks = task_backend.list_tasks().await?;
+                let weak_tasks = task_backend.list_tasks(&[]).await?;
                 let mut tasks = Vec::new();
                 for w in &weak_tasks {
                     tasks.push(w.snapshot(false).await?);
