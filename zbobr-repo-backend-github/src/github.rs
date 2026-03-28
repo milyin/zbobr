@@ -11,6 +11,11 @@ use zbobr_utility::{git, git_check, git_check_env, git_env, git_output};
 
 use crate::config::ZbobrRepoBackendGithubConfig;
 
+struct ExistingPr {
+    html_url: String,
+    number: u64,
+}
+
 /// Convert an octocrab error into an anyhow::Error with detailed information.
 fn octocrab_to_anyhow(e: octocrab::Error) -> anyhow::Error {
     match e {
@@ -498,49 +503,6 @@ impl ZbobrRepoBackendGithub {
         Ok(())
     }
 
-    /// Ensure a PR exists on GitHub for the given work branch (API-only, no push).
-    /// Creates a draft PR or silently succeeds if one already exists (422).
-    async fn ensure_pr_exists(
-        &self,
-        pr_repo: &str,
-        work_branch: &str,
-        base_branch: &str,
-    ) -> anyhow::Result<()> {
-        let pr_payload = serde_json::json!({
-            "title": work_branch,
-            "head": work_branch,
-            "base": base_branch,
-            "body": "",
-        });
-
-        #[derive(serde::Deserialize)]
-        struct PrResponse {
-            #[allow(dead_code)]
-            html_url: String,
-        }
-
-        let pr_endpoint = format!("/repos/{pr_repo}/pulls");
-
-        let create_result: Result<PrResponse, octocrab::Error> = self
-            .octocrab
-            .post(pr_endpoint.clone(), Some(&pr_payload))
-            .await;
-
-        match create_result {
-            Ok(_pr) => {
-                tracing::info!("Created PR for {work_branch} in {pr_repo}");
-            }
-            Err(octocrab::Error::GitHub { ref source, .. })
-                if source.status_code.as_u16() == 422 =>
-            {
-                tracing::info!("PR already exists for {work_branch} in {pr_repo}");
-            }
-            Err(e) => return Err(octocrab_to_anyhow(e)),
-        }
-
-        Ok(())
-    }
-
     /// Cross-org only: sync the fork's base branch with upstream via merge-upstream API.
     /// Fetches both remotes afterwards so local refs are current.
     async fn sync_fork_base_with_upstream(
@@ -738,10 +700,11 @@ impl ZbobrRepoBackendGithub {
         full_repo: &str,
         head: &str,
         base: Option<&str>,
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<ExistingPr> {
         #[derive(serde::Deserialize)]
         struct PrListItem {
             html_url: String,
+            number: u64,
         }
 
         // GitHub's list-PRs API requires "owner:branch" format for the head
@@ -765,14 +728,35 @@ impl ZbobrRepoBackendGithub {
             .await
             .map_err(octocrab_to_anyhow)?;
 
-        prs.into_iter().next().map(|pr| pr.html_url).ok_or_else(|| {
-            anyhow::anyhow!(
-                "No existing open PR found for head '{}' -> base '{:?}' in {}",
-                head,
-                base,
-                full_repo
-            )
-        })
+        prs.into_iter()
+            .next()
+            .map(|pr| ExistingPr {
+                html_url: pr.html_url,
+                number: pr.number,
+            })
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No existing open PR found for head '{}' -> base '{:?}' in {}",
+                    head,
+                    base,
+                    full_repo
+                )
+            })
+    }
+
+    async fn update_pr_body(
+        &self,
+        pr_repo: &str,
+        pr_number: u64,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        let endpoint = format!("/repos/{pr_repo}/pulls/{pr_number}");
+        let patch_payload = serde_json::json!({ "body": body });
+        self.octocrab
+            .patch::<serde_json::Value, _, _>(&endpoint, Some(&patch_payload))
+            .await
+            .map_err(octocrab_to_anyhow)?;
+        Ok(())
     }
 }
 
@@ -795,7 +779,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
     ///
     /// Phase 5 – Ensure PR exists:
     ///   If remote work branch doesn't exist: create placeholder commit, regular push, create PR.
-    ///   If remote work branch exists: just ensure_pr_exists (API only).
+    ///   If remote work branch exists: call ensure_pr_url (API only).
     ///
     /// Phase 6 – Abort any in-progress merge from a previous failed run.
     ///
@@ -868,9 +852,9 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         )
         .await?;
 
-        // Phase 5: Ensure PR exists
+        // Phase 5: Push if new branch
         if !remote_exists {
-            // Need to push first so the PR can be created
+            // Need to push first so the PR can be created later (by ensure_pr_url)
             tracing::info!(
                 "Remote work branch does not exist — creating placeholder commit and pushing"
             );
@@ -892,13 +876,6 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
 
             // Regular push (not force) — branch is new, so no conflict possible
             Self::push_worktree_to_remote(workspace_path, &push_remote, work_branch, &env).await?;
-
-            // Now create the PR
-            self.ensure_pr_exists(&pr_repo, work_branch, base_branch)
-                .await?;
-        } else {
-            self.ensure_pr_exists(&pr_repo, work_branch, base_branch)
-                .await?;
         }
 
         // Phase 6: Abort any in-progress merge from a previous failed run
@@ -985,8 +962,12 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         };
 
         // Find existing PR or create a new one
-        if let Ok(url) = self.find_existing_pr(&pr_repo, work_branch, None).await {
-            return Ok(url);
+        if let Ok(existing) = self.find_existing_pr(&pr_repo, work_branch, None).await {
+            if let Some(body) = body {
+                tracing::info!("Updating body of existing PR #{} for {work_branch}", existing.number);
+                self.update_pr_body(&pr_repo, existing.number, body).await?;
+            }
+            return Ok(existing.html_url);
         }
 
         tracing::info!("No existing PR found for {work_branch}, creating one in {pr_repo}");
@@ -1013,8 +994,14 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
                 if source.status_code.as_u16() == 422 =>
             {
                 tracing::info!("PR already exists (422), looking up existing PR");
-                self.find_existing_pr(&pr_repo, work_branch, Some(base_branch))
-                    .await
+                let existing = self
+                    .find_existing_pr(&pr_repo, work_branch, Some(base_branch))
+                    .await?;
+                if let Some(body) = body {
+                    tracing::info!("Updating body of existing PR #{} for {work_branch}", existing.number);
+                    self.update_pr_body(&pr_repo, existing.number, body).await?;
+                }
+                Ok(existing.html_url)
             }
             Err(e) => Err(octocrab_to_anyhow(e)),
         }
