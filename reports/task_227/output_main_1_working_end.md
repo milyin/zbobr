@@ -1,0 +1,1 @@
+The build had already succeeded in the foreground — the background task notification is stale (it was the initial long build that I had already observed complete successfully with `Finished \`dev\` profile`). The implementation is complete and committed.
