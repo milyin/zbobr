@@ -8,6 +8,7 @@
 
 mod stage_title;
 
+use chrono::{DateTime, FixedOffset};
 pub use stage_title::format_timestamp;
 
 use std::fmt;
@@ -266,17 +267,16 @@ const COMPACT_COMMENT_MAX_LEN: usize = 80;
 #[derive(Debug, Clone)]
 struct MdCompactComment {
     text: String,
-    timestamp: chrono::DateTime<chrono::FixedOffset>,
+    timestamp: DateTime<FixedOffset>,
     url: Option<String>,
 }
 
 impl MdCompactComment {
     fn from_comment(c: &Comment, for_prompt: bool) -> Self {
-        let first_line = c.body.lines().next().unwrap_or("").trim();
-        let comment_text = if for_prompt || first_line.chars().count() <= COMPACT_COMMENT_MAX_LEN {
-            first_line.to_string()
+        let comment_text = if for_prompt || c.body.len() <= COMPACT_COMMENT_MAX_LEN {
+            c.body.to_string()
         } else {
-            let truncated: String = first_line.chars().take(COMPACT_COMMENT_MAX_LEN).collect();
+            let truncated: String = c.body.chars().take(COMPACT_COMMENT_MAX_LEN).collect();
             format!("{}...", truncated)
         };
 
@@ -332,12 +332,9 @@ impl fmt::Display for MdStage {
         let mut ordered = self.records.clone();
         if let Some(non_checkbox_idx) = ordered
             .iter()
-            .position(|r| !matches!(r.record_type, MdRecordType::CheckboxUnchecked | MdRecordType::CheckboxChecked))
-        {
-            if non_checkbox_idx != 0 {
+            .position(|r| !matches!(r.record_type, MdRecordType::CheckboxUnchecked | MdRecordType::CheckboxChecked)) && non_checkbox_idx != 0 {
                 let non_checkbox = ordered.remove(non_checkbox_idx);
                 ordered.insert(0, non_checkbox);
-            }
         }
 
         for record in ordered {
@@ -403,10 +400,9 @@ impl MdStage {
             .into_iter()
             .flatten()
         {
-            if !link.starts_with("http://") && !link.starts_with("https://") {
-                if let Some(f) = report_url {
-                    *link = f(link);
-                }
+            if !link.starts_with("http://") && !link.starts_with("https://") &&
+                let Some(f) = report_url {
+                *link = f(link);
             }
         }
 
@@ -561,7 +557,7 @@ impl MdContext {
         for_prompt: bool,
         report_url: Option<&dyn Fn(&str) -> String>,
     ) -> Self {
-        let mut events: Vec<(chrono::DateTime<chrono::FixedOffset>, MdEntry)> = Vec::new();
+        let mut events: Vec<(DateTime<FixedOffset>, MdEntry)> = Vec::new();
 
         for stage in &ctx.stages {
             events.push((
@@ -806,11 +802,9 @@ mod tests {
                 .records
                 .iter()
                 .position(|r| !matches!(r.record_type, ContextRecordType::Checkbox(_)))
-            {
-                if pos != 0 {
-                    let id = expected_ids.remove(pos);
-                    expected_ids.insert(0, id);
-                }
+                && pos != 0 {
+                let id = expected_ids.remove(pos);
+                expected_ids.insert(0, id);
             }
 
             let parsed_ids: Vec<u64> = parsed_stage.records.iter().map(|r| r.id).collect();
