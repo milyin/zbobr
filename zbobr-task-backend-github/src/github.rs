@@ -870,8 +870,20 @@ impl ZbobrTaskBackendGithubImpl {
         })
         .await?;
 
+        let allowed_usernames = self.backend_config.allowed_usernames.as_deref();
+
         Ok(comments
             .into_iter()
+            .filter(|c| {
+                if let Some(usernames) = allowed_usernames {
+                    c.user
+                        .as_ref()
+                        .map(|u| usernames.contains(&u.login))
+                        .unwrap_or(false)
+                } else {
+                    true
+                }
+            })
             .map(|c| {
                 let body = c.body.unwrap_or_default();
                 let timestamp: chrono::DateTime<chrono::FixedOffset> = c
