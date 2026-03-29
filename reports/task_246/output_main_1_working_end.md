@@ -1,0 +1,1 @@
+The task is complete. I added comment filtering by `allowed_usernames` in `get_task_comments_internal()` — the same pattern already used in `list_tasks()`. When `allowed_usernames` is configured, only comments from those users are returned; otherwise all comments pass through unchanged.
