@@ -247,7 +247,6 @@ impl ZbobrDispatcher {
         tracker: Arc<std::sync::Mutex<Option<zbobr_api::config_tools::McpTool>>>,
         pipeline_name: String,
         pipeline_run_id: u64,
-        prompt_holder: Arc<std::sync::Mutex<Option<String>>>,
     ) -> RoleSession {
         RoleSession::with_shared_tracker(
             Arc::clone(self),
@@ -255,7 +254,6 @@ impl ZbobrDispatcher {
             tracker,
             pipeline_name,
             pipeline_run_id,
-            prompt_holder,
         )
     }
 }

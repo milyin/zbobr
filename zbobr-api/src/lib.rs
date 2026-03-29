@@ -18,9 +18,8 @@ pub use config::{
 };
 pub use context::format_timestamp;
 pub use task::{
-    Comment, CommentTag, ContextRecord, ContextRecordType, HistoryRecordType, Model, Pipeline,
+    Comment, ContextRecord, ContextRecordType, HistoryRecordType, Model, Pipeline,
     Role, Signal, StackEntry, Stage, StageContext, StageInfo, State, Task, TaskContext,
-    TaskIdentity, Tool, classify_comment, comment_tag, extract_repo_name, extract_summary,
-    filter_comments_for_run,
+    TaskIdentity, Tool, classify_comment, extract_repo_name
 };
 pub use tool_executor::{ExecutorOutput, ToolExecutor, format_command_for_log};

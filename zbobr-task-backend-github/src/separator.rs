@@ -224,21 +224,18 @@ mod tests {
                         record_type: ContextRecordType::Checkbox(false),
                         brief: "implement feature".to_string(),
                         report_link: None,
-                        parent_record_id: None,
                     },
                     ContextRecord {
                         id: 2,
                         record_type: ContextRecordType::Checkbox(true),
                         brief: "write tests".to_string(),
                         report_link: None,
-                        parent_record_id: None,
                     },
                     ContextRecord {
                         id: 3,
                         record_type: ContextRecordType::Success,
                         brief: "All done".to_string(),
                         report_link: Some("reports/success.md".to_string()),
-                        parent_record_id: None,
                     },
                 ],
             }],
@@ -399,7 +396,6 @@ mod tests {
                     record_type: ContextRecordType::Checkbox(false),
                     brief: "original item".to_string(),
                     report_link: None,
-                    parent_record_id: None,
                 }],
             }],
         };
@@ -424,7 +420,6 @@ mod tests {
                     record_type: ContextRecordType::Checkbox(false),
                     brief: "their change".to_string(),
                     report_link: None,
-                    parent_record_id: None,
                 }],
             }],
         };
@@ -449,7 +444,6 @@ mod tests {
                     record_type: ContextRecordType::Checkbox(true),
                     brief: "our change".to_string(),
                     report_link: None,
-                    parent_record_id: None,
                 }],
             }],
         };
