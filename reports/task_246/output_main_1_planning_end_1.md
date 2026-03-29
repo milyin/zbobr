@@ -1,0 +1,1 @@
+Plan finalized. The worker will add a `.filter()` step in `get_task_comments_internal()` that mirrors the `allowed_usernames` guard already used in `list_tasks()`.
