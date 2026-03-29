@@ -7,9 +7,8 @@ use std::{
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use zbobr_api::{
-    Comment, CommentTag, Model, Signal, Task, Tool,
+    Comment, Signal, Task,
     backend::TaskBackend,
-    comment_tag,
     task::{Pipeline, StackEntry, Stage, State, TaskContext},
 };
 
@@ -167,58 +166,6 @@ struct RepoResponse {
 #[derive(Debug, serde::Deserialize)]
 struct ContentResponse {
     content: Option<String>,
-}
-
-/// Extract report filename from a trailing markdown link in comment body.
-///
-/// Looks for a last line matching `[{filename}]({url})` where the url contains
-/// `/reports/task_`. Returns (clean_body, Some(filename)) or (original, None).
-fn extract_report_link(text: &str) -> (String, Option<String>) {
-    let trimmed = text.trim_end();
-    if let Some(last_newline) = trimmed.rfind('\n') {
-        let last_line = trimmed[last_newline + 1..].trim();
-        if let Some(report_name) = parse_report_link_line(last_line) {
-            let clean = trimmed[..last_newline].trim_end().to_string();
-            return (clean, Some(report_name));
-        }
-    } else if let Some(report_name) = parse_report_link_line(trimmed) {
-        return (String::new(), Some(report_name));
-    }
-    (text.to_string(), None)
-}
-
-/// Parse a single line as a report link: `[{filename}]({url containing /reports/task_})`.
-fn parse_report_link_line(line: &str) -> Option<String> {
-    let line = line.trim();
-    if !line.starts_with('[') {
-        return None;
-    }
-    let close_bracket = line.find(']')?;
-    let filename = &line[1..close_bracket];
-    let rest = &line[close_bracket + 1..];
-    if !rest.starts_with('(') || !rest.ends_with(')') {
-        return None;
-    }
-    let url = &rest[1..rest.len() - 1];
-    if url.contains("/reports/task_") {
-        Some(filename.to_string())
-    } else {
-        None
-    }
-}
-
-/// Format a clickable markdown link to a report file in the GitHub repo.
-fn format_report_link(
-    owner: &str,
-    repo: &str,
-    branch: &str,
-    reports_path: &str,
-    task_id: u64,
-    filename: &str,
-) -> String {
-    format!(
-        "\n\n[{filename}](https://github.com/{owner}/{repo}/blob/{branch}/{reports_path}/task_{task_id}/{filename})"
-    )
 }
 
 // ============================================================================
@@ -910,106 +857,22 @@ impl ZbobrTaskBackendGithubImpl {
                         chrono::DateTime::parse_from_rfc3339("1970-01-01T00:00:00Z").unwrap()
                     });
 
-                let mut parts = body.splitn(2, '\n');
-                let tag_line = parts.next().unwrap_or("");
-                let rest = parts.next();
-
-                let (tag, raw_text) = match tag_line.parse::<CommentTag>() {
-                    Ok(t) => {
-                        let body_text = rest.unwrap_or("").trim_start().to_string();
-                        (t, body_text)
-                    }
-                    Err(_) => (
-                        CommentTag::new(String::new(), 0, String::new(), String::new(), None, None),
-                        body.clone(),
-                    ),
-                };
-
-                let (text, report_name) = extract_report_link(&raw_text);
-
                 let username = c
                     .user
                     .as_ref()
                     .map(|u| u.login.clone())
-                    .unwrap_or_else(|| tag.hostname.clone());
+                    .unwrap_or("unknown".to_string());
 
                 Comment {
                     timestamp,
-                    stage: tag.stage,
                     username,
-                    tool: tag.tool,
-                    model: tag.model,
-                    text,
-                    pipeline: tag.pipeline,
-                    pipeline_run_id: tag.pipeline_run_id,
-                    caller_pipeline: tag.caller_pipeline,
-                    caller_pipeline_run_id: tag.caller_pipeline_run_id,
-                    report_name,
-                    prompt_name: None,
+                    body: body.clone(),
                     url: c.html_url,
                 }
             })
             .collect())
     }
 
-    /// Internal: post a task comment.
-    async fn post_task_comment_internal(
-        &self,
-        id: u64,
-        stage: &str,
-        hostname: &str,
-        tool: Option<Tool>,
-        model: Option<Model>,
-        body: &str,
-        pipeline: &str,
-        pipeline_run_id: u64,
-        caller_pipeline: Option<&str>,
-        caller_pipeline_run_id: Option<u64>,
-        report_name: Option<&str>,
-        prompt_name: Option<&str>,
-    ) -> anyhow::Result<()> {
-        let (owner, repo) = self.parse_repo()?;
-
-        let mut tag = CommentTag::new(
-            pipeline.to_string(),
-            pipeline_run_id,
-            stage.to_string(),
-            hostname.to_string(),
-            tool,
-            model,
-        );
-        if let (Some(cp), Some(cr)) = (caller_pipeline, caller_pipeline_run_id) {
-            tag = tag.with_caller(cp.to_string(), cr);
-        }
-
-        let reports_branch = self.reports_branch().unwrap_or("main");
-        let reports_path = self.reports_path();
-
-        let mut body_extended = body.to_string();
-        if let Some(rn) = report_name {
-            body_extended = format!(
-                "{body_extended}{}",
-                format_report_link(owner, repo, reports_branch, reports_path, id, rn)
-            );
-        }
-        if let Some(pn) = prompt_name {
-            body_extended = format!(
-                "{body_extended}{}",
-                format_report_link(owner, repo, reports_branch, reports_path, id, pn)
-            );
-        }
-
-        let formatted_body = format!("{}\n\n{}", tag, body_extended);
-
-        retry_github("create issue comment", || async {
-            self.octocrab
-                .issues(owner, repo)
-                .create_comment(id, &formatted_body)
-                .await
-        })
-        .await?;
-        Ok(())
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1207,53 +1070,6 @@ impl TaskMut for GithubTaskMut {
             Some(prefix) => format!("{prefix}{filename}"),
             None => filename.to_string(),
         }
-    }
-
-    async fn post_comment(
-        &self,
-        stage: &str,
-        hostname: &str,
-        tool: Option<Tool>,
-        model: Option<Model>,
-        body: &str,
-        pipeline: &str,
-        pipeline_run_id: u64,
-        caller_pipeline: Option<&str>,
-        caller_pipeline_run_id: Option<u64>,
-        report_text: Option<&str>,
-        prompt_text: Option<&str>,
-    ) -> anyhow::Result<()> {
-        let tag = comment_tag(body);
-        let report_name = if let Some(text) = report_text {
-            let base_name = format!("report_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
-            Some(self.backend.store_report(self.id, &base_name, text).await?)
-        } else {
-            None
-        };
-
-        let prompt_name = if let Some(text) = prompt_text {
-            let base_name = format!("prompt_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
-            Some(self.backend.store_report(self.id, &base_name, text).await?)
-        } else {
-            None
-        };
-
-        self.backend
-            .post_task_comment_internal(
-                self.id,
-                stage,
-                hostname,
-                tool,
-                model,
-                body,
-                pipeline,
-                pipeline_run_id,
-                caller_pipeline,
-                caller_pipeline_run_id,
-                report_name.as_deref(),
-                prompt_name.as_deref(),
-            )
-            .await
     }
 
     fn downgrade(self: Box<Self>) -> Box<dyn TaskWeak> {
@@ -1481,130 +1297,5 @@ mod flag_tests {
             params.get(PARAM_FLAG_CONFIRM).map(|s| s.as_str()),
             Some(PARAM_FLAG_VALUE_TRUE)
         );
-    }
-}
-
-#[cfg(test)]
-mod parse_tests {
-    use zbobr_api::task::CommentTag;
-
-    fn split_tag_body(input: &str) -> (CommentTag, String) {
-        let mut parts = input.splitn(2, '\n');
-        let tag_line = parts.next().unwrap_or("");
-        let rest = parts.next();
-
-        match tag_line.parse::<CommentTag>() {
-            Ok(tag) => {
-                let body = rest.unwrap_or("").trim_start().to_string();
-                (tag, body)
-            }
-            Err(_) => (
-                CommentTag::new(String::new(), 0, String::new(), String::new(), None, None),
-                input.to_string(),
-            ),
-        }
-    }
-
-    #[test]
-    fn test_parse_comment_tag_simple() {
-        let input = "// main:1:planning by localhost\n\nThis is the body";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.pipeline, "main");
-        assert_eq!(tag.pipeline_run_id, 1);
-        assert_eq!(tag.stage, "planning");
-        assert_eq!(tag.hostname, "localhost");
-        assert_eq!(body, "This is the body");
-    }
-
-    #[test]
-    fn test_parse_comment_tag_new_format() {
-        let input = "// main:3:reviewing by skynet\n\nRejected.";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.pipeline, "main");
-        assert_eq!(tag.pipeline_run_id, 3);
-        assert_eq!(tag.stage, "reviewing");
-        assert_eq!(tag.hostname, "skynet");
-        assert_eq!(body, "Rejected.");
-    }
-
-    #[test]
-    fn test_parse_comment_tag_no_tag_treated_as_empty() {
-        let input = "This is just text without a tag";
-        let (tag, body) = split_tag_body(input);
-        assert_eq!(tag.stage, "");
-        assert_eq!(tag.hostname, "");
-        assert_eq!(body, "This is just text without a tag");
-    }
-
-    #[test]
-    fn test_comment_tag_roundtrip() {
-        let tag = CommentTag::new(
-            "main".into(),
-            5,
-            "working".into(),
-            "host".into(),
-            None,
-            None,
-        );
-        let s = tag.to_string();
-        let parsed: CommentTag = s.parse().unwrap();
-        assert_eq!(parsed, tag);
-
-        let linked = CommentTag::new("sub".into(), 2, "done".into(), "host".into(), None, None)
-            .with_caller("main".into(), 1);
-        let linked_s = linked.to_string();
-        assert_eq!(linked_s, "// sub:2:done by host for main:1");
-        let linked_parsed: CommentTag = linked_s.parse().unwrap();
-        assert_eq!(linked_parsed, linked);
-    }
-}
-
-#[cfg(test)]
-mod report_link_tests {
-    use super::*;
-
-    #[test]
-    fn extract_no_link() {
-        let (text, name) = extract_report_link("just some text");
-        assert_eq!(text, "just some text");
-        assert_eq!(name, None);
-    }
-
-    #[test]
-    fn extract_with_link() {
-        let body = "[report_success] Brief\n\n[report_main_1_working_success.md](https://github.com/org/repo/blob/main/reports/task_5/report_main_1_working_success.md)";
-        let (text, name) = extract_report_link(body);
-        assert_eq!(text, "[report_success] Brief");
-        assert_eq!(name.as_deref(), Some("report_main_1_working_success.md"));
-    }
-
-    #[test]
-    fn extract_non_report_link() {
-        let body = "text\n\n[something](https://example.com/other)";
-        let (text, name) = extract_report_link(body);
-        assert_eq!(text, "text\n\n[something](https://example.com/other)");
-        assert_eq!(name, None);
-    }
-
-    #[test]
-    fn roundtrip() {
-        let original = "[report_success] Brief summary";
-        let filename = "report_main_1_working_success.md";
-        let with_link = format!(
-            "{}{}",
-            original,
-            format_report_link("org", "repo", "main", "reports", 5, filename)
-        );
-        let (text, name) = extract_report_link(&with_link);
-        assert_eq!(text, original);
-        assert_eq!(name.as_deref(), Some(filename));
-    }
-
-    #[test]
-    fn link_only_body() {
-        let body = "[report.md](https://github.com/o/r/blob/main/reports/task_1/report.md)";
-        let (text, name) = extract_report_link(body);
-        assert_eq!(text, "");
-        assert_eq!(name.as_deref(), Some("report.md"));
     }
 }

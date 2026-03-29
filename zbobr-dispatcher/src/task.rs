@@ -26,8 +26,6 @@ pub struct RoleSession {
     pipeline_name: String,
     /// Pipeline run ID for this session's comments.
     pipeline_run_id: u64,
-    /// Holds the prompt text for logging alongside comments.
-    prompt_text: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl RoleSession {
@@ -38,7 +36,6 @@ impl RoleSession {
             last_mapped_tool: Arc::new(std::sync::Mutex::new(None)),
             pipeline_name: String::new(),
             pipeline_run_id: 0,
-            prompt_text: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -48,7 +45,6 @@ impl RoleSession {
         tracker: Arc<std::sync::Mutex<Option<McpTool>>>,
         pipeline_name: String,
         pipeline_run_id: u64,
-        prompt_holder: Arc<std::sync::Mutex<Option<String>>>,
     ) -> Self {
         Self {
             zbobr,
@@ -56,7 +52,6 @@ impl RoleSession {
             last_mapped_tool: tracker,
             pipeline_name,
             pipeline_run_id,
-            prompt_text: prompt_holder,
         }
     }
 
@@ -147,36 +142,6 @@ impl RoleSession {
     pub async fn get_comments(&self) -> anyhow::Result<Vec<Comment>> {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         weak.get_comments().await
-    }
-
-    /// Post a comment immediately to the backend.
-    pub async fn post_comment(
-        &self,
-        body: &str,
-        stage: &str,
-        hostname: &str,
-        tool: Option<Tool>,
-        model: Option<Model>,
-        report_text: Option<&str>,
-    ) -> anyhow::Result<()> {
-        let prompt = self.prompt_text.lock().unwrap().clone();
-        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
-        let mutable = weak.upgrade().await?;
-        mutable
-            .post_comment(
-                stage,
-                hostname,
-                tool,
-                model,
-                body,
-                &self.pipeline_name,
-                self.pipeline_run_id,
-                None,
-                None,
-                report_text,
-                prompt.as_deref(),
-            )
-            .await
     }
 
     /// Get the current signal on the task.
@@ -617,38 +582,6 @@ impl TaskSession {
         })
         .await
     }
-
-    /// Post a structured comment directly to the backend.
-    pub async fn post_comment(
-        &self,
-        stage: &str,
-        hostname: &str,
-        tool: Option<Tool>,
-        model: Option<Model>,
-        body: &str,
-        pipeline: &str,
-        pipeline_run_id: u64,
-        caller_pipeline: Option<&str>,
-        caller_pipeline_run_id: Option<u64>,
-    ) -> anyhow::Result<()> {
-        let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
-        let mutable = weak.upgrade().await?;
-        mutable
-            .post_comment(
-                stage,
-                hostname,
-                tool,
-                model,
-                body,
-                pipeline,
-                pipeline_run_id,
-                caller_pipeline,
-                caller_pipeline_run_id,
-                None,
-                None,
-            )
-            .await
-    }
 }
 
 #[cfg(test)]
@@ -802,54 +735,6 @@ mod comment_model_tests {
 
         fn report_url(&self, filename: &str) -> String {
             filename.to_string()
-        }
-
-        async fn post_comment(
-            &self,
-            stage: &str,
-            hostname: &str,
-            tool: Option<Tool>,
-            model: Option<Model>,
-            body: &str,
-            pipeline: &str,
-            pipeline_run_id: u64,
-            caller_pipeline: Option<&str>,
-            caller_pipeline_run_id: Option<u64>,
-            report_text: Option<&str>,
-            prompt_text: Option<&str>,
-        ) -> anyhow::Result<()> {
-            let tag = comment_tag(body);
-            let report_name = if let Some(text) = report_text {
-                let base_name = format!("report_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
-                Some(self.mock_store_report(&base_name, text).await)
-            } else {
-                None
-            };
-
-            let prompt_name = if let Some(text) = prompt_text {
-                let base_name = format!("prompt_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
-                Some(self.mock_store_report(&base_name, text).await)
-            } else {
-                None
-            };
-
-            let mut comments = self.backend.comments.lock().await;
-            comments.entry(self.id).or_default().push(Comment {
-                timestamp: chrono::Utc::now().with_timezone(chrono::Local::now().offset()),
-                stage: stage.to_string(),
-                username: hostname.to_string(),
-                tool,
-                model,
-                text: body.to_string(),
-                pipeline: pipeline.to_string(),
-                pipeline_run_id,
-                caller_pipeline: caller_pipeline.map(str::to_string),
-                caller_pipeline_run_id,
-                report_name,
-                prompt_name,
-                url: None,
-            });
-            Ok(())
         }
 
         fn downgrade(self: Box<Self>) -> Box<dyn TaskWeak> {
@@ -1047,83 +932,7 @@ mod comment_model_tests {
         assert!(task.pause, "stop_with_error should set pause flag");
     }
 
-    #[tokio::test]
-    async fn dispatcher_posts_have_no_model() {
-        let (zbobr, task_backend) = make_test_parts();
-        let id = zbobr
-            .create_task("t", "", "READY", None, None)
-            .await
-            .unwrap();
-
-        zbobr
-            .task_session(id)
-            .post_comment(
-                "error",
-                "host",
-                None,
-                None,
-                "dispatcher error",
-                "",
-                0,
-                None,
-                None,
-            )
-            .await
-            .unwrap();
-
-        let weak = task_backend.get_task(id).await.unwrap();
-        let comments = weak.get_comments().await.unwrap();
-        assert_eq!(comments.len(), 1);
-        assert_eq!(comments[0].model, None);
-        assert_eq!(comments[0].tool, None);
-    }
-
-    #[test]
-    fn comment_tag_roundtrip() {
-        let tag = CommentTag::new(
-            "main".to_string(),
-            3,
-            "planning".to_string(),
-            "host".to_string(),
-            Some(Tool::Copilot),
-            Some(Model::Gpt5Mini),
-        );
-        assert_eq!(
-            tag.to_string(),
-            "// main:3:planning by host:copilot:gpt-5-mini"
-        );
-        let parsed: CommentTag = tag.to_string().parse().unwrap();
-        assert_eq!(parsed, tag);
-
-        let tag_no_tool = CommentTag::new(
-            "main".to_string(),
-            1,
-            "done".to_string(),
-            "web".to_string(),
-            None,
-            None,
-        );
-        assert_eq!(tag_no_tool.to_string(), "// main:1:done by web");
-        let parsed_no_tool: CommentTag = tag_no_tool.to_string().parse().unwrap();
-        assert_eq!(parsed_no_tool, tag_no_tool);
-
-        let tag_tool_no_model = CommentTag::new(
-            "init".to_string(),
-            2,
-            "working".to_string(),
-            "host".to_string(),
-            Some(Tool::Claude),
-            None,
-        );
-        assert_eq!(
-            tag_tool_no_model.to_string(),
-            "// init:2:working by host:claude"
-        );
-        let parsed_tnm: CommentTag = tag_tool_no_model.to_string().parse().unwrap();
-        assert_eq!(parsed_tnm, tag_tool_no_model);
-    }
-
-    // -----------------------------------------------------------------------
+   // -----------------------------------------------------------------------
     // Helper: create a UnifiedMcp for tests
     // -----------------------------------------------------------------------
 
@@ -1132,9 +941,8 @@ mod comment_model_tests {
         task_id: u64,
     ) -> crate::mcp::unified::UnifiedMcp {
         let tracker = Arc::new(std::sync::Mutex::new(None::<McpTool>));
-        let prompt_holder = Arc::new(std::sync::Mutex::new(None::<String>));
         let session =
-            zbobr.role_session_with_tracker(task_id, tracker, "main".to_string(), 1, prompt_holder);
+            zbobr.role_session_with_tracker(task_id, tracker, "main".to_string(), 1);
         let allowed_tools: std::collections::HashSet<zbobr_api::config_tools::McpTool> =
             zbobr_api::config_tools::McpTool::all()
                 .iter()

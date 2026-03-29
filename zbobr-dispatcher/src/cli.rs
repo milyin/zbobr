@@ -8,7 +8,7 @@ use std::{
 use anyhow::Context;
 use clap::{Args, Parser};
 use zbobr_api::{
-    CommentTag, Pipeline, Signal, StackEntry, State,
+    Pipeline, Signal, StackEntry, State,
     config::StageDefinition,
     config_tools::McpTool,
     task::{Stage, StageContext, StageInfo},
@@ -210,33 +210,10 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     if !task.description.is_empty() {
         println!("Description:\n{}", task.description);
     }
-    // show latest plan comment if present (look for [report_success] or legacy [post_plan] marker)
-    if !discussion.is_empty()
-        && let Some(plan_comment) = discussion.iter().rev().find(|c| {
-            c.text
-                .starts_with(&format!("[{}]", McpTool::ReportSuccess.as_str()))
-                || c.text.starts_with("[post_plan]")
-        })
-    {
-        println!("Plan (from comment):\n{}", plan_comment.text);
-    }
     if !discussion.is_empty() {
         println!("Discussion ({} comment(s)):", discussion.len());
         for (i, c) in discussion.iter().enumerate() {
-            let mut tag = CommentTag::new(
-                c.pipeline.clone(),
-                c.pipeline_run_id,
-                c.stage.clone(),
-                c.username.clone(),
-                c.tool,
-                c.model.clone(),
-            );
-            if let (Some(caller_pipeline), Some(caller_run_id)) =
-                (c.caller_pipeline.clone(), c.caller_pipeline_run_id)
-            {
-                tag = tag.with_caller(caller_pipeline, caller_run_id);
-            }
-            println!("  [{}] {}\n{}", i + 1, tag, c.text);
+            println!("  [{}] {}\n{}", i + 1, c.username, c.body);
         }
     }
 }
@@ -465,7 +442,6 @@ impl<'a> CliStageRunner<'a> {
             Arc::clone(&tool_tracker),
             self.pipeline_name.to_string(),
             pipeline_run_id,
-            Arc::clone(&prompt_holder),
         )
         .await?;
 
@@ -1425,7 +1401,6 @@ async fn start_mcp_server(
     tool_tracker: Arc<std::sync::Mutex<Option<McpTool>>>,
     pipeline_name: String,
     pipeline_run_id: u64,
-    prompt_holder: Arc<std::sync::Mutex<Option<String>>>,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
     let role_name = role_name.to_string();
@@ -1441,7 +1416,6 @@ async fn start_mcp_server(
             tool_tracker,
             pipeline_name,
             pipeline_run_id,
-            prompt_holder,
         )
         .await
         {

@@ -13,7 +13,7 @@ pub use stage_title::format_timestamp;
 use std::fmt;
 use std::str::FromStr;
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Result, bail};
 
 use crate::task::{Comment, ContextRecord, ContextRecordType, StageContext, TaskContext};
 use stage_title::MdStageTitle;
@@ -272,7 +272,7 @@ struct MdCompactComment {
 
 impl MdCompactComment {
     fn from_comment(c: &Comment, for_prompt: bool) -> Self {
-        let first_line = c.text.lines().next().unwrap_or("").trim();
+        let first_line = c.body.lines().next().unwrap_or("").trim();
         let comment_text = if for_prompt || first_line.chars().count() <= COMPACT_COMMENT_MAX_LEN {
             first_line.to_string()
         } else {
@@ -921,17 +921,8 @@ mod tests {
 
         let comments = vec![Comment {
             timestamp: utc("2024-01-01T00:30:00Z"),
-            stage: String::new(),
             username: String::new(),
-            tool: None,
-            model: None,
-            text: "Please hurry up!".to_string(),
-            pipeline: String::new(),
-            pipeline_run_id: 0,
-            caller_pipeline: None,
-            caller_pipeline_run_id: None,
-            report_name: None,
-            prompt_name: None,
+            body: "Please hurry up!".to_string(),
             url: None,
         }];
 
@@ -1090,17 +1081,8 @@ mod tests {
     fn make_comment(text: &str, ts: &str, url: Option<&str>) -> crate::task::Comment {
         crate::task::Comment {
             timestamp: utc(ts),
-            stage: String::new(),
             username: String::new(),
-            tool: None,
-            model: None,
-            text: text.to_string(),
-            pipeline: String::new(),
-            pipeline_run_id: 0,
-            caller_pipeline: None,
-            caller_pipeline_run_id: None,
-            report_name: None,
-            prompt_name: None,
+            body: text.to_string(),
             url: url.map(str::to_string),
         }
     }

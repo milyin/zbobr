@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::task::{Comment, Model, Signal, StackEntry, State, Task, TaskIdentity, Tool};
+use crate::task::{Comment, Signal, StackEntry, State, Task, TaskIdentity};
 
 /// Unicode symbol prepended to every formatted error status message.
 pub const ERROR_PREFIX: char = '\u{274C}';
@@ -166,25 +166,6 @@ pub trait TaskMut: Send + Sync {
         }))
         .await
     }
-
-    /// Post a structured comment (requires exclusive access).
-    /// If `report_text` is provided, stores it as a report file and sets `report_name`
-    /// on the comment. The filename is generated from the comment's pipeline, run id,
-    /// stage, and outcome (derived from the body's `[tool_name]` tag).
-    async fn post_comment(
-        &self,
-        stage: &str,
-        hostname: &str,
-        tool: Option<Tool>,
-        model: Option<Model>,
-        body: &str,
-        pipeline: &str,
-        pipeline_run_id: u64,
-        caller_pipeline: Option<&str>,
-        caller_pipeline_run_id: Option<u64>,
-        report_text: Option<&str>,
-        prompt_text: Option<&str>,
-    ) -> anyhow::Result<()>;
 
     /// Store a report file, deduplicating with `_N` suffix if needed.
     /// Returns the actual filename (without directory prefix).

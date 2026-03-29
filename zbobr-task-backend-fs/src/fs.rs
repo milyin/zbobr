@@ -8,9 +8,8 @@ use tokio::{
     sync::{Mutex, OwnedMutexGuard},
 };
 use zbobr_api::{
-    Comment, Model, Signal, StackEntry, State, Task, Tool,
+    Comment, Signal, StackEntry, State, Task,
     backend::{TaskBackend, TaskMut, TaskWeak},
-    comment_tag,
     task::TaskContext,
 };
 
@@ -235,22 +234,6 @@ impl ZbobrTaskBackendFs {
         }
     }
 
-    /// Write structured comments to disk.
-    async fn write_comments_structured(
-        &self,
-        id: u64,
-        comments: Vec<Comment>,
-    ) -> anyhow::Result<()> {
-        let path = self.comments_path(id);
-
-        let comments_file = CommentsFile { comments };
-        let yaml = serde_yaml::to_string(&comments_file).context("Failed to serialize comments")?;
-
-        fs::write(&path, yaml)
-            .await
-            .context("Failed to write comments file")
-    }
-
     /// Get the reports directory for a task.
     fn reports_dir(&self, task_id: u64) -> PathBuf {
         self.config
@@ -450,62 +433,6 @@ impl TaskMut for FsTaskMut {
         filename.to_string()
     }
 
-    async fn post_comment(
-        &self,
-        stage: &str,
-        hostname: &str,
-        tool: Option<Tool>,
-        model: Option<Model>,
-        body: &str,
-        pipeline: &str,
-        pipeline_run_id: u64,
-        caller_pipeline: Option<&str>,
-        caller_pipeline_run_id: Option<u64>,
-        report_text: Option<&str>,
-        prompt_text: Option<&str>,
-    ) -> anyhow::Result<()> {
-        let tag = comment_tag(body);
-        let report_name = if let Some(text) = report_text {
-            let base_name = format!("report_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
-            Some(self.backend.store_report(self.id, &base_name, text).await?)
-        } else {
-            None
-        };
-
-        let prompt_name = if let Some(text) = prompt_text {
-            let base_name = format!("prompt_{pipeline}_{pipeline_run_id}_{stage}_{tag}");
-            Some(self.backend.store_report(self.id, &base_name, text).await?)
-        } else {
-            None
-        };
-
-        let mut comments = self.backend.read_comments_structured(self.id).await?;
-
-        let new_comment = Comment {
-            timestamp: chrono::Utc::now().with_timezone(chrono::Local::now().offset()),
-            stage: stage.to_string(),
-            username: hostname.to_string(),
-            tool,
-            model,
-            text: body.to_string(),
-            pipeline: pipeline.to_string(),
-            pipeline_run_id,
-            caller_pipeline: caller_pipeline.map(str::to_string),
-            caller_pipeline_run_id,
-            report_name,
-            prompt_name,
-            url: None,
-        };
-
-        comments.push(new_comment);
-        self.backend
-            .write_comments_structured(self.id, comments)
-            .await?;
-
-        tracing::debug!("Posted structured comment to task {}", self.id);
-        Ok(())
-    }
-
     fn downgrade(self: Box<Self>) -> Box<dyn TaskWeak> {
         Box::new(FsTaskWeak {
             id: self.id,
@@ -698,68 +625,5 @@ impl TaskBackend for ArcTaskBackendFs {
 
     fn debug_state(&self) -> String {
         self.inner.debug_state()
-    }
-}
-
-#[cfg(test)]
-mod parse_tests {
-    use zbobr_api::task::CommentTag;
-
-    #[test]
-    fn test_parse_comment_tag_new_format() {
-        let input = "// main:3:planning by localhost";
-        let tag: CommentTag = input.parse().unwrap();
-        assert_eq!(tag.pipeline, "main");
-        assert_eq!(tag.pipeline_run_id, 3);
-        assert_eq!(tag.stage, "planning");
-        assert_eq!(tag.hostname, "localhost");
-    }
-
-    #[test]
-    fn test_parse_comment_tag_with_for_suffix() {
-        let input = "// sub:2:done by host:copilot:gpt-5-mini for main:1";
-        let tag: CommentTag = input.parse().unwrap();
-        assert_eq!(tag.pipeline, "sub");
-        assert_eq!(tag.pipeline_run_id, 2);
-        assert_eq!(tag.stage, "done");
-        assert_eq!(tag.hostname, "host");
-        assert_eq!(tag.caller_pipeline.as_deref(), Some("main"));
-        assert_eq!(tag.caller_pipeline_run_id, Some(1));
-    }
-
-    #[test]
-    fn test_comment_tag_roundtrip() {
-        let tag = CommentTag::new(
-            "main".into(),
-            1,
-            "planning".into(),
-            "localhost".into(),
-            None,
-            None,
-        );
-        let s = tag.to_string();
-        assert_eq!(s, "// main:1:planning by localhost");
-        let parsed: CommentTag = s.parse().unwrap();
-        assert_eq!(parsed, tag);
-
-        let tag2 = CommentTag::new(
-            "init".into(),
-            2,
-            "reviewing".into(),
-            "host".into(),
-            None,
-            None,
-        );
-        let s2 = tag2.to_string();
-        assert_eq!(s2, "// init:2:reviewing by host");
-        let parsed2: CommentTag = s2.parse().unwrap();
-        assert_eq!(parsed2, tag2);
-
-        let tag3 = CommentTag::new("sub".into(), 3, "done".into(), "worker".into(), None, None)
-            .with_caller("main".into(), 1);
-        let s3 = tag3.to_string();
-        assert_eq!(s3, "// sub:3:done by worker for main:1");
-        let parsed3: CommentTag = s3.parse().unwrap();
-        assert_eq!(parsed3, tag3);
     }
 }
