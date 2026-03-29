@@ -183,28 +183,9 @@ pub trait CommonMcpImpl: Send + Sync {
         };
 
         // Find the most recent report record to use as parent
-        let parent_record_id = match self.session().get_task().await {
-            Ok(task) => task.context.stages.last().and_then(|stage| {
-                stage
-                    .records
-                    .iter()
-                    .rev()
-                    .find(|r| {
-                        matches!(
-                            r.record_type,
-                            ContextRecordType::Success
-                                | ContextRecordType::Failure
-                                | ContextRecordType::Comment
-                        )
-                    })
-                    .map(|r| r.id)
-            }),
-            Err(_) => None,
-        };
-
         match self
             .session()
-            .add_checkbox_record(brief.to_string(), report_link, parent_record_id)
+            .add_checkbox_record(brief.to_string(), report_link)
             .await
         {
             Ok(id) => {

@@ -13,7 +13,7 @@ pub use stage_title::format_timestamp;
 use std::fmt;
 use std::str::FromStr;
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Result, bail};
 
 use crate::task::{Comment, ContextRecord, ContextRecordType, StageContext, TaskContext};
 use stage_title::MdStageTitle;
@@ -143,7 +143,6 @@ struct MdRecord {
     brief: String,
     id: u64,
     report_link: Option<String>,
-    parent_record_id: Option<u64>,
 }
 
 impl fmt::Display for MdRecord {
@@ -197,7 +196,6 @@ impl FromStr for MdRecord {
             brief,
             id,
             report_link,
-            parent_record_id: None,
         })
     }
 }
@@ -241,7 +239,6 @@ impl MdRecord {
             brief: r.brief.clone(),
             id: r.id,
             report_link,
-            parent_record_id: r.parent_record_id,
         }
     }
 
@@ -252,128 +249,20 @@ impl MdRecord {
             record_type: ContextRecordType::from(&self.record_type),
             brief: self.brief,
             report_link: self.report_link,
-            parent_record_id: self.parent_record_id,
         }
     }
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
-// Markdown user comment
-// ────────────────────────────────────────────────────────────────────────────────
-
-/// A user comment as it appears in markdown blockquote format.
-///
-/// Format:
-/// ```text
-/// > **[YYYY-MM-DD HH:MM:SS <sub>+HHMM</sub>]** first line
-/// > continued line
-/// ```
-#[derive(Debug, Clone)]
-struct MdUserComment {
-    timestamp: chrono::DateTime<chrono::FixedOffset>,
-    text: String,
-}
-
-impl fmt::Display for MdUserComment {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "> **[{} <sub>{}</sub>]** ",
-            self.timestamp.format("%Y-%m-%d %H:%M:%S"),
-            self.timestamp.format("%z"),
-        )?;
-        for (i, line) in self.text.lines().enumerate() {
-            if i > 0 {
-                write!(f, "\n> ")?;
-            }
-            write!(f, "{}", line)?;
-        }
-        Ok(())
-    }
-}
-
-impl FromStr for MdUserComment {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        let mut lines = s.lines();
-        let first = lines
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Empty comment"))?;
-        let first = first.trim_start_matches('>').trim();
-
-        // Parse: **[YYYY-MM-DD HH:MM:SS <sub>+HHMM</sub>]** text
-        let inner = first
-            .strip_prefix("**[")
-            .ok_or_else(|| anyhow::anyhow!("Invalid comment header: {}", first))?;
-        let bracket_end = inner
-            .find("]**")
-            .ok_or_else(|| anyhow::anyhow!("Missing ]** in comment header"))?;
-        let ts_part = &inner[..bracket_end];
-        let text_start = inner[bracket_end + 3..].trim();
-
-        // Parse timestamp: "YYYY-MM-DD HH:MM:SS <sub>+HHMM</sub>"
-        let sub_start = ts_part
-            .find("<sub>")
-            .ok_or_else(|| anyhow::anyhow!("Missing <sub> in comment timestamp"))?;
-        let sub_end = ts_part
-            .find("</sub>")
-            .ok_or_else(|| anyhow::anyhow!("Missing </sub> in comment timestamp"))?;
-        let datetime_part = ts_part[..sub_start].trim();
-        let tz = &ts_part[sub_start + 5..sub_end];
-        let full = format!("{} {}", datetime_part, tz);
-        let timestamp = chrono::DateTime::parse_from_str(&full, "%Y-%m-%d %H:%M:%S %z")
-            .with_context(|| format!("Invalid comment timestamp: {}", ts_part))?;
-
-        // Collect text from all lines
-        let mut text = text_start.to_string();
-        for line in lines {
-            let content = line.trim_start_matches('>');
-            let content = if content.starts_with(' ') {
-                &content[1..]
-            } else {
-                content
-            };
-            text.push('\n');
-            text.push_str(content);
-        }
-
-        Ok(MdUserComment { timestamp, text })
-    }
-}
-
-impl serde::Serialize for MdUserComment {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for MdUserComment {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
-    }
-}
-
-impl From<&Comment> for MdUserComment {
-    fn from(c: &Comment) -> Self {
-        MdUserComment {
-            timestamp: c.timestamp,
-            text: c.text.clone(),
-        }
-    }
-}
-
-// ────────────────────────────────────────────────────────────────────────────────
-// Compact comment (user-display mode)
+// Compact comment (shared prompt/no-prompt mode)
 // ────────────────────────────────────────────────────────────────────────────────
 
 /// Maximum character length for the truncated comment text in compact form.
 const COMPACT_COMMENT_MAX_LEN: usize = 80;
 
-/// A compact (single-line) representation of a user comment for user-display mode.
+/// A compact (single-line) representation of a comment used in serialized context.
 ///
-/// Format: `- comment text \`YYYY-MM-DD HH:MM:SS +HHMM\` <sub>[link](url)</sub>`
+/// Format: `- comment text `YYYY-MM-DD HH:MM:SS +HHMM` <sub>[link](url)</sub>`
 #[derive(Debug, Clone)]
 struct MdCompactComment {
     text: String,
@@ -382,14 +271,22 @@ struct MdCompactComment {
 }
 
 impl MdCompactComment {
-    fn from_comment(c: &Comment) -> Self {
-        let first_line = c.text.lines().next().unwrap_or("").trim();
-        let text = if first_line.chars().count() > COMPACT_COMMENT_MAX_LEN {
+    fn from_comment(c: &Comment, for_prompt: bool) -> Self {
+        let first_line = c.body.lines().next().unwrap_or("").trim();
+        let comment_text = if for_prompt || first_line.chars().count() <= COMPACT_COMMENT_MAX_LEN {
+            first_line.to_string()
+        } else {
             let truncated: String = first_line.chars().take(COMPACT_COMMENT_MAX_LEN).collect();
             format!("{}...", truncated)
-        } else {
-            first_line.to_string()
         };
+
+        let username = if c.username.is_empty() {
+            "unknown"
+        } else {
+            &c.username
+        };
+        let text = format!("user:**{}** {}", username, comment_text);
+
         MdCompactComment {
             text,
             timestamp: c.timestamp,
@@ -430,20 +327,27 @@ impl fmt::Display for MdStage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "- {}", self.title)?;
 
-        // Group records by parent_record_id for hierarchical display
-        for record in &self.records {
-            if record.parent_record_id.is_none() {
-                // Top-level record (4 spaces = sub-item of the stage header)
-                writeln!(f, "    {}", record)?;
-
-                // Display all child records (those with this record's id as parent)
-                for child in &self.records {
-                    if child.parent_record_id == Some(record.id) {
-                        writeln!(f, "        {}", child)?;
-                    }
-                }
+        // Flatten output: all records on the same level
+        // Reorder so first non-checkbox item is first in output
+        let mut ordered = self.records.clone();
+        if let Some(non_checkbox_idx) = ordered
+            .iter()
+            .position(|r| !matches!(r.record_type, MdRecordType::CheckboxUnchecked | MdRecordType::CheckboxChecked))
+        {
+            if non_checkbox_idx != 0 {
+                let non_checkbox = ordered.remove(non_checkbox_idx);
+                ordered.insert(0, non_checkbox);
             }
         }
+
+        for record in ordered {
+            let indent = match record.record_type {
+                MdRecordType::CheckboxUnchecked | MdRecordType::CheckboxChecked => "    ",
+                _ => "  ",
+            };
+            writeln!(f, "{}{}", indent, record)?;
+        }
+
         Ok(())
     }
 }
@@ -456,26 +360,15 @@ impl FromStr for MdStage {
         let first = lines.next().ok_or_else(|| anyhow::anyhow!("Empty stage"))?;
         let title: MdStageTitle = first.parse()?;
         let mut records = Vec::new();
-        let mut last_top_level_id: Option<u64> = None;
 
         for line in lines {
             if line.trim().is_empty() {
                 continue;
             }
 
-            // Count leading spaces to determine indentation level
-            let leading_spaces = line.len() - line.trim_start().len();
             let trimmed = line.trim();
 
             if let Some(record) = MdRecord::try_parse(trimmed)? {
-                let mut record = record;
-                // If indented by 8 spaces (child level), set parent to last top-level record
-                if leading_spaces >= 8 && last_top_level_id.is_some() {
-                    record.parent_record_id = last_top_level_id;
-                } else {
-                    // Top-level record (less indentation)
-                    last_top_level_id = Some(record.id);
-                }
                 records.push(record);
             }
         }
@@ -553,7 +446,6 @@ impl MdStage {
 #[derive(Debug, Clone)]
 enum MdEntry {
     Stage(MdStage),
-    Comment(MdUserComment),
     CompactComment(MdCompactComment),
 }
 
@@ -583,9 +475,6 @@ impl fmt::Display for MdContext {
                     // Stage display already ends with \n via writeln!
                     write!(f, "{}", stage)?;
                 }
-                MdEntry::Comment(comment) => {
-                    write!(f, "{}\n\n", comment)?;
-                }
                 MdEntry::CompactComment(c) => {
                     writeln!(f, "{}", c)?;
                 }
@@ -601,36 +490,12 @@ impl FromStr for MdContext {
     fn from_str(text: &str) -> Result<Self> {
         let mut entries: Vec<MdEntry> = Vec::new();
         let mut current_stage: Option<MdStage> = None;
-        let mut comment_lines: Vec<&str> = Vec::new();
 
         for line in text.lines() {
             let trimmed = line.trim();
 
             if trimmed.is_empty() {
-                // Flush accumulated comment lines (lenient: skip on parse failure)
-                if !comment_lines.is_empty() {
-                    let joined = comment_lines.join("\n");
-                    if let Ok(comment) = joined.parse::<MdUserComment>() {
-                        entries.push(MdEntry::Comment(comment));
-                    }
-                    comment_lines.clear();
-                }
                 continue;
-            }
-
-            // Accumulate blockquote lines
-            if trimmed.starts_with('>') {
-                comment_lines.push(trimmed);
-                continue;
-            }
-
-            // Flush pending comment lines
-            if !comment_lines.is_empty() {
-                let joined = comment_lines.join("\n");
-                if let Ok(comment) = joined.parse::<MdUserComment>() {
-                    entries.push(MdEntry::Comment(comment));
-                }
-                comment_lines.clear();
             }
 
             // Skip <!-- stage --> markers (inserted before stage titles in user-display mode)
@@ -666,13 +531,7 @@ impl FromStr for MdContext {
             bail!("Unrecognized line in context: {}", trimmed);
         }
 
-        // Flush remaining
-        if !comment_lines.is_empty() {
-            let joined = comment_lines.join("\n");
-            if let Ok(comment) = joined.parse::<MdUserComment>() {
-                entries.push(MdEntry::Comment(comment));
-            }
-        }
+        // Flush remaining stage
         if let Some(stage) = current_stage {
             entries.push(MdEntry::Stage(stage));
         }
@@ -712,11 +571,10 @@ impl MdContext {
         }
 
         for comment in comments {
-            let entry = if for_prompt {
-                MdEntry::Comment(MdUserComment::from(comment))
-            } else {
-                MdEntry::CompactComment(MdCompactComment::from_comment(comment))
-            };
+            let entry = MdEntry::CompactComment(MdCompactComment::from_comment(
+                comment,
+                for_prompt,
+            ));
             events.push((comment.timestamp, entry));
         }
 
@@ -735,7 +593,7 @@ impl MdContext {
             .into_iter()
             .filter_map(|e| match e {
                 MdEntry::Stage(s) => Some(s.into_stage_context()),
-                MdEntry::Comment(_) | MdEntry::CompactComment(_) => None,
+                MdEntry::CompactComment(_) => None,
             })
             .collect();
         TaskContext { stages }
@@ -808,21 +666,18 @@ mod tests {
                             record_type: ContextRecordType::Checkbox(false),
                             brief: "Define API schema".to_string(),
                             report_link: None,
-                            parent_record_id: None,
                         },
                         ContextRecord {
                             id: 2,
                             record_type: ContextRecordType::Checkbox(true),
                             brief: "Review requirements".to_string(),
                             report_link: None,
-                            parent_record_id: None,
                         },
                         ContextRecord {
                             id: 3,
                             record_type: ContextRecordType::Success,
                             brief: "Plan completed".to_string(),
                             report_link: Some("reports/plan_success.md".to_string()),
-                            parent_record_id: None,
                         },
                     ],
                 },
@@ -843,21 +698,18 @@ mod tests {
                             record_type: ContextRecordType::Failure,
                             brief: "Build failed".to_string(),
                             report_link: Some("reports/build_fail.md".to_string()),
-                            parent_record_id: None,
                         },
                         ContextRecord {
                             id: 5,
                             record_type: ContextRecordType::Comment,
                             brief: "Retrying with fix".to_string(),
                             report_link: None,
-                            parent_record_id: None,
                         },
                         ContextRecord {
                             id: 6,
                             record_type: ContextRecordType::Question,
                             brief: "Should we use async?".to_string(),
                             report_link: None,
-                            parent_record_id: None,
                         },
                     ],
                 },
@@ -874,18 +726,18 @@ mod tests {
         assert!(
             output.contains("`2024-01-01 00:00:00 +0000` <sub>[prompt](prompts/plan.md)</sub>")
         );
-        assert!(output.contains("    - [ ] Define API schema"));
-        assert!(output.contains("    - [x] Review requirements"));
+        assert!(output.contains("  - [ ] Define API schema"));
+        assert!(output.contains("  - [x] Review requirements"));
         assert!(
             output.contains(
-                "    - ✅ Plan completed <sub>[ctx_rec_3](reports/plan_success.md)</sub>"
+                "  - ✅ Plan completed <sub>[ctx_rec_3](reports/plan_success.md)</sub>"
             )
         );
         assert!(
-            output.contains("    - ❌ Build failed <sub>[ctx_rec_4](reports/build_fail.md)</sub>")
+            output.contains("  - ❌ Build failed <sub>[ctx_rec_4](reports/build_fail.md)</sub>")
         );
-        assert!(output.contains("    - 💬 Retrying with fix"));
-        assert!(output.contains("    - ❓ Should we use async?"));
+        assert!(output.contains("  - 💬 Retrying with fix"));
+        assert!(output.contains("  - ❓ Should we use async?"));
     }
 
     #[test]
@@ -913,22 +765,21 @@ mod tests {
         assert!(s0.info.prompt_link.as_deref() == Some("prompts/plan.md"));
         assert_eq!(s0.records.len(), 3);
 
-        assert_eq!(s0.records[0].id, 1);
+        // Output reorders first non-checkbox to the first slot.
+        assert_eq!(s0.records[0].id, 3);
+        assert_eq!(s0.records[0].record_type, ContextRecordType::Success);
+        assert_eq!(s0.records[0].brief, "Plan completed");
         assert_eq!(
-            s0.records[0].record_type,
-            ContextRecordType::Checkbox(false)
-        );
-        assert_eq!(s0.records[0].brief, "Define API schema");
-
-        assert_eq!(s0.records[1].id, 2);
-        assert_eq!(s0.records[1].record_type, ContextRecordType::Checkbox(true));
-
-        assert_eq!(s0.records[2].id, 3);
-        assert_eq!(s0.records[2].record_type, ContextRecordType::Success);
-        assert_eq!(
-            s0.records[2].report_link.as_deref(),
+            s0.records[0].report_link.as_deref(),
             Some("reports/plan_success.md")
         );
+
+        assert_eq!(s0.records[1].id, 1);
+        assert_eq!(s0.records[1].record_type, ContextRecordType::Checkbox(false));
+        assert_eq!(s0.records[1].brief, "Define API schema");
+
+        assert_eq!(s0.records[2].id, 2);
+        assert_eq!(s0.records[2].record_type, ContextRecordType::Checkbox(true));
     }
 
     #[test]
@@ -947,9 +798,28 @@ mod tests {
             assert_eq!(parsed_stage.info.model, orig_stage.info.model);
             assert_eq!(parsed_stage.info.prompt_link, orig_stage.info.prompt_link);
             assert_eq!(parsed_stage.records.len(), orig_stage.records.len());
-            for (orig_rec, parsed_rec) in orig_stage.records.iter().zip(parsed_stage.records.iter())
+
+            let mut expected_ids: Vec<u64> = orig_stage.records.iter().map(|r| r.id).collect();
+            if let Some(pos) = orig_stage
+                .records
+                .iter()
+                .position(|r| !matches!(r.record_type, ContextRecordType::Checkbox(_)))
             {
-                assert_eq!(parsed_rec.id, orig_rec.id);
+                if pos != 0 {
+                    let id = expected_ids.remove(pos);
+                    expected_ids.insert(0, id);
+                }
+            }
+
+            let parsed_ids: Vec<u64> = parsed_stage.records.iter().map(|r| r.id).collect();
+            assert_eq!(parsed_ids, expected_ids);
+
+            for parsed_rec in &parsed_stage.records {
+                let orig_rec = orig_stage
+                    .records
+                    .iter()
+                    .find(|r| r.id == parsed_rec.id)
+                    .unwrap();
                 assert_eq!(parsed_rec.record_type, orig_rec.record_type);
                 assert_eq!(parsed_rec.brief, orig_rec.brief);
                 assert_eq!(parsed_rec.report_link, orig_rec.report_link);
@@ -1004,28 +874,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_ignores_blockquote_comments() {
-        let text = "\
-- main:1:**working** `2024-01-01 00:00:00 +0000`
-  - [ ] Do work <sub>ctx_rec_1</sub>
-
-> **[2024-01-01 00:00:30 <sub>+0000</sub>]** User says hello
-> second line of comment
-
-  - ✅ Done <sub>[ctx_rec_2](r.md)</sub>
-";
-        let parsed = parse_context(text).unwrap();
-        assert_eq!(parsed.stages.len(), 1);
-        assert_eq!(parsed.stages[0].records.len(), 2);
-        assert_eq!(parsed.stages[0].records[0].brief, "Do work");
-        assert_eq!(parsed.stages[0].records[1].brief, "Done");
-        assert_eq!(
-            parsed.stages[0].records[1].report_link.as_deref(),
-            Some("r.md")
-        );
-    }
-
-    #[test]
     fn parse_error_on_record_before_stage() {
         let text = "  - [ ] orphan item <sub>ctx_rec_1</sub>\n";
         let result = parse_context(text);
@@ -1067,24 +915,14 @@ mod tests {
                     record_type: ContextRecordType::Checkbox(false),
                     brief: "Task A".to_string(),
                     report_link: None,
-                    parent_record_id: None,
                 }],
             }],
         };
 
         let comments = vec![Comment {
             timestamp: utc("2024-01-01T00:30:00Z"),
-            stage: String::new(),
-            hostname: String::new(),
-            tool: None,
-            model: None,
-            text: "Please hurry up!".to_string(),
-            pipeline: String::new(),
-            pipeline_run_id: 0,
-            caller_pipeline: None,
-            caller_pipeline_run_id: None,
-            report_name: None,
-            prompt_name: None,
+            username: String::new(),
+            body: "Please hurry up!".to_string(),
             url: None,
         }];
 
@@ -1132,7 +970,6 @@ mod tests {
                         "https://github.com/org/repo/blob/reports/reports/task_1/report.md"
                             .to_string(),
                     ),
-                    parent_record_id: None,
                 }],
             }],
         };
@@ -1162,7 +999,6 @@ mod tests {
             brief: "All tests passed".to_string(),
             id: 42,
             report_link: Some("reports/test.md".to_string()),
-            parent_record_id: None,
         };
         let s = record.to_string();
         let parsed: MdRecord = s.parse().unwrap();
@@ -1179,7 +1015,6 @@ mod tests {
             brief: "Todo item".to_string(),
             id: 1,
             report_link: None,
-            parent_record_id: None,
         };
         let s = record.to_string();
         let parsed: MdRecord = s.parse().unwrap();
@@ -1189,29 +1024,6 @@ mod tests {
         assert!(parsed.report_link.is_none());
     }
 
-    #[test]
-    fn md_user_comment_display_roundtrip() {
-        let comment = MdUserComment {
-            timestamp: utc("2024-06-15T10:30:00+03:00"),
-            text: "Hello world".to_string(),
-        };
-        let s = comment.to_string();
-        let parsed: MdUserComment = s.parse().unwrap();
-        assert_eq!(parsed.timestamp, comment.timestamp);
-        assert_eq!(parsed.text, "Hello world");
-    }
-
-    #[test]
-    fn md_user_comment_multiline_roundtrip() {
-        let comment = MdUserComment {
-            timestamp: utc("2024-01-01T00:00:00Z"),
-            text: "First line\nSecond line\nThird line".to_string(),
-        };
-        let s = comment.to_string();
-        let parsed: MdUserComment = s.parse().unwrap();
-        assert_eq!(parsed.timestamp, comment.timestamp);
-        assert_eq!(parsed.text, "First line\nSecond line\nThird line");
-    }
 
     #[test]
     fn md_stage_display_roundtrip() {
@@ -1232,14 +1044,12 @@ mod tests {
                     brief: "Item 1".to_string(),
                     id: 1,
                     report_link: None,
-                    parent_record_id: None,
                 },
                 MdRecord {
                     record_type: MdRecordType::Success,
                     brief: "Done".to_string(),
                     id: 2,
                     report_link: Some("r.md".to_string()),
-                    parent_record_id: None,
                 },
             ],
         };
@@ -1247,8 +1057,9 @@ mod tests {
         let parsed: MdStage = s.parse().unwrap();
         assert_eq!(parsed.title, stage.title);
         assert_eq!(parsed.records.len(), 2);
-        assert_eq!(parsed.records[0].id, 1);
-        assert_eq!(parsed.records[1].id, 2);
+        // Output reorders first non-checkbox record to the front
+        assert_eq!(parsed.records[0].id, 2);
+        assert_eq!(parsed.records[1].id, 1);
     }
 
     #[test]
@@ -1270,17 +1081,8 @@ mod tests {
     fn make_comment(text: &str, ts: &str, url: Option<&str>) -> crate::task::Comment {
         crate::task::Comment {
             timestamp: utc(ts),
-            stage: String::new(),
-            hostname: String::new(),
-            tool: None,
-            model: None,
-            text: text.to_string(),
-            pipeline: String::new(),
-            pipeline_run_id: 0,
-            caller_pipeline: None,
-            caller_pipeline_run_id: None,
-            report_name: None,
-            prompt_name: None,
+            username: String::new(),
+            body: text.to_string(),
             url: url.map(str::to_string),
         }
     }
@@ -1294,7 +1096,7 @@ mod tests {
             Some("https://example.com/comment/1"),
         )];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- hello world `2024-01-01 00:00:00 +0000` <sub>[link](https://example.com/comment/1)</sub>"));
+        assert!(output.contains("- user:**unknown** hello world `2024-01-01 00:00:00 +0000` <sub>[link](https://example.com/comment/1)</sub>"));
     }
 
     #[test]
@@ -1302,7 +1104,7 @@ mod tests {
         let ctx = TaskContext::default();
         let comments = vec![make_comment("short text", "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- short text `2024-01-01 00:00:00 +0000`"));
+        assert!(output.contains("- user:**unknown** short text `2024-01-01 00:00:00 +0000`"));
         assert!(!output.contains("<sub>"));
     }
 
@@ -1326,8 +1128,24 @@ mod tests {
             None,
         )];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- first line"));
+        assert!(output.contains("- user:**unknown** first line"));
         assert!(!output.contains("second line"));
+    }
+
+    #[test]
+    fn compact_comment_prefixes_user() {
+        let ctx = TaskContext::default();
+        let comments = vec![make_comment("hello world", "2024-01-01T00:00:00Z", None)];
+        let output = serialize_context(&ctx, &comments, false, None);
+        assert!(output.contains("- user:**unknown** hello world `2024-01-01 00:00:00 +0000`"));
+    }
+
+    #[test]
+    fn compact_comment_no_extra_cr_after_comment() {
+        let ctx = TaskContext::default();
+        let comments = vec![make_comment("hello world", "2024-01-01T00:00:00Z", None)];
+        let output = serialize_context(&ctx, &comments, false, None);
+        assert_eq!(output.lines().count(), 1);
     }
 
     #[test]
@@ -1362,15 +1180,22 @@ mod tests {
     }
 
     #[test]
-    fn for_prompt_true_uses_blockquote_not_compact() {
+    fn for_prompt_true_uses_compact_comment_format() {
         let ctx = TaskContext::default();
         let comments = vec![make_comment("a user comment", "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, true, None);
-        // Prompt mode: full blockquote format
-        assert!(output.contains("> **["));
-        assert!(output.contains("a user comment"));
-        // No compact format
-        assert!(!output.contains("<!-- stage -->"));
-        assert!(!output.contains("- a user comment"));
+        // Prompt mode now shares compact comment format, not blockquote.
+        assert!(!output.contains("> **["));
+        assert!(output.contains("- user:**unknown** a user comment `2024-01-01 00:00:00 +0000`"));
+    }
+
+    #[test]
+    fn for_prompt_true_does_not_truncate_long_comment_text() {
+        let long_text = "a".repeat(100);
+        let ctx = TaskContext::default();
+        let comments = vec![make_comment(&long_text, "2024-01-01T00:00:00Z", None)];
+        let output = serialize_context(&ctx, &comments, true, None);
+        assert!(output.contains(&format!("- user:**unknown** {} `2024-01-01 00:00:00 +0000`", long_text)));
+        assert!(!output.contains("..."));
     }
 }

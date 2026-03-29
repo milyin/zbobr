@@ -144,9 +144,6 @@ pub struct ContextRecord {
     /// Optional link to a long description or report.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_link: Option<String>,
-    /// Optional reference to parent record id (used for checklist items nested under reports).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_record_id: Option<u64>,
 }
 
 /// Metadata about a stage execution.
@@ -260,36 +257,10 @@ impl TaskContext {
 pub struct Comment {
     #[schemars(description = "Timestamp when comment was created", with = "String")]
     pub timestamp: chrono::DateTime<chrono::FixedOffset>,
-    #[schemars(description = "Stage that posted this comment")]
-    pub stage: String,
-    #[schemars(description = "Hostname of the system posting the comment")]
-    pub hostname: String,
-    #[schemars(description = "Tool that executed this comment (e.g. copilot, claude)")]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<Tool>,
-    #[schemars(description = "Model used by the tool")]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<Model>,
-    #[schemars(description = "Comment text (may contain [tool] section headers)")]
-    pub text: String,
-    #[schemars(description = "Pipeline name that produced this comment")]
-    #[serde(default)]
-    pub pipeline: String,
-    #[schemars(description = "Monotonic run counter within the pipeline")]
-    #[serde(default)]
-    pub pipeline_run_id: u64,
-    #[schemars(description = "Optional caller pipeline for linked final pipeline reports")]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub caller_pipeline: Option<String>,
-    #[schemars(description = "Optional caller pipeline run id for linked final pipeline reports")]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub caller_pipeline_run_id: Option<u64>,
-    #[schemars(description = "Optional full report filename stored via task backend")]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub report_name: Option<String>,
-    #[schemars(description = "Optional prompt filename stored via task backend (logging only)")]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt_name: Option<String>,
+    #[schemars(description = "Username of the user posting the comment")]
+    pub username: String,
+    #[schemars(description = "Comment body text")]
+    pub body: String,
     #[schemars(description = "URL of this comment (e.g. GitHub comment HTML URL)")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
@@ -323,36 +294,6 @@ pub fn classify_comment(text: &str) -> HistoryRecordType {
         "[report_intermediate]" => HistoryRecordType::Progress,
         "[ask_user]" | "[stop_with_question]" => HistoryRecordType::Question,
         _ => HistoryRecordType::Other,
-    }
-}
-
-/// Return a short tag derived from the comment's `[tool_name]` classification.
-/// Used to build report/prompt filenames.
-pub fn comment_tag(body: &str) -> &'static str {
-    match classify_comment(body) {
-        HistoryRecordType::Success => "success",
-        HistoryRecordType::Failure => "failure",
-        _ => "report",
-    }
-}
-
-/// Extract a one-line summary from comment text (first non-prefix line, truncated).
-pub fn extract_summary(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().collect();
-    // Skip the [tool_name] prefix line if present
-    let content_line = if lines
-        .first()
-        .map_or(false, |l| l.starts_with('[') && l.ends_with(']'))
-    {
-        lines.get(1).copied().unwrap_or("")
-    } else {
-        lines.first().copied().unwrap_or("")
-    };
-    let trimmed = content_line.trim();
-    if trimmed.len() > 120 {
-        format!("{}...", &trimmed[..120])
-    } else {
-        trimmed.to_string()
     }
 }
 
@@ -1040,155 +981,6 @@ impl std::str::FromStr for Model {
     }
 }
 
-/// Tag for comment formatting. Contains pipeline info, stage name, hostname, and optional tool/model.
-///
-/// Format: `// {pipeline}:{run_id}:{stage} by {hostname}[:{tool}[:{model}]]`
-/// Example: `// main:3:working by myhost:copilot:gpt-5-mini`
-/// Example (no tool): `// main:3:working by myhost`
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommentTag {
-    pub pipeline: String,
-    pub pipeline_run_id: u64,
-    pub stage: String,
-    pub hostname: String,
-    pub tool: Option<Tool>,
-    pub model: Option<Model>,
-    pub caller_pipeline: Option<String>,
-    pub caller_pipeline_run_id: Option<u64>,
-}
-
-impl CommentTag {
-    pub fn new(
-        pipeline: String,
-        pipeline_run_id: u64,
-        stage: String,
-        hostname: String,
-        tool: Option<Tool>,
-        model: Option<Model>,
-    ) -> Self {
-        Self {
-            pipeline,
-            pipeline_run_id,
-            stage,
-            hostname,
-            tool,
-            model,
-            caller_pipeline: None,
-            caller_pipeline_run_id: None,
-        }
-    }
-
-    pub fn with_caller(mut self, caller_pipeline: String, caller_pipeline_run_id: u64) -> Self {
-        self.caller_pipeline = Some(caller_pipeline);
-        self.caller_pipeline_run_id = Some(caller_pipeline_run_id);
-        self
-    }
-}
-
-impl std::fmt::Display for CommentTag {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        const FOR_SEPARATOR: &str = " for ";
-
-        write!(
-            f,
-            "// {}:{}:{} by {}",
-            self.pipeline, self.pipeline_run_id, self.stage, self.hostname
-        )?;
-        if let Some(ref tool) = self.tool {
-            write!(f, ":{tool}")?;
-            if let Some(ref model) = self.model {
-                write!(f, ":{model}")?;
-            }
-        }
-        if let (Some(caller_pipeline), Some(caller_run_id)) =
-            (&self.caller_pipeline, self.caller_pipeline_run_id)
-        {
-            write!(f, "{FOR_SEPARATOR}{caller_pipeline}:{caller_run_id}")?;
-        }
-        Ok(())
-    }
-}
-
-impl std::str::FromStr for CommentTag {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        const BY_SEPARATOR: &str = " by ";
-        const FOR_SEPARATOR: &str = " for ";
-
-        let s = s.trim_start_matches("//").trim_start();
-
-        let (prefix, suffix) = s
-            .split_once(BY_SEPARATOR)
-            .ok_or_else(|| anyhow::anyhow!("Invalid tag format: {}", s))?;
-
-        let prefix_parts: Vec<&str> = prefix.split(':').collect();
-        if prefix_parts.len() < 3 {
-            return Err(anyhow::anyhow!("Invalid tag prefix: {}", prefix));
-        }
-        let pipeline = prefix_parts[0].to_string();
-        let pipeline_run_id = prefix_parts[1]
-            .parse::<u64>()
-            .map_err(|_| anyhow::anyhow!("Invalid run id in tag prefix: {}", prefix_parts[1]))?;
-        let stage = prefix_parts[2].to_string();
-
-        let (host_part, caller_part) = if let Some((lhs, rhs)) = suffix.split_once(FOR_SEPARATOR) {
-            (lhs, Some(rhs))
-        } else {
-            (suffix, None)
-        };
-
-        let suffix_parts: Vec<&str> = host_part.split(':').collect();
-        let hostname = suffix_parts
-            .first()
-            .copied()
-            .unwrap_or_default()
-            .to_string();
-        if hostname.is_empty() {
-            return Err(anyhow::anyhow!("Invalid hostname in tag: {}", s));
-        }
-
-        let mut tool: Option<Tool> = None;
-        let mut model: Option<Model> = None;
-        for part in &suffix_parts[1..] {
-            if tool.is_none() {
-                if let Ok(t) = part.parse::<Tool>() {
-                    tool = Some(t);
-                }
-            } else if model.is_none() {
-                if let Ok(m) = part.parse::<Model>() {
-                    model = Some(m);
-                }
-            }
-        }
-
-        let (caller_pipeline, caller_pipeline_run_id) = if let Some(caller) = caller_part {
-            let caller_parts: Vec<&str> = caller.split(':').collect();
-            if caller_parts.len() != 2 {
-                return Err(anyhow::anyhow!("Invalid caller suffix: {}", caller));
-            }
-            let caller_pipeline = caller_parts[0].to_string();
-            let caller_pipeline_run_id = caller_parts[1]
-                .parse::<u64>()
-                .map_err(|_| anyhow::anyhow!("Invalid caller run id: {}", caller_parts[1]))?;
-            (Some(caller_pipeline), Some(caller_pipeline_run_id))
-        } else {
-            (None, None)
-        };
-
-        Ok(CommentTag {
-            pipeline,
-            pipeline_run_id,
-            stage,
-            hostname,
-            tool,
-            model,
-            caller_pipeline,
-            caller_pipeline_run_id,
-        })
-    }
-}
-
 /// A task in the abstract domain (generic, backed by GitHub or Filesystem).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Task {
@@ -1238,28 +1030,6 @@ pub struct Task {
     pub etag: Option<String>,
 }
 
-/// Filter comments for a specific pipeline run.
-///
-/// Comments with `pipeline_run_id == 0` (user comments) inherit the run ID
-/// of the previous comment at retrieval time.
-pub fn filter_comments_for_run(comments: &[Comment], target_run_id: u64) -> Vec<&Comment> {
-    let mut result = Vec::new();
-    let mut current_run_id: u64 = 0;
-    for comment in comments {
-        let effective = if comment.pipeline_run_id > 0 {
-            current_run_id = comment.pipeline_run_id;
-            comment.pipeline_run_id
-        } else {
-            current_run_id // user comment inherits previous
-        };
-        let caller_match = comment.caller_pipeline_run_id == Some(target_run_id);
-        if effective == target_run_id || caller_match {
-            result.push(comment);
-        }
-    }
-    result
-}
-
 impl Task {
     /// Returns a TaskIdentity if all three routing fields are set.
     pub fn identity(&self) -> Option<TaskIdentity> {
@@ -1275,109 +1045,6 @@ impl Task {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn make_comment(text: &str, pipeline: &str, run_id: u64) -> Comment {
-        Comment {
-            timestamp: chrono::DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z").unwrap(),
-            stage: "s".into(),
-            hostname: "h".into(),
-            tool: None,
-            model: None,
-            text: text.into(),
-            pipeline: pipeline.into(),
-            pipeline_run_id: run_id,
-            caller_pipeline: None,
-            caller_pipeline_run_id: None,
-            report_name: None,
-            prompt_name: None,
-            url: None,
-        }
-    }
-
-    fn make_comment_for(text: &str, pipeline: &str, run_id: u64, caller_run_id: u64) -> Comment {
-        Comment {
-            timestamp: chrono::DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z").unwrap(),
-            stage: "s".into(),
-            hostname: "h".into(),
-            tool: None,
-            model: None,
-            text: text.into(),
-            pipeline: pipeline.into(),
-            pipeline_run_id: run_id,
-            caller_pipeline: Some("main".into()),
-            caller_pipeline_run_id: Some(caller_run_id),
-            report_name: None,
-            prompt_name: None,
-            url: None,
-        }
-    }
-
-    #[test]
-    fn filter_separates_pipeline_runs() {
-        let comments = vec![
-            make_comment("main work", "main", 1),
-            make_comment("sub work", "sub", 2),
-            make_comment("more sub", "sub", 2),
-            make_comment("back to main", "main", 1),
-        ];
-        let run1: Vec<_> = filter_comments_for_run(&comments, 1)
-            .iter()
-            .map(|c| c.text.as_str())
-            .collect();
-        let run2: Vec<_> = filter_comments_for_run(&comments, 2)
-            .iter()
-            .map(|c| c.text.as_str())
-            .collect();
-        assert_eq!(run1, vec!["main work", "back to main"]);
-        assert_eq!(run2, vec!["sub work", "more sub"]);
-    }
-
-    #[test]
-    fn filter_user_comments_inherit_run_id() {
-        let comments = vec![
-            make_comment("agent start", "main", 1),
-            make_comment("user reply", "", 0), // user comment
-            make_comment("agent in sub", "sub", 2),
-            make_comment("user in sub", "", 0), // user comment
-            make_comment("agent back", "main", 1),
-        ];
-        let run1: Vec<_> = filter_comments_for_run(&comments, 1)
-            .iter()
-            .map(|c| c.text.as_str())
-            .collect();
-        let run2: Vec<_> = filter_comments_for_run(&comments, 2)
-            .iter()
-            .map(|c| c.text.as_str())
-            .collect();
-        assert_eq!(run1, vec!["agent start", "user reply", "agent back"]);
-        assert_eq!(run2, vec!["agent in sub", "user in sub"]);
-    }
-
-    #[test]
-    fn filter_empty_comments() {
-        let comments: Vec<Comment> = vec![];
-        assert!(filter_comments_for_run(&comments, 1).is_empty());
-    }
-
-    #[test]
-    fn filter_no_matching_run() {
-        let comments = vec![make_comment("a", "main", 1), make_comment("b", "main", 1)];
-        assert!(filter_comments_for_run(&comments, 99).is_empty());
-    }
-
-    #[test]
-    fn filter_matches_caller_linked_comments() {
-        let comments = vec![
-            make_comment("main work", "main", 1),
-            make_comment_for("sub final report", "sub", 2, 1),
-            make_comment("next main", "main", 1),
-        ];
-        let run1: Vec<_> = filter_comments_for_run(&comments, 1)
-            .iter()
-            .map(|c| c.text.as_str())
-            .collect();
-        assert_eq!(run1, vec!["main work", "sub final report", "next main"]);
-    }
 
     #[test]
     fn state_serde_format() {
@@ -1485,7 +1152,6 @@ mod tests {
             record_type,
             brief: brief.to_string(),
             report_link: None,
-            parent_record_id: None,
         }
     }
 
