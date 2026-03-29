@@ -8,6 +8,7 @@
 
 mod stage_title;
 
+use chrono::{DateTime, FixedOffset};
 pub use stage_title::format_timestamp;
 
 use std::fmt;
@@ -266,17 +267,16 @@ const COMPACT_COMMENT_MAX_LEN: usize = 80;
 #[derive(Debug, Clone)]
 struct MdCompactComment {
     text: String,
-    timestamp: chrono::DateTime<chrono::FixedOffset>,
+    timestamp: DateTime<FixedOffset>,
     url: Option<String>,
 }
 
 impl MdCompactComment {
     fn from_comment(c: &Comment, for_prompt: bool) -> Self {
-        let first_line = c.body.lines().next().unwrap_or("").trim();
-        let comment_text = if for_prompt || first_line.chars().count() <= COMPACT_COMMENT_MAX_LEN {
-            first_line.to_string()
+        let comment_text = if for_prompt || c.body.len() <= COMPACT_COMMENT_MAX_LEN {
+            c.body.to_string()
         } else {
-            let truncated: String = first_line.chars().take(COMPACT_COMMENT_MAX_LEN).collect();
+            let truncated: String = c.body.chars().take(COMPACT_COMMENT_MAX_LEN).collect();
             format!("{}...", truncated)
         };
 
@@ -330,14 +330,15 @@ impl fmt::Display for MdStage {
         // Flatten output: all records on the same level
         // Reorder so first non-checkbox item is first in output
         let mut ordered = self.records.clone();
-        if let Some(non_checkbox_idx) = ordered
-            .iter()
-            .position(|r| !matches!(r.record_type, MdRecordType::CheckboxUnchecked | MdRecordType::CheckboxChecked))
+        if let Some(non_checkbox_idx) = ordered.iter().position(|r| {
+            !matches!(
+                r.record_type,
+                MdRecordType::CheckboxUnchecked | MdRecordType::CheckboxChecked
+            )
+        }) && non_checkbox_idx != 0
         {
-            if non_checkbox_idx != 0 {
-                let non_checkbox = ordered.remove(non_checkbox_idx);
-                ordered.insert(0, non_checkbox);
-            }
+            let non_checkbox = ordered.remove(non_checkbox_idx);
+            ordered.insert(0, non_checkbox);
         }
 
         for record in ordered {
@@ -403,10 +404,11 @@ impl MdStage {
             .into_iter()
             .flatten()
         {
-            if !link.starts_with("http://") && !link.starts_with("https://") {
-                if let Some(f) = report_url {
-                    *link = f(link);
-                }
+            if !link.starts_with("http://")
+                && !link.starts_with("https://")
+                && let Some(f) = report_url
+            {
+                *link = f(link);
             }
         }
 
@@ -561,7 +563,7 @@ impl MdContext {
         for_prompt: bool,
         report_url: Option<&dyn Fn(&str) -> String>,
     ) -> Self {
-        let mut events: Vec<(chrono::DateTime<chrono::FixedOffset>, MdEntry)> = Vec::new();
+        let mut events: Vec<(DateTime<FixedOffset>, MdEntry)> = Vec::new();
 
         for stage in &ctx.stages {
             events.push((
@@ -571,10 +573,8 @@ impl MdContext {
         }
 
         for comment in comments {
-            let entry = MdEntry::CompactComment(MdCompactComment::from_comment(
-                comment,
-                for_prompt,
-            ));
+            let entry =
+                MdEntry::CompactComment(MdCompactComment::from_comment(comment, for_prompt));
             events.push((comment.timestamp, entry));
         }
 
@@ -731,9 +731,8 @@ mod tests {
         assert!(output.contains("  - [ ] Define API schema"));
         assert!(output.contains("  - [x] Review requirements"));
         assert!(
-            output.contains(
-                "  - ✅ Plan completed <sub>[ctx_rec_3](reports/plan_success.md)</sub>"
-            )
+            output
+                .contains("  - ✅ Plan completed <sub>[ctx_rec_3](reports/plan_success.md)</sub>")
         );
         assert!(
             output.contains("  - ❌ Build failed <sub>[ctx_rec_4](reports/build_fail.md)</sub>")
@@ -777,7 +776,10 @@ mod tests {
         );
 
         assert_eq!(s0.records[1].id, 1);
-        assert_eq!(s0.records[1].record_type, ContextRecordType::Checkbox(false));
+        assert_eq!(
+            s0.records[1].record_type,
+            ContextRecordType::Checkbox(false)
+        );
         assert_eq!(s0.records[1].brief, "Define API schema");
 
         assert_eq!(s0.records[2].id, 2);
@@ -806,11 +808,10 @@ mod tests {
                 .records
                 .iter()
                 .position(|r| !matches!(r.record_type, ContextRecordType::Checkbox(_)))
+                && pos != 0
             {
-                if pos != 0 {
-                    let id = expected_ids.remove(pos);
-                    expected_ids.insert(0, id);
-                }
+                let id = expected_ids.remove(pos);
+                expected_ids.insert(0, id);
             }
 
             let parsed_ids: Vec<u64> = parsed_stage.records.iter().map(|r| r.id).collect();
@@ -1029,7 +1030,6 @@ mod tests {
         assert!(parsed.report_link.is_none());
     }
 
-
     #[test]
     fn md_stage_display_roundtrip() {
         let stage = MdStage {
@@ -1201,7 +1201,10 @@ mod tests {
         let ctx = TaskContext::default();
         let comments = vec![make_comment(&long_text, "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, true, None);
-        assert!(output.contains(&format!("- user:**unknown** {} `2024-01-01 00:00:00 +0000`", long_text)));
+        assert!(output.contains(&format!(
+            "- user:**unknown** {} `2024-01-01 00:00:00 +0000`",
+            long_text
+        )));
         assert!(!output.contains("..."));
     }
 }

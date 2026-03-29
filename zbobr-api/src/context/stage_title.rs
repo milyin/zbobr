@@ -85,7 +85,11 @@ struct PipelineStage<'a> {
 
 impl fmt::Display for PipelineStage<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}:{}:**{}**", self.instance, self.pipeline, self.run_id, self.stage)
+        write!(
+            f,
+            "{}:{}:{}:**{}**",
+            self.instance, self.pipeline, self.run_id, self.stage
+        )
     }
 }
 
@@ -248,7 +252,12 @@ fn parse_next_pipeline_stage(rest: &mut &str) -> Result<(String, Pipeline, u64, 
     let stage_str = after_marker[..stage_end].trim();
     *rest = after_marker[stage_end + 2..].trim();
 
-    Ok((instance_str.to_string(), pipeline_str.parse().unwrap(), run_id, Stage::new(stage_str)))
+    Ok((
+        instance_str.to_string(),
+        pipeline_str.parse().unwrap(),
+        run_id,
+        Stage::new(stage_str),
+    ))
 }
 
 /// Try to parse a backtick-wrapped value. Returns the inner string if found.
