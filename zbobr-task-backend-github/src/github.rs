@@ -532,8 +532,7 @@ impl ZbobrTaskBackendGithubImpl {
         }
 
         // Create zbobr:<instance> label for this instance
-        let instance_label =
-            format!("{}{}", INSTANCE_LABEL_PREFIX, self.backend_config.instance);
+        let instance_label = format!("{}{}", INSTANCE_LABEL_PREFIX, self.backend_config.instance);
         let instance_color = "1d76db"; // blue
         let instance_desc = format!("Zbobr instance: {}", self.backend_config.instance);
         if !existing_labels.contains(&instance_label) {
@@ -898,7 +897,6 @@ impl ZbobrTaskBackendGithubImpl {
             })
             .collect())
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -1149,8 +1147,10 @@ impl TaskBackend for TaskBackendGithub {
 
         let (owner, repo) = self.inner.parse_repo()?;
 
-        let instance_label =
-            format!("{}{}", INSTANCE_LABEL_PREFIX, self.inner.backend_config.instance);
+        let instance_label = format!(
+            "{}{}",
+            INSTANCE_LABEL_PREFIX, self.inner.backend_config.instance
+        );
 
         let issues: Vec<IssueResponse> =
             if let Some(usernames) = self.inner.backend_config.allowed_usernames.as_deref() {

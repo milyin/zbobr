@@ -929,7 +929,7 @@ mod comment_model_tests {
         assert!(task.pause, "stop_with_error should set pause flag");
     }
 
-   // -----------------------------------------------------------------------
+    // -----------------------------------------------------------------------
     // Helper: create a UnifiedMcp for tests
     // -----------------------------------------------------------------------
 
@@ -938,8 +938,7 @@ mod comment_model_tests {
         task_id: u64,
     ) -> crate::mcp::unified::UnifiedMcp {
         let tracker = Arc::new(std::sync::Mutex::new(None::<McpTool>));
-        let session =
-            zbobr.role_session_with_tracker(task_id, tracker, "main".to_string(), 1);
+        let session = zbobr.role_session_with_tracker(task_id, tracker, "main".to_string(), 1);
         let allowed_tools: std::collections::HashSet<zbobr_api::config_tools::McpTool> =
             zbobr_api::config_tools::McpTool::all()
                 .iter()
