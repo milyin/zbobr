@@ -475,14 +475,16 @@ impl<'a> CliStageRunner<'a> {
         let executor = self
             .zbobr
             .build_executor(cli_tool, model.clone(), self.mcp_tester_override);
-        let copilot_token = match cli_tool {
-            Tool::Copilot => self.zbobr.copilot_github_token(),
-            _ => "",
+        let copilot_token_owned = match cli_tool {
+            Tool::Copilot => self.zbobr.copilot_github_token()?,
+            _ => String::new(),
         };
+        let agent_token_owned = self.zbobr.config().agent_github_token.resolve()?;
 
         let outcome = execute_tool(
             executor,
-            copilot_token,
+            &copilot_token_owned,
+            &agent_token_owned,
             self.task_id,
             role,
             assigned_port,
@@ -490,7 +492,6 @@ impl<'a> CliStageRunner<'a> {
             &work_dir,
             &mcp_url,
             plan_mode,
-            self.zbobr,
         )
         .await;
 
@@ -1448,6 +1449,7 @@ struct SessionOutcome {
 async fn execute_tool(
     executor: Box<dyn ToolExecutor>,
     copilot_token: &str,
+    agent_token: &str,
     task_id: u64,
     role: &str,
     assigned_port: u16,
@@ -1455,10 +1457,7 @@ async fn execute_tool(
     work_dir: &Path,
     mcp_url: &str,
     plan_mode: bool,
-    zbobr: &ZbobrDispatcher,
 ) -> SessionOutcome {
-    let agent_token = &zbobr.config().agent_github_token;
-
     tokio::select! {
         result = executor.execute(task_id, role, assigned_port, prompt, work_dir, mcp_url, plan_mode, agent_token, copilot_token) => {
             match result {

@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use zbobr_api::config::WorkflowConfig;
+use zbobr_api::{Secret, config::WorkflowConfig};
 use zbobr_dispatcher::{
     Comment, Task, Workflow, ZbobrDispatcher, ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
     backend::TaskBackendExt, cli::process_task, prompts::ConfiguredPromptBuilder, task::Tool,
@@ -154,14 +154,14 @@ pub async fn init_github_github(
     let task_backend_config = ZbobrTaskBackendGithubConfig {
         instance: dispatcher_config.instance.clone(),
         github_repo: task_repo.clone(),
-        github_token: task_token,
+        github_token: Secret::Value(task_token),
         reports_branch: None,
         reports_path: None,
         allowed_usernames: None,
     };
     let repo_backend_config = ZbobrRepoBackendGithubConfig {
         fork_owner: fork_owner.clone(),
-        github_token: repo_token,
+        github_token: Secret::Value(repo_token),
         repos_dir: base_path.join("repos"),
     };
 

@@ -187,8 +187,9 @@ pub struct ZbobrTaskBackendGithubImpl {
 impl ZbobrTaskBackendGithubImpl {
     pub fn from_config(backend_config: ZbobrTaskBackendGithubConfig) -> anyhow::Result<Self> {
         backend_config.validate()?;
+        let token = backend_config.github_token.resolve()?;
         let octocrab = octocrab::Octocrab::builder()
-            .personal_token(backend_config.github_token.clone())
+            .personal_token(token)
             .build()
             .map_err(|e| anyhow::anyhow!("Failed to build octocrab client: {e}"))?;
         Ok(Self {

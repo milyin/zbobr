@@ -5,6 +5,7 @@ pub mod config;
 pub mod config_tools;
 pub mod context;
 pub mod prompt;
+pub mod secret;
 pub mod task;
 pub mod tool_executor;
 
@@ -16,6 +17,7 @@ pub use config::{
     Config, PipelineConfig, StageDefinition, StageTransition, WorkflowArgs, WorkflowConfig,
     WorkflowToml, ZbobrDispatcherArgs, ZbobrDispatcherConfig, ZbobrDispatcherToml,
 };
+pub use secret::Secret;
 pub use context::format_timestamp;
 pub use task::{
     Comment, ContextRecord, ContextRecordType, HistoryRecordType, Model, Pipeline,

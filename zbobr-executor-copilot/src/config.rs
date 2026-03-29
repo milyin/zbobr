@@ -1,4 +1,4 @@
-use zbobr_api::task::Model;
+use zbobr_api::{Secret, task::Model};
 use zbobr_utility::config_struct;
 
 #[derive(Clone, Default)]
@@ -7,7 +7,9 @@ pub struct ZbobrExecutorCopilotConfig {
     /// Default AI model for Copilot executor.
     pub default_model: Model,
     /// GitHub token used by Copilot CLI (passed as COPILOT_GITHUB_TOKEN).
-    pub copilot_github_token: String,
+    /// Use `{ value = "token" }` for an inline token or `{ env = "VAR" }` to read from an env var.
+    #[config(skip_args)]
+    pub copilot_github_token: Secret,
 }
 
 impl ZbobrExecutorCopilotConfig {
@@ -17,16 +19,9 @@ impl ZbobrExecutorCopilotConfig {
         let merged = toml.unwrap_or_default().merge_with_args(args);
 
         let default_model = merged.default_model.unwrap_or(defaults.default_model);
-
-        // token precedence: environment variables override TOML/CLI
-        let copilot_github_token = std::env::var("COPILOT_GITHUB_TOKEN")
-            .or_else(|_| std::env::var("GH_TOKEN"))
-            .or_else(|_| std::env::var("GITHUB_TOKEN"))
-            .unwrap_or_else(|_| {
-                merged
-                    .copilot_github_token
-                    .unwrap_or(defaults.copilot_github_token.clone())
-            });
+        let copilot_github_token = merged
+            .copilot_github_token
+            .unwrap_or(defaults.copilot_github_token);
 
         Self {
             default_model,

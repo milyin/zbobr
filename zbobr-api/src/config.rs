@@ -5,6 +5,7 @@ use zbobr_utility::config_struct;
 
 use crate::{
     config_tools::McpTool,
+    secret::Secret,
     task::{Model, Pipeline, Stage, Tool},
 };
 
@@ -503,8 +504,10 @@ pub struct ZbobrDispatcherConfig {
     /// This is a security boundary: it limits what agents can do on GitHub — agents must
     /// not have write access so that erroneous or misbehaving agents cannot modify remote
     /// repositories. Use a fine-grained token with read-only scopes (or no scopes at all
-    /// for fully offline/mcp-tester runs). Defaults to "not-configured" when omitted.
-    pub agent_github_token: String,
+    /// for fully offline/mcp-tester runs). Defaults to `{ value = "not-configured" }` when omitted.
+    /// Use `{ value = "token" }` for an inline token or `{ env = "VAR" }` to read from an env var.
+    #[config(skip_args)]
+    pub agent_github_token: Secret,
     /// CLI tool to use as a global default. Individual stages may override this.
     pub tool: Tool,
     /// Global AI model to use when a stage does not specify an override.
@@ -539,7 +542,7 @@ impl Default for ZbobrDispatcherConfig {
             instance: "default".to_string(),
             workspaces: std::path::PathBuf::from("./workspaces"),
             base_port: 3000,
-            agent_github_token: "not-configured".to_string(),
+            agent_github_token: Secret::Value("not-configured".to_string()),
             tool: Tool::default(),
             model: Model::default(),
             work_branch_prefix: "zbobr_fix".to_string(),

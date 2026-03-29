@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use zbobr_api::Secret;
 use zbobr_utility::config_struct;
 
 #[derive(Clone)]
@@ -10,8 +11,9 @@ pub struct ZbobrRepoBackendGithubConfig {
     #[arg(long)]
     pub fork_owner: String,
     /// GitHub token with read/write access to fork org.
-    #[arg(long, env = "ZBOBR_REPO_GITHUB_TOKEN")]
-    pub github_token: String,
+    /// Use `{ value = "token" }` for an inline token or `{ env = "VAR" }` to read from an env var.
+    #[config(skip_args)]
+    pub github_token: Secret,
     /// Directory for bare clones of repositories.
     #[arg(long)]
     #[config(path)]
@@ -22,7 +24,7 @@ impl Default for ZbobrRepoBackendGithubConfig {
     fn default() -> Self {
         Self {
             fork_owner: String::new(),
-            github_token: String::new(),
+            github_token: Secret::default(),
             repos_dir: PathBuf::from("./repos"),
         }
     }
@@ -37,9 +39,16 @@ impl ZbobrRepoBackendGithubConfig {
                  This is the GitHub user or organization where target repos are forked for implementation."
             );
         }
-        if self.github_token.is_empty() {
+        let token = self.github_token.resolve().map_err(|e| {
+            anyhow::anyhow!(
+                "GitHub token not set. Set github_token in [repo] config.\n  \
+                 This token needs read/write access to the organization where repos are forked.\n  \
+                 Error: {e}"
+            )
+        })?;
+        if token.is_empty() {
             anyhow::bail!(
-                "GitHub token not set. Set github_token in [repo] config or use --repo-github-token.\n  \
+                "GitHub token not set. Set github_token in [repo] config.\n  \
                  This token needs read/write access to the organization where repos are forked."
             );
         }

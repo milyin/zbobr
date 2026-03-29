@@ -13,3 +13,6 @@ clap = { workspace = true }
 paste = { workspace = true }
 indexmap = { workspace = true }
 chrono = { workspace = true }
+
+[dev-dependencies]
+toml = { workspace = true }

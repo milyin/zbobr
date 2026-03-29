@@ -123,8 +123,8 @@ impl ZbobrDispatcher {
         }
     }
 
-    pub fn copilot_github_token(&self) -> &str {
-        &self.copilot.config.copilot_github_token
+    pub fn copilot_github_token(&self) -> anyhow::Result<String> {
+        self.copilot.config.copilot_github_token.resolve()
     }
 
     #[allow(clippy::too_many_arguments)]

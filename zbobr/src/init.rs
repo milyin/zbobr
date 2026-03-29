@@ -5,7 +5,7 @@ use std::{
 
 use indexmap::IndexMap;
 use zbobr_api::{
-    Pipeline, Stage,
+    Pipeline, Secret, Stage,
     config::{
         PipelineConfig, RoleDefinition, StageDefinition, StageTransition, WorkflowConfig,
         WorkflowToml,
@@ -98,7 +98,7 @@ fn default_config_toml() -> RootConfigToml {
             instance: Some("default".into()),
             workspaces: Some(PathBuf::from("./workspaces")),
             base_port: Some(3000),
-            agent_github_token: Some("not-configured".into()),
+            agent_github_token: Some(Secret::Value("not-configured".to_string())),
             tool: Some(Tool::Claude),
             model: Some(Model::Default),
             work_branch_prefix: Some("zbobr_fix".into()),
@@ -113,14 +113,14 @@ fn default_config_toml() -> RootConfigToml {
         tasks: Some(ZbobrTaskBackendGithubToml {
             instance: None,
             github_repo: Some("owner/repo".into()),
-            github_token: Some(String::new()),
+            github_token: Some(Secret::Value(String::new())),
             reports_branch: None,
             reports_path: None,
             allowed_usernames: None,
         }),
         repo: Some(ZbobrRepoBackendGithubToml {
             fork_owner: Some(String::new()),
-            github_token: Some(String::new()),
+            github_token: Some(Secret::Value(String::new())),
             repos_dir: Some(PathBuf::from("./repos")),
         }),
         executor: Some(ZbobrExecutorToml {
