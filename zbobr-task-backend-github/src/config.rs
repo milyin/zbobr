@@ -4,6 +4,10 @@ use zbobr_utility::config_struct;
 #[config_struct]
 /// Configuration for the GitHub task backend.
 pub struct ZbobrTaskBackendGithubConfig {
+    /// Instance name for label-based task filtering (`zbobr:<instance>`).
+    /// Injected from ZbobrDispatcherConfig; any TOML value is overwritten at runtime.
+    #[config(skip_args)]
+    pub instance: String,
     /// Task project repository ("Org/repo").
     #[arg(long)]
     pub github_repo: String,

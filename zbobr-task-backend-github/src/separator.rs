@@ -209,6 +209,7 @@ mod tests {
         TaskContext {
             stages: vec![StageContext {
                 info: StageInfo {
+                    instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
                     run_id: 1,
                     stage: Stage::new("working"),
@@ -254,28 +255,14 @@ mod tests {
         assert_eq!(parsed_ctx.stages.len(), 1);
         assert_eq!(parsed_ctx.stages[0].records.len(), 3);
 
-        // Verify IDs match after roundtrip
-        assert_eq!(parsed_ctx.stages[0].records[0].id, 1);
-        assert_eq!(parsed_ctx.stages[0].records[1].id, 2);
-        assert_eq!(parsed_ctx.stages[0].records[2].id, 3);
+        // Serialization reorders records (non-checkbox first), so look up by ID.
+        let records = &parsed_ctx.stages[0].records;
+        let find = |id: u64| records.iter().find(|r| r.id == id).unwrap();
 
-        // Verify states match
-        assert_eq!(
-            parsed_ctx.stages[0].records[0].record_type,
-            ContextRecordType::Checkbox(false)
-        );
-        assert_eq!(
-            parsed_ctx.stages[0].records[1].record_type,
-            ContextRecordType::Checkbox(true)
-        );
-        assert_eq!(
-            parsed_ctx.stages[0].records[2].record_type,
-            ContextRecordType::Success
-        );
-        assert_eq!(
-            parsed_ctx.stages[0].records[2].report_link.as_deref(),
-            Some("reports/success.md")
-        );
+        assert_eq!(find(1).record_type, ContextRecordType::Checkbox(false));
+        assert_eq!(find(2).record_type, ContextRecordType::Checkbox(true));
+        assert_eq!(find(3).record_type, ContextRecordType::Success);
+        assert_eq!(find(3).report_link.as_deref(), Some("reports/success.md"));
     }
 
     #[test]
@@ -382,6 +369,7 @@ mod tests {
         let ctx1 = TaskContext {
             stages: vec![StageContext {
                 info: StageInfo {
+                    instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
                     run_id: 1,
                     stage: Stage::new("planning"),
@@ -406,6 +394,7 @@ mod tests {
         let ctx_theirs = TaskContext {
             stages: vec![StageContext {
                 info: StageInfo {
+                    instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
                     run_id: 1,
                     stage: Stage::new("planning"),
@@ -430,6 +419,7 @@ mod tests {
         let ctx_ours = TaskContext {
             stages: vec![StageContext {
                 info: StageInfo {
+                    instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
                     run_id: 1,
                     stage: Stage::new("planning"),

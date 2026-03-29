@@ -651,6 +651,7 @@ mod tests {
             stages: vec![
                 StageContext {
                     info: StageInfo {
+                        instance: "default".to_string(),
                         pipeline: Pipeline::from("main"),
                         run_id: 1,
                         stage: Stage::new("planning"),
@@ -683,6 +684,7 @@ mod tests {
                 },
                 StageContext {
                     info: StageInfo {
+                        instance: "default".to_string(),
                         pipeline: Pipeline::from("main"),
                         run_id: 1,
                         stage: Stage::new("working"),
@@ -722,7 +724,7 @@ mod tests {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], false, None);
 
-        assert!(output.contains("main:1:**planning** `claude` `claude-opus-4.6`"));
+        assert!(output.contains("default:main:1:**planning** `claude` `claude-opus-4.6`"));
         assert!(
             output.contains("`2024-01-01 00:00:00 +0000` <sub>[prompt](prompts/plan.md)</sub>")
         );
@@ -853,6 +855,7 @@ mod tests {
         let ctx = TaskContext {
             stages: vec![StageContext {
                 info: StageInfo {
+                    instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
                     run_id: 1,
                     stage: Stage::new("working"),
@@ -889,7 +892,7 @@ mod tests {
     #[test]
     fn parse_error_on_missing_id() {
         let text = "\
-- main:1:**working** `2024-01-01 00:00:00 +0000`
+- default:main:1:**working** `2024-01-01 00:00:00 +0000`
   - [ ] no id marker
 ";
         let result = parse_context(text);
@@ -901,6 +904,7 @@ mod tests {
         let ctx = TaskContext {
             stages: vec![StageContext {
                 info: StageInfo {
+                    instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
                     run_id: 1,
                     stage: Stage::new("working"),
@@ -929,7 +933,7 @@ mod tests {
         let output = serialize_context(&ctx, &comments, false, None);
 
         // Stage should come before comment (by timestamp)
-        let stage_pos = output.find("main:1:**working**").unwrap();
+        let stage_pos = output.find("default:main:1:**working**").unwrap();
         let comment_pos = output.find("Please hurry up!").unwrap();
         assert!(stage_pos < comment_pos);
         assert!(output.contains("Please hurry up!"));
@@ -950,6 +954,7 @@ mod tests {
         let ctx = TaskContext {
             stages: vec![StageContext {
                 info: StageInfo {
+                    instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
                     run_id: 1,
                     stage: Stage::new("working"),
@@ -1029,6 +1034,7 @@ mod tests {
     fn md_stage_display_roundtrip() {
         let stage = MdStage {
             title: MdStageTitle {
+                instance: "default".to_string(),
                 timestamp: utc("2024-01-01T00:00:00Z"),
                 pipeline: Pipeline::from("main"),
                 run_id: 1,

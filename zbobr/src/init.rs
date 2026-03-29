@@ -95,6 +95,7 @@ fn default_config_toml() -> RootConfigToml {
 
     RootConfigToml {
         dispatcher: Some(ZbobrDispatcherToml {
+            instance: Some("default".into()),
             workspaces: Some(PathBuf::from("./workspaces")),
             base_port: Some(3000),
             agent_github_token: Some("not-configured".into()),
@@ -110,6 +111,7 @@ fn default_config_toml() -> RootConfigToml {
             timezone: None,
         }),
         tasks: Some(ZbobrTaskBackendGithubToml {
+            instance: None,
             github_repo: Some("owner/repo".into()),
             github_token: Some(String::new()),
             reports_branch: None,

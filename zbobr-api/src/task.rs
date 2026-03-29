@@ -151,6 +151,8 @@ pub struct ContextRecord {
     Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
 pub struct StageInfo {
+    /// Zbobr instance name that produced this stage.
+    pub instance: String,
     /// Pipeline that owns this stage.
     pub pipeline: Pipeline,
     /// Run identifier within the pipeline (monotonically increasing per pipeline).
@@ -1135,6 +1137,7 @@ mod tests {
 
     fn make_stage_info(pipeline: &str, stage: &str) -> StageInfo {
         StageInfo {
+            instance: "default".to_string(),
             pipeline: Pipeline::from(pipeline),
             run_id: 1,
             stage: Stage::from(stage),

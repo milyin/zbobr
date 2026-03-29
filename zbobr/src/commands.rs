@@ -216,6 +216,8 @@ pub async fn run(
         return run_without_backends(command, &prompt_builder);
     }
 
+    let mut tasks_config = tasks_config;
+    tasks_config.instance = dispatcher_config.instance.clone();
     let task_backend = TaskBackendGithub::new(tasks_config).await?;
     let repo_backend = ZbobrRepoBackendGithub::new(repo_config).await?;
 
