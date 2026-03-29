@@ -273,10 +273,22 @@ struct MdCompactComment {
 
 impl MdCompactComment {
     fn from_comment(c: &Comment, for_prompt: bool) -> Self {
-        let comment_text = if for_prompt || c.body.len() <= COMPACT_COMMENT_MAX_LEN {
+        let comment_text = if for_prompt {
+            // put to context as is
             c.body.to_string()
+        } else if c.body.len() <= COMPACT_COMMENT_MAX_LEN {
+            // short comment, use full text with line breaks replaced by spaces to keep format "ine stage - one line"
+            c.body.lines().collect::<Vec<_>>().join(" ")
         } else {
-            let truncated: String = c.body.chars().take(COMPACT_COMMENT_MAX_LEN).collect();
+            // long comment, truncate and replace line breaks with spaces
+            let truncated = c
+                .body
+                .chars()
+                .take(COMPACT_COMMENT_MAX_LEN)
+                .collect::<String>()
+                .lines()
+                .collect::<Vec<_>>()
+                .join(" ");
             format!("{}...", truncated)
         };
 
