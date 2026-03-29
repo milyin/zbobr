@@ -152,6 +152,7 @@ pub async fn init_github_github(
     };
 
     let task_backend_config = ZbobrTaskBackendGithubConfig {
+        instance: dispatcher_config.instance.clone(),
         github_repo: task_repo.clone(),
         github_token: task_token,
         reports_branch: None,

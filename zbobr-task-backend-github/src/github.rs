@@ -144,6 +144,11 @@ struct IssueLabel {
 }
 
 #[derive(Debug, serde::Deserialize)]
+struct IssueUser {
+    login: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
 struct CommentResponse {
     body: Option<String>,
     created_at: Option<String>,

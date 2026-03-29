@@ -972,6 +972,7 @@ mod comment_model_tests {
                 .modify_task(|mut task| {
                     task.context.stages.push(StageContext {
                         info: StageInfo {
+                            instance: "default".to_string(),
                             pipeline: Pipeline::Main,
                             run_id: 1,
                             stage: Stage::new("working"),

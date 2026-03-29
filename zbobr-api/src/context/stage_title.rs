@@ -30,6 +30,7 @@ use crate::task::{Model, Pipeline, Stage, StageInfo, Tool};
 /// A parsed stage title line, mapping 1:1 to the markdown format.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MdStageTitle {
+    pub instance: String,
     pub timestamp: chrono::DateTime<chrono::FixedOffset>,
     pub pipeline: Pipeline,
     pub run_id: u64,
@@ -43,6 +44,7 @@ pub struct MdStageTitle {
 impl From<&StageInfo> for MdStageTitle {
     fn from(info: &StageInfo) -> Self {
         MdStageTitle {
+            instance: info.instance.clone(),
             timestamp: info.timestamp,
             pipeline: info.pipeline.clone(),
             run_id: info.run_id,
@@ -58,6 +60,7 @@ impl From<&StageInfo> for MdStageTitle {
 impl From<MdStageTitle> for StageInfo {
     fn from(t: MdStageTitle) -> Self {
         StageInfo {
+            instance: t.instance,
             timestamp: t.timestamp,
             pipeline: t.pipeline,
             run_id: t.run_id,
@@ -72,8 +75,9 @@ impl From<MdStageTitle> for StageInfo {
 
 // -- Display (serialization) -------------------------------------------------
 
-/// Wrapper: `pipeline:run_id:**stage**`
+/// Wrapper: `instance:pipeline:run_id:**stage**`
 struct PipelineStage<'a> {
+    instance: &'a str,
     pipeline: &'a Pipeline,
     run_id: u64,
     stage: &'a Stage,
@@ -81,7 +85,7 @@ struct PipelineStage<'a> {
 
 impl fmt::Display for PipelineStage<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}:**{}**", self.pipeline, self.run_id, self.stage)
+        write!(f, "{}:{}:{}:**{}**", self.instance, self.pipeline, self.run_id, self.stage)
     }
 }
 
@@ -105,6 +109,7 @@ impl fmt::Display for MdStageTitle {
             f,
             "{}",
             PipelineStage {
+                instance: &self.instance,
                 pipeline: &self.pipeline,
                 run_id: self.run_id,
                 stage: &self.stage,
@@ -136,8 +141,8 @@ impl FromStr for MdStageTitle {
         let s = s.strip_prefix("- ").unwrap_or(s).trim();
         let mut rest = s;
 
-        // 1. pipeline:run_id:**stage**
-        let (pipeline, run_id, stage) = parse_next_pipeline_stage(&mut rest)?;
+        // 1. instance:pipeline:run_id:**stage**
+        let (instance, pipeline, run_id, stage) = parse_next_pipeline_stage(&mut rest)?;
 
         // 2. Optional backtick tokens (tool, model, timestamp)
         let mut tool = None;
@@ -182,6 +187,7 @@ impl FromStr for MdStageTitle {
         }
 
         Ok(MdStageTitle {
+            instance,
             timestamp,
             pipeline,
             run_id,
@@ -211,22 +217,30 @@ impl<'de> serde::Deserialize<'de> for MdStageTitle {
 
 // -- Parsing helpers ----------------------------------------------------------
 
-fn parse_next_pipeline_stage(rest: &mut &str) -> Result<(Pipeline, u64, Stage)> {
+fn parse_next_pipeline_stage(rest: &mut &str) -> Result<(String, Pipeline, u64, Stage)> {
     let stage_marker = ":**";
     let marker_pos = rest
         .find(stage_marker)
         .ok_or_else(|| anyhow::anyhow!("Missing ':**' stage marker"))?;
-    let pipeline_and_run = &rest[..marker_pos];
+    let instance_pipeline_and_run = &rest[..marker_pos];
     let after_marker = &rest[marker_pos + stage_marker.len()..];
 
-    let sep_pos = pipeline_and_run
+    // Format: instance:pipeline:run_id
+    // Split on the last ':' to get run_id, then split the remainder on the first ':' to get instance and pipeline.
+    let run_sep = instance_pipeline_and_run
         .rfind(':')
-        .ok_or_else(|| anyhow::anyhow!("Missing ':' between pipeline and run_id"))?;
-    let pipeline_str = pipeline_and_run[..sep_pos].trim();
-    let run_id: u64 = pipeline_and_run[sep_pos + 1..]
+        .ok_or_else(|| anyhow::anyhow!("Missing ':' before run_id"))?;
+    let run_id: u64 = instance_pipeline_and_run[run_sep + 1..]
         .trim()
         .parse()
         .context("Invalid run_id")?;
+    let instance_and_pipeline = instance_pipeline_and_run[..run_sep].trim();
+
+    let pipeline_sep = instance_and_pipeline
+        .find(':')
+        .ok_or_else(|| anyhow::anyhow!("Missing ':' between instance and pipeline"))?;
+    let instance_str = instance_and_pipeline[..pipeline_sep].trim();
+    let pipeline_str = instance_and_pipeline[pipeline_sep + 1..].trim();
 
     let stage_end = after_marker
         .find("**")
@@ -234,7 +248,7 @@ fn parse_next_pipeline_stage(rest: &mut &str) -> Result<(Pipeline, u64, Stage)> 
     let stage_str = after_marker[..stage_end].trim();
     *rest = after_marker[stage_end + 2..].trim();
 
-    Ok((pipeline_str.parse().unwrap(), run_id, Stage::new(stage_str)))
+    Ok((instance_str.to_string(), pipeline_str.parse().unwrap(), run_id, Stage::new(stage_str)))
 }
 
 /// Try to parse a backtick-wrapped value. Returns the inner string if found.
@@ -276,6 +290,7 @@ impl fmt::Display for MdMdStageTitleForPrompt<'_> {
             f,
             "{}",
             PipelineStage {
+                instance: &t.instance,
                 pipeline: &t.pipeline,
                 run_id: t.run_id,
                 stage: &t.stage,
@@ -297,6 +312,7 @@ mod tests {
 
     fn make_title() -> MdStageTitle {
         MdStageTitle {
+            instance: "myinstance".to_string(),
             timestamp: chrono::DateTime::parse_from_rfc3339("2024-06-15T10:30:00+03:00").unwrap(),
             pipeline: Pipeline::from("main"),
             run_id: 2,
@@ -322,7 +338,7 @@ mod tests {
         let s = title.to_string();
         assert_eq!(
             s,
-            "main:2:**working** `claude` `claude-opus-4.6` `2024-06-15 10:30:00 +0300` <sub>[prompt](prompts/work.md)</sub> <sub>[output](output/work.md)</sub>"
+            "myinstance:main:2:**working** `claude` `claude-opus-4.6` `2024-06-15 10:30:00 +0300` <sub>[prompt](prompts/work.md)</sub> <sub>[output](output/work.md)</sub>"
         );
     }
 
@@ -337,6 +353,7 @@ mod tests {
     #[test]
     fn display_without_optionals() {
         let title = MdStageTitle {
+            instance: "default".to_string(),
             timestamp: chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").unwrap(),
             pipeline: Pipeline::from("merge"),
             run_id: 1,
@@ -347,7 +364,7 @@ mod tests {
             output_link: None,
         };
         let s = title.to_string();
-        assert_eq!(s, "merge:1:**review** `2024-01-01 00:00:00 +0000`");
+        assert_eq!(s, "default:merge:1:**review** `2024-01-01 00:00:00 +0000`");
         let parsed: MdStageTitle = s.parse().unwrap();
         assert_eq!(parsed, title);
     }
@@ -355,6 +372,7 @@ mod tests {
     #[test]
     fn display_with_prompt_only() {
         let title = MdStageTitle {
+            instance: "default".to_string(),
             timestamp: chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").unwrap(),
             pipeline: Pipeline::from("merge"),
             run_id: 1,
@@ -367,7 +385,7 @@ mod tests {
         let s = title.to_string();
         assert_eq!(
             s,
-            "merge:1:**review** `2024-01-01 00:00:00 +0000` <sub>[prompt](prompts/review.md)</sub>"
+            "default:merge:1:**review** `2024-01-01 00:00:00 +0000` <sub>[prompt](prompts/review.md)</sub>"
         );
         let parsed: MdStageTitle = s.parse().unwrap();
         assert_eq!(parsed, title);

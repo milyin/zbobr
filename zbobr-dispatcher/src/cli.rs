@@ -403,6 +403,7 @@ impl<'a> CliStageRunner<'a> {
 
         // Add a new StageContext to the task's context for this stage execution.
         {
+            let instance = self.zbobr.config().instance.clone();
             let pipeline_name = self.pipeline_name.clone();
             let stage_name = Stage::new(self.stage_name);
             let tool_val = Some(cli_tool);
@@ -413,6 +414,7 @@ impl<'a> CliStageRunner<'a> {
                 .modify_task(move |mut task| {
                     task.context.stages.push(StageContext {
                         info: StageInfo {
+                            instance,
                             pipeline: pipeline_name,
                             run_id: pipeline_run_id,
                             stage: stage_name,
