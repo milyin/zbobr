@@ -104,8 +104,10 @@ mod tests {
 
     #[test]
     fn deserialize_rejects_unknown_keys() {
-        let result: Result<Secret, _> = toml::from_str(r#"value = "x"
-extra = "y""#);
+        let result: Result<Secret, _> = toml::from_str(
+            r#"value = "x"
+extra = "y""#,
+        );
         assert!(result.is_err());
     }
 
