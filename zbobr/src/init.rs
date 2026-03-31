@@ -174,6 +174,26 @@ fn default_workflow() -> WorkflowConfig {
             StageDefinition {
                 role: Some("worker".into()),
                 prompts: task_prompt.clone(),
+                on_intermediate: Some(StageTransition::stage("test_planner")),
+                ..Default::default()
+            },
+        ),
+        (
+            Stage::from("test_planner"),
+            StageDefinition {
+                role: Some("test_planner".into()),
+                prompts: task_prompt.clone(),
+                on_failure: Some(StageTransition::stage("working")),
+                on_intermediate: Some(StageTransition::stage("test_worker")),
+                ..Default::default()
+            },
+        ),
+        (
+            Stage::from("test_worker"),
+            StageDefinition {
+                role: Some("test_worker".into()),
+                prompts: task_prompt.clone(),
+                on_failure: Some(StageTransition::stage("working")),
                 on_intermediate: Some(StageTransition::stage("reviewing")),
                 ..Default::default()
             },
@@ -273,6 +293,38 @@ fn default_workflow() -> WorkflowConfig {
             },
         ),
         (
+            "test_planner".into(),
+            RoleDefinition {
+                mcp: vec![
+                    StopWithError,
+                    StopWithQuestion,
+                    ReportSuccess,
+                    ReportIntermediate,
+                    AddChecklistItem,
+                    DeleteCtxRec,
+                ],
+                prompt: Some(PathBuf::from("test_planner.md")),
+                ..Default::default()
+            },
+        ),
+        (
+            "test_worker".into(),
+            RoleDefinition {
+                mcp: vec![
+                    StopWithError,
+                    ReportSuccess,
+                    ReportFailure,
+                    ReportIntermediate,
+                    StopWithQuestion,
+                    AddChecklistItem,
+                    CheckChecklistItem,
+                    DeleteCtxRec,
+                ],
+                prompt: Some(PathBuf::from("test_worker.md")),
+                ..Default::default()
+            },
+        ),
+        (
             "reviewer".into(),
             RoleDefinition {
                 mcp: vec![
@@ -357,6 +409,8 @@ const PROMPT_FILES: &[(&str, &str)] = &[
     ("preparator_task", PREPARATOR_TASK_TEMPLATE),
     ("planner", PLANNER_PROMPT),
     ("worker", WORKER_PROMPT),
+    ("test_planner", TEST_PLANNER_PROMPT),
+    ("test_worker", TEST_WORKER_PROMPT),
     ("reviewer", REVIEWER_PROMPT),
     ("tester", TESTER_PROMPT),
     ("merger", MERGER_PROMPT),
@@ -500,7 +554,7 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 2. **Identify the analog referenced in the plan.** Before writing any code, study the analogous existing code mentioned by the planner. Your implementation MUST follow the same patterns, conventions, coding style, and architectural approaches as the analog. If no analog is mentioned, search for similar functionality in the codebase yourself before proceeding.
 3. Implement the task by going through unchecked checklist items one by one. Commit work after implementing each item.  **Follow the same patterns and style as the identified analog if one is available.**
 4. When implementation for an item is complete, mark the item done with `{mcp_check_checklist_item}` (pass the ctx_rec_N id).
-5. **Write tests for new functionality** unless explicitly specified to omit tests or the change is not code related (e.g., output messages, documentation updates, llm prompts) or the test is expected to be too complex or require specific environment. Tests should validate the added functionality.
+5. Correct existing tests if necessary, but **do NOT implement new tests for new functionality** in this stage. Tests will be implemented later.
 6. If you sense your context window is getting close to its limit, finish your current item to a buildable state, commit your work, mark completed items as done, call `{mcp_report_intermediate}` with a summary of what you accomplished and what remains and finish the session.
 7. If you need human clarification or intervention, call `{mcp_stop_with_question}`. If the plan is unclear or requires adjustment, call `{mcp_report_failure}`. In case of technical errors use `{mcp_stop_with_error}`.
 8. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
@@ -511,6 +565,31 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 ## Coding Guidelines
 
 - **Prefer deriving values from types and constants** rather than using hardcoded string literals. If a value can be computed from an existing type, enum variant, or constant, do it. Avoid duplicating the value as literals or constants."#;
+
+const TEST_PLANNER_PROMPT: &str = r#"#Analyze the implementation changes and determine if additional tests are required. Your job is to produce a test plan with list of tests to be added.
+
+## Workflow
+
+1. Read recent plan and recent implemetation report.
+2. Inspect changes in the working branch (e.g., `git diff origin/{destination_branch}...HEAD`) to understand implemented behavior.
+3. Decide whether the new feature/bugfix needs additional tests beyond existing coverage. If no new tests are needed, call `{mcp_report_success}` with only a brief rationale and finish.
+4. Prepare a plan for implementing the required tests as an overview document and set of checklist items
+5. Call `{mcp_add_checklist_item}` for each test or group of related tests.
+6. Call `{mcp_report_success}` with the overview report test-planning work is complete.
+"#;
+
+const TEST_WORKER_PROMPT: &str = r#"Implement and run the tests described in the plans.
+
+## Workflow
+
+1. For each unchecked checklist item related to tests, implement the corresponding test. Commit your work after implementing each item.
+2. Run only the tests mentioned in the checklist items, both checked and unchecked.
+3. If tests fail, call `{mcp_report_failure}` and include failure details.
+4. If tests pass, call `{mcp_report_success}`.
+
+## Important
+Do not implemet any functionality, your jond is only to implement and run tests.
+"#;
 
 const REVIEWER_PROMPT: &str = r#"# Reviewer Agent
 
@@ -636,3 +715,22 @@ You have read access to the task and repository:
 - For conflicting edits to the same code, ask the user which version is preferred
 - Preserve the intent of both branches' changes if both changes are valid
 - Do NOT delete either branch's work without explicit user guidance"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_workflow_includes_test_stages() {
+        let workflow = default_workflow();
+        let main = workflow.pipeline(Pipeline::MAIN).expect("main pipeline exists");
+        assert!(main.stages.contains_key("test_planner"));
+        assert!(main.stages.contains_key("test_worker"));
+
+        let working = main.stages.get("working").expect("working stage exists");
+        assert_eq!(
+            working.on_intermediate.as_ref().and_then(|t| t.next.as_ref()).map(|s| s.as_str()),
+            Some("test_planner")
+        );
+    }
+}
