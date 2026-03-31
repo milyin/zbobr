@@ -1263,4 +1263,42 @@ mod tests {
         assert_eq!(ContextRecordType::Comment.to_string(), "comment");
         assert_eq!(ContextRecordType::Question.to_string(), "question");
     }
+
+    fn make_task(id: u64, work_branch: Option<&str>) -> Task {
+        Task {
+            id,
+            title: String::new(),
+            description: String::new(),
+            state: State::Empty,
+            destination_repository: None,
+            destination_branch: None,
+            work_branch: work_branch.map(|s| s.to_string()),
+            pr_url: None,
+            context: TaskContext::default(),
+            signal: None,
+            stack: Vec::new(),
+            status: None,
+            pause: false,
+            confirm: false,
+            pipeline_run_id: 0,
+            stage_count: 0,
+            max_stage_count: 0,
+            closed: false,
+            etag: None,
+        }
+    }
+
+    #[test]
+    fn identity_returns_some_when_work_branch_set() {
+        let task = make_task(42, Some("zbobr_fix-123-my-feature"));
+        let identity = task.identity().expect("identity should be Some");
+        assert_eq!(identity.task_id, 42);
+        assert_eq!(identity.work_branch, "zbobr_fix-123-my-feature");
+    }
+
+    #[test]
+    fn identity_returns_none_when_work_branch_missing() {
+        let task = make_task(42, None);
+        assert!(task.identity().is_none());
+    }
 }
