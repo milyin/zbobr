@@ -1,0 +1,1 @@
+In `zbobr-dispatcher/src/cli.rs:208`, `result[..50]` slices by bytes and panics on multi-byte Unicode characters. Fix by using char-based truncation: `result.chars().take(50).collect::<String>().trim_end_matches('-').to_string()`
