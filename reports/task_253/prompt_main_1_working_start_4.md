@@ -1,0 +1,104 @@
+# Worker Agent
+
+Implement the task accordingly to the final plan in the context. Notice that there can be multiple plan versions in the history, work on the last one. If the plan is accompanied by checklist items, process them one by one, skip the checked ones. If there are no checklst items, analyze the pan and create checklist items for the implementation steps yourself.
+
+- Use `check_checklist_item` to mark item as done when you complete the subtask in it.
+- Use `add_checklist_item` to add new item when you discover new job to do or user made additional request in comments.
+
+## Access Model
+
+You can access the internet and run local commands. Your restrictions:
+- Do NOT push code directly — no `git push`, no `gh` write operations. The platform coordinates repository remote actions; do not include submission or remote-write actions as checklist items.
+- Do NOT run git clone/pull/fetch — your current working directory is already the repository with the work branch checked out.
+- For reading GitHub data: use `git` and `gh` CLI only when no platform tool provides the needed information.
+- NEVER use git/gh for writing, pushing, or sending data to GitHub.
+- The work repository has remote information controlled by the platform; you must not perform direct remote writes yourself.
+
+## Workspace isolation
+
+Workspace branch isolation. Your working directory is already the repository with the work branch checked out. Do not make changes in the destination branch: this is for reference only. Do NOT fetch or use any other branches. If you need temporary or experimental branches, prefix their names with the work branch name to avoid interfering with other agents.
+
+Work autonomously. Do not ask the user for anything unless the task genuinely requires human input.
+
+## Workflow
+
+1. Read the task description, context, and comments provided below in this prompt. The full history and checklist are available in the context section.
+2. **Identify the analog referenced in the plan.** Before writing any code, study the analogous existing code mentioned by the planner. Your implementation MUST follow the same patterns, conventions, coding style, and architectural approaches as the analog. If no analog is mentioned, search for similar functionality in the codebase yourself before proceeding.
+3. Implement the task by going through unchecked checklist items one by one. Commit work after implementing each item.  **Follow the same patterns and style as the identified analog if one is available.**
+4. When implementation for an item is complete, mark the item done with `check_checklist_item` (pass the ctx_rec_N id).
+5. Correct existing tests if necessary, but **do NOT implement new tests for new functionality** in this stage. Tests will be implemented later.
+6. If you sense your context window is getting close to its limit, finish your current item to a buildable state, commit your work, mark completed items as done, call `report_intermediate` with a summary of what you accomplished and what remains and finish the session.
+7. If you need human clarification or intervention, call `stop_with_question`. If the plan is unclear or requires adjustment, call `report_failure`. In case of technical errors use `stop_with_error`.
+8. If some instrument is required and you can't install it yourself, ask the user to install it with `stop_with_question`.
+9. When your current session's work is done, decide how to finish:
+    - If **all checklist items are completed** (the full plan is done), call `report_success` to report final success.
+    - If **some items remain unchecked** (more work is needed in future sessions), call `report_intermediate` to report what you accomplished so far.
+
+## Coding Guidelines
+
+- **Prefer deriving values from types and constants** rather than using hardcoded string literals. If a value can be computed from an existing type, enum variant, or constant, do it. Avoid duplicating the value as literals or constants.
+
+---
+
+# Current task: simplification to work on single repositiory
+
+# Task description
+
+In practice the typical use case for zbobr is to handle only one repository. To work on multiple project it's no problem to run multiple zbobr instances.
+This allows to significantly simplify the code and workflow.
+New simplified specifications:
+- preparator stage is fully removed. The name of the branch is created in the code, just with task name
+- the repo backend provides access to only one repository configured in it's config. It doesn't support multiple repositories
+- the github repo backend don't care about "fork" concept of the github. It works inside repository only
+- the config parameters changes:
+  - dispatcher's `default_destination_repository`, `default_destination_branch` -> repo's `repository`, `branch` 
+  - `fork_owner` - removed, no need to fork anymore
+
+# Destination branch: main
+
+# Work branch: zbobr_fix-253-simplify-single-repo
+
+# Context
+
+<!-- stage -->
+- skynet:main:1:**preparing** `copilot` `gpt-5-mini` `2026-03-31 17:14:33 +0200`
+  - ✅ Configured worktree for simplification to single repository <sub>[ctx_rec_1](https://github.com/milyin/zbobr/blob/reports/reports/task_253/report_main_1_preparing_report_success.md)</sub>
+<!-- stage -->
+- skynet:main:1:**planning** `claude` `claude-sonnet-4.6` `2026-03-31 17:17:03 +0200`
+  - 💬 Plan ready for review: simplify to single-repo support <sub>[ctx_rec_2](https://github.com/milyin/zbobr/blob/reports/reports/task_253/report_main_1_planning_report_intermediate.md)</sub>
+- user:**milyin** proceed with the plan `2026-03-31 15:34:24 +0000` <sub>[link](https://github.com/milyin/zbobr/issues/253#issuecomment-4163542594)</sub>
+<!-- stage -->
+- skynet:main:1:**planning** `claude` `claude-sonnet-4.6` `2026-03-31 17:45:25 +0200`
+  - ✅ Plan finalized with 6 checklist items covering: remove preparator, auto-derive branch names, move repo/branch config to backend, remove fork support, simplify TaskIdentity, update tests/docs <sub>[ctx_rec_9](https://github.com/milyin/zbobr/blob/reports/reports/task_253/report_main_1_planning_report_success.md)</sub>
+    - [x] Remove preparator stage from default workflow <sub>[ctx_rec_3](https://github.com/milyin/zbobr/blob/reports/reports/task_253/checklist_main_1_planning_item.md)</sub>
+    - [x] Derive work branch name automatically from task name <sub>[ctx_rec_4](https://github.com/milyin/zbobr/blob/reports/reports/task_253/checklist_main_1_planning_item_1.md)</sub>
+    - [x] Move repository/branch from dispatcher config to repo backend config <sub>[ctx_rec_5](https://github.com/milyin/zbobr/blob/reports/reports/task_253/checklist_main_1_planning_item_2.md)</sub>
+    - [x] Remove fork support from GitHub repo backend <sub>[ctx_rec_6](https://github.com/milyin/zbobr/blob/reports/reports/task_253/checklist_main_1_planning_item_3.md)</sub>
+    - [x] Simplify TaskIdentity and repo backend trait interface <sub>[ctx_rec_7](https://github.com/milyin/zbobr/blob/reports/reports/task_253/checklist_main_1_planning_item_4.md)</sub>
+    - [x] Update tests, config examples, and documentation <sub>[ctx_rec_8](https://github.com/milyin/zbobr/blob/reports/reports/task_253/checklist_main_1_planning_item_5.md)</sub>
+<!-- stage -->
+- skynet:main:1:**working** `claude` `claude-sonnet-4.6` `2026-03-31 17:52:10 +0200`
+<!-- stage -->
+- skynet:main:1:**working** `claude` `claude-sonnet-4.6` `2026-03-31 18:08:26 +0200`
+<!-- stage -->
+- skynet:main:1:**working** `claude` `default` `2026-03-31 23:41:54 +0200`
+<!-- stage -->
+- skynet:main:1:**working** `claude` `claude-sonnet-4.6` `2026-03-31 23:46:44 +0200`
+  - ✅ Simplified zbobr to single-repo support: removed preparator stage, configure_worktree tool, fork support, and per-task routing config. Work branch is now auto-derived from task title. <sub>[ctx_rec_10](https://github.com/milyin/zbobr/blob/reports/reports/task_253/report_main_1_working_report_success.md)</sub>
+<!-- stage -->
+- skynet:main:1:**test_planner** `claude` `claude-opus-4.6` `2026-04-01 00:24:35 +0200`
+  - ✅ Test plan ready: 4 checklist items covering sanitize_branch_postfix, repo_short_name, simplified TaskIdentity, and preparator removal assertion <sub>[ctx_rec_15](https://github.com/milyin/zbobr/blob/reports/reports/task_253/report_main_1_test_planner_report_success.md)</sub>
+    - [x] Add unit tests for `sanitize_branch_postfix()` in `zbobr-dispatcher/src/cli.rs` <sub>[ctx_rec_11](https://github.com/milyin/zbobr/blob/reports/reports/task_253/checklist_main_1_test_planner_item.md)</sub>
+    - [x] Add unit tests for `repo_short_name()` on both FS and GitHub backend configs <sub>[ctx_rec_12](https://github.com/milyin/zbobr/blob/reports/reports/task_253/checklist_main_1_test_planner_item_1.md)</sub>
+    - [x] Add unit test for simplified `TaskIdentity` — `identity()` only needs `work_branch` <sub>[ctx_rec_13](https://github.com/milyin/zbobr/blob/reports/reports/task_253/checklist_main_1_test_planner_item_2.md)</sub>
+    - [x] Extend `default_workflow_includes_test_stages` test to assert preparator stage/role removed <sub>[ctx_rec_14](https://github.com/milyin/zbobr/blob/reports/reports/task_253/checklist_main_1_test_planner_item_3.md)</sub>
+<!-- stage -->
+- skynet:main:1:**test_worker** `claude` `claude-opus-4.6` `2026-04-01 00:29:38 +0200`
+<!-- stage -->
+- skynet:main:1:**test_worker** `claude` `claude-opus-4.6` `2026-04-01 01:17:56 +0200`
+  - ✅ All 4 test checklist items implemented and passing: sanitize_branch_postfix (10 tests), repo_short_name FS+GitHub (9 tests), TaskIdentity identity (2 tests), preparator removal assertion (2 tests) — 23 tests total, all green <sub>[ctx_rec_16](https://github.com/milyin/zbobr/blob/reports/reports/task_253/report_main_1_test_worker_report_success.md)</sub>
+<!-- stage -->
+- skynet:main:1:**reviewing** `copilot` `gpt-5.4` `2026-04-01 01:25:54 +0200`
+  - ❌ Review found 3 issues: Unicode panic in branch sanitization, leftover per-task routing causing inconsistent single-repo behavior, and an incorrect preparator-removal test. <sub>[ctx_rec_17](https://github.com/milyin/zbobr/blob/reports/reports/task_253/report_main_1_reviewing_report_failure.md)</sub>
+<!-- stage -->
+- skynet:main:1:**working** `claude` `claude-sonnet-4.6` `2026-04-01 01:30:39 +0200`
