@@ -672,4 +672,31 @@ mod tests {
             Some("test_planner")
         );
     }
+
+    #[test]
+    fn default_workflow_has_no_preparator_stage() {
+        let workflow = default_workflow();
+        let main = workflow.pipeline(Pipeline::MAIN).expect("main pipeline exists");
+
+        // Preparator stage must not exist in any pipeline
+        assert!(
+            !main.stages.contains_key("preparator"),
+            "preparator stage should not exist in main pipeline"
+        );
+
+        if let Some(merge) = workflow.pipeline(Pipeline::MERGE) {
+            assert!(
+                !merge.stages.contains_key("preparator"),
+                "preparator stage should not exist in merge pipeline"
+            );
+        }
+
+        // No role should be named "preparator"
+        for role_name in workflow.roles.keys() {
+            assert_ne!(
+                role_name, "preparator",
+                "preparator role should not exist in workflow roles"
+            );
+        }
+    }
 }
