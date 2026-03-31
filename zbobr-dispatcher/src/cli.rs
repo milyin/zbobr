@@ -203,9 +203,9 @@ fn sanitize_branch_postfix(title: &str) -> String {
     }
     // trim trailing dash
     let result = result.trim_end_matches('-').to_string();
-    // truncate to 50 chars
-    if result.len() > 50 {
-        result[..50].trim_end_matches('-').to_string()
+    // truncate to 50 chars (char-based to avoid panicking on multi-byte Unicode)
+    if result.chars().count() > 50 {
+        result.chars().take(50).collect::<String>().trim_end_matches('-').to_string()
     } else {
         result
     }
@@ -1830,5 +1830,15 @@ mod tests {
     #[test]
     fn sanitize_branch_postfix_lowercases() {
         assert_eq!(sanitize_branch_postfix("FIX BUG"), "fix-bug");
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_unicode_no_panic() {
+        // Multi-byte Unicode chars: each Japanese char is 3 bytes.
+        // 20 chars × 3 bytes = 60 bytes > 50 bytes, but only 20 chars.
+        // Old byte-slice would panic; char-based should not.
+        let title = "タスク".repeat(20); // 60 chars
+        let result = sanitize_branch_postfix(&title);
+        assert!(result.chars().count() <= 50);
     }
 }
