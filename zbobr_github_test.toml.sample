@@ -17,10 +17,12 @@
 
 # Uncomment to enable GitHub repo-backend tests (integration_github_github):
 #
-# [repo.github]
-# # GitHub user or organisation where target repos are forked.
-# fork_owner = "owner"
-# # GitHub token with read/write access to the fork organisation.
+# [repo]
+# # GitHub repository to work in, in "owner/repo" format.
+# repository = "owner/zbobr-test-repo"
+# # Base branch to work against.
+# branch = "main"
+# # GitHub token with read/write access to the repository.
 # github_token = "ghp_your_repo_github_token_here"
 
 # Optional: GitHub token passed as GH_TOKEN to agent processes.

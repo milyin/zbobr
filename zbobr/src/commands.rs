@@ -69,13 +69,6 @@ pub enum TaskSubcommand {
         /// Initial state (READY, DONE, etc.; default: READY)
         #[arg(long, default_value = "READY")]
         state: String,
-
-        /// Destination repository in owner/repo format
-        #[arg(long)]
-        dest_repo: Option<String>,
-        /// Destination branch
-        #[arg(long)]
-        dest_branch: Option<String>,
         /// When set the task will be paused automatically on every state change
         #[arg(long, action = clap::ArgAction::SetTrue)]
         confirm: bool,
@@ -354,13 +347,11 @@ async fn run_task_subcommand(
             title,
             description,
             state,
-            dest_repo,
-            dest_branch,
             confirm,
         } => {
             let parsed_state = state.parse::<zbobr_api::State>()?;
             let id = zbobr
-                .create_task(&title, &description, parsed_state, dest_repo, dest_branch)
+                .create_task(&title, &description, parsed_state)
                 .await?;
             if confirm {
                 zbobr.task_session(id).set_confirm(true).await?;
@@ -617,10 +608,10 @@ async fn overwrite_author(
     let task = task_backend.get_task(id).await?.snapshot(false).await?;
     let identity = task
         .identity()
-        .ok_or_else(|| anyhow::anyhow!("Task #{} missing routing parameters", id))?;
+        .ok_or_else(|| anyhow::anyhow!("Task #{} missing work_branch", id))?;
 
-    let dest_repo = &identity.destination_repository;
-    let dest_branch = &identity.destination_branch;
+    let dest_repo = zbobr.repo_backend().repository();
+    let dest_branch = zbobr.repo_backend().branch();
 
     if dry_run {
         println!(
@@ -641,11 +632,7 @@ async fn overwrite_author(
     }
 
     let task_dir = TaskDir::new(zbobr.config().workspaces.as_path(), id);
-
-    let repo_name = std::path::Path::new(dest_repo)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| anyhow::anyhow!("Cannot extract repo name from: {}", dest_repo))?;
+    let repo_name = zbobr.repo_backend().repo_name();
     let repo_dir = task_dir.path().join(repo_name);
 
     if !repo_dir.exists() {
@@ -656,10 +643,8 @@ async fn overwrite_author(
         ));
     }
 
-    // Fetch latest refs (including dest_branch) via the auth-aware backend
-    // so that filter-branch range and dry-run log are accurate.
-    // Uses fetch_refs (fetch-only) instead of update_worktree to avoid
-    // side effects (merges, pushes, PR creation) that violate dry-run expectations.
+    // Fetch latest refs via the auth-aware backend so that filter-branch
+    // range and dry-run log are accurate.
     zbobr.fetch_refs(&identity).await?;
 
     if !dry_run {

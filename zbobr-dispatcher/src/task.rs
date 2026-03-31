@@ -854,6 +854,15 @@ mod comment_model_tests {
         fn debug_state(&self) -> String {
             "dummy".to_string()
         }
+        fn repository(&self) -> &str {
+            "dummy/repo"
+        }
+        fn branch(&self) -> &str {
+            "main"
+        }
+        fn repo_name(&self) -> &str {
+            "repo"
+        }
     }
 
     fn make_test_parts() -> (Arc<crate::ZbobrDispatcher>, ArcTrackingBackend) {
@@ -881,7 +890,7 @@ mod comment_model_tests {
     async fn mcp_helper_includes_explicit_model() {
         let (zbobr, task_backend) = make_test_parts();
         let id = zbobr
-            .create_task("t", "", "READY", None, None)
+            .create_task("t", "", "READY")
             .await
             .unwrap();
 
@@ -960,7 +969,7 @@ mod comment_model_tests {
     async fn report_success_stores_context_records() {
         let (zbobr, task_backend) = make_test_parts();
         let id = zbobr
-            .create_task("t", "desc", "READY", None, None)
+            .create_task("t", "desc", "READY")
             .await
             .unwrap();
 

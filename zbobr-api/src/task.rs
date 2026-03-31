@@ -69,12 +69,11 @@ impl<'de> serde::Deserialize<'de> for FixedOffsetTz {
 // -- TaskIdentity --
 
 /// Bundles task routing info for worktree operations.
-/// Only constructible when all three fields (destination_repository, destination_branch, work_branch) are set.
+/// Only constructible when the work_branch field is set.
+/// Repository and branch are now configured in the repo backend.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TaskIdentity {
     pub task_id: u64,
-    pub destination_repository: String,
-    pub destination_branch: String,
     pub work_branch: String,
 }
 
@@ -1033,12 +1032,10 @@ pub struct Task {
 }
 
 impl Task {
-    /// Returns a TaskIdentity if all three routing fields are set.
+    /// Returns a TaskIdentity if the work_branch field is set.
     pub fn identity(&self) -> Option<TaskIdentity> {
         Some(TaskIdentity {
             task_id: self.id,
-            destination_repository: self.destination_repository.clone()?,
-            destination_branch: self.destination_branch.clone()?,
             work_branch: self.work_branch.clone()?,
         })
     }

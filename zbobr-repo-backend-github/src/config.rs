@@ -7,10 +7,13 @@ use zbobr_utility::config_struct;
 #[config_struct]
 /// Configuration for the GitHub repo backend.
 pub struct ZbobrRepoBackendGithubConfig {
-    /// Owner for forks (GitHub user or org).
+    /// GitHub repository to work in, in "owner/repo" format.
     #[arg(long)]
-    pub fork_owner: String,
-    /// GitHub token with read/write access to fork org.
+    pub repository: String,
+    /// Base branch to work against (e.g. "main").
+    #[arg(long)]
+    pub branch: String,
+    /// GitHub token with read/write access to the repository.
     /// Use `{ value = "token" }` for an inline token or `{ env = "VAR" }` to read from an env var.
     #[config(skip_args)]
     pub github_token: Secret,
@@ -23,7 +26,8 @@ pub struct ZbobrRepoBackendGithubConfig {
 impl Default for ZbobrRepoBackendGithubConfig {
     fn default() -> Self {
         Self {
-            fork_owner: String::new(),
+            repository: String::new(),
+            branch: "main".to_string(),
             github_token: Secret::default(),
             repos_dir: PathBuf::from("./repos"),
         }
@@ -33,25 +37,30 @@ impl Default for ZbobrRepoBackendGithubConfig {
 impl ZbobrRepoBackendGithubConfig {
     /// Validate that all required fields are set and resolve secrets.
     pub fn validate(&mut self) -> anyhow::Result<()> {
-        if self.fork_owner.is_empty() {
+        if self.repository.is_empty() {
             anyhow::bail!(
-                "fork owner not set. Use --repo-fork-owner NAME or set fork_owner in [repo] config.\n  \
-                 This is the GitHub user or organization where target repos are forked for implementation."
+                "repository not set. Set repository in [repo] config.\n  \
+                 This is the GitHub repository in 'owner/repo' format."
             );
         }
         let token = self.github_token.resolve().map_err(|e| {
             anyhow::anyhow!(
                 "GitHub token not set. Set github_token in [repo] config.\n  \
-                 This token needs read/write access to the organization where repos are forked.\n  \
+                 This token needs read/write access to the repository.\n  \
                  Error: {e}"
             )
         })?;
         if token.is_empty() {
             anyhow::bail!(
                 "GitHub token not set. Set github_token in [repo] config.\n  \
-                 This token needs read/write access to the organization where repos are forked."
+                 This token needs read/write access to the repository."
             );
         }
         Ok(())
+    }
+
+    /// Extract the short repository name (the part after '/').
+    pub fn repo_short_name(&self) -> &str {
+        self.repository.rsplit('/').next().unwrap_or(&self.repository)
     }
 }

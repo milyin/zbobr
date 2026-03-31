@@ -15,7 +15,7 @@ use zbobr_api::config_tools::McpTool;
 use crate::{
     mcp::{
         common::{
-            AddChecklistItemParam, CheckChecklistItemParam, ConfigureWorktreeParam,
+            AddChecklistItemParam, CheckChecklistItemParam,
             DeleteCtxRecParam, MessageParam, ReportParam,
         },
         traits::CommonMcpImpl,
@@ -164,20 +164,6 @@ impl UnifiedMcp {
         self.stop_with_question_impl(&params.message).await
     }
 
-    #[tool(
-        description = "Configure worktree parameters: destination repository, destination branch, and work branch postfix. The work_branch_postfix is required; destination_repository and destination_branch are optional — only provided values are updated."
-    )]
-    async fn configure_worktree(
-        &self,
-        Parameters(params): Parameters<ConfigureWorktreeParam>,
-    ) -> String {
-        self.configure_worktree_impl(
-            params.destination_repository,
-            params.destination_branch,
-            params.work_branch_postfix,
-        )
-        .await
-    }
 }
 
 // Manual ServerHandler implementation with tool filtering

@@ -36,8 +36,6 @@ pub struct IntegrationTestEnv {
     /// Optional remote repository slug (`owner/repo`) used by GitHub repo-backend tests.
     /// `None` for the filesystem repo backend.
     pub target_repo: Option<String>,
-    /// Fork owner for the GitHub repo backend; `None` for the filesystem repo backend.
-    fork_owner: Option<String>,
 }
 
 /// Construct an environment backed by two filesystem backends.
@@ -69,10 +67,47 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
         .resolve()
         .expect("agent_github_token");
 
+    // Create a shared test git repository for the FS repo backend.
+    let test_repo_dir = base_path.join("test_repo");
+    tokio::fs::create_dir_all(&test_repo_dir).await.ok()?;
+    for args in [
+        vec!["init"],
+        vec!["config", "user.name", "test-bot"],
+        vec!["config", "user.email", "test@example.com"],
+    ] {
+        tokio::process::Command::new("git")
+            .args(&args)
+            .current_dir(&test_repo_dir)
+            .status()
+            .await
+            .ok()?
+            .success()
+            .then_some(())?;
+    }
+    tokio::fs::write(test_repo_dir.join("README.md"), "test repo")
+        .await
+        .ok()?;
+    for args in [
+        vec!["add", "README.md"],
+        vec!["commit", "-m", "Initial commit"],
+        vec!["branch", "-M", "main"],
+    ] {
+        tokio::process::Command::new("git")
+            .args(&args)
+            .current_dir(&test_repo_dir)
+            .status()
+            .await
+            .ok()?
+            .success()
+            .then_some(())?;
+    }
+
     let task_backend_config = ZbobrTaskBackendFsConfig {
         tasks_dir: base_path.join("tasks"),
     };
     let repo_backend_config = ZbobrRepoBackendFsConfig {
+        repository: test_repo_dir.to_string_lossy().to_string(),
+        branch: "main".to_string(),
         repos_dir: base_path.join("repos"),
     };
 
@@ -122,7 +157,6 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
         zbobr,
         dispatcher_factory,
         target_repo: None,
-        fork_owner: None,
     }))
 }
 
@@ -133,7 +167,8 @@ pub async fn init_github_github(
     name: &'static str,
     task_repo: String,
     task_token: String,
-    fork_owner: String,
+    repository: String,
+    branch: String,
     repo_token: String,
 ) -> Option<Arc<IntegrationTestEnv>> {
     install_rustls_provider();
@@ -168,7 +203,8 @@ pub async fn init_github_github(
         allowed_usernames: None,
     };
     let repo_backend_config = ZbobrRepoBackendGithubConfig {
-        fork_owner: fork_owner.clone(),
+        repository: repository.clone(),
+        branch: branch.clone(),
         github_token: Secret::value(repo_token),
         repos_dir: base_path.join("repos"),
     };
@@ -216,7 +252,6 @@ pub async fn init_github_github(
         zbobr,
         dispatcher_factory,
         target_repo: Some(task_repo),
-        fork_owner: Some(fork_owner),
     }))
 }
 
@@ -254,7 +289,7 @@ impl IntegrationTestEnv {
 
     pub async fn create_task(&self, title: &str, description: &str, state: &str) -> u64 {
         self.zbobr
-            .create_task(title, description, state, None, None)
+            .create_task(title, description, state)
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to create task: {e}", self.name))
     }

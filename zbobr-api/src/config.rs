@@ -514,12 +514,6 @@ pub struct ZbobrDispatcherConfig {
     pub model: Model,
     /// Prefix for work branches (default: "zbobr_fix").
     pub work_branch_prefix: String,
-    /// Default destination repository (e.g. "owner/repo" or a full git URL).
-    /// Used by `configure_worktree` as a fallback when the agent doesn't provide one.
-    pub default_destination_repository: Option<String>,
-    /// Default destination branch (e.g. "main").
-    /// Used by `configure_worktree` as a fallback when the agent doesn't provide one.
-    pub default_destination_branch: Option<String>,
     /// Git user name for commits made by the tool.
     pub git_user_name: String,
     /// Git user email for commits made by the tool.
@@ -546,8 +540,6 @@ impl Default for ZbobrDispatcherConfig {
             tool: Tool::default(),
             model: Model::default(),
             work_branch_prefix: "zbobr_fix".to_string(),
-            default_destination_repository: None,
-            default_destination_branch: None,
             git_user_name: String::new(),
             git_user_email: String::new(),
             overwrite_author: false,

@@ -12,7 +12,6 @@ pub enum McpTool {
     DeleteCtxRec,
     StopWithError,
     StopWithQuestion,
-    ConfigureWorktree,
 }
 
 impl McpTool {
@@ -26,7 +25,6 @@ impl McpTool {
             Self::DeleteCtxRec => "delete_ctx_rec",
             Self::StopWithError => "stop_with_error",
             Self::StopWithQuestion => "stop_with_question",
-            Self::ConfigureWorktree => "configure_worktree",
         }
     }
 
@@ -54,7 +52,6 @@ impl FromStr for McpTool {
             "delete_ctx_rec" => Ok(Self::DeleteCtxRec),
             "stop_with_error" => Ok(Self::StopWithError),
             "stop_with_question" => Ok(Self::StopWithQuestion),
-            "configure_worktree" => Ok(Self::ConfigureWorktree),
             other => Err(format!("unknown MCP tool: {other}")),
         }
     }
@@ -69,7 +66,6 @@ pub const ALL_TOOLS: &[McpTool] = &[
     McpTool::DeleteCtxRec,
     McpTool::StopWithError,
     McpTool::StopWithQuestion,
-    McpTool::ConfigureWorktree,
 ];
 
 /// All possible static MCP tool names across all roles.
@@ -82,5 +78,4 @@ pub const ALL_TOOL_NAMES: &[&str] = &[
     McpTool::DeleteCtxRec.as_str(),
     McpTool::StopWithError.as_str(),
     McpTool::StopWithQuestion.as_str(),
-    McpTool::ConfigureWorktree.as_str(),
 ];

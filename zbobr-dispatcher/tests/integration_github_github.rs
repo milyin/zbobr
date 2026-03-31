@@ -17,10 +17,10 @@ use tokio::sync::OnceCell;
 /// is created for every test so its octocrab/reqwest client is always bound to
 /// the current tokio runtime, avoiding `Service { source: Closed }` errors that
 /// occur when a pooled HTTP connection outlives the runtime that created it.
-static CONFIG: OnceCell<(String, String, String, String)> = OnceCell::const_new();
+static CONFIG: OnceCell<(String, String, String, String, String)> = OnceCell::const_new();
 
-async fn load_credentials() -> (String, String, String, String) {
-    let creds: &(String, String, String, String) = CONFIG
+async fn load_credentials() -> (String, String, String, String, String) {
+    let creds: &(String, String, String, String, String) = CONFIG
         .get_or_init(|| async {
             let cfg = GitHubTestConfig::load()
                 .expect("zbobr_github_test.toml not found; required for GitHub/GitHub tests");
@@ -45,7 +45,8 @@ async fn load_credentials() -> (String, String, String, String) {
             (
                 tasks.github_repo.expect("github_repo missing in [tasks]"),
                 task_token,
-                repo.fork_owner.expect("fork_owner missing in [repo]"),
+                repo.repository.expect("repository missing in [repo]"),
+                repo.branch.unwrap_or_else(|| "main".to_string()),
                 repo_token,
             )
         })
@@ -54,12 +55,13 @@ async fn load_credentials() -> (String, String, String, String) {
 }
 
 async fn get_env() -> Arc<IntegrationTestEnv> {
-    let (task_repo, task_token, fork_owner, repo_token) = load_credentials().await;
+    let (task_repo, task_token, repository, branch, repo_token) = load_credentials().await;
     mcp_integration::env::init_github_github(
         "github_github",
         task_repo,
         task_token,
-        fork_owner,
+        repository,
+        branch,
         repo_token,
     )
     .await
@@ -78,21 +80,6 @@ async fn test_github_github_abstract_all_mcp_tools() {
     abstract_test_helpers::run_all_mcp_tools(&env).await;
 }
 
-#[tokio::test]
-#[serial]
-#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
-async fn test_github_github_abstract_configure_worktree_idempotent() {
-    let env = get_env().await;
-    abstract_test_helpers::run_configure_worktree_idempotent(&env).await;
-}
-
-#[tokio::test]
-#[serial]
-#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
-async fn test_github_github_abstract_configure_worktree_ignore_requested_postfix() {
-    let env = get_env().await;
-    abstract_test_helpers::run_configure_worktree_ignore_requested_postfix(&env).await;
-}
 
 #[tokio::test]
 #[serial]
