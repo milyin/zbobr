@@ -32,11 +32,15 @@ async fn load_credentials() -> (String, String, String, String) {
                 .expect("[repo] section missing in zbobr_github_test.toml");
             let task_token = {
                 let mut s = tasks.github_token.expect("github_token missing in [tasks]");
-                s.resolve().expect("failed to resolve tasks.github_token").to_owned()
+                s.resolve()
+                    .expect("failed to resolve tasks.github_token")
+                    .to_owned()
             };
             let repo_token = {
                 let mut s = repo.github_token.expect("github_token missing in [repo]");
-                s.resolve().expect("failed to resolve repo.github_token").to_owned()
+                s.resolve()
+                    .expect("failed to resolve repo.github_token")
+                    .to_owned()
             };
             (
                 tasks.github_repo.expect("github_repo missing in [tasks]"),
