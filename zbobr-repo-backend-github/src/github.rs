@@ -147,10 +147,11 @@ pub struct ZbobrRepoBackendGithub {
 }
 
 impl ZbobrRepoBackendGithub {
-    pub fn from_config(backend_config: ZbobrRepoBackendGithubConfig) -> anyhow::Result<Self> {
+    pub fn from_config(mut backend_config: ZbobrRepoBackendGithubConfig) -> anyhow::Result<Self> {
         backend_config.validate()?;
+        let token = backend_config.github_token.as_ref().to_owned();
         let octocrab = octocrab::Octocrab::builder()
-            .personal_token(backend_config.github_token.clone())
+            .personal_token(token)
             .build()
             .map_err(|e| anyhow::anyhow!("Failed to build octocrab client: {e}"))?;
         Ok(Self {
@@ -264,12 +265,12 @@ impl ZbobrRepoBackendGithub {
     /// `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_*` / `GIT_CONFIG_VALUE_*`.
     /// Uses `http.extraheader` with a base64-encoded Authorization header so
     /// the token never appears in URLs, command-line args, or on-disk config.
-    fn token_auth_env(&self) -> [(&str, String); 3] {
+    fn token_auth_env(&self) -> anyhow::Result<[(&str, String); 3]> {
         use base64::Engine as _;
-        let token = &self.backend_config.github_token;
+        let token = self.backend_config.github_token.as_ref();
         let credentials =
             base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
-        [
+        Ok([
             ("GIT_CONFIG_COUNT", "1".into()),
             (
                 "GIT_CONFIG_KEY_0",
@@ -279,7 +280,7 @@ impl ZbobrRepoBackendGithub {
                 "GIT_CONFIG_VALUE_0",
                 format!("Authorization: basic {credentials}"),
             ),
-        ]
+        ])
     }
 
     /// Remove legacy insteadOf entries that embedded the token in git config.
@@ -347,7 +348,7 @@ impl ZbobrRepoBackendGithub {
 
         fs::create_dir_all(&self.backend_config.repos_dir).await?;
 
-        let owned_env = self.token_auth_env();
+        let owned_env = self.token_auth_env()?;
         let env: Vec<(&str, &str)> = owned_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
         if !bare_dir.exists() {
@@ -404,7 +405,7 @@ impl ZbobrRepoBackendGithub {
             git(bare_dir, &["remote", "add", "fork", &fork_url]).await?;
         }
 
-        let owned_env = self.token_auth_env();
+        let owned_env = self.token_auth_env()?;
         let env: Vec<(&str, &str)> = owned_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
         git_env(bare_dir, &["fetch", "fork"], &env).await?;
 
@@ -550,7 +551,7 @@ impl ZbobrRepoBackendGithub {
         }
 
         // Re-fetch fork so local refs are updated
-        let owned_env = self.token_auth_env();
+        let owned_env = self.token_auth_env()?;
         let env: Vec<(&str, &str)> = owned_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
         git_env(bare_dir, &["fetch", "fork"], &env).await?;
 
@@ -810,7 +811,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             );
         }
 
-        let owned_env = self.token_auth_env();
+        let owned_env = self.token_auth_env()?;
         let env: Vec<(&str, &str)> = owned_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
         // Phase 1: Setup
@@ -936,7 +937,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
     async fn fetch_refs(&self, identity: &zbobr_api::task::TaskIdentity) -> anyhow::Result<()> {
         let repo = parse_github_repo(&identity.destination_repository)?;
         let bare_dir = self.ensure_bare_clone_github(&repo).await?;
-        let owned_env = self.token_auth_env();
+        let owned_env = self.token_auth_env()?;
         let env: Vec<(&str, &str)> = owned_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
         git_env(&bare_dir, &["fetch", "origin"], &env).await?;
         Ok(())

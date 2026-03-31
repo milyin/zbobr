@@ -8,9 +8,13 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
+serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 zbobr-macros = { workspace = true }
+
+[dev-dependencies]
+toml = { workspace = true }
 
 [lib]
 name = "zbobr_utility"
