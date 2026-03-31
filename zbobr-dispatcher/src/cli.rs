@@ -1765,3 +1765,70 @@ async fn perform_stash_and_push(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_branch_postfix_basic() {
+        assert_eq!(sanitize_branch_postfix("Hello World"), "hello-world");
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_special_chars() {
+        assert_eq!(
+            sanitize_branch_postfix("fix: handle special chars!@#$%"),
+            "fix-handle-special-chars"
+        );
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_consecutive_dashes() {
+        assert_eq!(sanitize_branch_postfix("a---b"), "a-b");
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_leading_trailing_dashes() {
+        assert_eq!(sanitize_branch_postfix("--hello--"), "hello");
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_empty() {
+        assert_eq!(sanitize_branch_postfix(""), "");
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_only_special_chars() {
+        assert_eq!(sanitize_branch_postfix("!!!"), "");
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_truncates_long_input() {
+        let long_title = "a".repeat(60);
+        let result = sanitize_branch_postfix(&long_title);
+        assert!(result.len() <= 50);
+        assert_eq!(result, "a".repeat(50));
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_truncation_trims_trailing_dash() {
+        // Create input that will have a dash at position 50 after truncation
+        let mut title = "a".repeat(49);
+        title.push(' '); // becomes dash
+        title.push_str(&"b".repeat(10));
+        let result = sanitize_branch_postfix(&title);
+        assert!(result.len() <= 50);
+        assert!(!result.ends_with('-'));
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_preserves_numbers() {
+        assert_eq!(sanitize_branch_postfix("task 123 fix"), "task-123-fix");
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_lowercases() {
+        assert_eq!(sanitize_branch_postfix("FIX BUG"), "fix-bug");
+    }
+}
