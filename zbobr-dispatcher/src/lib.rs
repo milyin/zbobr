@@ -63,10 +63,11 @@ pub struct ZbobrDispatcher {
 }
 
 impl ZbobrDispatcher {
-    /// Validate the dispatcher's own configuration.
+    /// Validate the dispatcher's own configuration and resolve all secrets.
     /// Chain after `build()` to ensure the config is consistent.
-    pub fn validated(self) -> anyhow::Result<Self> {
+    pub fn validated(mut self) -> anyhow::Result<Self> {
         self.config.validate()?;
+        self.copilot.config.copilot_github_token.resolve()?;
         Ok(self)
     }
 
@@ -124,7 +125,7 @@ impl ZbobrDispatcher {
     }
 
     pub fn copilot_github_token(&self) -> &str {
-        &self.copilot.config.copilot_github_token
+        self.copilot.config.copilot_github_token.as_ref()
     }
 
     #[allow(clippy::too_many_arguments)]
