@@ -1,0 +1,1 @@
+In `zbobr/src/init.rs`, the test `default_workflow_has_no_preparator_stage` checks `!main.stages.contains_key("preparator")` but the old preparator stage was named "preparing" (not "preparator"). Fix to check for "preparing". Also add check for no stage having role="preparator".
