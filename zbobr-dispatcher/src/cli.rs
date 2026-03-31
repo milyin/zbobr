@@ -476,10 +476,10 @@ impl<'a> CliStageRunner<'a> {
             .zbobr
             .build_executor(cli_tool, model.clone(), self.mcp_tester_override);
         let copilot_token_owned = match cli_tool {
-            Tool::Copilot => self.zbobr.copilot_github_token()?,
+            Tool::Copilot => self.zbobr.copilot_github_token().to_owned(),
             _ => String::new(),
         };
-        let agent_token_owned = self.zbobr.config().agent_github_token.resolve()?;
+        let agent_token_owned = self.zbobr.config().agent_github_token.as_ref().to_owned();
 
         let outcome = execute_tool(
             executor,

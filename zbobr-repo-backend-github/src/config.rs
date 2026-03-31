@@ -31,8 +31,8 @@ impl Default for ZbobrRepoBackendGithubConfig {
 }
 
 impl ZbobrRepoBackendGithubConfig {
-    /// Validate that all required fields are set.
-    pub fn validate(&self) -> anyhow::Result<()> {
+    /// Validate that all required fields are set and resolve secrets.
+    pub fn validate(&mut self) -> anyhow::Result<()> {
         if self.fork_owner.is_empty() {
             anyhow::bail!(
                 "fork owner not set. Use --repo-fork-owner NAME or set fork_owner in [repo] config.\n  \

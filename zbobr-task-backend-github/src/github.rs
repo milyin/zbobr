@@ -185,9 +185,9 @@ pub struct ZbobrTaskBackendGithubImpl {
 }
 
 impl ZbobrTaskBackendGithubImpl {
-    pub fn from_config(backend_config: ZbobrTaskBackendGithubConfig) -> anyhow::Result<Self> {
+    pub fn from_config(mut backend_config: ZbobrTaskBackendGithubConfig) -> anyhow::Result<Self> {
         backend_config.validate()?;
-        let token = backend_config.github_token.resolve()?;
+        let token = backend_config.github_token.as_ref().to_owned();
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(token)
             .build()

@@ -29,8 +29,8 @@ pub struct ZbobrTaskBackendGithubConfig {
 }
 
 impl ZbobrTaskBackendGithubConfig {
-    /// Validate that all required fields are set.
-    pub fn validate(&self) -> anyhow::Result<()> {
+    /// Validate that all required fields are set and resolve secrets.
+    pub fn validate(&mut self) -> anyhow::Result<()> {
         if self.github_repo.is_empty() {
             anyhow::bail!(
                 "task repo not set. Use --tasks-github-repo owner/repo or set github_repo in [tasks] config.\n  \

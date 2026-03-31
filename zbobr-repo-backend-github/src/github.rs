@@ -147,9 +147,9 @@ pub struct ZbobrRepoBackendGithub {
 }
 
 impl ZbobrRepoBackendGithub {
-    pub fn from_config(backend_config: ZbobrRepoBackendGithubConfig) -> anyhow::Result<Self> {
+    pub fn from_config(mut backend_config: ZbobrRepoBackendGithubConfig) -> anyhow::Result<Self> {
         backend_config.validate()?;
-        let token = backend_config.github_token.resolve()?;
+        let token = backend_config.github_token.as_ref().to_owned();
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(token)
             .build()
@@ -267,7 +267,7 @@ impl ZbobrRepoBackendGithub {
     /// the token never appears in URLs, command-line args, or on-disk config.
     fn token_auth_env(&self) -> anyhow::Result<[(&str, String); 3]> {
         use base64::Engine as _;
-        let token = self.backend_config.github_token.resolve()?;
+        let token = self.backend_config.github_token.as_ref();
         let credentials =
             base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
         Ok([
