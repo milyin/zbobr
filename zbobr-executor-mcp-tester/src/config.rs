@@ -76,8 +76,8 @@ impl ZbobrExecutorMcpTesterConfig {
         }
         match stage_name {
             "preparation" | "preparator" => self.preparation.as_ref(),
-            "planning" | "planner" => self.planning.as_ref(),
-            "working" | "worker" => self.working.as_ref(),
+            "planning" | "planner" | "test_planner" => self.planning.as_ref(),
+            "working" | "worker" | "test_worker" => self.working.as_ref(),
             "reviewing" | "reviewer" => self.reviewing.as_ref(),
             "testing" | "tester" => self.testing.as_ref(),
             "merging" | "merger" => self.merging.as_ref(),
