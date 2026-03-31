@@ -50,3 +50,51 @@ impl ZbobrRepoBackendFsConfig {
             .unwrap_or(&self.repository)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with_repo(repository: &str) -> ZbobrRepoBackendFsConfig {
+        ZbobrRepoBackendFsConfig {
+            repository: repository.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn repo_short_name_simple_path() {
+        assert_eq!(config_with_repo("/home/user/my-project").repo_short_name(), "my-project");
+    }
+
+    #[test]
+    fn repo_short_name_trailing_slash() {
+        assert_eq!(config_with_repo("/home/user/my-project/").repo_short_name(), "my-project");
+    }
+
+    #[test]
+    fn repo_short_name_git_suffix() {
+        assert_eq!(config_with_repo("/home/user/my-project.git").repo_short_name(), "my-project");
+    }
+
+    #[test]
+    fn repo_short_name_git_url() {
+        assert_eq!(
+            config_with_repo("https://github.com/owner/repo.git").repo_short_name(),
+            "repo"
+        );
+    }
+
+    #[test]
+    fn repo_short_name_trailing_slash_and_git() {
+        assert_eq!(
+            config_with_repo("https://github.com/owner/repo.git/").repo_short_name(),
+            "repo"
+        );
+    }
+
+    #[test]
+    fn repo_short_name_bare_name() {
+        assert_eq!(config_with_repo("my-repo").repo_short_name(), "my-repo");
+    }
+}

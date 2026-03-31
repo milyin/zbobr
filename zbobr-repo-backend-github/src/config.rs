@@ -64,3 +64,30 @@ impl ZbobrRepoBackendGithubConfig {
         self.repository.rsplit('/').next().unwrap_or(&self.repository)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with_repo(repository: &str) -> ZbobrRepoBackendGithubConfig {
+        ZbobrRepoBackendGithubConfig {
+            repository: repository.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn repo_short_name_owner_repo() {
+        assert_eq!(config_with_repo("owner/my-repo").repo_short_name(), "my-repo");
+    }
+
+    #[test]
+    fn repo_short_name_bare_name() {
+        assert_eq!(config_with_repo("my-repo").repo_short_name(), "my-repo");
+    }
+
+    #[test]
+    fn repo_short_name_nested_path() {
+        assert_eq!(config_with_repo("org/sub/repo").repo_short_name(), "repo");
+    }
+}
