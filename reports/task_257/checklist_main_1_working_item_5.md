@@ -1,0 +1,1 @@
+The non-prompt text format was changed from `user:**name** text` to `user name: text` and truncation from join-with-spaces to first-line-only. These changes must be scoped to for_prompt=true only, preserving original behavior for for_prompt=false.
