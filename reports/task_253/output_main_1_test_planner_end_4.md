@@ -1,0 +1,1 @@
+Test plan complete. One checklist item added: **5 unit tests** for `validate()` on both FS and GitHub backend configs, covering the new branch-empty and repository-empty validation added in the latest fix. All other changes from the latest working stage are already well-covered by existing tests.
