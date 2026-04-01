@@ -108,8 +108,12 @@ impl GitHubRepo {
 }
 
 fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
-    // Standardize: remove trailing .git and /
-    let repo_ref = repo_ref.trim_end_matches(".git").trim_end_matches('/');
+    // Standardize: strip trailing '/' first so that ".git/" is handled correctly,
+    // then strip ".git", then any remaining trailing '/'.
+    let repo_ref = repo_ref
+        .trim_end_matches('/')
+        .trim_end_matches(".git")
+        .trim_end_matches('/');
 
     let full_name = if repo_ref.contains("://") {
         // extract owner/repo from URL
@@ -916,6 +920,18 @@ mod tests {
     #[test]
     fn parse_owner_repo_with_git_suffix() {
         let repo = parse_github_repo("owner/repo.git").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_https_url_with_git_suffix_and_trailing_slash() {
+        let repo = parse_github_repo("https://github.com/owner/repo.git/").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_owner_repo_with_git_suffix_and_trailing_slash() {
+        let repo = parse_github_repo("owner/repo.git/").unwrap();
         assert_eq!(repo.full_name, "owner/repo");
     }
 

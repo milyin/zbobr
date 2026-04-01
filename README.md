@@ -7,7 +7,7 @@ AI-powered task dispatcher that manages GitHub issues through automated stages u
 This repository contains **zbobr** — a reusable automation system that:
 
 - **Manager Agent**: Processes issues through stages (PENDING → GO_PLANNING → PLANNING → GO_WORKING → WORKING), creates implementation plans, and spawns Worker agents
-- **Worker Agent**: Implements individual issues by forking repos, creating PRs, and executing the work
+- **Worker Agent**: Implements individual issues by creating branches and PRs in the configured repository
 
 The dispatcher is domain-agnostic and can manage any set of repositories through **Task Projects**.
 
@@ -274,7 +274,7 @@ Fine-grained PAT — on the **task repo**:
 Zbobr manages **three distinct GitHub tokens** with different access levels and purposes:
 
 #### 1. Owner Token
-- **Purpose**: Used by zbobr dispatcher for repository management (creating forks, managing issues, labels, milestones)
+- **Purpose**: Used by zbobr dispatcher for repository management (managing issues, labels, milestones)
 - **Access Level**: Write access to repositories
 - **Resolution Order**:
    1. `GH_TOKEN` environment variable
