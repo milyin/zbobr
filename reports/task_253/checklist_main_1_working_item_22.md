@@ -1,0 +1,3 @@
+Two doc/example fixes:
+1. zbobr-task-backend-fs/example-task.yaml still has `destination_repository` and `destination_branch` in the `parameters` map. These are no longer used in the single-repo design - remove them.
+2. zbobr_github_test.toml.sample has `[tasks.github]` in comments but should be `[tasks]` (to match GitHubTestConfigToml struct). The header also incorrectly says "needs both [tasks.github] and [repo.github]".
