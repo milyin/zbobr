@@ -4,7 +4,7 @@ This document lists the exact GitHub API operations performed by each backend an
 
 ## Repo Backend Token (`ZBOBR_REPO_GITHUB_TOKEN`)
 
-Used by `zbobr-repo-backend-github` to manage forks, branches, and pull requests on target repositories.
+Used by `zbobr-repo-backend-github` to manage branches and pull requests on the configured repository.
 
 ### Classic PAT scopes
 
@@ -13,29 +13,16 @@ Used by `zbobr-repo-backend-github` to manage forks, branches, and pull requests
 
 ### Fine-grained PAT permissions
 
-The token needs access to **two sets of repositories**.
-
-**On the upstream (target) repositories** being forked/worked on:
+**On the configured target repository**:
 
 | Permission | Level | Operations |
 | --- | --- | --- |
-| Administration | Read/Write | Create fork (`POST /repos/{upstream}/{repo}/forks`) |
-| Contents | Read-only | Clone via `gh repo clone` / `git fetch` |
-| Metadata | Read-only | Check if fork exists (`GET /repos/{owner}/{repo}`) |
-| Pull requests | Read/Write | Create PRs — same-org mode only (`POST /repos/{repo}/pulls`) |
-
-**On the fork repositories** under `fork_owner`:
-
-| Permission | Level | Operations |
-| --- | --- | --- |
-| Contents | Read/Write | Clone, fetch, push branches (`git push --force`) |
+| Contents | Read/Write | Clone via `gh repo clone` / `git fetch`; push work branches |
 | Workflows | Read/Write | Push branches containing `.github/workflows/` files |
-| Pull requests | Read/Write | Create and list PRs (`POST/GET /repos/{fork}/pulls`) |
-| Metadata | Read-only | Repository info, verify fork exists |
+| Pull requests | Read/Write | Create and list PRs (`POST/GET /repos/{repo}/pulls`) |
+| Metadata | Read-only | Repository info (`GET /repos/{owner}/{repo}`) |
 
-> **Note on Workflows:** GitHub rejects a `git push` that modifies `.github/workflows/` unless the token has `Workflows: Write`. Since zbobr pushes the entire work branch — which may include workflow files from the upstream — this permission is effectively required for all target repositories that have GitHub Actions.
-
-> **Note on fork creation:** The `Administration: Write` permission is needed on the **upstream** repo (the one being forked), not on the fork owner's namespace. The fork owner must be a user or organization that the authenticated user has permission to fork into.
+> **Note on Workflows:** GitHub rejects a `git push` that modifies `.github/workflows/` unless the token has `Workflows: Write`. Since zbobr pushes the entire work branch — which may include workflow files — this permission is effectively required for all target repositories that have GitHub Actions.
 
 ---
 
@@ -49,7 +36,7 @@ Used by `zbobr-task-backend-github` to manage the task project repository: issue
 
 ### Fine-grained PAT permissions
 
-**On the task repo** (`--tasks-github-task-repo`):
+**On the task repo** (configured via `github_repo` in `[tasks]` or `--tasks-github-repo`):
 
 | Permission | Level | Operations |
 | --- | --- | --- |

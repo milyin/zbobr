@@ -563,8 +563,6 @@ role = "merger"
             title: String::new(),
             description: String::new(),
             state: State::Ready,
-            destination_repository: None,
-            destination_branch: None,
             work_branch: None,
             pr_url: None,
             context: TaskContext::default(),

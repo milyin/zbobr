@@ -121,10 +121,9 @@ pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
     let task_id = env
         .create_task("Test task", "Test task description", "READY")
         .await;
-    // Pre-set routing params so workspace preparation succeeds
+    // Pre-set work branch so the repo backend can set up the workspace
     let work_branch = format!("zbobr_fix-{task_id}-mcp");
-    let dest_repo = env.dest_repo(&repo_path);
-    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+    env.update_task_branches(task_id, &work_branch)
         .await;
 
     let workflow = build_workflow(vec![StageDef::new("alpha", "alpha", "main")]);
@@ -142,75 +141,18 @@ pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
     assert_eq!(task.state, State::Done, "Should complete as DONE");
 }
 
-// ===========================================================================
-// Test 1b: configure_worktree is idempotent for repeated identical calls
-// ===========================================================================
-
-pub async fn run_configure_worktree_idempotent(env: &IntegrationTestEnv) {
-    let repo_path = env.create_git_repo("repo_worktree_idempotent").await;
-    let task_id = env
-        .create_task(
-            "Worktree idempotent test",
-            "Repeated configure_worktree should be a no-op success",
-            "READY",
-        )
-        .await;
-
-    let workflow = build_workflow(vec![StageDef::new("alpha", "alpha", "main")]);
-    let dest_repo = env.dest_repo(&repo_path);
-    let scenarios = scenarios_map(vec![(
-        "alpha",
-        abstract_scenarios::configure_worktree_idempotent_scenario(&dest_repo, "idempotent"),
-    )]);
-
-    env.run_pipeline(task_id, &workflow, &scenarios).await;
-    env.run_to_completion(task_id, &workflow, &scenarios, 5)
-        .await;
-
-    let task = env.get_task(task_id).await;
-    assert_eq!(task.state, State::Done, "Should complete as DONE");
-}
-
-// ===========================================================================
-// Test 1c: configure_worktree should ignore requested work_branch when existing is set
-// ===========================================================================
-pub async fn run_configure_worktree_ignore_requested_postfix(env: &IntegrationTestEnv) {
-    let repo_path = env.create_git_repo("repo_worktree_ignore_requested").await;
-    let task_id = env
-        .create_task(
-            "Worktree ignore requested postfix test",
-            "configure_worktree should preserve existing work_branch",
-            "READY",
-        )
-        .await;
-
-    let workflow = build_workflow(vec![StageDef::new("alpha", "alpha", "main")]);
-    let dest_repo = env.dest_repo(&repo_path);
-    let scenarios = scenarios_map(vec![(
-        "alpha",
-        abstract_scenarios::configure_worktree_work_branch_ignored_scenario(&dest_repo),
-    )]);
-
-    env.run_pipeline(task_id, &workflow, &scenarios).await;
-    env.run_to_completion(task_id, &workflow, &scenarios, 5)
-        .await;
-
-    let task = env.get_task(task_id).await;
-    assert_eq!(task.state, State::Done, "Should complete as DONE");
-}
 
 // ===========================================================================
 // Test 2: Sequential stage advancement within a pipeline
 // ===========================================================================
 
 pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
-    let repo_path = env.create_git_repo("repo_transfer").await;
+    let _repo_path = env.create_git_repo("repo_transfer").await;
     let task_id = env
         .create_task("Transfer test", "Transfer test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-transfer");
-    let dest_repo = env.dest_repo(&repo_path);
-    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+    env.update_task_branches(task_id, &work_branch)
         .await;
 
     let workflow = build_workflow(vec![
@@ -278,8 +220,7 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
     let task_id = env
         .create_task("Conflict test", "Conflict test description", "READY")
         .await;
-    let dest_repo = env.dest_repo(&repo_path);
-    env.update_task_branches(task_id, &dest_repo, "main", work_branch)
+    env.update_task_branches(task_id, work_branch)
         .await;
 
     let workflow = build_workflow(vec![
@@ -341,13 +282,12 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
 // ===========================================================================
 
 pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
-    let repo_path = env.create_git_repo("repo_pause").await;
+    let _repo_path = env.create_git_repo("repo_pause").await;
     let task_id = env
         .create_task("Pause test", "Pause test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-pause");
-    let dest_repo = env.dest_repo(&repo_path);
-    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+    env.update_task_branches(task_id, &work_branch)
         .await;
 
     let workflow = build_workflow(vec![StageDef::new("work", "role_err", "main")]);
@@ -386,13 +326,12 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
 // ===========================================================================
 
 pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
-    let repo_path = env.create_git_repo("repo_ready").await;
+    let _repo_path = env.create_git_repo("repo_ready").await;
     let task_id = env
         .create_task("Ready test", "Ready test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-ready");
-    let dest_repo = env.dest_repo(&repo_path);
-    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+    env.update_task_branches(task_id, &work_branch)
         .await;
 
     let workflow = build_workflow(vec![StageDef::new("start", "role_start", "main")]);
@@ -420,13 +359,12 @@ pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
 // ===========================================================================
 
 pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
-    let repo_path = env.create_git_repo("repo_signals").await;
+    let _repo_path = env.create_git_repo("repo_signals").await;
     let task_id = env
         .create_task("Signal test", "Signal test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-signals");
-    let dest_repo = env.dest_repo(&repo_path);
-    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+    env.update_task_branches(task_id, &work_branch)
         .await;
 
     let mut pipelines: HashMap<Pipeline, PipelineConfig> = HashMap::new();
@@ -494,13 +432,12 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
 // ===========================================================================
 
 pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
-    let repo_path = env.create_git_repo("repo_ask").await;
+    let _repo_path = env.create_git_repo("repo_ask").await;
     let task_id = env
         .create_task("Ask test", "Ask test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-ask");
-    let dest_repo = env.dest_repo(&repo_path);
-    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+    env.update_task_branches(task_id, &work_branch)
         .await;
 
     let workflow = build_workflow(vec![StageDef::new("work", "role_ask", "main")]);
@@ -557,13 +494,12 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
 // ===========================================================================
 
 pub async fn run_call_stage(env: &IntegrationTestEnv) {
-    let repo_path = env.create_git_repo("repo_call_stage").await;
+    let _repo_path = env.create_git_repo("repo_call_stage").await;
     let task_id = env
         .create_task("Call stage test", "Call stage test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-call");
-    let dest_repo = env.dest_repo(&repo_path);
-    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+    env.update_task_branches(task_id, &work_branch)
         .await;
 
     // Build workflow:
@@ -674,7 +610,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
 // ===========================================================================
 
 pub async fn run_pause_state_conversion(env: &IntegrationTestEnv) {
-    let repo_path = env.create_git_repo("repo_pause_conv").await;
+    let _repo_path = env.create_git_repo("repo_pause_conv").await;
     let task_id = env
         .create_task(
             "Pause conversion test",
@@ -683,8 +619,7 @@ pub async fn run_pause_state_conversion(env: &IntegrationTestEnv) {
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-pause-conv");
-    let dest_repo = env.dest_repo(&repo_path);
-    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+    env.update_task_branches(task_id, &work_branch)
         .await;
 
     let workflow = build_workflow(vec![StageDef::new("work", "role_err", "main")]);
@@ -723,7 +658,7 @@ pub async fn run_pause_state_conversion(env: &IntegrationTestEnv) {
 // ===========================================================================
 
 pub async fn run_pause_resume_cycle(env: &IntegrationTestEnv) {
-    let repo_path = env.create_git_repo("repo_pause_resume").await;
+    let _repo_path = env.create_git_repo("repo_pause_resume").await;
     let task_id = env
         .create_task(
             "Pause resume test",
@@ -732,8 +667,7 @@ pub async fn run_pause_resume_cycle(env: &IntegrationTestEnv) {
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-pause-resume");
-    let dest_repo = env.dest_repo(&repo_path);
-    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+    env.update_task_branches(task_id, &work_branch)
         .await;
 
     let workflow = build_workflow(vec![StageDef::new("work", "role_work", "main")]);
@@ -799,13 +733,12 @@ pub async fn run_pause_resume_cycle(env: &IntegrationTestEnv) {
 // ===========================================================================
 
 pub async fn run_ready_fresh_start(env: &IntegrationTestEnv) {
-    let repo_path = env.create_git_repo("repo_fresh").await;
+    let _repo_path = env.create_git_repo("repo_fresh").await;
     let task_id = env
         .create_task("Fresh start test", "Fresh start test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-fresh");
-    let dest_repo = env.dest_repo(&repo_path);
-    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+    env.update_task_branches(task_id, &work_branch)
         .await;
 
     let workflow = build_workflow(vec![StageDef::new("start", "role_start", "main")]);
@@ -833,13 +766,12 @@ pub async fn run_ready_fresh_start(env: &IntegrationTestEnv) {
 // ===========================================================================
 
 pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
-    let repo_path = env.create_git_repo("repo_stage_pause").await;
+    let _repo_path = env.create_git_repo("repo_stage_pause").await;
     let task_id = env
         .create_task("Stage pause test", "Stage pause test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-stage-pause");
-    let dest_repo = env.dest_repo(&repo_path);
-    env.update_task_branches(task_id, &dest_repo, "main", &work_branch)
+    env.update_task_branches(task_id, &work_branch)
         .await;
 
     // Two stages: stage_a has on_success = { pause = true }, stage_b is normal

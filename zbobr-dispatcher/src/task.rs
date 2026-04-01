@@ -204,36 +204,6 @@ impl RoleSession {
         .await
     }
 
-    /// Get the destination_repository field.
-    pub async fn get_destination_repository(&self) -> anyhow::Result<Option<String>> {
-        let task = self.get_task().await?;
-        Ok(task.destination_repository)
-    }
-
-    /// Set the destination_repository field.
-    pub async fn set_destination_repository(&self, value: Option<String>) -> anyhow::Result<()> {
-        self.modify_task(move |mut task| {
-            task.destination_repository = value;
-            task
-        })
-        .await
-    }
-
-    /// Get the destination_branch field.
-    pub async fn get_destination_branch(&self) -> anyhow::Result<Option<String>> {
-        let task = self.get_task().await?;
-        Ok(task.destination_branch)
-    }
-
-    /// Set the destination_branch field.
-    pub async fn set_destination_branch(&self, value: Option<String>) -> anyhow::Result<()> {
-        self.modify_task(move |mut task| {
-            task.destination_branch = value;
-            task
-        })
-        .await
-    }
-
     /// Get the work_branch field.
     pub async fn get_work_branch(&self) -> anyhow::Result<Option<String>> {
         let task = self.get_task().await?;
@@ -550,12 +520,8 @@ impl TaskSession {
         // Delete placeholder commit and push before marking done.
         if let Some(work_branch) = &task.work_branch {
             let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), task_id);
-            let work_dir = if let Some(ref dest_repo) = task.destination_repository {
-                let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo.as_str());
-                task_dir.path().join(repo_name)
-            } else {
-                task_dir.path().to_path_buf()
-            };
+            let repo_name = self.zbobr.repo_backend().repo_name();
+            let work_dir = task_dir.path().join(repo_name);
             if let Err(e) = zbobr_utility::delete_placeholder_commit(&work_dir, work_branch).await {
                 tracing::warn!("Failed to delete placeholder commit for task #{task_id}: {e}");
             } else if let Some(identity) = task.identity() {
@@ -784,8 +750,6 @@ mod comment_model_tests {
                 title: title.to_string(),
                 description: description.to_string(),
                 state: state,
-                destination_repository: None,
-                destination_branch: None,
                 work_branch: None,
                 pr_url: None,
                 context: TaskContext::default(),
@@ -854,6 +818,15 @@ mod comment_model_tests {
         fn debug_state(&self) -> String {
             "dummy".to_string()
         }
+        fn repository(&self) -> &str {
+            "dummy/repo"
+        }
+        fn branch(&self) -> &str {
+            "main"
+        }
+        fn repo_name(&self) -> &str {
+            "repo"
+        }
     }
 
     fn make_test_parts() -> (Arc<crate::ZbobrDispatcher>, ArcTrackingBackend) {
@@ -881,7 +854,7 @@ mod comment_model_tests {
     async fn mcp_helper_includes_explicit_model() {
         let (zbobr, task_backend) = make_test_parts();
         let id = zbobr
-            .create_task("t", "", "READY", None, None)
+            .create_task("t", "", "READY")
             .await
             .unwrap();
 
@@ -960,7 +933,7 @@ mod comment_model_tests {
     async fn report_success_stores_context_records() {
         let (zbobr, task_backend) = make_test_parts();
         let id = zbobr
-            .create_task("t", "desc", "READY", None, None)
+            .create_task("t", "desc", "READY")
             .await
             .unwrap();
 

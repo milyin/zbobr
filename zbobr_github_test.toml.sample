@@ -5,11 +5,11 @@
 # tests are marked `#[ignore]` so they will be skipped by default; run them
 # explicitly with `cargo test -- --ignored` once you have filled in credentials:
 #
-#   integration_github_github — needs both [tasks.github] and [repo.github]
+#   integration_github_github — needs both [tasks] and [repo]
 
 # Uncomment to enable GitHub task-backend tests (integration_github_github):
 #
-# [tasks.github]
+# [tasks]
 # # GitHub repository whose issues are used as the task tracker (owner/repo).
 # github_repo = "owner/zbobr-test-tasks"
 # # GitHub token with read/write access to the tasks repository.
@@ -17,10 +17,12 @@
 
 # Uncomment to enable GitHub repo-backend tests (integration_github_github):
 #
-# [repo.github]
-# # GitHub user or organisation where target repos are forked.
-# fork_owner = "owner"
-# # GitHub token with read/write access to the fork organisation.
+# [repo]
+# # GitHub repository to work in, in "owner/repo" format.
+# repository = "owner/zbobr-test-repo"
+# # Base branch to work against.
+# branch = "main"
+# # GitHub token with read/write access to the repository.
 # github_token = "ghp_your_repo_github_token_here"
 
 # Optional: GitHub token passed as GH_TOKEN to agent processes.

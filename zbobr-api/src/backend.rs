@@ -135,22 +135,6 @@ pub trait TaskMut: Send + Sync {
         .await
     }
 
-    async fn set_destination_repository(&self, repo: Option<String>) -> anyhow::Result<()> {
-        self.modify_task(Box::new(move |mut task| {
-            task.destination_repository = repo;
-            task
-        }))
-        .await
-    }
-
-    async fn set_destination_branch(&self, branch: Option<String>) -> anyhow::Result<()> {
-        self.modify_task(Box::new(move |mut task| {
-            task.destination_branch = branch;
-            task
-        }))
-        .await
-    }
-
     async fn set_work_branch(&self, branch: Option<String>) -> anyhow::Result<()> {
         self.modify_task(Box::new(move |mut task| {
             task.work_branch = branch;
@@ -252,6 +236,16 @@ impl<T: TaskBackend + 'static> From<T> for Box<dyn TaskBackend> {
 
 #[async_trait]
 pub trait WorktreeBackend: Send + Sync {
+    /// Return the full configured repository path (e.g. "owner/repo" or local path).
+    fn repository(&self) -> &str;
+
+    /// Return the configured base branch (e.g. "main").
+    fn branch(&self) -> &str;
+
+    /// Return the short name of the configured repository (last path component).
+    /// Used to compute the workspace subdirectory name.
+    fn repo_name(&self) -> &str;
+
     /// Prepare worktree for the task. Returns Ok(true) if up-to-date,
     /// Ok(false) if merge conflict state.
     async fn update_worktree(

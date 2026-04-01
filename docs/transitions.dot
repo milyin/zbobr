@@ -1,22 +1,19 @@
 // Graphviz .dot description of task state transitions for dispatcher
-// States: PENDING, PREPARING, PLANNING, WORKING, REVIEWING, MERGING, DONE
+// States: PENDING, PLANNING, WORKING, REVIEWING, MERGING, DONE
 // Transitions controlled by signal and flags
 
 digraph dispatcher_states {
     rankdir=UD;
 
-    { rank=min; GO_PREPARE; }
     { rank=same; PENDING; }
-    { rank=same; PREPARING; PLANNING; WORKING; REVIEWING; MERGING } 
-    { rank=same; GO_PLAN; GO_WORK; GO_REVIEW; CLEAR_CONFLICT_FLAG; SET_PAUSE_FLAG } 
+    { rank=same; PLANNING; WORKING; REVIEWING; MERGING }
+    { rank=same; GO_PLAN; GO_WORK; GO_REVIEW; CLEAR_CONFLICT_FLAG; SET_PAUSE_FLAG }
     { rank=max; PENDING2; }
 
     splines=true;
     node [shape=ellipse];
-    node [group=git]; CHECK_SIGNALS_SIMPLE; PULL; CHECK_MERGE_CONFLICT; 
+    node [group=git]; CHECK_SIGNALS_SIMPLE; PULL; CHECK_MERGE_CONFLICT;
 
-    GO_PREPARE [shape=box, label="signal := go_prepare"];
-   
     CHECK_PAUSE [shape=diamond, label="pause == true or\nsignal == None ?"];
     CHECK_CONFLICT_FLAG [shape=diamond, label="conflict == true ?"];
     CHECK_SIGNALS_SIMPLE [shape=diamond, label="signal"];
@@ -32,27 +29,23 @@ digraph dispatcher_states {
 
     PENDING [ label = <<b>PENDING</b>>];
     PENDING2 [ label = <<b>PENDING</b>>];
-    PREPARING [ label = <<b>PREPARING</b>>];
     PLANNING [ label = <<b>PLANNING</b>>];
     WORKING [ label = <<b>WORKING</b>>];
     REVIEWING [ label = <<b>REVIEWING</b>>];
     MERGING [ label = <<b>MERGING</b>>];
     DONE [ label = <signal := None<br/><b>DONE</b>>];
 
-    GO_PREPARE [ shape = box; label = <signal := go_prepare> ];
     GO_PLAN[ shape = box; label = <signal := go_plan> ];
     GO_WORK[ shape = box; label = <signal := go_work> ];
     GO_REVIEW[ shape = box; label = <signal := go_review> ];
 
     // dispatcher evaluation flow
-    GO_PREPARE -> PENDING;
     PENDING -> CHECK_PAUSE;
     CHECK_PAUSE -> PENDING [label="yes"];
     CHECK_PAUSE -> CHECK_CONFLICT_FLAG [label="no"];
     CHECK_CONFLICT_FLAG -> MERGING [label="yes"];
     CHECK_CONFLICT_FLAG -> CHECK_SIGNALS_SIMPLE [label="no"];
-    CHECK_SIGNALS_SIMPLE -> PREPARING [label="go_prepare"];
-    CHECK_SIGNALS_SIMPLE -> PULL [label="other signal"];
+    CHECK_SIGNALS_SIMPLE -> PULL [label="signal set"];
     PULL -> CHECK_MERGE_CONFLICT;
     CHECK_MERGE_CONFLICT -> SET_CONFLICT_FLAG [label="yes"];
     SET_CONFLICT_FLAG -> MERGING;
@@ -62,10 +55,6 @@ digraph dispatcher_states {
     CHECK_SIGNALS_REPO -> WORKING   [label="go_work"];
 
     // Session possible outcomes
-    PREPARING -> GO_PLAN
-    PREPARING -> SET_PAUSE_FLAG
-    PREPARING -> PENDING2
-
     PLANNING -> GO_WORK
     PLANNING -> SET_PAUSE_FLAG
     PLANNING -> PENDING2
@@ -84,9 +73,9 @@ digraph dispatcher_states {
     MERGING -> SET_PAUSE_FLAG
     MERGING -> PENDING2
 
-    GO_PLAN -> PENDING2;
     SET_PAUSE_FLAG -> PENDING2;
     GO_WORK -> PENDING2;
     GO_REVIEW -> PENDING2;
+    GO_PLAN -> PENDING2;
     CLEAR_CONFLICT_FLAG -> PENDING2;
 }

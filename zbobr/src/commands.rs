@@ -3,16 +3,20 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Subcommand;
-use zbobr_api::{Comment, Pipeline, Stage, State, Task, config::WorkflowConfig, task::TaskContext};
+use zbobr_api::{
+    Comment, Pipeline, Stage, State, Task, WorktreeBackend, config::WorkflowConfig,
+    task::TaskContext,
+};
 use zbobr_dispatcher::{
-    ConfiguredPromptBuilder, TaskDir, Workflow, ZbobrDispatcher,
+    ConfiguredPromptBuilder, TaskDir, VAR_DESTINATION_BRANCH, VAR_DESTINATION_REPOSITORY,
+    Workflow, ZbobrDispatcher,
     config::{ZbobrDispatcherConfig, ZbobrExecutorConfig},
     print_task,
 };
 use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
-use zbobr_repo_backend_github::{ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig};
+use zbobr_repo_backend_github::{ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig, normalize_github_repo};
 use zbobr_task_backend_github::{TaskBackendGithub, ZbobrTaskBackendGithubConfig};
 use zbobr_utility::git_output;
 
@@ -69,13 +73,6 @@ pub enum TaskSubcommand {
         /// Initial state (READY, DONE, etc.; default: READY)
         #[arg(long, default_value = "READY")]
         state: String,
-
-        /// Destination repository in owner/repo format
-        #[arg(long)]
-        dest_repo: Option<String>,
-        /// Destination branch
-        #[arg(long)]
-        dest_branch: Option<String>,
         /// When set the task will be paused automatically on every state change
         #[arg(long, action = clap::ArgAction::SetTrue)]
         confirm: bool,
@@ -105,19 +102,11 @@ pub enum TaskSubcommand {
         #[arg(long)]
         state: Option<String>,
 
-        /// New destination repository in owner/repo format.
-        /// Pass `--dest-repo` without a value to delete the parameter.
-        #[arg(long, num_args = 0..=1)]
-        dest_repo: Option<Option<String>>,
-        /// New destination branch.
-        /// Pass `--dest-branch` without a value to delete the parameter.
-        #[arg(long, num_args = 0..=1)]
-        dest_branch: Option<Option<String>>,
         /// New work branch.
         /// Pass `--work-branch` without a value to delete the parameter.
         #[arg(long, num_args = 0..=1)]
         work_branch: Option<Option<String>>,
-        /// New signal (go_preparation, go_planning, etc.)
+        /// New signal (go_planning, go_working, etc.)
         #[arg(long)]
         signal: Option<String>,
         /// Set or clear the confirm flag (true/false).
@@ -133,9 +122,6 @@ pub enum TaskSubcommand {
     Process {
         /// Task ID
         task: Option<u64>,
-        /// MCP tester scenario file for preparation role
-        #[arg(long)]
-        executor_mcp_tester_preparation: Option<PathBuf>,
         /// MCP tester scenario file for planning role
         #[arg(long)]
         executor_mcp_tester_planning: Option<PathBuf>,
@@ -210,9 +196,13 @@ pub async fn run(
     command: Command,
 ) -> anyhow::Result<()> {
     let workflow = Workflow::new(workflow_config)?;
-    let prompt_builder = ConfiguredPromptBuilder::new(Some(config_dir), Arc::new(workflow.clone()));
 
     if !command.needs_backends() {
+        let normalized_repo = normalize_github_repo(&repo_config.repository)
+            .unwrap_or_else(|_| repo_config.repository.clone());
+        let prompt_builder = ConfiguredPromptBuilder::new(Some(config_dir), Arc::new(workflow.clone()))
+            .with_var(VAR_DESTINATION_REPOSITORY, &normalized_repo)
+            .with_var(VAR_DESTINATION_BRANCH, &repo_config.branch);
         return run_without_backends(command, &prompt_builder);
     }
 
@@ -220,6 +210,10 @@ pub async fn run(
     tasks_config.instance = dispatcher_config.instance.clone();
     let task_backend = TaskBackendGithub::new(tasks_config).await?;
     let repo_backend = ZbobrRepoBackendGithub::new(repo_config).await?;
+
+    let prompt_builder = ConfiguredPromptBuilder::new(Some(config_dir), Arc::new(workflow.clone()))
+        .with_var(VAR_DESTINATION_REPOSITORY, repo_backend.repository())
+        .with_var(VAR_DESTINATION_BRANCH, repo_backend.branch());
 
     let claude = ClaudeExecutor::new(executor_config.claude);
     let copilot = CopilotExecutor::new(executor_config.copilot);
@@ -282,8 +276,6 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
         title: "TITLE".to_string(),
         description: "DESCRIPTION".to_string(),
         state: State::Ready,
-        destination_repository: Some("DESTINATION_REPOSITORY".to_string()),
-        destination_branch: Some("DESTINATION_BRANCH".to_string()),
         work_branch: Some("WORK_BRANCH".to_string()),
         pr_url: None,
         context: TaskContext::default(),
@@ -354,13 +346,11 @@ async fn run_task_subcommand(
             title,
             description,
             state,
-            dest_repo,
-            dest_branch,
             confirm,
         } => {
             let parsed_state = state.parse::<zbobr_api::State>()?;
             let id = zbobr
-                .create_task(&title, &description, parsed_state, dest_repo, dest_branch)
+                .create_task(&title, &description, parsed_state)
                 .await?;
             if confirm {
                 zbobr.task_session(id).set_confirm(true).await?;
@@ -422,8 +412,6 @@ async fn run_task_subcommand(
             title,
             description,
             state,
-            dest_repo,
-            dest_branch,
             work_branch,
             signal,
             confirm,
@@ -453,12 +441,6 @@ async fn run_task_subcommand(
                     if let Some(s) = parsed_signal {
                         task.signal = Some(s);
                     }
-                    if let Some(repo) = dest_repo {
-                        task.destination_repository = repo;
-                    }
-                    if let Some(branch) = dest_branch {
-                        task.destination_branch = branch;
-                    }
                     if let Some(branch) = work_branch {
                         task.work_branch = branch;
                     }
@@ -476,7 +458,6 @@ async fn run_task_subcommand(
         }
         TaskSubcommand::Process {
             task,
-            executor_mcp_tester_preparation,
             executor_mcp_tester_planning,
             executor_mcp_tester_working,
             executor_mcp_tester_reviewing,
@@ -485,15 +466,13 @@ async fn run_task_subcommand(
         } => {
             let task = require_task_id(task, "process")?;
             let task_obj = task_backend.get_task(task).await?.snapshot(false).await?;
-            let mcp_tester_config_override = if executor_mcp_tester_preparation.is_some()
-                || executor_mcp_tester_planning.is_some()
+            let mcp_tester_config_override = if executor_mcp_tester_planning.is_some()
                 || executor_mcp_tester_working.is_some()
                 || executor_mcp_tester_reviewing.is_some()
                 || executor_mcp_tester_testing.is_some()
                 || executor_mcp_tester_merging.is_some()
             {
                 Some(ZbobrExecutorMcpTesterConfig {
-                    preparation: executor_mcp_tester_preparation,
                     planning: executor_mcp_tester_planning,
                     working: executor_mcp_tester_working,
                     reviewing: executor_mcp_tester_reviewing,
@@ -617,10 +596,10 @@ async fn overwrite_author(
     let task = task_backend.get_task(id).await?.snapshot(false).await?;
     let identity = task
         .identity()
-        .ok_or_else(|| anyhow::anyhow!("Task #{} missing routing parameters", id))?;
+        .ok_or_else(|| anyhow::anyhow!("Task #{} missing work_branch", id))?;
 
-    let dest_repo = &identity.destination_repository;
-    let dest_branch = &identity.destination_branch;
+    let dest_repo = zbobr.repo_backend().repository();
+    let dest_branch = zbobr.repo_backend().branch();
 
     if dry_run {
         println!(
@@ -641,11 +620,7 @@ async fn overwrite_author(
     }
 
     let task_dir = TaskDir::new(zbobr.config().workspaces.as_path(), id);
-
-    let repo_name = std::path::Path::new(dest_repo)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| anyhow::anyhow!("Cannot extract repo name from: {}", dest_repo))?;
+    let repo_name = zbobr.repo_backend().repo_name();
     let repo_dir = task_dir.path().join(repo_name);
 
     if !repo_dir.exists() {
@@ -656,10 +631,8 @@ async fn overwrite_author(
         ));
     }
 
-    // Fetch latest refs (including dest_branch) via the auth-aware backend
-    // so that filter-branch range and dry-run log are accurate.
-    // Uses fetch_refs (fetch-only) instead of update_worktree to avoid
-    // side effects (merges, pushes, PR creation) that violate dry-run expectations.
+    // Fetch latest refs via the auth-aware backend so that filter-branch
+    // range and dry-run log are accurate.
     zbobr.fetch_refs(&identity).await?;
 
     if !dry_run {

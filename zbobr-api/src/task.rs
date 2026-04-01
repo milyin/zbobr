@@ -69,12 +69,11 @@ impl<'de> serde::Deserialize<'de> for FixedOffsetTz {
 // -- TaskIdentity --
 
 /// Bundles task routing info for worktree operations.
-/// Only constructible when all three fields (destination_repository, destination_branch, work_branch) are set.
+/// Only constructible when the work_branch field is set.
+/// Repository and branch are now configured in the repo backend.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TaskIdentity {
     pub task_id: u64,
-    pub destination_repository: String,
-    pub destination_branch: String,
     pub work_branch: String,
 }
 
@@ -991,8 +990,6 @@ pub struct Task {
     pub description: String,
     /// Task state.
     pub state: State,
-    pub destination_repository: Option<String>,
-    pub destination_branch: Option<String>,
     pub work_branch: Option<String>,
     pub pr_url: Option<String>,
     /// Structured task context containing stage execution history and records.
@@ -1033,12 +1030,10 @@ pub struct Task {
 }
 
 impl Task {
-    /// Returns a TaskIdentity if all three routing fields are set.
+    /// Returns a TaskIdentity if the work_branch field is set.
     pub fn identity(&self) -> Option<TaskIdentity> {
         Some(TaskIdentity {
             task_id: self.id,
-            destination_repository: self.destination_repository.clone()?,
-            destination_branch: self.destination_branch.clone()?,
             work_branch: self.work_branch.clone()?,
         })
     }
@@ -1265,5 +1260,41 @@ mod tests {
         assert_eq!(ContextRecordType::Failure.to_string(), "failure");
         assert_eq!(ContextRecordType::Comment.to_string(), "comment");
         assert_eq!(ContextRecordType::Question.to_string(), "question");
+    }
+
+    fn make_task(id: u64, work_branch: Option<&str>) -> Task {
+        Task {
+            id,
+            title: String::new(),
+            description: String::new(),
+            state: State::Empty,
+            work_branch: work_branch.map(|s| s.to_string()),
+            pr_url: None,
+            context: TaskContext::default(),
+            signal: None,
+            stack: Vec::new(),
+            status: None,
+            pause: false,
+            confirm: false,
+            pipeline_run_id: 0,
+            stage_count: 0,
+            max_stage_count: 0,
+            closed: false,
+            etag: None,
+        }
+    }
+
+    #[test]
+    fn identity_returns_some_when_work_branch_set() {
+        let task = make_task(42, Some("zbobr_fix-123-my-feature"));
+        let identity = task.identity().expect("identity should be Some");
+        assert_eq!(identity.task_id, 42);
+        assert_eq!(identity.work_branch, "zbobr_fix-123-my-feature");
+    }
+
+    #[test]
+    fn identity_returns_none_when_work_branch_missing() {
+        let task = make_task(42, None);
+        assert!(task.identity().is_none());
     }
 }

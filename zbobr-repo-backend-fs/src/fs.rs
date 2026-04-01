@@ -34,25 +34,21 @@ impl ZbobrRepoBackendFs {
         Ok(Self { config })
     }
 
-    /// Extract a short repo name from a remote path (last path component).
-    fn repo_name_from_path(target_repo: &str) -> anyhow::Result<String> {
-        let path = Path::new(target_repo);
-        let name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
-            anyhow::anyhow!("Cannot extract repo name from path: {}", target_repo)
-        })?;
-        Ok(name.to_string())
-    }
-
     /// Ensure bare clone exists at `bare_dir`, fetching latest refs from origin.
     /// Configures fetch refspec so `refs/remotes/origin/*` are available in worktrees.
-    async fn ensure_bare_clone(&self, remote_repo: &str, bare_dir: &Path) -> anyhow::Result<()> {
+    async fn ensure_bare_clone(&self, bare_dir: &Path) -> anyhow::Result<()> {
         fs::create_dir_all(&self.config.repos_dir).await?;
 
         if !bare_dir.exists() {
             tracing::info!("Creating bare clone at {}", bare_dir.display());
             git(
                 &self.config.repos_dir,
-                &["clone", "--bare", remote_repo, bare_dir.to_str().unwrap()],
+                &[
+                    "clone",
+                    "--bare",
+                    &self.config.repository,
+                    bare_dir.to_str().unwrap(),
+                ],
             )
             .await?;
             // Configure fetch refspec so worktrees get proper origin/* refs
@@ -120,6 +116,18 @@ impl ZbobrRepoBackendFs {
 
 #[async_trait]
 impl WorktreeBackend for ZbobrRepoBackendFs {
+    fn repository(&self) -> &str {
+        &self.config.repository
+    }
+
+    fn branch(&self) -> &str {
+        &self.config.branch
+    }
+
+    fn repo_name(&self) -> &str {
+        self.config.repo_short_name()
+    }
+
     async fn update_worktree(
         &self,
         identity: &TaskIdentity,
@@ -127,8 +135,7 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
         _git_user_name: &str,
         _git_user_email: &str,
     ) -> anyhow::Result<bool> {
-        let remote_repo = &identity.destination_repository;
-        let base_branch = &identity.destination_branch;
+        let base_branch = &self.config.branch;
         let work_branch = &identity.work_branch;
 
         if work_branch == base_branch {
@@ -138,10 +145,12 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
             );
         }
 
-        let repo_name = Self::repo_name_from_path(remote_repo)?;
-        let bare_dir = self.config.repos_dir.join(format!("{}.git", repo_name));
+        let bare_dir = self
+            .config
+            .repos_dir
+            .join(format!("{}.git", self.config.repo_short_name()));
 
-        self.ensure_bare_clone(remote_repo, &bare_dir).await?;
+        self.ensure_bare_clone(&bare_dir).await?;
         self.ensure_worktree(&bare_dir, base_branch, work_branch, workspace_path)
             .await?;
 
@@ -169,11 +178,12 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
         Ok(is_uptodate)
     }
 
-    async fn fetch_refs(&self, identity: &TaskIdentity) -> anyhow::Result<()> {
-        let remote_repo = &identity.destination_repository;
-        let repo_name = Self::repo_name_from_path(remote_repo)?;
-        let bare_dir = self.config.repos_dir.join(format!("{}.git", repo_name));
-        self.ensure_bare_clone(remote_repo, &bare_dir).await?;
+    async fn fetch_refs(&self, _identity: &TaskIdentity) -> anyhow::Result<()> {
+        let bare_dir = self
+            .config
+            .repos_dir
+            .join(format!("{}.git", self.config.repo_short_name()));
+        self.ensure_bare_clone(&bare_dir).await?;
         zbobr_utility::git(&bare_dir, &["fetch", "origin"]).await?;
         Ok(())
     }
@@ -184,47 +194,37 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
         _body: Option<&str>,
     ) -> anyhow::Result<String> {
         let work_branch = &identity.work_branch;
-        if !self.config.repos_dir.exists() {
+
+        let bare_dir = self
+            .config
+            .repos_dir
+            .join(format!("{}.git", self.config.repo_short_name()));
+
+        if !bare_dir.exists() {
             anyhow::bail!("No worktree found for work_branch '{}'", work_branch);
         }
 
-        let mut entries = fs::read_dir(&self.config.repos_dir)
+        let output = git_output(&bare_dir, &["worktree", "list", "--porcelain"])
             .await
-            .context("Failed to read repos_dir")?;
+            .context("Failed to list worktrees")?;
 
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if !path.is_dir()
-                || !path
-                    .file_name()
-                    .is_some_and(|n| n.to_string_lossy().ends_with(".git"))
-            {
-                continue;
+        // Porcelain format: blocks separated by blank lines, each starting with "worktree <path>"
+        // followed by "branch refs/heads/<name>"
+        for block in output.split("\n\n") {
+            let mut wt_path = None;
+            let mut branch = None;
+            for line in block.lines() {
+                if let Some(p) = line.strip_prefix("worktree ") {
+                    wt_path = Some(p.to_string());
+                }
+                if let Some(b) = line.strip_prefix("branch refs/heads/") {
+                    branch = Some(b.to_string());
+                }
             }
-
-            let output = match git_output(&path, &["worktree", "list", "--porcelain"]).await {
-                Ok(o) => o,
-                Err(_) => continue,
-            };
-
-            // Porcelain format: blocks separated by blank lines, each starting with "worktree <path>"
-            // followed by "branch refs/heads/<name>"
-            for block in output.split("\n\n") {
-                let mut wt_path = None;
-                let mut branch = None;
-                for line in block.lines() {
-                    if let Some(p) = line.strip_prefix("worktree ") {
-                        wt_path = Some(p.to_string());
-                    }
-                    if let Some(b) = line.strip_prefix("branch refs/heads/") {
-                        branch = Some(b.to_string());
-                    }
-                }
-                if branch.as_deref() == Some(work_branch)
-                    && let Some(p) = wt_path
-                {
-                    return Ok(p);
-                }
+            if branch.as_deref() == Some(work_branch)
+                && let Some(p) = wt_path
+            {
+                return Ok(p);
             }
         }
 
@@ -256,7 +256,9 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
 
     fn debug_state(&self) -> String {
         format!(
-            "FilesystemRepoBackend(repos_dir: {})",
+            "FilesystemRepoBackend(repository={}, branch={}, repos_dir={})",
+            self.config.repository,
+            self.config.branch,
             self.config.repos_dir.display()
         )
     }

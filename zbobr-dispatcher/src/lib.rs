@@ -24,8 +24,8 @@ pub use config::{
 };
 pub use mcp::UnifiedMcp;
 pub use prompts::{
-    ConfiguredPromptBuilder, add_mcp_tool_variables, build_full_prompt, load_prompts,
-    validate_stage_prompts,
+    ConfiguredPromptBuilder, VAR_DESTINATION_BRANCH, VAR_DESTINATION_REPOSITORY,
+    add_mcp_tool_variables, build_full_prompt, load_prompts, validate_stage_prompts,
 };
 pub use task::{Comment, Model, RoleSession, StackEntry, Task, TaskSession, Tool};
 pub use task_dir::TaskDir;
@@ -128,51 +128,36 @@ impl ZbobrDispatcher {
         self.copilot.config.copilot_github_token.as_ref()
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn create_task(
         &self,
         title: &str,
         description: &str,
         state: impl Into<State>,
-        destination_repository: Option<String>,
-        destination_branch: Option<String>,
     ) -> anyhow::Result<u64> {
         let state = state.into();
-        self.create_task_with_confirm(
-            title,
-            description,
-            state,
-            destination_repository,
-            destination_branch,
-            false,
-        )
-        .await
+        self.create_task_with_confirm(title, description, state, false)
+            .await
     }
 
     /// Like `create_task` but also set the confirm flag on the new task when
     /// `confirm == true`.
-    #[allow(clippy::too_many_arguments)]
     pub async fn create_task_with_confirm(
         &self,
         title: &str,
         description: &str,
         state: impl Into<State>,
-        destination_repository: Option<String>,
-        destination_branch: Option<String>,
         confirm: bool,
     ) -> anyhow::Result<u64> {
         let id = self
             .task_backend
             .create_task(title, description, state.into())
             .await?;
-        // Set promoted fields + confirm flag + max_stage_count via modify
+        // Set confirm flag + max_stage_count via modify
         let max_stage_count = self.config.max_task_stage_count;
         let weak = self.task_backend.get_task(id).await?;
         let mutable = weak.upgrade().await?;
         mutable
             .modify_task(Box::new(move |mut task| {
-                task.destination_repository = destination_repository;
-                task.destination_branch = destination_branch;
                 if confirm {
                     task.confirm = true;
                 }
@@ -201,11 +186,6 @@ impl ZbobrDispatcher {
         self.task_backend.setup(force).await
     }
 
-    /// Extract repo name from a remote repo path (last path component).
-    fn extract_repo_name(remote_repo: &str) -> &str {
-        remote_repo.rsplit('/').next().unwrap_or(remote_repo)
-    }
-
     /// Fetch latest refs from origin with authentication.
     /// Unlike `update_worktree`, this only fetches — no merges, pushes, or PR side effects.
     pub async fn fetch_refs(&self, identity: &zbobr_api::TaskIdentity) -> anyhow::Result<()> {
@@ -218,7 +198,7 @@ impl ZbobrDispatcher {
         &self,
         identity: &zbobr_api::TaskIdentity,
     ) -> anyhow::Result<bool> {
-        let repo_name = Self::extract_repo_name(&identity.destination_repository);
+        let repo_name = self.repo_backend.repo_name();
         let task_dir = TaskDir::new(&self.config.workspaces, identity.task_id);
         let workspace_path = task_dir.path().join(repo_name);
         self.repo_backend

@@ -107,26 +107,63 @@ impl GitHubRepo {
     }
 }
 
+/// Returns true if `s` is a valid GitHub owner or repository name component.
+/// GitHub names may only contain alphanumeric characters, hyphens, underscores, and dots.
+fn is_valid_github_name(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
+}
+
 fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
-    // Standardize: remove trailing .git and /
-    let repo_ref = repo_ref.trim_end_matches(".git").trim_end_matches('/');
+    // Standardize: strip trailing '/' first so that ".git/" is handled correctly,
+    // then strip ".git", then any remaining trailing '/'.
+    let repo_ref = repo_ref
+        .trim_end_matches('/')
+        .trim_end_matches(".git")
+        .trim_end_matches('/');
 
     let full_name = if repo_ref.contains("://") {
-        // extract owner/repo from URL
+        // HTTPS URL: must be exactly https://github.com/owner/repo — no extra path segments.
+        // After stripping trailing '/' and '.git', splitting by '/' yields exactly 5 parts:
+        // ["https:", "", "github.com", "owner", "repo"]
         let parts: Vec<&str> = repo_ref.split('/').collect();
-        if parts.len() < 2 {
-            anyhow::bail!("Invalid GitHub URL: {}", repo_ref);
+        if parts.len() != 5 || parts[0] != "https:" || parts[2] != "github.com" {
+            anyhow::bail!(
+                "Invalid GitHub URL (expected 'https://github.com/owner/repo'): {}",
+                repo_ref
+            );
         }
-        format!("{}/{}", parts[parts.len() - 2], parts[parts.len() - 1])
+        if !is_valid_github_name(parts[3]) || !is_valid_github_name(parts[4]) {
+            anyhow::bail!(
+                "Invalid GitHub URL — owner or repo contains invalid characters: {}",
+                repo_ref
+            );
+        }
+        format!("{}/{}", parts[3], parts[4])
     } else if repo_ref.contains(':') {
-        // git@github.com:owner/repo
-        repo_ref.rsplit(':').next().unwrap_or("").to_string()
+        // git@github.com:owner/repo — validate host is github.com and path is exactly owner/repo
+        let colon_pos = repo_ref.find(':').unwrap();
+        let host_part = &repo_ref[..colon_pos];
+        let after_colon = &repo_ref[colon_pos + 1..];
+        if host_part != "git@github.com" {
+            anyhow::bail!(
+                "Invalid GitHub SSH URL (expected 'git@github.com:owner/repo'): {}",
+                repo_ref
+            );
+        }
+        let colon_parts: Vec<&str> = after_colon.split('/').collect();
+        if colon_parts.len() != 2 || colon_parts[0].is_empty() || colon_parts[1].is_empty() {
+            anyhow::bail!(
+                "Invalid GitHub SSH URL (expected 'git@github.com:owner/repo'): {}",
+                repo_ref
+            );
+        }
+        after_colon.to_string()
     } else {
         repo_ref.to_string()
     };
 
     let parts: Vec<&str> = full_name.split('/').collect();
-    if parts.len() != 2 {
+    if parts.len() != 2 || !is_valid_github_name(parts[0]) || !is_valid_github_name(parts[1]) {
         anyhow::bail!(
             "Invalid GitHub repository format: {}. Expected 'owner/repo' or a GitHub URL.",
             repo_ref
@@ -134,6 +171,13 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
     }
 
     Ok(GitHubRepo { full_name })
+}
+
+/// Normalize a GitHub repository reference to `owner/repo` format.
+/// Accepts HTTPS URLs, SSH URLs, and bare `owner/repo` strings.
+/// Returns an error if the input is not a valid GitHub repository reference.
+pub fn normalize_github_repo(repo_ref: &str) -> anyhow::Result<String> {
+    parse_github_repo(repo_ref).map(|r| r.full_name)
 }
 
 // ============================================================================
@@ -149,6 +193,10 @@ pub struct ZbobrRepoBackendGithub {
 impl ZbobrRepoBackendGithub {
     pub fn from_config(mut backend_config: ZbobrRepoBackendGithubConfig) -> anyhow::Result<Self> {
         backend_config.validate()?;
+        // Normalize repository to "owner/repo" format so all downstream API calls work
+        // regardless of whether the user supplied an HTTPS URL, SSH URL, or bare "owner/repo".
+        let repo = parse_github_repo(&backend_config.repository)?;
+        backend_config.repository = repo.full_name;
         let token = backend_config.github_token.as_ref().to_owned();
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(token)
@@ -165,100 +213,6 @@ impl ZbobrRepoBackendGithub {
         let backend = Self::from_config(backend_config)?;
         backend.validate_connectivity().await?;
         Ok(backend)
-    }
-
-    async fn ensure_fork(
-        &self,
-        target_repo: &str,
-        destination_branch: &str,
-    ) -> anyhow::Result<String> {
-        let repo = parse_github_repo(target_repo)?;
-        let fork_repo = format!("{}/{}", self.backend_config.fork_owner, repo.name());
-
-        // Check if fork already exists
-        let exists = retry_github("check fork exists", || {
-            self.octocrab
-                .get::<RepoResponse, _, _>(format!("/repos/{fork_repo}"), None::<&()>)
-        })
-        .await
-        .is_ok();
-
-        if !exists {
-            let fork_owner = &self.backend_config.fork_owner;
-            let endpoint = format!("/repos/{}/forks", repo.full_name);
-            let payload = serde_json::json!({ "organization": fork_owner });
-
-            tracing::info!(
-                "Creating fork of {target_repo} under organization '{fork_owner}' using endpoint {endpoint}"
-            );
-            tracing::debug!("Fork creation payload: {payload}");
-
-            retry_github("create fork", || {
-                self.octocrab.post(&endpoint, Some(&payload))
-            })
-            .await
-            .map_err(|e| {
-                let error_details = format!("{:?}", e);
-                tracing::error!(
-                    "Failed to create fork: target_repo={}, fork_owner={}, endpoint={}, error={:?}",
-                    target_repo,
-                    fork_owner,
-                    endpoint,
-                    e
-                );
-                anyhow::anyhow!(
-                    "Failed to create fork of {target_repo} under '{fork_owner}': \
-                         check if fork_owner is an organization you have access to, \
-                         and that your GitHub token has 'repo' and 'admin:org_hook' scopes. \
-                         Endpoint: {endpoint}. Error: {e}\n\
-                         Debug: {error_details}",
-                )
-            })
-            .map(|_: serde_json::Value| ())?;
-
-            // Wait a moment for the fork to be ready
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        } else {
-            // Fork exists — sync it with the destination branch on upstream.
-            // The destination branch (e.g. main) must exist on upstream; if it
-            // somehow doesn't, that is an error we should surface.
-            let endpoint = format!("/repos/{}/merge-upstream", fork_repo);
-            let body = serde_json::json!({ "branch": destination_branch });
-
-            tracing::info!(
-                "Syncing fork {fork_repo} with upstream {}/{}",
-                repo.full_name,
-                destination_branch
-            );
-
-            match self
-                .octocrab
-                .post::<serde_json::Value, serde_json::Value>(endpoint, Some(&body))
-                .await
-            {
-                Ok(response) => {
-                    tracing::debug!("merge-upstream response: {response}");
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to sync fork {fork_repo} with upstream {}/{destination_branch}: {e:#}",
-                        repo.full_name
-                    );
-                    return Err(e).with_context(|| {
-                        format!(
-                            "Failed to sync fork {fork_repo} with upstream {}/{destination_branch}",
-                            repo.full_name
-                        )
-                    });
-                }
-            }
-
-            tracing::info!(
-                "Successfully synced fork {fork_repo} with upstream destination branch '{destination_branch}'"
-            );
-        }
-
-        Ok(fork_repo)
     }
 
     /// Build environment variables that configure git token auth via
@@ -387,31 +341,6 @@ impl ZbobrRepoBackendGithub {
         Ok(bare_dir)
     }
 
-    /// Set up fork remote on bare clone for cross-org mode.
-    /// Returns `(push_remote_name, pr_repo_full_name)`.
-    async fn ensure_fork_remote(
-        &self,
-        bare_dir: &Path,
-        target_repo: &str,
-        base_branch: &str,
-    ) -> anyhow::Result<(String, String)> {
-        let fork_repo = self.ensure_fork(target_repo, base_branch).await?;
-
-        // Check if "fork" remote exists
-        let has_fork = git_check(bare_dir, &["remote", "get-url", "fork"]).await?;
-        if !has_fork {
-            let fork_url = format!("https://github.com/{fork_repo}.git");
-            tracing::info!("Adding fork remote: {fork_url}");
-            git(bare_dir, &["remote", "add", "fork", &fork_url]).await?;
-        }
-
-        let owned_env = self.token_auth_env()?;
-        let env: Vec<(&str, &str)> = owned_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        git_env(bare_dir, &["fetch", "fork"], &env).await?;
-
-        Ok(("fork".to_string(), fork_repo))
-    }
-
     /// Create a worktree at `workspace_path` for `work_branch` from `base_branch`.
     async fn ensure_worktree_github(
         &self,
@@ -504,68 +433,10 @@ impl ZbobrRepoBackendGithub {
         Ok(())
     }
 
-    /// Cross-org only: sync the fork's base branch with upstream via merge-upstream API.
-    /// Fetches both remotes afterwards so local refs are current.
-    async fn sync_fork_base_with_upstream(
-        &self,
-        bare_dir: &Path,
-        base_branch: &str,
-        fork_repo: &str,
-    ) -> anyhow::Result<()> {
-        // Check if origin/{base} and fork/{base} point to the same commit
-        let origin_ref = format!("origin/{base_branch}");
-        let fork_ref = format!("fork/{base_branch}");
-
-        let origin_sha = git_output(bare_dir, &["rev-parse", &origin_ref]).await;
-        let fork_sha = git_output(bare_dir, &["rev-parse", &fork_ref]).await;
-
-        let needs_sync = match (&origin_sha, &fork_sha) {
-            (Ok(a), Ok(b)) => a.trim() != b.trim(),
-            _ => true, // If either ref is missing, sync anyway
-        };
-
-        if !needs_sync {
-            tracing::info!("Fork base branch '{base_branch}' is already in sync with upstream");
-            return Ok(());
-        }
-
-        tracing::info!("Syncing fork {fork_repo} base branch '{base_branch}' with upstream");
-
-        let endpoint = format!("/repos/{fork_repo}/merge-upstream");
-        let body = serde_json::json!({ "branch": base_branch });
-
-        match self
-            .octocrab
-            .post::<serde_json::Value, serde_json::Value>(endpoint, Some(&body))
-            .await
-        {
-            Ok(response) => {
-                tracing::debug!("merge-upstream response: {response}");
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Failed to sync fork {fork_repo} base branch '{base_branch}' with upstream: {e:#}"
-                );
-                return Err(octocrab_to_anyhow(e));
-            }
-        }
-
-        // Re-fetch fork so local refs are updated
-        let owned_env = self.token_auth_env()?;
-        let env: Vec<(&str, &str)> = owned_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        git_env(bare_dir, &["fetch", "fork"], &env).await?;
-
-        Ok(())
-    }
-
-    /// Ensure local `refs/heads/{base_branch}` matches `refs/remotes/{remote}/{base_branch}`.
+    /// Ensure local `refs/heads/{base_branch}` matches `refs/remotes/origin/{base_branch}`.
     /// Uses `git update-ref` to force-set the local ref (safe — bare repo local base is just a copy).
-    async fn sync_local_base_ref(
-        bare_dir: &Path,
-        base_branch: &str,
-        remote: &str,
-    ) -> anyhow::Result<()> {
-        let remote_ref = format!("refs/remotes/{remote}/{base_branch}");
+    async fn sync_local_base_ref(bare_dir: &Path, base_branch: &str) -> anyhow::Result<()> {
+        let remote_ref = format!("refs/remotes/origin/{base_branch}");
         let local_ref = format!("refs/heads/{base_branch}");
 
         let remote_sha = git_output(bare_dir, &["rev-parse", &remote_ref]).await;
@@ -602,22 +473,22 @@ impl ZbobrRepoBackendGithub {
         Ok(())
     }
 
-    /// Fetch `{push_remote}/{work_branch}` with explicit refspec.
+    /// Fetch `origin/{work_branch}` with explicit refspec.
     /// Returns `false` if the remote branch doesn't exist yet.
     async fn fetch_remote_work_branch(
         bare_dir: &Path,
-        push_remote: &str,
         work_branch: &str,
         envs: &[(&str, &str)],
     ) -> anyhow::Result<bool> {
-        let refspec = format!("refs/heads/{work_branch}:refs/remotes/{push_remote}/{work_branch}");
+        let refspec =
+            format!("refs/heads/{work_branch}:refs/remotes/origin/{work_branch}");
 
-        let ok = git_check_env(bare_dir, &["fetch", push_remote, &refspec], envs).await?;
+        let ok = git_check_env(bare_dir, &["fetch", "origin", &refspec], envs).await?;
 
         if ok {
-            tracing::info!("Fetched {push_remote}/{work_branch}");
+            tracing::info!("Fetched origin/{work_branch}");
         } else {
-            tracing::info!("Remote branch {push_remote}/{work_branch} does not exist yet");
+            tracing::info!("Remote branch origin/{work_branch} does not exist yet");
         }
 
         Ok(ok)
@@ -677,18 +548,17 @@ impl ZbobrRepoBackendGithub {
         Ok(ok)
     }
 
-    /// Push worktree HEAD to remote without --force.
+    /// Push worktree HEAD to origin without --force.
     /// Errors if remote has diverged (requires merge first).
-    async fn push_worktree_to_remote(
+    async fn push_worktree_to_origin(
         worktree_path: &Path,
-        push_remote: &str,
         work_branch: &str,
         envs: &[(&str, &str)],
     ) -> anyhow::Result<()> {
-        tracing::info!("Pushing {work_branch} to {push_remote} (no force)");
+        tracing::info!("Pushing {work_branch} to origin (no force)");
         git_env(
             worktree_path,
-            &["push", push_remote, &format!("HEAD:{work_branch}")],
+            &["push", "origin", &format!("HEAD:{work_branch}")],
             envs,
         )
         .await
@@ -763,16 +633,26 @@ impl ZbobrRepoBackendGithub {
 
 #[async_trait]
 impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
+    fn repository(&self) -> &str {
+        &self.backend_config.repository
+    }
+
+    fn branch(&self) -> &str {
+        &self.backend_config.branch
+    }
+
+    fn repo_name(&self) -> &str {
+        self.backend_config.repo_short_name()
+    }
+
     /// Merge-based update_worktree flow. Never force-pushes the work branch.
     ///
     /// ## Algorithm
     ///
-    /// Phase 1 – Setup: parse repo, ensure bare clone (fetches origin),
-    ///   determine same-org vs cross-org, ensure fork remote if cross-org.
+    /// Phase 1 – Setup: parse repo, ensure bare clone (fetches origin).
     ///
     /// Phase 2 – Validate base branch sync:
-    ///   cross-org: sync fork base with upstream via merge-upstream API.
-    ///   All: sync local refs/heads/{base_branch} to match remote.
+    ///   Sync local refs/heads/{base_branch} to match origin.
     ///
     /// Phase 3 – Fetch remote work branch (may not exist yet).
     ///
@@ -786,10 +666,10 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
     ///
     /// Phase 7 – Stash uncommitted changes in worktree.
     ///
-    /// Phase 8 – Merge remote work → local work (element 5 → 6):
+    /// Phase 8 – Merge remote work → local work:
     ///   skip if remote doesn't exist. On conflict → return Ok(false).
     ///
-    /// Phase 9 – Merge base → local work (element 4 → 6):
+    /// Phase 9 – Merge base → local work:
     ///   on conflict → return Ok(false).
     ///
     /// Phase 10 – Push result back (no --force). Return Ok(true).
@@ -800,8 +680,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         git_user_name: &str,
         git_user_email: &str,
     ) -> anyhow::Result<bool> {
-        let remote_repo = &identity.destination_repository;
-        let base_branch = &identity.destination_branch;
+        let base_branch = &self.backend_config.branch;
         let work_branch = &identity.work_branch;
 
         if work_branch == base_branch {
@@ -815,32 +694,15 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         let env: Vec<(&str, &str)> = owned_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
         // Phase 1: Setup
-        let repo = parse_github_repo(remote_repo)?;
+        let repo = parse_github_repo(&self.backend_config.repository)?;
         let bare_dir = self.ensure_bare_clone_github(&repo).await?;
 
-        let same_org = repo
-            .owner()
-            .eq_ignore_ascii_case(&self.backend_config.fork_owner);
-
-        let (push_remote, pr_repo) = if same_org {
-            tracing::info!("Same-org mode: skipping fork setup for {}", repo.full_name);
-            ("origin".to_string(), repo.full_name.clone())
-        } else {
-            self.ensure_fork_remote(&bare_dir, remote_repo, base_branch)
-                .await?
-        };
-
         // Phase 2: Validate base branch sync
-        let base_remote = if same_org { "origin" } else { "fork" };
-        if !same_org {
-            self.sync_fork_base_with_upstream(&bare_dir, base_branch, &pr_repo)
-                .await?;
-        }
-        Self::sync_local_base_ref(&bare_dir, base_branch, base_remote).await?;
+        Self::sync_local_base_ref(&bare_dir, base_branch).await?;
 
         // Phase 3: Fetch remote work branch
         let remote_exists =
-            Self::fetch_remote_work_branch(&bare_dir, &push_remote, work_branch, &env).await?;
+            Self::fetch_remote_work_branch(&bare_dir, work_branch, &env).await?;
 
         // Phase 4: Create worktree
         self.ensure_worktree_github(
@@ -876,7 +738,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             }
 
             // Regular push (not force) — branch is new, so no conflict possible
-            Self::push_worktree_to_remote(workspace_path, &push_remote, work_branch, &env).await?;
+            Self::push_worktree_to_origin(workspace_path, work_branch, &env).await?;
         }
 
         // Phase 6: Abort any in-progress merge from a previous failed run
@@ -910,9 +772,9 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         // Phase 7: Stash uncommitted changes
         Self::stash_worktree_changes(workspace_path).await?;
 
-        // Phase 8: Merge remote work → local work (element 5 → 6)
+        // Phase 8: Merge remote work → local work
         if remote_exists {
-            let remote_ref = format!("{push_remote}/{work_branch}");
+            let remote_ref = format!("origin/{work_branch}");
             let merged = Self::merge_ref_into_worktree(workspace_path, &remote_ref).await?;
             if !merged {
                 tracing::warn!("Merge conflict merging remote work branch — needs merger");
@@ -920,7 +782,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             }
         }
 
-        // Phase 9: Merge base → local work (element 4 → 6)
+        // Phase 9: Merge base → local work
         let merged = Self::merge_ref_into_worktree(workspace_path, base_branch).await?;
         if !merged {
             tracing::warn!("Merge conflict merging base branch — needs merger");
@@ -928,14 +790,14 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         }
 
         // Phase 10: Push result back (no --force)
-        Self::push_worktree_to_remote(workspace_path, &push_remote, work_branch, &env).await?;
+        Self::push_worktree_to_origin(workspace_path, work_branch, &env).await?;
 
         tracing::info!("Worktree {work_branch}: up-to-date, all merges succeeded, pushed");
         Ok(true)
     }
 
-    async fn fetch_refs(&self, identity: &zbobr_api::task::TaskIdentity) -> anyhow::Result<()> {
-        let repo = parse_github_repo(&identity.destination_repository)?;
+    async fn fetch_refs(&self, _identity: &zbobr_api::task::TaskIdentity) -> anyhow::Result<()> {
+        let repo = parse_github_repo(&self.backend_config.repository)?;
         let bare_dir = self.ensure_bare_clone_github(&repo).await?;
         let owned_env = self.token_auth_env()?;
         let env: Vec<(&str, &str)> = owned_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
@@ -949,27 +811,17 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         body: Option<&str>,
     ) -> anyhow::Result<String> {
         let work_branch = &identity.work_branch;
-        let destination_repo = &identity.destination_repository;
-        let base_branch = &identity.destination_branch;
-
-        let repo = parse_github_repo(destination_repo)?;
-        let same_org = repo
-            .owner()
-            .eq_ignore_ascii_case(&self.backend_config.fork_owner);
-        let pr_repo = if same_org {
-            repo.full_name.clone()
-        } else {
-            format!("{}/{}", self.backend_config.fork_owner, repo.name())
-        };
+        let pr_repo = &self.backend_config.repository;
+        let base_branch = &self.backend_config.branch;
 
         // Find existing PR or create a new one
-        if let Ok(existing) = self.find_existing_pr(&pr_repo, work_branch, None).await {
+        if let Ok(existing) = self.find_existing_pr(pr_repo, work_branch, None).await {
             if let Some(body) = body {
                 tracing::info!(
                     "Updating body of existing PR #{} for {work_branch}",
                     existing.number
                 );
-                self.update_pr_body(&pr_repo, existing.number, body).await?;
+                self.update_pr_body(pr_repo, existing.number, body).await?;
             }
             return Ok(existing.html_url);
         }
@@ -999,14 +851,14 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
             {
                 tracing::info!("PR already exists (422), looking up existing PR");
                 let existing = self
-                    .find_existing_pr(&pr_repo, work_branch, Some(base_branch))
+                    .find_existing_pr(pr_repo, work_branch, Some(base_branch))
                     .await?;
                 if let Some(body) = body {
                     tracing::info!(
                         "Updating body of existing PR #{} for {work_branch}",
                         existing.number
                     );
-                    self.update_pr_body(&pr_repo, existing.number, body).await?;
+                    self.update_pr_body(pr_repo, existing.number, body).await?;
                 }
                 Ok(existing.html_url)
             }
@@ -1015,18 +867,18 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
     }
 
     async fn validate_connectivity(&self) -> anyhow::Result<()> {
-        // Check fork owner exists
-        let fork_owner = &self.backend_config.fork_owner;
-        let fork_owner_exists = retry_github("check fork owner", || {
+        // Check repository exists on GitHub
+        let repo_path = &self.backend_config.repository;
+        let repo_exists = retry_github("check repository exists", || {
             self.octocrab
-                .get::<serde_json::Value, _, _>(format!("/users/{fork_owner}"), None::<&()>)
+                .get::<RepoResponse, _, _>(format!("/repos/{repo_path}"), None::<&()>)
         })
         .await
         .is_ok();
-        if !fork_owner_exists {
+        if !repo_exists {
             anyhow::bail!(
-                "fork_owner '{fork_owner}' does not exist on GitHub as a user or organization.\n  \
-                 Check your fork_owner setting and ensure the account exists."
+                "repository '{repo_path}' does not exist on GitHub or is not accessible.\n  \
+                 Check your repository setting and ensure the token has access."
             );
         }
 
@@ -1054,9 +906,200 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
 
     fn debug_state(&self) -> String {
         format!(
-            "GitHubRepoBackend(fork_owner={}, repos_dir={})",
-            self.backend_config.fork_owner,
+            "GitHubRepoBackend(repository={}, branch={}, repos_dir={})",
+            self.backend_config.repository,
+            self.backend_config.branch,
             self.backend_config.repos_dir.display()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zbobr_api::Secret;
+
+    // ── parse_github_repo tests ──────────────────────────────────────
+
+    #[test]
+    fn parse_owner_repo_plain() {
+        let repo = parse_github_repo("owner/repo").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_https_url() {
+        let repo = parse_github_repo("https://github.com/owner/repo").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_https_url_with_git_suffix() {
+        let repo = parse_github_repo("https://github.com/owner/repo.git").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_https_url_trailing_slash() {
+        let repo = parse_github_repo("https://github.com/owner/repo/").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_ssh_url() {
+        let repo = parse_github_repo("git@github.com:owner/repo").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_ssh_url_with_git_suffix() {
+        let repo = parse_github_repo("git@github.com:owner/repo.git").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_owner_repo_with_git_suffix() {
+        let repo = parse_github_repo("owner/repo.git").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_https_url_with_git_suffix_and_trailing_slash() {
+        let repo = parse_github_repo("https://github.com/owner/repo.git/").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_owner_repo_with_git_suffix_and_trailing_slash() {
+        let repo = parse_github_repo("owner/repo.git/").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_rejects_bare_name() {
+        let result = parse_github_repo("just-a-name");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid GitHub repository format"));
+    }
+
+    #[test]
+    fn parse_rejects_url_with_extra_path() {
+        // URLs with extra path segments (e.g. issue/PR links) must be rejected
+        let result = parse_github_repo("https://github.com/owner/repo/issues/123");
+        assert!(result.is_err());
+        let result2 = parse_github_repo("https://github.com/owner/repo/pull/5");
+        assert!(result2.is_err());
+        let result3 = parse_github_repo("https://github.com/owner/repo/tree/main");
+        assert!(result3.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_ssh_url_with_extra_path() {
+        // SSH URLs with extra path components must be rejected
+        let result = parse_github_repo("git@github.com:owner/repo/extra");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid GitHub SSH URL"));
+
+        // Empty owner segment
+        let result2 = parse_github_repo("git@github.com:/repo");
+        assert!(result2.is_err());
+
+        // Empty repo segment (owner only)
+        let result3 = parse_github_repo("git@github.com:owner/");
+        assert!(result3.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_non_github_ssh_host() {
+        // SSH URLs must use git@github.com — other hosts must be rejected
+        let result = parse_github_repo("git@gitlab.com:owner/repo");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid GitHub SSH URL"));
+
+        let result2 = parse_github_repo("git@bitbucket.org:owner/repo");
+        assert!(result2.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_non_github_https_url() {
+        // HTTPS URLs must point to github.com specifically
+        let result = parse_github_repo("https://gitlab.com/owner/repo");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid GitHub URL"));
+
+        let result2 = parse_github_repo("https://notgithub.com/owner/repo");
+        assert!(result2.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_plain_format_with_empty_parts() {
+        // Plain "owner/repo" format must reject empty owner or repo
+        let result = parse_github_repo("/repo");
+        assert!(result.is_err());
+
+        let result2 = parse_github_repo("owner/");
+        assert!(result2.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_url_with_query_string() {
+        // Copy-pasted GitHub URLs with ?tab=readme or similar must be rejected
+        let result = parse_github_repo("https://github.com/owner/repo?tab=readme-ov-file");
+        assert!(result.is_err());
+
+        let result2 = parse_github_repo("https://github.com/owner/repo?tab=code");
+        assert!(result2.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_url_with_fragment() {
+        // URLs with fragment anchors (#section) must be rejected
+        let result = parse_github_repo("https://github.com/owner/repo#readme");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_http_url() {
+        // Only https:// is accepted — http:// must be rejected
+        let result = parse_github_repo("http://github.com/owner/repo");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid GitHub URL"));
+    }
+
+    // ── from_config normalization tests ──────────────────────────────
+
+    #[tokio::test]
+    async fn from_config_normalizes_https_url() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let config = ZbobrRepoBackendGithubConfig {
+            repository: "https://github.com/myorg/myrepo.git".to_string(),
+            branch: "main".to_string(),
+            github_token: Secret::value("ghp_test123"),
+            repos_dir: std::path::PathBuf::from("/tmp/test-repos"),
+        };
+        let backend = ZbobrRepoBackendGithub::from_config(config).unwrap();
+        assert_eq!(backend.backend_config.repository, "myorg/myrepo");
+    }
+
+    #[tokio::test]
+    async fn from_config_normalizes_ssh_url() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let config = ZbobrRepoBackendGithubConfig {
+            repository: "git@github.com:myorg/myrepo.git".to_string(),
+            branch: "main".to_string(),
+            github_token: Secret::value("ghp_test123"),
+            repos_dir: std::path::PathBuf::from("/tmp/test-repos"),
+        };
+        let backend = ZbobrRepoBackendGithub::from_config(config).unwrap();
+        assert_eq!(backend.backend_config.repository, "myorg/myrepo");
     }
 }

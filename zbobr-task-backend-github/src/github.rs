@@ -14,8 +14,6 @@ use zbobr_api::{
 
 // -- Parameter name constants (GitHub issue body parameter keys) --
 
-const PARAM_DESTINATION_REPOSITORY: &str = "destination_repository";
-const PARAM_DESTINATION_BRANCH: &str = "destination_branch";
 const PARAM_WORK_BRANCH: &str = "work_branch";
 const PARAM_PR_URL: &str = "pr_url";
 const PARAM_STACK: &str = "stack";
@@ -571,8 +569,6 @@ impl ZbobrTaskBackendGithubImpl {
         let (description, params_map, status, context) = parse_description_full(&body)?;
 
         // Promoted fields: read from params_map where they were stored
-        let destination_repository = params_map.get(PARAM_DESTINATION_REPOSITORY).cloned();
-        let destination_branch = params_map.get(PARAM_DESTINATION_BRANCH).cloned();
         let work_branch = params_map.get(PARAM_WORK_BRANCH).cloned();
         let pr_url = params_map.get(PARAM_PR_URL).cloned();
 
@@ -604,8 +600,6 @@ impl ZbobrTaskBackendGithubImpl {
             title: issue.title,
             description,
             state,
-            destination_repository,
-            destination_branch,
             work_branch,
             pr_url,
             context,
@@ -636,12 +630,6 @@ impl ZbobrTaskBackendGithubImpl {
         let mut params: HashMap<String, String> = HashMap::new();
         if let Some(ref v) = task.pr_url {
             params.insert(PARAM_PR_URL.to_string(), v.clone());
-        }
-        if let Some(ref v) = task.destination_repository {
-            params.insert(PARAM_DESTINATION_REPOSITORY.to_string(), v.clone());
-        }
-        if let Some(ref v) = task.destination_branch {
-            params.insert(PARAM_DESTINATION_BRANCH.to_string(), v.clone());
         }
         if let Some(ref v) = task.work_branch {
             params.insert(PARAM_WORK_BRANCH.to_string(), v.clone());
@@ -1328,8 +1316,6 @@ mod flag_tests {
             title: "t".to_string(),
             description: "d".to_string(),
             state: State::Done,
-            destination_repository: None,
-            destination_branch: None,
             work_branch: None,
             pr_url: None,
             context: TaskContext::default(),

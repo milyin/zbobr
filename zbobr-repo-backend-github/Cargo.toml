@@ -16,3 +16,6 @@ async-trait = { workspace = true }
 clap = { workspace = true }
 paste = { workspace = true }
 base64 = { workspace = true }
+
+[dev-dependencies]
+rustls = { version = "0.23", default-features = false, features = ["ring"] }

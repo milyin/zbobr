@@ -175,6 +175,84 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
 }
 
 // ---------------------------------------------------------------------------
+// Branch name helpers
+// ---------------------------------------------------------------------------
+
+/// Sanitize a task title into a valid git branch postfix.
+/// Lowercases, replaces non-alphanumeric characters with '-', collapses consecutive
+/// dashes, and trims leading/trailing dashes. Truncates to 50 characters.
+fn sanitize_branch_postfix(title: &str) -> String {
+    let sanitized: String = title
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect();
+
+    let mut result = String::new();
+    let mut last_dash = true; // treat start as dash to trim leading dashes
+    for c in sanitized.chars() {
+        if c == '-' {
+            if !last_dash {
+                result.push(c);
+                last_dash = true;
+            }
+        } else {
+            result.push(c);
+            last_dash = false;
+        }
+    }
+    // trim trailing dash
+    let result = result.trim_end_matches('-').to_string();
+    // truncate to 50 chars (char-based to avoid panicking on multi-byte Unicode)
+    if result.chars().count() > 50 {
+        result.chars().take(50).collect::<String>().trim_end_matches('-').to_string()
+    } else {
+        result
+    }
+}
+
+/// Ensure the task has a work_branch set. If not, derive one from the task title.
+async fn ensure_work_branch(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Result<()> {
+    let task = zbobr
+        .task_backend()
+        .get_task(task_id)
+        .await?
+        .snapshot(false)
+        .await?;
+
+    if task.work_branch.is_some() {
+        return Ok(());
+    }
+
+    let postfix = sanitize_branch_postfix(&task.title);
+    let postfix = if postfix.is_empty() {
+        "task".to_string()
+    } else {
+        postfix
+    };
+
+    let prefix = &zbobr.config().work_branch_prefix;
+    let work_branch = format!("{}-{}-{}", prefix, task_id, postfix);
+
+    tracing::info!(
+        "Task #{task_id}: auto-deriving work branch '{}' from title '{}'",
+        work_branch,
+        task.title
+    );
+
+    let weak = zbobr.task_backend().get_task(task_id).await?;
+    let mutable = weak.upgrade().await?;
+    mutable
+        .modify_task(Box::new(move |mut task| {
+            task.work_branch = Some(work_branch);
+            task
+        }))
+        .await?;
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Task display
 // ---------------------------------------------------------------------------
 
@@ -195,12 +273,6 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
         println!("Stack:       {:?}", task.stack);
     }
     println!("Pause:       {}", task.pause);
-    if let Some(ref repo) = task.destination_repository {
-        println!("Dest Repo:   {}", repo);
-    }
-    if let Some(ref branch) = task.destination_branch {
-        println!("Dest Branch: {}", branch);
-    }
     if let Some(ref branch) = task.work_branch {
         println!("Work Branch: {}", branch);
     }
@@ -287,6 +359,9 @@ impl<'a> CliStageRunner<'a> {
 
         let task_dir = TaskDir::new(self.zbobr.config().workspaces.as_path(), self.task_id);
         tokio::fs::create_dir_all(task_dir.path()).await?;
+
+        // Auto-derive work branch if not yet set
+        ensure_work_branch(self.zbobr, self.task_id).await?;
 
         // Unified worktree detection and problem handling
         let work_dir = match detect_and_handle_worktree(
@@ -1196,11 +1271,8 @@ pub async fn run_manager_loop(
 
 /// Unified worktree detection and problem dispatch.
 ///
-/// Checks whether the task has a valid identity (routing params), sets up the
-/// worktree, and attempts to merge upstream. If identity is undefined, returns
-/// the task directory as the working directory (prompt template validation will
-/// catch missing placeholders). If a merge conflict is detected, dispatches to
-/// the configured merge handler.
+/// Sets up the worktree for the task and attempts to merge upstream.
+/// If a merge conflict is detected, dispatches to the configured merge handler.
 async fn detect_and_handle_worktree(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
@@ -1215,13 +1287,12 @@ async fn detect_and_handle_worktree(
         .snapshot(false)
         .await?;
 
-    // 1. Check if identity is defined
+    // 1. Check if identity is defined (work_branch set)
     let identity = match task.identity() {
         Some(id) => id,
         None => {
-            // Identity not yet configured — proceed with task_dir.
-            // If the stage's prompt uses {destination_branch} or {work_branch},
-            // template rendering will catch the error before the agent starts.
+            // work_branch not set — proceed with task_dir.
+            // This should only happen if no stages have run yet.
             return Ok(WorktreeResult::Ready(task_dir.to_path_buf()));
         }
     };
@@ -1237,9 +1308,8 @@ async fn detect_and_handle_worktree(
         }
     };
 
-    // 3. Compute work_dir from identity
-    let dest_repo = &identity.destination_repository;
-    let repo_name = dest_repo.rsplit('/').next().unwrap_or(dest_repo);
+    // 3. Compute work_dir from backend repo name
+    let repo_name = zbobr.repo_backend().repo_name();
     let work_dir = TaskDir::new(zbobr.config().workspaces.as_path(), task_id)
         .path()
         .join(repo_name);
@@ -1249,11 +1319,8 @@ async fn detect_and_handle_worktree(
         return Ok(WorktreeResult::Ready(work_dir));
     }
 
-    // 5. Attempt merge
-    let dest_branch = task
-        .destination_branch
-        .clone()
-        .unwrap_or_else(|| "main".to_string());
+    // 5. Attempt merge with base branch from backend config
+    let base_branch = zbobr.repo_backend().branch();
 
     // If we ARE the conflict handler, start the merge but don't abort on failure —
     // the agent needs to see conflict markers in the working tree.
@@ -1261,7 +1328,7 @@ async fn detect_and_handle_worktree(
 
     let merged_ok = git_check(
         &work_dir,
-        &["merge", &format!("origin/{}", dest_branch), "--no-edit"],
+        &["merge", &format!("origin/{}", base_branch), "--no-edit"],
     )
     .await
     .context("Failed to run git merge for upstream sync")?;
@@ -1353,7 +1420,7 @@ async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Re
         Some(id) => id,
         None => {
             let msg = format!(
-                "Task #{task_id} is missing routing parameters (destination_repository, destination_branch, work_branch)"
+                "Task #{task_id} is missing work_branch — cannot ensure PR URL"
             );
             tracing::error!("{msg}");
             return Err(anyhow::anyhow!(msg));
@@ -1617,7 +1684,7 @@ async fn perform_stash_and_push(
     let task_backend = zbobr.task_backend();
 
     // Stash uncommitted changes if work_dir is a git repository.
-    // The preparator stage may start without a git repo (identity not yet set),
+    // The work_dir may not yet be a git repo on the first run,
     // so we skip stash but still proceed to update_worktree below.
     let is_git_repo = git_output(work_dir, &["rev-parse", "--is-inside-work-tree"])
         .await
@@ -1666,10 +1733,10 @@ async fn perform_stash_and_push(
         }
         let config = zbobr.config();
         if config.overwrite_author && is_uptodate && is_git_repo {
-            let dest_branch = identity.destination_branch.clone();
+            let base_branch = zbobr.repo_backend().branch().to_string();
             zbobr_utility::rewrite_authors_on_worktree(
                 work_dir,
-                &dest_branch,
+                &base_branch,
                 &config.git_user_name,
                 &config.git_user_email,
             )
@@ -1685,4 +1752,81 @@ async fn perform_stash_and_push(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_branch_postfix_basic() {
+        assert_eq!(sanitize_branch_postfix("Hello World"), "hello-world");
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_special_chars() {
+        assert_eq!(
+            sanitize_branch_postfix("fix: handle special chars!@#$%"),
+            "fix-handle-special-chars"
+        );
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_consecutive_dashes() {
+        assert_eq!(sanitize_branch_postfix("a---b"), "a-b");
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_leading_trailing_dashes() {
+        assert_eq!(sanitize_branch_postfix("--hello--"), "hello");
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_empty() {
+        assert_eq!(sanitize_branch_postfix(""), "");
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_only_special_chars() {
+        assert_eq!(sanitize_branch_postfix("!!!"), "");
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_truncates_long_input() {
+        let long_title = "a".repeat(60);
+        let result = sanitize_branch_postfix(&long_title);
+        assert!(result.len() <= 50);
+        assert_eq!(result, "a".repeat(50));
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_truncation_trims_trailing_dash() {
+        // Create input that will have a dash at position 50 after truncation
+        let mut title = "a".repeat(49);
+        title.push(' '); // becomes dash
+        title.push_str(&"b".repeat(10));
+        let result = sanitize_branch_postfix(&title);
+        assert!(result.len() <= 50);
+        assert!(!result.ends_with('-'));
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_preserves_numbers() {
+        assert_eq!(sanitize_branch_postfix("task 123 fix"), "task-123-fix");
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_lowercases() {
+        assert_eq!(sanitize_branch_postfix("FIX BUG"), "fix-bug");
+    }
+
+    #[test]
+    fn sanitize_branch_postfix_unicode_no_panic() {
+        // Multi-byte Unicode chars: each Japanese char is 3 bytes.
+        // 20 chars × 3 bytes = 60 bytes > 50 bytes, but only 20 chars.
+        // Old byte-slice would panic; char-based should not.
+        let title = "タスク".repeat(20); // 60 chars
+        let result = sanitize_branch_postfix(&title);
+        assert!(result.chars().count() <= 50);
+    }
 }
