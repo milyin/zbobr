@@ -20,14 +20,12 @@ The dispatcher is domain-agnostic and can manage any set of repositories through
 2. **Task Project** (`--tasks-github-task-repo`)
    - A GitHub repository whose issues the dispatcher manages
    - Example: `YoroolGui/copilot-zenoh`
-   - Contains: target repository list, project-specific guidance, and `zbobr.toml` config
-   - Created via `zbobr setup --tasks-github-task-repo owner/repo --repo-github-fork-owner owner`
+   - Contains: project-specific guidance and `zbobr.toml` config
+   - Created via `zbobr setup --tasks-github-task-repo owner/repo`
 
-3. **Fork Owner** (`--repo-github-fork-owner`)
-   - The GitHub user or organization where target repos are forked for implementation
-   - Worker agents fork repos under this account, create feature branches, and open PRs back to the original
-   - Can be a personal account (e.g., `milyin`) or an organization (e.g., `YoroolGui`)
-   - Configured in task project's `zbobr.toml` file or via `--repo-github-fork-owner` CLI flag
+3. **Target Repository** (`--repo-github-repository`)
+   - The single GitHub repository that worker agents operate on
+   - Configured in the `[repo]` section of `zbobr.toml` as `repository = "owner/repo"` and `branch = "main"`
 
 ## Installation
 
@@ -68,7 +66,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 export GH_TOKEN=$(gh auth token)
 
 # Example: Set up Zenoh task project
-zbobr setup --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-owner YoroolGui
+zbobr setup --tasks-github-task-repo YoroolGui/copilot-zenoh
 ```
 
 This will:
@@ -78,7 +76,7 @@ This will:
 **Launch the dispatcher:**
 ```bash
 # Run the manager loop (polls every 60 seconds)
-zbobr loop --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-owner YoroolGui
+zbobr loop --tasks-github-task-repo YoroolGui/copilot-zenoh
 ```
 
 **Using zbobr.toml (from task project):**
@@ -102,24 +100,20 @@ zbobr task create "Title" --description "desc" --confirm    # create new task th
 
 Notes on TOML layout:
 
-- New (preferred): root `zbobr.toml` may contain a `[dispatcher]` table with dispatcher-specific keys. Example:
+- Root `zbobr.toml` contains a `[dispatcher]` table with dispatcher-specific keys and a `[repo]` table with repository config. Example:
 
    [dispatcher]
    task_repo = "owner/repo"
 
-  Stage-specific settings (tool, model, prompts) can be placed in nested tables:
+   [repo]
+   repository = "owner/target-repo"
+   branch = "main"
 
-   [dispatcher.preparator]
-   tool = "claude"
-   model = "gpt-5-mini"
-   prompts = ["preparator.md"]
+  Stage-specific settings (tool, model, prompts) can be placed in nested tables under `[dispatcher]`. If a stage table is omitted the global defaults are used.
 
-  If a stage table is omitted the global defaults are used.  The previous
-  per-role `*_prompts` fields are removed.
+Note: legacy top-level dispatcher-only TOML files are no longer supported; use the root `zbobr.toml` with `[dispatcher]` and `[repo]` tables.
 
-Note: legacy top-level dispatcher-only TOML files are no longer supported; use the root `zbobr.toml` with a `[dispatcher]` table.
-
-This is the recommended approach for task-project workflows, as it eliminates the need to manually specify `--tasks-github-task-repo` and `--repo-github-fork-owner` flags.
+This is the recommended approach for task-project workflows, as it eliminates the need to manually specify `--tasks-github-task-repo` and `--repo-github-repository` flags.
 
 ## How It Works
 
@@ -130,9 +124,9 @@ This is the recommended approach for task-project workflows, as it eliminates th
 3. **Human reviews** and sets milestone to `GO_WORKING` (optionally add `tool:<name>` and `model:<name>` labels)
 4. **Manager spawns Worker** (transitioning to `WORKING` lock state)  
 5. **Worker implements** by:
-   - Forking target repo to fork owner (e.g., `YoroolGui/*`)
-   - Creating PR with link to issue
+   - Creating a work branch in the configured repository
    - Implementing the fix
+   - Creating a PR with link to the issue
 6. **Worker completes** by setting `PENDING` + adding `done` label
 7. **Human reviews** PR and merges
 
@@ -180,17 +174,17 @@ YoroolGui/copilot-zenoh/ (Task Project - created by zbobr setup)
 
 ```bash
 # Create task project for Apache Kafka ecosystem
-zbobr setup --tasks-github-task-repo myorg/copilot-kafka --repo-github-fork-owner myorg
+zbobr setup --tasks-github-task-repo myorg/copilot-kafka
 
 # Force-update existing labels
-zbobr setup --tasks-github-task-repo myorg/copilot-kafka --repo-github-fork-owner myorg --force
+zbobr setup --tasks-github-task-repo myorg/copilot-kafka --force
 ```
 
 ### Run the manager loop
 
 ```bash
 # Poll for issues every 30 seconds, clean up every 10 minutes
-zbobr loop --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-owner YoroolGui \
+zbobr loop --tasks-github-task-repo YoroolGui/copilot-zenoh \
   --interval 30 --cleanup-interval 600
 ```
 
@@ -198,10 +192,10 @@ zbobr loop --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-o
 
 ```bash
 # Run planner on issue #42 (creates implementation plan)
-zbobr task plan 42 --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-owner YoroolGui
+zbobr task plan 42 --tasks-github-task-repo YoroolGui/copilot-zenoh
 
 # Run worker on issue #42 (implements the plan, creates PR)
-zbobr task work 42 --tasks-github-task-repo YoroolGui/copilot-zenoh --repo-github-fork-owner YoroolGui
+zbobr task work 42 --tasks-github-task-repo YoroolGui/copilot-zenoh
 ```
 
 ## Configuration
@@ -246,7 +240,7 @@ Token resolution order used by zbobr:
 1. `GH_TOKEN` environment variable (preferred — matches `gh` CLI convention)
 2. `GITHUB_TOKEN` environment variable (fallback — matches GitHub Actions convention)
 
-Required token permissions: The token needs `repo` scope (full access to repositories) to create forks, manage issues/labels/milestones, and push branches.
+Required token permissions: The token needs `repo` scope (full access to repositories) to manage issues/labels/milestones and push branches.
 
 ### GitHub Backend Token Requirements
 
@@ -254,21 +248,14 @@ Zbobr uses two separate backend tokens. See [docs/github-token-permissions.md](d
 
 #### Repo Backend Token (`ZBOBR_REPO_GITHUB_TOKEN`)
 
-Manages forks, branches, and pull requests on target repositories.
+Manages branches and pull requests on the configured repository.
 
 Classic PAT scopes:
 
 - `repo`
-- `workflow` (required when target repos contain `.github/workflows/`)
+- `workflow` (required when the repository contains `.github/workflows/`)
 
-Fine-grained PAT — on the **upstream** (target) repositories:
-
-- `Administration` (Read/Write)
-- `Contents` (Read-only)
-- `Metadata` (Read-only)
-- `Pull requests` (Read/Write) — same-org mode only
-
-Fine-grained PAT — on the **fork** repositories under `fork_owner`:
+Fine-grained PAT — on the **target repository**:
 
 - `Contents` (Read/Write)
 - `Workflows` (Read/Write)
@@ -332,7 +319,7 @@ Zbobr manages **three distinct GitHub tokens** with different access levels and 
 
 - **Three tokens**: owner token (write, used by dispatcher), agent token (read-only, passed to agents as `GH_TOKEN`/`GITHUB_TOKEN`), and copilot token (for Copilot CLI, passed as `COPILOT_GITHUB_TOKEN`).
 - **dispatcher (octocrab)** uses the owner token when talking to the GitHub API. See [zbobr-dispatcher/src/lib.rs](zbobr-dispatcher/src/lib.rs) which constructs `Octocrab` with the owner token.
-- **`gh` cloning** for private/forked repos runs with the owner token injected into the environment to ensure authenticated clones. See [zbobr-dispatcher/src/backend/github.rs](zbobr-dispatcher/src/backend/github.rs) where `gh repo clone` is invoked with `GH_TOKEN`/`GITHUB_TOKEN` set to the owner token.
+- **`gh` cloning** for private repos runs with the owner token injected into the environment to ensure authenticated clones. See [zbobr-dispatcher/src/backend/github.rs](zbobr-dispatcher/src/backend/github.rs) where `gh repo clone` is invoked with `GH_TOKEN`/`GITHUB_TOKEN` set to the owner token.
 - **Agent processes** (Copilot/Claude) are spawned with the agent token in `GH_TOKEN`/`GITHUB_TOKEN` and the Copilot token in `COPILOT_GITHUB_TOKEN` so agents have read-only access while Copilot can use its own permissions. See [zbobr-dispatcher/src/tool_executor.rs](zbobr-dispatcher/src/tool_executor.rs).
 - **Runtime checks**: configuration validation enforces `ZBOBR_AGENT_GH_TOKEN` is set and different from the owner token to avoid accidental privilege escalation. See [zbobr-dispatcher/src/config.rs](zbobr-dispatcher/src/config.rs).
 
@@ -356,10 +343,9 @@ Detailed configuration parameters:
 See `zbobr.toml.sample` for examples of these fields and the code references above for enforcement and usage.
 
 - **All issue/PR management** happens in the task project repository
-- **Agents never modify** target repositories directly—they only create forks and PRs
+- **Agents work directly** in the configured target repository — no forks
 - **Labels and milestones** are dispatcher-managed and universal
-- **Task projects are configurable** — each task project defines its own target repositories
-- **Fork owners can be users or organizations** — no GitHub org creation required
+- **Each zbobr instance** manages exactly one target repository
 
 ## Documentation
 
