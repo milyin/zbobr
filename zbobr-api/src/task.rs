@@ -990,8 +990,6 @@ pub struct Task {
     pub description: String,
     /// Task state.
     pub state: State,
-    pub destination_repository: Option<String>,
-    pub destination_branch: Option<String>,
     pub work_branch: Option<String>,
     pub pr_url: Option<String>,
     /// Structured task context containing stage execution history and records.
@@ -1270,8 +1268,6 @@ mod tests {
             title: String::new(),
             description: String::new(),
             state: State::Empty,
-            destination_repository: None,
-            destination_branch: None,
             work_branch: work_branch.map(|s| s.to_string()),
             pr_url: None,
             context: TaskContext::default(),

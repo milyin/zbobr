@@ -29,10 +29,6 @@ struct TaskFile {
 
     // First-class routing fields (promoted from parameters)
     #[serde(default)]
-    destination_repository: Option<String>,
-    #[serde(default)]
-    destination_branch: Option<String>,
-    #[serde(default)]
     work_branch: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -75,8 +71,6 @@ impl TaskFile {
             title: self.title.clone(),
             description: self.description.clone(),
             state,
-            destination_repository: self.destination_repository.clone(),
-            destination_branch: self.destination_branch.clone(),
             work_branch: self.work_branch.clone(),
             pr_url: self.pr_url.clone(),
 
@@ -101,8 +95,6 @@ impl TaskFile {
             description: task.description.clone(),
             state: task.state.clone(),
             stage: None,
-            destination_repository: task.destination_repository.clone(),
-            destination_branch: task.destination_branch.clone(),
             work_branch: task.work_branch.clone(),
             pr_url: task.pr_url.clone(),
             pause: task.pause,
@@ -470,8 +462,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
             title: title.to_string(),
             description: description.to_string(),
             state,
-            destination_repository: None,
-            destination_branch: None,
             work_branch: None,
             pr_url: None,
 

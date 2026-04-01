@@ -135,22 +135,6 @@ pub trait TaskMut: Send + Sync {
         .await
     }
 
-    async fn set_destination_repository(&self, repo: Option<String>) -> anyhow::Result<()> {
-        self.modify_task(Box::new(move |mut task| {
-            task.destination_repository = repo;
-            task
-        }))
-        .await
-    }
-
-    async fn set_destination_branch(&self, branch: Option<String>) -> anyhow::Result<()> {
-        self.modify_task(Box::new(move |mut task| {
-            task.destination_branch = branch;
-            task
-        }))
-        .await
-    }
-
     async fn set_work_branch(&self, branch: Option<String>) -> anyhow::Result<()> {
         self.modify_task(Box::new(move |mut task| {
             task.work_branch = branch;

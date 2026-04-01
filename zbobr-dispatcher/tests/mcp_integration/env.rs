@@ -324,12 +324,10 @@ impl IntegrationTestEnv {
     pub async fn update_task_branches(
         &self,
         task_id: u64,
-        dest_repo: &str,
-        dest_branch: &str,
+        _dest_repo: &str,
+        _dest_branch: &str,
         work_branch: &str,
     ) {
-        let dest_repo = dest_repo.to_string();
-        let dest_branch = dest_branch.to_string();
         let work_branch = work_branch.to_string();
         let weak = self
             .zbobr
@@ -343,8 +341,6 @@ impl IntegrationTestEnv {
             .unwrap_or_else(|e| panic!("[{}] failed to upgrade task #{task_id}: {e}", self.name));
         mutable
             .modify_task(Box::new(move |mut task| {
-                task.destination_repository = Some(dest_repo);
-                task.destination_branch = Some(dest_branch);
                 task.work_branch = Some(work_branch);
                 task
             }))

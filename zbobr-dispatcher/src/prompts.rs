@@ -175,12 +175,6 @@ pub fn build_template_variables<'a>(
         Cow::Borrowed(VAR_DESCRIPTION),
         Cow::Borrowed(&task.description),
     );
-    if let Some(ref v) = task.destination_repository {
-        vars.insert(Cow::Borrowed(VAR_DESTINATION_REPOSITORY), Cow::Borrowed(v));
-    }
-    if let Some(ref v) = task.destination_branch {
-        vars.insert(Cow::Borrowed(VAR_DESTINATION_BRANCH), Cow::Borrowed(v));
-    }
     if let Some(ref v) = task.work_branch {
         vars.insert(Cow::Borrowed(VAR_WORK_BRANCH), Cow::Borrowed(v));
     }
@@ -340,8 +334,6 @@ mod tests {
             title: title.to_owned(),
             description: String::new(),
             state: "READY".into(),
-            destination_repository: None,
-            destination_branch: None,
             work_branch: None,
             pr_url: None,
             context: TaskContext::default(),
@@ -432,11 +424,7 @@ mod tests {
             assert!(keys.contains(expected), "missing key: {expected}");
         }
         // Optional keys absent when task fields are None
-        for absent in &[
-            VAR_DESTINATION_REPOSITORY,
-            VAR_DESTINATION_BRANCH,
-            VAR_WORK_BRANCH,
-        ] {
+        for absent in &[VAR_WORK_BRANCH] {
             assert!(!keys.contains(absent), "key should be absent: {absent}");
         }
     }
@@ -445,8 +433,6 @@ mod tests {
     fn build_template_variables_task_fields() {
         let mut task = dummy_task("My Task");
         task.description = "Task desc".to_string();
-        task.destination_repository = Some("owner/repo".to_string());
-        task.destination_branch = Some("main".to_string());
         task.work_branch = Some("feature-x".to_string());
 
         let vars = build_template_variables(&task, &[]);
@@ -457,14 +443,6 @@ mod tests {
         assert_eq!(
             vars[&Cow::Borrowed(VAR_DESCRIPTION) as &Cow<str>].as_ref(),
             "Task desc"
-        );
-        assert_eq!(
-            vars[&Cow::Borrowed(VAR_DESTINATION_REPOSITORY) as &Cow<str>].as_ref(),
-            "owner/repo"
-        );
-        assert_eq!(
-            vars[&Cow::Borrowed(VAR_DESTINATION_BRANCH) as &Cow<str>].as_ref(),
-            "main"
         );
         assert_eq!(
             vars[&Cow::Borrowed(VAR_WORK_BRANCH) as &Cow<str>].as_ref(),

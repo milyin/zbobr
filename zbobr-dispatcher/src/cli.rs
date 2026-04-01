@@ -211,8 +211,7 @@ fn sanitize_branch_postfix(title: &str) -> String {
     }
 }
 
-/// Ensure the task has a work_branch set. If not, derive one from the task title
-/// and populate destination_repository and destination_branch from the backend config.
+/// Ensure the task has a work_branch set. If not, derive one from the task title.
 async fn ensure_work_branch(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Result<()> {
     let task = zbobr
         .task_backend()
@@ -235,9 +234,6 @@ async fn ensure_work_branch(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyho
     let prefix = &zbobr.config().work_branch_prefix;
     let work_branch = format!("{}-{}-{}", prefix, task_id, postfix);
 
-    let repository = zbobr.repo_backend().repository().to_string();
-    let branch = zbobr.repo_backend().branch().to_string();
-
     tracing::info!(
         "Task #{task_id}: auto-deriving work branch '{}' from title '{}'",
         work_branch,
@@ -249,8 +245,6 @@ async fn ensure_work_branch(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyho
     mutable
         .modify_task(Box::new(move |mut task| {
             task.work_branch = Some(work_branch);
-            task.destination_repository = Some(repository);
-            task.destination_branch = Some(branch);
             task
         }))
         .await?;
@@ -279,12 +273,6 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
         println!("Stack:       {:?}", task.stack);
     }
     println!("Pause:       {}", task.pause);
-    if let Some(ref repo) = task.destination_repository {
-        println!("Dest Repo:   {}", repo);
-    }
-    if let Some(ref branch) = task.destination_branch {
-        println!("Dest Branch: {}", branch);
-    }
     if let Some(ref branch) = task.work_branch {
         println!("Work Branch: {}", branch);
     }
