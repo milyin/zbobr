@@ -1,0 +1,1 @@
+parse_github_repo() is too permissive: it splits by '/' and takes the last two segments, so URLs like https://github.com/owner/repo/issues/123 become "issues/123". Fix it to only accept the canonical forms: owner/repo, owner/repo.git, https://github.com/owner/repo[.git][/], git@github.com:owner/repo[.git] and reject anything with extra path components.
