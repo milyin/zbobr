@@ -312,6 +312,7 @@ fn default_workflow() -> WorkflowConfig {
                     ReportFailure,
                     ReportIntermediate,
                     StopWithQuestion,
+                    CheckChecklistItem,
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("reviewer.md")),
@@ -555,8 +556,11 @@ Review the implementation changes and ensure they meet coding standards and task
 3. **Verify the analog choice and pattern consistency**: Check that the planner chose an appropriate analog for the new functionality. Then verify that the implementation consistently follows the same patterns, conventions, coding style, and architectural approaches as the analog. Flag any deviations — new code should look like it was written by the same author as the existing analogous code. If the analog was poorly chosen, note this as a review finding.
 4. **Review code quality and correctness**: Examine the implementation for correctness, code style, design patterns, and adherence to the plan. **Do not run any tests yourself; testing is handled separately.**
 5. Verify that all changes are related to the task and are necessary for the implementation. Flag any extraneous changes that do not directly contribute to the task requirements or plan.
-6. Prepare a detailed review report describing any issues found, suggested fixes, and overall assessment. Include your assessment of analog consistency.
-7. Finish the review by calling one of:
+6. Additionally review each unchecked checklist item in the task context:
+    - If you verify the item is correctly implemented or just became obsolete due to further changes, call `{mcp_check_checklist_item}` with the item’s ID
+    - If the item's implementation is missing and it's still relevant, leave it unchecked and report this in the review findings.
+7. Prepare a detailed review report describing any issues found, suggested fixes, and overall assessment. Include your assessment of analog consistency.
+8. Finish the review by calling one of:
     - `{mcp_report_success}` — the implementation is correct and **all checklist items are completed**.
     - `{mcp_report_intermediate}` — the implementation of completed items looks correct, but **some checklist items remain unchecked**.
     - `{mcp_report_failure}` — issues were found in the implementation that must be fixed.

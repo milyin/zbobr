@@ -142,27 +142,6 @@ steps:
     .to_string()
 }
 
-/// Scenario that calls report_success (maps to success transition).
-pub fn report_success_scenario() -> String {
-    r#"name: Report Success
-description: Call report_success to trigger success transition
-timeout: 60
-stop_on_failure: true
-
-steps:
-- name: Success
-  operation:
-    type: tool_call
-    tool: report_success
-    arguments:
-      brief: "Accepted."
-      full_report: "Detailed acceptance report."
-  assertions:
-    - type: success
-"#
-    .to_string()
-}
-
 /// Scenario that calls stop_with_question (triggers PAUSE).
 pub fn stop_with_question_scenario() -> String {
     r#"name: Stop With Question
