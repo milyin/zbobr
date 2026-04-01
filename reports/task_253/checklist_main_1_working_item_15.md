@@ -1,0 +1,1 @@
+The README documents obsolete commands like zbobr setup --tasks-github-task-repo and zbobr task plan that no longer exist. Backend docs also misrepresent cloning/force-pushing behavior. Update docs to reflect current CLI commands and actual implementation details.
