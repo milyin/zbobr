@@ -809,8 +809,14 @@ mod tests {
         // Interactive records should use plain [ctx_rec_N] format
         assert!(output.contains("[ctx_rec_1]"), "checkbox should show ID");
         assert!(output.contains("[ctx_rec_2]"), "checkbox should show ID");
-        assert!(output.contains("[ctx_rec_3]"), "success with link should show ID");
-        assert!(output.contains("[ctx_rec_4]"), "failure with link should show ID");
+        assert!(
+            output.contains("[ctx_rec_3]"),
+            "success with link should show ID"
+        );
+        assert!(
+            output.contains("[ctx_rec_4]"),
+            "failure with link should show ID"
+        );
         // Non-interactive records must NOT have ctx_rec IDs
         assert!(
             !output.contains("[ctx_rec_5]"),
@@ -821,8 +827,14 @@ mod tests {
             "question without link should suppress ID in prompt mode"
         );
         // Non-interactive record text should still appear
-        assert!(output.contains("Retrying with fix"), "comment brief should appear");
-        assert!(output.contains("Should we use async?"), "question brief should appear");
+        assert!(
+            output.contains("Retrying with fix"),
+            "comment brief should appear"
+        );
+        assert!(
+            output.contains("Should we use async?"),
+            "question brief should appear"
+        );
     }
 
     #[test]
@@ -1729,7 +1741,10 @@ mod tests {
         };
         let rendered = record.to_string();
         assert_eq!(rendered, "- ✅ Build passed");
-        assert!(!rendered.contains("ctx_rec_"), "non-interactive success should suppress ID");
+        assert!(
+            !rendered.contains("ctx_rec_"),
+            "non-interactive success should suppress ID"
+        );
     }
 
     #[test]
@@ -1743,7 +1758,10 @@ mod tests {
         };
         let rendered = record.to_string();
         assert_eq!(rendered, "- ❌ Tests failed");
-        assert!(!rendered.contains("ctx_rec_"), "non-interactive failure should suppress ID");
+        assert!(
+            !rendered.contains("ctx_rec_"),
+            "non-interactive failure should suppress ID"
+        );
     }
 
     #[test]
@@ -1757,7 +1775,10 @@ mod tests {
         };
         let rendered = record.to_string();
         assert_eq!(rendered, "- 💬 Work in progress");
-        assert!(!rendered.contains("ctx_rec_"), "non-interactive comment should suppress ID");
+        assert!(
+            !rendered.contains("ctx_rec_"),
+            "non-interactive comment should suppress ID"
+        );
     }
 
     #[test]
@@ -1771,7 +1792,10 @@ mod tests {
         };
         let rendered = record.to_string();
         assert_eq!(rendered, "- ❓ Need clarification");
-        assert!(!rendered.contains("ctx_rec_"), "non-interactive question should suppress ID");
+        assert!(
+            !rendered.contains("ctx_rec_"),
+            "non-interactive question should suppress ID"
+        );
     }
 
     #[test]
@@ -1811,7 +1835,10 @@ mod tests {
         };
         let rendered = record.to_string();
         assert_eq!(rendered, "- ✅ Reviewed [ctx_rec_16]");
-        assert!(!rendered.contains("reports/review.md"), "report URL should not leak");
+        assert!(
+            !rendered.contains("reports/review.md"),
+            "report URL should not leak"
+        );
         assert!(!rendered.contains("<sub>"), "no <sub> tags in prompt mode");
     }
 
@@ -1826,7 +1853,10 @@ mod tests {
         };
         let rendered = record.to_string();
         assert_eq!(rendered, "- ❌ Build broke [ctx_rec_17]");
-        assert!(!rendered.contains("reports/build.md"), "report URL should not leak");
+        assert!(
+            !rendered.contains("reports/build.md"),
+            "report URL should not leak"
+        );
     }
 
     #[test]
@@ -1840,7 +1870,10 @@ mod tests {
         };
         let rendered = record.to_string();
         assert_eq!(rendered, "- 💬 Plan ready [ctx_rec_18]");
-        assert!(!rendered.contains("reports/plan.md"), "report URL should not leak");
+        assert!(
+            !rendered.contains("reports/plan.md"),
+            "report URL should not leak"
+        );
     }
 
     #[test]
@@ -1959,32 +1992,89 @@ mod tests {
         let output = serialize_context(&ctx, &[], true, None);
 
         // Interactive records MUST show [ctx_rec_N]
-        assert!(output.contains("[ctx_rec_1]"), "unchecked checkbox should show ID");
-        assert!(output.contains("[ctx_rec_2]"), "checked checkbox should show ID");
-        assert!(output.contains("[ctx_rec_3]"), "success with link should show ID");
-        assert!(output.contains("[ctx_rec_6]"), "failure with link should show ID");
-        assert!(output.contains("[ctx_rec_8]"), "comment with link should show ID");
+        assert!(
+            output.contains("[ctx_rec_1]"),
+            "unchecked checkbox should show ID"
+        );
+        assert!(
+            output.contains("[ctx_rec_2]"),
+            "checked checkbox should show ID"
+        );
+        assert!(
+            output.contains("[ctx_rec_3]"),
+            "success with link should show ID"
+        );
+        assert!(
+            output.contains("[ctx_rec_6]"),
+            "failure with link should show ID"
+        );
+        assert!(
+            output.contains("[ctx_rec_8]"),
+            "comment with link should show ID"
+        );
 
         // Non-interactive records MUST NOT show [ctx_rec_N]
-        assert!(!output.contains("[ctx_rec_4]"), "success without link should suppress ID");
-        assert!(!output.contains("[ctx_rec_5]"), "failure without link should suppress ID");
-        assert!(!output.contains("[ctx_rec_7]"), "comment without link should suppress ID");
-        assert!(!output.contains("[ctx_rec_9]"), "question without link should suppress ID");
+        assert!(
+            !output.contains("[ctx_rec_4]"),
+            "success without link should suppress ID"
+        );
+        assert!(
+            !output.contains("[ctx_rec_5]"),
+            "failure without link should suppress ID"
+        );
+        assert!(
+            !output.contains("[ctx_rec_7]"),
+            "comment without link should suppress ID"
+        );
+        assert!(
+            !output.contains("[ctx_rec_9]"),
+            "question without link should suppress ID"
+        );
 
         // All record briefs should still appear regardless of interactivity
-        assert!(output.contains("Implement feature"), "checkbox brief should appear");
-        assert!(output.contains("Write tests"), "checkbox brief should appear");
-        assert!(output.contains("All tests passed"), "success brief should appear");
-        assert!(output.contains("Lint clean"), "non-interactive success brief should appear");
-        assert!(output.contains("Flaky test"), "non-interactive failure brief should appear");
-        assert!(output.contains("Build error"), "failure with link brief should appear");
-        assert!(output.contains("Retrying now"), "non-interactive comment brief should appear");
-        assert!(output.contains("Plan ready"), "comment with link brief should appear");
-        assert!(output.contains("Should we refactor?"), "non-interactive question brief should appear");
+        assert!(
+            output.contains("Implement feature"),
+            "checkbox brief should appear"
+        );
+        assert!(
+            output.contains("Write tests"),
+            "checkbox brief should appear"
+        );
+        assert!(
+            output.contains("All tests passed"),
+            "success brief should appear"
+        );
+        assert!(
+            output.contains("Lint clean"),
+            "non-interactive success brief should appear"
+        );
+        assert!(
+            output.contains("Flaky test"),
+            "non-interactive failure brief should appear"
+        );
+        assert!(
+            output.contains("Build error"),
+            "failure with link brief should appear"
+        );
+        assert!(
+            output.contains("Retrying now"),
+            "non-interactive comment brief should appear"
+        );
+        assert!(
+            output.contains("Plan ready"),
+            "comment with link brief should appear"
+        );
+        assert!(
+            output.contains("Should we refactor?"),
+            "non-interactive question brief should appear"
+        );
 
         // No <sub> tags or report URLs in prompt mode
         assert!(!output.contains("<sub>"), "no <sub> tags in prompt output");
-        assert!(!output.contains("reports/"), "no report URLs in prompt output");
+        assert!(
+            !output.contains("reports/"),
+            "no report URLs in prompt output"
+        );
 
         // Verify normal mode still shows ALL IDs for comparison
         let normal_output = serialize_context(&ctx, &[], false, None);

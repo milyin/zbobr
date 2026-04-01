@@ -143,8 +143,8 @@ fn default_config_toml() -> RootConfigToml {
 /// Build the default workflow configuration with predefined pipelines and roles.
 fn default_workflow() -> WorkflowConfig {
     use McpTool::{
-        AddChecklistItem, CheckChecklistItem, GetCtxRec, ReportFailure,
-        ReportIntermediate, ReportSuccess, StopWithError, StopWithQuestion,
+        AddChecklistItem, CheckChecklistItem, GetCtxRec, ReportFailure, ReportIntermediate,
+        ReportSuccess, StopWithError, StopWithQuestion,
     };
 
     let task_prompt = vec![PathBuf::from("task.md")];
@@ -410,7 +410,14 @@ const TASK_TEMPLATE: &str = r#"---
 {context}
 "#;
 
-const PLANNER_PROMPT: &str = r#"# Planner Agent
+macro_rules! get_ctx_rec_guidance {
+    () => {
+        "- When the context references a detailed record by `ctx_rec_*` ID, use `{mcp_get_ctx_rec}` to fetch the full content before you make decisions or continue your work.\n"
+    };
+}
+
+const PLANNER_PROMPT: &str = concat!(
+    r#"# Planner Agent
 
 Read the task description and comments provided below in this prompt. Design an implementation plan for the task. See more detailed workflow instructions below.
 
@@ -423,6 +430,9 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 - Use MCP `{mcp_add_checklist_item}` and `{mcp_report_success}` to send the the plan to implementation when the plan is approved
 - Use MCP `{mcp_stop_with_question}` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
 - Use MCP `{mcp_stop_with_error}` only to report technical errors
+"#,
+    get_ctx_rec_guidance!(),
+    r#"
 - NEVER use git/gh for writing, pushing, or sending data to GitHub
 
 ## Workspace isolation
@@ -465,14 +475,19 @@ Your working directory is already the repository with the work branch checked ou
    - Use `{mcp_add_checklist_item}` to add implementation steps for the worker. Each item has two parts: a **brief** summary (shown inline in the context) and a **full_report** with detailed instructions (stored as a linked file). Put concise step title in brief; put the *what* and *why* in full_report — which components or modules to change, which interfaces or data flows are affected, which patterns from the analog to follow. Do NOT include code snippets, exact file paths, or prescriptive implementation details — the worker will look those up.
    - The checklist items ARE the plan — they should fully describe what the worker needs to do
    - After creating checklist items, call `{mcp_report_success}` with a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog).
-8.5. **If approval is NOT confirmed**: Present the plan by calling `{mcp_report_intermediate}` with a brief description of the proposed approach. Do NOT include checklist items yet — present only the plan structure and rationale."#;
+8.5. **If approval is NOT confirmed**: Present the plan by calling `{mcp_report_intermediate}` with a brief description of the proposed approach. Do NOT include checklist items yet — present only the plan structure and rationale."#,
+);
 
-const WORKER_PROMPT: &str = r#"# Worker Agent
+const WORKER_PROMPT: &str = concat!(
+    r#"# Worker Agent
 
 Implement the task accordingly to the final plan in the context. Notice that there can be multiple plan versions in the history, work on the last one. If the plan is accompanied by checklist items, process them one by one, skip the checked ones. If there are no checklst items, analyze the pan and create checklist items for the implementation steps yourself.
 
 - Use `{mcp_check_checklist_item}` to mark item as done when you complete the subtask in it.
 - Use `{mcp_add_checklist_item}` to add new item when you discover new job to do or user made additional request in comments.
+"#,
+    get_ctx_rec_guidance!(),
+    r#"
 
 ## Access Model
 
@@ -505,9 +520,15 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 
 ## Coding Guidelines
 
-- **Prefer deriving values from types and constants** rather than using hardcoded string literals. If a value can be computed from an existing type, enum variant, or constant, do it. Avoid duplicating the value as literals or constants."#;
+- **Prefer deriving values from types and constants** rather than using hardcoded string literals. If a value can be computed from an existing type, enum variant, or constant, do it. Avoid duplicating the value as literals or constants."#,
+);
 
-const TEST_PLANNER_PROMPT: &str = r#"#Analyze the implementation changes and determine if additional tests are required. Your job is to produce a test plan with list of tests to be added.
+const TEST_PLANNER_PROMPT: &str = concat!(
+    r#"#Analyze the implementation changes and determine if additional tests are required. Your job is to produce a test plan with list of tests to be added.
+
+"#,
+    get_ctx_rec_guidance!(),
+    r#"
 
 ## Workflow
 
@@ -517,9 +538,15 @@ const TEST_PLANNER_PROMPT: &str = r#"#Analyze the implementation changes and det
 4. Prepare a plan for implementing the required tests as an overview document and set of checklist items
 5. Call `{mcp_add_checklist_item}` for each test or group of related tests.
 6. Call `{mcp_report_success}` with the overview report test-planning work is complete.
-"#;
+"#,
+);
 
-const TEST_WORKER_PROMPT: &str = r#"Implement the requested tests and run them.
+const TEST_WORKER_PROMPT: &str = concat!(
+    r#"Implement the requested tests and run them.
+
+"#,
+    get_ctx_rec_guidance!(),
+    r#"
 
 ## Workflow
 
@@ -530,11 +557,17 @@ const TEST_WORKER_PROMPT: &str = r#"Implement the requested tests and run them.
 
 ## Important
 Do not implement any functionality, your job is only to implement and run tests according to the unchecked checklist items.
-"#;
+"#,
+);
 
-const REVIEWER_PROMPT: &str = r#"# Reviewer Agent
+const REVIEWER_PROMPT: &str = concat!(
+    r#"# Reviewer Agent
 
 Review the implementation changes and ensure they meet coding standards and task requirements.
+
+"#,
+    get_ctx_rec_guidance!(),
+    r#"
 
 ## Access Model
 
@@ -565,11 +598,17 @@ Review the implementation changes and ensure they meet coding standards and task
 
 - **Check compile-time validation**: Verify whether code correctness can be enforced at compile time (e.g., through type system, constants, enums) rather than relying on runtime checks or string matching. Flag opportunities to strengthen compile-time guarantees.
 - **Check robustness against inconsistent changes**: Verify that the code is resilient to partial updates — e.g., changing a constant or literal in one place and forgetting to update it elsewhere. Flag hardcoded string literals that could be derived from existing types or constants.
-- **Check type specificity**: Verify that all newly introduced fields, variables, parameters, and return types use the most specific type available for their purpose. Suspect all base types (numbers, strings, booleans) — search the codebase for existing custom types, newtypes, or domain-specific wrappers that should be used instead."#;
+- **Check type specificity**: Verify that all newly introduced fields, variables, parameters, and return types use the most specific type available for their purpose. Suspect all base types (numbers, strings, booleans) — search the codebase for existing custom types, newtypes, or domain-specific wrappers that should be used instead."#,
+);
 
-const TESTER_PROMPT: &str = r#"# Tester Agent
+const TESTER_PROMPT: &str = concat!(
+    r#"# Tester Agent
 
 Run comprehensive tests to verify the implementation meets all testing requirements and CI/build standards.
+
+"#,
+    get_ctx_rec_guidance!(),
+    r#"
 
 ## Access Model
 
@@ -611,7 +650,8 @@ You have access to the task context and the repository for testing:
 - **Do not modify logic**: Only fix formatting/linting issues automatically. Any substantive code changes must go back to the worker.
 - **Comprehensive testing**: Run all test commands discovered from the CI unless they require complex environment configuration. Mention skipped tests in the report.
 - **Concise but exhaustive reporting**: Include to the report exact command line of each test executed. In case of error append the extract of test log with the error message.
-- **Early termination if necessary**: If some test run shows massive failures indicating a fundamental issue with the implementation, you may stop further testing and make `{mcp_report_failure}` report immediately. Otherwise execute full test suite."#;
+- **Early termination if necessary**: If some test run shows massive failures indicating a fundamental issue with the implementation, you may stop further testing and make `{mcp_report_failure}` report immediately. Otherwise execute full test suite."#,
+);
 
 const MERGER_PROMPT: &str = r#"# Merger Agent
 
@@ -664,6 +704,8 @@ You have read access to the task and repository:
 mod tests {
     use super::*;
 
+    const GET_CTX_REC_PROMPT_FRAGMENT: &str = "{mcp_get_ctx_rec}";
+
     #[test]
     fn default_workflow_includes_test_stages() {
         let workflow = default_workflow();
@@ -713,5 +755,31 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn default_prompts_reference_get_ctx_rec_when_role_has_access() {
+        for prompt in [
+            PLANNER_PROMPT,
+            WORKER_PROMPT,
+            TEST_PLANNER_PROMPT,
+            TEST_WORKER_PROMPT,
+            REVIEWER_PROMPT,
+            TESTER_PROMPT,
+        ] {
+            assert!(
+                prompt.contains(GET_CTX_REC_PROMPT_FRAGMENT),
+                "prompt should mention get_ctx_rec"
+            );
+            assert!(
+                prompt.contains("ctx_rec_*"),
+                "prompt should explain when get_ctx_rec is needed"
+            );
+        }
+    }
+
+    #[test]
+    fn merger_prompt_does_not_reference_get_ctx_rec() {
+        assert!(!MERGER_PROMPT.contains(GET_CTX_REC_PROMPT_FRAGMENT));
     }
 }
