@@ -1256,4 +1256,167 @@ mod tests {
         assert!(output.contains(&format!("- user:**unknown** {}", long_text)));
         assert!(!output.contains("..."));
     }
+
+    // -- Display impl unit tests for for_prompt=true --
+
+    #[test]
+    fn md_record_display_for_prompt() {
+        let record = MdRecord {
+            record_type: MdRecordType::Success,
+            brief: "Plan completed".to_string(),
+            id: 7,
+            report_link: Some("reports/plan.md".to_string()),
+            for_prompt: true,
+        };
+        let rendered = record.to_string();
+        // Should use plain [ctx_rec_N] format
+        assert_eq!(rendered, "- ✅ Plan completed [ctx_rec_7]");
+        // Must NOT contain <sub> or URL
+        assert!(!rendered.contains("<sub>"));
+        assert!(!rendered.contains("reports/plan.md"));
+    }
+
+    #[test]
+    fn md_compact_comment_display_for_prompt() {
+        let comment = Comment {
+            timestamp: utc("2024-06-15T12:00:00Z"),
+            username: "alice".to_string(),
+            body: "please proceed".to_string(),
+            url: Some("https://example.com/comment/1".to_string()),
+        };
+        let compact = MdCompactComment::from_comment(&comment, true);
+        let rendered = compact.to_string();
+        // Should render as simple list item with user prefix
+        assert_eq!(rendered, "- user:**alice** please proceed");
+        // Must NOT contain timestamp or URL
+        assert!(!rendered.contains("2024-06-15"));
+        assert!(!rendered.contains("https://example.com"));
+        assert!(!rendered.contains("<sub>"));
+    }
+
+    #[test]
+    fn md_stage_display_for_prompt() {
+        let stage = MdStage {
+            title: MdStageTitle {
+                instance: "default".to_string(),
+                timestamp: utc("2024-01-01T00:00:00Z"),
+                pipeline: Pipeline::from("main"),
+                run_id: 1,
+                stage: Stage::new("planning"),
+                tool: Some(crate::task::Tool::Claude),
+                model: Some(Model::ClaudeOpus4_6),
+                prompt_link: Some("prompts/plan.md".to_string()),
+                output_link: None,
+            },
+            records: vec![MdRecord {
+                record_type: MdRecordType::Success,
+                brief: "Done".to_string(),
+                id: 1,
+                report_link: None,
+                for_prompt: true,
+            }],
+            for_prompt: true,
+        };
+        let rendered = stage.to_string();
+        // Stage header should only show the stage name
+        assert!(rendered.starts_with("- planning\n"));
+        // Must NOT contain metadata
+        assert!(!rendered.contains("`claude`"));
+        assert!(!rendered.contains("claude-opus-4.6"));
+        assert!(!rendered.contains("2024-01-01"));
+        assert!(!rendered.contains("prompts/plan.md"));
+    }
+
+    // -- Empty stage filtering tests --
+
+    #[test]
+    fn for_prompt_filters_empty_stages() {
+        let ctx = TaskContext {
+            stages: vec![
+                StageContext {
+                    info: StageInfo {
+                        instance: "default".to_string(),
+                        pipeline: Pipeline::from("main"),
+                        run_id: 1,
+                        stage: Stage::new("planning"),
+                        tool: Some(crate::task::Tool::Claude),
+                        model: Some(Model::ClaudeOpus4_6),
+                        prompt_link: None,
+                        output_link: None,
+                        timestamp: utc("2024-01-01T00:00:00Z"),
+                    },
+                    records: vec![ContextRecord {
+                        id: 1,
+                        record_type: ContextRecordType::Success,
+                        brief: "Plan completed".to_string(),
+                        report_link: None,
+                    }],
+                },
+                // Empty stage (no records) — should be filtered in for_prompt mode
+                StageContext {
+                    info: StageInfo {
+                        instance: "default".to_string(),
+                        pipeline: Pipeline::from("main"),
+                        run_id: 1,
+                        stage: Stage::new("working"),
+                        tool: None,
+                        model: None,
+                        prompt_link: None,
+                        output_link: None,
+                        timestamp: utc("2024-01-01T01:00:00Z"),
+                    },
+                    records: vec![],
+                },
+                StageContext {
+                    info: StageInfo {
+                        instance: "default".to_string(),
+                        pipeline: Pipeline::from("main"),
+                        run_id: 1,
+                        stage: Stage::new("reviewing"),
+                        tool: None,
+                        model: None,
+                        prompt_link: None,
+                        output_link: None,
+                        timestamp: utc("2024-01-01T02:00:00Z"),
+                    },
+                    records: vec![ContextRecord {
+                        id: 2,
+                        record_type: ContextRecordType::Comment,
+                        brief: "Looks good".to_string(),
+                        report_link: None,
+                    }],
+                },
+            ],
+        };
+
+        // for_prompt=true: empty stages should be filtered out
+        let prompt_output = serialize_context(&ctx, &[], true, None);
+        assert!(
+            prompt_output.contains("- planning\n"),
+            "stage with records should appear"
+        );
+        assert!(
+            !prompt_output.contains("working"),
+            "empty stage should be filtered out in for_prompt mode"
+        );
+        assert!(
+            prompt_output.contains("- reviewing\n"),
+            "stage with records should appear"
+        );
+
+        // for_prompt=false: ALL stages should appear, including empty ones
+        let full_output = serialize_context(&ctx, &[], false, None);
+        assert!(
+            full_output.contains("**planning**"),
+            "stage with records should appear"
+        );
+        assert!(
+            full_output.contains("**working**"),
+            "empty stage should NOT be filtered in normal mode"
+        );
+        assert!(
+            full_output.contains("**reviewing**"),
+            "stage with records should appear"
+        );
+    }
 }
