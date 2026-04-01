@@ -1,0 +1,1 @@
+README.md still contains references to [dispatcher.preparator] config, fork_owner CLI flag, and fork-based workflow descriptions. docs/github-token-permissions.md also references fork repos. These need to be updated to reflect the single-repo simplified design.
