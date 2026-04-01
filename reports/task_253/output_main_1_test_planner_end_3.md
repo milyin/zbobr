@@ -1,0 +1,1 @@
+Test planning is complete. No additional tests are needed — the latest changes only removed fields and all 59+ existing tests already pass and cover the simplified single-repo behavior.
