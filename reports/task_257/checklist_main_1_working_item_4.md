@@ -1,0 +1,1 @@
+The MdContext::fmt method adds `<!-- stage -->` markers before stage entries regardless of for_prompt mode. Need to gate this on for_prompt=false. Add for_prompt field to MdContext, or detect from entries.
