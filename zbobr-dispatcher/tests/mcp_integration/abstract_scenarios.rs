@@ -36,28 +36,6 @@ steps:
       path: result
       value: "checked"
 
-- name: add then delete
-  operation:
-    type: tool_call
-    tool: add_checklist_item
-    arguments:
-      brief: "Temp item"
-      full_report: "Temporary item to be deleted."
-  assertions:
-    - type: success
-
-- name: delete_ctx_rec
-  operation:
-    type: tool_call
-    tool: delete_ctx_rec
-    arguments:
-      id: "ctx_rec_2"
-  assertions:
-    - type: success
-    - type: contains
-      path: result
-      value: "deleted"
-
 - name: get_ctx_rec
   operation:
     type: tool_call

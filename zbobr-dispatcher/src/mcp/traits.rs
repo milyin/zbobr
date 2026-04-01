@@ -302,64 +302,6 @@ pub trait CommonMcpImpl: Send + Sync {
         }
     }
 
-    async fn delete_ctx_rec_impl(&self, id_str: &str) -> String {
-        let tool_name = McpTool::DeleteCtxRec.as_str();
-        tracing::info!(
-            "[{}#{}] {} id={}",
-            self.role_name(),
-            self.session().task_id(),
-            tool_name,
-            id_str,
-        );
-
-        let record_id = match parse_ctx_rec_id(id_str) {
-            Ok(id) => id,
-            Err(e) => {
-                let response = format!("Error: {e}");
-                log_mcp_string_response(
-                    self.role_name(),
-                    self.session().task_id(),
-                    tool_name,
-                    &response,
-                );
-                return response;
-            }
-        };
-
-        match self.session().delete_context_record(record_id).await {
-            Ok(true) => {
-                let response = format!("Record ctx_rec_{} deleted", record_id);
-                log_mcp_string_response(
-                    self.role_name(),
-                    self.session().task_id(),
-                    tool_name,
-                    &response,
-                );
-                response
-            }
-            Ok(false) => {
-                let response = format!("Error: record ctx_rec_{} not found", record_id);
-                log_mcp_string_response(
-                    self.role_name(),
-                    self.session().task_id(),
-                    tool_name,
-                    &response,
-                );
-                response
-            }
-            Err(e) => {
-                let response = format!("Error: {e}");
-                log_mcp_string_response(
-                    self.role_name(),
-                    self.session().task_id(),
-                    tool_name,
-                    &response,
-                );
-                response
-            }
-        }
-    }
-
     async fn get_ctx_rec_impl(&self, id_str: &str) -> String {
         let tool_name = McpTool::GetCtxRec.as_str();
         tracing::info!(

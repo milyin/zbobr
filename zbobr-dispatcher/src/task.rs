@@ -277,20 +277,6 @@ impl RoleSession {
         .await
     }
 
-    /// Delete a context record by id.
-    pub async fn delete_context_record(&self, record_id: u64) -> anyhow::Result<bool> {
-        let task_before = self.get_task().await?;
-        let exists = task_before.context.find_record(record_id).is_some();
-        if exists {
-            self.modify_task(move |mut task| {
-                task.context.delete_record(record_id);
-                task
-            })
-            .await?;
-        }
-        Ok(exists)
-    }
-
     /// Get the content of a context record by id.
     /// Returns the report file content if a report link is present, otherwise the brief.
     pub async fn get_context_record_content(

@@ -151,8 +151,16 @@ impl fmt::Display for MdRecord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}{}", self.record_type.prefix(), self.brief)?;
         let id_tag = format!("ctx_rec_{}", self.id);
+        let is_interactive = matches!(
+            self.record_type,
+            MdRecordType::CheckboxUnchecked | MdRecordType::CheckboxChecked
+        ) || self.report_link.is_some();
         if self.for_prompt {
-            write!(f, " [{}]", id_tag)
+            if is_interactive {
+                write!(f, " [{}]", id_tag)
+            } else {
+                Ok(())
+            }
         } else if let Some(url) = &self.report_link {
             write!(f, " <sub>[{}]({})</sub>", id_tag, url)
         } else {

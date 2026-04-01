@@ -54,14 +54,6 @@ pub struct CheckChecklistItemParam {
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
-pub struct DeleteCtxRecParam {
-    #[schemars(
-        description = "Context record ID to delete — either a numeric id or a string like 'ctx_rec_5'"
-    )]
-    pub id: String,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct GetCtxRecParam {
     #[schemars(
         description = "Context record ID — either a numeric id or a string like 'ctx_rec_5'"

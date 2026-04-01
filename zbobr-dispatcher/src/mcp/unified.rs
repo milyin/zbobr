@@ -15,7 +15,7 @@ use zbobr_api::config_tools::McpTool;
 use crate::{
     mcp::{
         common::{
-            AddChecklistItemParam, CheckChecklistItemParam, DeleteCtxRecParam, GetCtxRecParam,
+            AddChecklistItemParam, CheckChecklistItemParam, GetCtxRecParam,
             MessageParam, ReportParam,
         },
         traits::CommonMcpImpl,
@@ -143,13 +143,6 @@ impl UnifiedMcp {
         Parameters(params): Parameters<CheckChecklistItemParam>,
     ) -> String {
         self.check_checklist_item_impl(&params.id).await
-    }
-
-    #[tool(
-        description = "Delete a context record by its id. Accepts either a numeric id or a string like 'ctx_rec_5'."
-    )]
-    async fn delete_ctx_rec(&self, Parameters(params): Parameters<DeleteCtxRecParam>) -> String {
-        self.delete_ctx_rec_impl(&params.id).await
     }
 
     #[tool(
