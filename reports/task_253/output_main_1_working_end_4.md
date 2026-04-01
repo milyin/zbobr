@@ -1,0 +1,1 @@
+All three issues from the code review are resolved and committed.
