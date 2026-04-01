@@ -659,48 +659,70 @@ impl ZbobrTaskBackendGithubImpl {
     fn normalize_task_report_ref_for_config(
         config: &ZbobrTaskBackendGithubConfig,
         task_id: u64,
+        field_name: &str,
         link: &str,
-    ) -> String {
-        if let Some(prefix) = Self::report_url_prefix_from_config(config, task_id)
-            && let Some(filename) = link.strip_prefix(&prefix)
-        {
-            return filename.to_string();
+    ) -> anyhow::Result<String> {
+        let Some(prefix) = Self::report_url_prefix_from_config(config, task_id) else {
+            anyhow::bail!(
+                "Invalid task context link in {field_name}: cannot build GitHub blob prefix for task #{task_id}; link='{link}'"
+            );
+        };
+
+        let Some(filename) = link.strip_prefix(&prefix) else {
+            anyhow::bail!(
+                "Invalid task context link in {field_name}: expected full GitHub blob URL with prefix '{prefix}', got '{link}'"
+            );
+        };
+
+        if filename.is_empty() || filename.contains('/') || filename.contains("..") {
+            anyhow::bail!(
+                "Invalid task context link in {field_name}: URL tail must be a single filename, got '{link}'"
+            );
         }
 
-        let reports_path = config.reports_path.as_deref().unwrap_or("reports");
-        let task_dir_prefix = format!("{reports_path}/task_{task_id}/");
-        if let Some(filename) = link.strip_prefix(&task_dir_prefix) {
-            return filename.to_string();
-        }
-
-        link.to_string()
+        Ok(filename.to_string())
     }
 
     fn normalize_task_report_links_for_config(
         config: &ZbobrTaskBackendGithubConfig,
         task: &mut Task,
-    ) {
-        for stage in &mut task.context.stages {
-            for link in [&mut stage.info.prompt_link, &mut stage.info.output_link]
-                .into_iter()
-                .flatten()
-            {
-                *link = Self::normalize_task_report_ref_for_config(config, task.id, link);
+    ) -> anyhow::Result<()> {
+        for (stage_idx, stage) in task.context.stages.iter_mut().enumerate() {
+            if let Some(link) = stage.info.prompt_link.as_mut() {
+                *link = Self::normalize_task_report_ref_for_config(
+                    config,
+                    task.id,
+                    &format!("stage[{stage_idx}].prompt_link"),
+                    link,
+                )?;
+            }
+            if let Some(link) = stage.info.output_link.as_mut() {
+                *link = Self::normalize_task_report_ref_for_config(
+                    config,
+                    task.id,
+                    &format!("stage[{stage_idx}].output_link"),
+                    link,
+                )?;
             }
 
-            for link in stage
-                .records
-                .iter_mut()
-                .filter_map(|record| record.report_link.as_mut())
-            {
-                *link = Self::normalize_task_report_ref_for_config(config, task.id, link);
+            for (record_idx, record) in stage.records.iter_mut().enumerate() {
+                if let Some(link) = record.report_link.as_mut() {
+                    *link = Self::normalize_task_report_ref_for_config(
+                        config,
+                        task.id,
+                        &format!("stage[{stage_idx}].records[{record_idx}].report_link"),
+                        link,
+                    )?;
+                }
             }
         }
+
+        Ok(())
     }
 
     fn hydrate_issue_to_task(&self, issue: IssueResponse) -> anyhow::Result<Task> {
         let mut task = Self::issue_to_task(issue)?;
-        Self::normalize_task_report_links_for_config(&self.backend_config, &mut task);
+        Self::normalize_task_report_links_for_config(&self.backend_config, &mut task)?;
         Ok(task)
     }
 
@@ -1477,7 +1499,8 @@ mod flag_tests {
         };
 
         let mut task = ZbobrTaskBackendGithubImpl::issue_to_task(issue).unwrap();
-        ZbobrTaskBackendGithubImpl::normalize_task_report_links_for_config(&config, &mut task);
+        ZbobrTaskBackendGithubImpl::normalize_task_report_links_for_config(&config, &mut task)
+            .unwrap();
         let stage = &task.context.stages[0];
 
         assert_eq!(
@@ -1492,5 +1515,109 @@ mod flag_tests {
             stage.records[0].report_link.as_deref(),
             Some("report_main_1_working.md")
         );
+    }
+
+    #[test]
+    fn normalize_task_report_links_rejects_non_blob_report_link_with_diagnostic() {
+        let config = make_config();
+        let mut task = Task {
+            id: 1,
+            title: "t".to_string(),
+            description: "d".to_string(),
+            state: State::Ready,
+            work_branch: None,
+            pr_url: None,
+            context: TaskContext {
+                stages: vec![StageContext {
+                    info: StageInfo {
+                        instance: "default".to_string(),
+                        pipeline: Pipeline::Main,
+                        run_id: 1,
+                        stage: Stage::new("working"),
+                        tool: None,
+                        model: None,
+                        prompt_link: None,
+                        output_link: None,
+                        timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
+                    },
+                    records: vec![ContextRecord {
+                        id: 1,
+                        record_type: ContextRecordType::Success,
+                        brief: "done".to_string(),
+                        report_link: Some("report_main_1_working.md".to_string()),
+                    }],
+                }],
+            },
+            signal: None,
+            stack: vec![],
+            status: None,
+            pause: false,
+            confirm: false,
+            pipeline_run_id: 0,
+            stage_count: 0,
+            max_stage_count: 0,
+            closed: false,
+            etag: None,
+        };
+
+        let err =
+            ZbobrTaskBackendGithubImpl::normalize_task_report_links_for_config(&config, &mut task)
+                .unwrap_err()
+                .to_string();
+
+        assert!(err.contains("stage[0].records[0].report_link"));
+        assert!(err.contains("expected full GitHub blob URL"));
+        assert!(err.contains("report_main_1_working.md"));
+    }
+
+    #[test]
+    fn normalize_task_report_links_rejects_wrong_blob_prefix_with_diagnostic() {
+        let config = make_config();
+        let mut task = Task {
+            id: 1,
+            title: "t".to_string(),
+            description: "d".to_string(),
+            state: State::Ready,
+            work_branch: None,
+            pr_url: None,
+            context: TaskContext {
+                stages: vec![StageContext {
+                    info: StageInfo {
+                        instance: "default".to_string(),
+                        pipeline: Pipeline::Main,
+                        run_id: 1,
+                        stage: Stage::new("working"),
+                        tool: None,
+                        model: None,
+                        prompt_link: Some(
+                            "https://github.com/org/repo/blob/main/reports/task_1/prompt.md"
+                                .to_string(),
+                        ),
+                        output_link: None,
+                        timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
+                    },
+                    records: vec![],
+                }],
+            },
+            signal: None,
+            stack: vec![],
+            status: None,
+            pause: false,
+            confirm: false,
+            pipeline_run_id: 0,
+            stage_count: 0,
+            max_stage_count: 0,
+            closed: false,
+            etag: None,
+        };
+
+        let err =
+            ZbobrTaskBackendGithubImpl::normalize_task_report_links_for_config(&config, &mut task)
+                .unwrap_err()
+                .to_string();
+
+        assert!(err.contains("stage[0].prompt_link"));
+        assert!(err.contains("expected full GitHub blob URL"));
+        assert!(err.contains("blob/main"));
     }
 }
