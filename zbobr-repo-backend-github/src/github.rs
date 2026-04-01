@@ -966,6 +966,25 @@ mod tests {
         assert!(result3.is_err());
     }
 
+    #[test]
+    fn parse_rejects_ssh_url_with_extra_path() {
+        // SSH URLs with extra path components must be rejected
+        let result = parse_github_repo("git@github.com:owner/repo/extra");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid GitHub SSH URL"));
+
+        // Empty owner segment
+        let result2 = parse_github_repo("git@github.com:/repo");
+        assert!(result2.is_err());
+
+        // Empty repo segment (owner only)
+        let result3 = parse_github_repo("git@github.com:owner/");
+        assert!(result3.is_err());
+    }
+
     // ── from_config normalization tests ──────────────────────────────
 
     #[tokio::test]
