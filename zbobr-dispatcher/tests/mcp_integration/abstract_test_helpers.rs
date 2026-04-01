@@ -830,3 +830,66 @@ pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
         "Stack should be empty after completion"
     );
 }
+
+// ===========================================================================
+// Test 17: Graceful pause when runner.run() fails before MCP (empty description)
+// ===========================================================================
+
+pub async fn run_pause_on_runner_error(env: &IntegrationTestEnv) {
+    let _repo_path = env.create_git_repo("repo_runner_err").await;
+    // Create task with EMPTY description — this triggers the pre-flight check error
+    // inside CliStageRunner::run() before the MCP server is started.
+    let task_id = env.create_task("Runner error test", "", "READY").await;
+    let work_branch = format!("zbobr_fix-{task_id}-runner-err");
+    env.update_task_branches(task_id, &work_branch).await;
+
+    let workflow = build_workflow(vec![StageDef::new("work", "role_work", "main")]);
+
+    // Scenarios are irrelevant — the stage never reaches MCP.
+    let scenarios = scenarios_map(vec![(
+        "role_work",
+        abstract_scenarios::report_and_finish_scenario(),
+    )]);
+
+    // Step 1: run_pipeline → runner.run() errors on empty description → graceful pause
+    env.run_pipeline(task_id, &workflow, &scenarios).await;
+
+    let task = env.get_task(task_id).await;
+    assert!(
+        task.pause,
+        "runner.run() error should set pause flag for graceful pause"
+    );
+    assert_eq!(
+        task.state,
+        State::Running(Pipeline::Main, Stage::from("work")),
+        "State should still be Running when pause flag is set"
+    );
+    assert_eq!(
+        task.signal,
+        Some(Signal::go("work")),
+        "Signal should be set to re-run the failed stage"
+    );
+    assert!(
+        task.status
+            .as_ref()
+            .map(|s| s.contains("no description"))
+            .unwrap_or(false),
+        "Error message should mention missing description; got: {:?}",
+        task.status
+    );
+
+    // Step 2: continue_pipeline → centralized handler converts pause flag to PAUSE state
+    env.continue_pipeline(task_id, &workflow, &scenarios).await;
+
+    let task = env.get_task(task_id).await;
+    assert!(!task.pause, "Pause flag should be cleared");
+    assert_eq!(task.state, State::Pause, "State should be PAUSE");
+    assert!(task.signal.is_none(), "Signal should be cleared");
+    assert_eq!(task.stack.len(), 1, "Stack should have one entry");
+    assert_eq!(task.stack[0].pipeline, zbobr_api::Pipeline::Main);
+    assert_eq!(
+        task.stack[0].signal,
+        Signal::go("work"),
+        "Stack entry should save signal to re-run the stage"
+    );
+}
