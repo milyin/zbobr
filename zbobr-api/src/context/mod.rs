@@ -1429,4 +1429,234 @@ mod tests {
             "stage with records should appear"
         );
     }
+
+    // -- End-to-end prompt format validation --
+
+    #[test]
+    fn for_prompt_renders_complete_format() {
+        // Build a realistic context with multiple stages, one empty, and interleaved comments
+        let ctx = TaskContext {
+            stages: vec![
+                StageContext {
+                    info: StageInfo {
+                        instance: "skynet".to_string(),
+                        pipeline: Pipeline::from("main"),
+                        run_id: 1,
+                        stage: Stage::new("planning"),
+                        tool: Some(crate::task::Tool::Claude),
+                        model: Some(Model::ClaudeOpus4_6),
+                        prompt_link: Some("prompts/plan.md".to_string()),
+                        output_link: Some("outputs/plan_out.md".to_string()),
+                        timestamp: utc("2024-06-01T10:00:00Z"),
+                    },
+                    records: vec![
+                        ContextRecord {
+                            id: 1,
+                            record_type: ContextRecordType::Comment,
+                            brief: "Plan ready for review".to_string(),
+                            report_link: Some("reports/plan_review.md".to_string()),
+                        },
+                        ContextRecord {
+                            id: 2,
+                            record_type: ContextRecordType::Checkbox(true),
+                            brief: "Define API schema".to_string(),
+                            report_link: None,
+                        },
+                    ],
+                },
+                // Empty stage — should be filtered out in for_prompt mode
+                StageContext {
+                    info: StageInfo {
+                        instance: "skynet".to_string(),
+                        pipeline: Pipeline::from("main"),
+                        run_id: 1,
+                        stage: Stage::new("working"),
+                        tool: Some(crate::task::Tool::Copilot),
+                        model: Some(Model::ClaudeSonnet4_6),
+                        prompt_link: None,
+                        output_link: None,
+                        timestamp: utc("2024-06-01T11:00:00Z"),
+                    },
+                    records: vec![],
+                },
+                StageContext {
+                    info: StageInfo {
+                        instance: "skynet".to_string(),
+                        pipeline: Pipeline::from("main"),
+                        run_id: 1,
+                        stage: Stage::new("reviewing"),
+                        tool: Some(crate::task::Tool::Claude),
+                        model: Some(Model::ClaudeOpus4_6),
+                        prompt_link: Some("prompts/review.md".to_string()),
+                        output_link: None,
+                        timestamp: utc("2024-06-01T13:00:00Z"),
+                    },
+                    records: vec![
+                        ContextRecord {
+                            id: 3,
+                            record_type: ContextRecordType::Success,
+                            brief: "Review passed".to_string(),
+                            report_link: Some("reports/review_ok.md".to_string()),
+                        },
+                        ContextRecord {
+                            id: 4,
+                            record_type: ContextRecordType::Checkbox(true),
+                            brief: "All tests green".to_string(),
+                            report_link: None,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        // Comments interleaved between stages
+        let comments = vec![
+            Comment {
+                timestamp: utc("2024-06-01T10:30:00Z"),
+                username: "milyin".to_string(),
+                body: "proceed with the plan".to_string(),
+                url: Some("https://github.com/example/issues/1#comment-1".to_string()),
+            },
+            Comment {
+                timestamp: utc("2024-06-01T12:00:00Z"),
+                username: "milyin".to_string(),
+                body: "looks good so far".to_string(),
+                url: None,
+            },
+        ];
+
+        let output = serialize_context(&ctx, &comments, true, None);
+
+        // 1. No <!-- stage --> markers anywhere
+        assert!(
+            !output.contains("<!-- stage -->"),
+            "prompt output must not contain stage markers"
+        );
+
+        // 2. Stage headers are just "- {stage_name}" (no metadata)
+        assert!(
+            output.contains("- planning\n"),
+            "planning stage should appear as plain name"
+        );
+        assert!(
+            output.contains("- reviewing\n"),
+            "reviewing stage should appear as plain name"
+        );
+
+        // 3. Empty "working" stage is filtered out
+        assert!(
+            !output.contains("working"),
+            "empty working stage should be filtered out"
+        );
+
+        // 4. No stage metadata leaks (no tool, model, timestamps, prompt/output links)
+        assert!(!output.contains("`claude`"), "no tool metadata");
+        assert!(!output.contains("claude-opus-4.6"), "no model metadata");
+        assert!(!output.contains("2024-06-01 10:00:00"), "no timestamps in stage headers");
+        assert!(!output.contains("prompts/"), "no prompt links");
+        assert!(!output.contains("outputs/"), "no output links");
+
+        // 5. Records use plain [ctx_rec_N] (no <sub>, no URLs)
+        assert!(
+            output.contains("[ctx_rec_1]"),
+            "record should have plain ctx_rec tag"
+        );
+        assert!(
+            output.contains("[ctx_rec_3]"),
+            "record should have plain ctx_rec tag"
+        );
+        assert!(!output.contains("<sub>"), "no <sub> tags in prompt output");
+        assert!(
+            !output.contains("reports/"),
+            "no report URLs in prompt output"
+        );
+
+        // 6. Comments are plain "- user {name}: {body}" (no timestamp, no URL, no bold)
+        assert!(
+            output.contains("- user milyin: proceed with the plan"),
+            "comment should use plain format"
+        );
+        assert!(
+            output.contains("- user milyin: looks good so far"),
+            "comment should use plain format"
+        );
+        assert!(
+            !output.contains("user:**milyin**"),
+            "no bold in prompt comments"
+        );
+        assert!(
+            !output.contains("https://github.com/example"),
+            "no URLs in prompt comments"
+        );
+
+        // 7. Records are properly indented under stages
+        assert!(
+            output.contains("  - 💬 Plan ready for review [ctx_rec_1]"),
+            "non-checkbox record indented with 2 spaces"
+        );
+        assert!(
+            output.contains("    - [x] Define API schema [ctx_rec_2]"),
+            "checkbox record indented with 4 spaces"
+        );
+
+        // 8. Verify correct ordering (planning, comment, comment, reviewing)
+        let planning_pos = output.find("- planning").unwrap();
+        let comment1_pos = output.find("proceed with the plan").unwrap();
+        let comment2_pos = output.find("looks good so far").unwrap();
+        let reviewing_pos = output.find("- reviewing").unwrap();
+        assert!(
+            planning_pos < comment1_pos
+                && comment1_pos < comment2_pos
+                && comment2_pos < reviewing_pos,
+            "entries must be ordered chronologically"
+        );
+    }
+
+    // -- Multi-line comment in for_prompt mode --
+
+    #[test]
+    fn for_prompt_preserves_multiline_comment_body() {
+        let ctx = TaskContext::default();
+        let multiline_body = "proceed with plan\nalso fix the bug\nand update docs";
+        let comments = vec![Comment {
+            timestamp: utc("2024-06-01T10:00:00Z"),
+            username: "alice".to_string(),
+            body: multiline_body.to_string(),
+            url: Some("https://example.com/comment/1".to_string()),
+        }];
+
+        // for_prompt=true: full multi-line body should be preserved
+        let prompt_output = serialize_context(&ctx, &comments, true, None);
+        assert!(
+            prompt_output.contains("proceed with plan"),
+            "first line should appear in prompt mode"
+        );
+        assert!(
+            prompt_output.contains("also fix the bug"),
+            "second line should appear in prompt mode"
+        );
+        assert!(
+            prompt_output.contains("and update docs"),
+            "third line should appear in prompt mode"
+        );
+        assert!(
+            prompt_output.starts_with("- user alice: proceed with plan\nalso fix the bug\nand update docs"),
+            "full multi-line body should be preserved verbatim"
+        );
+
+        // for_prompt=false: only first line should appear (non-prompt uses first-line-only)
+        let normal_output = serialize_context(&ctx, &comments, false, None);
+        assert!(
+            normal_output.contains("proceed with plan"),
+            "first line should appear in normal mode"
+        );
+        assert!(
+            !normal_output.contains("also fix the bug"),
+            "second line should NOT appear in normal (non-prompt) mode"
+        );
+        assert!(
+            !normal_output.contains("and update docs"),
+            "third line should NOT appear in normal (non-prompt) mode"
+        );
+    }
 }
