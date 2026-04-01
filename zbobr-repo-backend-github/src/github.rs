@@ -116,15 +116,28 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
         .trim_end_matches('/');
 
     let full_name = if repo_ref.contains("://") {
-        // extract owner/repo from URL
+        // HTTPS URL: must be exactly https://github.com/owner/repo — no extra path segments.
+        // After stripping trailing '/' and '.git', splitting by '/' yields exactly 5 parts:
+        // ["https:", "", "github.com", "owner", "repo"]
         let parts: Vec<&str> = repo_ref.split('/').collect();
-        if parts.len() < 2 {
-            anyhow::bail!("Invalid GitHub URL: {}", repo_ref);
+        if parts.len() != 5 {
+            anyhow::bail!(
+                "Invalid GitHub URL (expected 'https://github.com/owner/repo'): {}",
+                repo_ref
+            );
         }
-        format!("{}/{}", parts[parts.len() - 2], parts[parts.len() - 1])
+        format!("{}/{}", parts[3], parts[4])
     } else if repo_ref.contains(':') {
-        // git@github.com:owner/repo
-        repo_ref.rsplit(':').next().unwrap_or("").to_string()
+        // git@github.com:owner/repo — the part after ':' must be exactly owner/repo
+        let after_colon = repo_ref.rsplit(':').next().unwrap_or("");
+        let colon_parts: Vec<&str> = after_colon.split('/').collect();
+        if colon_parts.len() != 2 || colon_parts[0].is_empty() || colon_parts[1].is_empty() {
+            anyhow::bail!(
+                "Invalid GitHub SSH URL (expected 'git@github.com:owner/repo'): {}",
+                repo_ref
+            );
+        }
+        after_colon.to_string()
     } else {
         repo_ref.to_string()
     };
@@ -940,6 +953,17 @@ mod tests {
         let result = parse_github_repo("just-a-name");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid GitHub repository format"));
+    }
+
+    #[test]
+    fn parse_rejects_url_with_extra_path() {
+        // URLs with extra path segments (e.g. issue/PR links) must be rejected
+        let result = parse_github_repo("https://github.com/owner/repo/issues/123");
+        assert!(result.is_err());
+        let result2 = parse_github_repo("https://github.com/owner/repo/pull/5");
+        assert!(result2.is_err());
+        let result3 = parse_github_repo("https://github.com/owner/repo/tree/main");
+        assert!(result3.is_err());
     }
 
     // ── from_config normalization tests ──────────────────────────────

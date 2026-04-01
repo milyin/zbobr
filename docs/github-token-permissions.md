@@ -17,7 +17,7 @@ Used by `zbobr-repo-backend-github` to manage branches and pull requests on the 
 
 | Permission | Level | Operations |
 | --- | --- | --- |
-| Contents | Read/Write | Clone via `gh repo clone` / `git fetch`; push work branches (`git push --force`) |
+| Contents | Read/Write | Clone via `gh repo clone` / `git fetch`; push work branches |
 | Workflows | Read/Write | Push branches containing `.github/workflows/` files |
 | Pull requests | Read/Write | Create and list PRs (`POST/GET /repos/{repo}/pulls`) |
 | Metadata | Read-only | Repository info (`GET /repos/{owner}/{repo}`) |
@@ -36,7 +36,7 @@ Used by `zbobr-task-backend-github` to manage the task project repository: issue
 
 ### Fine-grained PAT permissions
 
-**On the task repo** (configured via `github_repo` in `[tasks.github]` or `--tasks-github-repo`):
+**On the task repo** (configured via `github_repo` in `[tasks]` or `--tasks-github-repo`):
 
 | Permission | Level | Operations |
 | --- | --- | --- |

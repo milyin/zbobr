@@ -9,7 +9,7 @@ This repository contains **zbobr** — a reusable automation system that:
 - **Manager Agent**: Processes issues through stages (PENDING → GO_PLANNING → PLANNING → GO_WORKING → WORKING), creates implementation plans, and spawns Worker agents
 - **Worker Agent**: Implements individual issues by creating branches and PRs in the configured repository
 
-The dispatcher is domain-agnostic and can manage any set of repositories through **Task Projects**.
+Each zbobr instance manages a single configured target repository.
 
 ### Concepts
 
@@ -110,7 +110,7 @@ Notes on TOML layout:
 
 Note: legacy top-level dispatcher-only TOML files are no longer supported; use the root `zbobr.toml` with `[dispatcher]` and `[repo]` tables.
 
-This is the recommended approach for task-project workflows, as it eliminates the need to manually specify `--tasks-github-task-repo` and `--repo-github-repository` flags.
+This is the recommended approach for task-project workflows, as it eliminates the need to manually specify `--repo-github-repository` and `--tasks-github-repo` on the command line.
 
 ## How It Works
 
@@ -279,8 +279,8 @@ Zbobr manages **three distinct GitHub tokens** with different access levels and 
 - **Resolution Order**:
    1. `GH_TOKEN` environment variable
    2. `GITHUB_TOKEN` environment variable
-   3. `github_token` in `[backend_github]` section of `zbobr.toml`
-- **Config File**: `github_token` in `[backend_github]` section of `zbobr.toml`
+   3. `github_token` in `[repo]` section of `zbobr.toml`
+- **Config File**: `github_token` in `[repo]` section of `zbobr.toml`
 
 #### 2. Agent Token — **REQUIRED for restricted access**
 - **Purpose**: Passed to agent processes (Copilot/Claude sessions) as `GH_TOKEN` and `GITHUB_TOKEN`
@@ -320,7 +320,7 @@ Detailed configuration parameters:
 
 - Owner token:
    - Env vars: `GH_TOKEN`, `GITHUB_TOKEN`.
-   - TOML field: `github_token` in `[backend_github]` section of `zbobr.toml`.
+   - TOML field: `github_token` in `[repo]` section of `zbobr.toml`.
    - Used for: `octocrab` API calls and owner-level `gh` operations.
 
 - Agent token (read-only):
