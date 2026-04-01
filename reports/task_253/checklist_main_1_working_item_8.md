@@ -1,0 +1,1 @@
+The `validate()` methods in zbobr-repo-backend-github/src/config.rs and zbobr-repo-backend-fs/src/config.rs only validate the `repository` field. The newly centralized `branch` field needs the same non-empty validation to catch misconfiguration early.
