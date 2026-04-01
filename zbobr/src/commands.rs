@@ -3,9 +3,13 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Subcommand;
-use zbobr_api::{Comment, Pipeline, Stage, State, Task, config::WorkflowConfig, task::TaskContext};
+use zbobr_api::{
+    Comment, Pipeline, Stage, State, Task, WorktreeBackend, config::WorkflowConfig,
+    task::TaskContext,
+};
 use zbobr_dispatcher::{
-    ConfiguredPromptBuilder, TaskDir, Workflow, ZbobrDispatcher,
+    ConfiguredPromptBuilder, TaskDir, VAR_DESTINATION_BRANCH, VAR_DESTINATION_REPOSITORY,
+    Workflow, ZbobrDispatcher,
     config::{ZbobrDispatcherConfig, ZbobrExecutorConfig},
     print_task,
 };
@@ -98,14 +102,6 @@ pub enum TaskSubcommand {
         #[arg(long)]
         state: Option<String>,
 
-        /// New destination repository in owner/repo format.
-        /// Pass `--dest-repo` without a value to delete the parameter.
-        #[arg(long, num_args = 0..=1)]
-        dest_repo: Option<Option<String>>,
-        /// New destination branch.
-        /// Pass `--dest-branch` without a value to delete the parameter.
-        #[arg(long, num_args = 0..=1)]
-        dest_branch: Option<Option<String>>,
         /// New work branch.
         /// Pass `--work-branch` without a value to delete the parameter.
         #[arg(long, num_args = 0..=1)]
@@ -203,9 +199,9 @@ pub async fn run(
     command: Command,
 ) -> anyhow::Result<()> {
     let workflow = Workflow::new(workflow_config)?;
-    let prompt_builder = ConfiguredPromptBuilder::new(Some(config_dir), Arc::new(workflow.clone()));
 
     if !command.needs_backends() {
+        let prompt_builder = ConfiguredPromptBuilder::new(Some(config_dir), Arc::new(workflow.clone()));
         return run_without_backends(command, &prompt_builder);
     }
 
@@ -213,6 +209,10 @@ pub async fn run(
     tasks_config.instance = dispatcher_config.instance.clone();
     let task_backend = TaskBackendGithub::new(tasks_config).await?;
     let repo_backend = ZbobrRepoBackendGithub::new(repo_config).await?;
+
+    let prompt_builder = ConfiguredPromptBuilder::new(Some(config_dir), Arc::new(workflow.clone()))
+        .with_var(VAR_DESTINATION_REPOSITORY, repo_backend.repository())
+        .with_var(VAR_DESTINATION_BRANCH, repo_backend.branch());
 
     let claude = ClaudeExecutor::new(executor_config.claude);
     let copilot = CopilotExecutor::new(executor_config.copilot);
@@ -275,8 +275,6 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
         title: "TITLE".to_string(),
         description: "DESCRIPTION".to_string(),
         state: State::Ready,
-        destination_repository: Some("DESTINATION_REPOSITORY".to_string()),
-        destination_branch: Some("DESTINATION_BRANCH".to_string()),
         work_branch: Some("WORK_BRANCH".to_string()),
         pr_url: None,
         context: TaskContext::default(),
@@ -413,8 +411,6 @@ async fn run_task_subcommand(
             title,
             description,
             state,
-            dest_repo,
-            dest_branch,
             work_branch,
             signal,
             confirm,
@@ -443,12 +439,6 @@ async fn run_task_subcommand(
                     }
                     if let Some(s) = parsed_signal {
                         task.signal = Some(s);
-                    }
-                    if let Some(repo) = dest_repo {
-                        task.destination_repository = repo;
-                    }
-                    if let Some(branch) = dest_branch {
-                        task.destination_branch = branch;
                     }
                     if let Some(branch) = work_branch {
                         task.work_branch = branch;

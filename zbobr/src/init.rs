@@ -680,23 +680,25 @@ mod tests {
 
         // Preparator stage must not exist in any pipeline
         assert!(
-            !main.stages.contains_key("preparator"),
-            "preparator stage should not exist in main pipeline"
+            !main.stages.contains_key("preparing"),
+            "preparing stage should not exist in main pipeline"
         );
 
         if let Some(merge) = workflow.pipeline(Pipeline::MERGE) {
             assert!(
-                !merge.stages.contains_key("preparator"),
-                "preparator stage should not exist in merge pipeline"
+                !merge.stages.contains_key("preparing"),
+                "preparing stage should not exist in merge pipeline"
             );
         }
 
-        // No role should be named "preparator"
-        for role_name in workflow.roles.keys() {
-            assert_ne!(
-                role_name, "preparator",
-                "preparator role should not exist in workflow roles"
-            );
+        // No stage role should be named "preparator"
+        for stage_def in main.stages.values() {
+            if let Some(ref role) = stage_def.role {
+                assert_ne!(
+                    role, "preparator",
+                    "no stage in main pipeline should have role 'preparator'"
+                );
+            }
         }
     }
 }
