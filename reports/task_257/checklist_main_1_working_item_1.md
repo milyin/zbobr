@@ -1,0 +1,1 @@
+Four-file change: config_tools.rs (add GetCtxRec variant), zbobr-dispatcher/src/mcp/common.rs (add GetCtxRecParam), zbobr-dispatcher/src/task.rs (add get_context_record_content method), zbobr-dispatcher/src/mcp/traits.rs + unified.rs (wire up implementation).
