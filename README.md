@@ -17,11 +17,11 @@ The dispatcher is domain-agnostic and can manage any set of repositories through
    - Universal automation system that processes issues through stages
    - Contains planner/worker agents and the `zbobr` CLI binary
 
-2. **Task Project** (`--tasks-github-task-repo`)
+2. **Task Project** (`tasks.task_repo`)
    - A GitHub repository whose issues the dispatcher manages
    - Example: `YoroolGui/copilot-zenoh`
    - Contains: project-specific guidance and `zbobr.toml` config
-   - Created via `zbobr setup --tasks-github-task-repo owner/repo`
+   - Created via `zbobr init <workspace>` then `zbobr setup`
 
 3. **Target Repository** (`--repo-github-repository`)
    - The single GitHub repository that worker agents operate on
@@ -60,41 +60,38 @@ export PATH="$HOME/.cargo/bin:$PATH"
 - Permission to create repos (for task projects)
 - Rust and Cargo (for installation)
 
-**Setup a task project:**
+**Create a workspace:**
 ```bash
 # Ensure your GitHub token is available
 export GH_TOKEN=$(gh auth token)
 
-# Example: Set up Zenoh task project
-zbobr setup --tasks-github-task-repo YoroolGui/copilot-zenoh
+# Create a new zbobr workspace with config and directory structure
+zbobr init my-workspace
+cd my-workspace
 ```
 
-This will:
- - Create the task project repo on GitHub (if needed)
-- Set up milestones (stages) and labels (`tool:*`, `model:*`, `done`)
+**Set up the task project (after editing zbobr.toml):**
+```bash
+# Create milestones and labels in the configured task repo
+zbobr setup
+```
 
 **Launch the dispatcher:**
 ```bash
 # Run the manager loop (polls every 60 seconds)
-zbobr loop --tasks-github-task-repo YoroolGui/copilot-zenoh
+zbobr loop
 ```
 
-**Using zbobr.toml (from task project):**
+**Using zbobr.toml:**
 
-After setting up a task project, you can clone it and run `zbobr` directly — it automatically reads `zbobr.toml` from the current directory:
+Run `zbobr` from a directory containing `zbobr.toml` — it automatically reads config from the current directory:
 
 ```bash
-# Clone the task project
-git clone https://github.com/YoroolGui/copilot-zenoh.git
-cd copilot-zenoh
-
 # Run zbobr commands (automatically uses zbobr.toml config)
 zbobr loop                # Start the dispatcher loop
 zbobr task list           # Show all tasks
-zbobr task list --stage PENDING   # Filter tasks by stage
-zbobr task list --tool copilot   # Filter tasks by tool
-zbobr task plan 42        # Run planner on issue #42
-zbobr task work 42        # Run worker on issue #42
+zbobr task list --state READY    # Filter tasks by state
+zbobr task process 42     # Process issue #42 (single step)
 zbobr task create "Title" --description "desc" --confirm    # create new task that will pause on each stage change
 ```
 
@@ -173,29 +170,25 @@ YoroolGui/copilot-zenoh/ (Task Project - created by zbobr setup)
 ### Set up a new task project
 
 ```bash
-# Create task project for Apache Kafka ecosystem
-zbobr setup --tasks-github-task-repo myorg/copilot-kafka
+# Create labels and milestones in the configured task repo
+zbobr setup
 
 # Force-update existing labels
-zbobr setup --tasks-github-task-repo myorg/copilot-kafka --force
+zbobr setup --force
 ```
 
 ### Run the manager loop
 
 ```bash
 # Poll for issues every 30 seconds, clean up every 10 minutes
-zbobr loop --tasks-github-task-repo YoroolGui/copilot-zenoh \
-  --interval 30 --cleanup-interval 600
+zbobr loop --interval 30 --cleanup-interval 600
 ```
 
-### Manually run agents for a specific issue
+### Manually process a specific issue
 
 ```bash
-# Run planner on issue #42 (creates implementation plan)
-zbobr task plan 42 --tasks-github-task-repo YoroolGui/copilot-zenoh
-
-# Run worker on issue #42 (implements the plan, creates PR)
-zbobr task work 42 --tasks-github-task-repo YoroolGui/copilot-zenoh
+# Process issue #42 according to its current stage (single step)
+zbobr task process 42
 ```
 
 ## Configuration

@@ -201,7 +201,9 @@ pub async fn run(
     let workflow = Workflow::new(workflow_config)?;
 
     if !command.needs_backends() {
-        let prompt_builder = ConfiguredPromptBuilder::new(Some(config_dir), Arc::new(workflow.clone()));
+        let prompt_builder = ConfiguredPromptBuilder::new(Some(config_dir), Arc::new(workflow.clone()))
+            .with_var(VAR_DESTINATION_REPOSITORY, &repo_config.repository)
+            .with_var(VAR_DESTINATION_BRANCH, &repo_config.branch);
         return run_without_backends(command, &prompt_builder);
     }
 

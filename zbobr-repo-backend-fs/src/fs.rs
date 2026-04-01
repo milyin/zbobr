@@ -194,47 +194,37 @@ impl WorktreeBackend for ZbobrRepoBackendFs {
         _body: Option<&str>,
     ) -> anyhow::Result<String> {
         let work_branch = &identity.work_branch;
-        if !self.config.repos_dir.exists() {
+
+        let bare_dir = self
+            .config
+            .repos_dir
+            .join(format!("{}.git", self.config.repo_short_name()));
+
+        if !bare_dir.exists() {
             anyhow::bail!("No worktree found for work_branch '{}'", work_branch);
         }
 
-        let mut entries = fs::read_dir(&self.config.repos_dir)
+        let output = git_output(&bare_dir, &["worktree", "list", "--porcelain"])
             .await
-            .context("Failed to read repos_dir")?;
+            .context("Failed to list worktrees")?;
 
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if !path.is_dir()
-                || !path
-                    .file_name()
-                    .is_some_and(|n| n.to_string_lossy().ends_with(".git"))
-            {
-                continue;
+        // Porcelain format: blocks separated by blank lines, each starting with "worktree <path>"
+        // followed by "branch refs/heads/<name>"
+        for block in output.split("\n\n") {
+            let mut wt_path = None;
+            let mut branch = None;
+            for line in block.lines() {
+                if let Some(p) = line.strip_prefix("worktree ") {
+                    wt_path = Some(p.to_string());
+                }
+                if let Some(b) = line.strip_prefix("branch refs/heads/") {
+                    branch = Some(b.to_string());
+                }
             }
-
-            let output = match git_output(&path, &["worktree", "list", "--porcelain"]).await {
-                Ok(o) => o,
-                Err(_) => continue,
-            };
-
-            // Porcelain format: blocks separated by blank lines, each starting with "worktree <path>"
-            // followed by "branch refs/heads/<name>"
-            for block in output.split("\n\n") {
-                let mut wt_path = None;
-                let mut branch = None;
-                for line in block.lines() {
-                    if let Some(p) = line.strip_prefix("worktree ") {
-                        wt_path = Some(p.to_string());
-                    }
-                    if let Some(b) = line.strip_prefix("branch refs/heads/") {
-                        branch = Some(b.to_string());
-                    }
-                }
-                if branch.as_deref() == Some(work_branch)
-                    && let Some(p) = wt_path
-                {
-                    return Ok(p);
-                }
+            if branch.as_deref() == Some(work_branch)
+                && let Some(p) = wt_path
+            {
+                return Ok(p);
             }
         }
 
