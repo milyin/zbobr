@@ -283,25 +283,25 @@ struct MdCompactComment {
 
 impl MdCompactComment {
     fn from_comment(c: &Comment, for_prompt: bool) -> Self {
-        let comment_text = if for_prompt {
-            // put to context as is
-            c.body.to_string()
-        } else if c.body.len() <= COMPACT_COMMENT_MAX_LEN {
-            // short comment, use first line only to keep format "one stage - one line"
-            c.body.lines().next().unwrap_or("").to_string()
-        } else {
-            // long comment, truncate
-            let truncated = c.body.chars().take(COMPACT_COMMENT_MAX_LEN).collect::<String>();
-            let first_line = truncated.lines().next().unwrap_or("");
-            format!("{}...", first_line)
-        };
-
         let username = if c.username.is_empty() {
             "unknown"
         } else {
             &c.username
         };
-        let text = format!("user {}: {}", username, comment_text);
+
+        let text = if for_prompt {
+            // For agent prompts: use plain format with full body
+            format!("user {}: {}", username, c.body)
+        } else if c.body.len() <= COMPACT_COMMENT_MAX_LEN {
+            // Short comment: use first line only to keep format "one stage - one line"
+            let first_line = c.body.lines().next().unwrap_or("").to_string();
+            format!("user:**{}** {}", username, first_line)
+        } else {
+            // Long comment: truncate to first line
+            let truncated = c.body.chars().take(COMPACT_COMMENT_MAX_LEN).collect::<String>();
+            let first_line = truncated.lines().next().unwrap_or("");
+            format!("user:**{}** {}...", username, first_line)
+        };
 
         MdCompactComment {
             text,
@@ -482,16 +482,19 @@ enum MdEntry {
 #[derive(Debug, Clone)]
 struct MdContext {
     entries: Vec<MdEntry>,
+    for_prompt: bool,
 }
 
 impl fmt::Display for MdContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Add <!-- stage --> markers before stage entries when compact comments are present
         // so parsers can distinguish stage lines from compact comment lines.
-        let has_compact = self
-            .entries
-            .iter()
-            .any(|e| matches!(e, MdEntry::CompactComment(_)));
+        // In prompt mode, these markers are omitted to reduce noise.
+        let has_compact = !self.for_prompt
+            && self
+                .entries
+                .iter()
+                .any(|e| matches!(e, MdEntry::CompactComment(_)));
 
         for entry in &self.entries {
             match entry {
@@ -564,7 +567,10 @@ impl FromStr for MdContext {
             entries.push(MdEntry::Stage(stage));
         }
 
-        Ok(MdContext { entries })
+        Ok(MdContext {
+            entries,
+            for_prompt: false,
+        })
     }
 }
 
@@ -611,6 +617,7 @@ impl MdContext {
 
         MdContext {
             entries: events.into_iter().map(|(_, e)| e).collect(),
+            for_prompt,
         }
     }
 
@@ -1147,7 +1154,7 @@ mod tests {
             Some("https://example.com/comment/1"),
         )];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- user unknown: hello world `2024-01-01 00:00:00 +0000` <sub>[link](https://example.com/comment/1)</sub>"));
+        assert!(output.contains("- user:**unknown** hello world `2024-01-01 00:00:00 +0000` <sub>[link](https://example.com/comment/1)</sub>"));
     }
 
     #[test]
@@ -1155,7 +1162,7 @@ mod tests {
         let ctx = TaskContext::default();
         let comments = vec![make_comment("short text", "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- user unknown: short text `2024-01-01 00:00:00 +0000`"));
+        assert!(output.contains("- user:**unknown** short text `2024-01-01 00:00:00 +0000`"));
         assert!(!output.contains("<sub>"));
     }
 
@@ -1179,7 +1186,7 @@ mod tests {
             None,
         )];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- user unknown: first line"));
+        assert!(output.contains("- user:**unknown** first line"));
         assert!(!output.contains("second line"));
     }
 
@@ -1188,7 +1195,7 @@ mod tests {
         let ctx = TaskContext::default();
         let comments = vec![make_comment("hello world", "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- user unknown: hello world `2024-01-01 00:00:00 +0000`"));
+        assert!(output.contains("- user:**unknown** hello world `2024-01-01 00:00:00 +0000`"));
     }
 
     #[test]
@@ -1211,6 +1218,15 @@ mod tests {
     fn stage_marker_not_added_without_comments() {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], false, None);
+        assert!(!output.contains("<!-- stage -->"));
+    }
+
+    #[test]
+    fn stage_marker_not_added_in_prompt_mode() {
+        let ctx = sample_context();
+        let comments = vec![make_comment("a comment", "2024-01-01T00:30:00Z", None)];
+        // Even with compact comments present, prompt mode should NOT emit stage markers
+        let output = serialize_context(&ctx, &comments, true, None);
         assert!(!output.contains("<!-- stage -->"));
     }
 
