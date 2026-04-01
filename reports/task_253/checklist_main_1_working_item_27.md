@@ -1,0 +1,1 @@
+The SSH URL branch in parse_github_repo() only validates owner/repo format but doesn't check that the host is git@github.com. Non-GitHub SSH remotes like git@gitlab.com:owner/repo are incorrectly accepted. Need to extract and validate the host portion before the colon.
