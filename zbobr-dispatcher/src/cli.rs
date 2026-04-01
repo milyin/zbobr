@@ -890,7 +890,24 @@ pub async fn process_task(
                     stage_def,
                     mcp_tester_override,
                 );
-                runner.run().await?;
+                if let Err(e) = runner.run().await {
+                    let msg = format!(
+                        "Stage {}/{} failed for task #{}: {e}",
+                        pipeline_name, stage_name, task.id
+                    );
+                    tracing::error!("{msg}");
+                    let task_session = zbobr.task_session(task.id);
+                    let status = format_error_status(zbobr, &msg);
+                    if let Err(pause_err) = task_session
+                        .set_pause_with_status_and_signal(status, Signal::go(stage_name))
+                        .await
+                    {
+                        tracing::error!(
+                            "Failed to pause task #{} after stage error: {pause_err}",
+                            task.id
+                        );
+                    }
+                }
             }
         }
         crate::workflow::StateAction::Done => {
@@ -1123,7 +1140,17 @@ pub async fn run_manager_loop(
                             pipeline_name, stage_name, task.id
                         );
                         tracing::error!("{msg}");
-                        set_task_status_with_log(zbobr, task.id, "stage run failure", &msg).await;
+                        let task_session = zbobr.task_session(task.id);
+                        let status = format_error_status(zbobr, &msg);
+                        if let Err(pause_err) = task_session
+                            .set_pause_with_status_and_signal(status, Signal::go(stage_name))
+                            .await
+                        {
+                            tracing::error!(
+                                "Failed to pause task #{} after stage error: {pause_err}",
+                                task.id
+                            );
+                        }
                     }
                     session_run = true;
                     break;
