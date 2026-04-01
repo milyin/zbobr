@@ -517,17 +517,17 @@ const TEST_PLANNER_PROMPT: &str = r#"#Analyze the implementation changes and det
 6. Call `{mcp_report_success}` with the overview report test-planning work is complete.
 "#;
 
-const TEST_WORKER_PROMPT: &str = r#"Implement and run the tests described in the plans.
+const TEST_WORKER_PROMPT: &str = r#"Implement the requested tests and run them.
 
 ## Workflow
 
 1. For each unchecked checklist item related to tests, implement the corresponding test. Commit your work after implementing each item.
-2. Run only the tests mentioned in the checklist items, both checked and unchecked.
+2. Run the implemented tests.
 3. If tests fail, call `{mcp_report_failure}` and include failure details.
 4. If tests pass, call `{mcp_report_success}`.
 
 ## Important
-Do not implemet any functionality, your jond is only to implement and run tests.
+Do not implement any functionality, your job is only to implement and run tests according to the unchecked checklist items.
 "#;
 
 const REVIEWER_PROMPT: &str = r#"# Reviewer Agent
