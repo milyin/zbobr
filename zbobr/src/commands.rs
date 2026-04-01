@@ -288,6 +288,8 @@ fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
         max_stage_count: 0,
         closed: false,
         etag: None,
+        destination_branch: None,
+        destination_repository: None,
     };
     let comments = vec![
         Comment {

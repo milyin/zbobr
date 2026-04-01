@@ -24,8 +24,8 @@ pub use config::{
 };
 pub use mcp::UnifiedMcp;
 pub use prompts::{
-    ConfiguredPromptBuilder, add_mcp_tool_variables, build_full_prompt, load_prompts,
-    validate_stage_prompts,
+    ConfiguredPromptBuilder, VAR_DESTINATION_BRANCH, VAR_DESTINATION_REPOSITORY,
+    add_mcp_tool_variables, build_full_prompt, load_prompts, validate_stage_prompts,
 };
 pub use task::{Comment, Model, RoleSession, StackEntry, Task, TaskSession, Tool};
 pub use task_dir::TaskDir;
