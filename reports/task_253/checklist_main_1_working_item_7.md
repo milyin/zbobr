@@ -1,0 +1,1 @@
+The GitHub backend's `repo_short_name()` at zbobr-repo-backend-github/src/config.rs:62-65 uses raw string splitting without normalizing URL-formatted inputs. It needs to match the FS backend approach: trim trailing `/`, trim `.git` suffix, then split on `/`. Also update unit tests to cover URL formats.
