@@ -1,0 +1,1 @@
+The zbobr task prompt command fails in dry-run (no backend) mode because prompt variable injection only occurs during backend instantiation. Fix: instantiate/populate variables from repo config regardless of whether a backend is active, or supply explicit defaults so the dry-run path works correctly.
