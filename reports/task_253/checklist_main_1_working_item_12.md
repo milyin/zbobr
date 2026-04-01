@@ -1,0 +1,1 @@
+README.md line 163 still says `zbobr.toml  # zbobr configuration (fork owner, default model)` - remove the fork owner reference since fork support was removed.
