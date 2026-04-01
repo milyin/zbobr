@@ -1,0 +1,1 @@
+Fix: README.md:12 remove "any set of repositories" claim, README.md:113 remove --tasks-github-task-repo, README.md:282-283/323 fix [backend_github] -> [repo], docs/github-token-permissions.md:39 fix [tasks.github] -> [tasks], docs/github-token-permissions.md:20 remove force push mention.
