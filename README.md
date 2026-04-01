@@ -17,7 +17,7 @@ Each zbobr instance manages a single configured target repository.
    - Universal automation system that processes issues through stages
    - Contains planner/worker agents and the `zbobr` CLI binary
 
-2. **Task Project** (`tasks.task_repo`)
+2. **Task Project** (`tasks.github_repo`)
    - A GitHub repository whose issues the dispatcher manages
    - Example: `YoroolGui/copilot-zenoh`
    - Contains: project-specific guidance and `zbobr.toml` config
@@ -97,10 +97,13 @@ zbobr task create "Title" --description "desc" --confirm    # create new task th
 
 Notes on TOML layout:
 
-- Root `zbobr.toml` contains a `[dispatcher]` table with dispatcher-specific keys and a `[repo]` table with repository config. Example:
+- Root `zbobr.toml` contains a `[dispatcher]` table with dispatcher-specific keys, a `[tasks]` table for the task backend, and a `[repo]` table with repository config. Example:
 
    [dispatcher]
-   task_repo = "owner/repo"
+   instance = "mybot"
+
+   [tasks]
+   github_repo = "owner/zbobr-test-tasks"
 
    [repo]
    repository = "owner/target-repo"
@@ -108,7 +111,7 @@ Notes on TOML layout:
 
   Stage-specific settings (tool, model, prompts) can be placed in nested tables under `[dispatcher]`. If a stage table is omitted the global defaults are used.
 
-Note: legacy top-level dispatcher-only TOML files are no longer supported; use the root `zbobr.toml` with `[dispatcher]` and `[repo]` tables.
+Note: legacy top-level dispatcher-only TOML files are no longer supported; use the root `zbobr.toml` with `[dispatcher]`, `[tasks]`, and `[repo]` tables.
 
 This is the recommended approach for task-project workflows, as it eliminates the need to manually specify `--repo-repository` and `--tasks-github-repo` on the command line.
 

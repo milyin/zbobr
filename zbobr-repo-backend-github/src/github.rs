@@ -161,6 +161,13 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
     Ok(GitHubRepo { full_name })
 }
 
+/// Normalize a GitHub repository reference to `owner/repo` format.
+/// Accepts HTTPS URLs, SSH URLs, and bare `owner/repo` strings.
+/// Returns an error if the input is not a valid GitHub repository reference.
+pub fn normalize_github_repo(repo_ref: &str) -> anyhow::Result<String> {
+    parse_github_repo(repo_ref).map(|r| r.full_name)
+}
+
 // ============================================================================
 // ZbobrRepoBackendGithub
 // ============================================================================

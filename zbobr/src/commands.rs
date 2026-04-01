@@ -16,7 +16,7 @@ use zbobr_dispatcher::{
 use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
-use zbobr_repo_backend_github::{ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig};
+use zbobr_repo_backend_github::{ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig, normalize_github_repo};
 use zbobr_task_backend_github::{TaskBackendGithub, ZbobrTaskBackendGithubConfig};
 use zbobr_utility::git_output;
 
@@ -198,8 +198,10 @@ pub async fn run(
     let workflow = Workflow::new(workflow_config)?;
 
     if !command.needs_backends() {
+        let normalized_repo = normalize_github_repo(&repo_config.repository)
+            .unwrap_or_else(|_| repo_config.repository.clone());
         let prompt_builder = ConfiguredPromptBuilder::new(Some(config_dir), Arc::new(workflow.clone()))
-            .with_var(VAR_DESTINATION_REPOSITORY, &repo_config.repository)
+            .with_var(VAR_DESTINATION_REPOSITORY, &normalized_repo)
             .with_var(VAR_DESTINATION_BRANCH, &repo_config.branch);
         return run_without_backends(command, &prompt_builder);
     }
