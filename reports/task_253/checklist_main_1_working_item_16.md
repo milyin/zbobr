@@ -1,0 +1,1 @@
+The current parse_github_repo trims `.git` before `/`, so URLs like `https://github.com/owner/repo.git/` are not normalized correctly — the trailing slash is stripped but `.git` remains. Fix: reverse the trim order to `/` → `.git` → `/`.
