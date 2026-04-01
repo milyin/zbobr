@@ -205,7 +205,12 @@ fn sanitize_branch_postfix(title: &str) -> String {
     let result = result.trim_end_matches('-').to_string();
     // truncate to 50 chars (char-based to avoid panicking on multi-byte Unicode)
     if result.chars().count() > 50 {
-        result.chars().take(50).collect::<String>().trim_end_matches('-').to_string()
+        result
+            .chars()
+            .take(50)
+            .collect::<String>()
+            .trim_end_matches('-')
+            .to_string()
     } else {
         result
     }
@@ -1419,9 +1424,7 @@ async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Re
     let identity = match task.identity() {
         Some(id) => id,
         None => {
-            let msg = format!(
-                "Task #{task_id} is missing work_branch — cannot ensure PR URL"
-            );
+            let msg = format!("Task #{task_id} is missing work_branch — cannot ensure PR URL");
             tracing::error!("{msg}");
             return Err(anyhow::anyhow!(msg));
         }

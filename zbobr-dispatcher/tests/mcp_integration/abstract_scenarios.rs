@@ -58,6 +58,15 @@ steps:
       path: result
       value: "deleted"
 
+- name: get_ctx_rec
+  operation:
+    type: tool_call
+    tool: get_ctx_rec
+    arguments:
+      id: "1"
+  assertions:
+    - type: success
+
 - name: report_success
   operation:
     type: tool_call
@@ -70,7 +79,6 @@ steps:
 "#
     .to_string()
 }
-
 
 /// Minimal scenario that just reports success (used for default-transition stages).
 pub fn report_and_finish_scenario() -> String {

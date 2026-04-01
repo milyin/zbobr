@@ -110,7 +110,9 @@ impl GitHubRepo {
 /// Returns true if `s` is a valid GitHub owner or repository name component.
 /// GitHub names may only contain alphanumeric characters, hyphens, underscores, and dots.
 fn is_valid_github_name(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
 }
 
 fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
@@ -480,8 +482,7 @@ impl ZbobrRepoBackendGithub {
         work_branch: &str,
         envs: &[(&str, &str)],
     ) -> anyhow::Result<bool> {
-        let refspec =
-            format!("refs/heads/{work_branch}:refs/remotes/origin/{work_branch}");
+        let refspec = format!("refs/heads/{work_branch}:refs/remotes/origin/{work_branch}");
 
         let ok = git_check_env(bare_dir, &["fetch", "origin", &refspec], envs).await?;
 
@@ -701,8 +702,7 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         Self::sync_local_base_ref(&bare_dir, base_branch).await?;
 
         // Phase 3: Fetch remote work branch
-        let remote_exists =
-            Self::fetch_remote_work_branch(&bare_dir, work_branch, &env).await?;
+        let remote_exists = Self::fetch_remote_work_branch(&bare_dir, work_branch, &env).await?;
 
         // Phase 4: Create worktree
         self.ensure_worktree_github(
@@ -979,7 +979,12 @@ mod tests {
     fn parse_rejects_bare_name() {
         let result = parse_github_repo("just-a-name");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid GitHub repository format"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid GitHub repository format")
+        );
     }
 
     #[test]
@@ -998,10 +1003,12 @@ mod tests {
         // SSH URLs with extra path components must be rejected
         let result = parse_github_repo("git@github.com:owner/repo/extra");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid GitHub SSH URL"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid GitHub SSH URL")
+        );
 
         // Empty owner segment
         let result2 = parse_github_repo("git@github.com:/repo");
@@ -1017,10 +1024,12 @@ mod tests {
         // SSH URLs must use git@github.com — other hosts must be rejected
         let result = parse_github_repo("git@gitlab.com:owner/repo");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid GitHub SSH URL"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid GitHub SSH URL")
+        );
 
         let result2 = parse_github_repo("git@bitbucket.org:owner/repo");
         assert!(result2.is_err());
@@ -1031,10 +1040,12 @@ mod tests {
         // HTTPS URLs must point to github.com specifically
         let result = parse_github_repo("https://gitlab.com/owner/repo");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid GitHub URL"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid GitHub URL")
+        );
 
         let result2 = parse_github_repo("https://notgithub.com/owner/repo");
         assert!(result2.is_err());
@@ -1072,7 +1083,12 @@ mod tests {
         // Only https:// is accepted — http:// must be rejected
         let result = parse_github_repo("http://github.com/owner/repo");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid GitHub URL"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid GitHub URL")
+        );
     }
 
     // ── from_config normalization tests ──────────────────────────────

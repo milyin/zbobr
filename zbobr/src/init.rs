@@ -143,7 +143,7 @@ fn default_config_toml() -> RootConfigToml {
 /// Build the default workflow configuration with predefined pipelines and roles.
 fn default_workflow() -> WorkflowConfig {
     use McpTool::{
-        AddChecklistItem, CheckChecklistItem, DeleteCtxRec, ReportFailure,
+        AddChecklistItem, CheckChecklistItem, DeleteCtxRec, GetCtxRec, ReportFailure,
         ReportIntermediate, ReportSuccess, StopWithError, StopWithQuestion,
     };
 
@@ -243,6 +243,7 @@ fn default_workflow() -> WorkflowConfig {
                     ReportIntermediate,
                     AddChecklistItem,
                     DeleteCtxRec,
+                    GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("planner.md")),
                 default_tool: None,
@@ -262,6 +263,7 @@ fn default_workflow() -> WorkflowConfig {
                     AddChecklistItem,
                     CheckChecklistItem,
                     DeleteCtxRec,
+                    GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("worker.md")),
                 ..Default::default()
@@ -277,6 +279,7 @@ fn default_workflow() -> WorkflowConfig {
                     ReportIntermediate,
                     AddChecklistItem,
                     DeleteCtxRec,
+                    GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("test_planner.md")),
                 ..Default::default()
@@ -294,6 +297,7 @@ fn default_workflow() -> WorkflowConfig {
                     AddChecklistItem,
                     CheckChecklistItem,
                     DeleteCtxRec,
+                    GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("test_worker.md")),
                 ..Default::default()
@@ -308,6 +312,7 @@ fn default_workflow() -> WorkflowConfig {
                     ReportFailure,
                     ReportIntermediate,
                     StopWithQuestion,
+                    GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("reviewer.md")),
                 ..Default::default()
@@ -321,6 +326,7 @@ fn default_workflow() -> WorkflowConfig {
                     ReportSuccess,
                     ReportFailure,
                     StopWithQuestion,
+                    GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("tester.md")),
                 ..Default::default()
@@ -662,13 +668,19 @@ mod tests {
     #[test]
     fn default_workflow_includes_test_stages() {
         let workflow = default_workflow();
-        let main = workflow.pipeline(Pipeline::MAIN).expect("main pipeline exists");
+        let main = workflow
+            .pipeline(Pipeline::MAIN)
+            .expect("main pipeline exists");
         assert!(main.stages.contains_key("test_planner"));
         assert!(main.stages.contains_key("test_worker"));
 
         let working = main.stages.get("working").expect("working stage exists");
         assert_eq!(
-            working.on_intermediate.as_ref().and_then(|t| t.next.as_ref()).map(|s| s.as_str()),
+            working
+                .on_intermediate
+                .as_ref()
+                .and_then(|t| t.next.as_ref())
+                .map(|s| s.as_str()),
             Some("test_planner")
         );
     }
@@ -676,7 +688,9 @@ mod tests {
     #[test]
     fn default_workflow_has_no_preparator_stage() {
         let workflow = default_workflow();
-        let main = workflow.pipeline(Pipeline::MAIN).expect("main pipeline exists");
+        let main = workflow
+            .pipeline(Pipeline::MAIN)
+            .expect("main pipeline exists");
 
         // Preparator stage must not exist in any pipeline
         assert!(

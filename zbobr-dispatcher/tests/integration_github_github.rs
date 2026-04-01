@@ -80,7 +80,6 @@ async fn test_github_github_abstract_all_mcp_tools() {
     abstract_test_helpers::run_all_mcp_tools(&env).await;
 }
 
-
 #[tokio::test]
 #[serial]
 #[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]

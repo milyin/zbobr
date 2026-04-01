@@ -34,7 +34,6 @@ async fn test_fs_fs_abstract_all_mcp_tools() {
     abstract_test_helpers::run_all_mcp_tools(&env).await;
 }
 
-
 #[tokio::test]
 async fn test_fs_fs_abstract_stage_transfer() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
