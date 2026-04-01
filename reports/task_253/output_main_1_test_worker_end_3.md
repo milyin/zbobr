@@ -1,0 +1,1 @@
+Reported failure. The `zbobr` crate has a compilation error in `commands.rs` that was left behind when the `Task` struct fields and dispatcher exports were removed in the prior working stage. 22 tests across 4 other packages all pass, but the 2 `default_workflow` tests in the `zbobr` crate can't run until that compilation issue is fixed.
