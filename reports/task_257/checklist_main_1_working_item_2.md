@@ -1,0 +1,1 @@
+In zbobr-dispatcher/tests/mcp_integration/abstract_scenarios.rs, add a `get_ctx_rec` step to the `all_mcp_tools_scenario()` function so the tool is covered in the integration test surface. The step should call the tool with an id (from a previously created ctx_rec) and assert success.
