@@ -1,0 +1,1 @@
+In zbobr-api/src/context/mod.rs, change comment formatting from `user:**{username}** {text}` to `user {username}: {text}` to match the requested simplified form. Also update the corresponding test assertion from `"- user:**alice** please proceed"` to `"- user alice: please proceed"`.
