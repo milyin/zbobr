@@ -128,8 +128,16 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
         }
         format!("{}/{}", parts[3], parts[4])
     } else if repo_ref.contains(':') {
-        // git@github.com:owner/repo — the part after ':' must be exactly owner/repo
-        let after_colon = repo_ref.rsplit(':').next().unwrap_or("");
+        // git@github.com:owner/repo — validate host is github.com and path is exactly owner/repo
+        let colon_pos = repo_ref.find(':').unwrap();
+        let host_part = &repo_ref[..colon_pos];
+        let after_colon = &repo_ref[colon_pos + 1..];
+        if host_part != "git@github.com" {
+            anyhow::bail!(
+                "Invalid GitHub SSH URL (expected 'git@github.com:owner/repo'): {}",
+                repo_ref
+            );
+        }
         let colon_parts: Vec<&str> = after_colon.split('/').collect();
         if colon_parts.len() != 2 || colon_parts[0].is_empty() || colon_parts[1].is_empty() {
             anyhow::bail!(
@@ -983,6 +991,20 @@ mod tests {
         // Empty repo segment (owner only)
         let result3 = parse_github_repo("git@github.com:owner/");
         assert!(result3.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_non_github_ssh_host() {
+        // SSH URLs must use git@github.com — other hosts must be rejected
+        let result = parse_github_repo("git@gitlab.com:owner/repo");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid GitHub SSH URL"));
+
+        let result2 = parse_github_repo("git@bitbucket.org:owner/repo");
+        assert!(result2.is_err());
     }
 
     #[test]
