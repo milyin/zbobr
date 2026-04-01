@@ -120,4 +120,62 @@ mod tests {
     fn repo_short_name_trailing_slash() {
         assert_eq!(config_with_repo("owner/my-repo/").repo_short_name(), "my-repo");
     }
+
+    fn config_with_repo_and_branch(
+        repository: &str,
+        branch: &str,
+        token: Secret,
+    ) -> ZbobrRepoBackendGithubConfig {
+        ZbobrRepoBackendGithubConfig {
+            repository: repository.to_string(),
+            branch: branch.to_string(),
+            github_token: token,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn validate_ok_when_all_fields_set() {
+        let mut config =
+            config_with_repo_and_branch("owner/repo", "main", Secret::value("ghp_token123"));
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_fails_when_repository_empty() {
+        let mut config =
+            config_with_repo_and_branch("", "main", Secret::value("ghp_token123"));
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("repository not set"));
+    }
+
+    #[test]
+    fn validate_fails_when_branch_empty() {
+        let mut config =
+            config_with_repo_and_branch("owner/repo", "", Secret::value("ghp_token123"));
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("branch not set"));
+    }
+
+    #[test]
+    fn validate_fails_when_token_empty() {
+        let mut config =
+            config_with_repo_and_branch("owner/repo", "main", Secret::value(""));
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("GitHub token not set"));
+    }
+
+    #[test]
+    fn validate_fails_when_token_env_missing() {
+        unsafe {
+            std::env::remove_var("ZBOBR_TEST_VALIDATE_MISSING_TOKEN");
+        }
+        let mut config = config_with_repo_and_branch(
+            "owner/repo",
+            "main",
+            Secret::env("ZBOBR_TEST_VALIDATE_MISSING_TOKEN"),
+        );
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("GitHub token not set"));
+    }
 }

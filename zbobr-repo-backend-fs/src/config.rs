@@ -103,4 +103,36 @@ mod tests {
     fn repo_short_name_bare_name() {
         assert_eq!(config_with_repo("my-repo").repo_short_name(), "my-repo");
     }
+
+    #[test]
+    fn validate_ok_when_repository_and_branch_set() {
+        let config = ZbobrRepoBackendFsConfig {
+            repository: "/home/user/repo".to_string(),
+            branch: "main".to_string(),
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_fails_when_repository_empty() {
+        let config = ZbobrRepoBackendFsConfig {
+            repository: String::new(),
+            branch: "main".to_string(),
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("repository not set"));
+    }
+
+    #[test]
+    fn validate_fails_when_branch_empty() {
+        let config = ZbobrRepoBackendFsConfig {
+            repository: "/home/user/repo".to_string(),
+            branch: String::new(),
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("branch not set"));
+    }
 }
