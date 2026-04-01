@@ -1,0 +1,1 @@
+Remove `pub destination_repository: Option<String>` and `pub destination_branch: Option<String>` from the Task struct in zbobr-api/src/task.rs. These fields are no longer needed since the single-repo config is in the backend. Also update the `identity()` method and all test helpers that construct Task structs.
