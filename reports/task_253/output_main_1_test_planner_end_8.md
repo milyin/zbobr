@@ -1,0 +1,1 @@
+No additional tests are needed for the latest changes. The `.git/` URL normalization fix already ships with 2 dedicated tests, the FS `ensure_pr_url` simplification is covered by existing integration tests, and the dry-run prompt wiring is top-level dispatch not practically unit-testable. Report submitted.
