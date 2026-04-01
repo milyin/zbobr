@@ -160,7 +160,7 @@ zbobr/ (repo root)
 └── README.md               # This file
 
 YoroolGui/copilot-zenoh/ (Task Project - created by zbobr setup)
-├── zbobr.toml              # zbobr configuration (fork owner, default model)
+├── zbobr.toml              # zbobr configuration (default model, stage settings)
 ├── prompts/
 │   ├── common.md           # Shared context and domain knowledge
 │   ├── planner.md          # Additional planner context

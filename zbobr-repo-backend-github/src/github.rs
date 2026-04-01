@@ -149,6 +149,10 @@ pub struct ZbobrRepoBackendGithub {
 impl ZbobrRepoBackendGithub {
     pub fn from_config(mut backend_config: ZbobrRepoBackendGithubConfig) -> anyhow::Result<Self> {
         backend_config.validate()?;
+        // Normalize repository to "owner/repo" format so all downstream API calls work
+        // regardless of whether the user supplied an HTTPS URL, SSH URL, or bare "owner/repo".
+        let repo = parse_github_repo(&backend_config.repository)?;
+        backend_config.repository = repo.full_name;
         let token = backend_config.github_token.as_ref().to_owned();
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(token)

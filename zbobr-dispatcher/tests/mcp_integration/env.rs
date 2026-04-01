@@ -251,7 +251,7 @@ pub async fn init_github_github(
         name,
         zbobr,
         dispatcher_factory,
-        target_repo: Some(task_repo),
+        target_repo: Some(repository),
     }))
 }
 
