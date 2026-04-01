@@ -144,13 +144,16 @@ struct MdRecord {
     brief: String,
     id: u64,
     report_link: Option<String>,
+    for_prompt: bool,
 }
 
 impl fmt::Display for MdRecord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}{}", self.record_type.prefix(), self.brief)?;
         let id_tag = format!("ctx_rec_{}", self.id);
-        if let Some(url) = &self.report_link {
+        if self.for_prompt {
+            write!(f, " [{}]", id_tag)
+        } else if let Some(url) = &self.report_link {
             write!(f, " <sub>[{}]({})</sub>", id_tag, url)
         } else {
             write!(f, " <sub>{}</sub>", id_tag)
@@ -197,6 +200,7 @@ impl FromStr for MdRecord {
             brief,
             id,
             report_link,
+            for_prompt: false,
         })
     }
 }
@@ -224,7 +228,11 @@ impl MdRecord {
     }
 
     /// Convert from a domain `ContextRecord`, optionally transforming report URLs.
-    fn from_context_record(r: &ContextRecord, report_url: Option<&dyn Fn(&str) -> String>) -> Self {
+    fn from_context_record(
+        r: &ContextRecord,
+        for_prompt: bool,
+        report_url: Option<&dyn Fn(&str) -> String>,
+    ) -> Self {
         let report_link = r.report_link.as_ref().map(|filename| {
             if filename.starts_with("http://") || filename.starts_with("https://") {
                 filename.clone()
@@ -240,6 +248,7 @@ impl MdRecord {
             brief: r.brief.clone(),
             id: r.id,
             report_link,
+            for_prompt,
         }
     }
 
@@ -269,46 +278,47 @@ struct MdCompactComment {
     text: String,
     timestamp: DateTime<FixedOffset>,
     url: Option<String>,
+    for_prompt: bool,
 }
 
 impl MdCompactComment {
     fn from_comment(c: &Comment, for_prompt: bool) -> Self {
-        let comment_text = if for_prompt {
-            // put to context as is
-            c.body.to_string()
-        } else if c.body.len() <= COMPACT_COMMENT_MAX_LEN {
-            // short comment, use full text with line breaks replaced by spaces to keep format "ine stage - one line"
-            c.body.lines().collect::<Vec<_>>().join(" ")
-        } else {
-            // long comment, truncate and replace line breaks with spaces
-            let truncated = c
-                .body
-                .chars()
-                .take(COMPACT_COMMENT_MAX_LEN)
-                .collect::<String>()
-                .lines()
-                .collect::<Vec<_>>()
-                .join(" ");
-            format!("{}...", truncated)
-        };
-
         let username = if c.username.is_empty() {
             "unknown"
         } else {
             &c.username
         };
-        let text = format!("user:**{}** {}", username, comment_text);
+
+        let text = if for_prompt {
+            // For agent prompts: use plain format with full body
+            format!("user {}: {}", username, c.body)
+        } else if c.body.len() <= COMPACT_COMMENT_MAX_LEN {
+            let joined = c.body.lines().collect::<Vec<_>>().join(" ");
+            format!("user:**{}** {}", username, joined)
+        } else {
+            let truncated = c
+                .body
+                .chars()
+                .take(COMPACT_COMMENT_MAX_LEN)
+                .collect::<String>();
+            let joined = truncated.lines().collect::<Vec<_>>().join(" ");
+            format!("user:**{}** {}...", username, joined)
+        };
 
         MdCompactComment {
             text,
             timestamp: c.timestamp,
             url: c.url.clone(),
+            for_prompt,
         }
     }
 }
 
 impl fmt::Display for MdCompactComment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.for_prompt {
+            return write!(f, "- {}", self.text);
+        }
         write!(f, "- {} `{}`", self.text, format_timestamp(&self.timestamp))?;
         if let Some(url) = &self.url {
             write!(f, " <sub>[link]({})</sub>", url)?;
@@ -333,11 +343,16 @@ impl fmt::Display for MdCompactComment {
 struct MdStage {
     title: MdStageTitle,
     records: Vec<MdRecord>,
+    for_prompt: bool,
 }
 
 impl fmt::Display for MdStage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "- {}", self.title)?;
+        if self.for_prompt {
+            writeln!(f, "- {}", self.title.stage)?;
+        } else {
+            writeln!(f, "- {}", self.title)?;
+        }
 
         // Flatten output: all records on the same level
         // Reorder so first non-checkbox item is first in output
@@ -385,7 +400,11 @@ impl FromStr for MdStage {
                 records.push(record);
             }
         }
-        Ok(MdStage { title, records })
+        Ok(MdStage {
+            title,
+            records,
+            for_prompt: false,
+        })
     }
 }
 
@@ -433,10 +452,14 @@ impl MdStage {
         let records = stage
             .records
             .iter()
-            .map(|r| MdRecord::from_context_record(r, report_url))
+            .map(|r| MdRecord::from_context_record(r, for_prompt, report_url))
             .collect();
 
-        MdStage { title, records }
+        MdStage {
+            title,
+            records,
+            for_prompt,
+        }
     }
 
     /// Convert to a domain `StageContext`.
@@ -469,16 +492,19 @@ enum MdEntry {
 #[derive(Debug, Clone)]
 struct MdContext {
     entries: Vec<MdEntry>,
+    for_prompt: bool,
 }
 
 impl fmt::Display for MdContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Add <!-- stage --> markers before stage entries when compact comments are present
         // so parsers can distinguish stage lines from compact comment lines.
-        let has_compact = self
-            .entries
-            .iter()
-            .any(|e| matches!(e, MdEntry::CompactComment(_)));
+        // In prompt mode, these markers are omitted to reduce noise.
+        let has_compact = !self.for_prompt
+            && self
+                .entries
+                .iter()
+                .any(|e| matches!(e, MdEntry::CompactComment(_)));
 
         for entry in &self.entries {
             match entry {
@@ -536,6 +562,7 @@ impl FromStr for MdContext {
                     current_stage = Some(MdStage {
                         title,
                         records: Vec::new(),
+                        for_prompt: false,
                     });
                 }
                 // else: compact comment line or unknown `- ` line — skip silently
@@ -550,7 +577,10 @@ impl FromStr for MdContext {
             entries.push(MdEntry::Stage(stage));
         }
 
-        Ok(MdContext { entries })
+        Ok(MdContext {
+            entries,
+            for_prompt: false,
+        })
     }
 }
 
@@ -578,10 +608,12 @@ impl MdContext {
         let mut events: Vec<(DateTime<FixedOffset>, MdEntry)> = Vec::new();
 
         for stage in &ctx.stages {
-            events.push((
-                stage.info.timestamp,
-                MdEntry::Stage(MdStage::from_stage_context(stage, for_prompt, report_url)),
-            ));
+            let md_stage = MdStage::from_stage_context(stage, for_prompt, report_url);
+            // When rendering for agent prompts, skip stages with no records (e.g. failed stages)
+            if for_prompt && md_stage.records.is_empty() {
+                continue;
+            }
+            events.push((stage.info.timestamp, MdEntry::Stage(md_stage)));
         }
 
         for comment in comments {
@@ -595,6 +627,7 @@ impl MdContext {
 
         MdContext {
             entries: events.into_iter().map(|(_, e)| e).collect(),
+            for_prompt,
         }
     }
 
@@ -758,8 +791,15 @@ mod tests {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], true, None);
 
+        // Stage header should only contain the stage name
+        assert!(output.contains("- planning\n"));
+        assert!(output.contains("- working\n"));
+        // Metadata (tool, model, timestamp, prompt link) should not appear
+        assert!(!output.contains("`claude`"));
+        assert!(!output.contains("`claude-opus-4.6`"));
         assert!(!output.contains("](prompts/plan.md)"));
-        assert!(output.contains("`claude` `claude-opus-4.6`"));
+        // Records should use plain [ctx_rec_N] format
+        assert!(output.contains("[ctx_rec_3]"));
     }
 
     #[test]
@@ -846,10 +886,12 @@ mod tests {
     fn roundtrip_for_prompt_loses_prompt_link() {
         let original = sample_context();
         let serialized = serialize_context(&original, &[], true, None);
-        let parsed = parse_context(&serialized).unwrap();
 
-        // prompt_link should be None since for_prompt=true omitted it
-        assert!(parsed.stages[0].info.prompt_link.is_none());
+        // for_prompt output is not meant to be parsed back — verify the rendered format instead
+        // Stage name only (no metadata)
+        assert!(serialized.contains("- planning\n"));
+        // prompt_link not present
+        assert!(!serialized.contains("prompts/plan.md"));
     }
 
     #[test]
@@ -857,10 +899,13 @@ mod tests {
         let mut ctx = sample_context();
         ctx.stages[0].info.output_link = Some("outputs/plan_output.md".to_string());
         let serialized = serialize_context(&ctx, &[], true, None);
-        let parsed = parse_context(&serialized).unwrap();
 
-        assert!(parsed.stages[0].info.prompt_link.is_none());
-        assert!(parsed.stages[0].info.output_link.is_none());
+        // for_prompt output is not meant to be parsed back — verify the rendered format instead
+        // Neither prompt nor output links should appear
+        assert!(!serialized.contains("prompts/plan.md"));
+        assert!(!serialized.contains("outputs/plan_output.md"));
+        // Stage name only
+        assert!(serialized.contains("- planning\n"));
     }
 
     #[test]
@@ -1017,6 +1062,7 @@ mod tests {
             brief: "All tests passed".to_string(),
             id: 42,
             report_link: Some("reports/test.md".to_string()),
+            for_prompt: false,
         };
         let s = record.to_string();
         let parsed: MdRecord = s.parse().unwrap();
@@ -1033,6 +1079,7 @@ mod tests {
             brief: "Todo item".to_string(),
             id: 1,
             report_link: None,
+            for_prompt: false,
         };
         let s = record.to_string();
         let parsed: MdRecord = s.parse().unwrap();
@@ -1062,14 +1109,17 @@ mod tests {
                     brief: "Item 1".to_string(),
                     id: 1,
                     report_link: None,
+                    for_prompt: false,
                 },
                 MdRecord {
                     record_type: MdRecordType::Success,
                     brief: "Done".to_string(),
                     id: 2,
                     report_link: Some("r.md".to_string()),
+                    for_prompt: false,
                 },
             ],
+            for_prompt: false,
         };
         let s = stage.to_string();
         let parsed: MdStage = s.parse().unwrap();
@@ -1182,6 +1232,15 @@ mod tests {
     }
 
     #[test]
+    fn stage_marker_not_added_in_prompt_mode() {
+        let ctx = sample_context();
+        let comments = vec![make_comment("a comment", "2024-01-01T00:30:00Z", None)];
+        // Even with compact comments present, prompt mode should NOT emit stage markers
+        let output = serialize_context(&ctx, &comments, true, None);
+        assert!(!output.contains("<!-- stage -->"));
+    }
+
+    #[test]
     fn compact_comment_roundtrip_preserves_context() {
         // When compact comments are present, the TaskContext should still be parsed correctly
         let ctx = sample_context();
@@ -1202,9 +1261,10 @@ mod tests {
         let ctx = TaskContext::default();
         let comments = vec![make_comment("a user comment", "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, true, None);
-        // Prompt mode now shares compact comment format, not blockquote.
+        // Prompt mode renders comments without timestamp or link
         assert!(!output.contains("> **["));
-        assert!(output.contains("- user:**unknown** a user comment `2024-01-01 00:00:00 +0000`"));
+        assert!(output.contains("- user unknown: a user comment"));
+        assert!(!output.contains("`2024-01-01 00:00:00 +0000`"));
     }
 
     #[test]
@@ -1213,10 +1273,408 @@ mod tests {
         let ctx = TaskContext::default();
         let comments = vec![make_comment(&long_text, "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, true, None);
-        assert!(output.contains(&format!(
-            "- user:**unknown** {} `2024-01-01 00:00:00 +0000`",
-            long_text
-        )));
+        assert!(output.contains(&format!("- user unknown: {}", long_text)));
         assert!(!output.contains("..."));
+    }
+
+    // -- Display impl unit tests for for_prompt=true --
+
+    #[test]
+    fn md_record_display_for_prompt() {
+        let record = MdRecord {
+            record_type: MdRecordType::Success,
+            brief: "Plan completed".to_string(),
+            id: 7,
+            report_link: Some("reports/plan.md".to_string()),
+            for_prompt: true,
+        };
+        let rendered = record.to_string();
+        // Should use plain [ctx_rec_N] format
+        assert_eq!(rendered, "- ✅ Plan completed [ctx_rec_7]");
+        // Must NOT contain <sub> or URL
+        assert!(!rendered.contains("<sub>"));
+        assert!(!rendered.contains("reports/plan.md"));
+    }
+
+    #[test]
+    fn md_compact_comment_display_for_prompt() {
+        let comment = Comment {
+            timestamp: utc("2024-06-15T12:00:00Z"),
+            username: "alice".to_string(),
+            body: "please proceed".to_string(),
+            url: Some("https://example.com/comment/1".to_string()),
+        };
+        let compact = MdCompactComment::from_comment(&comment, true);
+        let rendered = compact.to_string();
+        // Should render as simple list item with user prefix
+        assert_eq!(rendered, "- user alice: please proceed");
+        // Must NOT contain timestamp or URL
+        assert!(!rendered.contains("2024-06-15"));
+        assert!(!rendered.contains("https://example.com"));
+        assert!(!rendered.contains("<sub>"));
+    }
+
+    #[test]
+    fn md_stage_display_for_prompt() {
+        let stage = MdStage {
+            title: MdStageTitle {
+                instance: "default".to_string(),
+                timestamp: utc("2024-01-01T00:00:00Z"),
+                pipeline: Pipeline::from("main"),
+                run_id: 1,
+                stage: Stage::new("planning"),
+                tool: Some(crate::task::Tool::Claude),
+                model: Some(Model::ClaudeOpus4_6),
+                prompt_link: Some("prompts/plan.md".to_string()),
+                output_link: None,
+            },
+            records: vec![MdRecord {
+                record_type: MdRecordType::Success,
+                brief: "Done".to_string(),
+                id: 1,
+                report_link: None,
+                for_prompt: true,
+            }],
+            for_prompt: true,
+        };
+        let rendered = stage.to_string();
+        // Stage header should only show the stage name
+        assert!(rendered.starts_with("- planning\n"));
+        // Must NOT contain metadata
+        assert!(!rendered.contains("`claude`"));
+        assert!(!rendered.contains("claude-opus-4.6"));
+        assert!(!rendered.contains("2024-01-01"));
+        assert!(!rendered.contains("prompts/plan.md"));
+    }
+
+    // -- Empty stage filtering tests --
+
+    #[test]
+    fn for_prompt_filters_empty_stages() {
+        let ctx = TaskContext {
+            stages: vec![
+                StageContext {
+                    info: StageInfo {
+                        instance: "default".to_string(),
+                        pipeline: Pipeline::from("main"),
+                        run_id: 1,
+                        stage: Stage::new("planning"),
+                        tool: Some(crate::task::Tool::Claude),
+                        model: Some(Model::ClaudeOpus4_6),
+                        prompt_link: None,
+                        output_link: None,
+                        timestamp: utc("2024-01-01T00:00:00Z"),
+                    },
+                    records: vec![ContextRecord {
+                        id: 1,
+                        record_type: ContextRecordType::Success,
+                        brief: "Plan completed".to_string(),
+                        report_link: None,
+                    }],
+                },
+                // Empty stage (no records) — should be filtered in for_prompt mode
+                StageContext {
+                    info: StageInfo {
+                        instance: "default".to_string(),
+                        pipeline: Pipeline::from("main"),
+                        run_id: 1,
+                        stage: Stage::new("working"),
+                        tool: None,
+                        model: None,
+                        prompt_link: None,
+                        output_link: None,
+                        timestamp: utc("2024-01-01T01:00:00Z"),
+                    },
+                    records: vec![],
+                },
+                StageContext {
+                    info: StageInfo {
+                        instance: "default".to_string(),
+                        pipeline: Pipeline::from("main"),
+                        run_id: 1,
+                        stage: Stage::new("reviewing"),
+                        tool: None,
+                        model: None,
+                        prompt_link: None,
+                        output_link: None,
+                        timestamp: utc("2024-01-01T02:00:00Z"),
+                    },
+                    records: vec![ContextRecord {
+                        id: 2,
+                        record_type: ContextRecordType::Comment,
+                        brief: "Looks good".to_string(),
+                        report_link: None,
+                    }],
+                },
+            ],
+        };
+
+        // for_prompt=true: empty stages should be filtered out
+        let prompt_output = serialize_context(&ctx, &[], true, None);
+        assert!(
+            prompt_output.contains("- planning\n"),
+            "stage with records should appear"
+        );
+        assert!(
+            !prompt_output.contains("working"),
+            "empty stage should be filtered out in for_prompt mode"
+        );
+        assert!(
+            prompt_output.contains("- reviewing\n"),
+            "stage with records should appear"
+        );
+
+        // for_prompt=false: ALL stages should appear, including empty ones
+        let full_output = serialize_context(&ctx, &[], false, None);
+        assert!(
+            full_output.contains("**planning**"),
+            "stage with records should appear"
+        );
+        assert!(
+            full_output.contains("**working**"),
+            "empty stage should NOT be filtered in normal mode"
+        );
+        assert!(
+            full_output.contains("**reviewing**"),
+            "stage with records should appear"
+        );
+    }
+
+    // -- End-to-end prompt format validation --
+
+    #[test]
+    fn for_prompt_renders_complete_format() {
+        // Build a realistic context with multiple stages, one empty, and interleaved comments
+        let ctx = TaskContext {
+            stages: vec![
+                StageContext {
+                    info: StageInfo {
+                        instance: "skynet".to_string(),
+                        pipeline: Pipeline::from("main"),
+                        run_id: 1,
+                        stage: Stage::new("planning"),
+                        tool: Some(crate::task::Tool::Claude),
+                        model: Some(Model::ClaudeOpus4_6),
+                        prompt_link: Some("prompts/plan.md".to_string()),
+                        output_link: Some("outputs/plan_out.md".to_string()),
+                        timestamp: utc("2024-06-01T10:00:00Z"),
+                    },
+                    records: vec![
+                        ContextRecord {
+                            id: 1,
+                            record_type: ContextRecordType::Comment,
+                            brief: "Plan ready for review".to_string(),
+                            report_link: Some("reports/plan_review.md".to_string()),
+                        },
+                        ContextRecord {
+                            id: 2,
+                            record_type: ContextRecordType::Checkbox(true),
+                            brief: "Define API schema".to_string(),
+                            report_link: None,
+                        },
+                    ],
+                },
+                // Empty stage — should be filtered out in for_prompt mode
+                StageContext {
+                    info: StageInfo {
+                        instance: "skynet".to_string(),
+                        pipeline: Pipeline::from("main"),
+                        run_id: 1,
+                        stage: Stage::new("working"),
+                        tool: Some(crate::task::Tool::Copilot),
+                        model: Some(Model::ClaudeSonnet4_6),
+                        prompt_link: None,
+                        output_link: None,
+                        timestamp: utc("2024-06-01T11:00:00Z"),
+                    },
+                    records: vec![],
+                },
+                StageContext {
+                    info: StageInfo {
+                        instance: "skynet".to_string(),
+                        pipeline: Pipeline::from("main"),
+                        run_id: 1,
+                        stage: Stage::new("reviewing"),
+                        tool: Some(crate::task::Tool::Claude),
+                        model: Some(Model::ClaudeOpus4_6),
+                        prompt_link: Some("prompts/review.md".to_string()),
+                        output_link: None,
+                        timestamp: utc("2024-06-01T13:00:00Z"),
+                    },
+                    records: vec![
+                        ContextRecord {
+                            id: 3,
+                            record_type: ContextRecordType::Success,
+                            brief: "Review passed".to_string(),
+                            report_link: Some("reports/review_ok.md".to_string()),
+                        },
+                        ContextRecord {
+                            id: 4,
+                            record_type: ContextRecordType::Checkbox(true),
+                            brief: "All tests green".to_string(),
+                            report_link: None,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        // Comments interleaved between stages
+        let comments = vec![
+            Comment {
+                timestamp: utc("2024-06-01T10:30:00Z"),
+                username: "milyin".to_string(),
+                body: "proceed with the plan".to_string(),
+                url: Some("https://github.com/example/issues/1#comment-1".to_string()),
+            },
+            Comment {
+                timestamp: utc("2024-06-01T12:00:00Z"),
+                username: "milyin".to_string(),
+                body: "looks good so far".to_string(),
+                url: None,
+            },
+        ];
+
+        let output = serialize_context(&ctx, &comments, true, None);
+
+        // 1. No <!-- stage --> markers anywhere
+        assert!(
+            !output.contains("<!-- stage -->"),
+            "prompt output must not contain stage markers"
+        );
+
+        // 2. Stage headers are just "- {stage_name}" (no metadata)
+        assert!(
+            output.contains("- planning\n"),
+            "planning stage should appear as plain name"
+        );
+        assert!(
+            output.contains("- reviewing\n"),
+            "reviewing stage should appear as plain name"
+        );
+
+        // 3. Empty "working" stage is filtered out
+        assert!(
+            !output.contains("working"),
+            "empty working stage should be filtered out"
+        );
+
+        // 4. No stage metadata leaks (no tool, model, timestamps, prompt/output links)
+        assert!(!output.contains("`claude`"), "no tool metadata");
+        assert!(!output.contains("claude-opus-4.6"), "no model metadata");
+        assert!(
+            !output.contains("2024-06-01 10:00:00"),
+            "no timestamps in stage headers"
+        );
+        assert!(!output.contains("prompts/"), "no prompt links");
+        assert!(!output.contains("outputs/"), "no output links");
+
+        // 5. Records use plain [ctx_rec_N] (no <sub>, no URLs)
+        assert!(
+            output.contains("[ctx_rec_1]"),
+            "record should have plain ctx_rec tag"
+        );
+        assert!(
+            output.contains("[ctx_rec_3]"),
+            "record should have plain ctx_rec tag"
+        );
+        assert!(!output.contains("<sub>"), "no <sub> tags in prompt output");
+        assert!(
+            !output.contains("reports/"),
+            "no report URLs in prompt output"
+        );
+
+        // 6. Comments are plain "- user {name}: {body}" (no timestamp, no URL, no bold)
+        assert!(
+            output.contains("- user milyin: proceed with the plan"),
+            "comment should use plain format"
+        );
+        assert!(
+            output.contains("- user milyin: looks good so far"),
+            "comment should use plain format"
+        );
+        assert!(
+            !output.contains("user:**milyin**"),
+            "no bold in prompt comments"
+        );
+        assert!(
+            !output.contains("https://github.com/example"),
+            "no URLs in prompt comments"
+        );
+
+        // 7. Records are properly indented under stages
+        assert!(
+            output.contains("  - 💬 Plan ready for review [ctx_rec_1]"),
+            "non-checkbox record indented with 2 spaces"
+        );
+        assert!(
+            output.contains("    - [x] Define API schema [ctx_rec_2]"),
+            "checkbox record indented with 4 spaces"
+        );
+
+        // 8. Verify correct ordering (planning, comment, comment, reviewing)
+        let planning_pos = output.find("- planning").unwrap();
+        let comment1_pos = output.find("proceed with the plan").unwrap();
+        let comment2_pos = output.find("looks good so far").unwrap();
+        let reviewing_pos = output.find("- reviewing").unwrap();
+        assert!(
+            planning_pos < comment1_pos
+                && comment1_pos < comment2_pos
+                && comment2_pos < reviewing_pos,
+            "entries must be ordered chronologically"
+        );
+    }
+
+    // -- Multi-line comment in for_prompt mode --
+
+    #[test]
+    fn for_prompt_preserves_multiline_comment_body() {
+        let ctx = TaskContext::default();
+        let multiline_body = "proceed with plan\nalso fix the bug\nand update docs";
+        let comments = vec![Comment {
+            timestamp: utc("2024-06-01T10:00:00Z"),
+            username: "alice".to_string(),
+            body: multiline_body.to_string(),
+            url: Some("https://example.com/comment/1".to_string()),
+        }];
+
+        // for_prompt=true: full multi-line body should be preserved
+        let prompt_output = serialize_context(&ctx, &comments, true, None);
+        assert!(
+            prompt_output.contains("proceed with plan"),
+            "first line should appear in prompt mode"
+        );
+        assert!(
+            prompt_output.contains("also fix the bug"),
+            "second line should appear in prompt mode"
+        );
+        assert!(
+            prompt_output.contains("and update docs"),
+            "third line should appear in prompt mode"
+        );
+        assert!(
+            prompt_output
+                .starts_with("- user alice: proceed with plan\nalso fix the bug\nand update docs"),
+            "full multi-line body should be preserved verbatim"
+        );
+
+        // for_prompt=false: lines should be joined with spaces in non-prompt mode
+        let normal_output = serialize_context(&ctx, &comments, false, None);
+        assert!(
+            normal_output.contains("proceed with plan"),
+            "first line should appear in normal mode"
+        );
+        assert!(
+            normal_output.contains("also fix the bug"),
+            "second line should appear in normal mode (joined with space)"
+        );
+        assert!(
+            normal_output.contains("and update docs"),
+            "third line should appear in normal mode (joined with space)"
+        );
+        assert!(
+            normal_output.contains("proceed with plan also fix the bug and update docs"),
+            "lines should be joined with spaces in normal mode"
+        );
     }
 }

@@ -15,8 +15,8 @@ use zbobr_api::config_tools::McpTool;
 use crate::{
     mcp::{
         common::{
-            AddChecklistItemParam, CheckChecklistItemParam, DeleteCtxRecParam, MessageParam,
-            ReportParam,
+            AddChecklistItemParam, CheckChecklistItemParam, DeleteCtxRecParam, GetCtxRecParam,
+            MessageParam, ReportParam,
         },
         traits::CommonMcpImpl,
     },
@@ -150,6 +150,13 @@ impl UnifiedMcp {
     )]
     async fn delete_ctx_rec(&self, Parameters(params): Parameters<DeleteCtxRecParam>) -> String {
         self.delete_ctx_rec_impl(&params.id).await
+    }
+
+    #[tool(
+        description = "Get the content of a context record by its id. Returns the full report content if available, or the brief summary. Accepts either a numeric id or a string like 'ctx_rec_5'."
+    )]
+    async fn get_ctx_rec(&self, Parameters(params): Parameters<GetCtxRecParam>) -> String {
+        self.get_ctx_rec_impl(&params.id).await
     }
 
     #[tool(description = "Report an error to the user and pause task processing")]

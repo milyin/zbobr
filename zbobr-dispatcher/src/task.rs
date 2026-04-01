@@ -291,6 +291,26 @@ impl RoleSession {
         Ok(exists)
     }
 
+    /// Get the content of a context record by id.
+    /// Returns the report file content if a report link is present, otherwise the brief.
+    pub async fn get_context_record_content(
+        &self,
+        record_id: u64,
+    ) -> anyhow::Result<Option<String>> {
+        let task = self.get_task().await?;
+        match task.context.find_record(record_id) {
+            Some((_, record)) => {
+                if let Some(ref link) = record.report_link {
+                    let content = self.read_report(link).await?;
+                    Ok(Some(content))
+                } else {
+                    Ok(Some(record.brief.clone()))
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
     /// Add a context record of a specific type to the current stage.
     /// Returns the assigned record id.
     pub async fn add_context_record(
@@ -988,5 +1008,138 @@ mod comment_model_tests {
             .await
             .unwrap();
         assert_eq!(failure_report, "detailed failure report");
+    }
+
+    #[tokio::test]
+    async fn get_context_record_content_returns_report_or_brief() {
+        let (zbobr, task_backend) = make_test_parts();
+        let id = zbobr.create_task("t", "desc", "READY").await.unwrap();
+
+        // Add a stage with two records: one with report_link, one without
+        {
+            let weak = task_backend.get_task(id).await.unwrap();
+            let mutable = weak.upgrade().await.unwrap();
+
+            // Store a report file
+            let filename = mutable
+                .store_report("test_report", "full report content here")
+                .await
+                .unwrap();
+
+            mutable
+                .modify_task(Box::new(move |mut task| {
+                    task.context.stages.push(StageContext {
+                        info: StageInfo {
+                            instance: "default".to_string(),
+                            pipeline: Pipeline::Main,
+                            run_id: 1,
+                            stage: Stage::new("working"),
+                            tool: Some(Tool::Copilot),
+                            model: Some(Model::Gpt5Mini),
+                            prompt_link: None,
+                            output_link: None,
+                            timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
+                        },
+                        records: vec![
+                            ContextRecord {
+                                id: 1,
+                                record_type: ContextRecordType::Success,
+                                brief: "with report".to_string(),
+                                report_link: Some(filename),
+                            },
+                            ContextRecord {
+                                id: 2,
+                                record_type: ContextRecordType::Comment,
+                                brief: "brief only text".to_string(),
+                                report_link: None,
+                            },
+                        ],
+                    });
+                    task
+                }))
+                .await
+                .unwrap();
+        }
+
+        let session = zbobr.role_session(id);
+
+        // Record with report_link → returns full report content
+        let content = session.get_context_record_content(1).await.unwrap();
+        assert_eq!(content, Some("full report content here".to_string()));
+
+        // Record without report_link → returns brief
+        let content = session.get_context_record_content(2).await.unwrap();
+        assert_eq!(content, Some("brief only text".to_string()));
+
+        // Non-existent record → returns None
+        let content = session.get_context_record_content(999).await.unwrap();
+        assert_eq!(content, None);
+    }
+
+    #[tokio::test]
+    async fn get_ctx_rec_returns_content() {
+        let (zbobr, task_backend) = make_test_parts();
+        let id = zbobr.create_task("t", "desc", "READY").await.unwrap();
+
+        // Set up a stage with a record that has a report
+        {
+            let weak = task_backend.get_task(id).await.unwrap();
+            let mutable = weak.upgrade().await.unwrap();
+
+            let filename = mutable
+                .store_report("mcp_report", "mcp report content")
+                .await
+                .unwrap();
+
+            mutable
+                .modify_task(Box::new(move |mut task| {
+                    task.context.stages.push(StageContext {
+                        info: StageInfo {
+                            instance: "default".to_string(),
+                            pipeline: Pipeline::Main,
+                            run_id: 1,
+                            stage: Stage::new("working"),
+                            tool: Some(Tool::Copilot),
+                            model: Some(Model::Gpt5Mini),
+                            prompt_link: None,
+                            output_link: None,
+                            timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
+                        },
+                        records: vec![ContextRecord {
+                            id: 1,
+                            record_type: ContextRecordType::Success,
+                            brief: "done".to_string(),
+                            report_link: Some(filename),
+                        }],
+                    });
+                    task
+                }))
+                .await
+                .unwrap();
+        }
+
+        let mcp = make_test_mcp(&zbobr, id);
+
+        // Valid record ID → returns report content
+        let result = mcp.get_ctx_rec_impl("1").await;
+        assert_eq!(result, "mcp report content");
+
+        // Also works with ctx_rec_N format
+        let result = mcp.get_ctx_rec_impl("ctx_rec_1").await;
+        assert_eq!(result, "mcp report content");
+
+        // Non-existent record ID → error containing "not found"
+        let result = mcp.get_ctx_rec_impl("999").await;
+        assert!(
+            result.contains("not found"),
+            "expected 'not found' in response, got: {result}"
+        );
+
+        // Invalid ID format → parsing error
+        let result = mcp.get_ctx_rec_impl("abc").await;
+        assert!(
+            result.contains("Error"),
+            "expected error response, got: {result}"
+        );
     }
 }

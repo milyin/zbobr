@@ -10,6 +10,7 @@ pub enum McpTool {
     AddChecklistItem,
     CheckChecklistItem,
     DeleteCtxRec,
+    GetCtxRec,
     StopWithError,
     StopWithQuestion,
 }
@@ -23,6 +24,7 @@ impl McpTool {
             Self::AddChecklistItem => "add_checklist_item",
             Self::CheckChecklistItem => "check_checklist_item",
             Self::DeleteCtxRec => "delete_ctx_rec",
+            Self::GetCtxRec => "get_ctx_rec",
             Self::StopWithError => "stop_with_error",
             Self::StopWithQuestion => "stop_with_question",
         }
@@ -50,6 +52,7 @@ impl FromStr for McpTool {
             "add_checklist_item" => Ok(Self::AddChecklistItem),
             "check_checklist_item" => Ok(Self::CheckChecklistItem),
             "delete_ctx_rec" => Ok(Self::DeleteCtxRec),
+            "get_ctx_rec" => Ok(Self::GetCtxRec),
             "stop_with_error" => Ok(Self::StopWithError),
             "stop_with_question" => Ok(Self::StopWithQuestion),
             other => Err(format!("unknown MCP tool: {other}")),
@@ -64,6 +67,7 @@ pub const ALL_TOOLS: &[McpTool] = &[
     McpTool::AddChecklistItem,
     McpTool::CheckChecklistItem,
     McpTool::DeleteCtxRec,
+    McpTool::GetCtxRec,
     McpTool::StopWithError,
     McpTool::StopWithQuestion,
 ];
@@ -76,6 +80,7 @@ pub const ALL_TOOL_NAMES: &[&str] = &[
     McpTool::AddChecklistItem.as_str(),
     McpTool::CheckChecklistItem.as_str(),
     McpTool::DeleteCtxRec.as_str(),
+    McpTool::GetCtxRec.as_str(),
     McpTool::StopWithError.as_str(),
     McpTool::StopWithQuestion.as_str(),
 ];
