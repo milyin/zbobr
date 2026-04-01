@@ -293,14 +293,12 @@ impl MdCompactComment {
             // For agent prompts: use plain format with full body
             format!("user {}: {}", username, c.body)
         } else if c.body.len() <= COMPACT_COMMENT_MAX_LEN {
-            // Short comment: use first line only to keep format "one stage - one line"
-            let first_line = c.body.lines().next().unwrap_or("").to_string();
-            format!("user:**{}** {}", username, first_line)
+            let joined = c.body.lines().collect::<Vec<_>>().join(" ");
+            format!("user:**{}** {}", username, joined)
         } else {
-            // Long comment: truncate to first line
             let truncated = c.body.chars().take(COMPACT_COMMENT_MAX_LEN).collect::<String>();
-            let first_line = truncated.lines().next().unwrap_or("");
-            format!("user:**{}** {}...", username, first_line)
+            let joined = truncated.lines().collect::<Vec<_>>().join(" ");
+            format!("user:**{}** {}...", username, joined)
         };
 
         MdCompactComment {
@@ -1178,7 +1176,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_comment_uses_first_line_only() {
+    fn compact_comment_joins_multiline_with_spaces() {
         let ctx = TaskContext::default();
         let comments = vec![make_comment(
             "first line\nsecond line\nthird line",
@@ -1186,8 +1184,7 @@ mod tests {
             None,
         )];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- user:**unknown** first line"));
-        assert!(!output.contains("second line"));
+        assert!(output.contains("- user:**unknown** first line second line third line"));
     }
 
     #[test]
@@ -1644,19 +1641,23 @@ mod tests {
             "full multi-line body should be preserved verbatim"
         );
 
-        // for_prompt=false: only first line should appear (non-prompt uses first-line-only)
+        // for_prompt=false: lines should be joined with spaces in non-prompt mode
         let normal_output = serialize_context(&ctx, &comments, false, None);
         assert!(
             normal_output.contains("proceed with plan"),
             "first line should appear in normal mode"
         );
         assert!(
-            !normal_output.contains("also fix the bug"),
-            "second line should NOT appear in normal (non-prompt) mode"
+            normal_output.contains("also fix the bug"),
+            "second line should appear in normal mode (joined with space)"
         );
         assert!(
-            !normal_output.contains("and update docs"),
-            "third line should NOT appear in normal (non-prompt) mode"
+            normal_output.contains("and update docs"),
+            "third line should appear in normal mode (joined with space)"
+        );
+        assert!(
+            normal_output.contains("proceed with plan also fix the bug and update docs"),
+            "lines should be joined with spaces in normal mode"
         );
     }
 }
