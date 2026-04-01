@@ -1,0 +1,3 @@
+In `zbobr/src/commands.rs`, the dry-run path (line 202) uses raw `repo_config.repository` for `VAR_DESTINATION_REPOSITORY`, while the runtime path (line 213) uses the normalized `repo_backend.repository()`. If the user provides a GitHub URL (e.g. `https://github.com/owner/repo.git`), the dry-run prompt shows the raw URL but runtime shows `owner/repo`.
+
+Fix: Make `parse_github_repo` public in `zbobr-repo-backend-github/src/github.rs`, re-export it from `lib.rs`, and use it in `commands.rs` to normalize the repository value in the dry-run path.
