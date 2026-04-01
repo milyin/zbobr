@@ -3,7 +3,7 @@ pub mod traits;
 pub mod unified;
 
 pub use common::{
-    AddChecklistItemParam, CheckChecklistItemParam, DeleteCtxRecParam,
-    MessageParam, ReportParam, run_role_mcp_server,
+    AddChecklistItemParam, CheckChecklistItemParam, DeleteCtxRecParam, MessageParam, ReportParam,
+    run_role_mcp_server,
 };
 pub use unified::UnifiedMcp;

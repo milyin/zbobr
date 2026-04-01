@@ -77,7 +77,6 @@ pub fn parse_ctx_rec_id(id: &str) -> Result<u64, String> {
     ))
 }
 
-
 /// Bind to an available port starting from the given base port.
 ///
 /// The old `find_available_port` implementation closed the listener immediately
