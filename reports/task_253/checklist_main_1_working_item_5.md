@@ -1,0 +1,1 @@
+In zbobr-task-backend-github/src/github.rs: remove PARAM_DESTINATION_REPOSITORY and PARAM_DESTINATION_BRANCH constants, remove reading them in issue_to_task(), and remove writing them in task_to_string_params().
