@@ -1,0 +1,1 @@
+The test run also completed successfully (exit code 0) — all tests passed as expected.
