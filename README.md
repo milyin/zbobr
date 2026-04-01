@@ -23,7 +23,7 @@ Each zbobr instance manages a single configured target repository.
    - Contains: project-specific guidance and `zbobr.toml` config
    - Created via `zbobr init <workspace>` then `zbobr setup`
 
-3. **Target Repository** (`--repo-github-repository`)
+3. **Target Repository** (`--repo-repository`)
    - The single GitHub repository that worker agents operate on
    - Configured in the `[repo]` section of `zbobr.toml` as `repository = "owner/repo"` and `branch = "main"`
 
@@ -110,13 +110,13 @@ Notes on TOML layout:
 
 Note: legacy top-level dispatcher-only TOML files are no longer supported; use the root `zbobr.toml` with `[dispatcher]` and `[repo]` tables.
 
-This is the recommended approach for task-project workflows, as it eliminates the need to manually specify `--repo-github-repository` and `--tasks-github-repo` on the command line.
+This is the recommended approach for task-project workflows, as it eliminates the need to manually specify `--repo-repository` and `--tasks-github-repo` on the command line.
 
 ## How It Works
 
 ### Workflow
 
-1. **Create issue** in task project with milestone `GO_PLANNING` and reference a target repo
+1. **Create issue** in task project with milestone `GO_PLANNING`
 2. **Manager researches** the issue (transitioning to `PLANNING` lock state) and creates an implementation plan → sets `PENDING`
 3. **Human reviews** and sets milestone to `GO_WORKING` (optionally add `tool:<name>` and `model:<name>` labels)
 4. **Manager spawns Worker** (transitioning to `WORKING` lock state)  

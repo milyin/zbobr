@@ -120,7 +120,7 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
         // After stripping trailing '/' and '.git', splitting by '/' yields exactly 5 parts:
         // ["https:", "", "github.com", "owner", "repo"]
         let parts: Vec<&str> = repo_ref.split('/').collect();
-        if parts.len() != 5 {
+        if parts.len() != 5 || parts[2] != "github.com" {
             anyhow::bail!(
                 "Invalid GitHub URL (expected 'https://github.com/owner/repo'): {}",
                 repo_ref
@@ -143,7 +143,7 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
     };
 
     let parts: Vec<&str> = full_name.split('/').collect();
-    if parts.len() != 2 {
+    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
         anyhow::bail!(
             "Invalid GitHub repository format: {}. Expected 'owner/repo' or a GitHub URL.",
             repo_ref
@@ -983,6 +983,30 @@ mod tests {
         // Empty repo segment (owner only)
         let result3 = parse_github_repo("git@github.com:owner/");
         assert!(result3.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_non_github_https_url() {
+        // HTTPS URLs must point to github.com specifically
+        let result = parse_github_repo("https://gitlab.com/owner/repo");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid GitHub URL"));
+
+        let result2 = parse_github_repo("https://notgithub.com/owner/repo");
+        assert!(result2.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_plain_format_with_empty_parts() {
+        // Plain "owner/repo" format must reject empty owner or repo
+        let result = parse_github_repo("/repo");
+        assert!(result.is_err());
+
+        let result2 = parse_github_repo("owner/");
+        assert!(result2.is_err());
     }
 
     // ── from_config normalization tests ──────────────────────────────
