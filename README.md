@@ -109,7 +109,7 @@ Notes on TOML layout:
    repository = "owner/target-repo"
    branch = "main"
 
-  Stage-specific settings (tool, model, prompts) can be placed in nested tables under `[dispatcher]`. If a stage table is omitted the global defaults are used.
+  Stage-specific settings (role, tool, model, prompts, and transitions) are defined in `[workflow.pipelines.*.stages.*]` tables. Global defaults (tool, model) are set in `[dispatcher]`.
 
 Note: legacy top-level dispatcher-only TOML files are no longer supported; use the root `zbobr.toml` with `[dispatcher]`, `[tasks]`, and `[repo]` tables.
 
@@ -276,14 +276,15 @@ Fine-grained PAT — on the **task repo**:
 
 Zbobr manages **three distinct GitHub tokens** with different access levels and purposes:
 
-#### 1. Owner Token
-- **Purpose**: Used by zbobr dispatcher for repository management (managing issues, labels, milestones)
-- **Access Level**: Write access to repositories
-- **Resolution Order**:
-   1. `GH_TOKEN` environment variable
-   2. `GITHUB_TOKEN` environment variable
-   3. `github_token` in `[repo]` section of `zbobr.toml`
+#### 1. Repo Token
+- **Purpose**: Used by the repo backend to clone, push branches, and create pull requests on the configured target repository
+- **Access Level**: Write access to the configured code repository
 - **Config File**: `github_token` in `[repo]` section of `zbobr.toml`
+
+#### 1b. Task Token
+- **Purpose**: Used by the task backend to manage issues, labels, milestones, and comments on the task project repository
+- **Access Level**: Write access to the task project repository
+- **Config File**: `github_token` in `[tasks]` section of `zbobr.toml`
 
 #### 2. Agent Token — **REQUIRED for restricted access**
 - **Purpose**: Passed to agent processes (Copilot/Claude sessions) as `GH_TOKEN` and `GITHUB_TOKEN`

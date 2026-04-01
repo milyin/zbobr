@@ -107,6 +107,12 @@ impl GitHubRepo {
     }
 }
 
+/// Returns true if `s` is a valid GitHub owner or repository name component.
+/// GitHub names may only contain alphanumeric characters, hyphens, underscores, and dots.
+fn is_valid_github_name(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
+}
+
 fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
     // Standardize: strip trailing '/' first so that ".git/" is handled correctly,
     // then strip ".git", then any remaining trailing '/'.
@@ -120,9 +126,15 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
         // After stripping trailing '/' and '.git', splitting by '/' yields exactly 5 parts:
         // ["https:", "", "github.com", "owner", "repo"]
         let parts: Vec<&str> = repo_ref.split('/').collect();
-        if parts.len() != 5 || parts[2] != "github.com" {
+        if parts.len() != 5 || parts[0] != "https:" || parts[2] != "github.com" {
             anyhow::bail!(
                 "Invalid GitHub URL (expected 'https://github.com/owner/repo'): {}",
+                repo_ref
+            );
+        }
+        if !is_valid_github_name(parts[3]) || !is_valid_github_name(parts[4]) {
+            anyhow::bail!(
+                "Invalid GitHub URL — owner or repo contains invalid characters: {}",
                 repo_ref
             );
         }
@@ -151,7 +163,7 @@ fn parse_github_repo(repo_ref: &str) -> anyhow::Result<GitHubRepo> {
     };
 
     let parts: Vec<&str> = full_name.split('/').collect();
-    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+    if parts.len() != 2 || !is_valid_github_name(parts[0]) || !is_valid_github_name(parts[1]) {
         anyhow::bail!(
             "Invalid GitHub repository format: {}. Expected 'owner/repo' or a GitHub URL.",
             repo_ref
@@ -1036,6 +1048,31 @@ mod tests {
 
         let result2 = parse_github_repo("owner/");
         assert!(result2.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_url_with_query_string() {
+        // Copy-pasted GitHub URLs with ?tab=readme or similar must be rejected
+        let result = parse_github_repo("https://github.com/owner/repo?tab=readme-ov-file");
+        assert!(result.is_err());
+
+        let result2 = parse_github_repo("https://github.com/owner/repo?tab=code");
+        assert!(result2.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_url_with_fragment() {
+        // URLs with fragment anchors (#section) must be rejected
+        let result = parse_github_repo("https://github.com/owner/repo#readme");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_rejects_http_url() {
+        // Only https:// is accepted — http:// must be rejected
+        let result = parse_github_repo("http://github.com/owner/repo");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid GitHub URL"));
     }
 
     // ── from_config normalization tests ──────────────────────────────
