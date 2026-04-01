@@ -224,4 +224,32 @@ mod tests {
         assert_eq!(ports.len(), entries.len(), "ports must all be unique");
         // listeners are dropped when `entries` goes out of scope
     }
+
+    #[test]
+    fn parse_ctx_rec_id_bare_numeric() {
+        assert_eq!(parse_ctx_rec_id("5").unwrap(), 5);
+    }
+
+    #[test]
+    fn parse_ctx_rec_id_prefixed_format() {
+        assert_eq!(parse_ctx_rec_id("ctx_rec_5").unwrap(), 5);
+    }
+
+    #[test]
+    fn parse_ctx_rec_id_invalid_string() {
+        let err = parse_ctx_rec_id("abc").unwrap_err();
+        assert!(err.contains("Invalid context record ID"));
+    }
+
+    #[test]
+    fn parse_ctx_rec_id_invalid_suffix() {
+        let err = parse_ctx_rec_id("ctx_rec_abc").unwrap_err();
+        assert!(err.contains("Invalid context record ID"));
+    }
+
+    #[test]
+    fn parse_ctx_rec_id_empty_string() {
+        let err = parse_ctx_rec_id("").unwrap_err();
+        assert!(err.contains("Invalid context record ID"));
+    }
 }
