@@ -1,0 +1,1 @@
+No additional tests needed. The latest commit is purely cleanup — removing dead preparator code from public interfaces and updating docs. All existing 47+ tests adequately cover the implemented behavior.
