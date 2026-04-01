@@ -314,14 +314,23 @@ impl ZbobrTaskBackendGithubImpl {
     async fn apply_state_change(&self, id: u64, state: &State) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
 
-        // Fetch current labels and remove all existing state: and legacy flag: labels
+        // Fetch current labels
         let issue: IssueResponse = retry_github("get issue labels", || {
             self.octocrab
                 .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
         })
         .await?;
+
+        // Get the new labels we want to set
+        let new_labels = Self::state_to_labels(state);
+        let new_labels_set: std::collections::HashSet<&str> =
+            new_labels.iter().map(|s| s.as_str()).collect();
+
+        // Remove state: and legacy flag: labels that are NOT in the new set
         for label in &issue.labels {
-            if label.name.starts_with(STATE_PREFIX) || label.name.starts_with(FLAG_LABEL_PREFIX) {
+            if (label.name.starts_with(STATE_PREFIX) || label.name.starts_with(FLAG_LABEL_PREFIX))
+                && !new_labels_set.contains(label.name.as_str())
+            {
                 let _ = retry_github("remove state label", || async {
                     self.octocrab
                         .issues(owner, repo)
@@ -333,7 +342,6 @@ impl ZbobrTaskBackendGithubImpl {
         }
 
         // Add new state labels if not empty
-        let new_labels = Self::state_to_labels(state);
         if !new_labels.is_empty() {
             // Ensure all labels exist before assigning them
             for label in &new_labels {
@@ -341,13 +349,24 @@ impl ZbobrTaskBackendGithubImpl {
                 let desc = format!("State: {label}");
                 self.ensure_label_exists(label, color, &desc).await?;
             }
-            retry_github("add state labels", || async {
-                self.octocrab
-                    .issues(owner, repo)
-                    .add_labels(id, &new_labels)
-                    .await
-            })
-            .await?;
+
+            // Only add labels that aren't already present
+            let existing_label_names: std::collections::HashSet<&str> =
+                issue.labels.iter().map(|l| l.name.as_str()).collect();
+            let labels_to_add: Vec<String> = new_labels
+                .into_iter()
+                .filter(|label| !existing_label_names.contains(label.as_str()))
+                .collect();
+
+            if !labels_to_add.is_empty() {
+                retry_github("add state labels", || async {
+                    self.octocrab
+                        .issues(owner, repo)
+                        .add_labels(id, &labels_to_add)
+                        .await
+                })
+                .await?;
+            }
         }
 
         Ok(())
