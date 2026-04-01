@@ -1,0 +1,1 @@
+All done. Implemented 10 new tests for `parse_github_repo()` and `from_config()` normalization, committed them, and verified all 45 checklist tests pass across the workspace.
