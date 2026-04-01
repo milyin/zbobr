@@ -291,6 +291,26 @@ impl RoleSession {
         Ok(exists)
     }
 
+    /// Get the content of a context record by id.
+    /// Returns the report file content if a report link is present, otherwise the brief.
+    pub async fn get_context_record_content(
+        &self,
+        record_id: u64,
+    ) -> anyhow::Result<Option<String>> {
+        let task = self.get_task().await?;
+        match task.context.find_record(record_id) {
+            Some((_, record)) => {
+                if let Some(ref link) = record.report_link {
+                    let content = self.read_report(link).await?;
+                    Ok(Some(content))
+                } else {
+                    Ok(Some(record.brief.clone()))
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
     /// Add a context record of a specific type to the current stage.
     /// Returns the assigned record id.
     pub async fn add_context_record(

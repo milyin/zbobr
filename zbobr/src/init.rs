@@ -143,7 +143,7 @@ fn default_config_toml() -> RootConfigToml {
 /// Build the default workflow configuration with predefined pipelines and roles.
 fn default_workflow() -> WorkflowConfig {
     use McpTool::{
-        AddChecklistItem, CheckChecklistItem, DeleteCtxRec, ReportFailure,
+        AddChecklistItem, CheckChecklistItem, DeleteCtxRec, GetCtxRec, ReportFailure,
         ReportIntermediate, ReportSuccess, StopWithError, StopWithQuestion,
     };
 
@@ -243,6 +243,7 @@ fn default_workflow() -> WorkflowConfig {
                     ReportIntermediate,
                     AddChecklistItem,
                     DeleteCtxRec,
+                    GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("planner.md")),
                 default_tool: None,
@@ -262,6 +263,7 @@ fn default_workflow() -> WorkflowConfig {
                     AddChecklistItem,
                     CheckChecklistItem,
                     DeleteCtxRec,
+                    GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("worker.md")),
                 ..Default::default()
@@ -277,6 +279,7 @@ fn default_workflow() -> WorkflowConfig {
                     ReportIntermediate,
                     AddChecklistItem,
                     DeleteCtxRec,
+                    GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("test_planner.md")),
                 ..Default::default()
@@ -294,6 +297,7 @@ fn default_workflow() -> WorkflowConfig {
                     AddChecklistItem,
                     CheckChecklistItem,
                     DeleteCtxRec,
+                    GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("test_worker.md")),
                 ..Default::default()
@@ -308,6 +312,7 @@ fn default_workflow() -> WorkflowConfig {
                     ReportFailure,
                     ReportIntermediate,
                     StopWithQuestion,
+                    GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("reviewer.md")),
                 ..Default::default()
@@ -321,6 +326,7 @@ fn default_workflow() -> WorkflowConfig {
                     ReportSuccess,
                     ReportFailure,
                     StopWithQuestion,
+                    GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("tester.md")),
                 ..Default::default()

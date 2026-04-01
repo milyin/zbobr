@@ -360,6 +360,63 @@ pub trait CommonMcpImpl: Send + Sync {
         }
     }
 
+    async fn get_ctx_rec_impl(&self, id_str: &str) -> String {
+        let tool_name = McpTool::GetCtxRec.as_str();
+        tracing::info!(
+            "[{}#{}] {} id={}",
+            self.role_name(),
+            self.session().task_id(),
+            tool_name,
+            id_str,
+        );
+
+        let record_id = match parse_ctx_rec_id(id_str) {
+            Ok(id) => id,
+            Err(e) => {
+                let response = format!("Error: {e}");
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                return response;
+            }
+        };
+
+        match self.session().get_context_record_content(record_id).await {
+            Ok(Some(content)) => {
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &content,
+                );
+                content
+            }
+            Ok(None) => {
+                let response = format!("Error: record ctx_rec_{} not found", record_id);
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                response
+            }
+            Err(e) => {
+                let response = format!("Error: {e}");
+                log_mcp_string_response(
+                    self.role_name(),
+                    self.session().task_id(),
+                    tool_name,
+                    &response,
+                );
+                response
+            }
+        }
+    }
+
     /// Shared implementation: format a status message, pause the task, and optionally add a
     /// context record (for questions). For errors (`add_context_record = false`), only the
     /// STATUS field is set. For questions (`add_context_record = true`), a Question context

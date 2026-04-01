@@ -144,13 +144,16 @@ struct MdRecord {
     brief: String,
     id: u64,
     report_link: Option<String>,
+    for_prompt: bool,
 }
 
 impl fmt::Display for MdRecord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}{}", self.record_type.prefix(), self.brief)?;
         let id_tag = format!("ctx_rec_{}", self.id);
-        if let Some(url) = &self.report_link {
+        if self.for_prompt {
+            write!(f, " [{}]", id_tag)
+        } else if let Some(url) = &self.report_link {
             write!(f, " <sub>[{}]({})</sub>", id_tag, url)
         } else {
             write!(f, " <sub>{}</sub>", id_tag)
@@ -197,6 +200,7 @@ impl FromStr for MdRecord {
             brief,
             id,
             report_link,
+            for_prompt: false,
         })
     }
 }
@@ -224,7 +228,11 @@ impl MdRecord {
     }
 
     /// Convert from a domain `ContextRecord`, optionally transforming report URLs.
-    fn from_context_record(r: &ContextRecord, report_url: Option<&dyn Fn(&str) -> String>) -> Self {
+    fn from_context_record(
+        r: &ContextRecord,
+        for_prompt: bool,
+        report_url: Option<&dyn Fn(&str) -> String>,
+    ) -> Self {
         let report_link = r.report_link.as_ref().map(|filename| {
             if filename.starts_with("http://") || filename.starts_with("https://") {
                 filename.clone()
@@ -240,6 +248,7 @@ impl MdRecord {
             brief: r.brief.clone(),
             id: r.id,
             report_link,
+            for_prompt,
         }
     }
 
@@ -269,6 +278,7 @@ struct MdCompactComment {
     text: String,
     timestamp: DateTime<FixedOffset>,
     url: Option<String>,
+    for_prompt: bool,
 }
 
 impl MdCompactComment {
@@ -303,12 +313,16 @@ impl MdCompactComment {
             text,
             timestamp: c.timestamp,
             url: c.url.clone(),
+            for_prompt,
         }
     }
 }
 
 impl fmt::Display for MdCompactComment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.for_prompt {
+            return write!(f, "- {}", self.text);
+        }
         write!(f, "- {} `{}`", self.text, format_timestamp(&self.timestamp))?;
         if let Some(url) = &self.url {
             write!(f, " <sub>[link]({})</sub>", url)?;
@@ -333,11 +347,16 @@ impl fmt::Display for MdCompactComment {
 struct MdStage {
     title: MdStageTitle,
     records: Vec<MdRecord>,
+    for_prompt: bool,
 }
 
 impl fmt::Display for MdStage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "- {}", self.title)?;
+        if self.for_prompt {
+            writeln!(f, "- {}", self.title.stage)?;
+        } else {
+            writeln!(f, "- {}", self.title)?;
+        }
 
         // Flatten output: all records on the same level
         // Reorder so first non-checkbox item is first in output
@@ -385,7 +404,7 @@ impl FromStr for MdStage {
                 records.push(record);
             }
         }
-        Ok(MdStage { title, records })
+        Ok(MdStage { title, records, for_prompt: false })
     }
 }
 
@@ -433,10 +452,10 @@ impl MdStage {
         let records = stage
             .records
             .iter()
-            .map(|r| MdRecord::from_context_record(r, report_url))
+            .map(|r| MdRecord::from_context_record(r, for_prompt, report_url))
             .collect();
 
-        MdStage { title, records }
+        MdStage { title, records, for_prompt }
     }
 
     /// Convert to a domain `StageContext`.
@@ -536,6 +555,7 @@ impl FromStr for MdContext {
                     current_stage = Some(MdStage {
                         title,
                         records: Vec::new(),
+                        for_prompt: false,
                     });
                 }
                 // else: compact comment line or unknown `- ` line — skip silently
@@ -578,10 +598,12 @@ impl MdContext {
         let mut events: Vec<(DateTime<FixedOffset>, MdEntry)> = Vec::new();
 
         for stage in &ctx.stages {
-            events.push((
-                stage.info.timestamp,
-                MdEntry::Stage(MdStage::from_stage_context(stage, for_prompt, report_url)),
-            ));
+            let md_stage = MdStage::from_stage_context(stage, for_prompt, report_url);
+            // When rendering for agent prompts, skip stages with no records (e.g. failed stages)
+            if for_prompt && md_stage.records.is_empty() {
+                continue;
+            }
+            events.push((stage.info.timestamp, MdEntry::Stage(md_stage)));
         }
 
         for comment in comments {
@@ -758,8 +780,15 @@ mod tests {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], true, None);
 
+        // Stage header should only contain the stage name
+        assert!(output.contains("- planning\n"));
+        assert!(output.contains("- working\n"));
+        // Metadata (tool, model, timestamp, prompt link) should not appear
+        assert!(!output.contains("`claude`"));
+        assert!(!output.contains("`claude-opus-4.6`"));
         assert!(!output.contains("](prompts/plan.md)"));
-        assert!(output.contains("`claude` `claude-opus-4.6`"));
+        // Records should use plain [ctx_rec_N] format
+        assert!(output.contains("[ctx_rec_3]"));
     }
 
     #[test]
@@ -846,10 +875,12 @@ mod tests {
     fn roundtrip_for_prompt_loses_prompt_link() {
         let original = sample_context();
         let serialized = serialize_context(&original, &[], true, None);
-        let parsed = parse_context(&serialized).unwrap();
 
-        // prompt_link should be None since for_prompt=true omitted it
-        assert!(parsed.stages[0].info.prompt_link.is_none());
+        // for_prompt output is not meant to be parsed back — verify the rendered format instead
+        // Stage name only (no metadata)
+        assert!(serialized.contains("- planning\n"));
+        // prompt_link not present
+        assert!(!serialized.contains("prompts/plan.md"));
     }
 
     #[test]
@@ -857,10 +888,13 @@ mod tests {
         let mut ctx = sample_context();
         ctx.stages[0].info.output_link = Some("outputs/plan_output.md".to_string());
         let serialized = serialize_context(&ctx, &[], true, None);
-        let parsed = parse_context(&serialized).unwrap();
 
-        assert!(parsed.stages[0].info.prompt_link.is_none());
-        assert!(parsed.stages[0].info.output_link.is_none());
+        // for_prompt output is not meant to be parsed back — verify the rendered format instead
+        // Neither prompt nor output links should appear
+        assert!(!serialized.contains("prompts/plan.md"));
+        assert!(!serialized.contains("outputs/plan_output.md"));
+        // Stage name only
+        assert!(serialized.contains("- planning\n"));
     }
 
     #[test]
@@ -1017,6 +1051,7 @@ mod tests {
             brief: "All tests passed".to_string(),
             id: 42,
             report_link: Some("reports/test.md".to_string()),
+            for_prompt: false,
         };
         let s = record.to_string();
         let parsed: MdRecord = s.parse().unwrap();
@@ -1033,6 +1068,7 @@ mod tests {
             brief: "Todo item".to_string(),
             id: 1,
             report_link: None,
+            for_prompt: false,
         };
         let s = record.to_string();
         let parsed: MdRecord = s.parse().unwrap();
@@ -1062,14 +1098,17 @@ mod tests {
                     brief: "Item 1".to_string(),
                     id: 1,
                     report_link: None,
+                    for_prompt: false,
                 },
                 MdRecord {
                     record_type: MdRecordType::Success,
                     brief: "Done".to_string(),
                     id: 2,
                     report_link: Some("r.md".to_string()),
+                    for_prompt: false,
                 },
             ],
+            for_prompt: false,
         };
         let s = stage.to_string();
         let parsed: MdStage = s.parse().unwrap();
@@ -1202,9 +1241,10 @@ mod tests {
         let ctx = TaskContext::default();
         let comments = vec![make_comment("a user comment", "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, true, None);
-        // Prompt mode now shares compact comment format, not blockquote.
+        // Prompt mode renders comments without timestamp or link
         assert!(!output.contains("> **["));
-        assert!(output.contains("- user:**unknown** a user comment `2024-01-01 00:00:00 +0000`"));
+        assert!(output.contains("- user:**unknown** a user comment"));
+        assert!(!output.contains("`2024-01-01 00:00:00 +0000`"));
     }
 
     #[test]
@@ -1213,10 +1253,7 @@ mod tests {
         let ctx = TaskContext::default();
         let comments = vec![make_comment(&long_text, "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, true, None);
-        assert!(output.contains(&format!(
-            "- user:**unknown** {} `2024-01-01 00:00:00 +0000`",
-            long_text
-        )));
+        assert!(output.contains(&format!("- user:**unknown** {}", long_text)));
         assert!(!output.contains("..."));
     }
 }

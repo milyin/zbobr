@@ -61,6 +61,14 @@ pub struct DeleteCtxRecParam {
     pub id: String,
 }
 
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct GetCtxRecParam {
+    #[schemars(
+        description = "Context record ID — either a numeric id or a string like 'ctx_rec_5'"
+    )]
+    pub id: String,
+}
+
 /// Parse a context record ID from either a numeric string or `ctx_rec_N` format.
 pub fn parse_ctx_rec_id(id: &str) -> Result<u64, String> {
     if let Ok(n) = id.parse::<u64>() {
