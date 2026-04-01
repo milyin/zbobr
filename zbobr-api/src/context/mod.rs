@@ -1138,7 +1138,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_comment_uses_first_line_only() {
+    fn compact_comment_replaces_cr_to_space() {
         let ctx = TaskContext::default();
         let comments = vec![make_comment(
             "first line\nsecond line\nthird line",
@@ -1146,8 +1146,8 @@ mod tests {
             None,
         )];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- user:**unknown** first line"));
-        assert!(!output.contains("second line"));
+        assert!(output.contains("- user:**unknown** first line second line third line"));
+        assert!(output.lines().count() == 1); // all on one line
     }
 
     #[test]
