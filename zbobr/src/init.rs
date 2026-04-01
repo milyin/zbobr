@@ -143,7 +143,7 @@ fn default_config_toml() -> RootConfigToml {
 /// Build the default workflow configuration with predefined pipelines and roles.
 fn default_workflow() -> WorkflowConfig {
     use McpTool::{
-        AddChecklistItem, CheckChecklistItem, DeleteCtxRec, GetCtxRec, ReportFailure,
+        AddChecklistItem, CheckChecklistItem, GetCtxRec, ReportFailure,
         ReportIntermediate, ReportSuccess, StopWithError, StopWithQuestion,
     };
 
@@ -242,7 +242,6 @@ fn default_workflow() -> WorkflowConfig {
                     ReportSuccess,
                     ReportIntermediate,
                     AddChecklistItem,
-                    DeleteCtxRec,
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("planner.md")),
@@ -262,7 +261,6 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithQuestion,
                     AddChecklistItem,
                     CheckChecklistItem,
-                    DeleteCtxRec,
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("worker.md")),
@@ -278,7 +276,6 @@ fn default_workflow() -> WorkflowConfig {
                     ReportSuccess,
                     ReportIntermediate,
                     AddChecklistItem,
-                    DeleteCtxRec,
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("test_planner.md")),
@@ -296,7 +293,6 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithQuestion,
                     AddChecklistItem,
                     CheckChecklistItem,
-                    DeleteCtxRec,
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("test_worker.md")),
@@ -467,7 +463,6 @@ Your working directory is already the repository with the work branch checked ou
 8. **Prepare checklist items for the worker** (only when plan is approved):
    - Review the unchecked checklist items in the context below (if any).
    - Use `{mcp_add_checklist_item}` to add implementation steps for the worker. Each item has two parts: a **brief** summary (shown inline in the context) and a **full_report** with detailed instructions (stored as a linked file). Put concise step title in brief; put the *what* and *why* in full_report — which components or modules to change, which interfaces or data flows are affected, which patterns from the analog to follow. Do NOT include code snippets, exact file paths, or prescriptive implementation details — the worker will look those up.
-   - Use `{mcp_delete_ctx_rec}` to remove unnecessary unchecked items
    - The checklist items ARE the plan — they should fully describe what the worker needs to do
    - After creating checklist items, call `{mcp_report_success}` with a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog).
 8.5. **If approval is NOT confirmed**: Present the plan by calling `{mcp_report_intermediate}` with a brief description of the proposed approach. Do NOT include checklist items yet — present only the plan structure and rationale."#;

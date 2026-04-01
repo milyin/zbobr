@@ -151,8 +151,16 @@ impl fmt::Display for MdRecord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}{}", self.record_type.prefix(), self.brief)?;
         let id_tag = format!("ctx_rec_{}", self.id);
+        let is_interactive = matches!(
+            self.record_type,
+            MdRecordType::CheckboxUnchecked | MdRecordType::CheckboxChecked
+        ) || self.report_link.is_some();
         if self.for_prompt {
-            write!(f, " [{}]", id_tag)
+            if is_interactive {
+                write!(f, " [{}]", id_tag)
+            } else {
+                Ok(())
+            }
         } else if let Some(url) = &self.report_link {
             write!(f, " <sub>[{}]({})</sub>", id_tag, url)
         } else {
@@ -798,8 +806,23 @@ mod tests {
         assert!(!output.contains("`claude`"));
         assert!(!output.contains("`claude-opus-4.6`"));
         assert!(!output.contains("](prompts/plan.md)"));
-        // Records should use plain [ctx_rec_N] format
-        assert!(output.contains("[ctx_rec_3]"));
+        // Interactive records should use plain [ctx_rec_N] format
+        assert!(output.contains("[ctx_rec_1]"), "checkbox should show ID");
+        assert!(output.contains("[ctx_rec_2]"), "checkbox should show ID");
+        assert!(output.contains("[ctx_rec_3]"), "success with link should show ID");
+        assert!(output.contains("[ctx_rec_4]"), "failure with link should show ID");
+        // Non-interactive records must NOT have ctx_rec IDs
+        assert!(
+            !output.contains("[ctx_rec_5]"),
+            "comment without link should suppress ID in prompt mode"
+        );
+        assert!(
+            !output.contains("[ctx_rec_6]"),
+            "question without link should suppress ID in prompt mode"
+        );
+        // Non-interactive record text should still appear
+        assert!(output.contains("Retrying with fix"), "comment brief should appear");
+        assert!(output.contains("Should we use async?"), "question brief should appear");
     }
 
     #[test]
@@ -1345,6 +1368,13 @@ mod tests {
         assert!(!rendered.contains("claude-opus-4.6"));
         assert!(!rendered.contains("2024-01-01"));
         assert!(!rendered.contains("prompts/plan.md"));
+        // Non-interactive record (Success without report_link) must NOT show ctx_rec ID
+        assert!(
+            !rendered.contains("ctx_rec_1"),
+            "non-interactive success record should suppress ID in prompt mode"
+        );
+        // Record text should still appear
+        assert!(rendered.contains("Done"), "record brief should appear");
     }
 
     // -- Empty stage filtering tests --
@@ -1569,14 +1599,22 @@ mod tests {
         assert!(!output.contains("prompts/"), "no prompt links");
         assert!(!output.contains("outputs/"), "no output links");
 
-        // 5. Records use plain [ctx_rec_N] (no <sub>, no URLs)
+        // 5. Interactive records use plain [ctx_rec_N] (no <sub>, no URLs)
         assert!(
             output.contains("[ctx_rec_1]"),
-            "record should have plain ctx_rec tag"
+            "comment with report_link should have plain ctx_rec tag"
+        );
+        assert!(
+            output.contains("[ctx_rec_2]"),
+            "checkbox should have plain ctx_rec tag"
         );
         assert!(
             output.contains("[ctx_rec_3]"),
-            "record should have plain ctx_rec tag"
+            "success with report_link should have plain ctx_rec tag"
+        );
+        assert!(
+            output.contains("[ctx_rec_4]"),
+            "checkbox should have plain ctx_rec tag"
         );
         assert!(!output.contains("<sub>"), "no <sub> tags in prompt output");
         assert!(
@@ -1676,5 +1714,285 @@ mod tests {
             normal_output.contains("proceed with plan also fix the bug and update docs"),
             "lines should be joined with spaces in normal mode"
         );
+    }
+
+    // -- Unit tests for MdRecord non-interactive ID suppression in prompt mode --
+
+    #[test]
+    fn md_record_prompt_suppresses_id_for_success_without_link() {
+        let record = MdRecord {
+            record_type: MdRecordType::Success,
+            brief: "Build passed".to_string(),
+            id: 10,
+            report_link: None,
+            for_prompt: true,
+        };
+        let rendered = record.to_string();
+        assert_eq!(rendered, "- ✅ Build passed");
+        assert!(!rendered.contains("ctx_rec_"), "non-interactive success should suppress ID");
+    }
+
+    #[test]
+    fn md_record_prompt_suppresses_id_for_failure_without_link() {
+        let record = MdRecord {
+            record_type: MdRecordType::Failure,
+            brief: "Tests failed".to_string(),
+            id: 11,
+            report_link: None,
+            for_prompt: true,
+        };
+        let rendered = record.to_string();
+        assert_eq!(rendered, "- ❌ Tests failed");
+        assert!(!rendered.contains("ctx_rec_"), "non-interactive failure should suppress ID");
+    }
+
+    #[test]
+    fn md_record_prompt_suppresses_id_for_comment_without_link() {
+        let record = MdRecord {
+            record_type: MdRecordType::Comment,
+            brief: "Work in progress".to_string(),
+            id: 12,
+            report_link: None,
+            for_prompt: true,
+        };
+        let rendered = record.to_string();
+        assert_eq!(rendered, "- 💬 Work in progress");
+        assert!(!rendered.contains("ctx_rec_"), "non-interactive comment should suppress ID");
+    }
+
+    #[test]
+    fn md_record_prompt_suppresses_id_for_question_without_link() {
+        let record = MdRecord {
+            record_type: MdRecordType::Question,
+            brief: "Need clarification".to_string(),
+            id: 13,
+            report_link: None,
+            for_prompt: true,
+        };
+        let rendered = record.to_string();
+        assert_eq!(rendered, "- ❓ Need clarification");
+        assert!(!rendered.contains("ctx_rec_"), "non-interactive question should suppress ID");
+    }
+
+    #[test]
+    fn md_record_prompt_shows_id_for_checkbox_unchecked() {
+        let record = MdRecord {
+            record_type: MdRecordType::CheckboxUnchecked,
+            brief: "Todo item".to_string(),
+            id: 14,
+            report_link: None,
+            for_prompt: true,
+        };
+        let rendered = record.to_string();
+        assert_eq!(rendered, "- [ ] Todo item [ctx_rec_14]");
+    }
+
+    #[test]
+    fn md_record_prompt_shows_id_for_checkbox_checked() {
+        let record = MdRecord {
+            record_type: MdRecordType::CheckboxChecked,
+            brief: "Done item".to_string(),
+            id: 15,
+            report_link: None,
+            for_prompt: true,
+        };
+        let rendered = record.to_string();
+        assert_eq!(rendered, "- [x] Done item [ctx_rec_15]");
+    }
+
+    #[test]
+    fn md_record_prompt_shows_id_for_success_with_link() {
+        let record = MdRecord {
+            record_type: MdRecordType::Success,
+            brief: "Reviewed".to_string(),
+            id: 16,
+            report_link: Some("reports/review.md".to_string()),
+            for_prompt: true,
+        };
+        let rendered = record.to_string();
+        assert_eq!(rendered, "- ✅ Reviewed [ctx_rec_16]");
+        assert!(!rendered.contains("reports/review.md"), "report URL should not leak");
+        assert!(!rendered.contains("<sub>"), "no <sub> tags in prompt mode");
+    }
+
+    #[test]
+    fn md_record_prompt_shows_id_for_failure_with_link() {
+        let record = MdRecord {
+            record_type: MdRecordType::Failure,
+            brief: "Build broke".to_string(),
+            id: 17,
+            report_link: Some("reports/build.md".to_string()),
+            for_prompt: true,
+        };
+        let rendered = record.to_string();
+        assert_eq!(rendered, "- ❌ Build broke [ctx_rec_17]");
+        assert!(!rendered.contains("reports/build.md"), "report URL should not leak");
+    }
+
+    #[test]
+    fn md_record_prompt_shows_id_for_comment_with_link() {
+        let record = MdRecord {
+            record_type: MdRecordType::Comment,
+            brief: "Plan ready".to_string(),
+            id: 18,
+            report_link: Some("reports/plan.md".to_string()),
+            for_prompt: true,
+        };
+        let rendered = record.to_string();
+        assert_eq!(rendered, "- 💬 Plan ready [ctx_rec_18]");
+        assert!(!rendered.contains("reports/plan.md"), "report URL should not leak");
+    }
+
+    #[test]
+    fn md_record_normal_mode_always_shows_id() {
+        // Verify that normal mode (for_prompt=false) still shows IDs for all record types
+        for (record_type, prefix) in [
+            (MdRecordType::Success, "- ✅ "),
+            (MdRecordType::Failure, "- ❌ "),
+            (MdRecordType::Comment, "- 💬 "),
+            (MdRecordType::Question, "- ❓ "),
+        ] {
+            let record = MdRecord {
+                record_type,
+                brief: "test".to_string(),
+                id: 99,
+                report_link: None,
+                for_prompt: false,
+            };
+            let rendered = record.to_string();
+            assert!(
+                rendered.contains("ctx_rec_99"),
+                "normal mode should always show ID, got: {rendered} for prefix {prefix}"
+            );
+            assert!(
+                rendered.contains("<sub>"),
+                "normal mode should use <sub> tags, got: {rendered}"
+            );
+        }
+    }
+
+    // -- End-to-end test with mixed interactive and non-interactive records in prompt mode --
+
+    #[test]
+    fn for_prompt_mixed_interactive_and_non_interactive_records() {
+        let ctx = TaskContext {
+            stages: vec![StageContext {
+                info: StageInfo {
+                    instance: "default".to_string(),
+                    pipeline: Pipeline::from("main"),
+                    run_id: 1,
+                    stage: Stage::new("working"),
+                    tool: Some(crate::task::Tool::Claude),
+                    model: Some(Model::ClaudeOpus4_6),
+                    prompt_link: None,
+                    output_link: None,
+                    timestamp: utc("2024-01-01T00:00:00Z"),
+                },
+                records: vec![
+                    // Interactive: checkbox unchecked
+                    ContextRecord {
+                        id: 1,
+                        record_type: ContextRecordType::Checkbox(false),
+                        brief: "Implement feature".to_string(),
+                        report_link: None,
+                    },
+                    // Interactive: checkbox checked
+                    ContextRecord {
+                        id: 2,
+                        record_type: ContextRecordType::Checkbox(true),
+                        brief: "Write tests".to_string(),
+                        report_link: None,
+                    },
+                    // Interactive: success with report_link
+                    ContextRecord {
+                        id: 3,
+                        record_type: ContextRecordType::Success,
+                        brief: "All tests passed".to_string(),
+                        report_link: Some("reports/tests.md".to_string()),
+                    },
+                    // Non-interactive: success without report_link
+                    ContextRecord {
+                        id: 4,
+                        record_type: ContextRecordType::Success,
+                        brief: "Lint clean".to_string(),
+                        report_link: None,
+                    },
+                    // Non-interactive: failure without report_link
+                    ContextRecord {
+                        id: 5,
+                        record_type: ContextRecordType::Failure,
+                        brief: "Flaky test".to_string(),
+                        report_link: None,
+                    },
+                    // Interactive: failure with report_link
+                    ContextRecord {
+                        id: 6,
+                        record_type: ContextRecordType::Failure,
+                        brief: "Build error".to_string(),
+                        report_link: Some("reports/build.md".to_string()),
+                    },
+                    // Non-interactive: comment without report_link
+                    ContextRecord {
+                        id: 7,
+                        record_type: ContextRecordType::Comment,
+                        brief: "Retrying now".to_string(),
+                        report_link: None,
+                    },
+                    // Interactive: comment with report_link
+                    ContextRecord {
+                        id: 8,
+                        record_type: ContextRecordType::Comment,
+                        brief: "Plan ready".to_string(),
+                        report_link: Some("reports/plan.md".to_string()),
+                    },
+                    // Non-interactive: question without report_link
+                    ContextRecord {
+                        id: 9,
+                        record_type: ContextRecordType::Question,
+                        brief: "Should we refactor?".to_string(),
+                        report_link: None,
+                    },
+                ],
+            }],
+        };
+
+        let output = serialize_context(&ctx, &[], true, None);
+
+        // Interactive records MUST show [ctx_rec_N]
+        assert!(output.contains("[ctx_rec_1]"), "unchecked checkbox should show ID");
+        assert!(output.contains("[ctx_rec_2]"), "checked checkbox should show ID");
+        assert!(output.contains("[ctx_rec_3]"), "success with link should show ID");
+        assert!(output.contains("[ctx_rec_6]"), "failure with link should show ID");
+        assert!(output.contains("[ctx_rec_8]"), "comment with link should show ID");
+
+        // Non-interactive records MUST NOT show [ctx_rec_N]
+        assert!(!output.contains("[ctx_rec_4]"), "success without link should suppress ID");
+        assert!(!output.contains("[ctx_rec_5]"), "failure without link should suppress ID");
+        assert!(!output.contains("[ctx_rec_7]"), "comment without link should suppress ID");
+        assert!(!output.contains("[ctx_rec_9]"), "question without link should suppress ID");
+
+        // All record briefs should still appear regardless of interactivity
+        assert!(output.contains("Implement feature"), "checkbox brief should appear");
+        assert!(output.contains("Write tests"), "checkbox brief should appear");
+        assert!(output.contains("All tests passed"), "success brief should appear");
+        assert!(output.contains("Lint clean"), "non-interactive success brief should appear");
+        assert!(output.contains("Flaky test"), "non-interactive failure brief should appear");
+        assert!(output.contains("Build error"), "failure with link brief should appear");
+        assert!(output.contains("Retrying now"), "non-interactive comment brief should appear");
+        assert!(output.contains("Plan ready"), "comment with link brief should appear");
+        assert!(output.contains("Should we refactor?"), "non-interactive question brief should appear");
+
+        // No <sub> tags or report URLs in prompt mode
+        assert!(!output.contains("<sub>"), "no <sub> tags in prompt output");
+        assert!(!output.contains("reports/"), "no report URLs in prompt output");
+
+        // Verify normal mode still shows ALL IDs for comparison
+        let normal_output = serialize_context(&ctx, &[], false, None);
+        for id in 1..=9 {
+            assert!(
+                normal_output.contains(&format!("ctx_rec_{}", id)),
+                "normal mode should show ctx_rec_{id}"
+            );
+        }
     }
 }
