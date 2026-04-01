@@ -5,11 +5,11 @@
 # tests are marked `#[ignore]` so they will be skipped by default; run them
 # explicitly with `cargo test -- --ignored` once you have filled in credentials:
 #
-#   integration_github_github — needs both [tasks.github] and [repo.github]
+#   integration_github_github — needs both [tasks] and [repo]
 
 # Uncomment to enable GitHub task-backend tests (integration_github_github):
 #
-# [tasks.github]
+# [tasks]
 # # GitHub repository whose issues are used as the task tracker (owner/repo).
 # github_repo = "owner/zbobr-test-tasks"
 # # GitHub token with read/write access to the tasks repository.

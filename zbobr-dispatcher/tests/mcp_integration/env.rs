@@ -273,16 +273,6 @@ impl IntegrationTestEnv {
         self.name
     }
 
-    /// Return the destination repository reference appropriate for this backend.
-    /// For GitHub backends returns `https://github.com/{owner/repo}`,
-    /// for FS backends returns the local path as a string.
-    pub fn dest_repo(&self, local_path: &std::path::Path) -> String {
-        self.target_repo
-            .as_deref()
-            .map(|r| format!("https://github.com/{r}"))
-            .unwrap_or_else(|| local_path.to_string_lossy().to_string())
-    }
-
     // -----------------------------------------------------------------------
     // Task utilities
     // -----------------------------------------------------------------------
@@ -321,13 +311,7 @@ impl IntegrationTestEnv {
             })
     }
 
-    pub async fn update_task_branches(
-        &self,
-        task_id: u64,
-        _dest_repo: &str,
-        _dest_branch: &str,
-        work_branch: &str,
-    ) {
+    pub async fn update_task_branches(&self, task_id: u64, work_branch: &str) {
         let work_branch = work_branch.to_string();
         let weak = self
             .zbobr

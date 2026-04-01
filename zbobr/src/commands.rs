@@ -106,7 +106,7 @@ pub enum TaskSubcommand {
         /// Pass `--work-branch` without a value to delete the parameter.
         #[arg(long, num_args = 0..=1)]
         work_branch: Option<Option<String>>,
-        /// New signal (go_preparation, go_planning, etc.)
+        /// New signal (go_planning, go_working, etc.)
         #[arg(long)]
         signal: Option<String>,
         /// Set or clear the confirm flag (true/false).
