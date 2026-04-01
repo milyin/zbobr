@@ -869,3 +869,86 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zbobr_api::Secret;
+
+    // ── parse_github_repo tests ──────────────────────────────────────
+
+    #[test]
+    fn parse_owner_repo_plain() {
+        let repo = parse_github_repo("owner/repo").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_https_url() {
+        let repo = parse_github_repo("https://github.com/owner/repo").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_https_url_with_git_suffix() {
+        let repo = parse_github_repo("https://github.com/owner/repo.git").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_https_url_trailing_slash() {
+        let repo = parse_github_repo("https://github.com/owner/repo/").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_ssh_url() {
+        let repo = parse_github_repo("git@github.com:owner/repo").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_ssh_url_with_git_suffix() {
+        let repo = parse_github_repo("git@github.com:owner/repo.git").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_owner_repo_with_git_suffix() {
+        let repo = parse_github_repo("owner/repo.git").unwrap();
+        assert_eq!(repo.full_name, "owner/repo");
+    }
+
+    #[test]
+    fn parse_rejects_bare_name() {
+        let result = parse_github_repo("just-a-name");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid GitHub repository format"));
+    }
+
+    // ── from_config normalization tests ──────────────────────────────
+
+    #[tokio::test]
+    async fn from_config_normalizes_https_url() {
+        let config = ZbobrRepoBackendGithubConfig {
+            repository: "https://github.com/myorg/myrepo.git".to_string(),
+            branch: "main".to_string(),
+            github_token: Secret::value("ghp_test123"),
+            repos_dir: std::path::PathBuf::from("/tmp/test-repos"),
+        };
+        let backend = ZbobrRepoBackendGithub::from_config(config).unwrap();
+        assert_eq!(backend.backend_config.repository, "myorg/myrepo");
+    }
+
+    #[tokio::test]
+    async fn from_config_normalizes_ssh_url() {
+        let config = ZbobrRepoBackendGithubConfig {
+            repository: "git@github.com:myorg/myrepo.git".to_string(),
+            branch: "main".to_string(),
+            github_token: Secret::value("ghp_test123"),
+            repos_dir: std::path::PathBuf::from("/tmp/test-repos"),
+        };
+        let backend = ZbobrRepoBackendGithub::from_config(config).unwrap();
+        assert_eq!(backend.backend_config.repository, "myorg/myrepo");
+    }
+}
