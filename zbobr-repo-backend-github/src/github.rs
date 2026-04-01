@@ -946,6 +946,7 @@ mod tests {
 
     #[tokio::test]
     async fn from_config_normalizes_https_url() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let config = ZbobrRepoBackendGithubConfig {
             repository: "https://github.com/myorg/myrepo.git".to_string(),
             branch: "main".to_string(),
@@ -958,6 +959,7 @@ mod tests {
 
     #[tokio::test]
     async fn from_config_normalizes_ssh_url() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let config = ZbobrRepoBackendGithubConfig {
             repository: "git@github.com:myorg/myrepo.git".to_string(),
             branch: "main".to_string(),
