@@ -1,0 +1,3 @@
+Two cleanup items:
+1. commands.rs:109 - doc comment says "New signal (go_preparation, go_planning, etc.)" but go_preparation is a removed signal. Update to "New signal (go_planning, go_working, etc.)"
+2. test_helpers.rs is not included in mod.rs (dead file) but contains many `fork_owner()` calls and fork-related functions (run_repo_backend_clone_cross_org, etc.) that contradict single-repo design. Either remove the file or add it to mod.rs after cleaning it up. Since it's not part of any compilation unit, it should be removed or cleaned.
