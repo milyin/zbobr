@@ -43,6 +43,12 @@ impl ZbobrRepoBackendGithubConfig {
                  This is the GitHub repository in 'owner/repo' format."
             );
         }
+        if self.branch.is_empty() {
+            anyhow::bail!(
+                "branch not set. Set branch in [repo] config.\n  \
+                 This is the base branch to work against (e.g. 'main')."
+            );
+        }
         let token = self.github_token.resolve().map_err(|e| {
             anyhow::anyhow!(
                 "GitHub token not set. Set github_token in [repo] config.\n  \
@@ -59,9 +65,15 @@ impl ZbobrRepoBackendGithubConfig {
         Ok(())
     }
 
-    /// Extract the short repository name (the part after '/').
+    /// Extract the short repository name (the part after the last '/'),
+    /// stripping any trailing slash or `.git` suffix first.
     pub fn repo_short_name(&self) -> &str {
-        self.repository.rsplit('/').next().unwrap_or(&self.repository)
+        self.repository
+            .trim_end_matches('/')
+            .trim_end_matches(".git")
+            .rsplit('/')
+            .next()
+            .unwrap_or(&self.repository)
     }
 }
 
@@ -89,5 +101,23 @@ mod tests {
     #[test]
     fn repo_short_name_nested_path() {
         assert_eq!(config_with_repo("org/sub/repo").repo_short_name(), "repo");
+    }
+
+    #[test]
+    fn repo_short_name_git_suffix() {
+        assert_eq!(config_with_repo("owner/my-repo.git").repo_short_name(), "my-repo");
+    }
+
+    #[test]
+    fn repo_short_name_https_url() {
+        assert_eq!(
+            config_with_repo("https://github.com/owner/repo.git").repo_short_name(),
+            "repo"
+        );
+    }
+
+    #[test]
+    fn repo_short_name_trailing_slash() {
+        assert_eq!(config_with_repo("owner/my-repo/").repo_short_name(), "my-repo");
     }
 }

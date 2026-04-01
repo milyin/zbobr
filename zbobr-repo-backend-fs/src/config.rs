@@ -36,6 +36,12 @@ impl ZbobrRepoBackendFsConfig {
                  This is the local path or remote URL of the repository to work in."
             );
         }
+        if self.branch.is_empty() {
+            anyhow::bail!(
+                "branch not set. Set branch in [repo] config.\n  \
+                 This is the base branch to work against (e.g. 'main')."
+            );
+        }
         // repos_dir can be any path — we'll create it if needed
         Ok(())
     }
