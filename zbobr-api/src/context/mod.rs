@@ -287,19 +287,13 @@ impl MdCompactComment {
             // put to context as is
             c.body.to_string()
         } else if c.body.len() <= COMPACT_COMMENT_MAX_LEN {
-            // short comment, use full text with line breaks replaced by spaces to keep format "ine stage - one line"
-            c.body.lines().collect::<Vec<_>>().join(" ")
+            // short comment, use first line only to keep format "one stage - one line"
+            c.body.lines().next().unwrap_or("").to_string()
         } else {
-            // long comment, truncate and replace line breaks with spaces
-            let truncated = c
-                .body
-                .chars()
-                .take(COMPACT_COMMENT_MAX_LEN)
-                .collect::<String>()
-                .lines()
-                .collect::<Vec<_>>()
-                .join(" ");
-            format!("{}...", truncated)
+            // long comment, truncate
+            let truncated = c.body.chars().take(COMPACT_COMMENT_MAX_LEN).collect::<String>();
+            let first_line = truncated.lines().next().unwrap_or("");
+            format!("{}...", first_line)
         };
 
         let username = if c.username.is_empty() {
@@ -307,7 +301,7 @@ impl MdCompactComment {
         } else {
             &c.username
         };
-        let text = format!("user:**{}** {}", username, comment_text);
+        let text = format!("user {}: {}", username, comment_text);
 
         MdCompactComment {
             text,
@@ -1153,7 +1147,7 @@ mod tests {
             Some("https://example.com/comment/1"),
         )];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- user:**unknown** hello world `2024-01-01 00:00:00 +0000` <sub>[link](https://example.com/comment/1)</sub>"));
+        assert!(output.contains("- user unknown: hello world `2024-01-01 00:00:00 +0000` <sub>[link](https://example.com/comment/1)</sub>"));
     }
 
     #[test]
@@ -1161,7 +1155,7 @@ mod tests {
         let ctx = TaskContext::default();
         let comments = vec![make_comment("short text", "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- user:**unknown** short text `2024-01-01 00:00:00 +0000`"));
+        assert!(output.contains("- user unknown: short text `2024-01-01 00:00:00 +0000`"));
         assert!(!output.contains("<sub>"));
     }
 
@@ -1185,7 +1179,7 @@ mod tests {
             None,
         )];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- user:**unknown** first line"));
+        assert!(output.contains("- user unknown: first line"));
         assert!(!output.contains("second line"));
     }
 
@@ -1194,7 +1188,7 @@ mod tests {
         let ctx = TaskContext::default();
         let comments = vec![make_comment("hello world", "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("- user:**unknown** hello world `2024-01-01 00:00:00 +0000`"));
+        assert!(output.contains("- user unknown: hello world `2024-01-01 00:00:00 +0000`"));
     }
 
     #[test]
@@ -1243,7 +1237,7 @@ mod tests {
         let output = serialize_context(&ctx, &comments, true, None);
         // Prompt mode renders comments without timestamp or link
         assert!(!output.contains("> **["));
-        assert!(output.contains("- user:**unknown** a user comment"));
+        assert!(output.contains("- user unknown: a user comment"));
         assert!(!output.contains("`2024-01-01 00:00:00 +0000`"));
     }
 
@@ -1253,7 +1247,7 @@ mod tests {
         let ctx = TaskContext::default();
         let comments = vec![make_comment(&long_text, "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, true, None);
-        assert!(output.contains(&format!("- user:**unknown** {}", long_text)));
+        assert!(output.contains(&format!("- user unknown: {}", long_text)));
         assert!(!output.contains("..."));
     }
 
@@ -1287,7 +1281,7 @@ mod tests {
         let compact = MdCompactComment::from_comment(&comment, true);
         let rendered = compact.to_string();
         // Should render as simple list item with user prefix
-        assert_eq!(rendered, "- user:**alice** please proceed");
+        assert_eq!(rendered, "- user alice: please proceed");
         // Must NOT contain timestamp or URL
         assert!(!rendered.contains("2024-06-15"));
         assert!(!rendered.contains("https://example.com"));
