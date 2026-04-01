@@ -1,0 +1,1 @@
+In env.rs, init_github_github() sets target_repo: Some(task_repo) but it should be Some(repository). The target_repo field should hold the repo backend's repository (the one agents work on), not the task tracking repository.
