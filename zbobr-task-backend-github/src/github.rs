@@ -644,6 +644,66 @@ impl ZbobrTaskBackendGithubImpl {
         })
     }
 
+    fn report_url_prefix_from_config(
+        config: &ZbobrTaskBackendGithubConfig,
+        task_id: u64,
+    ) -> Option<String> {
+        let (owner, repo) = config.parse_repo().ok()?;
+        let branch = config.reports_branch.as_deref().unwrap_or("main");
+        let reports_path = config.reports_path.as_deref().unwrap_or("reports");
+        Some(format!(
+            "https://github.com/{owner}/{repo}/blob/{branch}/{reports_path}/task_{task_id}/"
+        ))
+    }
+
+    fn normalize_task_report_ref_for_config(
+        config: &ZbobrTaskBackendGithubConfig,
+        task_id: u64,
+        link: &str,
+    ) -> String {
+        if let Some(prefix) = Self::report_url_prefix_from_config(config, task_id)
+            && let Some(filename) = link.strip_prefix(&prefix)
+        {
+            return filename.to_string();
+        }
+
+        let reports_path = config.reports_path.as_deref().unwrap_or("reports");
+        let task_dir_prefix = format!("{reports_path}/task_{task_id}/");
+        if let Some(filename) = link.strip_prefix(&task_dir_prefix) {
+            return filename.to_string();
+        }
+
+        link.to_string()
+    }
+
+    fn normalize_task_report_links_for_config(
+        config: &ZbobrTaskBackendGithubConfig,
+        task: &mut Task,
+    ) {
+        for stage in &mut task.context.stages {
+            for link in [&mut stage.info.prompt_link, &mut stage.info.output_link]
+                .into_iter()
+                .flatten()
+            {
+                *link = Self::normalize_task_report_ref_for_config(config, task.id, link);
+            }
+
+            for link in stage
+                .records
+                .iter_mut()
+                .filter_map(|record| record.report_link.as_mut())
+            {
+                *link = Self::normalize_task_report_ref_for_config(config, task.id, link);
+            }
+        }
+    }
+
+    fn hydrate_issue_to_task(&self, issue: IssueResponse) -> anyhow::Result<Task> {
+        let mut task = Self::issue_to_task(issue)?;
+        Self::normalize_task_report_links_for_config(&self.backend_config, &mut task);
+        Ok(task)
+    }
+
     /// Build the string parameters map for serialization, including promoted fields.
     fn task_to_string_params(task: &Task) -> HashMap<String, String> {
         let mut params: HashMap<String, String> = HashMap::new();
@@ -755,7 +815,7 @@ impl ZbobrTaskBackendGithubImpl {
                 .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
         })
         .await?;
-        Self::issue_to_task(issue)
+        self.hydrate_issue_to_task(issue)
     }
 
     /// Internal: read task with cooling check.
@@ -1209,7 +1269,7 @@ impl TaskBackend for TaskBackendGithub {
         for issue in issues {
             let id = issue.number;
             // Reuse list payload as the saved snapshot until a caller asks for refresh.
-            match ZbobrTaskBackendGithubImpl::issue_to_task(issue) {
+            match self.inner.hydrate_issue_to_task(issue) {
                 Ok(task) => {
                     result.push(Box::new(GithubTaskWeak {
                         id,
@@ -1297,7 +1357,11 @@ impl TaskBackend for TaskBackendGithub {
 #[cfg(test)]
 mod flag_tests {
     use super::*;
-    use crate::separator::PARAMETERS_SEPARATOR;
+    use crate::separator::{PARAMETERS_SEPARATOR, serialize_description_full};
+    use zbobr_api::{
+        Secret,
+        task::{ContextRecord, ContextRecordType, Pipeline, Stage, StageContext, StageInfo},
+    };
 
     fn make_issue_with_params(key: &str, value: &str) -> IssueResponse {
         let body = format!("desc{PARAMETERS_SEPARATOR}{key}: {value}\n");
@@ -1307,6 +1371,17 @@ mod flag_tests {
             body: Some(body),
             state: "open".to_string(),
             labels: vec![],
+        }
+    }
+
+    fn make_config() -> ZbobrTaskBackendGithubConfig {
+        ZbobrTaskBackendGithubConfig {
+            instance: "default".to_string(),
+            github_repo: "org/repo".to_string(),
+            github_token: Secret::value("test-token"),
+            reports_branch: Some("reports".to_string()),
+            reports_path: Some("reports".to_string()),
+            allowed_usernames: None,
         }
     }
 
@@ -1357,6 +1432,65 @@ mod flag_tests {
         assert_eq!(
             params.get(PARAM_FLAG_CONFIRM).map(|s| s.as_str()),
             Some(PARAM_FLAG_VALUE_TRUE)
+        );
+    }
+
+    #[test]
+    fn hydrate_issue_to_task_restores_bare_report_filenames_from_blob_urls() {
+        let config = make_config();
+        let context = TaskContext {
+            stages: vec![StageContext {
+                info: StageInfo {
+                    instance: "default".to_string(),
+                    pipeline: Pipeline::Main,
+                    run_id: 1,
+                    stage: Stage::new("working"),
+                    tool: None,
+                    model: None,
+                    prompt_link: Some("prompt_main_1_working.md".to_string()),
+                    output_link: Some("output_main_1_working.md".to_string()),
+                    timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
+                },
+                records: vec![ContextRecord {
+                    id: 6,
+                    record_type: ContextRecordType::Success,
+                    brief: "done".to_string(),
+                    report_link: Some("report_main_1_working.md".to_string()),
+                }],
+            }],
+        };
+        let report_prefix = "https://github.com/org/repo/blob/reports/reports/task_1/".to_string();
+        let body = serialize_description_full(
+            "desc",
+            &HashMap::new(),
+            &None,
+            &context,
+            &[],
+            Some(&|filename| format!("{report_prefix}{filename}")),
+        );
+        let issue = IssueResponse {
+            number: 1,
+            title: "test".to_string(),
+            body: Some(body),
+            state: "open".to_string(),
+            labels: vec![],
+        };
+
+        let mut task = ZbobrTaskBackendGithubImpl::issue_to_task(issue).unwrap();
+        ZbobrTaskBackendGithubImpl::normalize_task_report_links_for_config(&config, &mut task);
+        let stage = &task.context.stages[0];
+
+        assert_eq!(
+            stage.info.prompt_link.as_deref(),
+            Some("prompt_main_1_working.md")
+        );
+        assert_eq!(
+            stage.info.output_link.as_deref(),
+            Some("output_main_1_working.md")
+        );
+        assert_eq!(
+            stage.records[0].report_link.as_deref(),
+            Some("report_main_1_working.md")
         );
     }
 }
