@@ -1,0 +1,1 @@
+No additional tests needed for this round. The latest commit (44e9ca3) contains only a docs update, a simplification already covered by existing integration tests, and a straightforward wiring fix in top-level dispatch that isn't practically unit-testable. All 172 existing tests cover the implemented behavior.
