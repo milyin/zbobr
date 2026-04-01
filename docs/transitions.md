@@ -16,7 +16,7 @@ This page describes how the dispatcher drives tasks through its lifecycle. A com
 
 ## Task fields
 
-* **state** – the current state of the task. A task in the `PENDING` state is handled by the dispatcher. Tasks in other states are handled by the corresponding session (`MERGING`, `PREPARING`, `PLANNING`, `WORKING`, and `REVIEWING`) executed by the dispatcher. After processing, a task always returns to the `PENDING` state. A task set to `DONE` state is not handled further.
+* **state** – the current state of the task. A task in the `PENDING` state is handled by the dispatcher. Tasks in other states are handled by the corresponding session (`MERGING`, `PLANNING`, `WORKING`, and `REVIEWING`) executed by the dispatcher. After processing, a task always returns to the `PENDING` state. A task set to `DONE` state is not handled further.
 
 * **signal** – an enum value indicating the desired next state for the task.
 

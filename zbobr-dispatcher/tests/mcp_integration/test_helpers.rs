@@ -10,32 +10,6 @@ use zbobr_dispatcher::{CommentType, TaskDir};
 use super::{env::IntegrationTestEnv, scenarios};
 
 // ---------------------------------------------------------------------------
-// Preparation
-// ---------------------------------------------------------------------------
-
-pub async fn run_preparation(env: &IntegrationTestEnv) {
-    let repo_path = env.create_git_repo("repo_preparation").await;
-    let task_id = env
-        .create_task("Dummy Task", "Dummy task description", "READY")
-        .await;
-
-    env.run_stage(
-        task_id,
-        "preparator",
-        scenarios::preparation_scenario(&repo_path.to_string_lossy()),
-    )
-    .await;
-
-    let task = env.get_task(task_id).await;
-    assert_eq!(
-        task.signal,
-        Some("go_planning".to_string()),
-        "[{}] Preparator should emit go_plan after setting repo/branches",
-        env.name()
-    );
-}
-
-// ---------------------------------------------------------------------------
 // Planning
 // ---------------------------------------------------------------------------
 

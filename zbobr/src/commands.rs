@@ -122,9 +122,6 @@ pub enum TaskSubcommand {
     Process {
         /// Task ID
         task: Option<u64>,
-        /// MCP tester scenario file for preparation role
-        #[arg(long)]
-        executor_mcp_tester_preparation: Option<PathBuf>,
         /// MCP tester scenario file for planning role
         #[arg(long)]
         executor_mcp_tester_planning: Option<PathBuf>,
@@ -459,7 +456,6 @@ async fn run_task_subcommand(
         }
         TaskSubcommand::Process {
             task,
-            executor_mcp_tester_preparation,
             executor_mcp_tester_planning,
             executor_mcp_tester_working,
             executor_mcp_tester_reviewing,
@@ -468,15 +464,13 @@ async fn run_task_subcommand(
         } => {
             let task = require_task_id(task, "process")?;
             let task_obj = task_backend.get_task(task).await?.snapshot(false).await?;
-            let mcp_tester_config_override = if executor_mcp_tester_preparation.is_some()
-                || executor_mcp_tester_planning.is_some()
+            let mcp_tester_config_override = if executor_mcp_tester_planning.is_some()
                 || executor_mcp_tester_working.is_some()
                 || executor_mcp_tester_reviewing.is_some()
                 || executor_mcp_tester_testing.is_some()
                 || executor_mcp_tester_merging.is_some()
             {
                 Some(ZbobrExecutorMcpTesterConfig {
-                    preparation: executor_mcp_tester_preparation,
                     planning: executor_mcp_tester_planning,
                     working: executor_mcp_tester_working,
                     reviewing: executor_mcp_tester_reviewing,

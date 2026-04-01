@@ -9,10 +9,9 @@ use zbobr_utility::{config_struct, resolve_path};
 #[config_struct]
 /// Configuration for the mcp-tester executor.
 ///
-/// Supports the legacy per-role fields (preparation, planning, etc.)
+/// Supports per-role fields (planning, working, etc.)
 /// and a generic `scenarios` map for arbitrary role→scenario-file mappings.
 pub struct ZbobrExecutorMcpTesterConfig {
-    pub preparation: Option<PathBuf>,
     pub planning: Option<PathBuf>,
     pub working: Option<PathBuf>,
     pub reviewing: Option<PathBuf>,
@@ -39,10 +38,6 @@ impl ZbobrExecutorMcpTesterConfig {
             .map(|(k, v)| (k, resolve_path(v, config_dir)))
             .collect();
         Self {
-            preparation: merged
-                .preparation
-                .as_ref()
-                .map(|p| resolve_path(p.clone(), config_dir)),
             planning: merged
                 .planning
                 .as_ref()
@@ -69,13 +64,12 @@ impl ZbobrExecutorMcpTesterConfig {
 
     /// Get the scenario file path for the given stage name.
     /// Checks the generic `scenarios` map first, then falls back to
-    /// legacy per-role field mapping for backward compatibility.
+    /// per-role field mapping.
     pub fn scenario_for_stage(&self, stage_name: &str) -> Option<&PathBuf> {
         if let Some(p) = self.scenarios.get(stage_name) {
             return Some(p);
         }
         match stage_name {
-            "preparation" | "preparator" => self.preparation.as_ref(),
             "planning" | "planner" | "test_planner" => self.planning.as_ref(),
             "working" | "worker" | "test_worker" => self.working.as_ref(),
             "reviewing" | "reviewer" => self.reviewing.as_ref(),

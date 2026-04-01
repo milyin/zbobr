@@ -46,7 +46,7 @@ Each task file contains:
 - `stage`: Current stage (e.g., "PENDING", "PLANNING", "WORKING")
 - `tool`: Optional tool name (e.g., "copilot", "claude")
 - `model`: Optional model name (e.g., "gpt-5-mini", "claude-sonnet-4.5")
-- `parameters`: Key-value map of task parameters (destination_repository, destination_branch, etc.)
+- `parameters`: Key-value map of task parameters
 - `done`: Boolean flag
 - `checklist`: Array of checklist items with id, checked status, and text
 - `signal`: Optional control signal (e.g., "stop", "done", "go_plan")

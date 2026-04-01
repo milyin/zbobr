@@ -48,7 +48,7 @@ pub trait ToolExecutor: Send + Sync {
     /// * `model` - The AI model to use
     /// * `port` - The MCP server port
     /// * `prompt` - The prompt text for the tool
-    /// * `work_dir` - The agent working directory (repo subdirectory for non-Preparator roles)
+    /// * `work_dir` - The agent working directory (repo subdirectory)
     /// * `mcp_url` - The MCP server URL
     /// * `agent_github_token` - Read-only GitHub token for agent (passed as GH_TOKEN/GITHUB_TOKEN).
     ///   Security boundary: limits agent's GitHub access to read-only to prevent erroneous

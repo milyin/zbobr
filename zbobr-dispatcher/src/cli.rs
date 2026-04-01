@@ -1684,7 +1684,7 @@ async fn perform_stash_and_push(
     let task_backend = zbobr.task_backend();
 
     // Stash uncommitted changes if work_dir is a git repository.
-    // The preparator stage may start without a git repo (identity not yet set),
+    // The work_dir may not yet be a git repo on the first run,
     // so we skip stash but still proceed to update_worktree below.
     let is_git_repo = git_output(work_dir, &["rev-parse", "--is-inside-work-tree"])
         .await

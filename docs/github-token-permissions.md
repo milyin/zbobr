@@ -36,7 +36,7 @@ Used by `zbobr-task-backend-github` to manage the task project repository: issue
 
 ### Fine-grained PAT permissions
 
-**On the task repo** (`--tasks-github-task-repo`):
+**On the task repo** (configured via `github_repo` in `[tasks.github]` or `--tasks-github-repo`):
 
 | Permission | Level | Operations |
 | --- | --- | --- |
