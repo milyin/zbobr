@@ -1,0 +1,1 @@
+The FS backend's ensure_pr_url() method currently scans every .git entry under repos_dir. With the single-repo design, it should only look at the configured repository's bare clone path. Fix the lookup to use the known repo path directly instead of scanning all clones.
