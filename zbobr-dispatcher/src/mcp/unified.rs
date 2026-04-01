@@ -15,8 +15,8 @@ use zbobr_api::config_tools::McpTool;
 use crate::{
     mcp::{
         common::{
-            AddChecklistItemParam, CheckChecklistItemParam, GetCtxRecParam,
-            MessageParam, ReportParam,
+            AddChecklistItemParam, CheckChecklistItemParam, GetCtxRecParam, MessageParam,
+            ReportParam,
         },
         traits::CommonMcpImpl,
     },
