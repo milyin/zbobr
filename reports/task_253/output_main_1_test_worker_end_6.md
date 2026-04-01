@@ -1,0 +1,1 @@
+All done. Implemented 8 new `validate()` tests (3 for FS backend, 5 for GitHub backend) covering empty repository, empty branch, and token validation cases. All 34 checklist tests pass across all 5 checklist items.
