@@ -873,10 +873,7 @@ mod comment_model_tests {
     #[tokio::test]
     async fn mcp_helper_includes_explicit_model() {
         let (zbobr, task_backend) = make_test_parts();
-        let id = zbobr
-            .create_task("t", "", "READY")
-            .await
-            .unwrap();
+        let id = zbobr.create_task("t", "", "READY").await.unwrap();
 
         let session = zbobr.role_session(id);
         let allowed_tools: std::collections::HashSet<zbobr_api::config_tools::McpTool> = [
@@ -952,10 +949,7 @@ mod comment_model_tests {
     #[tokio::test]
     async fn report_success_stores_context_records() {
         let (zbobr, task_backend) = make_test_parts();
-        let id = zbobr
-            .create_task("t", "desc", "READY")
-            .await
-            .unwrap();
+        let id = zbobr.create_task("t", "desc", "READY").await.unwrap();
 
         // Add a stage context so records can be attached
         {
@@ -1019,10 +1013,7 @@ mod comment_model_tests {
     #[tokio::test]
     async fn get_context_record_content_returns_report_or_brief() {
         let (zbobr, task_backend) = make_test_parts();
-        let id = zbobr
-            .create_task("t", "desc", "READY")
-            .await
-            .unwrap();
+        let id = zbobr.create_task("t", "desc", "READY").await.unwrap();
 
         // Add a stage with two records: one with report_link, one without
         {
@@ -1088,10 +1079,7 @@ mod comment_model_tests {
     #[tokio::test]
     async fn get_ctx_rec_returns_content() {
         let (zbobr, task_backend) = make_test_parts();
-        let id = zbobr
-            .create_task("t", "desc", "READY")
-            .await
-            .unwrap();
+        let id = zbobr.create_task("t", "desc", "READY").await.unwrap();
 
         // Set up a stage with a record that has a report
         {

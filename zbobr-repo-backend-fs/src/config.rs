@@ -70,17 +70,26 @@ mod tests {
 
     #[test]
     fn repo_short_name_simple_path() {
-        assert_eq!(config_with_repo("/home/user/my-project").repo_short_name(), "my-project");
+        assert_eq!(
+            config_with_repo("/home/user/my-project").repo_short_name(),
+            "my-project"
+        );
     }
 
     #[test]
     fn repo_short_name_trailing_slash() {
-        assert_eq!(config_with_repo("/home/user/my-project/").repo_short_name(), "my-project");
+        assert_eq!(
+            config_with_repo("/home/user/my-project/").repo_short_name(),
+            "my-project"
+        );
     }
 
     #[test]
     fn repo_short_name_git_suffix() {
-        assert_eq!(config_with_repo("/home/user/my-project.git").repo_short_name(), "my-project");
+        assert_eq!(
+            config_with_repo("/home/user/my-project.git").repo_short_name(),
+            "my-project"
+        );
     }
 
     #[test]

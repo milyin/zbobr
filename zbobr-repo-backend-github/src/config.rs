@@ -90,7 +90,10 @@ mod tests {
 
     #[test]
     fn repo_short_name_owner_repo() {
-        assert_eq!(config_with_repo("owner/my-repo").repo_short_name(), "my-repo");
+        assert_eq!(
+            config_with_repo("owner/my-repo").repo_short_name(),
+            "my-repo"
+        );
     }
 
     #[test]
@@ -105,7 +108,10 @@ mod tests {
 
     #[test]
     fn repo_short_name_git_suffix() {
-        assert_eq!(config_with_repo("owner/my-repo.git").repo_short_name(), "my-repo");
+        assert_eq!(
+            config_with_repo("owner/my-repo.git").repo_short_name(),
+            "my-repo"
+        );
     }
 
     #[test]
@@ -118,7 +124,10 @@ mod tests {
 
     #[test]
     fn repo_short_name_trailing_slash() {
-        assert_eq!(config_with_repo("owner/my-repo/").repo_short_name(), "my-repo");
+        assert_eq!(
+            config_with_repo("owner/my-repo/").repo_short_name(),
+            "my-repo"
+        );
     }
 
     fn config_with_repo_and_branch(
@@ -143,8 +152,7 @@ mod tests {
 
     #[test]
     fn validate_fails_when_repository_empty() {
-        let mut config =
-            config_with_repo_and_branch("", "main", Secret::value("ghp_token123"));
+        let mut config = config_with_repo_and_branch("", "main", Secret::value("ghp_token123"));
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("repository not set"));
     }
@@ -159,8 +167,7 @@ mod tests {
 
     #[test]
     fn validate_fails_when_token_empty() {
-        let mut config =
-            config_with_repo_and_branch("owner/repo", "main", Secret::value(""));
+        let mut config = config_with_repo_and_branch("owner/repo", "main", Secret::value(""));
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("GitHub token not set"));
     }

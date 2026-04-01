@@ -80,7 +80,6 @@ steps:
     .to_string()
 }
 
-
 /// Minimal scenario that just reports success (used for default-transition stages).
 pub fn report_and_finish_scenario() -> String {
     r#"name: Report And Finish

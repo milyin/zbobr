@@ -123,8 +123,7 @@ pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
         .await;
     // Pre-set work branch so the repo backend can set up the workspace
     let work_branch = format!("zbobr_fix-{task_id}-mcp");
-    env.update_task_branches(task_id, &work_branch)
-        .await;
+    env.update_task_branches(task_id, &work_branch).await;
 
     let workflow = build_workflow(vec![StageDef::new("alpha", "alpha", "main")]);
 
@@ -141,7 +140,6 @@ pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
     assert_eq!(task.state, State::Done, "Should complete as DONE");
 }
 
-
 // ===========================================================================
 // Test 2: Sequential stage advancement within a pipeline
 // ===========================================================================
@@ -152,8 +150,7 @@ pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
         .create_task("Transfer test", "Transfer test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-transfer");
-    env.update_task_branches(task_id, &work_branch)
-        .await;
+    env.update_task_branches(task_id, &work_branch).await;
 
     let workflow = build_workflow(vec![
         StageDef::new("first", "role_a", "main"),
@@ -220,8 +217,7 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
     let task_id = env
         .create_task("Conflict test", "Conflict test description", "READY")
         .await;
-    env.update_task_branches(task_id, work_branch)
-        .await;
+    env.update_task_branches(task_id, work_branch).await;
 
     let workflow = build_workflow(vec![
         StageDef::new("work", "role_work", "main"),
@@ -287,8 +283,7 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
         .create_task("Pause test", "Pause test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-pause");
-    env.update_task_branches(task_id, &work_branch)
-        .await;
+    env.update_task_branches(task_id, &work_branch).await;
 
     let workflow = build_workflow(vec![StageDef::new("work", "role_err", "main")]);
 
@@ -331,8 +326,7 @@ pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
         .create_task("Ready test", "Ready test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-ready");
-    env.update_task_branches(task_id, &work_branch)
-        .await;
+    env.update_task_branches(task_id, &work_branch).await;
 
     let workflow = build_workflow(vec![StageDef::new("start", "role_start", "main")]);
 
@@ -364,8 +358,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
         .create_task("Signal test", "Signal test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-signals");
-    env.update_task_branches(task_id, &work_branch)
-        .await;
+    env.update_task_branches(task_id, &work_branch).await;
 
     let mut pipelines: HashMap<Pipeline, PipelineConfig> = HashMap::new();
     pipelines.insert(
@@ -437,8 +430,7 @@ pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
         .create_task("Ask test", "Ask test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-ask");
-    env.update_task_branches(task_id, &work_branch)
-        .await;
+    env.update_task_branches(task_id, &work_branch).await;
 
     let workflow = build_workflow(vec![StageDef::new("work", "role_ask", "main")]);
 
@@ -499,8 +491,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
         .create_task("Call stage test", "Call stage test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-call");
-    env.update_task_branches(task_id, &work_branch)
-        .await;
+    env.update_task_branches(task_id, &work_branch).await;
 
     // Build workflow:
     //   main:  call_sub → finish
@@ -619,8 +610,7 @@ pub async fn run_pause_state_conversion(env: &IntegrationTestEnv) {
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-pause-conv");
-    env.update_task_branches(task_id, &work_branch)
-        .await;
+    env.update_task_branches(task_id, &work_branch).await;
 
     let workflow = build_workflow(vec![StageDef::new("work", "role_err", "main")]);
 
@@ -667,8 +657,7 @@ pub async fn run_pause_resume_cycle(env: &IntegrationTestEnv) {
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-pause-resume");
-    env.update_task_branches(task_id, &work_branch)
-        .await;
+    env.update_task_branches(task_id, &work_branch).await;
 
     let workflow = build_workflow(vec![StageDef::new("work", "role_work", "main")]);
 
@@ -738,8 +727,7 @@ pub async fn run_ready_fresh_start(env: &IntegrationTestEnv) {
         .create_task("Fresh start test", "Fresh start test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-fresh");
-    env.update_task_branches(task_id, &work_branch)
-        .await;
+    env.update_task_branches(task_id, &work_branch).await;
 
     let workflow = build_workflow(vec![StageDef::new("start", "role_start", "main")]);
 
@@ -771,8 +759,7 @@ pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
         .create_task("Stage pause test", "Stage pause test description", "READY")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-stage-pause");
-    env.update_task_branches(task_id, &work_branch)
-        .await;
+    env.update_task_branches(task_id, &work_branch).await;
 
     // Two stages: stage_a has on_success = { pause = true }, stage_b is normal
     let workflow = build_workflow(vec![

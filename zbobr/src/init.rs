@@ -668,13 +668,19 @@ mod tests {
     #[test]
     fn default_workflow_includes_test_stages() {
         let workflow = default_workflow();
-        let main = workflow.pipeline(Pipeline::MAIN).expect("main pipeline exists");
+        let main = workflow
+            .pipeline(Pipeline::MAIN)
+            .expect("main pipeline exists");
         assert!(main.stages.contains_key("test_planner"));
         assert!(main.stages.contains_key("test_worker"));
 
         let working = main.stages.get("working").expect("working stage exists");
         assert_eq!(
-            working.on_intermediate.as_ref().and_then(|t| t.next.as_ref()).map(|s| s.as_str()),
+            working
+                .on_intermediate
+                .as_ref()
+                .and_then(|t| t.next.as_ref())
+                .map(|s| s.as_str()),
             Some("test_planner")
         );
     }
@@ -682,7 +688,9 @@ mod tests {
     #[test]
     fn default_workflow_has_no_preparator_stage() {
         let workflow = default_workflow();
-        let main = workflow.pipeline(Pipeline::MAIN).expect("main pipeline exists");
+        let main = workflow
+            .pipeline(Pipeline::MAIN)
+            .expect("main pipeline exists");
 
         // Preparator stage must not exist in any pipeline
         assert!(

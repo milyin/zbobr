@@ -296,7 +296,11 @@ impl MdCompactComment {
             let joined = c.body.lines().collect::<Vec<_>>().join(" ");
             format!("user:**{}** {}", username, joined)
         } else {
-            let truncated = c.body.chars().take(COMPACT_COMMENT_MAX_LEN).collect::<String>();
+            let truncated = c
+                .body
+                .chars()
+                .take(COMPACT_COMMENT_MAX_LEN)
+                .collect::<String>();
             let joined = truncated.lines().collect::<Vec<_>>().join(" ");
             format!("user:**{}** {}...", username, joined)
         };
@@ -396,7 +400,11 @@ impl FromStr for MdStage {
                 records.push(record);
             }
         }
-        Ok(MdStage { title, records, for_prompt: false })
+        Ok(MdStage {
+            title,
+            records,
+            for_prompt: false,
+        })
     }
 }
 
@@ -447,7 +455,11 @@ impl MdStage {
             .map(|r| MdRecord::from_context_record(r, for_prompt, report_url))
             .collect();
 
-        MdStage { title, records, for_prompt }
+        MdStage {
+            title,
+            records,
+            for_prompt,
+        }
     }
 
     /// Convert to a domain `StageContext`.
@@ -1549,7 +1561,10 @@ mod tests {
         // 4. No stage metadata leaks (no tool, model, timestamps, prompt/output links)
         assert!(!output.contains("`claude`"), "no tool metadata");
         assert!(!output.contains("claude-opus-4.6"), "no model metadata");
-        assert!(!output.contains("2024-06-01 10:00:00"), "no timestamps in stage headers");
+        assert!(
+            !output.contains("2024-06-01 10:00:00"),
+            "no timestamps in stage headers"
+        );
         assert!(!output.contains("prompts/"), "no prompt links");
         assert!(!output.contains("outputs/"), "no output links");
 
@@ -1637,7 +1652,8 @@ mod tests {
             "third line should appear in prompt mode"
         );
         assert!(
-            prompt_output.starts_with("- user alice: proceed with plan\nalso fix the bug\nand update docs"),
+            prompt_output
+                .starts_with("- user alice: proceed with plan\nalso fix the bug\nand update docs"),
             "full multi-line body should be preserved verbatim"
         );
 

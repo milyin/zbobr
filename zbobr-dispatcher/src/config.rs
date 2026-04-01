@@ -27,5 +27,3 @@ pub struct ZbobrExecutorConfig {
     #[config(nested)]
     pub mcp_tester: ZbobrExecutorMcpTesterConfig,
 }
-
-

@@ -15,8 +15,8 @@ use zbobr_api::config_tools::McpTool;
 use crate::{
     mcp::{
         common::{
-            AddChecklistItemParam, CheckChecklistItemParam,
-            DeleteCtxRecParam, GetCtxRecParam, MessageParam, ReportParam,
+            AddChecklistItemParam, CheckChecklistItemParam, DeleteCtxRecParam, GetCtxRecParam,
+            MessageParam, ReportParam,
         },
         traits::CommonMcpImpl,
     },
@@ -170,7 +170,6 @@ impl UnifiedMcp {
     async fn stop_with_question(&self, Parameters(params): Parameters<MessageParam>) -> String {
         self.stop_with_question_impl(&params.message).await
     }
-
 }
 
 // Manual ServerHandler implementation with tool filtering
