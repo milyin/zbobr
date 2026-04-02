@@ -25,7 +25,7 @@ const PROMPT_LABEL: &str = "prompt";
 /// Label used for the output sub-link in the stage title markdown.
 const OUTPUT_LABEL: &str = "output";
 
-use crate::task::{Pipeline, Stage, StageInfo};
+use crate::task::{Model, Pipeline, Stage, StageInfo};
 
 /// A parsed stage title line, mapping 1:1 to the markdown format.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,7 +36,7 @@ pub struct MdStageTitle {
     pub run_id: u64,
     pub stage: Stage,
     pub tool: Option<String>,
-    pub model: Option<String>,
+    pub model: Option<Model>,
     pub prompt_link: Option<String>,
     pub output_link: Option<String>,
 }
@@ -156,7 +156,8 @@ impl FromStr for MdStageTitle {
         while !rest.is_empty() {
             if let Some(value) = try_parse_next_backtick(&mut rest) {
                 // A backtick containing a space is a timestamp (dates look like
-                // "2024-01-01 00:00:00 +0000"); tools and models never have spaces.
+                // "2024-01-01 00:00:00 +0000"); tool names and models never have
+                // spaces — this invariant is enforced at the type level by `Model`.
                 if let Ok(ts) = chrono::DateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S %z") {
                     timestamp_from_backtick = Some(ts);
                     break;
@@ -164,7 +165,7 @@ impl FromStr for MdStageTitle {
                 if tool.is_none() {
                     tool = Some(value.to_string());
                 } else if model.is_none() {
-                    model = Some(value.to_string());
+                    model = value.parse::<Model>().ok();
                 }
                 continue;
             }
@@ -327,7 +328,7 @@ mod tests {
             run_id: 2,
             stage: Stage::new("working"),
             tool: Some("claude".to_string()),
-            model: Some("claude-opus-4.6".to_string()),
+            model: Some("claude-opus-4.6".parse().unwrap()),
             prompt_link: Some("prompts/work.md".to_string()),
             output_link: Some("output/work.md".to_string()),
         }

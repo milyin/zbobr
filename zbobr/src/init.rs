@@ -140,11 +140,11 @@ fn default_config_toml() -> RootConfigToml {
             vec![
                 ToolEntry {
                     provider: "copilot".to_string(),
-                    model: "claude-opus-4.6".to_string(),
+                    model: "claude-opus-4.6".parse().unwrap(),
                 },
                 ToolEntry {
                     provider: "claude".to_string(),
-                    model: "claude-opus-4-6".to_string(),
+                    model: "claude-opus-4-6".parse().unwrap(),
                 },
             ],
         ),
@@ -153,11 +153,11 @@ fn default_config_toml() -> RootConfigToml {
             vec![
                 ToolEntry {
                     provider: "copilot_planner".to_string(),
-                    model: "claude-opus-4.6".to_string(),
+                    model: "claude-opus-4.6".parse().unwrap(),
                 },
                 ToolEntry {
                     provider: "claude_planner".to_string(),
-                    model: "claude-opus-4-6".to_string(),
+                    model: "claude-opus-4-6".parse().unwrap(),
                 },
             ],
         ),
@@ -166,11 +166,11 @@ fn default_config_toml() -> RootConfigToml {
             vec![
                 ToolEntry {
                     provider: "copilot".to_string(),
-                    model: "gpt-5-mini".to_string(),
+                    model: "gpt-5-mini".parse().unwrap(),
                 },
                 ToolEntry {
                     provider: "claude".to_string(),
-                    model: "claude-haiku-4-5".to_string(),
+                    model: "claude-haiku-4-5".parse().unwrap(),
                 },
             ],
         ),

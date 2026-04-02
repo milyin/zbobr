@@ -347,7 +347,7 @@ impl<'a> CliStageRunner<'a> {
             .zbobr
             .config()
             .resolve_tool_name(self.stage_def, self.zbobr.workflow().config());
-        let (resolved_provider, model_string) = self.zbobr.select_provider(&tool_name)?;
+        let (resolved_provider, model) = self.zbobr.select_provider(&tool_name)?;
         let plan_mode = resolved_provider.plan_mode;
 
         // Set state to running
@@ -481,7 +481,7 @@ impl<'a> CliStageRunner<'a> {
             let pipeline_name = self.pipeline_name.clone();
             let stage_name = Stage::new(self.stage_name);
             let tool_val = Some(resolved_provider.name.clone());
-            let model_val = Some(model_string.clone());
+            let model_val = Some(model.clone());
             let timestamp = chrono::Utc::now().with_timezone(&self.zbobr.config().fixed_offset());
             let role_session = self.zbobr.role_session(self.task_id);
             role_session
@@ -512,7 +512,7 @@ impl<'a> CliStageRunner<'a> {
             role,
             self.task_id,
             Tool(resolved_provider.executor.clone()),
-            Model(model_string.clone()),
+            model.clone(),
             self.stage_name.to_string(),
             allowed_tools,
             Arc::clone(&tool_tracker),
@@ -562,7 +562,7 @@ impl<'a> CliStageRunner<'a> {
             &agent_token_owned,
             self.task_id,
             role,
-            &model_string,
+            model.as_str(),
             assigned_port,
             &prompt_text,
             &work_dir,

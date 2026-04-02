@@ -80,6 +80,7 @@ impl ZbobrDispatcher {
     /// Chain after `build()` to ensure the config is consistent.
     pub fn validated(mut self) -> anyhow::Result<Self> {
         self.config.validate()?;
+        self.config.validate_workflow_refs(self.workflow.config())?;
         self.copilot.config.copilot_github_token.resolve()?;
         Ok(self)
     }
@@ -116,7 +117,7 @@ impl ZbobrDispatcher {
     ///
     /// Filters out currently excluded providers, groups remaining entries by priority,
     /// and selects within the highest-priority group using round-robin.
-    pub fn select_provider(&self, tool_name: &str) -> anyhow::Result<(ResolvedProvider, String)> {
+    pub fn select_provider(&self, tool_name: &str) -> anyhow::Result<(ResolvedProvider, Model)> {
         let entries: &Vec<ToolEntry> = self
             .config
             .tools
@@ -444,7 +445,7 @@ mod tests {
     fn tool_entry(provider: &str, model: &str) -> ToolEntry {
         ToolEntry {
             provider: provider.to_string(),
-            model: model.to_string(),
+            model: model.parse().unwrap(),
         }
     }
 
@@ -461,7 +462,7 @@ mod tests {
         let dispatcher = make_dispatcher(providers, tools);
         let (rp, model) = dispatcher.select_provider("smart").unwrap();
         assert_eq!(rp.executor, "claude");
-        assert_eq!(model, "opus");
+        assert_eq!(model.as_str(), "opus");
     }
 
     #[test]
@@ -482,7 +483,7 @@ mod tests {
         let dispatcher = make_dispatcher(providers, tools);
         let (rp, model) = dispatcher.select_provider("smart").unwrap();
         assert_eq!(rp.name, "claude");
-        assert_eq!(model, "opus");
+        assert_eq!(model.as_str(), "opus");
     }
 
     #[test]
@@ -543,7 +544,7 @@ mod tests {
 
         let (rp, model) = dispatcher.select_provider("smart").unwrap();
         assert_eq!(rp.name, "fallback");
-        assert_eq!(model, "haiku");
+        assert_eq!(model.as_str(), "haiku");
     }
 
     #[test]

@@ -163,7 +163,7 @@ pub struct StageInfo {
     pub tool: Option<String>,
     /// Model string used by the executor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
+    pub model: Option<Model>,
     /// Link to the prompt used for this stage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_link: Option<String>,
@@ -793,11 +793,19 @@ impl<'de> serde::Deserialize<'de> for Tool {
 ///
 /// A transparent newtype over `String`. Model names are arbitrary strings
 /// passed verbatim to executor CLIs — there is no longer a closed set of
-/// known models.
+/// known models. Whitespace is not allowed (enforced at construction time).
 #[derive(Debug, Clone, PartialEq, Eq, Default, schemars::JsonSchema)]
 pub struct Model(pub String);
 
 impl Model {
+    /// Construct a `Model`, returning `Err` if the string contains any whitespace.
+    pub fn try_new(s: &str) -> Result<Self, String> {
+        if s.chars().any(|c| c.is_whitespace()) {
+            return Err(format!("model name must not contain whitespace: {:?}", s));
+        }
+        Ok(Model(s.to_string()))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -810,9 +818,9 @@ impl std::fmt::Display for Model {
 }
 
 impl std::str::FromStr for Model {
-    type Err = std::convert::Infallible;
+    type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Model(s.to_string()))
+        Model::try_new(s)
     }
 }
 
@@ -825,7 +833,7 @@ impl serde::Serialize for Model {
 impl<'de> serde::Deserialize<'de> for Model {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        Ok(Model(s))
+        Model::try_new(&s).map_err(serde::de::Error::custom)
     }
 }
 

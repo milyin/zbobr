@@ -214,7 +214,7 @@ mod tests {
                     run_id: 1,
                     stage: Stage::new("working"),
                     tool: Some("claude".to_string()),
-                    model: Some("claude-opus-4.6".to_string()),
+                    model: Some("claude-opus-4.6".parse().unwrap()),
                     prompt_link: Some("prompts/work.md".to_string()),
                     output_link: None,
                     timestamp: "2024-01-01T00:00:00Z".parse().unwrap(),
