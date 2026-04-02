@@ -312,56 +312,6 @@ pub fn build_prompt_with_task(
         .map_err(|e| anyhow::anyhow!("Failed to render prompt template: {e}"))
 }
 
-/// Validate that all prompt files referenced by stage definitions exist.
-pub fn validate_stage_prompts(
-    workflow: &WorkflowConfig,
-    base_path: Option<&PathBuf>,
-) -> anyhow::Result<()> {
-    let mut missing_files = Vec::new();
-
-    for (_, _, stage) in workflow.all_stages() {
-        for path in prompt_files_for_stage(stage, workflow) {
-            if !file_exists(&path, base_path) {
-                missing_files.push(path);
-            }
-        }
-    }
-
-    if !missing_files.is_empty() {
-        let missing_list = missing_files
-            .iter()
-            .map(|p| format!("  - {}", p.display()))
-            .collect::<Vec<_>>()
-            .join("\n");
-        return Err(anyhow::anyhow!(
-            "The following prompt files do not exist:\n{}",
-            missing_list
-        ));
-    }
-
-    Ok(())
-}
-
-/// Check if a file exists, resolving relative paths with base_path if provided.
-fn file_exists(path: &PathBuf, base_path: Option<&PathBuf>) -> bool {
-    let resolved_path = if let Some(base) = base_path {
-        if path.is_relative() {
-            base.join(path)
-        } else {
-            path.clone()
-        }
-    } else if path.is_relative() {
-        match std::env::current_dir() {
-            Ok(cwd) => cwd.join(path),
-            Err(_) => return false,
-        }
-    } else {
-        path.clone()
-    };
-
-    resolved_path.exists()
-}
-
 #[cfg(test)]
 mod tests {
     use std::{fs, io::Write};
