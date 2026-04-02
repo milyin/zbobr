@@ -98,7 +98,10 @@ impl ConfiguredPromptBuilder {
                 continue;
             }
             if let Err(e) = self.build_for_stage_with_task(stage_def, &task, &comments) {
-                errors.push(format!("  pipeline '{}', stage '{}': {}", pipeline, stage_name, e));
+                errors.push(format!(
+                    "  pipeline '{}', stage '{}': {}",
+                    pipeline, stage_name, e
+                ));
             }
         }
 
