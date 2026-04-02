@@ -654,8 +654,8 @@ impl ZbobrDispatcherConfig {
                 }
             }
         }
-        // Verify global default tool name exists
-        if !self.tools.is_empty() && !self.tools.contains_key(self.tool.as_str()) {
+        // Verify global default tool name exists in [tools].
+        if !self.tools.contains_key(self.tool.as_str()) {
             anyhow::bail!(
                 "Global dispatcher tool '{}' is not defined in [tools]",
                 self.tool
@@ -1199,7 +1199,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_passes_when_tools_empty() {
+    fn validate_rejects_when_tools_empty() {
         let mut providers = IndexMap::new();
         providers.insert(
             "claude".to_string(),
@@ -1213,7 +1213,12 @@ mod tests {
         );
         let mut config = make_config(providers, IndexMap::new());
         config.tool = "anything".to_string();
-        assert!(config.validate().is_ok());
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("not defined in [tools]"),
+            "Expected 'not defined in [tools]' in error: {msg}"
+        );
     }
 
     #[test]
