@@ -1564,20 +1564,23 @@ async fn execute_tool(
     tokio::select! {
         result = executor.execute(task_id, role, model, assigned_port, prompt, work_dir, mcp_url, plan_mode, agent_token, copilot_token) => {
             match result {
-                Ok(ExecutorOutput { output, exit_ok: true }) => SessionOutcome {
+                Ok(ExecutorOutput { output, exit_ok: true, .. }) => SessionOutcome {
                     execution_interrupted: false,
                     execution_error: None,
                     execution_output: Some(output),
                     connectivity_failure: false,
                 },
-                Ok(ExecutorOutput { output, exit_ok: false }) => {
+                Ok(ExecutorOutput { output, exit_ok: false, quota_failure }) => {
                     let e = anyhow::anyhow!("Tool exited with non-zero status");
                     tracing::error!("Tool execution failed: {e}");
+                    if quota_failure {
+                        tracing::warn!("Quota/rate-limit failure detected in executor output — treating as provider unavailability");
+                    }
                     SessionOutcome {
                         execution_interrupted: false,
                         execution_error: Some(e),
                         execution_output: Some(output),
-                        connectivity_failure: false,
+                        connectivity_failure: quota_failure,
                     }
                 }
                 Err(e) => {

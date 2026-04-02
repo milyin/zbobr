@@ -34,6 +34,26 @@ pub struct ExecutorOutput {
     pub output: String,
     /// `true` if the process exited with status 0.
     pub exit_ok: bool,
+    /// `true` if the output indicates a quota or account-limit failure (rate
+    /// limiting, billing limits, etc.).  Such failures are treated as provider
+    /// unavailability and trigger temporary provider exclusion, just like
+    /// connectivity failures.
+    pub quota_failure: bool,
+}
+
+/// Scan combined executor output for known quota / rate-limit / account-limit
+/// error signatures.  Returns `true` when any known pattern is found.
+///
+/// The patterns are deliberately specific to avoid false positives on task
+/// output that happens to mention these words in a different context.
+pub fn detect_quota_failure(output: &str) -> bool {
+    let lower = output.to_lowercase();
+    lower.contains("rate limit")
+        || lower.contains("too many requests")
+        || lower.contains("quota exceeded")
+        || lower.contains("usage limit")
+        || lower.contains("account limit")
+        || lower.contains("rate_limit_error")
 }
 
 /// Trait for executing AI tools with specific configurations.

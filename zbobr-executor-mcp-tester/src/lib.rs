@@ -111,6 +111,7 @@ impl ToolExecutor for McpTesterExecutor {
         Ok(ExecutorOutput {
             output,
             exit_ok: status.success(),
+            quota_failure: false,
         })
     }
 }

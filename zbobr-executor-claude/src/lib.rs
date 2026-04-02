@@ -2,7 +2,7 @@ use std::{path::Path, process::Stdio};
 
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use zbobr_api::tool_executor::{ExecutorOutput, ToolExecutor, format_command_for_log};
+use zbobr_api::tool_executor::{ExecutorOutput, ToolExecutor, detect_quota_failure, format_command_for_log};
 use zbobr_utility::Secret;
 
 pub mod config;
@@ -138,9 +138,11 @@ impl ToolExecutor for ClaudeExecutor {
         let stderr_lines = stderr_result.unwrap_or_default();
         let output = combine_output(stdout_lines, stderr_lines);
 
+        let quota_failure = !status.success() && detect_quota_failure(&output);
         Ok(ExecutorOutput {
             output,
             exit_ok: status.success(),
+            quota_failure,
         })
     }
 }

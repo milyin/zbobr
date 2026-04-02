@@ -165,7 +165,11 @@ impl FromStr for MdStageTitle {
                 if tool.is_none() {
                     tool = Some(value.to_string());
                 } else if model.is_none() {
-                    model = value.parse::<Model>().ok();
+                    model = Some(
+                        value
+                            .parse::<Model>()
+                            .map_err(|e| anyhow::anyhow!("Invalid model token {:?} in stage title: {e}", value))?,
+                    );
                 }
                 continue;
             }
