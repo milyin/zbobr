@@ -314,12 +314,17 @@ pub fn build_prompt_with_task(
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, io::Write};
+    use std::{collections::HashMap, fs, io::Write, sync::Arc};
 
+    use indexmap::IndexMap;
     use tempfile::TempDir;
-    use zbobr_api::task::TaskContext;
+    use zbobr_api::{
+        config::{PipelineConfig, StageDefinition},
+        task::{Pipeline, Stage, TaskContext},
+    };
 
     use super::*;
+    use crate::workflow::Workflow;
 
     fn dummy_task(title: &str) -> Task {
         Task {
@@ -592,5 +597,99 @@ mod tests {
             err.to_string().contains("mcp_configure_worktree"),
             "error should name the unavailable tool: {err}"
         );
+    }
+
+    // --- validate_all_prompts ---
+
+    /// Helper: build a `ConfiguredPromptBuilder` from a single-pipeline workflow config.
+    fn make_prompt_builder(
+        base_path: Option<PathBuf>,
+        stages: IndexMap<Stage, StageDefinition>,
+    ) -> ConfiguredPromptBuilder {
+        let mut pipelines = HashMap::new();
+        pipelines.insert(Pipeline::from("main"), PipelineConfig { stages });
+        let config = WorkflowConfig {
+            prompts_dir: None,
+            pipelines,
+            roles: IndexMap::new(),
+        };
+        let workflow = Arc::new(Workflow::from_config(config));
+        ConfiguredPromptBuilder::new(base_path, workflow)
+    }
+
+    #[test]
+    fn validate_all_prompts_valid_templates_pass() {
+        let dir = TempDir::new().unwrap();
+        let prompt_path = write_file(&dir, "worker.md", "Do the work on {title}");
+        let mut stages = IndexMap::new();
+        stages.insert(
+            Stage::from("work"),
+            StageDefinition {
+                role: Some("default".to_string()),
+                prompts: vec![prompt_path],
+                ..Default::default()
+            },
+        );
+        let builder = make_prompt_builder(None, stages);
+        assert!(builder.validate_all_prompts().is_ok());
+    }
+
+    #[test]
+    fn validate_all_prompts_undefined_variable_fails() {
+        let dir = TempDir::new().unwrap();
+        let prompt_path = write_file(&dir, "bad.md", "Use {mcp_nonexistent} tool");
+        let mut stages = IndexMap::new();
+        stages.insert(
+            Stage::from("work"),
+            StageDefinition {
+                role: Some("default".to_string()),
+                prompts: vec![prompt_path],
+                ..Default::default()
+            },
+        );
+        let builder = make_prompt_builder(None, stages);
+        let result = builder.validate_all_prompts();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("mcp_nonexistent"),
+            "error should mention the undefined variable: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_all_prompts_missing_file_fails() {
+        let mut stages = IndexMap::new();
+        stages.insert(
+            Stage::from("work"),
+            StageDefinition {
+                role: Some("default".to_string()),
+                prompts: vec![PathBuf::from("/nonexistent/prompt.md")],
+                ..Default::default()
+            },
+        );
+        let builder = make_prompt_builder(None, stages);
+        let result = builder.validate_all_prompts();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Failed to read prompt file"),
+            "error should mention missing file: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_all_prompts_call_stages_skipped() {
+        let mut stages = IndexMap::new();
+        // A call stage has no prompt files — should not cause an error.
+        stages.insert(
+            Stage::from("delegate"),
+            StageDefinition {
+                call: Some(Pipeline::from("sub")),
+                ..Default::default()
+            },
+        );
+        let builder = make_prompt_builder(None, stages);
+        assert!(builder.validate_all_prompts().is_ok());
     }
 }
