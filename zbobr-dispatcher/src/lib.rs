@@ -337,3 +337,232 @@ impl ZbobrDispatcher {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use indexmap::IndexMap;
+    use zbobr_api::config::{ProviderDefinition, ToolEntry};
+
+    // ── Mock backends ────────────────────────────────────────────────────
+
+    struct MockTaskBackend;
+
+    #[async_trait::async_trait]
+    impl zbobr_api::backend::TaskBackend for MockTaskBackend {
+        async fn get_task(&self, _id: u64) -> anyhow::Result<Box<dyn zbobr_api::backend::TaskWeak>> {
+            unimplemented!()
+        }
+        async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn zbobr_api::backend::TaskWeak>>> {
+            unimplemented!()
+        }
+        async fn create_task(
+            &self,
+            _title: &str,
+            _description: &str,
+            _state: zbobr_api::State,
+        ) -> anyhow::Result<u64> {
+            unimplemented!()
+        }
+        async fn setup(&self, _force: bool) -> anyhow::Result<()> {
+            unimplemented!()
+        }
+        async fn validate_connectivity(&self) -> anyhow::Result<()> {
+            unimplemented!()
+        }
+        fn debug_state(&self) -> String {
+            "mock".to_string()
+        }
+    }
+
+    struct MockRepoBackend;
+
+    #[async_trait::async_trait]
+    impl zbobr_api::backend::WorktreeBackend for MockRepoBackend {
+        fn repository(&self) -> &str { "mock/repo" }
+        fn branch(&self) -> &str { "main" }
+        fn repo_name(&self) -> &str { "repo" }
+        async fn update_worktree(
+            &self,
+            _identity: &zbobr_api::TaskIdentity,
+            _workspace_path: &std::path::Path,
+            _git_user_name: &str,
+            _git_user_email: &str,
+        ) -> anyhow::Result<bool> {
+            unimplemented!()
+        }
+        async fn fetch_refs(&self, _identity: &zbobr_api::TaskIdentity) -> anyhow::Result<()> {
+            unimplemented!()
+        }
+        async fn ensure_pr_url(
+            &self,
+            _identity: &zbobr_api::TaskIdentity,
+            _body: Option<&str>,
+        ) -> anyhow::Result<String> {
+            unimplemented!()
+        }
+        async fn validate_connectivity(&self) -> anyhow::Result<()> {
+            unimplemented!()
+        }
+        fn debug_state(&self) -> String {
+            "mock".to_string()
+        }
+    }
+
+    /// Build a minimal dispatcher with given providers and tools.
+    fn make_dispatcher(
+        providers: IndexMap<String, ProviderDefinition>,
+        tools: IndexMap<String, Vec<ToolEntry>>,
+    ) -> ZbobrDispatcher {
+        let config = ZbobrDispatcherConfig {
+            providers,
+            tools,
+            ..Default::default()
+        };
+        ZbobrDispatcherBuilder::new()
+            .with_config(config)
+            .with_workflow(Workflow::default())
+            .with_task_backend(MockTaskBackend)
+            .with_repo_backend(MockRepoBackend)
+            .build()
+    }
+
+    fn provider_def(executor: &str, priority: i32) -> ProviderDefinition {
+        ProviderDefinition {
+            executor: Some(executor.to_string()),
+            parent: None,
+            priority,
+            plan_mode: None,
+            access_key: None,
+        }
+    }
+
+    fn tool_entry(provider: &str, model: &str) -> ToolEntry {
+        ToolEntry {
+            provider: provider.to_string(),
+            model: model.to_string(),
+        }
+    }
+
+    // ── select_provider tests ────────────────────────────────────────────
+
+    #[test]
+    fn select_provider_basic() {
+        let mut providers = IndexMap::new();
+        providers.insert("claude".to_string(), provider_def("claude", 10));
+
+        let mut tools = IndexMap::new();
+        tools.insert("smart".to_string(), vec![tool_entry("claude", "opus")]);
+
+        let dispatcher = make_dispatcher(providers, tools);
+        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        assert_eq!(rp.executor, "claude");
+        assert_eq!(model, "opus");
+    }
+
+    #[test]
+    fn select_provider_prefers_higher_priority() {
+        let mut providers = IndexMap::new();
+        providers.insert("claude".to_string(), provider_def("claude", 10));
+        providers.insert("fallback".to_string(), provider_def("claude", 0));
+
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![
+                tool_entry("fallback", "haiku"),
+                tool_entry("claude", "opus"),
+            ],
+        );
+
+        let dispatcher = make_dispatcher(providers, tools);
+        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        assert_eq!(rp.name, "claude");
+        assert_eq!(model, "opus");
+    }
+
+    #[test]
+    fn select_provider_round_robin_same_priority() {
+        let mut providers = IndexMap::new();
+        providers.insert("a".to_string(), provider_def("claude", 10));
+        providers.insert("b".to_string(), provider_def("copilot", 10));
+
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![tool_entry("a", "model-a"), tool_entry("b", "model-b")],
+        );
+
+        let dispatcher = make_dispatcher(providers, tools);
+
+        let (rp1, _) = dispatcher.select_provider("smart").unwrap();
+        let (rp2, _) = dispatcher.select_provider("smart").unwrap();
+        assert_ne!(rp1.name, rp2.name, "Round-robin should alternate providers");
+    }
+
+    #[test]
+    fn select_provider_skips_excluded() {
+        let mut providers = IndexMap::new();
+        providers.insert("a".to_string(), provider_def("claude", 10));
+        providers.insert("b".to_string(), provider_def("copilot", 10));
+
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![tool_entry("a", "model-a"), tool_entry("b", "model-b")],
+        );
+
+        let dispatcher = make_dispatcher(providers, tools);
+        dispatcher.exclude_provider("a");
+
+        let (rp, _) = dispatcher.select_provider("smart").unwrap();
+        assert_eq!(rp.name, "b");
+    }
+
+    #[test]
+    fn select_provider_falls_back_to_lower_priority_when_higher_excluded() {
+        let mut providers = IndexMap::new();
+        providers.insert("primary".to_string(), provider_def("claude", 10));
+        providers.insert("fallback".to_string(), provider_def("claude", 0));
+
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![
+                tool_entry("primary", "opus"),
+                tool_entry("fallback", "haiku"),
+            ],
+        );
+
+        let dispatcher = make_dispatcher(providers, tools);
+        dispatcher.exclude_provider("primary");
+
+        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        assert_eq!(rp.name, "fallback");
+        assert_eq!(model, "haiku");
+    }
+
+    #[test]
+    fn select_provider_all_excluded_error() {
+        let mut providers = IndexMap::new();
+        providers.insert("only".to_string(), provider_def("claude", 10));
+
+        let mut tools = IndexMap::new();
+        tools.insert("smart".to_string(), vec![tool_entry("only", "opus")]);
+
+        let dispatcher = make_dispatcher(providers, tools);
+        dispatcher.exclude_provider("only");
+
+        let err = dispatcher.select_provider("smart").unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(msg.contains("excluded"), "Expected 'excluded' in error: {msg}");
+    }
+
+    #[test]
+    fn select_provider_unknown_tool_error() {
+        let dispatcher = make_dispatcher(IndexMap::new(), IndexMap::new());
+        let err = dispatcher.select_provider("nonexistent").unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(msg.contains("not found"), "Expected 'not found' in error: {msg}");
+    }
+}
