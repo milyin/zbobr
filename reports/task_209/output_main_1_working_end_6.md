@@ -1,0 +1,1 @@
+The fix is implemented. `MdContext::from_str` now tracks the `<!-- stage -->` marker via an `after_stage_marker` boolean. When a `- ...` line immediately follows that marker, `MdStageTitle::from_str` errors are propagated instead of silently discarded. Lines without the preceding marker still follow the original lenient path for backward compatibility with compact comments.
