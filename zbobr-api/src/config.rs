@@ -691,7 +691,7 @@ impl ZbobrDispatcherConfig {
 
     /// Determine the effective tool name for a stage.
     ///
-    /// Precedence: stage.tool → role.tool → global dispatcher.tool
+    /// Precedence: stage.tool → role.tool
     pub fn resolve_tool_name(
         &self,
         stage_def: &StageDefinition,

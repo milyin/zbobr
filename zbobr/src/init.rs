@@ -343,6 +343,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("worker.md")),
+                tool: Some("smart".to_string()),
                 ..Default::default()
             },
         ),
@@ -358,6 +359,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("test_planner.md")),
+                tool: Some("planner".to_string()),
                 ..Default::default()
             },
         ),
@@ -375,6 +377,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("test_worker.md")),
+                tool: Some("smart".to_string()),
                 ..Default::default()
             },
         ),
@@ -391,6 +394,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("reviewer.md")),
+                tool: Some("smart".to_string()),
                 ..Default::default()
             },
         ),
@@ -405,6 +409,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("tester.md")),
+                tool: Some("smart".to_string()),
                 ..Default::default()
             },
         ),
@@ -413,6 +418,7 @@ fn default_workflow() -> WorkflowConfig {
             RoleDefinition {
                 mcp: vec![StopWithError, ReportSuccess, StopWithQuestion],
                 prompt: Some(PathBuf::from("merger.md")),
+                tool: Some("silly".to_string()),
                 ..Default::default()
             },
         ),
