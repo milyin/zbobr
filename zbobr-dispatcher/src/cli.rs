@@ -343,18 +343,10 @@ impl<'a> CliStageRunner<'a> {
             .stage_def
             .role_name()
             .expect("role stage must have role");
-        let cli_tool = self
+        let tool_name = self
             .zbobr
             .config()
-            .tool_for_stage(self.stage_def, self.zbobr.workflow().config());
-        let model = self
-            .zbobr
-            .config()
-            .model_for_stage(self.stage_def, self.zbobr.workflow().config());
-        let plan_mode = self
-            .zbobr
-            .config()
-            .plan_mode_for_stage(self.stage_def, self.zbobr.workflow().config());
+            .resolve_tool_name(self.stage_def, self.zbobr.workflow().config())?;
 
         // Set state to running
         self.zbobr
@@ -417,7 +409,7 @@ impl<'a> CliStageRunner<'a> {
                     task.max_stage_count
                 );
                 let status = format_error_status(
-                    &self.zbobr,
+                    self.zbobr,
                     &format!(
                         "Stage count limit ({}) reached - auto-paused",
                         task.max_stage_count
@@ -481,151 +473,175 @@ impl<'a> CliStageRunner<'a> {
             .await?;
         let pipeline_run_id = task_snap.pipeline_run_id;
 
-        // Add a new StageContext to the task's context for this stage execution.
-        {
-            let instance = self.zbobr.config().instance.clone();
-            let pipeline_name = self.pipeline_name.clone();
-            let stage_name = Stage::new(self.stage_name);
-            let tool_val = Some(cli_tool);
-            let model_val = Some(model.clone());
-            let timestamp = chrono::Utc::now().with_timezone(&self.zbobr.config().fixed_offset());
-            let role_session = self.zbobr.role_session(self.task_id);
-            role_session
-                .modify_task(move |mut task| {
-                    task.context.stages.push(StageContext {
-                        info: StageInfo {
-                            instance,
-                            pipeline: pipeline_name,
-                            run_id: pipeline_run_id,
-                            stage: stage_name,
-                            tool: tool_val,
-                            model: model_val,
-                            prompt_link: None,
-                            output_link: None,
-                            timestamp,
-                        },
-                        records: Vec::new(),
-                    });
-                    task
-                })
-                .await?;
-        }
-
-        let tool_tracker = Arc::new(std::sync::Mutex::new(None::<McpTool>));
-        let prompt_holder = Arc::new(std::sync::Mutex::new(None::<String>));
-        let (assigned_port, server_handle) = start_mcp_server(
-            Arc::clone(self.zbobr),
-            role,
-            self.task_id,
-            cli_tool,
-            model.clone(),
-            self.stage_name.to_string(),
-            allowed_tools,
-            Arc::clone(&tool_tracker),
-            self.pipeline_name.to_string(),
-            pipeline_run_id,
-        )
-        .await?;
-
-        let mcp_url = format!(
-            "http://127.0.0.1:{}/{}/{}",
-            assigned_port, role, self.task_id,
-        );
-
         let prompt_text = self.prompt(pipeline_run_id).await?;
-        *prompt_holder.lock().unwrap() = Some(prompt_text.clone());
 
-        // Store the prompt and link it to the stage context entry.
-        {
+        // Store the prompt once; the link is reused for each provider attempt's StageContext entry.
+        let prompt_link = {
             let role_session = self.zbobr.role_session(self.task_id);
             let base_name = format!(
                 "prompt_{}_{}_{}_start",
                 self.pipeline_name, pipeline_run_id, self.stage_name
             );
-            let prompt_link = role_session.store_report(&base_name, &prompt_text).await?;
-            role_session
-                .modify_task(move |mut task| {
-                    if let Some(stage) = task.context.stages.last_mut() {
-                        stage.info.prompt_link = Some(prompt_link);
-                    }
-                    task
-                })
-                .await?;
-        }
-        let executor = self
-            .zbobr
-            .build_executor(cli_tool, model.clone(), self.mcp_tester_override);
-        let copilot_token_owned = match cli_tool {
-            Tool::Copilot => self.zbobr.copilot_github_token().to_owned(),
-            _ => String::new(),
+            role_session.store_report(&base_name, &prompt_text).await?
         };
+
         let agent_token_owned = self.zbobr.config().agent_github_token.as_ref().to_owned();
 
-        let outcome = execute_tool(
-            executor,
-            &copilot_token_owned,
-            &agent_token_owned,
-            self.task_id,
-            role,
-            assigned_port,
-            &prompt_text,
-            &work_dir,
-            &mcp_url,
-            plan_mode,
-        )
-        .await;
+        // Provider retry loop: on connectivity/quota failure, exclude the failing provider and
+        // immediately retry with the next available one.  select_provider() returns an error when
+        // all providers for the tool are exhausted, which terminates the loop.
+        loop {
+            let (resolved_provider, model) = self.zbobr.select_provider(&tool_name)?;
+            let plan_mode = resolved_provider.plan_mode;
 
-        // Store the captured output and link it to the stage context entry.
-        if let Some(ref output) = outcome.execution_output {
-            let role_session = self.zbobr.role_session(self.task_id);
-            let base_name = format!(
-                "output_{}_{}_{}_end",
-                self.pipeline_name, pipeline_run_id, self.stage_name
+            // Add a new StageContext to the task's context for this attempt.
+            {
+                let instance = self.zbobr.config().instance.clone();
+                let pipeline_name = self.pipeline_name.clone();
+                let stage_name = Stage::new(self.stage_name);
+                let tool_val = Some(resolved_provider.name.clone());
+                let model_val = Some(model.clone());
+                let timestamp =
+                    chrono::Utc::now().with_timezone(&self.zbobr.config().fixed_offset());
+                let prompt_link_val = Some(prompt_link.clone());
+                let role_session = self.zbobr.role_session(self.task_id);
+                role_session
+                    .modify_task(move |mut task| {
+                        task.context.stages.push(StageContext {
+                            info: StageInfo {
+                                instance,
+                                pipeline: pipeline_name,
+                                run_id: pipeline_run_id,
+                                stage: stage_name,
+                                tool: tool_val,
+                                model: model_val,
+                                prompt_link: prompt_link_val,
+                                output_link: None,
+                                timestamp,
+                            },
+                            records: Vec::new(),
+                        });
+                        task
+                    })
+                    .await?;
+            }
+
+            let tool_tracker = Arc::new(std::sync::Mutex::new(None::<McpTool>));
+            let (assigned_port, server_handle) = start_mcp_server(
+                Arc::clone(self.zbobr),
+                role,
+                self.task_id,
+                Tool(resolved_provider.executor.clone()),
+                model.clone(),
+                self.stage_name.to_string(),
+                allowed_tools.clone(),
+                Arc::clone(&tool_tracker),
+                self.pipeline_name.to_string(),
+                pipeline_run_id,
+            )
+            .await?;
+
+            let mcp_url = format!(
+                "http://127.0.0.1:{}/{}/{}",
+                assigned_port, role, self.task_id,
             );
-            match role_session.store_report(&base_name, output).await {
-                Ok(output_link) => {
-                    if let Err(e) = role_session
-                        .modify_task(move |mut task| {
-                            if let Some(stage) = task.context.stages.last_mut() {
-                                stage.info.output_link = Some(output_link);
-                            }
-                            task
-                        })
-                        .await
-                    {
-                        tracing::warn!("Failed to set output_link for task #{}: {e}", self.task_id);
+
+            let executor = self
+                .zbobr
+                .build_executor(&resolved_provider, self.mcp_tester_override)?;
+            let copilot_token_owned = if resolved_provider.executor == Tool::COPILOT {
+                self.zbobr.copilot_github_token().to_owned()
+            } else {
+                String::new()
+            };
+
+            let outcome = execute_tool(
+                executor,
+                &copilot_token_owned,
+                &agent_token_owned,
+                self.task_id,
+                role,
+                model.as_str(),
+                assigned_port,
+                &prompt_text,
+                &work_dir,
+                &mcp_url,
+                plan_mode,
+            )
+            .await;
+
+            // Exclude provider on connectivity/quota failures so subsequent attempts and stage
+            // runs skip it until the exclusion expires.
+            if outcome.connectivity_failure {
+                self.zbobr.exclude_provider(&resolved_provider.name);
+            }
+
+            // Store the captured output and link it to the stage context entry.
+            if let Some(ref output) = outcome.execution_output {
+                let role_session = self.zbobr.role_session(self.task_id);
+                let base_name = format!(
+                    "output_{}_{}_{}_end",
+                    self.pipeline_name, pipeline_run_id, self.stage_name
+                );
+                match role_session.store_report(&base_name, output).await {
+                    Ok(output_link) => {
+                        if let Err(e) = role_session
+                            .modify_task(move |mut task| {
+                                if let Some(stage) = task.context.stages.last_mut() {
+                                    stage.info.output_link = Some(output_link);
+                                }
+                                task
+                            })
+                            .await
+                        {
+                            tracing::warn!(
+                                "Failed to set output_link for task #{}: {e}",
+                                self.task_id
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to store output report for task #{}: {e}",
+                            self.task_id
+                        );
                     }
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to store output report for task #{}: {e}",
-                        self.task_id
-                    );
-                }
             }
-        }
 
-        // Read the last mapped tool from the shared tracker.
-        let last_mapped_tool = *tool_tracker.lock().unwrap();
+            // Read the last mapped tool from the shared tracker.
+            let last_mapped_tool = *tool_tracker.lock().unwrap();
 
-        if let Some(e) = finalize_stage_session(
-            self.zbobr,
-            self.task_id,
-            self.pipeline_name,
-            self.stage_name,
-            &work_dir,
-            outcome,
-            last_mapped_tool,
-        )
-        .await?
-        {
+            // Retry immediately with the next provider if this was a connectivity/quota failure.
+            if outcome.connectivity_failure {
+                server_handle.abort();
+                tracing::warn!(
+                    "Provider '{}' failed for tool '{}' — retrying with next available provider",
+                    resolved_provider.name,
+                    tool_name,
+                );
+                continue;
+            }
+
+            if let Some(e) = finalize_stage_session(
+                self.zbobr,
+                self.task_id,
+                self.pipeline_name,
+                self.stage_name,
+                &work_dir,
+                outcome,
+                last_mapped_tool,
+            )
+            .await?
+            {
+                server_handle.abort();
+                return Err(e);
+            }
+
             server_handle.abort();
-            return Err(e);
+
+            return Ok(());
         }
-
-        server_handle.abort();
-
-        Ok(())
     }
 }
 
@@ -992,8 +1008,10 @@ pub async fn run_manager_loop(
         repo_backend.debug_state()
     );
     tracing::info!("Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s");
-    tracing::info!("Global CLI Tool default: {:?}", zbobr.config().tool);
-    tracing::info!("Global model default: {:?}", zbobr.config().model);
+    tracing::info!(
+        "Configured providers: {:?}",
+        zbobr.config().providers.keys().collect::<Vec<_>>()
+    );
     if let Some(base) = prompt_builder.base_path() {
         tracing::info!("Prompts base path: {}", base.display());
     }
@@ -1004,19 +1022,15 @@ pub async fn run_manager_loop(
         if let Some(target) = stage_def.call_pipeline() {
             tracing::info!("Stage {}/{}: call={}", pipeline_name, stage_name, target,);
         } else {
-            let tool = zbobr
+            let tool_name = zbobr
                 .config()
-                .tool_for_stage(stage_def, zbobr.workflow().config());
-            let model = zbobr
-                .config()
-                .model_for_stage(stage_def, zbobr.workflow().config());
+                .resolve_tool_name(stage_def, zbobr.workflow().config());
             tracing::info!(
-                "Stage {}/{}: role={:?}, tool={:?}, model={:?}, prompts={:?}",
+                "Stage {}/{}: role={:?}, tool={:?}, prompts={:?}",
                 pipeline_name,
                 stage_name,
                 stage_def.role_name().unwrap_or("<none>"),
-                tool,
-                model,
+                tool_name,
                 stage_def.role_prompt
             );
         }
@@ -1489,6 +1503,7 @@ async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Re
 /// Only sets a parameter if it is not already present, so a previously
 /// prepared task keeps its values unchanged. Called unconditionally at
 /// the start of every stage run.
+#[allow(clippy::too_many_arguments)]
 async fn start_mcp_server(
     zbobr: Arc<ZbobrDispatcher>,
     role_name: &str,
@@ -1540,6 +1555,10 @@ struct SessionOutcome {
     execution_interrupted: bool,
     execution_error: Option<anyhow::Error>,
     execution_output: Option<String>,
+    /// True only when the executor could not be spawned or a connectivity-level
+    /// error occurred (i.e. the provider itself was unavailable). False for
+    /// ordinary non-zero exit codes, which represent task-level failures.
+    connectivity_failure: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1549,6 +1568,7 @@ async fn execute_tool(
     agent_token: &str,
     task_id: u64,
     role: &str,
+    model: &str,
     assigned_port: u16,
     prompt: &str,
     work_dir: &Path,
@@ -1556,20 +1576,25 @@ async fn execute_tool(
     plan_mode: bool,
 ) -> SessionOutcome {
     tokio::select! {
-        result = executor.execute(task_id, role, assigned_port, prompt, work_dir, mcp_url, plan_mode, agent_token, copilot_token) => {
+        result = executor.execute(task_id, role, model, assigned_port, prompt, work_dir, mcp_url, plan_mode, agent_token, copilot_token) => {
             match result {
-                Ok(ExecutorOutput { output, exit_ok: true }) => SessionOutcome {
+                Ok(ExecutorOutput { output, exit_ok: true, .. }) => SessionOutcome {
                     execution_interrupted: false,
                     execution_error: None,
                     execution_output: Some(output),
+                    connectivity_failure: false,
                 },
-                Ok(ExecutorOutput { output, exit_ok: false }) => {
+                Ok(ExecutorOutput { output, exit_ok: false, quota_failure }) => {
                     let e = anyhow::anyhow!("Tool exited with non-zero status");
                     tracing::error!("Tool execution failed: {e}");
+                    if quota_failure {
+                        tracing::warn!("Quota/rate-limit failure detected in executor output — treating as provider unavailability");
+                    }
                     SessionOutcome {
                         execution_interrupted: false,
                         execution_error: Some(e),
                         execution_output: Some(output),
+                        connectivity_failure: quota_failure,
                     }
                 }
                 Err(e) => {
@@ -1578,6 +1603,7 @@ async fn execute_tool(
                         execution_interrupted: false,
                         execution_error: Some(e),
                         execution_output: None,
+                        connectivity_failure: true,
                     }
                 }
             }
@@ -1588,6 +1614,7 @@ async fn execute_tool(
                 execution_interrupted: true,
                 execution_error: None,
                 execution_output: None,
+                connectivity_failure: false,
             }
         }
     }

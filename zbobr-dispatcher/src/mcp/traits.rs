@@ -388,8 +388,8 @@ pub trait CommonMcpImpl: Send + Sync {
             return response;
         }
 
-        if add_context_record {
-            if let Err(e) = self
+        if add_context_record
+            && let Err(e) = self
                 .session()
                 .add_context_record(
                     zbobr_api::task::ContextRecordType::Question,
@@ -397,20 +397,19 @@ pub trait CommonMcpImpl: Send + Sync {
                     None,
                 )
                 .await
-            {
-                tracing::error!(
-                    "Failed to add question context record for task {}: {e}",
-                    self.session().task_id()
-                );
-                let response = format!("Error adding question to context: {e}");
-                log_mcp_string_response(
-                    self.role_name(),
-                    self.session().task_id(),
-                    tool.as_str(),
-                    &response,
-                );
-                return response;
-            }
+        {
+            tracing::error!(
+                "Failed to add question context record for task {}: {e}",
+                self.session().task_id()
+            );
+            let response = format!("Error adding question to context: {e}");
+            log_mcp_string_response(
+                self.role_name(),
+                self.session().task_id(),
+                tool.as_str(),
+                &response,
+            );
+            return response;
         }
 
         let response = if add_context_record {

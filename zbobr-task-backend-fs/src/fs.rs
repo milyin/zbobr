@@ -295,14 +295,13 @@ impl ZbobrTaskBackendFs {
             .context("Failed to read directory entry")?
         {
             let path = entry.path();
-            if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
-                if filename.ends_with(".yaml")
-                    && !filename.contains(".comments.")
-                    && let Some(id_str) = filename.strip_suffix(".yaml")
-                    && let Ok(id) = id_str.parse::<u64>()
-                {
-                    task_ids.push(id);
-                }
+            if let Some(filename) = path.file_name().and_then(|n| n.to_str())
+                && filename.ends_with(".yaml")
+                && !filename.contains(".comments.")
+                && let Some(id_str) = filename.strip_suffix(".yaml")
+                && let Ok(id) = id_str.parse::<u64>()
+            {
+                task_ids.push(id);
             }
         }
 

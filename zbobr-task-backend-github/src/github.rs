@@ -735,10 +735,10 @@ impl ZbobrTaskBackendGithubImpl {
         if let Some(ref v) = task.work_branch {
             params.insert(PARAM_WORK_BRANCH.to_string(), v.clone());
         }
-        if !task.stack.is_empty() {
-            if let Ok(json) = serde_json::to_string(&task.stack) {
-                params.insert(PARAM_STACK.to_string(), json);
-            }
+        if !task.stack.is_empty()
+            && let Ok(json) = serde_json::to_string(&task.stack)
+        {
+            params.insert(PARAM_STACK.to_string(), json);
         }
         // Store pipeline and stage as params (not labels)
         match &task.state {

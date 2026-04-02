@@ -538,6 +538,7 @@ impl FromStr for MdContext {
     fn from_str(text: &str) -> Result<Self> {
         let mut entries: Vec<MdEntry> = Vec::new();
         let mut current_stage: Option<MdStage> = None;
+        let mut after_stage_marker = false;
 
         for line in text.lines() {
             let trimmed = line.trim();
@@ -546,13 +547,15 @@ impl FromStr for MdContext {
                 continue;
             }
 
-            // Skip <!-- stage --> markers (inserted before stage titles in user-display mode)
+            // Track <!-- stage --> markers (inserted before stage titles in user-display mode)
             if trimmed == "<!-- stage -->" {
+                after_stage_marker = true;
                 continue;
             }
 
             // Try parsing as record (add to current stage)
             if let Some(record) = MdRecord::try_parse(trimmed)? {
+                after_stage_marker = false;
                 let stage = current_stage.as_mut().ok_or_else(|| {
                     anyhow::anyhow!("Context record found before any stage header: {}", trimmed)
                 })?;
@@ -562,8 +565,23 @@ impl FromStr for MdContext {
 
             // Parse as stage title — try first to avoid flushing current_stage on failure
             if trimmed.starts_with("- ") {
-                if let Ok(title) = trimmed.parse::<MdStageTitle>() {
-                    // Valid stage title: flush previous stage
+                let was_after_marker = after_stage_marker;
+                after_stage_marker = false;
+                if was_after_marker {
+                    // Preceded by <!-- stage -->: must parse as a valid stage title
+                    let title = trimmed.parse::<MdStageTitle>().map_err(|e| {
+                        anyhow::anyhow!("Malformed stage title after <!-- stage --> marker: {e}")
+                    })?;
+                    if let Some(stage) = current_stage.take() {
+                        entries.push(MdEntry::Stage(stage));
+                    }
+                    current_stage = Some(MdStage {
+                        title,
+                        records: Vec::new(),
+                        for_prompt: false,
+                    });
+                } else if let Ok(title) = trimmed.parse::<MdStageTitle>() {
+                    // Valid stage title without marker: flush previous stage
                     if let Some(stage) = current_stage.take() {
                         entries.push(MdEntry::Stage(stage));
                     }
@@ -693,7 +711,7 @@ pub fn parse_context(text: &str) -> Result<TaskContext> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task::{Model, Pipeline, Stage, StageInfo};
+    use crate::task::{Pipeline, Stage, StageInfo};
 
     fn utc(s: &str) -> chrono::DateTime<chrono::FixedOffset> {
         s.parse::<chrono::DateTime<chrono::FixedOffset>>().unwrap()
@@ -708,8 +726,8 @@ mod tests {
                         pipeline: Pipeline::from("main"),
                         run_id: 1,
                         stage: Stage::new("planning"),
-                        tool: Some(crate::task::Tool::Claude),
-                        model: Some(Model::ClaudeOpus4_6),
+                        tool: Some("claude".to_string()),
+                        model: Some("claude-opus-4.6".parse().unwrap()),
                         prompt_link: Some("prompts/plan.md".to_string()),
                         output_link: None,
                         timestamp: utc("2024-01-01T00:00:00Z"),
@@ -1358,8 +1376,8 @@ mod tests {
                 pipeline: Pipeline::from("main"),
                 run_id: 1,
                 stage: Stage::new("planning"),
-                tool: Some(crate::task::Tool::Claude),
-                model: Some(Model::ClaudeOpus4_6),
+                tool: Some("claude".to_string()),
+                model: Some("claude-opus-4.6".parse().unwrap()),
                 prompt_link: Some("prompts/plan.md".to_string()),
                 output_link: None,
             },
@@ -1401,8 +1419,8 @@ mod tests {
                         pipeline: Pipeline::from("main"),
                         run_id: 1,
                         stage: Stage::new("planning"),
-                        tool: Some(crate::task::Tool::Claude),
-                        model: Some(Model::ClaudeOpus4_6),
+                        tool: Some("claude".to_string()),
+                        model: Some("claude-opus-4.6".parse().unwrap()),
                         prompt_link: None,
                         output_link: None,
                         timestamp: utc("2024-01-01T00:00:00Z"),
@@ -1495,8 +1513,8 @@ mod tests {
                         pipeline: Pipeline::from("main"),
                         run_id: 1,
                         stage: Stage::new("planning"),
-                        tool: Some(crate::task::Tool::Claude),
-                        model: Some(Model::ClaudeOpus4_6),
+                        tool: Some("claude".to_string()),
+                        model: Some("claude-opus-4.6".parse().unwrap()),
                         prompt_link: Some("prompts/plan.md".to_string()),
                         output_link: Some("outputs/plan_out.md".to_string()),
                         timestamp: utc("2024-06-01T10:00:00Z"),
@@ -1523,8 +1541,8 @@ mod tests {
                         pipeline: Pipeline::from("main"),
                         run_id: 1,
                         stage: Stage::new("working"),
-                        tool: Some(crate::task::Tool::Copilot),
-                        model: Some(Model::ClaudeSonnet4_6),
+                        tool: Some("copilot".to_string()),
+                        model: Some("claude-sonnet-4.6".parse().unwrap()),
                         prompt_link: None,
                         output_link: None,
                         timestamp: utc("2024-06-01T11:00:00Z"),
@@ -1537,8 +1555,8 @@ mod tests {
                         pipeline: Pipeline::from("main"),
                         run_id: 1,
                         stage: Stage::new("reviewing"),
-                        tool: Some(crate::task::Tool::Claude),
-                        model: Some(Model::ClaudeOpus4_6),
+                        tool: Some("claude".to_string()),
+                        model: Some("claude-opus-4.6".parse().unwrap()),
                         prompt_link: Some("prompts/review.md".to_string()),
                         output_link: None,
                         timestamp: utc("2024-06-01T13:00:00Z"),
@@ -1915,8 +1933,8 @@ mod tests {
                     pipeline: Pipeline::from("main"),
                     run_id: 1,
                     stage: Stage::new("working"),
-                    tool: Some(crate::task::Tool::Claude),
-                    model: Some(Model::ClaudeOpus4_6),
+                    tool: Some("claude".to_string()),
+                    model: Some("claude-opus-4.6".parse().unwrap()),
                     prompt_link: None,
                     output_link: None,
                     timestamp: utc("2024-01-01T00:00:00Z"),
@@ -2084,5 +2102,26 @@ mod tests {
                 "normal mode should show ctx_rec_{id}"
             );
         }
+    }
+
+    #[test]
+    fn parse_errors_on_malformed_stage_after_marker() {
+        // A valid stage followed by <!-- stage --> marker and a malformed stage title
+        // (model token with a space) should produce an error, not silently skip.
+        let text = "\
+- default:main:1:**working** `claude` `claude-opus-4.6` `2024-01-01 00:00:00 +0000`
+<!-- stage -->
+- default:main:2:**working** `claude` `bad model` `2024-06-15 10:30:00 +0300`
+";
+        let result = parse_context(text);
+        assert!(
+            result.is_err(),
+            "expected error for malformed stage title after <!-- stage --> marker"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Malformed stage title after <!-- stage --> marker"),
+            "error should mention the marker context, got: {err_msg}"
+        );
     }
 }

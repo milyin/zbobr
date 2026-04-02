@@ -11,7 +11,7 @@ use zbobr_api::{
     Pipeline, Signal, Stage, StageTransition, State,
     config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig},
 };
-use zbobr_dispatcher::{backend::TaskBackendExt, task::Tool};
+use zbobr_dispatcher::backend::TaskBackendExt;
 
 use super::{abstract_scenarios, env::IntegrationTestEnv};
 
@@ -59,7 +59,7 @@ fn build_workflow_with_roles(
                 Stage::from(s.name),
                 StageDefinition {
                     role: Some(s.role.to_string()),
-                    tool: Some(Tool::McpTester),
+                    tool: Some("mcp-tester".to_string()),
                     on_success: s.on_success,
                     on_failure: s.on_failure,
                     on_intermediate: s.on_intermediate,
@@ -192,7 +192,11 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
         return;
     }
 
-    let repo_path = env.create_git_repo("repo_auto_conflict").await;
+    let repo_path = env
+        .local_repo_path
+        .as_ref()
+        .expect("fs integration env should expose local_repo_path")
+        .clone();
     let work_branch = "zbobr_conflict-detect-abstract";
 
     // Create work branch with a commit
@@ -369,7 +373,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
                     Stage::from("check"),
                     StageDefinition {
                         role: Some("role_check".to_string()),
-                        tool: Some(Tool::McpTester),
+                        tool: Some("mcp-tester".to_string()),
                         ..Default::default()
                     },
                 ),
@@ -377,7 +381,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
                     Stage::from("finish"),
                     StageDefinition {
                         role: Some("role_finish".to_string()),
-                        tool: Some(Tool::McpTester),
+                        tool: Some("mcp-tester".to_string()),
                         ..Default::default()
                     },
                 ),
@@ -514,7 +518,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
                     "finish".into(),
                     StageDefinition {
                         role: Some("role_finish".into()),
-                        tool: Some(Tool::McpTester),
+                        tool: Some("mcp-tester".to_string()),
                         ..Default::default()
                     },
                 ),
@@ -528,7 +532,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
                 "work".into(),
                 StageDefinition {
                     role: Some("role_work".into()),
-                    tool: Some(Tool::McpTester),
+                    tool: Some("mcp-tester".to_string()),
                     ..Default::default()
                 },
             )]),
@@ -541,7 +545,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
                 "merging".into(),
                 StageDefinition {
                     role: Some("role_merge".into()),
-                    tool: Some(Tool::McpTester),
+                    tool: Some("mcp-tester".to_string()),
                     ..Default::default()
                 },
             )]),

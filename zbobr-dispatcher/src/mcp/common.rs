@@ -66,10 +66,8 @@ pub fn parse_ctx_rec_id(id: &str) -> Result<u64, String> {
     if let Ok(n) = id.parse::<u64>() {
         return Ok(n);
     }
-    if let Some(n_str) = id.strip_prefix("ctx_rec_") {
-        if let Ok(n) = n_str.parse::<u64>() {
-            return Ok(n);
-        }
+    if let Some(n_str) = id.strip_prefix("ctx_rec_") && let Ok(n) = n_str.parse::<u64>() {
+        return Ok(n);
     }
     Err(format!(
         "Invalid context record ID '{}': expected a number or 'ctx_rec_N'",
@@ -133,6 +131,7 @@ pub(crate) async fn serve_mcp(
 
 /// Run the MCP HTTP server scoped to a role and task.
 /// Returns the actual port that was assigned (spawns server in background).
+#[allow(clippy::too_many_arguments)]
 pub async fn run_role_mcp_server(
     zbobr: std::sync::Arc<ZbobrDispatcher>,
     role_name: &str,
@@ -173,7 +172,7 @@ pub async fn run_role_mcp_server(
                 session.clone(),
                 allowed_tools.clone(),
                 role_name_owned.clone(),
-                tool,
+                tool.clone(),
                 model.clone(),
                 stage_name.clone(),
                 pipeline_name.clone(),

@@ -13,7 +13,11 @@ pub mod task_dir;
 pub mod tool_executor;
 pub mod workflow;
 
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 pub use cli::{
     ConfigFileArg, ConfigLocation, GlobalArgs, parse_cli, print_task, process_task,
@@ -32,7 +36,10 @@ pub use task_dir::TaskDir;
 pub use tool_executor::ToolExecutor;
 use typesafe_builder::{_TypesafeBuilderEmpty, _TypesafeBuilderFilled, Builder};
 pub use workflow::{StateAction, Workflow};
-use zbobr_api::State;
+use zbobr_api::{
+    State,
+    config::{ResolvedProvider, ToolEntry},
+};
 
 pub use zbobr_api::config::Config;
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
@@ -60,6 +67,12 @@ pub struct ZbobrDispatcher {
     mcp_tester: McpTesterExecutor,
     #[builder(optional)]
     prompt_builder: Option<ConfiguredPromptBuilder>,
+    /// Providers excluded until the stored Instant (expiry).
+    #[builder(default = "Arc::new(Mutex::new(HashMap::new()))")]
+    excluded_providers: Arc<Mutex<HashMap<String, Instant>>>,
+    /// Round-robin counters per tool name.
+    #[builder(default = "Arc::new(Mutex::new(HashMap::new()))")]
+    round_robin_state: Arc<Mutex<HashMap<String, usize>>>,
 }
 
 impl ZbobrDispatcher {
@@ -67,6 +80,9 @@ impl ZbobrDispatcher {
     /// Chain after `build()` to ensure the config is consistent.
     pub fn validated(mut self) -> anyhow::Result<Self> {
         self.config.validate()?;
+        self.config.validate_workflow_refs(self.workflow.config())?;
+        // Eagerly resolve providers to catch circular inheritance at startup.
+        self.config.resolve_providers()?;
         self.copilot.config.copilot_github_token.resolve()?;
         Ok(self)
     }
@@ -99,28 +115,112 @@ impl ZbobrDispatcher {
         &self.mcp_tester.config
     }
 
+    /// Select a provider and model for the given tool name.
+    ///
+    /// Filters out currently excluded providers, groups remaining entries by priority,
+    /// and selects within the highest-priority group using round-robin.
+    pub fn select_provider(&self, tool_name: &str) -> anyhow::Result<(ResolvedProvider, Model)> {
+        let entries: &Vec<ToolEntry> = self.config.tools.get(tool_name).ok_or_else(|| {
+            anyhow::anyhow!("Tool '{}' not found in dispatcher config", tool_name)
+        })?;
+
+        let resolved_providers = self.config.resolve_providers()?;
+
+        // Prune expired exclusions and snapshot current excluded set
+        let now = Instant::now();
+        let mut excluded_lock = self.excluded_providers.lock().unwrap();
+        excluded_lock.retain(|_, expiry| *expiry > now);
+        let excluded_set: HashSet<String> = excluded_lock.keys().cloned().collect();
+        drop(excluded_lock);
+
+        // Filter to available entries
+        let available: Vec<(usize, &ToolEntry)> = entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| !excluded_set.contains(&entry.provider))
+            .collect();
+
+        if available.is_empty() {
+            anyhow::bail!(
+                "All providers for tool '{}' are currently excluded",
+                tool_name
+            );
+        }
+
+        // Group by provider priority
+        let mut priority_groups: HashMap<i32, Vec<(usize, &ToolEntry)>> = HashMap::new();
+        for (idx, entry) in &available {
+            let rp = resolved_providers
+                .get(&entry.provider)
+                .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", entry.provider))?;
+            priority_groups
+                .entry(rp.priority)
+                .or_default()
+                .push((*idx, *entry));
+        }
+
+        // Pick the highest-priority group
+        let max_priority = priority_groups.keys().copied().max().unwrap();
+        let top_group = &priority_groups[&max_priority];
+
+        // Round-robin within the top group
+        let mut rr = self.round_robin_state.lock().unwrap();
+        let counter = rr.entry(tool_name.to_string()).or_insert(0);
+        let pick = *counter % top_group.len();
+        *counter = counter.wrapping_add(1);
+        drop(rr);
+
+        let (_, entry) = &top_group[pick];
+        let rp = resolved_providers.get(&entry.provider).unwrap().clone();
+        Ok((rp, entry.model.clone()))
+    }
+
+    /// Mark a provider as temporarily excluded.
+    ///
+    /// The provider will be skipped by `select_provider` until the exclusion expires.
+    pub fn exclude_provider(&self, provider_name: &str) {
+        let expiry = Instant::now() + Duration::from_secs(self.config.provider_exclusion_secs);
+        self.excluded_providers
+            .lock()
+            .unwrap()
+            .insert(provider_name.to_string(), expiry);
+        tracing::info!(
+            "Provider '{}' excluded for {}s",
+            provider_name,
+            self.config.provider_exclusion_secs
+        );
+    }
+
+    /// Build an executor for the given resolved provider.
     pub fn build_executor(
         &self,
-        tool: Tool,
-        model: Model,
+        provider: &ResolvedProvider,
         mcp_tester_override: Option<&ZbobrExecutorMcpTesterConfig>,
-    ) -> Box<dyn ToolExecutor> {
-        match tool {
-            Tool::Copilot => {
-                let mut config = self.copilot.config.clone();
-                config.default_model = model;
-                Box::new(CopilotExecutor { config })
-            }
-            Tool::Claude => {
-                let mut config = self.claude.config.clone();
-                config.default_model = model;
-                Box::new(ClaudeExecutor { config })
-            }
-            Tool::McpTester => Box::new(McpTesterExecutor {
+    ) -> anyhow::Result<Box<dyn ToolExecutor>> {
+        match provider.executor.as_str() {
+            "copilot" => Ok(Box::new(CopilotExecutor {
+                config: self.copilot.config.clone(),
+            })),
+            "mcp-tester" => Ok(Box::new(McpTesterExecutor {
                 config: mcp_tester_override
                     .cloned()
                     .unwrap_or_else(|| self.mcp_tester.config.clone()),
-            }),
+            })),
+            "claude" => {
+                let mut executor = ClaudeExecutor {
+                    config: self.claude.config.clone(),
+                    access_key: None,
+                };
+                if let Some(ref key) = provider.access_key {
+                    executor.access_key = Some(key.clone());
+                }
+                Ok(Box::new(executor))
+            }
+            other => anyhow::bail!(
+                "Unknown executor '{}' for provider '{}'",
+                other,
+                provider.name
+            ),
         }
     }
 
@@ -236,5 +336,344 @@ impl ZbobrDispatcher {
             pipeline_name,
             pipeline_run_id,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use indexmap::IndexMap;
+    use zbobr_api::config::{ProviderDefinition, RoleDefinition, ToolEntry, WorkflowConfig};
+
+    // ── Mock backends ────────────────────────────────────────────────────
+
+    struct MockTaskBackend;
+
+    #[async_trait::async_trait]
+    impl zbobr_api::backend::TaskBackend for MockTaskBackend {
+        async fn get_task(
+            &self,
+            _id: u64,
+        ) -> anyhow::Result<Box<dyn zbobr_api::backend::TaskWeak>> {
+            unimplemented!()
+        }
+        async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn zbobr_api::backend::TaskWeak>>> {
+            unimplemented!()
+        }
+        async fn create_task(
+            &self,
+            _title: &str,
+            _description: &str,
+            _state: zbobr_api::State,
+        ) -> anyhow::Result<u64> {
+            unimplemented!()
+        }
+        async fn setup(&self, _force: bool) -> anyhow::Result<()> {
+            unimplemented!()
+        }
+        async fn validate_connectivity(&self) -> anyhow::Result<()> {
+            unimplemented!()
+        }
+        fn debug_state(&self) -> String {
+            "mock".to_string()
+        }
+    }
+
+    struct MockRepoBackend;
+
+    #[async_trait::async_trait]
+    impl zbobr_api::backend::WorktreeBackend for MockRepoBackend {
+        fn repository(&self) -> &str {
+            "mock/repo"
+        }
+        fn branch(&self) -> &str {
+            "main"
+        }
+        fn repo_name(&self) -> &str {
+            "repo"
+        }
+        async fn update_worktree(
+            &self,
+            _identity: &zbobr_api::TaskIdentity,
+            _workspace_path: &std::path::Path,
+            _git_user_name: &str,
+            _git_user_email: &str,
+        ) -> anyhow::Result<bool> {
+            unimplemented!()
+        }
+        async fn fetch_refs(&self, _identity: &zbobr_api::TaskIdentity) -> anyhow::Result<()> {
+            unimplemented!()
+        }
+        async fn ensure_pr_url(
+            &self,
+            _identity: &zbobr_api::TaskIdentity,
+            _body: Option<&str>,
+        ) -> anyhow::Result<String> {
+            unimplemented!()
+        }
+        async fn validate_connectivity(&self) -> anyhow::Result<()> {
+            unimplemented!()
+        }
+        fn debug_state(&self) -> String {
+            "mock".to_string()
+        }
+    }
+
+    /// Build a minimal dispatcher with given providers and tools.
+    fn make_dispatcher(
+        providers: IndexMap<String, ProviderDefinition>,
+        tools: IndexMap<String, Vec<ToolEntry>>,
+    ) -> ZbobrDispatcher {
+        make_dispatcher_with_workflow(providers, tools, Workflow::default())
+    }
+
+    fn make_dispatcher_with_workflow(
+        providers: IndexMap<String, ProviderDefinition>,
+        tools: IndexMap<String, Vec<ToolEntry>>,
+        workflow: Workflow,
+    ) -> ZbobrDispatcher {
+        let config = ZbobrDispatcherConfig {
+            providers,
+            tools,
+            ..Default::default()
+        };
+        ZbobrDispatcherBuilder::new()
+            .with_config(config)
+            .with_workflow(workflow)
+            .with_task_backend(MockTaskBackend)
+            .with_repo_backend(MockRepoBackend)
+            .build()
+    }
+
+    fn provider_def(executor: &str, priority: i32) -> ProviderDefinition {
+        ProviderDefinition {
+            executor: Some(executor.to_string()),
+            parent: None,
+            priority: Some(priority),
+            plan_mode: None,
+            access_key: None,
+        }
+    }
+
+    fn tool_entry(provider: &str, model: &str) -> ToolEntry {
+        ToolEntry {
+            provider: provider.to_string(),
+            model: model.parse().unwrap(),
+        }
+    }
+
+    // ── select_provider tests ────────────────────────────────────────────
+
+    #[test]
+    fn select_provider_basic() {
+        let mut providers = IndexMap::new();
+        providers.insert("claude".to_string(), provider_def("claude", 10));
+
+        let mut tools = IndexMap::new();
+        tools.insert("smart".to_string(), vec![tool_entry("claude", "opus")]);
+
+        let dispatcher = make_dispatcher(providers, tools);
+        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        assert_eq!(rp.executor, "claude");
+        assert_eq!(model.as_str(), "opus");
+    }
+
+    #[test]
+    fn select_provider_prefers_higher_priority() {
+        let mut providers = IndexMap::new();
+        providers.insert("claude".to_string(), provider_def("claude", 10));
+        providers.insert("fallback".to_string(), provider_def("claude", 0));
+
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![
+                tool_entry("fallback", "haiku"),
+                tool_entry("claude", "opus"),
+            ],
+        );
+
+        let dispatcher = make_dispatcher(providers, tools);
+        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        assert_eq!(rp.name, "claude");
+        assert_eq!(model.as_str(), "opus");
+    }
+
+    #[test]
+    fn select_provider_round_robin_same_priority() {
+        let mut providers = IndexMap::new();
+        providers.insert("a".to_string(), provider_def("claude", 10));
+        providers.insert("b".to_string(), provider_def("copilot", 10));
+
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![tool_entry("a", "model-a"), tool_entry("b", "model-b")],
+        );
+
+        let dispatcher = make_dispatcher(providers, tools);
+
+        let (rp1, _) = dispatcher.select_provider("smart").unwrap();
+        let (rp2, _) = dispatcher.select_provider("smart").unwrap();
+        assert_ne!(rp1.name, rp2.name, "Round-robin should alternate providers");
+    }
+
+    #[test]
+    fn select_provider_skips_excluded() {
+        let mut providers = IndexMap::new();
+        providers.insert("a".to_string(), provider_def("claude", 10));
+        providers.insert("b".to_string(), provider_def("copilot", 10));
+
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![tool_entry("a", "model-a"), tool_entry("b", "model-b")],
+        );
+
+        let dispatcher = make_dispatcher(providers, tools);
+        dispatcher.exclude_provider("a");
+
+        let (rp, _) = dispatcher.select_provider("smart").unwrap();
+        assert_eq!(rp.name, "b");
+    }
+
+    #[test]
+    fn select_provider_falls_back_to_lower_priority_when_higher_excluded() {
+        let mut providers = IndexMap::new();
+        providers.insert("primary".to_string(), provider_def("claude", 10));
+        providers.insert("fallback".to_string(), provider_def("claude", 0));
+
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![
+                tool_entry("primary", "opus"),
+                tool_entry("fallback", "haiku"),
+            ],
+        );
+
+        let dispatcher = make_dispatcher(providers, tools);
+        dispatcher.exclude_provider("primary");
+
+        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        assert_eq!(rp.name, "fallback");
+        assert_eq!(model.as_str(), "haiku");
+    }
+
+    #[test]
+    fn select_provider_all_excluded_error() {
+        let mut providers = IndexMap::new();
+        providers.insert("only".to_string(), provider_def("claude", 10));
+
+        let mut tools = IndexMap::new();
+        tools.insert("smart".to_string(), vec![tool_entry("only", "opus")]);
+
+        let dispatcher = make_dispatcher(providers, tools);
+        dispatcher.exclude_provider("only");
+
+        let err = dispatcher.select_provider("smart").unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("excluded"),
+            "Expected 'excluded' in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn select_provider_unknown_tool_error() {
+        let dispatcher = make_dispatcher(IndexMap::new(), IndexMap::new());
+        let err = dispatcher.select_provider("nonexistent").unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("not found"),
+            "Expected 'not found' in error: {msg}"
+        );
+    }
+
+    // ── build_executor tests ─────────────────────────────────────────────
+
+    #[test]
+    fn build_executor_unknown_executor_error() {
+        let dispatcher = make_dispatcher(IndexMap::new(), IndexMap::new());
+        let bad_provider = zbobr_api::config::ResolvedProvider {
+            name: "broken".to_string(),
+            executor: "nonexistent".to_string(),
+            priority: 10,
+            plan_mode: false,
+            access_key: None,
+        };
+        let result = dispatcher.build_executor(&bad_provider, None);
+        assert!(result.is_err(), "Expected Err for unknown executor");
+        let msg = result.err().unwrap().to_string();
+        assert!(
+            msg.contains("Unknown executor"),
+            "Expected 'Unknown executor' in error: {msg}"
+        );
+    }
+
+    // ── validated() integration tests ───────────────────────────────────
+
+    #[test]
+    fn validated_catches_circular_providers() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "a".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("b".to_string()),
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        providers.insert(
+            "b".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("a".to_string()),
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert("smart".to_string(), vec![tool_entry("a", "m1")]);
+        let dispatcher = make_dispatcher(providers, tools);
+        let result = dispatcher.validated();
+        assert!(result.is_err(), "Expected Err for circular providers");
+        let msg = result.err().unwrap().to_string().to_lowercase();
+        assert!(
+            msg.contains("circular"),
+            "Expected 'circular' in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validated_catches_invalid_workflow_refs() {
+        let providers = IndexMap::from([("cp".to_string(), provider_def("copilot", 10))]);
+        let tools = IndexMap::from([("smart".to_string(), vec![tool_entry("cp", "some-model")])]);
+        let mut roles = IndexMap::new();
+        roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: None,
+                tool: Some("nonexistent".to_string()),
+            },
+        );
+        let wf_config = WorkflowConfig {
+            prompts_dir: None,
+            roles,
+            pipelines: std::collections::HashMap::new(),
+        };
+        let workflow = Workflow::from_config(wf_config);
+        let dispatcher = make_dispatcher_with_workflow(providers, tools, workflow);
+        let result = dispatcher.validated();
+        assert!(result.is_err(), "Expected Err for invalid workflow refs");
+        let msg = result.err().unwrap().to_string();
+        assert!(
+            msg.contains("nonexistent"),
+            "Expected 'nonexistent' in error: {msg}"
+        );
     }
 }
