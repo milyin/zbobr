@@ -1,0 +1,1 @@
+In `zbobr-api/src/config.rs:694`, the doc comment still says "Precedence: stage.tool → role.tool → global dispatcher.tool" but the global fallback has been removed. Update to "Precedence: stage.tool → role.tool".
