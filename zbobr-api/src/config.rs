@@ -16,19 +16,58 @@ pub trait Config: Sized {
     fn build(toml: Option<Self::Toml>, args: Self::Args, config_dir: &std::path::Path) -> Self;
 }
 
-/// Definition of a role: which MCP tools it can access, an optional prompt file, and default tool/model.
+/// Definition of a role: which MCP tools it can access, an optional prompt file, and optional tool override.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RoleDefinition {
     pub mcp: Vec<McpTool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<PathBuf>,
+    /// Tool name override for this role. Overrides the global dispatcher `tool`.
+    /// Stage-level `tool` takes precedence over this.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_tool: Option<Tool>,
+    pub tool: Option<String>,
+}
+
+/// A provider definition: a named executor configuration with optional inheritance.
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderDefinition {
+    /// Executor type (e.g. "claude", "copilot", "mcp-tester").
+    /// Required unless `parent` is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_model: Option<Model>,
+    pub executor: Option<String>,
+    /// Parent provider to inherit settings from. Child fields override parent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_plan_mode: Option<bool>,
+    pub parent: Option<String>,
+    /// Selection priority. Higher values are preferred. Omit to inherit from
+    /// parent (root providers default to 10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<i32>,
+    /// Enable plan mode for this provider. Overrides any executor default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_mode: Option<bool>,
+    /// API key for the executor (e.g. Anthropic API key for the claude executor).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_key: Option<Secret>,
+}
+
+/// A resolved provider with all inheritance fully flattened.
+#[derive(Clone, Debug)]
+pub struct ResolvedProvider {
+    pub name: String,
+    pub executor: String,
+    pub priority: i32,
+    pub plan_mode: bool,
+    pub access_key: Option<Secret>,
+}
+
+/// One entry within a named tool definition: a (provider, model) pair.
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolEntry {
+    pub provider: String,
+    pub model: Model,
 }
 
 /// A stage transition descriptor with an optional target stage and pause flag.
@@ -108,12 +147,9 @@ pub struct StageDefinition {
     pub role: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call: Option<Pipeline>,
+    /// Tool name override for this stage. Overrides role-level and global `tool`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<Model>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<Tool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plan_mode: Option<bool>,
+    pub tool: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role_prompt: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -216,35 +252,35 @@ impl PipelineConfig {
                 ),
                 _ => {}
             }
-            if let Some(ref target) = stage.on_success.as_ref().and_then(|t| t.next.as_ref()) {
-                if !self.stages.contains_key(target.as_str()) {
-                    anyhow::bail!(
-                        "Pipeline '{}' stage '{}' on_success references unknown stage '{}'",
-                        pipeline_name,
-                        sname,
-                        target
-                    );
-                }
+            if let Some(ref target) = stage.on_success.as_ref().and_then(|t| t.next.as_ref())
+                && !self.stages.contains_key(target.as_str())
+            {
+                anyhow::bail!(
+                    "Pipeline '{}' stage '{}' on_success references unknown stage '{}'",
+                    pipeline_name,
+                    sname,
+                    target
+                );
             }
-            if let Some(ref target) = stage.on_failure.as_ref().and_then(|t| t.next.as_ref()) {
-                if !self.stages.contains_key(target.as_str()) {
-                    anyhow::bail!(
-                        "Pipeline '{}' stage '{}' on_failure references unknown stage '{}'",
-                        pipeline_name,
-                        sname,
-                        target
-                    );
-                }
+            if let Some(ref target) = stage.on_failure.as_ref().and_then(|t| t.next.as_ref())
+                && !self.stages.contains_key(target.as_str())
+            {
+                anyhow::bail!(
+                    "Pipeline '{}' stage '{}' on_failure references unknown stage '{}'",
+                    pipeline_name,
+                    sname,
+                    target
+                );
             }
-            if let Some(ref target) = stage.on_intermediate.as_ref().and_then(|t| t.next.as_ref()) {
-                if !self.stages.contains_key(target.as_str()) {
-                    anyhow::bail!(
-                        "Pipeline '{}' stage '{}' on_intermediate references unknown stage '{}'",
-                        pipeline_name,
-                        sname,
-                        target
-                    );
-                }
+            if let Some(ref target) = stage.on_intermediate.as_ref().and_then(|t| t.next.as_ref())
+                && !self.stages.contains_key(target.as_str())
+            {
+                anyhow::bail!(
+                    "Pipeline '{}' stage '{}' on_intermediate references unknown stage '{}'",
+                    pipeline_name,
+                    sname,
+                    target
+                );
             }
         }
         Ok(())
@@ -383,17 +419,16 @@ impl WorkflowConfig {
     /// Find the first stage with a given role (across all pipelines, preferring default pipeline).
     pub fn find_stage_by_role(&self, role: &str) -> Option<(&Pipeline, &str, &StageDefinition)> {
         let default = self.default_pipeline();
-        if let Some(pipeline) = self.pipelines.get(default.as_str()) {
-            if let Some((name, stage)) = pipeline
+        if let Some(pipeline) = self.pipelines.get(default.as_str())
+            && let Some((name, stage)) = pipeline
                 .stages
                 .iter()
                 .find(|(_, s)| s.role_name() == Some(role))
-            {
-                return self
-                    .pipelines
-                    .get_key_value(default.as_str())
-                    .map(|(p, _)| (p, name.as_str(), stage));
-            }
+        {
+            return self
+                .pipelines
+                .get_key_value(default.as_str())
+                .map(|(p, _)| (p, name.as_str(), stage));
         }
         for (pname, pipeline) in &self.pipelines {
             if let Some((sname, stage)) = pipeline
@@ -452,15 +487,13 @@ impl WorkflowConfig {
         if !self.roles.is_empty() {
             for (pname, pipeline) in &self.pipelines {
                 for (sname, stage) in &pipeline.stages {
-                    if let Some(role) = &stage.role {
-                        if !self.roles.contains_key(role) {
-                            anyhow::bail!(
-                                "Stage '{}/{}' references unknown role '{}' (not in [workflow.roles])",
-                                pname,
-                                sname,
-                                role
-                            );
-                        }
+                    if let Some(role) = &stage.role && !self.roles.contains_key(role) {
+                        anyhow::bail!(
+                            "Stage '{}/{}' references unknown role '{}' (not in [workflow.roles])",
+                            pname,
+                            sname,
+                            role
+                        );
                     }
                 }
             }
@@ -469,15 +502,13 @@ impl WorkflowConfig {
         // Every call-stage's target pipeline must exist
         for (pname, pipeline) in &self.pipelines {
             for (sname, stage) in &pipeline.stages {
-                if let Some(target) = &stage.call {
-                    if !self.pipelines.contains_key(target.as_str()) {
-                        anyhow::bail!(
-                            "Stage '{}/{}' calls unknown pipeline '{}'",
-                            pname,
-                            sname,
-                            target
-                        );
-                    }
+                if let Some(target) = &stage.call && !self.pipelines.contains_key(target.as_str()) {
+                    anyhow::bail!(
+                        "Stage '{}/{}' calls unknown pipeline '{}'",
+                        pname,
+                        sname,
+                        target
+                    );
                 }
             }
         }
@@ -508,10 +539,17 @@ pub struct ZbobrDispatcherConfig {
     /// Use `{ value = "token" }` for an inline token or `{ env = "VAR" }` to read from an env var.
     #[config(skip_args)]
     pub agent_github_token: Secret,
-    /// CLI tool to use as a global default. Individual stages may override this.
-    pub tool: Tool,
-    /// Global AI model to use when a stage does not specify an override.
-    pub model: Model,
+    /// Global default tool name. Stages and roles may override this.
+    pub tool: String,
+    /// Named provider definitions. Providers map a name to an executor + settings.
+    #[config(skip_args)]
+    pub providers: IndexMap<String, ProviderDefinition>,
+    /// Named tool definitions. Each tool is a list of (provider, model) pairs.
+    #[config(skip_args)]
+    pub tools: IndexMap<String, Vec<ToolEntry>>,
+    /// Seconds a provider is excluded from selection after a failure.
+    #[config(skip_args)]
+    pub provider_exclusion_secs: u64,
     /// Prefix for work branches (default: "zbobr_fix").
     pub work_branch_prefix: String,
     /// Git user name for commits made by the tool.
@@ -537,8 +575,10 @@ impl Default for ZbobrDispatcherConfig {
             workspaces: std::path::PathBuf::from("./workspaces"),
             base_port: 3000,
             agent_github_token: Secret::value("not-configured"),
-            tool: Tool::default(),
-            model: Model::default(),
+            tool: "smart".to_string(),
+            providers: IndexMap::new(),
+            tools: IndexMap::new(),
+            provider_exclusion_secs: 300,
             work_branch_prefix: "zbobr_fix".to_string(),
             git_user_name: String::new(),
             git_user_email: String::new(),
@@ -569,78 +609,847 @@ impl ZbobrDispatcherConfig {
         }
     }
 
-    /// Validate that global tool/model are compatible and resolve all secrets.
+    /// Validate configuration consistency and resolve all secrets.
     pub fn validate(&mut self) -> anyhow::Result<()> {
-        if self.model.model_name_for_tool(self.tool).is_none() {
+        // Verify parent references are valid
+        for (provider_name, provider) in &self.providers {
+            if let Some(ref parent) = provider.parent
+                && !self.providers.contains_key(parent.as_str())
+            {
+                anyhow::bail!(
+                    "Provider '{}' references unknown parent '{}'",
+                    provider_name,
+                    parent
+                );
+            }
+            if provider.executor.is_none() && provider.parent.is_none() {
+                anyhow::bail!(
+                    "Provider '{}' has neither 'executor' nor 'parent' — one is required",
+                    provider_name
+                );
+            }
+            if let Some(ref executor) = provider.executor {
+                let valid = [Tool::CLAUDE, Tool::COPILOT, Tool::MCP_TESTER];
+                if !valid.contains(&executor.as_str()) {
+                    anyhow::bail!(
+                        "Provider '{}' has unknown executor '{}' — must be one of 'claude', 'copilot', 'mcp-tester'",
+                        provider_name,
+                        executor
+                    );
+                }
+            }
+        }
+        // Verify tool entries reference existing providers
+        for (tool_name, entries) in &self.tools {
+            for entry in entries {
+                if !self.providers.contains_key(entry.provider.as_str()) {
+                    anyhow::bail!(
+                        "Tool '{}' references unknown provider '{}'",
+                        tool_name,
+                        entry.provider
+                    );
+                }
+            }
+        }
+        // Verify global default tool name exists in [tools].
+        if !self.tools.contains_key(self.tool.as_str()) {
             anyhow::bail!(
-                "Global model {:?} is not supported by global tool {:?}",
-                self.model,
+                "Global dispatcher tool '{}' is not defined in [tools]",
                 self.tool
             );
         }
         self.agent_github_token.resolve()?;
+        // Resolve secrets in providers
+        for provider in self.providers.values_mut() {
+            if let Some(ref mut key) = provider.access_key {
+                key.resolve()?;
+            }
+        }
         Ok(())
     }
 
-    /// Determine which tool to use for a stage, falling back to role default, then global default.
-    pub fn tool_for_stage(&self, stage_def: &StageDefinition, workflow: &WorkflowConfig) -> Tool {
-        if let Some(tool) = stage_def.tool {
-            tool
-        } else if let Some(role_name) = stage_def.role_name() {
-            if let Some(role_def) = workflow.role_definition(role_name) {
-                if let Some(tool) = role_def.default_tool {
+    /// Validate that all tool-name references in role and stage definitions exist in `self.tools`.
+    pub fn validate_workflow_refs(&self, workflow: &WorkflowConfig) -> anyhow::Result<()> {
+        for (role_name, role_def) in &workflow.roles {
+            if let Some(ref tool) = role_def.tool
+                && !self.tools.contains_key(tool.as_str())
+            {
+                anyhow::bail!(
+                    "Role '{}' references unknown tool '{}' (not in [tools])",
+                    role_name,
                     tool
-                } else {
-                    self.tool
-                }
-            } else {
-                self.tool
+                );
             }
-        } else {
-            self.tool
         }
+        for (pname, pipeline) in &workflow.pipelines {
+            for (sname, stage) in &pipeline.stages {
+                if let Some(ref tool) = stage.tool
+                    && !self.tools.contains_key(tool.as_str())
+                {
+                    anyhow::bail!(
+                        "Stage '{}/{}' references unknown tool '{}' (not in [tools])",
+                        pname,
+                        sname,
+                        tool
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 
-    /// Determine which model to use for a stage, falling back to role default, then global default.
-    pub fn model_for_stage(&self, stage_def: &StageDefinition, workflow: &WorkflowConfig) -> Model {
-        if let Some(model) = stage_def.model.as_ref() {
-            model.clone()
-        } else if let Some(role_name) = stage_def.role_name() {
-            if let Some(role_def) = workflow.role_definition(role_name) {
-                if let Some(model) = role_def.default_model.as_ref() {
-                    model.clone()
-                } else {
-                    self.model.clone()
-                }
-            } else {
-                self.model.clone()
-            }
-        } else {
-            self.model.clone()
-        }
-    }
-
-    /// Determine whether to run claude in plan mode for this stage.
+    /// Determine the effective tool name for a stage.
     ///
-    /// Precedence:
-    /// 1. Stage-level `plan_mode`
-    /// 2. Role-level `default_plan_mode`
-    /// 3. Default false.
-    pub fn plan_mode_for_stage(
+    /// Precedence: stage.tool → role.tool → global dispatcher.tool
+    pub fn resolve_tool_name(
         &self,
         stage_def: &StageDefinition,
         workflow: &WorkflowConfig,
-    ) -> bool {
-        if let Some(plan_mode) = stage_def.plan_mode {
-            plan_mode
-        } else if let Some(role_name) = stage_def.role_name() {
-            if let Some(role_def) = workflow.role_definition(role_name) {
-                role_def.default_plan_mode.unwrap_or(false)
-            } else {
-                false
-            }
-        } else {
-            false
+    ) -> String {
+        if let Some(ref tool) = stage_def.tool {
+            return tool.clone();
         }
+        if let Some(role_name) = stage_def.role_name()
+            && let Some(role_def) = workflow.role_definition(role_name)
+            && let Some(ref tool) = role_def.tool
+        {
+            return tool.clone();
+        }
+        self.tool.clone()
+    }
+
+    /// Resolve all providers by flattening inheritance chains.
+    ///
+    /// Returns an `IndexMap` from provider name to `ResolvedProvider`.
+    pub fn resolve_providers(&self) -> anyhow::Result<IndexMap<String, ResolvedProvider>> {
+        let mut resolved = IndexMap::new();
+        for name in self.providers.keys() {
+            let rp = self.resolve_single_provider(name, &mut Vec::new())?;
+            resolved.insert(name.clone(), rp);
+        }
+        Ok(resolved)
+    }
+
+    fn resolve_single_provider(
+        &self,
+        name: &str,
+        visited: &mut Vec<String>,
+    ) -> anyhow::Result<ResolvedProvider> {
+        if visited.contains(&name.to_string()) {
+            anyhow::bail!("Circular parent reference detected in provider '{}'", name);
+        }
+        visited.push(name.to_string());
+
+        let def = self
+            .providers
+            .get(name)
+            .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", name))?;
+
+        if let Some(ref parent_name) = def.parent {
+            let parent = self.resolve_single_provider(parent_name, visited)?;
+            Ok(ResolvedProvider {
+                name: name.to_string(),
+                executor: def.executor.clone().unwrap_or(parent.executor),
+                priority: def.priority.unwrap_or(parent.priority),
+                plan_mode: def.plan_mode.unwrap_or(parent.plan_mode),
+                access_key: def.access_key.clone().or(parent.access_key),
+            })
+        } else {
+            let executor = def.executor.clone().ok_or_else(|| {
+                anyhow::anyhow!("Provider '{}' has no executor and no parent", name)
+            })?;
+            Ok(ResolvedProvider {
+                name: name.to_string(),
+                executor,
+                priority: def.priority.unwrap_or(10),
+                plan_mode: def.plan_mode.unwrap_or(false),
+                access_key: def.access_key.clone(),
+            })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use indexmap::IndexMap;
+
+    /// Helper: build a minimal ZbobrDispatcherConfig with given providers and tools.
+    fn make_config(
+        providers: IndexMap<String, ProviderDefinition>,
+        tools: IndexMap<String, Vec<ToolEntry>>,
+    ) -> ZbobrDispatcherConfig {
+        ZbobrDispatcherConfig {
+            providers,
+            tools,
+            ..Default::default()
+        }
+    }
+
+    // ── resolve_providers tests ──────────────────────────────────────────
+
+    #[test]
+    fn resolve_providers_basic() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        assert_eq!(resolved.len(), 1);
+        let rp = &resolved["claude"];
+        assert_eq!(rp.name, "claude");
+        assert_eq!(rp.executor, "claude");
+        assert_eq!(rp.priority, 10);
+        assert!(!rp.plan_mode);
+        assert!(rp.access_key.is_none());
+    }
+
+    #[test]
+    fn resolve_providers_single_level_inheritance() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude_base".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        providers.insert(
+            "claude_child".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("claude_base".to_string()),
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        let child = &resolved["claude_child"];
+        assert_eq!(child.executor, "claude");
+    }
+
+    #[test]
+    fn resolve_providers_multi_level_chain() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "grandparent".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        providers.insert(
+            "parent".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("grandparent".to_string()),
+                priority: None,
+                plan_mode: Some(true),
+                access_key: None,
+            },
+        );
+        providers.insert(
+            "child".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("parent".to_string()),
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        let child = &resolved["child"];
+        assert_eq!(child.executor, "claude");
+        assert!(child.plan_mode);
+    }
+
+    #[test]
+    fn resolve_providers_circular_reference() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "a".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("b".to_string()),
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        providers.insert(
+            "b".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("a".to_string()),
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let err = config.resolve_providers().unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("circular"),
+            "Expected 'circular' in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn resolve_providers_child_overrides_parent() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "base".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: Some(false),
+                access_key: None,
+            },
+        );
+        providers.insert(
+            "child".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("base".to_string()),
+                priority: Some(5),
+                plan_mode: Some(true),
+                access_key: None,
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        let child = &resolved["child"];
+        assert_eq!(child.executor, "claude");
+        assert_eq!(child.priority, 5);
+        assert!(child.plan_mode);
+    }
+
+    // ── validate tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn validate_valid_config() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "opus".parse().unwrap(),
+            }],
+        );
+        let mut config = make_config(providers, tools);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_unknown_parent() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "child".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("nonexistent".to_string()),
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut config = make_config(providers, IndexMap::new());
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("unknown parent"),
+            "Expected 'unknown parent' in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_no_executor_no_parent() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "broken".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut config = make_config(providers, IndexMap::new());
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("neither 'executor' nor 'parent'"),
+            "Expected \"neither 'executor' nor 'parent'\" in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_tool_references_unknown_provider() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "ghost".to_string(),
+                model: "opus".parse().unwrap(),
+            }],
+        );
+        let mut config = make_config(providers, tools);
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("unknown provider"),
+            "Expected 'unknown provider' in error: {msg}"
+        );
+    }
+
+    // ── resolve_tool_name tests ─────────────────────────────────────────
+
+    fn make_workflow_with_role(role_name: &str, tool: Option<String>) -> WorkflowConfig {
+        let mut roles = IndexMap::new();
+        roles.insert(
+            role_name.to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: None,
+                tool,
+            },
+        );
+        WorkflowConfig {
+            prompts_dir: None,
+            roles,
+            pipelines: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn resolve_tool_name_stage_overrides() {
+        let stage = StageDefinition {
+            tool: Some("stage-tool".to_string()),
+            role: Some("worker".to_string()),
+            ..Default::default()
+        };
+        let workflow = make_workflow_with_role("worker", Some("role-tool".to_string()));
+        let config = ZbobrDispatcherConfig {
+            tool: "global-tool".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.resolve_tool_name(&stage, &workflow), "stage-tool");
+    }
+
+    #[test]
+    fn resolve_tool_name_falls_back_to_role() {
+        let stage = StageDefinition {
+            tool: None,
+            role: Some("worker".to_string()),
+            ..Default::default()
+        };
+        let workflow = make_workflow_with_role("worker", Some("role-tool".to_string()));
+        let config = ZbobrDispatcherConfig {
+            tool: "global-tool".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.resolve_tool_name(&stage, &workflow), "role-tool");
+    }
+
+    #[test]
+    fn resolve_tool_name_falls_back_to_global() {
+        let stage = StageDefinition {
+            tool: None,
+            role: Some("worker".to_string()),
+            ..Default::default()
+        };
+        let workflow = make_workflow_with_role("worker", None);
+        let config = ZbobrDispatcherConfig {
+            tool: "global-tool".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.resolve_tool_name(&stage, &workflow), "global-tool");
+    }
+
+    #[test]
+    fn resolve_tool_name_no_role_falls_back_to_global() {
+        let stage = StageDefinition {
+            tool: None,
+            role: Some("nonexistent".to_string()),
+            ..Default::default()
+        };
+        let workflow = WorkflowConfig::default();
+        let config = ZbobrDispatcherConfig {
+            tool: "global-tool".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.resolve_tool_name(&stage, &workflow), "global-tool");
+    }
+
+    // ── resolve_providers – priority inheritance ────────────────────────
+
+    #[test]
+    fn resolve_providers_inherits_priority_from_parent() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "base".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: Some(3),
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        providers.insert(
+            "child".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("base".to_string()),
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        let child = &resolved["child"];
+        assert_eq!(
+            child.priority, 3,
+            "Child should inherit parent's priority (3), not default (10)"
+        );
+    }
+
+    // ── validate – unknown executor ─────────────────────────────────────
+
+    // ── validate – global tool check ───────────────────────────────────
+
+    #[test]
+    fn validate_rejects_unknown_global_tool() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "opus".parse().unwrap(),
+            }],
+        );
+        let mut config = make_config(providers, tools);
+        config.tool = "nonexistent".to_string();
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("not defined in [tools]"),
+            "Expected 'not defined in [tools]' in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_when_tools_empty() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut config = make_config(providers, IndexMap::new());
+        config.tool = "anything".to_string();
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("not defined in [tools]"),
+            "Expected 'not defined in [tools]' in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_passes_when_global_tool_exists() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "opus".parse().unwrap(),
+            }],
+        );
+        let mut config = make_config(providers, tools);
+        config.tool = "smart".to_string();
+        assert!(config.validate().is_ok());
+    }
+
+    // ── validate_workflow_refs tests ─────────────────────────────────────
+
+    #[test]
+    fn validate_workflow_refs_rejects_unknown_role_tool() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "opus".parse().unwrap(),
+            }],
+        );
+        let config = make_config(providers, tools);
+        let workflow = make_workflow_with_role("worker", Some("nonexistent".to_string()));
+        let err = config.validate_workflow_refs(&workflow).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Role 'worker' references unknown tool"),
+            "Expected role unknown tool error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_workflow_refs_rejects_unknown_stage_tool() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "opus".parse().unwrap(),
+            }],
+        );
+        let config = make_config(providers, tools);
+
+        let mut stages = IndexMap::new();
+        stages.insert(
+            Stage::from("working"),
+            StageDefinition {
+                role: Some("worker".to_string()),
+                tool: Some("bad".to_string()),
+                ..Default::default()
+            },
+        );
+        let mut pipelines = HashMap::new();
+        pipelines.insert(Pipeline::Main, PipelineConfig { stages });
+        let workflow = WorkflowConfig {
+            prompts_dir: None,
+            roles: IndexMap::new(),
+            pipelines,
+        };
+        let err = config.validate_workflow_refs(&workflow).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Stage") && msg.contains("references unknown tool"),
+            "Expected stage unknown tool error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_workflow_refs_passes_valid_refs() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "opus".parse().unwrap(),
+            }],
+        );
+        let config = make_config(providers, tools);
+
+        let mut stages = IndexMap::new();
+        stages.insert(
+            Stage::from("working"),
+            StageDefinition {
+                role: Some("worker".to_string()),
+                tool: Some("smart".to_string()),
+                ..Default::default()
+            },
+        );
+        let mut pipelines = HashMap::new();
+        pipelines.insert(Pipeline::Main, PipelineConfig { stages });
+        let mut roles = IndexMap::new();
+        roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: None,
+                tool: Some("smart".to_string()),
+            },
+        );
+        let workflow = WorkflowConfig {
+            prompts_dir: None,
+            roles,
+            pipelines,
+        };
+        assert!(config.validate_workflow_refs(&workflow).is_ok());
+    }
+
+    #[test]
+    fn validate_workflow_refs_passes_no_tool_refs() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "opus".parse().unwrap(),
+            }],
+        );
+        let config = make_config(providers, tools);
+
+        let mut stages = IndexMap::new();
+        stages.insert(
+            Stage::from("working"),
+            StageDefinition {
+                role: Some("worker".to_string()),
+                tool: None,
+                ..Default::default()
+            },
+        );
+        let mut pipelines = HashMap::new();
+        pipelines.insert(Pipeline::Main, PipelineConfig { stages });
+        let mut roles = IndexMap::new();
+        roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: None,
+                tool: None,
+            },
+        );
+        let workflow = WorkflowConfig {
+            prompts_dir: None,
+            roles,
+            pipelines,
+        };
+        assert!(config.validate_workflow_refs(&workflow).is_ok());
+    }
+
+    // ── validate – unknown executor ─────────────────────────────────────
+
+    #[test]
+    fn validate_unknown_executor() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "bad".to_string(),
+            ProviderDefinition {
+                executor: Some("invalid_executor".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut config = make_config(providers, IndexMap::new());
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("unknown executor"),
+            "Expected 'unknown executor' in error: {msg}"
+        );
     }
 }

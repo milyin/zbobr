@@ -7,14 +7,12 @@ use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Secret, Stage,
     config::{
-        PipelineConfig, RoleDefinition, StageDefinition, StageTransition, WorkflowConfig,
-        WorkflowToml,
+        PipelineConfig, ProviderDefinition, RoleDefinition, StageDefinition, StageTransition,
+        ToolEntry, WorkflowConfig, WorkflowToml,
     },
     config_tools::McpTool,
-    task::{Model, Tool},
 };
 use zbobr_dispatcher::config::{ZbobrDispatcherToml, ZbobrExecutorToml};
-use zbobr_executor_claude::ZbobrExecutorClaudeToml;
 use zbobr_executor_copilot::ZbobrExecutorCopilotToml;
 use zbobr_repo_backend_github::ZbobrRepoBackendGithubToml;
 use zbobr_task_backend_github::ZbobrTaskBackendGithubToml;
@@ -93,14 +91,101 @@ async fn write_or_new(path: &Path, content: &str) -> anyhow::Result<()> {
 fn default_config_toml() -> RootConfigToml {
     let workflow = default_workflow();
 
+    let providers = IndexMap::from([
+        (
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        ),
+        (
+            "copilot".to_string(),
+            ProviderDefinition {
+                executor: Some("copilot".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        ),
+        (
+            "claude_planner".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("claude".to_string()),
+                priority: None,
+                plan_mode: Some(true),
+                access_key: None,
+            },
+        ),
+        (
+            "copilot_planner".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("copilot".to_string()),
+                priority: None,
+                plan_mode: Some(true),
+                access_key: None,
+            },
+        ),
+    ]);
+
+    let tools = IndexMap::from([
+        (
+            "smart".to_string(),
+            vec![
+                ToolEntry {
+                    provider: "copilot".to_string(),
+                    model: "claude-opus-4.6".parse().unwrap(),
+                },
+                ToolEntry {
+                    provider: "claude".to_string(),
+                    model: "claude-opus-4-6".parse().unwrap(),
+                },
+            ],
+        ),
+        (
+            "planner".to_string(),
+            vec![
+                ToolEntry {
+                    provider: "copilot_planner".to_string(),
+                    model: "claude-opus-4.6".parse().unwrap(),
+                },
+                ToolEntry {
+                    provider: "claude_planner".to_string(),
+                    model: "claude-opus-4-6".parse().unwrap(),
+                },
+            ],
+        ),
+        (
+            "silly".to_string(),
+            vec![
+                ToolEntry {
+                    provider: "copilot".to_string(),
+                    model: "gpt-5-mini".parse().unwrap(),
+                },
+                ToolEntry {
+                    provider: "claude".to_string(),
+                    model: "claude-haiku-4-5".parse().unwrap(),
+                },
+            ],
+        ),
+    ]);
+
     RootConfigToml {
         dispatcher: Some(ZbobrDispatcherToml {
             instance: Some("default".into()),
             workspaces: Some(PathBuf::from("./workspaces")),
             base_port: Some(3000),
             agent_github_token: Some(Secret::value("not-configured")),
-            tool: Some(Tool::Claude),
-            model: Some(Model::Default),
+            tool: Some("smart".to_string()),
+            providers: Some(providers),
+            tools: Some(tools),
+            provider_exclusion_secs: None,
             work_branch_prefix: Some("zbobr_fix".into()),
             git_user_name: Some("zbobr".into()),
             git_user_email: Some("zbobr@example.com".into()),
@@ -123,11 +208,8 @@ fn default_config_toml() -> RootConfigToml {
             repos_dir: Some(PathBuf::from("./repos")),
         }),
         executor: Some(ZbobrExecutorToml {
-            claude: Some(ZbobrExecutorClaudeToml {
-                default_model: Some(Model::ClaudeOpus4_6),
-            }),
+            claude: None,
             copilot: Some(ZbobrExecutorCopilotToml {
-                default_model: Some(Model::Default),
                 copilot_github_token: None,
             }),
             mcp_tester: None,
@@ -245,9 +327,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("planner.md")),
-                default_tool: None,
-                default_model: None,
-                default_plan_mode: Some(true),
+                tool: Some("planner".to_string()),
             },
         ),
         (

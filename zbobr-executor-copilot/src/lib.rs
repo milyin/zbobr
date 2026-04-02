@@ -2,9 +2,8 @@ use std::{path::Path, process::Stdio};
 
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use zbobr_api::{
-    task::Tool,
-    tool_executor::{ExecutorOutput, ToolExecutor, format_command_for_log},
+use zbobr_api::tool_executor::{
+    ExecutorOutput, ToolExecutor, detect_quota_failure, format_command_for_log,
 };
 
 pub mod config;
@@ -27,6 +26,7 @@ impl ToolExecutor for CopilotExecutor {
         &self,
         task_id: u64,
         role: &str,
+        model: &str,
         _port: u16,
         prompt: &str,
         work_dir: &Path,
@@ -47,26 +47,13 @@ impl ToolExecutor for CopilotExecutor {
         });
         let mcp_config_str = serde_json::to_string(&mcp_config)?;
 
-        let model_name = self
-            .config
-            .default_model
-            .model_name_for_tool(Tool::Copilot)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Model {} is not supported by copilot",
-                    self.config.default_model
-                )
-            })?;
-
-        tracing::info!(
-            "Starting copilot {role} session for task #{task_id} with model {model_name}"
-        );
+        tracing::info!("Starting copilot {role} session for task #{task_id} with model {model}");
         tracing::info!("MCP endpoint: {mcp_url}");
         tracing::debug!("MCP config JSON: {}", mcp_config_str);
 
         let args = [
             "--model",
-            model_name,
+            model,
             "--additional-mcp-config",
             &mcp_config_str,
             "--no-ask-user",
@@ -133,9 +120,11 @@ impl ToolExecutor for CopilotExecutor {
         let stderr_lines = stderr_result.unwrap_or_default();
         let output = combine_output(stdout_lines, stderr_lines);
 
+        let quota_failure = !status.success() && detect_quota_failure(&output);
         Ok(ExecutorOutput {
             output,
             exit_ok: status.success(),
+            quota_failure,
         })
     }
 }

@@ -42,6 +42,7 @@ pub(crate) fn serialize_parameters(params: &HashMap<String, String>) -> String {
 
 /// Parse a task description into (description, parameters, status, context).
 /// Section order: description → PARAMETERS → STATUS → CONTEXT.
+#[allow(clippy::type_complexity)]
 pub(crate) fn parse_description_full(
     full_text: &str,
 ) -> Result<(String, HashMap<String, String>, Option<String>, TaskContext)> {
@@ -202,7 +203,7 @@ pub(crate) fn merge_concurrent_description_updates(
 mod tests {
     use super::*;
     use zbobr_api::task::{
-        ContextRecord, ContextRecordType, Model, Pipeline, Stage, StageContext, StageInfo,
+        ContextRecord, ContextRecordType, Pipeline, Stage, StageContext, StageInfo,
     };
 
     fn sample_context() -> TaskContext {
@@ -213,8 +214,8 @@ mod tests {
                     pipeline: Pipeline::from("main"),
                     run_id: 1,
                     stage: Stage::new("working"),
-                    tool: Some(zbobr_api::task::Tool::Claude),
-                    model: Some(Model::ClaudeOpus4_6),
+                    tool: Some("claude".to_string()),
+                    model: Some("claude-opus-4.6".parse().unwrap()),
                     prompt_link: Some("prompts/work.md".to_string()),
                     output_link: None,
                     timestamp: "2024-01-01T00:00:00Z".parse().unwrap(),

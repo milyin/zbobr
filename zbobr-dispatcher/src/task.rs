@@ -267,10 +267,10 @@ impl RoleSession {
     /// Check (mark as done) a checkbox context record by id.
     pub async fn check_checkbox_record(&self, record_id: u64) -> anyhow::Result<()> {
         self.modify_task(move |mut task| {
-            if let Some((_, record)) = task.context.find_record_mut(record_id) {
-                if let ContextRecordType::Checkbox(_) = record.record_type {
-                    record.record_type = ContextRecordType::Checkbox(true);
-                }
+            if let Some((_, record)) = task.context.find_record_mut(record_id)
+                && let ContextRecordType::Checkbox(_) = record.record_type
+            {
+                record.record_type = ContextRecordType::Checkbox(true);
             }
             task
         })
@@ -873,8 +873,8 @@ mod comment_model_tests {
             session,
             allowed_tools,
             "planner".to_string(),
-            Tool::Copilot,
-            Model::Gpt5Mini,
+            Tool::copilot(),
+            Model("gpt-5-mini".to_string()),
             "planning".to_string(),
             "main".to_string(),
             1,
@@ -924,8 +924,8 @@ mod comment_model_tests {
             session,
             allowed_tools,
             "worker".to_string(),
-            Tool::Copilot,
-            Model::Gpt5Mini,
+            Tool::copilot(),
+            Model("gpt-5-mini".to_string()),
             "working".to_string(),
             "main".to_string(),
             1,
@@ -948,8 +948,8 @@ mod comment_model_tests {
                             pipeline: Pipeline::Main,
                             run_id: 1,
                             stage: Stage::new("working"),
-                            tool: Some(Tool::Copilot),
-                            model: Some(Model::Gpt5Mini),
+                            tool: Some("copilot".to_string()),
+                            model: Some("gpt-5-mini".parse().unwrap()),
                             prompt_link: None,
                             output_link: None,
                             timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
@@ -1020,8 +1020,8 @@ mod comment_model_tests {
                             pipeline: Pipeline::Main,
                             run_id: 1,
                             stage: Stage::new("working"),
-                            tool: Some(Tool::Copilot),
-                            model: Some(Model::Gpt5Mini),
+                            tool: Some("copilot".to_string()),
+                            model: Some("gpt-5-mini".parse().unwrap()),
                             prompt_link: None,
                             output_link: None,
                             timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
@@ -1085,8 +1085,8 @@ mod comment_model_tests {
                             pipeline: Pipeline::Main,
                             run_id: 1,
                             stage: Stage::new("working"),
-                            tool: Some(Tool::Copilot),
-                            model: Some(Model::Gpt5Mini),
+                            tool: Some("copilot".to_string()),
+                            model: Some("gpt-5-mini".parse().unwrap()),
                             prompt_link: None,
                             output_link: None,
                             timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),

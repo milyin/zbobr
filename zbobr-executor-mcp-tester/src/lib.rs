@@ -26,6 +26,7 @@ impl ToolExecutor for McpTesterExecutor {
         &self,
         task_id: u64,
         role: &str,
+        _model: &str,
         _port: u16,
         _prompt: &str,
         work_dir: &Path,
@@ -110,6 +111,7 @@ impl ToolExecutor for McpTesterExecutor {
         Ok(ExecutorOutput {
             output,
             exit_ok: status.success(),
+            quota_failure: false,
         })
     }
 }
@@ -150,6 +152,7 @@ mod tests {
             .execute(
                 42,
                 "preparation",
+                "",
                 0,
                 "",
                 Path::new("."),

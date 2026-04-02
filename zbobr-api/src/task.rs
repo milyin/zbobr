@@ -158,10 +158,10 @@ pub struct StageInfo {
     pub run_id: u64,
     /// Stage name within the pipeline.
     pub stage: Stage,
-    /// Tool used for execution (e.g. copilot, claude).
+    /// Executor/provider used for this stage (e.g. "claude", "copilot", or a provider name).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<Tool>,
-    /// Model used by the tool.
+    pub tool: Option<String>,
+    /// Model string used by the executor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<Model>,
     /// Link to the prompt used for this stage.
@@ -734,251 +734,106 @@ pub enum WorktreeProblem {
 /// Role for task execution — now a plain string to support configurable roles.
 pub type Role = String;
 
-/// AI Tool/Agent to use.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    serde::Serialize,
-    serde::Deserialize,
-    PartialEq,
-    Eq,
-    schemars::JsonSchema,
-    Default,
-)]
-pub enum Tool {
-    #[serde(rename = "copilot")]
-    #[default]
-    Copilot,
-    #[serde(rename = "claude")]
-    Claude,
-    #[serde(rename = "mcp-tester")]
-    McpTester,
-}
+/// Executor type identifier.
+///
+/// A transparent newtype over `String`. Serializes as the inner string so
+/// existing TOML/JSON representations remain backward-compatible.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, schemars::JsonSchema)]
+pub struct Tool(pub String);
 
 impl Tool {
-    /// Returns all available tools.
-    pub fn all() -> &'static [Tool] {
-        &[Tool::Copilot, Tool::Claude, Tool::McpTester]
+    pub const CLAUDE: &'static str = "claude";
+    pub const COPILOT: &'static str = "copilot";
+    pub const MCP_TESTER: &'static str = "mcp-tester";
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn claude() -> Self {
+        Tool(Self::CLAUDE.to_string())
+    }
+
+    pub fn copilot() -> Self {
+        Tool(Self::COPILOT.to_string())
+    }
+
+    pub fn mcp_tester() -> Self {
+        Tool(Self::MCP_TESTER.to_string())
     }
 }
 
 impl std::fmt::Display for Tool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Tool::Copilot => write!(f, "copilot"),
-            Tool::Claude => write!(f, "claude"),
-            Tool::McpTester => write!(f, "mcp-tester"),
-        }
+        f.write_str(&self.0)
     }
 }
 
 impl std::str::FromStr for Tool {
-    type Err = anyhow::Error;
+    type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "copilot" => Ok(Tool::Copilot),
-            "claude" => Ok(Tool::Claude),
-            "mcp-tester" => Ok(Tool::McpTester),
-            _ => Err(anyhow::anyhow!("Unknown tool: {}", s)),
-        }
+        Ok(Tool(s.to_string()))
     }
 }
 
-/// AI Model to use.
-#[derive(
-    Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, schemars::JsonSchema, Default,
-)]
-pub enum Model {
-    /// Special sentinel indicating the default model for the current tool.
-    /// The concrete mapping is handled outside of the enum (e.g. via
-    /// executor configuration).  It serializes to the string "default".
-    #[serde(rename = "default")]
-    Default,
-
-    // Retired models (kept for backward compatibility, no longer available)
-    #[serde(rename = "gpt-4o")]
-    Gpt4o,
-    #[serde(rename = "claude-3-5-sonnet")]
-    Claude35Sonnet,
-    #[serde(rename = "claude-3-opus")]
-    Claude3Opus,
-    // Active models
-    #[serde(rename = "gpt-5-mini")]
-    #[default]
-    Gpt5Mini,
-    #[serde(rename = "gpt-5")]
-    Gpt5,
-    #[serde(rename = "gpt-5.1")]
-    Gpt5_1,
-    #[serde(rename = "gpt-5.1-codex-mini")]
-    Gpt5_1CodexMini,
-    #[serde(rename = "gpt-5.1-codex")]
-    Gpt5_1Codex,
-    #[serde(rename = "gpt-5.1-codex-max")]
-    Gpt5_1CodexMax,
-    #[serde(rename = "gpt-5.2")]
-    Gpt5_2,
-    #[serde(rename = "gpt-5.2-codex")]
-    Gpt5_2Codex,
-    #[serde(rename = "gpt-5.4")]
-    Gpt5_4,
-    #[serde(rename = "gpt-5.3-codex")]
-    Gpt5_3Codex,
-    #[serde(rename = "gpt-4.1")]
-    Gpt4_1,
-    #[serde(rename = "claude-sonnet-4")]
-    ClaudeSonnet4,
-    #[serde(rename = "claude-haiku-4.5")]
-    ClaudeHaiku4_5,
-    #[serde(rename = "claude-opus-4.5")]
-    ClaudeOpus4_5,
-    #[serde(rename = "claude-sonnet-4.5")]
-    ClaudeSonnet4_5,
-    #[serde(rename = "claude-sonnet-4.6")]
-    ClaudeSonnet4_6,
-    #[serde(rename = "claude-opus-4.6")]
-    ClaudeOpus4_6,
-    #[serde(rename = "claude-opus-4.6-fast")]
-    ClaudeOpus4_6Fast,
-    #[serde(rename = "gemini-3-pro-preview")]
-    Gemini3ProPreview,
+impl serde::Serialize for Tool {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
 }
+
+impl<'de> serde::Deserialize<'de> for Tool {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(Tool(s))
+    }
+}
+
+/// AI model name.
+///
+/// A transparent newtype over `String`. Model names are arbitrary strings
+/// passed verbatim to executor CLIs — there is no longer a closed set of
+/// known models. Whitespace is not allowed (enforced at construction time).
+#[derive(Debug, Clone, PartialEq, Eq, Default, schemars::JsonSchema)]
+pub struct Model(pub String);
 
 impl Model {
-    /// Returns all available models.
-    pub fn all() -> &'static [Model] {
-        &[
-            Model::Default,
-            Model::Gpt5Mini,
-            Model::Gpt5,
-            Model::Gpt5_1,
-            Model::Gpt5_1CodexMini,
-            Model::Gpt5_1Codex,
-            Model::Gpt5_1CodexMax,
-            Model::Gpt5_2,
-            Model::Gpt5_2Codex,
-            Model::Gpt5_4,
-            Model::Gpt5_3Codex,
-            Model::Gpt4_1,
-            Model::ClaudeSonnet4,
-            Model::ClaudeHaiku4_5,
-            Model::ClaudeOpus4_5,
-            Model::ClaudeSonnet4_5,
-            Model::ClaudeSonnet4_6,
-            Model::ClaudeOpus4_6,
-            Model::ClaudeOpus4_6Fast,
-            Model::Gemini3ProPreview,
-        ]
+    /// Construct a `Model`, returning `Err` if the string contains any whitespace.
+    pub fn try_new(s: &str) -> Result<Self, String> {
+        if s.chars().any(|c| c.is_whitespace()) {
+            return Err(format!("model name must not contain whitespace: {:?}", s));
+        }
+        Ok(Model(s.to_string()))
     }
 
-    pub fn model_name_for_tool(&self, tool: Tool) -> Option<&'static str> {
-        match tool {
-            Tool::Copilot => match self {
-                // cheapest Copilot offering is gpt-5-mini
-                Model::Default => Some("gpt-5-mini"),
-                Model::Gpt4o => None,          // retired
-                Model::Claude35Sonnet => None, // retired
-                Model::Claude3Opus => None,    // retired
-                Model::Gpt5Mini => Some("gpt-5-mini"),
-                Model::Gpt5 => Some("gpt-5"),
-                Model::Gpt5_1 => Some("gpt-5.1"),
-                Model::Gpt5_1CodexMini => Some("gpt-5.1-codex-mini"),
-                Model::Gpt5_1Codex => Some("gpt-5.1-codex"),
-                Model::Gpt5_1CodexMax => Some("gpt-5.1-codex-max"),
-                Model::Gpt5_2 => Some("gpt-5.2"),
-                Model::Gpt5_2Codex => Some("gpt-5.2-codex"),
-                Model::Gpt5_4 => Some("gpt-5.4"),
-                Model::Gpt5_3Codex => Some("gpt-5.3-codex"),
-                Model::Gpt4_1 => Some("gpt-4.1"),
-                Model::ClaudeSonnet4 => Some("claude-sonnet-4"),
-                Model::ClaudeHaiku4_5 => Some("claude-haiku-4.5"),
-                Model::ClaudeOpus4_5 => Some("claude-opus-4.5"),
-                Model::ClaudeSonnet4_5 => Some("claude-sonnet-4.5"),
-                Model::ClaudeSonnet4_6 => Some("claude-sonnet-4.6"),
-                Model::ClaudeOpus4_6 => Some("claude-opus-4.6"),
-                Model::ClaudeOpus4_6Fast => Some("claude-opus-4.6-fast"),
-                Model::Gemini3ProPreview => Some("gemini-3-pro-preview"),
-            },
-            Tool::Claude => match self {
-                // cheapest Claude offering is the 3.5 sonnet
-                Model::Default => Some("claude-3-5-sonnet"),
-                Model::Claude35Sonnet => Some("claude-3-5-sonnet"),
-                Model::Claude3Opus => Some("claude-3-opus"),
-                Model::ClaudeSonnet4_5 => Some("claude-sonnet-4-5"),
-                Model::ClaudeHaiku4_5 => Some("claude-haiku-4-5"),
-                Model::ClaudeOpus4_5 => Some("claude-opus-4-5"),
-                Model::ClaudeSonnet4_6 => Some("claude-sonnet-4-6"),
-                Model::ClaudeOpus4_6 => Some("claude-opus-4-6"),
-                Model::ClaudeOpus4_6Fast => Some("claude-opus-4-6"),
-                Model::ClaudeSonnet4 => Some("claude-sonnet-4"),
-                _ => None,
-            },
-            Tool::McpTester => None,
-        }
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
 impl std::fmt::Display for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            Model::Default => "default",
-            Model::Gpt4o => "gpt-4o",
-            Model::Claude35Sonnet => "claude-3-5-sonnet",
-            Model::Claude3Opus => "claude-3-opus",
-            Model::Gpt5Mini => "gpt-5-mini",
-            Model::Gpt5 => "gpt-5",
-            Model::Gpt5_1 => "gpt-5.1",
-            Model::Gpt5_1CodexMini => "gpt-5.1-codex-mini",
-            Model::Gpt5_1Codex => "gpt-5.1-codex",
-            Model::Gpt5_1CodexMax => "gpt-5.1-codex-max",
-            Model::Gpt5_2 => "gpt-5.2",
-            Model::Gpt5_2Codex => "gpt-5.2-codex",
-            Model::Gpt5_4 => "gpt-5.4",
-            Model::Gpt5_3Codex => "gpt-5.3-codex",
-            Model::Gpt4_1 => "gpt-4.1",
-            Model::ClaudeSonnet4 => "claude-sonnet-4",
-            Model::ClaudeHaiku4_5 => "claude-haiku-4.5",
-            Model::ClaudeOpus4_5 => "claude-opus-4.5",
-            Model::ClaudeSonnet4_5 => "claude-sonnet-4.5",
-            Model::ClaudeSonnet4_6 => "claude-sonnet-4.6",
-            Model::ClaudeOpus4_6 => "claude-opus-4.6",
-            Model::ClaudeOpus4_6Fast => "claude-opus-4.6-fast",
-            Model::Gemini3ProPreview => "gemini-3-pro-preview",
-        };
-        f.write_str(s)
+        f.write_str(&self.0)
     }
 }
 
 impl std::str::FromStr for Model {
-    type Err = anyhow::Error;
+    type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().replace('.', "-").as_str() {
-            "default" => Ok(Model::Default),
-            "gpt-4o" | "gpt4o" => Ok(Model::Gpt4o),
-            "claude-3-5-sonnet" | "claude35sonnet" => Ok(Model::Claude35Sonnet),
-            "claude-3-opus" | "claude3opus" => Ok(Model::Claude3Opus),
-            "gpt-5-mini" | "gpt5mini" => Ok(Model::Gpt5Mini),
-            "gpt-5" => Ok(Model::Gpt5),
-            "gpt-5-1" => Ok(Model::Gpt5_1),
-            "gpt-5-1-codex-mini" => Ok(Model::Gpt5_1CodexMini),
-            "gpt-5-1-codex" => Ok(Model::Gpt5_1Codex),
-            "gpt-5-1-codex-max" => Ok(Model::Gpt5_1CodexMax),
-            "gpt-5-2" => Ok(Model::Gpt5_2),
-            "gpt-5-2-codex" => Ok(Model::Gpt5_2Codex),
-            "gpt-5-4" => Ok(Model::Gpt5_4),
-            "gpt-5-3-codex" => Ok(Model::Gpt5_3Codex),
-            "gpt-4-1" => Ok(Model::Gpt4_1),
-            "claude-sonnet-4" => Ok(Model::ClaudeSonnet4),
-            "claude-haiku-4-5" => Ok(Model::ClaudeHaiku4_5),
-            "claude-opus-4-5" => Ok(Model::ClaudeOpus4_5),
-            "claude-sonnet-4-5" => Ok(Model::ClaudeSonnet4_5),
-            "claude-sonnet-4-6" => Ok(Model::ClaudeSonnet4_6),
-            "claude-opus-4-6" => Ok(Model::ClaudeOpus4_6),
-            "claude-opus-4-6-fast" => Ok(Model::ClaudeOpus4_6Fast),
-            "gemini-3-pro-preview" => Ok(Model::Gemini3ProPreview),
-            _ => Err(anyhow::anyhow!("Unknown model: {}", s)),
-        }
+        Model::try_new(s)
+    }
+}
+
+impl serde::Serialize for Model {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Model {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Model::try_new(&s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -1296,5 +1151,44 @@ mod tests {
     fn identity_returns_none_when_work_branch_missing() {
         let task = make_task(42, None);
         assert!(task.identity().is_none());
+    }
+
+    // ── Model::try_new tests ────────────────────────────────────────────
+
+    #[test]
+    fn model_try_new_valid() {
+        let m = Model::try_new("claude-opus-4.6").unwrap();
+        assert_eq!(m.as_str(), "claude-opus-4.6");
+    }
+
+    #[test]
+    fn model_try_new_rejects_space() {
+        let err = Model::try_new("claude opus").unwrap_err();
+        assert!(
+            err.to_lowercase().contains("whitespace"),
+            "Expected 'whitespace' in error: {err}"
+        );
+    }
+
+    #[test]
+    fn model_try_new_rejects_tab() {
+        assert!(Model::try_new("model\there").is_err());
+    }
+
+    #[test]
+    fn model_from_str_rejects_whitespace() {
+        let result: Result<Model, _> = "bad model".parse();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn model_deserialize_rejects_whitespace() {
+        let toml_str = r#"model = "bad model""#;
+        #[derive(serde::Deserialize)]
+        struct Wrapper {
+            model: Model,
+        }
+        let result: Result<Wrapper, _> = toml::from_str(toml_str);
+        assert!(result.is_err());
     }
 }
