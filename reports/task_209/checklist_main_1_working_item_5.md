@@ -1,0 +1,1 @@
+Add quota_failure: bool field to ExecutorOutput in zbobr-api/src/tool_executor.rs. Have claude and copilot executors scan their combined output for known quota/rate-limit patterns and set this field. In zbobr-dispatcher/src/cli.rs, treat quota_failure as equivalent to connectivity_failure for provider exclusion.
