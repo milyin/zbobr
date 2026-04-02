@@ -487,7 +487,9 @@ impl WorkflowConfig {
         if !self.roles.is_empty() {
             for (pname, pipeline) in &self.pipelines {
                 for (sname, stage) in &pipeline.stages {
-                    if let Some(role) = &stage.role && !self.roles.contains_key(role) {
+                    if let Some(role) = &stage.role
+                        && !self.roles.contains_key(role)
+                    {
                         anyhow::bail!(
                             "Stage '{}/{}' references unknown role '{}' (not in [workflow.roles])",
                             pname,
@@ -502,7 +504,9 @@ impl WorkflowConfig {
         // Every call-stage's target pipeline must exist
         for (pname, pipeline) in &self.pipelines {
             for (sname, stage) in &pipeline.stages {
-                if let Some(target) = &stage.call && !self.pipelines.contains_key(target.as_str()) {
+                if let Some(target) = &stage.call
+                    && !self.pipelines.contains_key(target.as_str())
+                {
                     anyhow::bail!(
                         "Stage '{}/{}' calls unknown pipeline '{}'",
                         pname,
@@ -661,9 +665,10 @@ impl ZbobrDispatcherConfig {
     /// Validate that all tool-name references in role and stage definitions exist in `self.tools`.
     pub fn validate_workflow_refs(&self, workflow: &WorkflowConfig) -> anyhow::Result<()> {
         for (role_name, role_def) in &workflow.roles {
-            if let Some(ref tool) = role_def.tool
-                && !self.tools.contains_key(tool.as_str())
-            {
+            let Some(ref tool) = role_def.tool else {
+                anyhow::bail!("Role '{}' has no tool defined", role_name);
+            };
+            if !self.tools.contains_key(tool.as_str()) {
                 anyhow::bail!(
                     "Role '{}' references unknown tool '{}' (not in [tools])",
                     role_name,
@@ -690,7 +695,7 @@ impl ZbobrDispatcherConfig {
 
     /// Determine the effective tool name for a stage.
     ///
-    /// Precedence: stage.tool → role.tool → global dispatcher.tool
+    /// Precedence: stage.tool → role.tool
     pub fn resolve_tool_name(
         &self,
         stage_def: &StageDefinition,
@@ -705,7 +710,8 @@ impl ZbobrDispatcherConfig {
         {
             return Ok(tool.clone());
         }
-        anyhow::bail!("No tool found for stage {:?} with role {:?}",
+        anyhow::bail!(
+            "No tool found for stage {:?} with role {:?}",
             stage_def,
             stage_def.role_name()
         );
@@ -1069,11 +1075,11 @@ mod tests {
             ..Default::default()
         };
         let workflow = make_workflow_with_role("worker", Some("role-tool".to_string()));
-        let config = ZbobrDispatcherConfig {
-            tool: "global-tool".to_string(),
-            ..Default::default()
-        };
-        assert_eq!(config.resolve_tool_name(&stage, &workflow), "stage-tool");
+        let config = ZbobrDispatcherConfig::default();
+        assert_eq!(
+            config.resolve_tool_name(&stage, &workflow).unwrap(),
+            "stage-tool"
+        );
     }
 
     #[test]
@@ -1084,41 +1090,35 @@ mod tests {
             ..Default::default()
         };
         let workflow = make_workflow_with_role("worker", Some("role-tool".to_string()));
-        let config = ZbobrDispatcherConfig {
-            tool: "global-tool".to_string(),
-            ..Default::default()
-        };
-        assert_eq!(config.resolve_tool_name(&stage, &workflow), "role-tool");
+        let config = ZbobrDispatcherConfig::default();
+        assert_eq!(
+            config.resolve_tool_name(&stage, &workflow).unwrap(),
+            "role-tool"
+        );
     }
 
     #[test]
-    fn resolve_tool_name_falls_back_to_global() {
+    fn resolve_tool_name_errors_when_no_tool() {
         let stage = StageDefinition {
             tool: None,
             role: Some("worker".to_string()),
             ..Default::default()
         };
         let workflow = make_workflow_with_role("worker", None);
-        let config = ZbobrDispatcherConfig {
-            tool: "global-tool".to_string(),
-            ..Default::default()
-        };
-        assert_eq!(config.resolve_tool_name(&stage, &workflow), "global-tool");
+        let config = ZbobrDispatcherConfig::default();
+        assert!(config.resolve_tool_name(&stage, &workflow).is_err());
     }
 
     #[test]
-    fn resolve_tool_name_no_role_falls_back_to_global() {
+    fn resolve_tool_name_errors_when_no_role() {
         let stage = StageDefinition {
             tool: None,
             role: Some("nonexistent".to_string()),
             ..Default::default()
         };
         let workflow = WorkflowConfig::default();
-        let config = ZbobrDispatcherConfig {
-            tool: "global-tool".to_string(),
-            ..Default::default()
-        };
-        assert_eq!(config.resolve_tool_name(&stage, &workflow), "global-tool");
+        let config = ZbobrDispatcherConfig::default();
+        assert!(config.resolve_tool_name(&stage, &workflow).is_err());
     }
 
     // ── resolve_providers – priority inheritance ────────────────────────
@@ -1158,87 +1158,7 @@ mod tests {
 
     // ── validate – unknown executor ─────────────────────────────────────
 
-    // ── validate – global tool check ───────────────────────────────────
-
-    #[test]
-    fn validate_rejects_unknown_global_tool() {
-        let mut providers = IndexMap::new();
-        providers.insert(
-            "claude".to_string(),
-            ProviderDefinition {
-                executor: Some("claude".to_string()),
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
-            },
-        );
-        let mut tools = IndexMap::new();
-        tools.insert(
-            "smart".to_string(),
-            vec![ToolEntry {
-                provider: "claude".to_string(),
-                model: "opus".parse().unwrap(),
-            }],
-        );
-        let mut config = make_config(providers, tools);
-        config.tool = "nonexistent".to_string();
-        let err = config.validate().unwrap_err();
-        let msg = err.to_string().to_lowercase();
-        assert!(
-            msg.contains("not defined in [tools]"),
-            "Expected 'not defined in [tools]' in error: {msg}"
-        );
-    }
-
-    #[test]
-    fn validate_rejects_when_tools_empty() {
-        let mut providers = IndexMap::new();
-        providers.insert(
-            "claude".to_string(),
-            ProviderDefinition {
-                executor: Some("claude".to_string()),
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
-            },
-        );
-        let mut config = make_config(providers, IndexMap::new());
-        config.tool = "anything".to_string();
-        let err = config.validate().unwrap_err();
-        let msg = err.to_string().to_lowercase();
-        assert!(
-            msg.contains("not defined in [tools]"),
-            "Expected 'not defined in [tools]' in error: {msg}"
-        );
-    }
-
-    #[test]
-    fn validate_passes_when_global_tool_exists() {
-        let mut providers = IndexMap::new();
-        providers.insert(
-            "claude".to_string(),
-            ProviderDefinition {
-                executor: Some("claude".to_string()),
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
-            },
-        );
-        let mut tools = IndexMap::new();
-        tools.insert(
-            "smart".to_string(),
-            vec![ToolEntry {
-                provider: "claude".to_string(),
-                model: "opus".parse().unwrap(),
-            }],
-        );
-        let mut config = make_config(providers, tools);
-        config.tool = "smart".to_string();
-        assert!(config.validate().is_ok());
-    }
+    // ── validate – global tool check (removed — global tool no longer exists) ──
 
     // ── validate_workflow_refs tests ─────────────────────────────────────
 
@@ -1372,7 +1292,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_workflow_refs_passes_no_tool_refs() {
+    fn validate_workflow_refs_rejects_role_without_tool() {
         let mut providers = IndexMap::new();
         providers.insert(
             "claude".to_string(),
@@ -1419,7 +1339,12 @@ mod tests {
             roles,
             pipelines,
         };
-        assert!(config.validate_workflow_refs(&workflow).is_ok());
+        let err = config.validate_workflow_refs(&workflow).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Role 'worker' has no tool defined"),
+            "Expected role no tool error: {msg}"
+        );
     }
 
     // ── validate – unknown executor ─────────────────────────────────────
