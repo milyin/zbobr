@@ -417,4 +417,25 @@ mod tests {
         assert!(!prompt.contains("<sub>"));
         assert!(prompt.contains("`2024-06-15 10:30:00 +0300`"));
     }
+
+    #[test]
+    fn parse_rejects_malformed_model_token() {
+        // Valid tool backtick but model backtick contains a space → should fail
+        let s = "myinstance:main:2:**working** `claude` `bad model` `2024-06-15 10:30:00 +0300`";
+        let result = s.parse::<MdStageTitle>();
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Invalid model token"),
+            "Expected 'Invalid model token' in error, got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn parse_accepts_valid_model_token() {
+        let s = "myinstance:main:2:**working** `claude` `claude-opus-4.6` `2024-06-15 10:30:00 +0300`";
+        let parsed: MdStageTitle = s.parse().unwrap();
+        assert_eq!(parsed.tool.as_deref(), Some("claude"));
+        assert_eq!(parsed.model.as_ref().unwrap().as_str(), "claude-opus-4.6");
+    }
 }

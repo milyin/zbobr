@@ -93,3 +93,44 @@ pub trait ToolExecutor: Send + Sync {
         copilot_github_token: &str,
     ) -> anyhow::Result<ExecutorOutput>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_quota_failure_rate_limit() {
+        assert!(detect_quota_failure("Error: rate limit exceeded, try again later"));
+    }
+
+    #[test]
+    fn detect_quota_failure_too_many_requests() {
+        assert!(detect_quota_failure("HTTP 429: too many requests"));
+    }
+
+    #[test]
+    fn detect_quota_failure_quota_exceeded() {
+        assert!(detect_quota_failure("API quota exceeded for this billing period"));
+    }
+
+    #[test]
+    fn detect_quota_failure_usage_limit() {
+        // Verifies case-insensitivity: "Usage Limit" with mixed case
+        assert!(detect_quota_failure("Your Usage Limit has been reached"));
+    }
+
+    #[test]
+    fn detect_quota_failure_account_limit() {
+        assert!(detect_quota_failure("account limit reached, upgrade your plan"));
+    }
+
+    #[test]
+    fn detect_quota_failure_rate_limit_error() {
+        assert!(detect_quota_failure("Received rate_limit_error from API"));
+    }
+
+    #[test]
+    fn detect_quota_failure_no_match() {
+        assert!(!detect_quota_failure("Command failed with exit code 1"));
+    }
+}
