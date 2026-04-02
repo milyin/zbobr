@@ -1,0 +1,1 @@
+All done. The `default_workflow_roles_have_tool` test was added to `zbobr/src/init.rs`, committed, and passes successfully.
