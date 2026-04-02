@@ -1,0 +1,3 @@
+Remove the now-superseded `validate_stage_prompts()` function and `file_exists()` helper from `zbobr-dispatcher/src/prompts.rs`. Also remove `validate_stage_prompts` from the `pub use prompts::{...}` export list in `zbobr-dispatcher/src/lib.rs`.
+
+**Why:** These functions only checked file existence, not actual template correctness. The new `validate_all_prompts()` method fully supersedes them by actually rendering every prompt. They have zero callers currently.
