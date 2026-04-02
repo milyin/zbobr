@@ -246,6 +246,16 @@ fn default_workflow() -> WorkflowConfig {
             StageDefinition {
                 role: Some("worker".into()),
                 prompts: task_prompt.clone(),
+                on_intermediate: Some(StageTransition::stage("reviewing")),
+                ..Default::default()
+            },
+        ),
+        (
+            Stage::from("reviewing"),
+            StageDefinition {
+                role: Some("reviewer".into()),
+                prompts: task_prompt.clone(),
+                on_failure: Some(StageTransition::stage("working")),
                 on_intermediate: Some(StageTransition::stage("test_planner")),
                 ..Default::default()
             },
@@ -264,16 +274,6 @@ fn default_workflow() -> WorkflowConfig {
             Stage::from("test_worker"),
             StageDefinition {
                 role: Some("test_worker".into()),
-                prompts: task_prompt.clone(),
-                on_failure: Some(StageTransition::stage("working")),
-                on_intermediate: Some(StageTransition::stage("reviewing")),
-                ..Default::default()
-            },
-        ),
-        (
-            Stage::from("reviewing"),
-            StageDefinition {
-                role: Some("reviewer".into()),
                 prompts: task_prompt.clone(),
                 on_failure: Some(StageTransition::stage("working")),
                 on_intermediate: Some(StageTransition::stage("working")),
