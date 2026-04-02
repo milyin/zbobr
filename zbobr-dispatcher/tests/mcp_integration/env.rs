@@ -9,7 +9,8 @@ use std::{
     },
 };
 
-use zbobr_api::{Secret, config::WorkflowConfig};
+use indexmap::IndexMap;
+use zbobr_api::{Model, Secret, config::{ProviderDefinition, ToolEntry, WorkflowConfig}};
 use zbobr_dispatcher::{
     Comment, Task, Workflow, ZbobrDispatcher, ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
     backend::TaskBackendExt, cli::process_task, prompts::ConfiguredPromptBuilder, task::Tool,
@@ -21,6 +22,30 @@ use zbobr_task_backend_fs::{ArcTaskBackendFs, ZbobrTaskBackendFs, ZbobrTaskBacke
 use zbobr_task_backend_github::{TaskBackendGithub, ZbobrTaskBackendGithubConfig};
 
 static SCENARIO_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Build the standard test provider/tool entries for integration tests.
+///
+/// Defines one provider "mcp-tester" backed by the mcp-tester executor, and one
+/// tool also named "mcp-tester" that selects that provider with model "test-model".
+fn test_providers_and_tools() -> (
+    IndexMap<String, ProviderDefinition>,
+    IndexMap<String, Vec<ToolEntry>>,
+) {
+    let provider = ProviderDefinition {
+        executor: Some(Tool::MCP_TESTER.to_string()),
+        parent: None,
+        priority: None,
+        plan_mode: None,
+        access_key: None,
+    };
+    let entry = ToolEntry {
+        provider: "mcp-tester".to_string(),
+        model: Model::try_new("test-model").expect("valid model name"),
+    };
+    let providers = IndexMap::from([("mcp-tester".to_string(), provider)]);
+    let tools = IndexMap::from([("mcp-tester".to_string(), vec![entry])]);
+    (providers, tools)
+}
 
 /// Shared environment for integration tests.  Holds a live `ZbobrDispatcher`
 /// and backends — no CLI binary involved.
@@ -54,9 +79,12 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
         base_path.display()
     );
 
+    let (providers, tools) = test_providers_and_tools();
     let mut dispatcher_config = ZbobrDispatcherConfig {
         workspaces: workspaces_dir.clone(),
         tool: "mcp-tester".to_string(),
+        providers,
+        tools,
         git_user_name: "test-bot".to_string(),
         git_user_email: "test@example.com".to_string(),
         overwrite_author: false,
@@ -126,7 +154,9 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
                 None,
                 Arc::new(default_workflow),
             ))
-            .build(),
+            .build()
+            .validated()
+            .expect("test dispatcher config must be valid"),
     );
 
     zbobr.setup_repository(false).await.ok()?;
@@ -146,7 +176,9 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
                 .with_task_backend(tb)
                 .with_repo_backend(rb)
                 .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(workflow)))
-                .build(),
+                .build()
+                .validated()
+                .expect("test dispatcher config must be valid"),
         )
     });
 
@@ -184,9 +216,12 @@ pub async fn init_github_github(
         base_path.display()
     );
 
+    let (providers, tools) = test_providers_and_tools();
     let mut dispatcher_config = ZbobrDispatcherConfig {
         workspaces: workspaces_dir.clone(),
         tool: "mcp-tester".to_string(),
+        providers,
+        tools,
         ..ZbobrDispatcherConfig::default()
     };
     dispatcher_config
@@ -223,7 +258,9 @@ pub async fn init_github_github(
                 None,
                 Arc::new(default_workflow),
             ))
-            .build(),
+            .build()
+            .validated()
+            .expect("test dispatcher config must be valid"),
     );
 
     zbobr.setup_repository(false).await.ok()?;
@@ -241,7 +278,9 @@ pub async fn init_github_github(
                 .with_task_backend(tb)
                 .with_repo_backend(rb)
                 .with_prompt_builder(ConfiguredPromptBuilder::new(None, Arc::new(workflow)))
-                .build(),
+                .build()
+                .validated()
+                .expect("test dispatcher config must be valid"),
         )
     });
 

@@ -11,7 +11,7 @@ use zbobr_api::{
     Pipeline, Signal, Stage, StageTransition, State,
     config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig},
 };
-use zbobr_dispatcher::{backend::TaskBackendExt, task::Tool};
+use zbobr_dispatcher::backend::TaskBackendExt;
 
 use super::{abstract_scenarios, env::IntegrationTestEnv};
 
