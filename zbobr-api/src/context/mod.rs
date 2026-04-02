@@ -538,6 +538,7 @@ impl FromStr for MdContext {
     fn from_str(text: &str) -> Result<Self> {
         let mut entries: Vec<MdEntry> = Vec::new();
         let mut current_stage: Option<MdStage> = None;
+        let mut after_stage_marker = false;
 
         for line in text.lines() {
             let trimmed = line.trim();
@@ -546,13 +547,15 @@ impl FromStr for MdContext {
                 continue;
             }
 
-            // Skip <!-- stage --> markers (inserted before stage titles in user-display mode)
+            // Track <!-- stage --> markers (inserted before stage titles in user-display mode)
             if trimmed == "<!-- stage -->" {
+                after_stage_marker = true;
                 continue;
             }
 
             // Try parsing as record (add to current stage)
             if let Some(record) = MdRecord::try_parse(trimmed)? {
+                after_stage_marker = false;
                 let stage = current_stage.as_mut().ok_or_else(|| {
                     anyhow::anyhow!("Context record found before any stage header: {}", trimmed)
                 })?;
@@ -562,8 +565,23 @@ impl FromStr for MdContext {
 
             // Parse as stage title — try first to avoid flushing current_stage on failure
             if trimmed.starts_with("- ") {
-                if let Ok(title) = trimmed.parse::<MdStageTitle>() {
-                    // Valid stage title: flush previous stage
+                let was_after_marker = after_stage_marker;
+                after_stage_marker = false;
+                if was_after_marker {
+                    // Preceded by <!-- stage -->: must parse as a valid stage title
+                    let title = trimmed
+                        .parse::<MdStageTitle>()
+                        .map_err(|e| anyhow::anyhow!("Malformed stage title after <!-- stage --> marker: {e}"))?;
+                    if let Some(stage) = current_stage.take() {
+                        entries.push(MdEntry::Stage(stage));
+                    }
+                    current_stage = Some(MdStage {
+                        title,
+                        records: Vec::new(),
+                        for_prompt: false,
+                    });
+                } else if let Ok(title) = trimmed.parse::<MdStageTitle>() {
+                    // Valid stage title without marker: flush previous stage
                     if let Some(stage) = current_stage.take() {
                         entries.push(MdEntry::Stage(stage));
                     }
@@ -577,6 +595,7 @@ impl FromStr for MdContext {
                 continue;
             }
 
+            after_stage_marker = false;
             bail!("Unrecognized line in context: {}", trimmed);
         }
 
