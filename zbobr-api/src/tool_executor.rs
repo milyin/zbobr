@@ -63,6 +63,7 @@ pub trait ToolExecutor: Send + Sync {
         &self,
         task_id: u64,
         role: &str,
+        model: &str,
         port: u16,
         prompt: &str,
         work_dir: &Path,

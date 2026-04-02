@@ -2,10 +2,8 @@ use std::{path::Path, process::Stdio};
 
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use zbobr_api::{
-    task::Tool,
-    tool_executor::{ExecutorOutput, ToolExecutor, format_command_for_log},
-};
+use zbobr_api::tool_executor::{ExecutorOutput, ToolExecutor, format_command_for_log};
+use zbobr_utility::Secret;
 
 pub mod config;
 pub use config::{ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeConfig, ZbobrExecutorClaudeToml};
@@ -13,11 +11,17 @@ pub use config::{ZbobrExecutorClaudeArgs, ZbobrExecutorClaudeConfig, ZbobrExecut
 /// Executor for Claude CLI.
 pub struct ClaudeExecutor {
     pub config: ZbobrExecutorClaudeConfig,
+    /// Optional API key override (ANTHROPIC_API_KEY).
+    /// Injected by the dispatcher from the selected provider's access_key.
+    pub access_key: Option<Secret>,
 }
 
 impl ClaudeExecutor {
     pub fn new(config: ZbobrExecutorClaudeConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            access_key: None,
+        }
     }
 }
 
@@ -27,6 +31,7 @@ impl ToolExecutor for ClaudeExecutor {
         &self,
         task_id: u64,
         role: &str,
+        model: &str,
         _port: u16,
         prompt: &str,
         work_dir: &Path,
@@ -47,19 +52,8 @@ impl ToolExecutor for ClaudeExecutor {
         });
         let mcp_config_str = serde_json::to_string(&mcp_config)?;
 
-        let model_name = self
-            .config
-            .default_model
-            .model_name_for_tool(Tool::Claude)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Model {} is not supported by claude",
-                    self.config.default_model
-                )
-            })?;
-
         tracing::info!(
-            "Starting claude {role} session for task #{task_id} with model {model_name}"
+            "Starting claude {role} session for task #{task_id} with model {model}"
         );
         tracing::info!("MCP endpoint: {mcp_url}");
         tracing::debug!("MCP config JSON: {}", mcp_config_str);
@@ -68,7 +62,7 @@ impl ToolExecutor for ClaudeExecutor {
 
         let args = [
             "--model",
-            model_name,
+            model,
             "--mcp-config",
             &mcp_config_str,
             "--permission-mode",
@@ -98,6 +92,11 @@ impl ToolExecutor for ClaudeExecutor {
         cmd.env("GH_TOKEN", agent_github_token)
             .env("GITHUB_TOKEN", agent_github_token)
             .env("COPILOT_GITHUB_TOKEN", copilot_github_token);
+
+        // Override ANTHROPIC_API_KEY if access_key is configured
+        if let Some(ref key) = self.access_key {
+            cmd.env("ANTHROPIC_API_KEY", key.as_ref());
+        }
 
         let mut child = cmd.spawn()?;
 

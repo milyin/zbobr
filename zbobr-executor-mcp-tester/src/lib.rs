@@ -26,6 +26,7 @@ impl ToolExecutor for McpTesterExecutor {
         &self,
         task_id: u64,
         role: &str,
+        _model: &str,
         _port: u16,
         _prompt: &str,
         work_dir: &Path,
@@ -150,6 +151,7 @@ mod tests {
             .execute(
                 42,
                 "preparation",
+                "",
                 0,
                 "",
                 Path::new("."),

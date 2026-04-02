@@ -56,7 +56,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
 
     let mut dispatcher_config = ZbobrDispatcherConfig {
         workspaces: workspaces_dir.clone(),
-        tool: Tool::McpTester,
+        tool: "mcp-tester".to_string(),
         git_user_name: "test-bot".to_string(),
         git_user_email: "test@example.com".to_string(),
         overwrite_author: false,
@@ -186,7 +186,7 @@ pub async fn init_github_github(
 
     let mut dispatcher_config = ZbobrDispatcherConfig {
         workspaces: workspaces_dir.clone(),
-        tool: Tool::McpTester,
+        tool: "mcp-tester".to_string(),
         ..ZbobrDispatcherConfig::default()
     };
     dispatcher_config

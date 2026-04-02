@@ -343,18 +343,12 @@ impl<'a> CliStageRunner<'a> {
             .stage_def
             .role_name()
             .expect("role stage must have role");
-        let cli_tool = self
+        let tool_name = self
             .zbobr
             .config()
-            .tool_for_stage(self.stage_def, self.zbobr.workflow().config());
-        let model = self
-            .zbobr
-            .config()
-            .model_for_stage(self.stage_def, self.zbobr.workflow().config());
-        let plan_mode = self
-            .zbobr
-            .config()
-            .plan_mode_for_stage(self.stage_def, self.zbobr.workflow().config());
+            .resolve_tool_name(self.stage_def, self.zbobr.workflow().config());
+        let (resolved_provider, model_string) = self.zbobr.select_provider(&tool_name)?;
+        let plan_mode = resolved_provider.plan_mode;
 
         // Set state to running
         self.zbobr
@@ -486,8 +480,8 @@ impl<'a> CliStageRunner<'a> {
             let instance = self.zbobr.config().instance.clone();
             let pipeline_name = self.pipeline_name.clone();
             let stage_name = Stage::new(self.stage_name);
-            let tool_val = Some(cli_tool);
-            let model_val = Some(model.clone());
+            let tool_val = Some(resolved_provider.name.clone());
+            let model_val = Some(model_string.clone());
             let timestamp = chrono::Utc::now().with_timezone(&self.zbobr.config().fixed_offset());
             let role_session = self.zbobr.role_session(self.task_id);
             role_session
@@ -517,8 +511,8 @@ impl<'a> CliStageRunner<'a> {
             Arc::clone(self.zbobr),
             role,
             self.task_id,
-            cli_tool,
-            model.clone(),
+            Tool(resolved_provider.executor.clone()),
+            Model(model_string.clone()),
             self.stage_name.to_string(),
             allowed_tools,
             Arc::clone(&tool_tracker),
@@ -554,10 +548,11 @@ impl<'a> CliStageRunner<'a> {
         }
         let executor = self
             .zbobr
-            .build_executor(cli_tool, model.clone(), self.mcp_tester_override);
-        let copilot_token_owned = match cli_tool {
-            Tool::Copilot => self.zbobr.copilot_github_token().to_owned(),
-            _ => String::new(),
+            .build_executor(&resolved_provider, self.mcp_tester_override);
+        let copilot_token_owned = if resolved_provider.executor == Tool::COPILOT {
+            self.zbobr.copilot_github_token().to_owned()
+        } else {
+            String::new()
         };
         let agent_token_owned = self.zbobr.config().agent_github_token.as_ref().to_owned();
 
@@ -567,6 +562,7 @@ impl<'a> CliStageRunner<'a> {
             &agent_token_owned,
             self.task_id,
             role,
+            &model_string,
             assigned_port,
             &prompt_text,
             &work_dir,
@@ -574,6 +570,11 @@ impl<'a> CliStageRunner<'a> {
             plan_mode,
         )
         .await;
+
+        // Exclude provider on execution failure so the next stage run picks a different one.
+        if outcome.execution_error.is_some() {
+            self.zbobr.exclude_provider(&resolved_provider.name);
+        }
 
         // Store the captured output and link it to the stage context entry.
         if let Some(ref output) = outcome.execution_output {
@@ -992,8 +993,11 @@ pub async fn run_manager_loop(
         repo_backend.debug_state()
     );
     tracing::info!("Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s");
-    tracing::info!("Global CLI Tool default: {:?}", zbobr.config().tool);
-    tracing::info!("Global model default: {:?}", zbobr.config().model);
+    tracing::info!("Global default tool: {:?}", zbobr.config().tool);
+    tracing::info!(
+        "Configured providers: {:?}",
+        zbobr.config().providers.keys().collect::<Vec<_>>()
+    );
     if let Some(base) = prompt_builder.base_path() {
         tracing::info!("Prompts base path: {}", base.display());
     }
@@ -1004,19 +1008,15 @@ pub async fn run_manager_loop(
         if let Some(target) = stage_def.call_pipeline() {
             tracing::info!("Stage {}/{}: call={}", pipeline_name, stage_name, target,);
         } else {
-            let tool = zbobr
+            let tool_name = zbobr
                 .config()
-                .tool_for_stage(stage_def, zbobr.workflow().config());
-            let model = zbobr
-                .config()
-                .model_for_stage(stage_def, zbobr.workflow().config());
+                .resolve_tool_name(stage_def, zbobr.workflow().config());
             tracing::info!(
-                "Stage {}/{}: role={:?}, tool={:?}, model={:?}, prompts={:?}",
+                "Stage {}/{}: role={:?}, tool={:?}, prompts={:?}",
                 pipeline_name,
                 stage_name,
                 stage_def.role_name().unwrap_or("<none>"),
-                tool,
-                model,
+                tool_name,
                 stage_def.role_prompt
             );
         }
@@ -1549,6 +1549,7 @@ async fn execute_tool(
     agent_token: &str,
     task_id: u64,
     role: &str,
+    model: &str,
     assigned_port: u16,
     prompt: &str,
     work_dir: &Path,
@@ -1556,7 +1557,7 @@ async fn execute_tool(
     plan_mode: bool,
 ) -> SessionOutcome {
     tokio::select! {
-        result = executor.execute(task_id, role, assigned_port, prompt, work_dir, mcp_url, plan_mode, agent_token, copilot_token) => {
+        result = executor.execute(task_id, role, model, assigned_port, prompt, work_dir, mcp_url, plan_mode, agent_token, copilot_token) => {
             match result {
                 Ok(ExecutorOutput { output, exit_ok: true }) => SessionOutcome {
                     execution_interrupted: false,

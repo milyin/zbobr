@@ -173,7 +173,7 @@ pub async fn run_role_mcp_server(
                 session.clone(),
                 allowed_tools.clone(),
                 role_name_owned.clone(),
-                tool,
+                tool.clone(),
                 model.clone(),
                 stage_name.clone(),
                 pipeline_name.clone(),

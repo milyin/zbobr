@@ -50,7 +50,7 @@ impl CommonMcpImpl for UnifiedMcp {
     }
 
     fn mcp_tool(&self) -> Tool {
-        self.tool
+        self.tool.clone()
     }
 
     fn mcp_model(&self) -> Model {

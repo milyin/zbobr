@@ -13,7 +13,11 @@ pub mod task_dir;
 pub mod tool_executor;
 pub mod workflow;
 
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 pub use cli::{
     ConfigFileArg, ConfigLocation, GlobalArgs, parse_cli, print_task, process_task,
@@ -32,7 +36,10 @@ pub use task_dir::TaskDir;
 pub use tool_executor::ToolExecutor;
 use typesafe_builder::{_TypesafeBuilderEmpty, _TypesafeBuilderFilled, Builder};
 pub use workflow::{StateAction, Workflow};
-use zbobr_api::State;
+use zbobr_api::{
+    State,
+    config::{ResolvedProvider, ToolEntry},
+};
 
 pub use zbobr_api::config::Config;
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
@@ -60,6 +67,12 @@ pub struct ZbobrDispatcher {
     mcp_tester: McpTesterExecutor,
     #[builder(optional)]
     prompt_builder: Option<ConfiguredPromptBuilder>,
+    /// Providers excluded until the stored Instant (expiry).
+    #[builder(default = "Arc::new(Mutex::new(HashMap::new()))")]
+    excluded_providers: Arc<Mutex<HashMap<String, Instant>>>,
+    /// Round-robin counters per tool name.
+    #[builder(default = "Arc::new(Mutex::new(HashMap::new()))")]
+    round_robin_state: Arc<Mutex<HashMap<String, usize>>>,
 }
 
 impl ZbobrDispatcher {
@@ -99,28 +112,114 @@ impl ZbobrDispatcher {
         &self.mcp_tester.config
     }
 
+    /// Select a provider and model for the given tool name.
+    ///
+    /// Filters out currently excluded providers, groups remaining entries by priority,
+    /// and selects within the highest-priority group using round-robin.
+    pub fn select_provider(&self, tool_name: &str) -> anyhow::Result<(ResolvedProvider, String)> {
+        let entries: &Vec<ToolEntry> = self
+            .config
+            .tools
+            .get(tool_name)
+            .ok_or_else(|| anyhow::anyhow!("Tool '{}' not found in dispatcher config", tool_name))?;
+
+        let resolved_providers = self.config.resolve_providers()?;
+
+        // Prune expired exclusions and snapshot current excluded set
+        let now = Instant::now();
+        let mut excluded_lock = self.excluded_providers.lock().unwrap();
+        excluded_lock.retain(|_, expiry| *expiry > now);
+        let excluded_set: HashSet<String> = excluded_lock.keys().cloned().collect();
+        drop(excluded_lock);
+
+        // Filter to available entries
+        let available: Vec<(usize, &ToolEntry)> = entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| !excluded_set.contains(&entry.provider))
+            .collect();
+
+        if available.is_empty() {
+            anyhow::bail!(
+                "All providers for tool '{}' are currently excluded",
+                tool_name
+            );
+        }
+
+        // Group by provider priority
+        let mut priority_groups: HashMap<i32, Vec<(usize, &ToolEntry)>> = HashMap::new();
+        for (idx, entry) in &available {
+            let rp = resolved_providers
+                .get(&entry.provider)
+                .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", entry.provider))?;
+            priority_groups
+                .entry(rp.priority)
+                .or_default()
+                .push((*idx, *entry));
+        }
+
+        // Pick the highest-priority group
+        let max_priority = priority_groups.keys().copied().max().unwrap();
+        let top_group = &priority_groups[&max_priority];
+
+        // Round-robin within the top group
+        let mut rr = self.round_robin_state.lock().unwrap();
+        let counter = rr.entry(tool_name.to_string()).or_insert(0);
+        let pick = *counter % top_group.len();
+        *counter = counter.wrapping_add(1);
+        drop(rr);
+
+        let (_, entry) = &top_group[pick];
+        let rp = resolved_providers
+            .get(&entry.provider)
+            .unwrap()
+            .clone();
+        Ok((rp, entry.model.clone()))
+    }
+
+    /// Mark a provider as temporarily excluded.
+    ///
+    /// The provider will be skipped by `select_provider` until the exclusion expires.
+    pub fn exclude_provider(&self, provider_name: &str) {
+        let expiry = Instant::now()
+            + Duration::from_secs(self.config.provider_exclusion_secs);
+        self.excluded_providers
+            .lock()
+            .unwrap()
+            .insert(provider_name.to_string(), expiry);
+        tracing::info!(
+            "Provider '{}' excluded for {}s",
+            provider_name,
+            self.config.provider_exclusion_secs
+        );
+    }
+
+    /// Build an executor for the given resolved provider.
     pub fn build_executor(
         &self,
-        tool: Tool,
-        model: Model,
+        provider: &ResolvedProvider,
         mcp_tester_override: Option<&ZbobrExecutorMcpTesterConfig>,
     ) -> Box<dyn ToolExecutor> {
-        match tool {
-            Tool::Copilot => {
-                let mut config = self.copilot.config.clone();
-                config.default_model = model;
-                Box::new(CopilotExecutor { config })
-            }
-            Tool::Claude => {
-                let mut config = self.claude.config.clone();
-                config.default_model = model;
-                Box::new(ClaudeExecutor { config })
-            }
-            Tool::McpTester => Box::new(McpTesterExecutor {
+        match provider.executor.as_str() {
+            "copilot" => Box::new(CopilotExecutor {
+                config: self.copilot.config.clone(),
+            }),
+            "mcp-tester" => Box::new(McpTesterExecutor {
                 config: mcp_tester_override
                     .cloned()
                     .unwrap_or_else(|| self.mcp_tester.config.clone()),
             }),
+            _ => {
+                // "claude" or any other string defaults to ClaudeExecutor
+                let mut executor = ClaudeExecutor {
+                    config: self.claude.config.clone(),
+                    access_key: None,
+                };
+                if let Some(ref key) = provider.access_key {
+                    executor.access_key = Some(key.clone());
+                }
+                Box::new(executor)
+            }
         }
     }
 
