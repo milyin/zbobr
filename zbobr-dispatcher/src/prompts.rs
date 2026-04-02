@@ -68,6 +68,50 @@ impl ConfiguredPromptBuilder {
         .await
     }
 
+    /// Validate all prompts by rendering every stage's prompt with dummy data.
+    /// Catches template parse errors and undefined variables at startup.
+    pub fn validate_all_prompts(&self) -> anyhow::Result<()> {
+        let task = Task {
+            id: 0,
+            title: "TITLE".to_string(),
+            description: "DESCRIPTION".to_string(),
+            state: "READY".into(),
+            work_branch: Some("WORK_BRANCH".to_string()),
+            pr_url: None,
+            context: zbobr_api::task::TaskContext::default(),
+            signal: None,
+            stack: vec![],
+            status: None,
+            pause: false,
+            confirm: false,
+            pipeline_run_id: 0,
+            stage_count: 0,
+            max_stage_count: 0,
+            closed: false,
+            etag: None,
+        };
+        let comments: Vec<Comment> = vec![];
+        let mut errors: Vec<String> = Vec::new();
+
+        for (pipeline, stage_name, stage_def) in self.workflow.config().all_stages() {
+            if stage_def.is_call() {
+                continue;
+            }
+            if let Err(e) = self.build_for_stage_with_task(stage_def, &task, &comments) {
+                errors.push(format!("  pipeline '{}', stage '{}': {}", pipeline, stage_name, e));
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "Prompt validation failed:\n{}",
+                errors.join("\n")
+            ))
+        }
+    }
+
     /// Build prompt for a stage using the given task and comments
     /// instead of fetching from the backend.
     pub fn build_for_stage_with_task(
