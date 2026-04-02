@@ -346,7 +346,7 @@ impl<'a> CliStageRunner<'a> {
         let tool_name = self
             .zbobr
             .config()
-            .resolve_tool_name(self.stage_def, self.zbobr.workflow().config());
+            .resolve_tool_name(self.stage_def, self.zbobr.workflow().config())?;
 
         // Set state to running
         self.zbobr
@@ -1008,7 +1008,6 @@ pub async fn run_manager_loop(
         repo_backend.debug_state()
     );
     tracing::info!("Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s");
-    tracing::info!("Global default tool: {:?}", zbobr.config().tool);
     tracing::info!(
         "Configured providers: {:?}",
         zbobr.config().providers.keys().collect::<Vec<_>>()

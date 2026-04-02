@@ -539,8 +539,6 @@ pub struct ZbobrDispatcherConfig {
     /// Use `{ value = "token" }` for an inline token or `{ env = "VAR" }` to read from an env var.
     #[config(skip_args)]
     pub agent_github_token: Secret,
-    /// Global default tool name. Stages and roles may override this.
-    pub tool: String,
     /// Named provider definitions. Providers map a name to an executor + settings.
     #[config(skip_args)]
     pub providers: IndexMap<String, ProviderDefinition>,
@@ -575,7 +573,6 @@ impl Default for ZbobrDispatcherConfig {
             workspaces: std::path::PathBuf::from("./workspaces"),
             base_port: 3000,
             agent_github_token: Secret::value("not-configured"),
-            tool: "smart".to_string(),
             providers: IndexMap::new(),
             tools: IndexMap::new(),
             provider_exclusion_secs: 300,
@@ -651,13 +648,6 @@ impl ZbobrDispatcherConfig {
                 }
             }
         }
-        // Verify global default tool name exists in [tools].
-        if !self.tools.contains_key(self.tool.as_str()) {
-            anyhow::bail!(
-                "Global dispatcher tool '{}' is not defined in [tools]",
-                self.tool
-            );
-        }
         self.agent_github_token.resolve()?;
         // Resolve secrets in providers
         for provider in self.providers.values_mut() {
@@ -705,17 +695,20 @@ impl ZbobrDispatcherConfig {
         &self,
         stage_def: &StageDefinition,
         workflow: &WorkflowConfig,
-    ) -> String {
+    ) -> anyhow::Result<String> {
         if let Some(ref tool) = stage_def.tool {
-            return tool.clone();
+            return Ok(tool.clone());
         }
         if let Some(role_name) = stage_def.role_name()
             && let Some(role_def) = workflow.role_definition(role_name)
             && let Some(ref tool) = role_def.tool
         {
-            return tool.clone();
+            return Ok(tool.clone());
         }
-        self.tool.clone()
+        anyhow::bail!("No tool found for stage {:?} with role {:?}",
+            stage_def,
+            stage_def.role_name()
+        );
     }
 
     /// Resolve all providers by flattening inheritance chains.
