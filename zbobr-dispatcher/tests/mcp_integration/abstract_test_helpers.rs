@@ -192,7 +192,11 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
         return;
     }
 
-    let repo_path = env.create_git_repo("repo_auto_conflict").await;
+    let repo_path = env
+        .local_repo_path
+        .as_ref()
+        .expect("fs integration env should expose local_repo_path")
+        .clone();
     let work_branch = "zbobr_conflict-detect-abstract";
 
     // Create work branch with a commit

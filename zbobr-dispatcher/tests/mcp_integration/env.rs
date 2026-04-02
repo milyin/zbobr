@@ -56,6 +56,7 @@ pub struct IntegrationTestEnv {
     pub base_path: PathBuf,
     pub workspaces_dir: PathBuf,
     pub name: &'static str,
+    pub local_repo_path: Option<PathBuf>,
     /// Default dispatcher (with default workflow) for convenience
     /// methods like `create_task`, `get_task`, `setup_repository`, etc.
     pub zbobr: Arc<ZbobrDispatcher>,
@@ -189,6 +190,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
         base_path,
         workspaces_dir,
         name,
+        local_repo_path: Some(test_repo_dir),
         zbobr,
         dispatcher_factory,
         target_repo: None,
@@ -291,6 +293,7 @@ pub async fn init_github_github(
         base_path,
         workspaces_dir,
         name,
+        local_repo_path: None,
         zbobr,
         dispatcher_factory,
         target_repo: Some(repository),

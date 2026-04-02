@@ -802,6 +802,19 @@ mod tests {
                 .as_ref()
                 .and_then(|t| t.next.as_ref())
                 .map(|s| s.as_str()),
+            Some("reviewing")
+        );
+
+        let reviewing = main
+            .stages
+            .get("reviewing")
+            .expect("reviewing stage exists");
+        assert_eq!(
+            reviewing
+                .on_intermediate
+                .as_ref()
+                .and_then(|t| t.next.as_ref())
+                .map(|s| s.as_str()),
             Some("test_planner")
         );
     }
