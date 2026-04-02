@@ -182,7 +182,6 @@ fn default_config_toml() -> RootConfigToml {
             workspaces: Some(PathBuf::from("./workspaces")),
             base_port: Some(3000),
             agent_github_token: Some(Secret::value("not-configured")),
-            tool: Some("smart".to_string()),
             providers: Some(providers),
             tools: Some(tools),
             provider_exclusion_secs: None,
