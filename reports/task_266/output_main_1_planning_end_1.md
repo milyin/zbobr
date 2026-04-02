@@ -1,0 +1,1 @@
+Plan is ready for review. The approach is to add a `validate_all_prompts()` method on `ConfiguredPromptBuilder` that renders every stage's prompt with a dummy task at startup, catching template errors and undefined variables immediately rather than at runtime. It replaces the dead `validate_stage_prompts` function that only checked file existence.
