@@ -349,7 +349,7 @@ impl ZbobrDispatcher {
 mod tests {
     use super::*;
     use indexmap::IndexMap;
-    use zbobr_api::config::{ProviderDefinition, ToolEntry};
+    use zbobr_api::config::{ProviderDefinition, RoleDefinition, ToolEntry, WorkflowConfig};
 
     // ── Mock backends ────────────────────────────────────────────────────
 
@@ -421,6 +421,14 @@ mod tests {
         providers: IndexMap<String, ProviderDefinition>,
         tools: IndexMap<String, Vec<ToolEntry>>,
     ) -> ZbobrDispatcher {
+        make_dispatcher_with_workflow(providers, tools, Workflow::default())
+    }
+
+    fn make_dispatcher_with_workflow(
+        providers: IndexMap<String, ProviderDefinition>,
+        tools: IndexMap<String, Vec<ToolEntry>>,
+        workflow: Workflow,
+    ) -> ZbobrDispatcher {
         let config = ZbobrDispatcherConfig {
             providers,
             tools,
@@ -428,7 +436,7 @@ mod tests {
         };
         ZbobrDispatcherBuilder::new()
             .with_config(config)
-            .with_workflow(Workflow::default())
+            .with_workflow(workflow)
             .with_task_backend(MockTaskBackend)
             .with_repo_backend(MockRepoBackend)
             .build()
@@ -591,6 +599,75 @@ mod tests {
         assert!(
             msg.contains("Unknown executor"),
             "Expected 'Unknown executor' in error: {msg}"
+        );
+    }
+
+    // ── validated() integration tests ───────────────────────────────────
+
+    #[test]
+    fn validated_catches_circular_providers() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "a".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("b".to_string()),
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        providers.insert(
+            "b".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("a".to_string()),
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert("smart".to_string(), vec![tool_entry("a", "m1")]);
+        let dispatcher = make_dispatcher(providers, tools);
+        let result = dispatcher.validated();
+        assert!(result.is_err(), "Expected Err for circular providers");
+        let msg = result.err().unwrap().to_string().to_lowercase();
+        assert!(
+            msg.contains("circular"),
+            "Expected 'circular' in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validated_catches_invalid_workflow_refs() {
+        let providers = IndexMap::from([("cp".to_string(), provider_def("copilot", 10))]);
+        let tools = IndexMap::from([(
+            "smart".to_string(),
+            vec![tool_entry("cp", "some-model")],
+        )]);
+        let mut roles = IndexMap::new();
+        roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: None,
+                tool: Some("nonexistent".to_string()),
+            },
+        );
+        let wf_config = WorkflowConfig {
+            prompts_dir: None,
+            roles,
+            pipelines: std::collections::HashMap::new(),
+        };
+        let workflow = Workflow::from_config(wf_config);
+        let dispatcher = make_dispatcher_with_workflow(providers, tools, workflow);
+        let result = dispatcher.validated();
+        assert!(result.is_err(), "Expected Err for invalid workflow refs");
+        let msg = result.err().unwrap().to_string();
+        assert!(
+            msg.contains("nonexistent"),
+            "Expected 'nonexistent' in error: {msg}"
         );
     }
 }
