@@ -81,6 +81,8 @@ impl ZbobrDispatcher {
     pub fn validated(mut self) -> anyhow::Result<Self> {
         self.config.validate()?;
         self.config.validate_workflow_refs(self.workflow.config())?;
+        // Eagerly resolve providers to catch circular inheritance at startup.
+        self.config.resolve_providers()?;
         self.copilot.config.copilot_github_token.resolve()?;
         Ok(self)
     }

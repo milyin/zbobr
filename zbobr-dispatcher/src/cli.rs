@@ -571,8 +571,9 @@ impl<'a> CliStageRunner<'a> {
         )
         .await;
 
-        // Exclude provider on execution failure so the next stage run picks a different one.
-        if outcome.execution_error.is_some() {
+        // Exclude provider only on connectivity/spawn failures so the next stage run picks a
+        // different one. Task-level failures (non-zero exit) do not indicate provider unavailability.
+        if outcome.connectivity_failure {
             self.zbobr.exclude_provider(&resolved_provider.name);
         }
 
@@ -1540,6 +1541,10 @@ struct SessionOutcome {
     execution_interrupted: bool,
     execution_error: Option<anyhow::Error>,
     execution_output: Option<String>,
+    /// True only when the executor could not be spawned or a connectivity-level
+    /// error occurred (i.e. the provider itself was unavailable). False for
+    /// ordinary non-zero exit codes, which represent task-level failures.
+    connectivity_failure: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1563,6 +1568,7 @@ async fn execute_tool(
                     execution_interrupted: false,
                     execution_error: None,
                     execution_output: Some(output),
+                    connectivity_failure: false,
                 },
                 Ok(ExecutorOutput { output, exit_ok: false }) => {
                     let e = anyhow::anyhow!("Tool exited with non-zero status");
@@ -1571,6 +1577,7 @@ async fn execute_tool(
                         execution_interrupted: false,
                         execution_error: Some(e),
                         execution_output: Some(output),
+                        connectivity_failure: false,
                     }
                 }
                 Err(e) => {
@@ -1579,6 +1586,7 @@ async fn execute_tool(
                         execution_interrupted: false,
                         execution_error: Some(e),
                         execution_output: None,
+                        connectivity_failure: true,
                     }
                 }
             }
@@ -1589,6 +1597,7 @@ async fn execute_tool(
                 execution_interrupted: true,
                 execution_error: None,
                 execution_output: None,
+                connectivity_failure: false,
             }
         }
     }
