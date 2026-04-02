@@ -1,0 +1,1 @@
+In zbobr-api/src/context/stage_title.rs:168, the `.ok()` silently converts invalid Model tokens to None. Change it to propagate an error when a second non-timestamp backtick token is present but Model::from_str fails, restoring strict parsing behavior.
