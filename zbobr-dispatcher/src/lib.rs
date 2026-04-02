@@ -569,4 +569,25 @@ mod tests {
         let msg = err.to_string().to_lowercase();
         assert!(msg.contains("not found"), "Expected 'not found' in error: {msg}");
     }
+
+    // ── build_executor tests ─────────────────────────────────────────────
+
+    #[test]
+    fn build_executor_unknown_executor_error() {
+        let dispatcher = make_dispatcher(IndexMap::new(), IndexMap::new());
+        let bad_provider = zbobr_api::config::ResolvedProvider {
+            name: "broken".to_string(),
+            executor: "nonexistent".to_string(),
+            priority: 10,
+            plan_mode: false,
+            access_key: None,
+        };
+        let result = dispatcher.build_executor(&bad_provider, None);
+        assert!(result.is_err(), "Expected Err for unknown executor");
+        let msg = result.err().unwrap().to_string();
+        assert!(
+            msg.contains("Unknown executor"),
+            "Expected 'Unknown executor' in error: {msg}"
+        );
+    }
 }

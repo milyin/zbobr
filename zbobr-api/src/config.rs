@@ -1090,4 +1090,63 @@ mod tests {
         };
         assert_eq!(config.resolve_tool_name(&stage, &workflow), "global-tool");
     }
+
+    // ── resolve_providers – priority inheritance ────────────────────────
+
+    #[test]
+    fn resolve_providers_inherits_priority_from_parent() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "base".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: Some(3),
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        providers.insert(
+            "child".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("base".to_string()),
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        let child = &resolved["child"];
+        assert_eq!(
+            child.priority, 3,
+            "Child should inherit parent's priority (3), not default (10)"
+        );
+    }
+
+    // ── validate – unknown executor ─────────────────────────────────────
+
+    #[test]
+    fn validate_unknown_executor() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "bad".to_string(),
+            ProviderDefinition {
+                executor: Some("invalid_executor".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut config = make_config(providers, IndexMap::new());
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("unknown executor"),
+            "Expected 'unknown executor' in error: {msg}"
+        );
+    }
 }
