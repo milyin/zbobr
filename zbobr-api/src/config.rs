@@ -726,3 +726,360 @@ impl ZbobrDispatcherConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use indexmap::IndexMap;
+
+    /// Helper: build a minimal ZbobrDispatcherConfig with given providers and tools.
+    fn make_config(
+        providers: IndexMap<String, ProviderDefinition>,
+        tools: IndexMap<String, Vec<ToolEntry>>,
+    ) -> ZbobrDispatcherConfig {
+        ZbobrDispatcherConfig {
+            providers,
+            tools,
+            ..Default::default()
+        }
+    }
+
+    // ── resolve_providers tests ──────────────────────────────────────────
+
+    #[test]
+    fn resolve_providers_basic() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: 10,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        assert_eq!(resolved.len(), 1);
+        let rp = &resolved["claude"];
+        assert_eq!(rp.name, "claude");
+        assert_eq!(rp.executor, "claude");
+        assert_eq!(rp.priority, 10);
+        assert!(!rp.plan_mode);
+        assert!(rp.access_key.is_none());
+    }
+
+    #[test]
+    fn resolve_providers_single_level_inheritance() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude_base".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: 10,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        providers.insert(
+            "claude_child".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("claude_base".to_string()),
+                priority: 10,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        let child = &resolved["claude_child"];
+        assert_eq!(child.executor, "claude");
+    }
+
+    #[test]
+    fn resolve_providers_multi_level_chain() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "grandparent".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: 10,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        providers.insert(
+            "parent".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("grandparent".to_string()),
+                priority: 10,
+                plan_mode: Some(true),
+                access_key: None,
+            },
+        );
+        providers.insert(
+            "child".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("parent".to_string()),
+                priority: 10,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        let child = &resolved["child"];
+        assert_eq!(child.executor, "claude");
+        assert!(child.plan_mode);
+    }
+
+    #[test]
+    fn resolve_providers_circular_reference() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "a".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("b".to_string()),
+                priority: 10,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        providers.insert(
+            "b".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("a".to_string()),
+                priority: 10,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let err = config.resolve_providers().unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(msg.contains("circular"), "Expected 'circular' in error: {msg}");
+    }
+
+    #[test]
+    fn resolve_providers_child_overrides_parent() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "base".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: 10,
+                plan_mode: Some(false),
+                access_key: None,
+            },
+        );
+        providers.insert(
+            "child".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("base".to_string()),
+                priority: 5,
+                plan_mode: Some(true),
+                access_key: None,
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        let child = &resolved["child"];
+        assert_eq!(child.executor, "claude");
+        assert_eq!(child.priority, 5);
+        assert!(child.plan_mode);
+    }
+
+    // ── validate tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn validate_valid_config() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: 10,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "opus".to_string(),
+            }],
+        );
+        let mut config = make_config(providers, tools);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_unknown_parent() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "child".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("nonexistent".to_string()),
+                priority: 10,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut config = make_config(providers, IndexMap::new());
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("unknown parent"),
+            "Expected 'unknown parent' in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_no_executor_no_parent() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "broken".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: None,
+                priority: 10,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut config = make_config(providers, IndexMap::new());
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("neither 'executor' nor 'parent'"),
+            "Expected \"neither 'executor' nor 'parent'\" in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_tool_references_unknown_provider() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: 10,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "ghost".to_string(),
+                model: "opus".to_string(),
+            }],
+        );
+        let mut config = make_config(providers, tools);
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("unknown provider"),
+            "Expected 'unknown provider' in error: {msg}"
+        );
+    }
+
+    // ── resolve_tool_name tests ─────────────────────────────────────────
+
+    fn make_workflow_with_role(role_name: &str, tool: Option<String>) -> WorkflowConfig {
+        let mut roles = IndexMap::new();
+        roles.insert(
+            role_name.to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: None,
+                tool,
+            },
+        );
+        WorkflowConfig {
+            prompts_dir: None,
+            roles,
+            pipelines: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn resolve_tool_name_stage_overrides() {
+        let stage = StageDefinition {
+            tool: Some("stage-tool".to_string()),
+            role: Some("worker".to_string()),
+            ..Default::default()
+        };
+        let workflow = make_workflow_with_role("worker", Some("role-tool".to_string()));
+        let config = ZbobrDispatcherConfig {
+            tool: "global-tool".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.resolve_tool_name(&stage, &workflow), "stage-tool");
+    }
+
+    #[test]
+    fn resolve_tool_name_falls_back_to_role() {
+        let stage = StageDefinition {
+            tool: None,
+            role: Some("worker".to_string()),
+            ..Default::default()
+        };
+        let workflow = make_workflow_with_role("worker", Some("role-tool".to_string()));
+        let config = ZbobrDispatcherConfig {
+            tool: "global-tool".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.resolve_tool_name(&stage, &workflow), "role-tool");
+    }
+
+    #[test]
+    fn resolve_tool_name_falls_back_to_global() {
+        let stage = StageDefinition {
+            tool: None,
+            role: Some("worker".to_string()),
+            ..Default::default()
+        };
+        let workflow = make_workflow_with_role("worker", None);
+        let config = ZbobrDispatcherConfig {
+            tool: "global-tool".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.resolve_tool_name(&stage, &workflow), "global-tool");
+    }
+
+    #[test]
+    fn resolve_tool_name_no_role_falls_back_to_global() {
+        let stage = StageDefinition {
+            tool: None,
+            role: Some("nonexistent".to_string()),
+            ..Default::default()
+        };
+        let workflow = WorkflowConfig::default();
+        let config = ZbobrDispatcherConfig {
+            tool: "global-tool".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.resolve_tool_name(&stage, &workflow), "global-tool");
+    }
+}
