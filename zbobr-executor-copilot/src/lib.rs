@@ -59,6 +59,8 @@ impl ToolExecutor for CopilotExecutor {
             "--no-ask-user",
             "--allow-all-tools",
             "--allow-all-urls",
+            "--allow-tool",
+            "zbobr",
             "-p",
             prompt,
         ];
