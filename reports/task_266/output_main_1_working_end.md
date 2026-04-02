@@ -1,0 +1,1 @@
+Background build task completed successfully — already accounted for in the implementation above.
