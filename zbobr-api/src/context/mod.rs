@@ -711,7 +711,7 @@ pub fn parse_context(text: &str) -> Result<TaskContext> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task::{Model, Pipeline, Stage, StageInfo};
+    use crate::task::{Pipeline, Stage, StageInfo};
 
     fn utc(s: &str) -> chrono::DateTime<chrono::FixedOffset> {
         s.parse::<chrono::DateTime<chrono::FixedOffset>>().unwrap()

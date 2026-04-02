@@ -1186,7 +1186,7 @@ mod tests {
         let toml_str = r#"model = "bad model""#;
         #[derive(serde::Deserialize)]
         struct Wrapper {
-            model: Model,
+            _model: Model,
         }
         let result: Result<Wrapper, _> = toml::from_str(toml_str);
         assert!(result.is_err());
