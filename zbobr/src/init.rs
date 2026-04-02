@@ -880,4 +880,16 @@ mod tests {
     fn merger_prompt_does_not_reference_get_ctx_rec() {
         assert!(!MERGER_PROMPT.contains(GET_CTX_REC_PROMPT_FRAGMENT));
     }
+
+    #[test]
+    fn default_workflow_roles_have_tool() {
+        let workflow = default_workflow();
+        for (name, role_def) in &workflow.roles {
+            assert!(
+                role_def.tool.is_some(),
+                "Role '{}' in default_workflow must have a tool defined",
+                name
+            );
+        }
+    }
 }
