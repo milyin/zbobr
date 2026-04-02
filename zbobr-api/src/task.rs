@@ -1152,4 +1152,43 @@ mod tests {
         let task = make_task(42, None);
         assert!(task.identity().is_none());
     }
+
+    // ── Model::try_new tests ────────────────────────────────────────────
+
+    #[test]
+    fn model_try_new_valid() {
+        let m = Model::try_new("claude-opus-4.6").unwrap();
+        assert_eq!(m.as_str(), "claude-opus-4.6");
+    }
+
+    #[test]
+    fn model_try_new_rejects_space() {
+        let err = Model::try_new("claude opus").unwrap_err();
+        assert!(
+            err.to_lowercase().contains("whitespace"),
+            "Expected 'whitespace' in error: {err}"
+        );
+    }
+
+    #[test]
+    fn model_try_new_rejects_tab() {
+        assert!(Model::try_new("model\there").is_err());
+    }
+
+    #[test]
+    fn model_from_str_rejects_whitespace() {
+        let result: Result<Model, _> = "bad model".parse();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn model_deserialize_rejects_whitespace() {
+        let toml_str = r#"model = "bad model""#;
+        #[derive(serde::Deserialize)]
+        struct Wrapper {
+            model: Model,
+        }
+        let result: Result<Wrapper, _> = toml::from_str(toml_str);
+        assert!(result.is_err());
+    }
 }

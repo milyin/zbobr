@@ -1165,6 +1165,267 @@ mod tests {
 
     // ── validate – unknown executor ─────────────────────────────────────
 
+    // ── validate – global tool check ───────────────────────────────────
+
+    #[test]
+    fn validate_rejects_unknown_global_tool() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "opus".parse().unwrap(),
+            }],
+        );
+        let mut config = make_config(providers, tools);
+        config.tool = "nonexistent".to_string();
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("not defined in [tools]"),
+            "Expected 'not defined in [tools]' in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_passes_when_tools_empty() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut config = make_config(providers, IndexMap::new());
+        config.tool = "anything".to_string();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_passes_when_global_tool_exists() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "opus".parse().unwrap(),
+            }],
+        );
+        let mut config = make_config(providers, tools);
+        config.tool = "smart".to_string();
+        assert!(config.validate().is_ok());
+    }
+
+    // ── validate_workflow_refs tests ─────────────────────────────────────
+
+    #[test]
+    fn validate_workflow_refs_rejects_unknown_role_tool() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "opus".parse().unwrap(),
+            }],
+        );
+        let config = make_config(providers, tools);
+        let workflow = make_workflow_with_role("worker", Some("nonexistent".to_string()));
+        let err = config.validate_workflow_refs(&workflow).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Role 'worker' references unknown tool"),
+            "Expected role unknown tool error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_workflow_refs_rejects_unknown_stage_tool() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "opus".parse().unwrap(),
+            }],
+        );
+        let config = make_config(providers, tools);
+
+        let mut stages = IndexMap::new();
+        stages.insert(
+            Stage::from("working"),
+            StageDefinition {
+                role: Some("worker".to_string()),
+                tool: Some("bad".to_string()),
+                ..Default::default()
+            },
+        );
+        let mut pipelines = HashMap::new();
+        pipelines.insert(Pipeline::Main, PipelineConfig { stages });
+        let workflow = WorkflowConfig {
+            prompts_dir: None,
+            roles: IndexMap::new(),
+            pipelines,
+        };
+        let err = config.validate_workflow_refs(&workflow).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Stage") && msg.contains("references unknown tool"),
+            "Expected stage unknown tool error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_workflow_refs_passes_valid_refs() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "opus".parse().unwrap(),
+            }],
+        );
+        let config = make_config(providers, tools);
+
+        let mut stages = IndexMap::new();
+        stages.insert(
+            Stage::from("working"),
+            StageDefinition {
+                role: Some("worker".to_string()),
+                tool: Some("smart".to_string()),
+                ..Default::default()
+            },
+        );
+        let mut pipelines = HashMap::new();
+        pipelines.insert(Pipeline::Main, PipelineConfig { stages });
+        let mut roles = IndexMap::new();
+        roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: None,
+                tool: Some("smart".to_string()),
+            },
+        );
+        let workflow = WorkflowConfig {
+            prompts_dir: None,
+            roles,
+            pipelines,
+        };
+        assert!(config.validate_workflow_refs(&workflow).is_ok());
+    }
+
+    #[test]
+    fn validate_workflow_refs_passes_no_tool_refs() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: None,
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "opus".parse().unwrap(),
+            }],
+        );
+        let config = make_config(providers, tools);
+
+        let mut stages = IndexMap::new();
+        stages.insert(
+            Stage::from("working"),
+            StageDefinition {
+                role: Some("worker".to_string()),
+                tool: None,
+                ..Default::default()
+            },
+        );
+        let mut pipelines = HashMap::new();
+        pipelines.insert(Pipeline::Main, PipelineConfig { stages });
+        let mut roles = IndexMap::new();
+        roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: None,
+                tool: None,
+            },
+        );
+        let workflow = WorkflowConfig {
+            prompts_dir: None,
+            roles,
+            pipelines,
+        };
+        assert!(config.validate_workflow_refs(&workflow).is_ok());
+    }
+
+    // ── validate – unknown executor ─────────────────────────────────────
+
     #[test]
     fn validate_unknown_executor() {
         let mut providers = IndexMap::new();
