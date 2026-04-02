@@ -487,7 +487,9 @@ impl WorkflowConfig {
         if !self.roles.is_empty() {
             for (pname, pipeline) in &self.pipelines {
                 for (sname, stage) in &pipeline.stages {
-                    if let Some(role) = &stage.role && !self.roles.contains_key(role) {
+                    if let Some(role) = &stage.role
+                        && !self.roles.contains_key(role)
+                    {
                         anyhow::bail!(
                             "Stage '{}/{}' references unknown role '{}' (not in [workflow.roles])",
                             pname,
@@ -502,7 +504,9 @@ impl WorkflowConfig {
         // Every call-stage's target pipeline must exist
         for (pname, pipeline) in &self.pipelines {
             for (sname, stage) in &pipeline.stages {
-                if let Some(target) = &stage.call && !self.pipelines.contains_key(target.as_str()) {
+                if let Some(target) = &stage.call
+                    && !self.pipelines.contains_key(target.as_str())
+                {
                     anyhow::bail!(
                         "Stage '{}/{}' calls unknown pipeline '{}'",
                         pname,
@@ -706,7 +710,8 @@ impl ZbobrDispatcherConfig {
         {
             return Ok(tool.clone());
         }
-        anyhow::bail!("No tool found for stage {:?} with role {:?}",
+        anyhow::bail!(
+            "No tool found for stage {:?} with role {:?}",
             stage_def,
             stage_def.role_name()
         );
