@@ -679,6 +679,110 @@ mod tests {
     }
 
     #[test]
+    fn validate_all_prompts_aggregates_multiple_errors() {
+        let dir = TempDir::new().unwrap();
+        // Stage 1: missing file error
+        // Stage 2: undefined variable error
+        let bad_var_path = write_file(&dir, "bad_var.md", "Use {mcp_nonexistent} tool");
+        let mut stages = IndexMap::new();
+        stages.insert(
+            Stage::from("stage_a"),
+            StageDefinition {
+                role: Some("default".to_string()),
+                prompts: vec![PathBuf::from("/nonexistent/prompt.md")],
+                ..Default::default()
+            },
+        );
+        stages.insert(
+            Stage::from("stage_b"),
+            StageDefinition {
+                role: Some("default".to_string()),
+                prompts: vec![bad_var_path],
+                ..Default::default()
+            },
+        );
+        let builder = make_prompt_builder(None, stages);
+        let result = builder.validate_all_prompts();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("stage_a"),
+            "error should mention first failing stage: {err}"
+        );
+        assert!(
+            err.contains("stage_b"),
+            "error should mention second failing stage: {err}"
+        );
+    }
+
+    /// Helper: build a `ConfiguredPromptBuilder` from a multi-pipeline workflow config.
+    fn make_prompt_builder_multi(
+        base_path: Option<PathBuf>,
+        pipelines: HashMap<Pipeline, PipelineConfig>,
+    ) -> ConfiguredPromptBuilder {
+        let config = WorkflowConfig {
+            prompts_dir: None,
+            pipelines,
+            roles: IndexMap::new(),
+        };
+        let workflow = Arc::new(Workflow::from_config(config));
+        ConfiguredPromptBuilder::new(base_path, workflow)
+    }
+
+    #[test]
+    fn validate_all_prompts_multi_pipeline() {
+        let dir = TempDir::new().unwrap();
+        let valid_path = write_file(&dir, "ok.md", "Do {title}");
+
+        let mut main_stages = IndexMap::new();
+        main_stages.insert(
+            Stage::from("work"),
+            StageDefinition {
+                role: Some("default".to_string()),
+                prompts: vec![valid_path],
+                ..Default::default()
+            },
+        );
+
+        let mut secondary_stages = IndexMap::new();
+        secondary_stages.insert(
+            Stage::from("broken"),
+            StageDefinition {
+                role: Some("default".to_string()),
+                prompts: vec![PathBuf::from("/nonexistent/secondary_prompt.md")],
+                ..Default::default()
+            },
+        );
+
+        let mut pipelines = HashMap::new();
+        pipelines.insert(
+            Pipeline::from("main"),
+            PipelineConfig {
+                stages: main_stages,
+            },
+        );
+        pipelines.insert(
+            Pipeline::from("secondary"),
+            PipelineConfig {
+                stages: secondary_stages,
+            },
+        );
+
+        let builder = make_prompt_builder_multi(None, pipelines);
+        let result = builder.validate_all_prompts();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("pipeline 'secondary'"),
+            "error should identify the failing pipeline: {err}"
+        );
+        assert!(
+            err.contains("stage 'broken'"),
+            "error should identify the failing stage: {err}"
+        );
+    }
+
+    #[test]
     fn validate_all_prompts_call_stages_skipped() {
         let mut stages = IndexMap::new();
         // A call stage has no prompt files — should not cause an error.
