@@ -548,7 +548,7 @@ impl<'a> CliStageRunner<'a> {
         }
         let executor = self
             .zbobr
-            .build_executor(&resolved_provider, self.mcp_tester_override);
+            .build_executor(&resolved_provider, self.mcp_tester_override)?;
         let copilot_token_owned = if resolved_provider.executor == Tool::COPILOT {
             self.zbobr.copilot_github_token().to_owned()
         } else {

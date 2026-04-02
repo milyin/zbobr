@@ -199,18 +199,17 @@ impl ZbobrDispatcher {
         &self,
         provider: &ResolvedProvider,
         mcp_tester_override: Option<&ZbobrExecutorMcpTesterConfig>,
-    ) -> Box<dyn ToolExecutor> {
+    ) -> anyhow::Result<Box<dyn ToolExecutor>> {
         match provider.executor.as_str() {
-            "copilot" => Box::new(CopilotExecutor {
+            "copilot" => Ok(Box::new(CopilotExecutor {
                 config: self.copilot.config.clone(),
-            }),
-            "mcp-tester" => Box::new(McpTesterExecutor {
+            })),
+            "mcp-tester" => Ok(Box::new(McpTesterExecutor {
                 config: mcp_tester_override
                     .cloned()
                     .unwrap_or_else(|| self.mcp_tester.config.clone()),
-            }),
-            _ => {
-                // "claude" or any other string defaults to ClaudeExecutor
+            })),
+            "claude" => {
                 let mut executor = ClaudeExecutor {
                     config: self.claude.config.clone(),
                     access_key: None,
@@ -218,8 +217,13 @@ impl ZbobrDispatcher {
                 if let Some(ref key) = provider.access_key {
                     executor.access_key = Some(key.clone());
                 }
-                Box::new(executor)
+                Ok(Box::new(executor))
             }
+            other => anyhow::bail!(
+                "Unknown executor '{}' for provider '{}'",
+                other,
+                provider.name
+            ),
         }
     }
 
@@ -431,7 +435,7 @@ mod tests {
         ProviderDefinition {
             executor: Some(executor.to_string()),
             parent: None,
-            priority,
+            priority: Some(priority),
             plan_mode: None,
             access_key: None,
         }

@@ -97,7 +97,7 @@ fn default_config_toml() -> RootConfigToml {
             ProviderDefinition {
                 executor: Some("claude".to_string()),
                 parent: None,
-                priority: 10,
+                priority: None,
                 plan_mode: None,
                 access_key: None,
             },
@@ -107,7 +107,7 @@ fn default_config_toml() -> RootConfigToml {
             ProviderDefinition {
                 executor: Some("copilot".to_string()),
                 parent: None,
-                priority: 10,
+                priority: None,
                 plan_mode: None,
                 access_key: None,
             },
@@ -117,7 +117,7 @@ fn default_config_toml() -> RootConfigToml {
             ProviderDefinition {
                 executor: None,
                 parent: Some("claude".to_string()),
-                priority: 10,
+                priority: None,
                 plan_mode: Some(true),
                 access_key: None,
             },
@@ -127,7 +127,7 @@ fn default_config_toml() -> RootConfigToml {
             ProviderDefinition {
                 executor: None,
                 parent: Some("copilot".to_string()),
-                priority: 10,
+                priority: None,
                 plan_mode: Some(true),
                 access_key: None,
             },
