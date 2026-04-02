@@ -1,0 +1,1 @@
+In `zbobr/src/init.rs` `default_workflow()`, roles `worker`, `test_planner`, `test_worker`, `reviewer`, `tester`, and `merger` use `..Default::default()` which leaves `tool` as `None`. Assign appropriate tool names: `"smart"` for worker/test_worker/reviewer, `"planner"` for test_planner, `"smart"` for tester, `"silly"` for merger.
