@@ -10,7 +10,10 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use zbobr_api::{Model, Secret, config::{ProviderDefinition, ToolEntry, WorkflowConfig}};
+use zbobr_api::{
+    Model, Secret,
+    config::{ProviderDefinition, ToolEntry, WorkflowConfig},
+};
 use zbobr_dispatcher::{
     Comment, Task, Workflow, ZbobrDispatcher, ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
     backend::TaskBackendExt, cli::process_task, prompts::ConfiguredPromptBuilder, task::Tool,

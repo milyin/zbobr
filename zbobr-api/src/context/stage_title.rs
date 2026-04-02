@@ -165,11 +165,9 @@ impl FromStr for MdStageTitle {
                 if tool.is_none() {
                     tool = Some(value.to_string());
                 } else if model.is_none() {
-                    model = Some(
-                        value
-                            .parse::<Model>()
-                            .map_err(|e| anyhow::anyhow!("Invalid model token {:?} in stage title: {e}", value))?,
-                    );
+                    model = Some(value.parse::<Model>().map_err(|e| {
+                        anyhow::anyhow!("Invalid model token {:?} in stage title: {e}", value)
+                    })?);
                 }
                 continue;
             }
@@ -433,7 +431,8 @@ mod tests {
 
     #[test]
     fn parse_accepts_valid_model_token() {
-        let s = "myinstance:main:2:**working** `claude` `claude-opus-4.6` `2024-06-15 10:30:00 +0300`";
+        let s =
+            "myinstance:main:2:**working** `claude` `claude-opus-4.6` `2024-06-15 10:30:00 +0300`";
         let parsed: MdStageTitle = s.parse().unwrap();
         assert_eq!(parsed.tool.as_deref(), Some("claude"));
         assert_eq!(parsed.model.as_ref().unwrap().as_str(), "claude-opus-4.6");

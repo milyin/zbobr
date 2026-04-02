@@ -75,6 +75,7 @@ pub const ALL_TOOL_NAMES: &[&str] = zbobr_api::config_tools::ALL_TOOL_NAMES;
 
 #[tool_router]
 impl UnifiedMcp {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         session: RoleSession,
         allowed_tools: HashSet<McpTool>,
@@ -222,7 +223,7 @@ impl ServerHandler for UnifiedMcp {
         }
 
         let tcc = ToolCallContext::new(self, request, context);
-        self.tool_router.call(tcc).await.map_err(McpError::from)
+        self.tool_router.call(tcc).await
     }
 }
 

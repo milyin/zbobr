@@ -263,7 +263,7 @@ impl ZbobrRepoBackendGithub {
                     .stderr(std::process::Stdio::null())
                     .status()
                     .await;
-                let success = status.as_ref().map_or(false, |s| s.success());
+                let success = status.as_ref().is_ok_and(|s| s.success());
                 if !success {
                     // Redact any embedded credentials from the key before logging
                     let redacted_key = if let Some(proto_end) = key.find("://") {

@@ -10,10 +10,7 @@ pub struct ZbobrExecutorClaudeConfig {}
 
 impl ZbobrExecutorClaudeConfig {
     /// Build configuration — no TOML fields to merge.
-    pub fn build(
-        _toml: Option<ZbobrExecutorClaudeToml>,
-        _args: ZbobrExecutorClaudeArgs,
-    ) -> Self {
+    pub fn build(_toml: Option<ZbobrExecutorClaudeToml>, _args: ZbobrExecutorClaudeArgs) -> Self {
         Self::default()
     }
 }

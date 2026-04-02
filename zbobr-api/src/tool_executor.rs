@@ -100,7 +100,9 @@ mod tests {
 
     #[test]
     fn detect_quota_failure_rate_limit() {
-        assert!(detect_quota_failure("Error: rate limit exceeded, try again later"));
+        assert!(detect_quota_failure(
+            "Error: rate limit exceeded, try again later"
+        ));
     }
 
     #[test]
@@ -110,7 +112,9 @@ mod tests {
 
     #[test]
     fn detect_quota_failure_quota_exceeded() {
-        assert!(detect_quota_failure("API quota exceeded for this billing period"));
+        assert!(detect_quota_failure(
+            "API quota exceeded for this billing period"
+        ));
     }
 
     #[test]
@@ -121,7 +125,9 @@ mod tests {
 
     #[test]
     fn detect_quota_failure_account_limit() {
-        assert!(detect_quota_failure("account limit reached, upgrade your plan"));
+        assert!(detect_quota_failure(
+            "account limit reached, upgrade your plan"
+        ));
     }
 
     #[test]

@@ -120,11 +120,9 @@ impl ZbobrDispatcher {
     /// Filters out currently excluded providers, groups remaining entries by priority,
     /// and selects within the highest-priority group using round-robin.
     pub fn select_provider(&self, tool_name: &str) -> anyhow::Result<(ResolvedProvider, Model)> {
-        let entries: &Vec<ToolEntry> = self
-            .config
-            .tools
-            .get(tool_name)
-            .ok_or_else(|| anyhow::anyhow!("Tool '{}' not found in dispatcher config", tool_name))?;
+        let entries: &Vec<ToolEntry> = self.config.tools.get(tool_name).ok_or_else(|| {
+            anyhow::anyhow!("Tool '{}' not found in dispatcher config", tool_name)
+        })?;
 
         let resolved_providers = self.config.resolve_providers()?;
 
@@ -173,10 +171,7 @@ impl ZbobrDispatcher {
         drop(rr);
 
         let (_, entry) = &top_group[pick];
-        let rp = resolved_providers
-            .get(&entry.provider)
-            .unwrap()
-            .clone();
+        let rp = resolved_providers.get(&entry.provider).unwrap().clone();
         Ok((rp, entry.model.clone()))
     }
 
@@ -184,8 +179,7 @@ impl ZbobrDispatcher {
     ///
     /// The provider will be skipped by `select_provider` until the exclusion expires.
     pub fn exclude_provider(&self, provider_name: &str) {
-        let expiry = Instant::now()
-            + Duration::from_secs(self.config.provider_exclusion_secs);
+        let expiry = Instant::now() + Duration::from_secs(self.config.provider_exclusion_secs);
         self.excluded_providers
             .lock()
             .unwrap()
@@ -357,7 +351,10 @@ mod tests {
 
     #[async_trait::async_trait]
     impl zbobr_api::backend::TaskBackend for MockTaskBackend {
-        async fn get_task(&self, _id: u64) -> anyhow::Result<Box<dyn zbobr_api::backend::TaskWeak>> {
+        async fn get_task(
+            &self,
+            _id: u64,
+        ) -> anyhow::Result<Box<dyn zbobr_api::backend::TaskWeak>> {
             unimplemented!()
         }
         async fn list_tasks(&self) -> anyhow::Result<Vec<Box<dyn zbobr_api::backend::TaskWeak>>> {
@@ -386,9 +383,15 @@ mod tests {
 
     #[async_trait::async_trait]
     impl zbobr_api::backend::WorktreeBackend for MockRepoBackend {
-        fn repository(&self) -> &str { "mock/repo" }
-        fn branch(&self) -> &str { "main" }
-        fn repo_name(&self) -> &str { "repo" }
+        fn repository(&self) -> &str {
+            "mock/repo"
+        }
+        fn branch(&self) -> &str {
+            "main"
+        }
+        fn repo_name(&self) -> &str {
+            "repo"
+        }
         async fn update_worktree(
             &self,
             _identity: &zbobr_api::TaskIdentity,
@@ -570,7 +573,10 @@ mod tests {
 
         let err = dispatcher.select_provider("smart").unwrap_err();
         let msg = err.to_string().to_lowercase();
-        assert!(msg.contains("excluded"), "Expected 'excluded' in error: {msg}");
+        assert!(
+            msg.contains("excluded"),
+            "Expected 'excluded' in error: {msg}"
+        );
     }
 
     #[test]
@@ -578,7 +584,10 @@ mod tests {
         let dispatcher = make_dispatcher(IndexMap::new(), IndexMap::new());
         let err = dispatcher.select_provider("nonexistent").unwrap_err();
         let msg = err.to_string().to_lowercase();
-        assert!(msg.contains("not found"), "Expected 'not found' in error: {msg}");
+        assert!(
+            msg.contains("not found"),
+            "Expected 'not found' in error: {msg}"
+        );
     }
 
     // ── build_executor tests ─────────────────────────────────────────────
@@ -642,10 +651,7 @@ mod tests {
     #[test]
     fn validated_catches_invalid_workflow_refs() {
         let providers = IndexMap::from([("cp".to_string(), provider_def("copilot", 10))]);
-        let tools = IndexMap::from([(
-            "smart".to_string(),
-            vec![tool_entry("cp", "some-model")],
-        )]);
+        let tools = IndexMap::from([("smart".to_string(), vec![tool_entry("cp", "some-model")])]);
         let mut roles = IndexMap::new();
         roles.insert(
             "worker".to_string(),

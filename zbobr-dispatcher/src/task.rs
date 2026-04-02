@@ -267,10 +267,10 @@ impl RoleSession {
     /// Check (mark as done) a checkbox context record by id.
     pub async fn check_checkbox_record(&self, record_id: u64) -> anyhow::Result<()> {
         self.modify_task(move |mut task| {
-            if let Some((_, record)) = task.context.find_record_mut(record_id) {
-                if let ContextRecordType::Checkbox(_) = record.record_type {
-                    record.record_type = ContextRecordType::Checkbox(true);
-                }
+            if let Some((_, record)) = task.context.find_record_mut(record_id)
+                && let ContextRecordType::Checkbox(_) = record.record_type
+            {
+                record.record_type = ContextRecordType::Checkbox(true);
             }
             task
         })

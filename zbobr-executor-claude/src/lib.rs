@@ -2,7 +2,9 @@ use std::{path::Path, process::Stdio};
 
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use zbobr_api::tool_executor::{ExecutorOutput, ToolExecutor, detect_quota_failure, format_command_for_log};
+use zbobr_api::tool_executor::{
+    ExecutorOutput, ToolExecutor, detect_quota_failure, format_command_for_log,
+};
 use zbobr_utility::Secret;
 
 pub mod config;
@@ -52,9 +54,7 @@ impl ToolExecutor for ClaudeExecutor {
         });
         let mcp_config_str = serde_json::to_string(&mcp_config)?;
 
-        tracing::info!(
-            "Starting claude {role} session for task #{task_id} with model {model}"
-        );
+        tracing::info!("Starting claude {role} session for task #{task_id} with model {model}");
         tracing::info!("MCP endpoint: {mcp_url}");
         tracing::debug!("MCP config JSON: {}", mcp_config_str);
 

@@ -569,9 +569,9 @@ impl FromStr for MdContext {
                 after_stage_marker = false;
                 if was_after_marker {
                     // Preceded by <!-- stage -->: must parse as a valid stage title
-                    let title = trimmed
-                        .parse::<MdStageTitle>()
-                        .map_err(|e| anyhow::anyhow!("Malformed stage title after <!-- stage --> marker: {e}"))?;
+                    let title = trimmed.parse::<MdStageTitle>().map_err(|e| {
+                        anyhow::anyhow!("Malformed stage title after <!-- stage --> marker: {e}")
+                    })?;
                     if let Some(stage) = current_stage.take() {
                         entries.push(MdEntry::Stage(stage));
                     }
@@ -595,7 +595,6 @@ impl FromStr for MdContext {
                 continue;
             }
 
-            after_stage_marker = false;
             bail!("Unrecognized line in context: {}", trimmed);
         }
 
@@ -2115,7 +2114,10 @@ mod tests {
 - default:main:2:**working** `claude` `bad model` `2024-06-15 10:30:00 +0300`
 ";
         let result = parse_context(text);
-        assert!(result.is_err(), "expected error for malformed stage title after <!-- stage --> marker");
+        assert!(
+            result.is_err(),
+            "expected error for malformed stage title after <!-- stage --> marker"
+        );
         let err_msg = result.unwrap_err().to_string();
         assert!(
             err_msg.contains("Malformed stage title after <!-- stage --> marker"),

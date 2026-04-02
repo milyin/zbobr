@@ -409,7 +409,7 @@ impl<'a> CliStageRunner<'a> {
                     task.max_stage_count
                 );
                 let status = format_error_status(
-                    &self.zbobr,
+                    self.zbobr,
                     &format!(
                         "Stage count limit ({}) reached - auto-paused",
                         task.max_stage_count
@@ -1504,6 +1504,7 @@ async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Re
 /// Only sets a parameter if it is not already present, so a previously
 /// prepared task keeps its values unchanged. Called unconditionally at
 /// the start of every stage run.
+#[allow(clippy::too_many_arguments)]
 async fn start_mcp_server(
     zbobr: Arc<ZbobrDispatcher>,
     role_name: &str,

@@ -42,6 +42,7 @@ pub(crate) fn serialize_parameters(params: &HashMap<String, String>) -> String {
 
 /// Parse a task description into (description, parameters, status, context).
 /// Section order: description → PARAMETERS → STATUS → CONTEXT.
+#[allow(clippy::type_complexity)]
 pub(crate) fn parse_description_full(
     full_text: &str,
 ) -> Result<(String, HashMap<String, String>, Option<String>, TaskContext)> {

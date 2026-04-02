@@ -103,10 +103,9 @@ pub fn prompt_files_for_stage(
     } else if let Some(role_def) = stage_def
         .role_name()
         .and_then(|r| workflow.role_definition(r))
+        && let Some(ref prompt_path) = role_def.prompt
     {
-        if let Some(ref prompt_path) = role_def.prompt {
-            files.push(prompt_path.clone());
-        }
+        files.push(prompt_path.clone());
     }
     files.extend(stage_def.prompts.iter().cloned());
     if let Some(ref prompts_dir) = workflow.prompts_dir {
