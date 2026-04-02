@@ -66,7 +66,9 @@ pub fn parse_ctx_rec_id(id: &str) -> Result<u64, String> {
     if let Ok(n) = id.parse::<u64>() {
         return Ok(n);
     }
-    if let Some(n_str) = id.strip_prefix("ctx_rec_") && let Ok(n) = n_str.parse::<u64>() {
+    if let Some(n_str) = id.strip_prefix("ctx_rec_")
+        && let Ok(n) = n_str.parse::<u64>()
+    {
         return Ok(n);
     }
     Err(format!(

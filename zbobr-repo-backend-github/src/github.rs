@@ -415,8 +415,11 @@ impl ZbobrRepoBackendGithub {
         zbobr_utility::cleanup_worktree_for_branch(bare_dir, work_branch, workspace_path).await?;
 
         let ws = workspace_path.to_str().unwrap();
-        let local_work_branch_exists =
-            git_check(bare_dir, &["rev-parse", &format!("{}^{{commit}}", work_branch)]).await?;
+        let local_work_branch_exists = git_check(
+            bare_dir,
+            &["rev-parse", &format!("{}^{{commit}}", work_branch)],
+        )
+        .await?;
         if local_work_branch_exists {
             git(bare_dir, &["worktree", "add", ws, work_branch]).await?;
         } else {
