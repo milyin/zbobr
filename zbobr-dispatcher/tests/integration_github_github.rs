@@ -127,3 +127,11 @@ async fn test_github_github_abstract_pause_on_ask_user() {
     let env = get_env().await;
     abstract_test_helpers::run_pause_on_ask_user(&env).await;
 }
+
+#[tokio::test]
+#[serial]
+#[ignore = "full GitHub backend test — run with `cargo test -- --ignored`"]
+async fn test_github_github_abstract_pause_on_runner_error() {
+    let env = get_env().await;
+    abstract_test_helpers::run_pause_on_runner_error(&env).await;
+}
