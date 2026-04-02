@@ -1,0 +1,1 @@
+In zbobr-dispatcher/src/lib.rs, add `self.config.resolve_providers()?;` call inside the `validated()` method (after `self.config.validate()` and `self.config.validate_workflow_refs()`). This ensures circular provider inheritance is detected at startup instead of lazily during stage execution.
