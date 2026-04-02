@@ -2104,4 +2104,22 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn parse_errors_on_malformed_stage_after_marker() {
+        // A valid stage followed by <!-- stage --> marker and a malformed stage title
+        // (model token with a space) should produce an error, not silently skip.
+        let text = "\
+- default:main:1:**working** `claude` `claude-opus-4.6` `2024-01-01 00:00:00 +0000`
+<!-- stage -->
+- default:main:2:**working** `claude` `bad model` `2024-06-15 10:30:00 +0300`
+";
+        let result = parse_context(text);
+        assert!(result.is_err(), "expected error for malformed stage title after <!-- stage --> marker");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Malformed stage title after <!-- stage --> marker"),
+            "error should mention the marker context, got: {err_msg}"
+        );
+    }
 }
