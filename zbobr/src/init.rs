@@ -731,9 +731,13 @@ const TEST_PLANNER_PROMPT: &str = concat!(
 1. Read recent plan and recent implemetation report.
 2. Inspect changes in the working branch (e.g., `git diff origin/{destination_branch}...HEAD`) to understand implemented behavior.
 3. Decide whether the new feature/bugfix needs additional tests beyond existing coverage. If no new tests are needed, call `{mcp_report_success}` with only a brief rationale and finish.
-4. Prepare a plan for implementing the required tests as an overview document and set of checklist items
-5. Call `{mcp_add_checklist_item}` for each test or group of related tests.
-6. Call `{mcp_report_success}` with the overview report test-planning work is complete.
+4. Do NOT propose tests that only assert static prompt text or default config literal values.
+5. Treat prompt files and default config examples as source-of-truth authoring artifacts, not behavior contracts to snapshot.
+6. Prefer tests that validate behavior and contracts: transitions/routing, parser/serializer invariants, error handling, and externally observable outcomes.
+7. Add content-based assertions only when exact text/value stability is itself an explicit product/API contract.
+8. Prepare a plan for implementing the required tests as an overview document and set of checklist items
+9. Call `{mcp_add_checklist_item}` for each test or group of related tests.
+10. Call `{mcp_report_success}` with the overview report test-planning work is complete.
 "#,
 );
 
@@ -794,7 +798,9 @@ Review the implementation changes and ensure they meet coding standards and task
 
 - **Check compile-time validation**: Verify whether code correctness can be enforced at compile time (e.g., through type system, constants, enums) rather than relying on runtime checks or string matching. Flag opportunities to strengthen compile-time guarantees.
 - **Check robustness against inconsistent changes**: Verify that the code is resilient to partial updates — e.g., changing a constant or literal in one place and forgetting to update it elsewhere. Flag hardcoded string literals that could be derived from existing types or constants. But don't be overzealous — not every literal needs to be served as a constant, especially in examples, demonstrations, or tests.
-- **Check type specificity**: Verify that all newly introduced fields, variables, parameters, and return types use the most specific type available for their purpose. Suspect all base types (numbers, strings, booleans) — search the codebase for existing custom types, newtypes, or domain-specific wrappers that should be used instead."#,
+- **Check type specificity**: Verify that all newly introduced fields, variables, parameters, and return types use the most specific type available for their purpose. Suspect all base types (numbers, strings, booleans) — search the codebase for existing custom types, newtypes, or domain-specific wrappers that should be used instead.
+- **Check test value**: Flag tests that only verify static prompt/config content as low-value and brittle unless exact text/value is an explicit runtime or API contract.
+- **Prefer behavior-oriented tests**: Favor findings and suggestions toward tests that validate observable behavior, transitions, integration boundaries, and failure paths."#,
 );
 
 const TESTER_PROMPT: &str = concat!(
