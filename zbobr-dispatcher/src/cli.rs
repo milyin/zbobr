@@ -319,7 +319,11 @@ pub fn select_runnable_task<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Optio
                         if def.call_pipeline().is_none()
                 )
         })
-        .max_by_key(|t| task_priority(t))
+        .max_by(|a, b| {
+            task_priority(a)
+                .cmp(&task_priority(b))
+                .then_with(|| b.id.cmp(&a.id))
+        })
 }
 
 // ---------------------------------------------------------------------------
