@@ -1,0 +1,1 @@
+Remove `TaskSubcommand::Show { id: None, .. }` from the `needs_backends()` no-backend fast path in `zbobr/src/commands.rs`. Also remove the corresponding match arm from `run_without_backends()`. This ensures `task show` (with or without --json) always goes through the backend-aware path in `run_task_subcommand()` where real tasks are fetched and serialized.
