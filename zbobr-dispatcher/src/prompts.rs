@@ -851,4 +851,28 @@ mod tests {
         let builder = make_prompt_builder(None, stages);
         assert!(builder.validate_all_prompts().is_ok());
     }
+
+    #[test]
+    fn sample_task_and_comments_has_nontrivial_fields() {
+        let (task, comments) = sample_task_and_comments();
+
+        assert!(task.pr_url.is_some(), "task.pr_url should be Some");
+        assert!(task.signal.is_some(), "task.signal should be Some");
+        assert!(!task.stack.is_empty(), "task.stack should be non-empty");
+        assert!(
+            !task.context.stages.is_empty(),
+            "task.context.stages should be non-empty"
+        );
+        assert!(
+            task.context.stages.iter().all(|s| !s.records.is_empty()),
+            "every stage context should have at least one record"
+        );
+        for comment in &comments {
+            assert!(
+                comment.url.is_some(),
+                "all comments should have url set, but found None for comment by '{}'",
+                comment.username
+            );
+        }
+    }
 }
