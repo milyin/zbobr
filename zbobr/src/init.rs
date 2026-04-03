@@ -1264,4 +1264,38 @@ name = "test"
             "drudge backup entry must have priority = 0"
         );
     }
+
+    #[test]
+    fn tester_prompt_excludes_formatting_linting_and_defers_to_separate_stage() {
+        // The task explicitly moved formatting/linting out of the tester stage.
+        assert!(
+            !TESTER_PROMPT.to_lowercase().contains("run formatting"),
+            "TESTER_PROMPT must not instruct the tester to run formatting checks"
+        );
+        assert!(
+            !TESTER_PROMPT.to_lowercase().contains("fix formatting"),
+            "TESTER_PROMPT must not instruct the tester to fix formatting issues"
+        );
+        assert!(
+            TESTER_PROMPT.contains("separate stage"),
+            "TESTER_PROMPT must indicate that linting/formatting is handled by a separate stage"
+        );
+    }
+
+    #[test]
+    fn linter_prompt_covers_formatting_and_linting_without_testing() {
+        // The linter stage is responsible for formatting and linting only.
+        assert!(
+            LINTER_PROMPT.to_lowercase().contains("formatting"),
+            "LINTER_PROMPT must cover formatting as a core responsibility"
+        );
+        assert!(
+            LINTER_PROMPT.to_lowercase().contains("linting"),
+            "LINTER_PROMPT must cover linting as a core responsibility"
+        );
+        assert!(
+            !LINTER_PROMPT.to_lowercase().contains("run comprehensive test"),
+            "LINTER_PROMPT must not instruct the linter to run tests"
+        );
+    }
 }
