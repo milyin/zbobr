@@ -19,6 +19,16 @@ use zbobr_task_backend_github::ZbobrTaskBackendGithubToml;
 
 use super::RootConfigToml;
 
+// Default model names used by init workspace. Copilot paths use dot notation
+// for some claude models, while actual Claude executor uses hyphen notation.
+const COPILOT_MODEL_HAIKU: &str = "claude-haiku-4.5";
+const CLAUDE_MODEL_HAIKU: &str = "claude-haiku-4-5";
+const COPILOT_MODEL_SONNET: &str = "claude-sonnet-4.6";
+const CLAUDE_MODEL_OPUS: &str = "claude-opus-4-6";
+const CLAUDE_MODEL_SONNET: &str = "claude-sonnet-4.6";
+const COPILOT_MODEL_GPT_5_4: &str = "gpt-5.4";
+const COPILOT_MODEL_GPT_5_MINI: &str = "gpt-5-mini";
+
 /// Initialize a new zbobr workspace at the given directory.
 ///
 /// Creates the directory (if it does not exist), writes a complete `zbobr.toml`
@@ -141,12 +151,12 @@ fn default_config_toml() -> RootConfigToml {
             vec![
                 ToolEntry {
                     provider: "claude".to_string(),
-                    model: "claude-opus-4.6".parse().unwrap(),
+                    model: CLAUDE_MODEL_OPUS.parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
                     provider: "copilot".to_string(),
-                    model: "claude-sonnet-4.6".parse().unwrap(),
+                    model: COPILOT_MODEL_SONNET.parse().unwrap(),
                     priority: Some(0),
                 },
             ],
@@ -156,12 +166,12 @@ fn default_config_toml() -> RootConfigToml {
             vec![
                 ToolEntry {
                     provider: "claude_planner".to_string(),
-                    model: "claude-opus-4-6".parse().unwrap(),
+                    model: CLAUDE_MODEL_OPUS.parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
                     provider: "copilot_planner".to_string(),
-                    model: "claude-sonnet-4.6".parse().unwrap(),
+                    model: COPILOT_MODEL_SONNET.parse().unwrap(),
                     priority: Some(0),
                 },
             ],
@@ -171,12 +181,12 @@ fn default_config_toml() -> RootConfigToml {
             vec![
                 ToolEntry {
                     provider: "copilot".to_string(),
-                    model: "claude-haiku-4.5".parse().unwrap(),
+                    model: COPILOT_MODEL_HAIKU.parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
                     provider: "claude".to_string(),
-                    model: "claude-haiku-4.5".parse().unwrap(),
+                    model: CLAUDE_MODEL_HAIKU.parse().unwrap(),
                     priority: Some(0),
                 },
             ],
@@ -186,12 +196,12 @@ fn default_config_toml() -> RootConfigToml {
             vec![
                 ToolEntry {
                     provider: "copilot".to_string(),
-                    model: "gpt-5.4".parse().unwrap(),
+                    model: COPILOT_MODEL_GPT_5_4.parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
                     provider: "claude".to_string(),
-                    model: "claude-sonnet-4.6".parse().unwrap(),
+                    model: CLAUDE_MODEL_SONNET.parse().unwrap(),
                     priority: Some(0),
                 },
             ],
@@ -201,12 +211,12 @@ fn default_config_toml() -> RootConfigToml {
             vec![
                 ToolEntry {
                     provider: "copilot".to_string(),
-                    model: "gpt-5-mini".parse().unwrap(),
+                    model: COPILOT_MODEL_GPT_5_MINI.parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
                     provider: "claude".to_string(),
-                    model: "claude-haiku-4.5".parse().unwrap(),
+                    model: CLAUDE_MODEL_HAIKU.parse().unwrap(),
                     priority: Some(0),
                 },
             ],

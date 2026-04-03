@@ -661,9 +661,10 @@ impl<'a> CliStageRunner<'a> {
 
             if outcome.execution_failed {
                 cycle_excluded_providers.insert(resolved_provider.name.clone());
-                let attempts_remaining = self
-                    .zbobr
-                    .available_provider_model_count_excluding(&tool_name, &cycle_excluded_providers)?;
+                let attempts_remaining = self.zbobr.available_provider_model_count_excluding(
+                    &tool_name,
+                    &cycle_excluded_providers,
+                )?;
                 let excluded = self.zbobr.record_provider_failure(&resolved_provider.name);
                 server_handle.abort();
                 if attempts_remaining > 0 {
