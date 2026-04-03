@@ -185,6 +185,7 @@ fn default_config_toml() -> RootConfigToml {
             providers: Some(providers),
             tools: Some(tools),
             provider_exclusion_secs: None,
+            provider_exclusion_fail_count: None,
             work_branch_prefix: Some("zbobr_fix".into()),
             git_user_name: Some("zbobr".into()),
             git_user_email: Some("zbobr@example.com".into()),

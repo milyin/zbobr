@@ -552,6 +552,9 @@ pub struct ZbobrDispatcherConfig {
     /// Seconds a provider is excluded from selection after a failure.
     #[config(skip_args)]
     pub provider_exclusion_secs: u64,
+    /// Consecutive failures required before excluding a provider.
+    #[config(skip_args)]
+    pub provider_exclusion_fail_count: u32,
     /// Prefix for work branches (default: "zbobr_fix").
     pub work_branch_prefix: String,
     /// Git user name for commits made by the tool.
@@ -580,6 +583,7 @@ impl Default for ZbobrDispatcherConfig {
             providers: IndexMap::new(),
             tools: IndexMap::new(),
             provider_exclusion_secs: 300,
+            provider_exclusion_fail_count: 1,
             work_branch_prefix: "zbobr_fix".to_string(),
             git_user_name: String::new(),
             git_user_email: String::new(),

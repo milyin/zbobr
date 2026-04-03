@@ -73,6 +73,9 @@ pub struct ZbobrDispatcher {
     /// Round-robin counters per tool name.
     #[builder(default = "Arc::new(Mutex::new(HashMap::new()))")]
     round_robin_state: Arc<Mutex<HashMap<String, usize>>>,
+    /// Consecutive failure counters per provider.
+    #[builder(default = "Arc::new(Mutex::new(HashMap::new()))")]
+    provider_failure_counts: Arc<Mutex<HashMap<String, u32>>>,
 }
 
 impl ZbobrDispatcher {
@@ -184,11 +187,66 @@ impl ZbobrDispatcher {
             .lock()
             .unwrap()
             .insert(provider_name.to_string(), expiry);
+        self.provider_failure_counts
+            .lock()
+            .unwrap()
+            .insert(provider_name.to_string(), 0);
         tracing::info!(
             "Provider '{}' excluded for {}s",
             provider_name,
             self.config.provider_exclusion_secs
         );
+    }
+
+    /// Return how many provider/model pairs for a tool are currently eligible
+    /// for selection (i.e. not excluded).
+    pub fn available_provider_model_count(&self, tool_name: &str) -> anyhow::Result<usize> {
+        let entries: &Vec<ToolEntry> = self.config.tools.get(tool_name).ok_or_else(|| {
+            anyhow::anyhow!("Tool '{}' not found in dispatcher config", tool_name)
+        })?;
+
+        let now = Instant::now();
+        let mut excluded_lock = self.excluded_providers.lock().unwrap();
+        excluded_lock.retain(|_, expiry| *expiry > now);
+        let excluded_set: HashSet<String> = excluded_lock.keys().cloned().collect();
+        drop(excluded_lock);
+
+        Ok(entries
+            .iter()
+            .filter(|entry| !excluded_set.contains(&entry.provider))
+            .count())
+    }
+
+    /// Record a successful provider call and reset its consecutive failure count.
+    pub fn record_provider_success(&self, provider_name: &str) {
+        self.provider_failure_counts
+            .lock()
+            .unwrap()
+            .insert(provider_name.to_string(), 0);
+    }
+
+    /// Record a failed provider call and exclude when the failure threshold is reached.
+    ///
+    /// Returns `true` if this failure caused provider exclusion.
+    pub fn record_provider_failure(&self, provider_name: &str) -> bool {
+        let threshold = self.config.provider_exclusion_fail_count.max(1);
+
+        let should_exclude = {
+            let mut counts = self.provider_failure_counts.lock().unwrap();
+            let next = counts
+                .get(provider_name)
+                .copied()
+                .unwrap_or(0)
+                .saturating_add(1);
+            counts.insert(provider_name.to_string(), next);
+            next >= threshold
+        };
+
+        if should_exclude {
+            self.exclude_provider(provider_name);
+        }
+
+        should_exclude
     }
 
     /// Build an executor for the given resolved provider.
@@ -587,6 +645,71 @@ mod tests {
         assert!(
             msg.contains("not found"),
             "Expected 'not found' in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn record_provider_failure_excludes_on_threshold() {
+        let mut providers = IndexMap::new();
+        providers.insert("a".to_string(), provider_def("claude", 10));
+
+        let mut tools = IndexMap::new();
+        tools.insert("smart".to_string(), vec![tool_entry("a", "model-a")]);
+
+        let dispatcher = make_dispatcher(providers, tools);
+        dispatcher
+            .provider_failure_counts
+            .lock()
+            .unwrap()
+            .insert("a".to_string(), 0);
+
+        // Default threshold is 1.
+        let excluded = dispatcher.record_provider_failure("a");
+        assert!(excluded, "Provider should be excluded on first failure");
+        assert!(
+            dispatcher
+                .excluded_providers
+                .lock()
+                .unwrap()
+                .contains_key("a"),
+            "Provider should be present in exclusion map"
+        );
+    }
+
+    #[test]
+    fn record_provider_success_resets_failures() {
+        let mut providers = IndexMap::new();
+        providers.insert("a".to_string(), provider_def("claude", 10));
+
+        let mut tools = IndexMap::new();
+        tools.insert("smart".to_string(), vec![tool_entry("a", "model-a")]);
+
+        let mut cfg = ZbobrDispatcherConfig {
+            providers,
+            tools,
+            ..Default::default()
+        };
+        cfg.provider_exclusion_fail_count = 2;
+
+        let dispatcher = ZbobrDispatcherBuilder::new()
+            .with_config(cfg)
+            .with_workflow(Workflow::default())
+            .with_task_backend(MockTaskBackend)
+            .with_repo_backend(MockRepoBackend)
+            .build();
+
+        let excluded_first = dispatcher.record_provider_failure("a");
+        assert!(
+            !excluded_first,
+            "Provider should not be excluded before threshold"
+        );
+
+        dispatcher.record_provider_success("a");
+
+        let excluded_after_reset = dispatcher.record_provider_failure("a");
+        assert!(
+            !excluded_after_reset,
+            "Failure counter should reset after success"
         );
     }
 
