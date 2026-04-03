@@ -1,6 +1,7 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -487,11 +488,13 @@ impl<'a> CliStageRunner<'a> {
 
         let agent_token_owned = self.zbobr.config().agent_github_token.as_ref().to_owned();
 
-        // Provider retry loop: on connectivity/quota failure, exclude the failing provider and
-        // immediately retry with the next available one.  select_provider() returns an error when
-        // all providers for the tool are exhausted, which terminates the loop.
+        // Provider retry loop: on any failed execution attempt, retry with the next provider/model
+        // selected by the existing priority + round-robin logic.
+        let mut cycle_excluded_providers: HashSet<String> = HashSet::new();
         loop {
-            let (resolved_provider, model) = self.zbobr.select_provider(&tool_name)?;
+            let (resolved_provider, model) = self
+                .zbobr
+                .select_provider_excluding(&tool_name, &cycle_excluded_providers)?;
             let plan_mode = resolved_provider.plan_mode;
 
             // Add a new StageContext to the task's context for this attempt.
@@ -570,12 +573,6 @@ impl<'a> CliStageRunner<'a> {
             )
             .await;
 
-            // Exclude provider on connectivity/quota failures so subsequent attempts and stage
-            // runs skip it until the exclusion expires.
-            if outcome.connectivity_failure {
-                self.zbobr.exclude_provider(&resolved_provider.name);
-            }
-
             // Store the captured output and link it to the stage context entry.
             if let Some(ref output) = outcome.execution_output {
                 let role_session = self.zbobr.role_session(self.task_id);
@@ -612,15 +609,33 @@ impl<'a> CliStageRunner<'a> {
             // Read the last mapped tool from the shared tracker.
             let last_mapped_tool = *tool_tracker.lock().unwrap();
 
-            // Retry immediately with the next provider if this was a connectivity/quota failure.
-            if outcome.connectivity_failure {
+            if outcome.execution_failed {
+                cycle_excluded_providers.insert(resolved_provider.name.clone());
+                let attempts_remaining = self
+                    .zbobr
+                    .available_provider_model_count_excluding(&tool_name, &cycle_excluded_providers)?;
+                let excluded = self.zbobr.record_provider_failure(&resolved_provider.name);
                 server_handle.abort();
+                if attempts_remaining > 0 {
+                    let exclusion_hint = if excluded {
+                        " (provider temporarily excluded)"
+                    } else {
+                        ""
+                    };
+                    tracing::warn!(
+                        "Provider '{}' failed for tool '{}' — retrying with next available provider{}",
+                        resolved_provider.name,
+                        tool_name,
+                        exclusion_hint,
+                    );
+                    continue;
+                }
                 tracing::warn!(
-                    "Provider '{}' failed for tool '{}' — retrying with next available provider",
-                    resolved_provider.name,
-                    tool_name,
+                    "Provider/model attempts exhausted for tool '{}' after a full cycle",
+                    tool_name
                 );
-                continue;
+            } else {
+                self.zbobr.record_provider_success(&resolved_provider.name);
             }
 
             if let Some(e) = finalize_stage_session(
@@ -1555,10 +1570,8 @@ struct SessionOutcome {
     execution_interrupted: bool,
     execution_error: Option<anyhow::Error>,
     execution_output: Option<String>,
-    /// True only when the executor could not be spawned or a connectivity-level
-    /// error occurred (i.e. the provider itself was unavailable). False for
-    /// ordinary non-zero exit codes, which represent task-level failures.
-    connectivity_failure: bool,
+    /// True when execution failed and the stage should try another provider/model.
+    execution_failed: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1582,19 +1595,16 @@ async fn execute_tool(
                     execution_interrupted: false,
                     execution_error: None,
                     execution_output: Some(output),
-                    connectivity_failure: false,
+                    execution_failed: false,
                 },
-                Ok(ExecutorOutput { output, exit_ok: false, quota_failure }) => {
+                Ok(ExecutorOutput { output, exit_ok: false, .. }) => {
                     let e = anyhow::anyhow!("Tool exited with non-zero status");
                     tracing::error!("Tool execution failed: {e}");
-                    if quota_failure {
-                        tracing::warn!("Quota/rate-limit failure detected in executor output — treating as provider unavailability");
-                    }
                     SessionOutcome {
                         execution_interrupted: false,
                         execution_error: Some(e),
                         execution_output: Some(output),
-                        connectivity_failure: quota_failure,
+                        execution_failed: true,
                     }
                 }
                 Err(e) => {
@@ -1603,7 +1613,7 @@ async fn execute_tool(
                         execution_interrupted: false,
                         execution_error: Some(e),
                         execution_output: None,
-                        connectivity_failure: true,
+                        execution_failed: true,
                     }
                 }
             }
@@ -1614,7 +1624,7 @@ async fn execute_tool(
                 execution_interrupted: true,
                 execution_error: None,
                 execution_output: None,
-                connectivity_failure: false,
+                execution_failed: false,
             }
         }
     }

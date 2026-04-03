@@ -44,6 +44,7 @@ fn test_providers_and_tools() -> (
     let entry = ToolEntry {
         provider: "mcp-tester".to_string(),
         model: Model::try_new("test-model").expect("valid model name"),
+        priority: None,
     };
     let providers = IndexMap::from([("mcp-tester".to_string(), provider)]);
     let tools = IndexMap::from([("mcp-tester".to_string(), vec![entry])]);

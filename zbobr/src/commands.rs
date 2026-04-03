@@ -3,15 +3,12 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Subcommand;
-use zbobr_api::{
-    Comment, Pipeline, Stage, State, Task, WorktreeBackend, config::WorkflowConfig,
-    task::TaskContext,
-};
+use zbobr_api::{Pipeline, Stage, WorktreeBackend, config::WorkflowConfig};
 use zbobr_dispatcher::{
     ConfiguredPromptBuilder, TaskDir, VAR_DESTINATION_BRANCH, VAR_DESTINATION_REPOSITORY, Workflow,
     ZbobrDispatcher,
     config::{ZbobrDispatcherConfig, ZbobrExecutorConfig},
-    print_task,
+    print_task, sample_task_and_comments,
 };
 use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
@@ -244,7 +241,7 @@ fn run_without_backends(
         } => {
             let workflow = prompt_builder.workflow_config();
             let stage_def = resolve_stage_def(workflow, &stage, &role, &pipeline)?;
-            let (task, comments) = dummy_task_and_comments();
+            let (task, comments) = sample_task_and_comments();
             let prompt = prompt_builder.build_for_stage_with_task(stage_def, &task, &comments)?;
             println!("{}", prompt);
             Ok(())
@@ -252,49 +249,12 @@ fn run_without_backends(
         Command::Task {
             subcommand: TaskSubcommand::Show { id: None },
         } => {
-            let (task, comments) = dummy_task_and_comments();
+            let (task, comments) = sample_task_and_comments();
             print_task(&task, &comments);
             Ok(())
         }
         _ => unreachable!("needs_backends() returned false for unexpected command"),
     }
-}
-
-fn dummy_task_and_comments() -> (Task, Vec<Comment>) {
-    let task = Task {
-        id: 0,
-        title: "TITLE".to_string(),
-        description: "DESCRIPTION".to_string(),
-        state: State::Ready,
-        work_branch: Some("WORK_BRANCH".to_string()),
-        pr_url: None,
-        context: TaskContext::default(),
-        signal: None,
-        stack: vec![],
-        status: None,
-        pause: false,
-        confirm: false,
-        pipeline_run_id: 0,
-        stage_count: 0,
-        max_stage_count: 0,
-        closed: false,
-        etag: None,
-    };
-    let comments = vec![
-        Comment {
-            timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
-            username: "dummy".to_string(),
-            body: "USER_REQUEST".to_string(),
-            url: None,
-        },
-        Comment {
-            timestamp: "2025-01-01T01:00:00Z".parse().unwrap(),
-            username: "dummy".to_string(),
-            body: "[report_success]\nREPORT".to_string(),
-            url: None,
-        },
-    ];
-    (task, comments)
 }
 
 /// Handle commands that need the full dispatcher.
@@ -465,7 +425,7 @@ async fn run_task_subcommand(
                     .build_for_stage(stage_def, task_id, zbobr.task_backend())
                     .await?
             } else {
-                let (task, comments) = dummy_task_and_comments();
+                let (task, comments) = sample_task_and_comments();
                 zbobr
                     .prompt_builder()
                     .build_for_stage_with_task(stage_def, &task, &comments)?
