@@ -915,4 +915,37 @@ mod tests {
             "Expected 'nonexistent' in error: {msg}"
         );
     }
+
+    #[test]
+    fn select_provider_entry_priority_elevates_above_provider() {
+        let mut providers = IndexMap::new();
+        providers.insert("a".to_string(), provider_def("claude", 5));
+        providers.insert("b".to_string(), provider_def("copilot", 5));
+
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![
+                tool_entry("a", "opus"),
+                ToolEntry {
+                    provider: "b".to_string(),
+                    model: "sonnet".parse().unwrap(),
+                    priority: Some(20),
+                },
+            ],
+        );
+
+        let dispatcher = make_dispatcher(providers, tools);
+
+        // Provider "b" has base priority 5 but entry priority 20 → should win.
+        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        assert_eq!(rp.name, "b", "elevated entry should be selected first");
+        assert_eq!(model.as_str(), "sonnet");
+
+        // When "b" is excluded, fall back to "a" (effective priority 5).
+        dispatcher.exclude_provider("b");
+        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        assert_eq!(rp.name, "a");
+        assert_eq!(model.as_str(), "opus");
+    }
 }

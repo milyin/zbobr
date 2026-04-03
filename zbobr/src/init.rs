@@ -933,4 +933,114 @@ mod tests {
             );
         }
     }
+
+    // ── default config uses "developer" tool ─────────────────────────────
+
+    #[test]
+    fn default_config_roles_reference_developer_tool() {
+        let config = default_config_toml();
+        let dispatcher = config.dispatcher.as_ref().expect("dispatcher config present");
+        let tools = dispatcher.tools.as_ref().expect("tools present");
+        assert!(
+            tools.contains_key("developer"),
+            "default config must have a 'developer' tool, got keys: {:?}",
+            tools.keys().collect::<Vec<_>>()
+        );
+        // Ensure no role references the old "smart" tool name
+        let workflow = default_workflow();
+        for (role_name, role_def) in &workflow.roles {
+            if let Some(tool) = &role_def.tool {
+                assert_ne!(
+                    tool, "smart",
+                    "Role '{}' references old tool name 'smart'; should be 'developer'",
+                    role_name
+                );
+            }
+        }
+    }
+
+    // ── inline_dispatcher_tables unit tests ──────────────────────────────
+
+    #[test]
+    fn inline_dispatcher_tables_converts_providers_to_inline() {
+        let toml_str = r#"
+[dispatcher.providers.copilot]
+executor = "copilot"
+
+[dispatcher.providers.claude]
+executor = "claude"
+"#;
+        let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
+        inline_dispatcher_tables(&mut doc);
+        let output = doc.to_string();
+        // Should use inline table syntax, not section headers
+        assert!(
+            output.contains("copilot = {"),
+            "copilot should be inline table, got: {output}"
+        );
+        assert!(
+            output.contains("claude = {"),
+            "claude should be inline table, got: {output}"
+        );
+        assert!(
+            !output.contains("[dispatcher.providers.copilot]"),
+            "section header should be gone, got: {output}"
+        );
+    }
+
+    #[test]
+    fn inline_dispatcher_tables_converts_tools_to_inline_array() {
+        let toml_str = r#"
+[[dispatcher.tools.developer]]
+provider = "claude"
+model = "claude-opus-4.6"
+
+[[dispatcher.tools.developer]]
+provider = "copilot"
+model = "claude-opus-4.6"
+"#;
+        let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
+        inline_dispatcher_tables(&mut doc);
+        let output = doc.to_string();
+        assert!(
+            output.contains("developer = ["),
+            "developer should be inline array, got: {output}"
+        );
+        assert!(
+            !output.contains("[[dispatcher.tools.developer]]"),
+            "array-of-tables header should be gone, got: {output}"
+        );
+    }
+
+    #[test]
+    fn inline_dispatcher_tables_noop_when_dispatcher_absent() {
+        let toml_str = r#"
+[workflow]
+name = "test"
+"#;
+        let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
+        // Should not panic
+        inline_dispatcher_tables(&mut doc);
+    }
+
+    #[test]
+    fn default_config_toml_uses_inline_dispatcher_format() {
+        let config = default_config_toml();
+        let pretty = toml::to_string_pretty(&config).unwrap();
+        let mut doc: toml_edit::DocumentMut = pretty.parse().unwrap();
+        inline_dispatcher_tables(&mut doc);
+        let output = doc.to_string();
+        assert!(
+            output.contains("copilot = {"),
+            "copilot provider should be inline, got: {output}"
+        );
+        assert!(
+            output.contains("developer = ["),
+            "developer tool should be inline array, got: {output}"
+        );
+        assert!(
+            !output.contains("[[dispatcher.tools."),
+            "no array-of-tables headers should remain, got: {output}"
+        );
+    }
 }

@@ -1384,4 +1384,76 @@ mod tests {
             "Expected 'unknown executor' in error: {msg}"
         );
     }
+
+    // ── ToolEntry priority serde round-trips ─────────────────────────────
+
+    #[test]
+    fn tool_entry_priority_deserializes_from_toml() {
+        let toml_str = r#"
+[dispatcher.tools]
+developer = [
+  { provider = "claude", model = "claude-opus-4.6", priority = 0 }
+]
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            dispatcher: Dispatcher,
+        }
+        #[derive(serde::Deserialize)]
+        struct Dispatcher {
+            tools: IndexMap<String, Vec<ToolEntry>>,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let entry = &root.dispatcher.tools["developer"][0];
+        assert_eq!(entry.priority, Some(0));
+    }
+
+    #[test]
+    fn tool_entry_priority_defaults_to_none() {
+        let toml_str = r#"
+[dispatcher.tools]
+developer = [
+  { provider = "claude", model = "claude-opus-4.6" }
+]
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            dispatcher: Dispatcher,
+        }
+        #[derive(serde::Deserialize)]
+        struct Dispatcher {
+            tools: IndexMap<String, Vec<ToolEntry>>,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let entry = &root.dispatcher.tools["developer"][0];
+        assert_eq!(entry.priority, None);
+    }
+
+    #[test]
+    fn tool_entry_priority_none_skipped_in_serialization() {
+        let entry = ToolEntry {
+            provider: "claude".to_string(),
+            model: "claude-opus-4.6".parse().unwrap(),
+            priority: None,
+        };
+        let serialized = toml::to_string(&entry).unwrap();
+        assert!(
+            !serialized.contains("priority"),
+            "priority should be absent when None, got: {serialized}"
+        );
+    }
+
+    #[test]
+    fn tool_entry_priority_some_included_in_serialization() {
+        let entry = ToolEntry {
+            provider: "copilot".to_string(),
+            model: "claude-sonnet-4.6".parse().unwrap(),
+            priority: Some(5),
+        };
+        let serialized = toml::to_string(&entry).unwrap();
+        assert!(
+            serialized.contains("priority = 5"),
+            "priority = 5 should be present, got: {serialized}"
+        );
+    }
 }
