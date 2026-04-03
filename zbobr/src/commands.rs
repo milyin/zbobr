@@ -191,6 +191,7 @@ pub async fn run(
             ConfiguredPromptBuilder::new(Some(config_dir), Arc::new(workflow.clone()))
                 .with_var(VAR_DESTINATION_REPOSITORY, &normalized_repo)
                 .with_var(VAR_DESTINATION_BRANCH, &repo_config.branch);
+        prompt_builder.validate_all_prompts()?;
         return run_without_backends(command, &prompt_builder);
     }
 
@@ -202,6 +203,7 @@ pub async fn run(
     let prompt_builder = ConfiguredPromptBuilder::new(Some(config_dir), Arc::new(workflow.clone()))
         .with_var(VAR_DESTINATION_REPOSITORY, repo_backend.repository())
         .with_var(VAR_DESTINATION_BRANCH, repo_backend.branch());
+    prompt_builder.validate_all_prompts()?;
 
     let claude = ClaudeExecutor::new(executor_config.claude);
     let copilot = CopilotExecutor::new(executor_config.copilot);
