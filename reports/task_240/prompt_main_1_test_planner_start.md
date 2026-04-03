@@ -1,0 +1,81 @@
+#Analyze the implementation changes and determine if additional tests are required. Your job is to produce a test plan with list of tests to be added.
+
+- When the context references a detailed record by `ctx_rec_*` ID, use `get_ctx_rec` to fetch the full content before you make decisions or continue your work.
+
+
+## Workflow
+
+1. Read recent plan and recent implemetation report.
+2. Inspect changes in the working branch (e.g., `git diff origin/main...HEAD`) to understand implemented behavior.
+3. Decide whether the new feature/bugfix needs additional tests beyond existing coverage. If no new tests are needed, call `report_success` with only a brief rationale and finish.
+4. Do NOT propose tests that only assert static prompt text or default config literal values.
+5. Treat prompt files and default config examples as source-of-truth authoring artifacts, not behavior contracts to snapshot.
+6. Prefer tests that validate behavior and contracts: transitions/routing, parser/serializer invariants, error handling, and externally observable outcomes.
+7. Add content-based assertions only when exact text/value stability is itself an explicit product/API contract.
+8. Prepare a plan for implementing the required tests as an overview document and set of checklist items
+9. Call `add_checklist_item` for each test or group of related tests.
+10. Call `report_success` with the overview report test-planning work is complete.
+
+---
+
+# Current task: update task list, add json output
+
+# Task description
+
+- update command line command `task list` - make it return list of assigned tasks, one line per task - id, stage count, state, description. Create type "task list entry" or like it with this subset of fields
+   - add command line flag parameter --json output for list
+   - add command line flag parameter --select. It prints only id of ready task with hightest priority (now it's largest stage count, but this can change. Make common function to this lookup, use it both here and in the `loop`). If no task is ready, nothinng is printed, exit code is 1
+- add json flag for `task show`, show json of task with all fields
+
+# Destination branch: main
+
+# Work branch: zbobr_fix-240-update-task-list-add-json-output
+
+# Context
+
+- planning
+  - 💬 Plan: (1) Create `TaskListEntry` struct with id/stage_count/state/title. (2) Extract shared ready-task priority selection function from loop logic. (3) Update `task list` to compact one-line format, add `--json` and `--select` flags. (4) Add `--json` flag to `task show` for full Task JSON output. [ctx_rec_1]
+- user milyin: proceed with plan
+- planning
+  - ✅ Plan approved and checklist created. Approach: extract shared ready-task selection from loop, add TaskListEntry for compact display, update task list/show with --json and --select flags. [ctx_rec_5]
+    - [x] Create TaskListEntry struct and extract shared ready-task selection function [ctx_rec_2]
+    - [x] Update `task list` command: compact format, --json flag, --select flag [ctx_rec_3]
+    - [x] Add --json flag to `task show` for full Task JSON output [ctx_rec_4]
+- working
+  - ✅ Implemented TaskListEntry, select_ready_task, --json and --select flags for task list/show [ctx_rec_6]
+- reviewing
+  - ❌ Review found three issues: selector logic is not actually shared with loop and can return non-ready tasks; `task show --json` without ID drops full-task fields; `TaskListEntry` uses `title` instead of requested `description`. [ctx_rec_7]
+- working
+  - ✅ Fixed all three review issues: description field, select_ready_task excludes Running tasks + shared priority fn, task show --json uses full Task [ctx_rec_11]
+    - [x] Fix select_ready_task: exclude Running tasks, extract shared priority key fn, wire into loop [ctx_rec_8]
+    - [x] TaskListEntry: rename title→description, update From impl and list display [ctx_rec_9]
+    - [x] Fix task show --json no-ID path: serialize Vec<Task> not Vec<TaskListEntry> [ctx_rec_10]
+- user milyin: restore the "title"! The "description" is a misprint
+- reviewing
+  - ❌ Review failed: compact task list still uses description instead of title, and the loop still does not use the shared ready-task lookup required by the task plan. [ctx_rec_12]
+- working
+  - ✅ Fixed both review issues: title restored in TaskListEntry, loop uses select_ready_task [ctx_rec_15]
+    - [x] Restore TaskListEntry.title (not description) + compact list output uses title [ctx_rec_13]
+    - [x] Refactor run_manager_loop to use select_ready_task for RunStage candidate selection [ctx_rec_14]
+- reviewing
+  - ❌ Review failed: `task list --select` still uses a weaker readiness predicate than the loop and can return idle tasks. [ctx_rec_16]
+- working
+  - ✅ Fixed: replaced select_ready_task with select_runnable_task using workflow.resolve_next_action, shared by both --select and loop Phase 2 [ctx_rec_18]
+    - [x] Add select_runnable_task using resolve_next_action, use in --select and loop Phase 2 [ctx_rec_17]
+- reviewing
+  - ❌ Review failed: `task list --select` can still disagree with the loop for READY-with-stack tasks because the shared selector skips the loop’s state-normalization step. [ctx_rec_19]
+- working
+  - ✅ Fixed: select_runnable_task now excludes READY-with-stack tasks, matching loop Phase 1/2 semantics exactly [ctx_rec_21]
+    - [x] Fix select_runnable_task: exclude READY-with-stack tasks to match loop Phase 1 semantics [ctx_rec_20]
+- reviewing
+  - ❌ Review failed: `task show --json` without ID is still routed through the no-backend sample path, so the new full-task list JSON path is unreachable. [ctx_rec_22]
+- working
+  - ✅ Fixed task show --json routing: removed Show{id:None} from no-backend fast path so real tasks are always fetched [ctx_rec_24]
+    - [x] Fix task show --json routing: remove Show{id:None} from needs_backends no-backend path [ctx_rec_23]
+- reviewing
+  - ❌ Review failed: `task list --select` and the loop can still choose different tasks on `stage_count` ties because the shared selector has no deterministic tie-breaker. [ctx_rec_25]
+- working
+  - ✅ Added deterministic tie-breaker to select_runnable_task: now uses (stage_count DESC, task_id DESC) so --select and the loop always agree on highest-priority task regardless of pre-sort order. [ctx_rec_27]
+    - [x] Add deterministic tie-breaker to select_runnable_task: use (stage_count, task_id) as total ordering key [ctx_rec_26]
+- reviewing
+  - ✅ Review passed: implementation is consistent with the plan, no blocking issues found, and all checklist items are complete. [ctx_rec_28]
