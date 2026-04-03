@@ -19,7 +19,7 @@ use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
-    Comment, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
+    Comment, Task, TaskDir, ToolExecutor, Workflow, ZbobrDispatcher,
     task::{Model, Tool},
     workflow::SequentialSignal,
 };
@@ -289,21 +289,26 @@ impl From<&Task> for TaskListEntry {
 /// Priority key for task scheduling: higher value → processed first.
 ///
 /// This is the single source of truth for task priority ordering used by both
-/// [`select_ready_task`] and [`run_manager_loop`].
+/// [`select_runnable_task`] and [`run_manager_loop`].
 fn task_priority(task: &Task) -> u64 {
     task.stage_count
 }
 
-/// Return the highest-priority ready task from `tasks`.
+/// Return the highest-priority task that the workflow is ready to run (non-call [`StateAction::RunStage`]).
 ///
-/// "Ready" means the task is not done, not paused (flag or state), and not
-/// currently running.  Priority is determined by [`task_priority`].
-/// Returns `None` if no ready task exists.
-pub fn select_ready_task(tasks: &[Task]) -> Option<&Task> {
+/// Uses full workflow resolution via [`Workflow::resolve_next_action`] so that the predicate
+/// matches exactly the tasks that [`run_manager_loop`] would schedule in Phase 2.
+/// Returns `None` if no runnable task exists.
+pub fn select_runnable_task<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Option<&'a Task> {
     tasks
         .iter()
         .filter(|t| {
-            !t.state.is_done() && !t.pause && !t.state.is_pause() && !t.state.is_running()
+            !t.pause
+                && matches!(
+                    workflow.resolve_next_action(t),
+                    Ok(crate::workflow::StateAction::RunStage(_, _, ref def))
+                        if def.call_pipeline().is_none()
+                )
         })
         .max_by_key(|t| task_priority(t))
 }
@@ -1321,10 +1326,10 @@ pub async fn run_manager_loop(
             }
         }
 
-        // Phase 2: use select_ready_task to pick the highest-priority RunStage candidate
+        // Phase 2: use select_runnable_task to pick the highest-priority RunStage candidate
         // and run its stage.  This shares the exact same ready-task selection logic as the
         // `task list --select` CLI flag.
-        if let Some(task) = select_ready_task(&runstage_candidates) {
+        if let Some(task) = select_runnable_task(workflow, &runstage_candidates) {
             let action = match workflow.resolve_next_action(task) {
                 Ok(a) => a,
                 Err(e) => {

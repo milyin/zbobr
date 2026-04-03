@@ -8,7 +8,7 @@ use zbobr_dispatcher::{
     ConfiguredPromptBuilder, TaskDir, TaskListEntry, VAR_DESTINATION_BRANCH,
     VAR_DESTINATION_REPOSITORY, Workflow, ZbobrDispatcher,
     config::{ZbobrDispatcherConfig, ZbobrExecutorConfig},
-    print_task, sample_task_and_comments, select_ready_task,
+    print_task, sample_task_and_comments, select_runnable_task,
 };
 use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
@@ -339,7 +339,7 @@ async fn run_task_subcommand(
             tasks.sort_by_key(|t| t.id);
 
             if select {
-                match select_ready_task(&tasks) {
+                match select_runnable_task(zbobr.workflow(), &tasks) {
                     Some(task) => println!("{}", task.id),
                     None => std::process::exit(1),
                 }
