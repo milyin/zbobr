@@ -5,10 +5,10 @@ use std::{path::PathBuf, sync::Arc};
 use clap::Subcommand;
 use zbobr_api::{Pipeline, Stage, WorktreeBackend, config::WorkflowConfig};
 use zbobr_dispatcher::{
-    ConfiguredPromptBuilder, TaskDir, VAR_DESTINATION_BRANCH, VAR_DESTINATION_REPOSITORY, Workflow,
-    ZbobrDispatcher,
+    ConfiguredPromptBuilder, TaskDir, TaskListEntry, VAR_DESTINATION_BRANCH,
+    VAR_DESTINATION_REPOSITORY, Workflow, ZbobrDispatcher,
     config::{ZbobrDispatcherConfig, ZbobrExecutorConfig},
-    print_task, sample_task_and_comments,
+    print_task, sample_task_and_comments, select_ready_task,
 };
 use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
@@ -81,11 +81,20 @@ pub enum TaskSubcommand {
         /// Only show tasks in this state
         #[arg(long)]
         state: Option<String>,
+        /// Output as JSON array
+        #[arg(long)]
+        json: bool,
+        /// Print the ID of the highest-priority ready task and exit; exits with code 1 if none
+        #[arg(long)]
+        select: bool,
     },
     /// Show a task by ID (or list all tasks if no ID given)
     Show {
         /// Task ID
         id: Option<u64>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Update fields of an existing task
     Update {
@@ -163,7 +172,7 @@ impl Command {
                     subcommand: TaskSubcommand::Prompt { id: None, .. },
                 }
                 | Command::Task {
-                    subcommand: TaskSubcommand::Show { id: None },
+                    subcommand: TaskSubcommand::Show { id: None, .. },
                 }
         )
     }
@@ -247,10 +256,14 @@ fn run_without_backends(
             Ok(())
         }
         Command::Task {
-            subcommand: TaskSubcommand::Show { id: None },
+            subcommand: TaskSubcommand::Show { id: None, json },
         } => {
             let (task, comments) = sample_task_and_comments();
-            print_task(&task, &comments);
+            if json {
+                println!("{}", serde_json::to_string_pretty(&task)?);
+            } else {
+                print_task(&task, &comments);
+            }
             Ok(())
         }
         _ => unreachable!("needs_backends() returned false for unexpected command"),
@@ -307,7 +320,7 @@ async fn run_task_subcommand(
             }
             println!("Created task #{}", id);
         }
-        TaskSubcommand::List { state } => {
+        TaskSubcommand::List { state, json, select } => {
             let state_filter = state
                 .as_deref()
                 .map(str::parse::<zbobr_api::State>)
@@ -325,21 +338,35 @@ async fn run_task_subcommand(
             }
             tasks.sort_by_key(|t| t.id);
 
-            if tasks.is_empty() {
+            if select {
+                match select_ready_task(&tasks) {
+                    Some(task) => println!("{}", task.id),
+                    None => std::process::exit(1),
+                }
+                return Ok(());
+            }
+
+            if json {
+                let entries: Vec<TaskListEntry> = tasks.iter().map(TaskListEntry::from).collect();
+                println!("{}", serde_json::to_string_pretty(&entries)?);
+            } else if tasks.is_empty() {
                 println!("No tasks found");
             } else {
                 for task in &tasks {
-                    print_task(task, &[]);
-                    println!("---");
+                    println!("{}\t{}\t{:?}\t{}", task.id, task.stage_count, task.state, task.title);
                 }
             }
         }
-        TaskSubcommand::Show { id } => {
+        TaskSubcommand::Show { id, json } => {
             if let Some(id) = id {
                 let weak = task_backend.get_task(id).await?;
                 let task = weak.snapshot(false).await?;
-                let discussion = weak.get_comments().await?;
-                print_task(&task, &discussion);
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&task)?);
+                } else {
+                    let discussion = weak.get_comments().await?;
+                    print_task(&task, &discussion);
+                }
             } else {
                 let weak_tasks = task_backend.list_tasks().await?;
                 let mut tasks = Vec::new();
@@ -347,7 +374,10 @@ async fn run_task_subcommand(
                     tasks.push(w.snapshot(false).await?);
                 }
                 tasks.sort_by_key(|t| t.id);
-                if tasks.is_empty() {
+                if json {
+                    let entries: Vec<TaskListEntry> = tasks.iter().map(TaskListEntry::from).collect();
+                    println!("{}", serde_json::to_string_pretty(&entries)?);
+                } else if tasks.is_empty() {
                     println!("No tasks found");
                 } else {
                     for task in &tasks {

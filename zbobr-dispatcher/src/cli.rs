@@ -259,6 +259,45 @@ async fn ensure_work_branch(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyho
 }
 
 // ---------------------------------------------------------------------------
+// Task list entry
+// ---------------------------------------------------------------------------
+
+/// Compact projection of a [`Task`] for one-line list display and JSON output.
+#[derive(Debug, serde::Serialize)]
+pub struct TaskListEntry {
+    pub id: u64,
+    pub stage_count: u64,
+    pub state: State,
+    pub title: String,
+}
+
+impl From<&Task> for TaskListEntry {
+    fn from(task: &Task) -> Self {
+        Self {
+            id: task.id,
+            stage_count: task.stage_count,
+            state: task.state.clone(),
+            title: task.title.clone(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Ready-task selection
+// ---------------------------------------------------------------------------
+
+/// Return the highest-priority ready task from `tasks`.
+///
+/// Priority is defined as the highest `stage_count` among tasks that are
+/// neither done nor paused.  Returns `None` if no ready task exists.
+pub fn select_ready_task(tasks: &[Task]) -> Option<&Task> {
+    tasks
+        .iter()
+        .filter(|t| !t.state.is_done() && !t.pause && !t.state.is_pause())
+        .max_by_key(|t| t.stage_count)
+}
+
+// ---------------------------------------------------------------------------
 // Task display
 // ---------------------------------------------------------------------------
 
