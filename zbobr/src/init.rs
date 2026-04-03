@@ -196,6 +196,21 @@ fn default_config_toml() -> RootConfigToml {
                 },
             ],
         ),
+        (
+            "drudge".to_string(),
+            vec![
+                ToolEntry {
+                    provider: "copilot".to_string(),
+                    model: "gpt-5-mini".parse().unwrap(),
+                    priority: None,
+                },
+                ToolEntry {
+                    provider: "claude".to_string(),
+                    model: "claude-haiku-4.5".parse().unwrap(),
+                    priority: Some(0),
+                },
+            ],
+        ),
     ]);
 
     RootConfigToml {
@@ -299,6 +314,15 @@ fn default_workflow() -> WorkflowConfig {
                 prompts: task_prompt.clone(),
                 on_failure: Some(StageTransition::stage("working")),
                 on_intermediate: Some(StageTransition::stage("working")),
+                ..Default::default()
+            },
+        ),
+        (
+            Stage::from("linting"),
+            StageDefinition {
+                role: Some("linter".into()),
+                prompts: task_prompt.clone(),
+                on_failure: Some(StageTransition::stage("working")),
                 ..Default::default()
             },
         ),
@@ -437,6 +461,21 @@ fn default_workflow() -> WorkflowConfig {
             },
         ),
         (
+            "linter".into(),
+            RoleDefinition {
+                mcp: vec![
+                    StopWithError,
+                    ReportSuccess,
+                    ReportFailure,
+                    StopWithQuestion,
+                    GetCtxRec,
+                ],
+                prompt: Some(PathBuf::from("linter.md")),
+                tool: Some("drudge".to_string()),
+                ..Default::default()
+            },
+        ),
+        (
             "merger".into(),
             RoleDefinition {
                 mcp: vec![StopWithError, ReportSuccess, StopWithQuestion],
@@ -544,6 +583,7 @@ const PROMPT_FILES: &[(&str, &str)] = &[
     ("test_planner", TEST_PLANNER_PROMPT),
     ("test_worker", TEST_WORKER_PROMPT),
     ("reviewer", REVIEWER_PROMPT),
+    ("linter", LINTER_PROMPT),
     ("tester", TESTER_PROMPT),
     ("merger", MERGER_PROMPT),
     ("task", TASK_TEMPLATE),
@@ -765,7 +805,6 @@ Run comprehensive tests to verify the implementation meets all testing requireme
 "#,
     get_ctx_rec_guidance!(),
     r#"
-
 ## Access Model
 
 You have access to the task context and the repository for testing:
@@ -780,33 +819,68 @@ You have access to the task context and the repository for testing:
 2. **Independently discover testing infrastructure:**
    - Examine CI and build configuration files (`.github/workflows/`, `Makefile`, `Cargo.toml`, `tox.ini`, `CMakeLists.txt`, or equivalent)
    - Identify test frameworks and commands (cargo test, npm test, pytest, etc.)
-   - Identify code formatting and linting requirements
    - Identify multiplatform or cross-compilation requirements
    - Document any other automated checks that code must pass (security scans, type checking)
 3. **Run comprehensive test suite** matching the project's requirements:
    - Execute all test commands you identified from the CI configuration
    - Record test framework versions, commands executed, and full output
    - Measure code coverage if available
-   - Run formatting/linting checks to ensure code quality
    - Verify all CI requirements are met
-4. **Fix formatting/linting issues if found**: If the only failures are formatting/linting issues (e.g., `cargo fmt`, `cargo clippy`, `prettier`, `black`, `gofmt`), fix them directly, commit with a message like `chore: fix formatting`, and repeat formatting/linting test.
-5. In case of test failures run the failed tests on the original branch to determine if the failure is due to new changes or existing issues in the codebase.
-6. **Document all testing performed:**
+4. In case of test failures run the failed tests on the original branch to determine if the failure is due to new changes or existing issues in the codebase.
+5. **Document all testing performed:**
    - Test frameworks and versions used
    - All commands executed with full output
    - Test results (passed/failed/skipped counts)
    - Any failures found
    - Code coverage metrics
-   - Formatting/linting issues (and whether you fixed them)
-7. Call `{mcp_report_success}` if all tests pass and all requirements are met, or `{mcp_report_failure}` if any tests fail or requirements are not met. Pass your comprehensive test report as a parameter.
+6. Call `{mcp_report_success}` if all tests pass and all requirements are met, or `{mcp_report_failure}` if any tests fail or requirements are not met. Pass your comprehensive test report as a parameter.
 
 ## Important Notes
 
-- **Formatting fixes are allowed**: If the only issue is code style/formatting, fix it and commit — do not reject the task for formatting alone.
-- **Do not modify logic**: Only fix formatting/linting issues automatically. Any substantive code changes must go back to the worker.
+- **Linting and formatting checks are handled by a separate stage — do not run them here.**
+- **Do not modify logic or formatting**: Any substantive code changes must go back to the worker.
 - **Comprehensive testing**: Run all test commands discovered from the CI unless they require complex environment configuration. Mention skipped tests in the report.
 - **Concise but exhaustive reporting**: Include to the report exact command line of each test executed. In case of error append the extract of test log with the error message.
 - **Early termination if necessary**: If some test run shows massive failures indicating a fundamental issue with the implementation, you may stop further testing and make `{mcp_report_failure}` report immediately. Otherwise execute full test suite."#,
+);
+
+const LINTER_PROMPT: &str = concat!(
+    r#"# Linter Agent
+
+Check code formatting and linting, and fix any issues found.
+
+"#,
+    get_ctx_rec_guidance!(),
+    r#"
+## Access Model
+
+You have access to the task context and the repository:
+- The task description, work plan, worker's reports, and context are provided below in this prompt. The full history and checklist are available in the context section.
+- Your current working directory is the repository with the work branch checked out
+- Use `{mcp_stop_with_error}` only to report technical errors
+
+## Workflow
+
+1. Read the task description and context provided below in this prompt.
+2. **Discover formatting and linting setup** by examining CI and build configuration files:
+   - `.github/workflows/` — look for formatting/linting steps (e.g., `cargo fmt --check`, `cargo clippy`, `prettier`, `black`, `gofmt`, `eslint`)
+   - `Makefile`, `Cargo.toml`, `package.json`, `pyproject.toml`, or equivalent — identify lint/fmt commands
+   - Note exact commands and flags used in CI so you run the same checks
+3. **Run all formatting and linting checks** identified from CI:
+   - Record each command executed and its full output
+4. **Fix any issues found**:
+   - Apply auto-fixes (e.g., `cargo fmt`, `gofmt -w`, `black .`, `prettier --write`)
+   - Address linting warnings or errors that have auto-fix options
+   - Commit fixes with a message like `chore: fix formatting and linting`
+   - Do NOT modify logic — only formatting and linting fixes are allowed here
+5. Re-run the checks after fixing to confirm everything passes.
+6. Call `{mcp_report_success}` if all formatting and linting checks pass, or `{mcp_report_failure}` if issues remain that cannot be auto-fixed. Pass a brief report of what was checked and what was fixed.
+
+## Important Notes
+
+- **Only fix formatting and linting** — do not modify logic, tests, or functionality.
+- **Do not run tests** — functional testing is handled by a separate stage.
+- **Fix issues autonomously**: You are allowed and expected to fix formatting/linting issues directly and commit them."#,
 );
 
 const MERGER_PROMPT: &str = r#"# Merger Agent
@@ -934,6 +1008,7 @@ mod tests {
             TEST_PLANNER_PROMPT,
             TEST_WORKER_PROMPT,
             REVIEWER_PROMPT,
+            LINTER_PROMPT,
             TESTER_PROMPT,
         ] {
             assert!(
