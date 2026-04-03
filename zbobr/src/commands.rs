@@ -171,9 +171,6 @@ impl Command {
                 | Command::Task {
                     subcommand: TaskSubcommand::Prompt { id: None, .. },
                 }
-                | Command::Task {
-                    subcommand: TaskSubcommand::Show { id: None, .. },
-                }
         )
     }
 }
@@ -240,30 +237,18 @@ fn run_without_backends(
             unreachable!("Init is handled before config loading in main()")
         }
         Command::Task {
-            subcommand:
-                TaskSubcommand::Prompt {
-                    id: None,
-                    stage,
-                    role,
-                    pipeline,
-                },
+            subcommand: TaskSubcommand::Prompt {
+                id: None,
+                stage,
+                role,
+                pipeline,
+            },
         } => {
             let workflow = prompt_builder.workflow_config();
             let stage_def = resolve_stage_def(workflow, &stage, &role, &pipeline)?;
             let (task, comments) = sample_task_and_comments();
             let prompt = prompt_builder.build_for_stage_with_task(stage_def, &task, &comments)?;
             println!("{}", prompt);
-            Ok(())
-        }
-        Command::Task {
-            subcommand: TaskSubcommand::Show { id: None, json },
-        } => {
-            let (task, comments) = sample_task_and_comments();
-            if json {
-                println!("{}", serde_json::to_string_pretty(&task)?);
-            } else {
-                print_task(&task, &comments);
-            }
             Ok(())
         }
         _ => unreachable!("needs_backends() returned false for unexpected command"),
