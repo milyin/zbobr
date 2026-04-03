@@ -837,6 +837,12 @@ impl<'de> serde::Deserialize<'de> for Model {
     }
 }
 
+pub const DEFAULT_MAX_STAGE_COUNT: u64 = 20;
+
+fn default_max_stage_count() -> u64 {
+    DEFAULT_MAX_STAGE_COUNT
+}
+
 /// A task in the abstract domain (generic, backed by GitHub or Filesystem).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Task {
@@ -872,7 +878,7 @@ pub struct Task {
     pub stage_count: u64,
     /// Maximum number of stages this task is allowed to pass before being auto-paused.
     /// 0 means no limit. Can be set individually per task (overrides the global default).
-    #[serde(default)]
+    #[serde(default = "default_max_stage_count")]
     pub max_stage_count: u64,
     /// Whether the task is closed (e.g. GitHub issue closed, fs task marked closed).
     /// Closed tasks are not listed by `list_tasks` and their worktrees can be cleaned up.
@@ -1133,7 +1139,7 @@ mod tests {
             confirm: false,
             pipeline_run_id: 0,
             stage_count: 0,
-            max_stage_count: 0,
+            max_stage_count: DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
         }

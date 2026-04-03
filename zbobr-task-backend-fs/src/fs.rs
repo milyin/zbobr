@@ -472,7 +472,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             confirm: false,
             pipeline_run_id: 0,
             stage_count: 0,
-            max_stage_count: 0,
+            max_stage_count: self.config.default_max_stage_count,
             closed: false,
             etag: None,
         };

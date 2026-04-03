@@ -1,7 +1,7 @@
 use zbobr_api::Secret;
 use zbobr_utility::config_struct;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 #[config_struct]
 /// Configuration for the GitHub task backend.
 pub struct ZbobrTaskBackendGithubConfig {
@@ -9,6 +9,10 @@ pub struct ZbobrTaskBackendGithubConfig {
     /// Injected from ZbobrDispatcherConfig; any TOML value is overwritten at runtime.
     #[config(skip_args)]
     pub instance: String,
+    /// Optional default maximum number of stages for new tasks (0 disables limit).
+    /// If absent, falls back to zbobr_api::task::DEFAULT_MAX_STAGE_COUNT.
+    #[arg(long)]
+    pub default_max_stage_count: u64,
     /// Task project repository ("Org/repo").
     #[arg(long)]
     pub github_repo: String,
@@ -26,6 +30,20 @@ pub struct ZbobrTaskBackendGithubConfig {
     /// If specified, only process tasks created by these GitHub usernames.
     #[arg(long)]
     pub allowed_usernames: Option<Vec<String>>,
+}
+
+impl Default for ZbobrTaskBackendGithubConfig {
+    fn default() -> Self {
+        Self {
+            instance: String::new(),
+            github_repo: String::new(),
+            github_token: Secret::value("not-configured"),
+            reports_branch: None,
+            reports_path: None,
+            allowed_usernames: None,
+            default_max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
+        }
+    }
 }
 
 impl ZbobrTaskBackendGithubConfig {

@@ -7,7 +7,7 @@ use zbobr_api::{
     config::{StageDefinition, WorkflowConfig},
     config_tools::McpTool,
     context::serialize_context,
-    task::{Pipeline, Stage, Tool},
+    task::{Pipeline, Stage, Tool, DEFAULT_MAX_STAGE_COUNT},
 };
 
 use crate::{backend::TaskBackend, workflow::Workflow};
@@ -168,7 +168,7 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
         confirm: false,
         pipeline_run_id: 1,
         stage_count: 2,
-        max_stage_count: 10,
+        max_stage_count: DEFAULT_MAX_STAGE_COUNT,
         closed: false,
         etag: None,
     };
@@ -397,7 +397,7 @@ mod tests {
             confirm: false,
             pipeline_run_id: 0,
             stage_count: 0,
-            max_stage_count: 0,
+            max_stage_count: DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
         }
