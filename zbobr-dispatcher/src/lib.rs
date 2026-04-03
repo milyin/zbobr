@@ -29,7 +29,7 @@ pub use config::{
 pub use mcp::UnifiedMcp;
 pub use prompts::{
     ConfiguredPromptBuilder, VAR_DESTINATION_BRANCH, VAR_DESTINATION_REPOSITORY,
-    add_mcp_tool_variables, build_full_prompt, load_prompts,
+    add_mcp_tool_variables, build_full_prompt, load_prompts, sample_task_and_comments,
 };
 pub use task::{Comment, Model, RoleSession, StackEntry, Task, TaskSession, Tool};
 pub use task_dir::TaskDir;

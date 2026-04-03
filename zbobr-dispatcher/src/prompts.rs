@@ -2,10 +2,12 @@ use std::{borrow::Cow, collections::HashMap, path::PathBuf, sync::Arc};
 
 use simpleinterpolation::Interpolation;
 use zbobr_api::{
-    Comment, Task,
+    Comment, ContextRecord, ContextRecordType, Signal, StackEntry, StageContext, StageInfo, Task,
+    TaskContext,
     config::{StageDefinition, WorkflowConfig},
     config_tools::McpTool,
     context::serialize_context,
+    task::{Pipeline, Stage, Tool},
 };
 
 use crate::{backend::TaskBackend, workflow::Workflow};
@@ -68,29 +70,10 @@ impl ConfiguredPromptBuilder {
         .await
     }
 
-    /// Validate all prompts by rendering every stage's prompt with dummy data.
+    /// Validate all prompts by rendering every stage's prompt with sample data.
     /// Catches template parse errors and undefined variables at startup.
     pub fn validate_all_prompts(&self) -> anyhow::Result<()> {
-        let task = Task {
-            id: 0,
-            title: "TITLE".to_string(),
-            description: "DESCRIPTION".to_string(),
-            state: "READY".into(),
-            work_branch: Some("WORK_BRANCH".to_string()),
-            pr_url: None,
-            context: zbobr_api::task::TaskContext::default(),
-            signal: None,
-            stack: vec![],
-            status: None,
-            pause: false,
-            confirm: false,
-            pipeline_run_id: 0,
-            stage_count: 0,
-            max_stage_count: 0,
-            closed: false,
-            etag: None,
-        };
-        let comments: Vec<Comment> = vec![];
+        let (task, comments) = sample_task_and_comments();
         let mut errors: Vec<String> = Vec::new();
 
         for (pipeline, stage_name, stage_def) in self.workflow.config().all_stages() {
@@ -135,6 +118,75 @@ impl ConfiguredPromptBuilder {
             &self.extra_vars,
         )
     }
+}
+
+/// Returns a representative task and comments for prompt previewing and validation.
+///
+/// The values are non-trivial so that template variables such as `context`,
+/// `signal`, `stack`, `pr_url`, and comment `url` fields are exercised.
+pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
+    const SAMPLE_REPO_URL: &str = "https://github.com/example/repo";
+    const SAMPLE_ISSUE_URL: &str = "https://github.com/example/repo/issues/1";
+    let stage_info = StageInfo {
+        instance: "zbobr".to_string(),
+        pipeline: Pipeline::from("main"),
+        run_id: 1,
+        stage: Stage::new("planning"),
+        tool: Some(Tool::CLAUDE.to_string()),
+        model: None,
+        prompt_link: None,
+        output_link: None,
+        timestamp: "2025-01-01T00:00:00+00:00".parse().unwrap(),
+    };
+    let context = TaskContext {
+        stages: vec![StageContext {
+            info: stage_info,
+            records: vec![ContextRecord {
+                id: 1,
+                record_type: ContextRecordType::Success,
+                brief: "Plan approved and ready for implementation".to_string(),
+                report_link: Some(format!("{SAMPLE_ISSUE_URL}#issuecomment-100")),
+            }],
+        }],
+    };
+    let task = Task {
+        id: 1,
+        title: "TITLE".to_string(),
+        description: "DESCRIPTION".to_string(),
+        state: zbobr_api::State::Ready,
+        work_branch: Some("zbobr_fix-1-sample-task".to_string()),
+        pr_url: Some(format!("{SAMPLE_REPO_URL}/pull/42")),
+        context,
+        signal: Some(Signal::Go(Stage::new("working"))),
+        stack: vec![StackEntry {
+            pipeline: Pipeline::from("parent"),
+            pipeline_run_id: 1,
+            signal: Signal::Go(Stage::new("done")),
+        }],
+        status: None,
+        pause: false,
+        confirm: false,
+        pipeline_run_id: 1,
+        stage_count: 2,
+        max_stage_count: 10,
+        closed: false,
+        etag: None,
+    };
+    let comments = vec![
+        Comment {
+            timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
+            username: "user".to_string(),
+            body: "USER_REQUEST".to_string(),
+            url: Some(format!("{SAMPLE_ISSUE_URL}#issuecomment-200")),
+        },
+        Comment {
+            timestamp: "2025-01-01T01:00:00Z".parse().unwrap(),
+            username: "zbobr[bot]".to_string(),
+            body: "[report_success]\nREPORT".to_string(),
+            url: Some(format!("{SAMPLE_ISSUE_URL}#issuecomment-201")),
+        },
+    ];
+    (task, comments)
 }
 
 /// Collect prompt file paths from a StageDefinition.
@@ -798,5 +850,29 @@ mod tests {
         );
         let builder = make_prompt_builder(None, stages);
         assert!(builder.validate_all_prompts().is_ok());
+    }
+
+    #[test]
+    fn sample_task_and_comments_has_nontrivial_fields() {
+        let (task, comments) = sample_task_and_comments();
+
+        assert!(task.pr_url.is_some(), "task.pr_url should be Some");
+        assert!(task.signal.is_some(), "task.signal should be Some");
+        assert!(!task.stack.is_empty(), "task.stack should be non-empty");
+        assert!(
+            !task.context.stages.is_empty(),
+            "task.context.stages should be non-empty"
+        );
+        assert!(
+            task.context.stages.iter().all(|s| !s.records.is_empty()),
+            "every stage context should have at least one record"
+        );
+        for comment in &comments {
+            assert!(
+                comment.url.is_some(),
+                "all comments should have url set, but found None for comment by '{}'",
+                comment.username
+            );
+        }
     }
 }
