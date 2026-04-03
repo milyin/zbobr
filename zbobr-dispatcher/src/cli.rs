@@ -268,7 +268,7 @@ pub struct TaskListEntry {
     pub id: u64,
     pub stage_count: u64,
     pub state: State,
-    pub description: String,
+    pub title: String,
 }
 
 impl From<&Task> for TaskListEntry {
@@ -277,7 +277,7 @@ impl From<&Task> for TaskListEntry {
             id: task.id,
             stage_count: task.stage_count,
             state: task.state.clone(),
-            description: task.description.clone(),
+            title: task.title.clone(),
         }
     }
 }
@@ -1133,6 +1133,11 @@ pub async fn run_manager_loop(
         all_tasks.sort_by(|a, b| task_priority(b).cmp(&task_priority(a)));
 
         let mut session_run = false;
+
+        // Phase 1: apply transitions and handle Done / instant call-stage actions for all
+        // tasks eagerly.  Non-call RunStage tasks are collected for priority-based selection
+        // in Phase 2 below.
+        let mut runstage_candidates: Vec<Task> = Vec::new();
         for task in &all_tasks {
             if task.state.is_done() {
                 continue;
@@ -1178,15 +1183,16 @@ pub async fn run_manager_loop(
 
             match action {
                 crate::workflow::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
-                    tracing::info!(
-                        "Processing task #{} (state={:?}, signal={:?}) — running stage {}/{}",
-                        task.id,
-                        task.state,
-                        task.signal,
-                        pipeline_name,
-                        stage_name,
-                    );
                     if let Some(call_target) = stage_def.call_pipeline() {
+                        // Call stages are instant — process eagerly without consuming the slot
+                        tracing::info!(
+                            "Processing task #{} (state={:?}, signal={:?}) — running stage {}/{}",
+                            task.id,
+                            task.state,
+                            task.signal,
+                            pipeline_name,
+                            stage_name,
+                        );
                         if let Err(e) = handle_call_stage(
                             zbobr,
                             task.id,
@@ -1203,37 +1209,10 @@ pub async fn run_manager_loop(
                                 task.id
                             );
                         }
-                        // Don't break — call stages are instant, continue processing
-                        continue;
+                    } else {
+                        // Non-call RunStage — collect for priority-based selection in Phase 2
+                        runstage_candidates.push(task.clone());
                     }
-                    let runner = CliStageRunner::new(
-                        zbobr,
-                        task.id,
-                        pipeline_name,
-                        stage_name,
-                        stage_def,
-                        None,
-                    );
-                    if let Err(e) = runner.run().await {
-                        let msg = format!(
-                            "Stage {}/{} failed for task #{}: {e}",
-                            pipeline_name, stage_name, task.id
-                        );
-                        tracing::error!("{msg}");
-                        let task_session = zbobr.task_session(task.id);
-                        let status = format_error_status(zbobr, &msg);
-                        if let Err(pause_err) = task_session
-                            .set_pause_with_status_and_signal(status, Signal::go(stage_name))
-                            .await
-                        {
-                            tracing::error!(
-                                "Failed to pause task #{} after stage error: {pause_err}",
-                                task.id
-                            );
-                        }
-                    }
-                    session_run = true;
-                    break;
                 }
                 crate::workflow::StateAction::Done => {
                     let task_session = zbobr.task_session(task.id);
@@ -1339,6 +1318,58 @@ pub async fn run_manager_loop(
                     }
                 }
                 crate::workflow::StateAction::Paused | crate::workflow::StateAction::Idle => {}
+            }
+        }
+
+        // Phase 2: use select_ready_task to pick the highest-priority RunStage candidate
+        // and run its stage.  This shares the exact same ready-task selection logic as the
+        // `task list --select` CLI flag.
+        if let Some(task) = select_ready_task(&runstage_candidates) {
+            let action = match workflow.resolve_next_action(task) {
+                Ok(a) => a,
+                Err(e) => {
+                    tracing::warn!("State machine error for task #{}: {e}", task.id);
+                    continue;
+                }
+            };
+            if let crate::workflow::StateAction::RunStage(pipeline_name, stage_name, stage_def) =
+                action
+            {
+                tracing::info!(
+                    "Processing task #{} (state={:?}, signal={:?}) — running stage {}/{}",
+                    task.id,
+                    task.state,
+                    task.signal,
+                    pipeline_name,
+                    stage_name,
+                );
+                let runner = CliStageRunner::new(
+                    zbobr,
+                    task.id,
+                    pipeline_name,
+                    stage_name,
+                    stage_def,
+                    None,
+                );
+                if let Err(e) = runner.run().await {
+                    let msg = format!(
+                        "Stage {}/{} failed for task #{}: {e}",
+                        pipeline_name, stage_name, task.id
+                    );
+                    tracing::error!("{msg}");
+                    let task_session = zbobr.task_session(task.id);
+                    let status = format_error_status(zbobr, &msg);
+                    if let Err(pause_err) = task_session
+                        .set_pause_with_status_and_signal(status, Signal::go(stage_name))
+                        .await
+                    {
+                        tracing::error!(
+                            "Failed to pause task #{} after stage error: {pause_err}",
+                            task.id
+                        );
+                    }
+                }
+                session_run = true;
             }
         }
 

@@ -353,7 +353,7 @@ async fn run_task_subcommand(
                 println!("No tasks found");
             } else {
                 for task in &tasks {
-                    println!("{}\t{}\t{:?}\t{}", task.id, task.stage_count, task.state, task.description);
+                    println!("{}\t{}\t{:?}\t{}", task.id, task.stage_count, task.state, task.title);
                 }
             }
         }
