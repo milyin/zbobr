@@ -20,8 +20,8 @@ use std::{
 };
 
 pub use cli::{
-    ConfigFileArg, ConfigLocation, GlobalArgs, parse_cli, print_task, process_task,
-    resolve_config_location, run_manager_loop,
+    ConfigFileArg, ConfigLocation, GlobalArgs, TaskListEntry, parse_cli, print_task, process_task,
+    resolve_config_location, run_manager_loop, select_runnable_task,
 };
 pub use config::{
     ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs, ZbobrExecutorToml,

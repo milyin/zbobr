@@ -477,7 +477,8 @@ mod tests {
             assert!(keys.contains(expected), "missing key: {expected}");
         }
         // Optional keys absent when task fields are None
-        for absent in &[VAR_WORK_BRANCH] {
+        {
+            let absent = &VAR_WORK_BRANCH;
             assert!(!keys.contains(absent), "key should be absent: {absent}");
         }
     }

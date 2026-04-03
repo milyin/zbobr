@@ -456,7 +456,6 @@ impl IntegrationTestEnv {
 
         let mcp_tester_config = ZbobrExecutorMcpTesterConfig {
             scenarios: scenario_paths,
-            ..Default::default()
         };
 
         let task = self.get_task(task_id).await;
@@ -515,7 +514,6 @@ impl IntegrationTestEnv {
 
             let mcp_tester_config = ZbobrExecutorMcpTesterConfig {
                 scenarios: scenario_paths,
-                ..Default::default()
             };
 
             let task = self.get_task(task_id).await;
@@ -560,7 +558,6 @@ impl IntegrationTestEnv {
 
         let mcp_tester_config = ZbobrExecutorMcpTesterConfig {
             scenarios: scenario_paths,
-            ..Default::default()
         };
 
         let task = self.get_task(task_id).await;
