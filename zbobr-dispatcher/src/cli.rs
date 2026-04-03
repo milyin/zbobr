@@ -268,7 +268,7 @@ pub struct TaskListEntry {
     pub id: u64,
     pub stage_count: u64,
     pub state: State,
-    pub title: String,
+    pub description: String,
 }
 
 impl From<&Task> for TaskListEntry {
@@ -277,7 +277,7 @@ impl From<&Task> for TaskListEntry {
             id: task.id,
             stage_count: task.stage_count,
             state: task.state.clone(),
-            title: task.title.clone(),
+            description: task.description.clone(),
         }
     }
 }
@@ -286,15 +286,26 @@ impl From<&Task> for TaskListEntry {
 // Ready-task selection
 // ---------------------------------------------------------------------------
 
+/// Priority key for task scheduling: higher value → processed first.
+///
+/// This is the single source of truth for task priority ordering used by both
+/// [`select_ready_task`] and [`run_manager_loop`].
+fn task_priority(task: &Task) -> u64 {
+    task.stage_count
+}
+
 /// Return the highest-priority ready task from `tasks`.
 ///
-/// Priority is defined as the highest `stage_count` among tasks that are
-/// neither done nor paused.  Returns `None` if no ready task exists.
+/// "Ready" means the task is not done, not paused (flag or state), and not
+/// currently running.  Priority is determined by [`task_priority`].
+/// Returns `None` if no ready task exists.
 pub fn select_ready_task(tasks: &[Task]) -> Option<&Task> {
     tasks
         .iter()
-        .filter(|t| !t.state.is_done() && !t.pause && !t.state.is_pause())
-        .max_by_key(|t| t.stage_count)
+        .filter(|t| {
+            !t.state.is_done() && !t.pause && !t.state.is_pause() && !t.state.is_running()
+        })
+        .max_by_key(|t| task_priority(t))
 }
 
 // ---------------------------------------------------------------------------
@@ -1117,8 +1128,8 @@ pub async fn run_manager_loop(
                 Err(e) => tracing::warn!("Failed to snapshot task: {e}"),
             }
         }
-        // Sort by stage_count descending so tasks closest to completion are processed first.
-        all_tasks.sort_by(|a, b| b.stage_count.cmp(&a.stage_count));
+        // Sort by task_priority descending so tasks closest to completion are processed first.
+        all_tasks.sort_by(|a, b| task_priority(b).cmp(&task_priority(a)));
 
         let mut session_run = false;
         for task in &all_tasks {

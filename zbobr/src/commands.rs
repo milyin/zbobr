@@ -353,7 +353,7 @@ async fn run_task_subcommand(
                 println!("No tasks found");
             } else {
                 for task in &tasks {
-                    println!("{}\t{}\t{:?}\t{}", task.id, task.stage_count, task.state, task.title);
+                    println!("{}\t{}\t{:?}\t{}", task.id, task.stage_count, task.state, task.description);
                 }
             }
         }
@@ -375,8 +375,7 @@ async fn run_task_subcommand(
                 }
                 tasks.sort_by_key(|t| t.id);
                 if json {
-                    let entries: Vec<TaskListEntry> = tasks.iter().map(TaskListEntry::from).collect();
-                    println!("{}", serde_json::to_string_pretty(&entries)?);
+                    println!("{}", serde_json::to_string_pretty(&tasks)?);
                 } else if tasks.is_empty() {
                     println!("No tasks found");
                 } else {
