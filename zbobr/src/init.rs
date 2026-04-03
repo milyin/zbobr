@@ -402,7 +402,6 @@ fn default_workflow() -> WorkflowConfig {
                 ],
                 prompt: Some(PathBuf::from("worker.md")),
                 tool: Some("developer".to_string()),
-                ..Default::default()
             },
         ),
         (
@@ -418,7 +417,6 @@ fn default_workflow() -> WorkflowConfig {
                 ],
                 prompt: Some(PathBuf::from("test_planner.md")),
                 tool: Some("planner".to_string()),
-                ..Default::default()
             },
         ),
         (
@@ -436,7 +434,6 @@ fn default_workflow() -> WorkflowConfig {
                 ],
                 prompt: Some(PathBuf::from("test_worker.md")),
                 tool: Some("developer".to_string()),
-                ..Default::default()
             },
         ),
         (
@@ -453,7 +450,6 @@ fn default_workflow() -> WorkflowConfig {
                 ],
                 prompt: Some(PathBuf::from("reviewer.md")),
                 tool: Some("developer".to_string()),
-                ..Default::default()
             },
         ),
         (
@@ -468,7 +464,6 @@ fn default_workflow() -> WorkflowConfig {
                 ],
                 prompt: Some(PathBuf::from("tester.md")),
                 tool: Some("developer".to_string()),
-                ..Default::default()
             },
         ),
         (
@@ -483,7 +478,6 @@ fn default_workflow() -> WorkflowConfig {
                 ],
                 prompt: Some(PathBuf::from("linter.md")),
                 tool: Some("drudge".to_string()),
-                ..Default::default()
             },
         ),
         (
@@ -492,7 +486,6 @@ fn default_workflow() -> WorkflowConfig {
                 mcp: vec![StopWithError, ReportSuccess, StopWithQuestion],
                 prompt: Some(PathBuf::from("merger.md")),
                 tool: Some("silly".to_string()),
-                ..Default::default()
             },
         ),
     ]);

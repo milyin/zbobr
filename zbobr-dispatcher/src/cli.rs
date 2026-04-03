@@ -1148,7 +1148,7 @@ pub async fn run_manager_loop(
             }
         }
         // Sort by task_priority descending so tasks closest to completion are processed first.
-        all_tasks.sort_by(|a, b| task_priority(b).cmp(&task_priority(a)));
+        all_tasks.sort_by_key(|b| std::cmp::Reverse(task_priority(b)));
 
         let mut session_run = false;
 
