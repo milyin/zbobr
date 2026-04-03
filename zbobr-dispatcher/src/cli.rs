@@ -1924,6 +1924,185 @@ async fn perform_stash_and_push(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use indexmap::IndexMap;
+    use zbobr_api::config::{PipelineConfig, WorkflowConfig};
+    use zbobr_api::config::StageDefinition;
+    use zbobr_api::{Pipeline, StackEntry};
+
+    // -- Test Helpers --
+
+    /// Build a minimal Workflow with a single "main" pipeline containing one "working" stage.
+    fn make_workflow() -> Workflow {
+        let role_stage = StageDefinition {
+            role: Some("worker".to_string()),
+            ..Default::default()
+        };
+        let main_pipeline = PipelineConfig {
+            stages: IndexMap::from([("working".into(), role_stage)]),
+        };
+        let config = WorkflowConfig {
+            pipelines: [("main".into(), main_pipeline)].into(),
+            ..Default::default()
+        };
+        Workflow::from_config(config)
+    }
+
+    /// Construct a Task with the given fields, defaults for the rest.
+    fn make_task(id: u64, state: State, stage_count: u64, pause: bool, stack: Vec<StackEntry>) -> Task {
+        Task {
+            id,
+            title: format!("task {}", id),
+            description: "test description".to_string(),
+            state,
+            work_branch: None,
+            pr_url: None,
+            context: Default::default(),
+            signal: None,
+            stack,
+            status: None,
+            pause,
+            confirm: false,
+            pipeline_run_id: 0,
+            stage_count,
+            max_stage_count: 0,
+            closed: false,
+            etag: None,
+        }
+    }
+
+    // -- Tests for select_runnable_task --
+
+    #[test]
+    fn select_runnable_task_selects_highest_stage_count() {
+        let wf = make_workflow();
+        let tasks = [
+            make_task(1, State::Ready, 2, false, vec![]),
+            make_task(2, State::Ready, 5, false, vec![]),
+            make_task(3, State::Ready, 3, false, vec![]),
+        ];
+
+        let selected = select_runnable_task(&wf, &tasks);
+        assert!(selected.is_some());
+        assert_eq!(selected.unwrap().id, 2);
+    }
+
+    #[test]
+    fn select_runnable_task_deterministic_tie_break() {
+        let wf = make_workflow();
+        // Two tasks with same stage_count but different IDs
+        let tasks1 = [
+            make_task(5, State::Ready, 10, false, vec![]),
+            make_task(3, State::Ready, 10, false, vec![]),
+        ];
+        let tasks2 = [
+            make_task(3, State::Ready, 10, false, vec![]),
+            make_task(5, State::Ready, 10, false, vec![]),
+        ];
+
+        let selected1 = select_runnable_task(&wf, &tasks1);
+        let selected2 = select_runnable_task(&wf, &tasks2);
+
+        // Both should select the same task regardless of input order (deterministic)
+        // The implementation uses b.id.cmp(&a.id) which selects the lower ID on ties
+        assert_eq!(selected1.map(|t| t.id), Some(3));
+        assert_eq!(selected2.map(|t| t.id), Some(3));
+    }
+
+    #[test]
+    fn select_runnable_task_excludes_paused_tasks() {
+        let wf = make_workflow();
+        let tasks = [make_task(1, State::Ready, 10, true, vec![])];
+
+        let selected = select_runnable_task(&wf, &tasks);
+        assert!(selected.is_none());
+    }
+
+    #[test]
+    fn select_runnable_task_excludes_ready_with_stack() {
+        let wf = make_workflow();
+        let stack = vec![StackEntry {
+            pipeline: Pipeline::Main,
+            signal: Signal::go("working"),
+            pipeline_run_id: 1,
+        }];
+        let tasks = [make_task(1, State::Ready, 10, false, stack)];
+
+        let selected = select_runnable_task(&wf, &tasks);
+        // READY-with-stack tasks are excluded (Phase 1 normalization)
+        assert!(selected.is_none());
+    }
+
+    #[test]
+    fn select_runnable_task_excludes_done_tasks() {
+        let wf = make_workflow();
+        let tasks = [make_task(1, State::Done, 10, false, vec![])];
+
+        let selected = select_runnable_task(&wf, &tasks);
+        assert!(selected.is_none());
+    }
+
+    #[test]
+    fn select_runnable_task_returns_none_on_empty_input() {
+        let wf = make_workflow();
+        let tasks: [Task; 0] = [];
+
+        let selected = select_runnable_task(&wf, &tasks);
+        assert!(selected.is_none());
+    }
+
+    #[test]
+    fn select_runnable_task_returns_none_when_all_filtered() {
+        let wf = make_workflow();
+        let stack = vec![StackEntry {
+            pipeline: Pipeline::Main,
+            signal: Signal::go("working"),
+            pipeline_run_id: 1,
+        }];
+        let tasks = [
+            make_task(1, State::Ready, 10, true, vec![]),           // paused
+            make_task(2, State::Done, 5, false, vec![]),            // done
+            make_task(3, State::Ready, 15, false, stack),           // ready with stack
+        ];
+
+        let selected = select_runnable_task(&wf, &tasks);
+        assert!(selected.is_none());
+    }
+
+    // -- Tests for TaskListEntry --
+
+    #[test]
+    fn task_list_entry_from_task_projects_correct_fields() {
+        let task = make_task(42, State::Ready, 7, false, vec![]);
+        let entry = TaskListEntry::from(&task);
+
+        assert_eq!(entry.id, 42);
+        assert_eq!(entry.stage_count, 7);
+        assert_eq!(entry.state, State::Ready);
+        assert_eq!(entry.title, "task 42");
+    }
+
+    #[test]
+    fn task_list_entry_json_serialization_has_expected_keys() {
+        let task = make_task(99, State::Pending(Pipeline::Main), 3, false, vec![]);
+        let entry = TaskListEntry::from(&task);
+        let json_str = serde_json::to_string(&entry).expect("failed to serialize");
+        let json_obj: serde_json::Value = serde_json::from_str(&json_str).expect("failed to parse json");
+
+        // Check that all expected keys are present
+        assert!(json_obj.is_object());
+        let obj = json_obj.as_object().unwrap();
+        assert!(obj.contains_key("id"));
+        assert!(obj.contains_key("stage_count"));
+        assert!(obj.contains_key("state"));
+        assert!(obj.contains_key("title"));
+
+        // Verify values
+        assert_eq!(obj["id"].as_u64(), Some(99));
+        assert_eq!(obj["stage_count"].as_u64(), Some(3));
+        assert_eq!(obj["title"].as_str(), Some("task 99"));
+    }
+
+    // -- Existing tests for sanitize_branch_postfix --
 
     #[test]
     fn sanitize_branch_postfix_basic() {
