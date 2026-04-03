@@ -1,6 +1,7 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -489,9 +490,14 @@ impl<'a> CliStageRunner<'a> {
 
         // Provider retry loop: on any failed execution attempt, retry with the next provider/model
         // selected by the existing priority + round-robin logic.
-        let mut attempts_remaining = self.zbobr.available_provider_model_count(&tool_name)?;
+        let mut cycle_excluded_providers: HashSet<String> = HashSet::new();
+        let mut attempts_remaining = self
+            .zbobr
+            .available_provider_model_count_excluding(&tool_name, &cycle_excluded_providers)?;
         loop {
-            let (resolved_provider, model) = self.zbobr.select_provider(&tool_name)?;
+            let (resolved_provider, model) = self
+                .zbobr
+                .select_provider_excluding(&tool_name, &cycle_excluded_providers)?;
             let plan_mode = resolved_provider.plan_mode;
 
             // Add a new StageContext to the task's context for this attempt.
@@ -607,7 +613,10 @@ impl<'a> CliStageRunner<'a> {
             let last_mapped_tool = *tool_tracker.lock().unwrap();
 
             if outcome.execution_failed {
-                attempts_remaining = attempts_remaining.saturating_sub(1);
+                cycle_excluded_providers.insert(resolved_provider.name.clone());
+                attempts_remaining = self
+                    .zbobr
+                    .available_provider_model_count_excluding(&tool_name, &cycle_excluded_providers)?;
                 let excluded = self.zbobr.record_provider_failure(&resolved_provider.name);
                 server_handle.abort();
                 if attempts_remaining > 0 {

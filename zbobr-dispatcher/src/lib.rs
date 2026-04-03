@@ -123,6 +123,16 @@ impl ZbobrDispatcher {
     /// Filters out currently excluded providers, groups remaining entries by priority,
     /// and selects within the highest-priority group using round-robin.
     pub fn select_provider(&self, tool_name: &str) -> anyhow::Result<(ResolvedProvider, Model)> {
+        self.select_provider_excluding(tool_name, &HashSet::new())
+    }
+
+    /// Select a provider/model pair while additionally excluding provider names
+    /// for the current selection cycle.
+    pub fn select_provider_excluding(
+        &self,
+        tool_name: &str,
+        additional_excluded: &HashSet<String>,
+    ) -> anyhow::Result<(ResolvedProvider, Model)> {
         let entries: &Vec<ToolEntry> = self.config.tools.get(tool_name).ok_or_else(|| {
             anyhow::anyhow!("Tool '{}' not found in dispatcher config", tool_name)
         })?;
@@ -140,7 +150,10 @@ impl ZbobrDispatcher {
         let available: Vec<(usize, &ToolEntry)> = entries
             .iter()
             .enumerate()
-            .filter(|(_, entry)| !excluded_set.contains(&entry.provider))
+            .filter(|(_, entry)| {
+                !excluded_set.contains(&entry.provider)
+                    && !additional_excluded.contains(&entry.provider)
+            })
             .collect();
 
         if available.is_empty() {
@@ -201,6 +214,16 @@ impl ZbobrDispatcher {
     /// Return how many provider/model pairs for a tool are currently eligible
     /// for selection (i.e. not excluded).
     pub fn available_provider_model_count(&self, tool_name: &str) -> anyhow::Result<usize> {
+        self.available_provider_model_count_excluding(tool_name, &HashSet::new())
+    }
+
+    /// Return how many provider/model pairs for a tool are currently eligible
+    /// for selection after applying both global and additional exclusions.
+    pub fn available_provider_model_count_excluding(
+        &self,
+        tool_name: &str,
+        additional_excluded: &HashSet<String>,
+    ) -> anyhow::Result<usize> {
         let entries: &Vec<ToolEntry> = self.config.tools.get(tool_name).ok_or_else(|| {
             anyhow::anyhow!("Tool '{}' not found in dispatcher config", tool_name)
         })?;
@@ -213,7 +236,10 @@ impl ZbobrDispatcher {
 
         Ok(entries
             .iter()
-            .filter(|entry| !excluded_set.contains(&entry.provider))
+            .filter(|entry| {
+                !excluded_set.contains(&entry.provider)
+                    && !additional_excluded.contains(&entry.provider)
+            })
             .count())
     }
 
@@ -616,6 +642,32 @@ mod tests {
         let (rp, model) = dispatcher.select_provider("smart").unwrap();
         assert_eq!(rp.name, "fallback");
         assert_eq!(model.as_str(), "haiku");
+    }
+
+    #[test]
+    fn select_provider_honors_additional_exclusions() {
+        let mut providers = IndexMap::new();
+        providers.insert("primary".to_string(), provider_def("claude", 10));
+        providers.insert("fallback".to_string(), provider_def("copilot", 0));
+
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![
+                tool_entry("primary", "opus"),
+                tool_entry("fallback", "gpt-5.3-codex"),
+            ],
+        );
+
+        let dispatcher = make_dispatcher(providers, tools);
+        let mut excluded = HashSet::new();
+        excluded.insert("primary".to_string());
+
+        let (rp, model) = dispatcher
+            .select_provider_excluding("smart", &excluded)
+            .unwrap();
+        assert_eq!(rp.name, "fallback");
+        assert_eq!(model.as_str(), "gpt-5.3-codex");
     }
 
     #[test]
