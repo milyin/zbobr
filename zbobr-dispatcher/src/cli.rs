@@ -298,12 +298,21 @@ fn task_priority(task: &Task) -> u64 {
 ///
 /// Uses full workflow resolution via [`Workflow::resolve_next_action`] so that the predicate
 /// matches exactly the tasks that [`run_manager_loop`] would schedule in Phase 2.
+///
+/// Tasks in `READY` state with a non-empty stack are excluded because the loop normalises them
+/// via `apply_ready_from_state` in Phase 1 and defers them to the next cycle — they are never
+/// present in Phase 2 `runstage_candidates`.  Calling `resolve_next_action` on such tasks
+/// would use the wrong pipeline (default instead of the saved stack pipeline).
+///
 /// Returns `None` if no runnable task exists.
 pub fn select_runnable_task<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Option<&'a Task> {
     tasks
         .iter()
         .filter(|t| {
+            // READY-with-stack tasks are normalised in loop Phase 1 and deferred; skip them.
+            let ready_with_stack = t.state.is_ready() && !t.stack.is_empty();
             !t.pause
+                && !ready_with_stack
                 && matches!(
                     workflow.resolve_next_action(t),
                     Ok(crate::workflow::StateAction::RunStage(_, _, ref def))
