@@ -671,6 +671,35 @@ mod tests {
     }
 
     #[test]
+    fn select_provider_excluding_preserves_priority_tiers() {
+        let mut providers = IndexMap::new();
+        providers.insert("high_a".to_string(), provider_def("claude", 10));
+        providers.insert("high_b".to_string(), provider_def("copilot", 10));
+        providers.insert("low".to_string(), provider_def("copilot", 0));
+
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![
+                tool_entry("high_a", "claude-opus-4-6"),
+                tool_entry("low", "gpt-5.3-codex"),
+                tool_entry("high_b", "gpt-5.4"),
+            ],
+        );
+
+        let dispatcher = make_dispatcher(providers, tools);
+        let mut excluded = HashSet::new();
+        excluded.insert("high_a".to_string());
+
+        let (rp, model) = dispatcher
+            .select_provider_excluding("smart", &excluded)
+            .unwrap();
+
+        assert_eq!(rp.name, "high_b");
+        assert_eq!(model.as_str(), "gpt-5.4");
+    }
+
+    #[test]
     fn select_provider_all_excluded_error() {
         let mut providers = IndexMap::new();
         providers.insert("only".to_string(), provider_def("claude", 10));
