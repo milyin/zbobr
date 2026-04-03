@@ -123,6 +123,16 @@ fn default_config_toml() -> RootConfigToml {
                 access_key: None,
             },
         ),
+        (
+            "copilot_planner".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("copilot".to_string()),
+                priority: None,
+                plan_mode: Some(true),
+                access_key: None,
+            },
+        ),
     ]);
 
     let tools = IndexMap::from([
@@ -136,7 +146,7 @@ fn default_config_toml() -> RootConfigToml {
                 },
                 ToolEntry {
                     provider: "copilot".to_string(),
-                    model: "claude-opus-4.6".parse().unwrap(),
+                    model: "claude-sonnet-4.6".parse().unwrap(),
                     priority: Some(0),
                 },
             ],
@@ -149,20 +159,40 @@ fn default_config_toml() -> RootConfigToml {
                     model: "claude-opus-4-6".parse().unwrap(),
                     priority: None,
                 },
+                ToolEntry {
+                    provider: "copilot_planner".to_string(),
+                    model: "claude-sonnet-4.6".parse().unwrap(),
+                    priority: Some(0),
+                },
             ],
         ),
         (
-            "silly".to_string(),
+            "helper".to_string(),
             vec![
                 ToolEntry {
                     provider: "copilot".to_string(),
-                    model: "gpt-5-mini".parse().unwrap(),
+                    model: "claude-haiku-4.5".parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
                     provider: "claude".to_string(),
-                    model: "claude-haiku-4-5".parse().unwrap(),
+                    model: "claude-haiku-4.5".parse().unwrap(),
+                    priority: Some(0),
+                },
+            ],
+        ),
+        (
+            "reviewer".to_string(),
+            vec![
+                ToolEntry {
+                    provider: "copilot".to_string(),
+                    model: "gpt-5.4".parse().unwrap(),
                     priority: None,
+                },
+                ToolEntry {
+                    provider: "claude".to_string(),
+                    model: "claude-sonnet-4.6".parse().unwrap(),
+                    priority: Some(0),
                 },
             ],
         ),
