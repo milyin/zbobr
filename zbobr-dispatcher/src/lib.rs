@@ -170,7 +170,7 @@ impl ZbobrDispatcher {
                 .get(&entry.provider)
                 .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", entry.provider))?;
             priority_groups
-                .entry(rp.priority)
+                .entry(entry.priority.unwrap_or(rp.priority))
                 .or_default()
                 .push((*idx, *entry));
         }
@@ -543,6 +543,7 @@ mod tests {
         ToolEntry {
             provider: provider.to_string(),
             model: model.parse().unwrap(),
+            priority: None,
         }
     }
 
@@ -697,6 +698,40 @@ mod tests {
 
         assert_eq!(rp.name, "high_b");
         assert_eq!(model.as_str(), "gpt-5.4");
+    }
+
+    #[test]
+    fn select_provider_entry_priority_overrides_provider() {
+        let mut providers = IndexMap::new();
+        providers.insert("primary".to_string(), provider_def("claude", 10));
+        providers.insert("fallback".to_string(), provider_def("copilot", 10));
+
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![
+                tool_entry("primary", "opus"),
+                ToolEntry {
+                    provider: "fallback".to_string(),
+                    model: "haiku".parse().unwrap(),
+                    priority: Some(0),
+                },
+            ],
+        );
+
+        let dispatcher = make_dispatcher(providers, tools);
+
+        // Both providers have priority 10, but the fallback entry overrides to 0.
+        // Without exclusions, the primary (effective priority 10) should be selected.
+        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        assert_eq!(rp.name, "primary");
+        assert_eq!(model.as_str(), "opus");
+
+        // When primary is excluded, fallback (entry priority 0) is the only option.
+        dispatcher.exclude_provider("primary");
+        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        assert_eq!(rp.name, "fallback");
+        assert_eq!(model.as_str(), "haiku");
     }
 
     #[test]
@@ -879,5 +914,38 @@ mod tests {
             msg.contains("nonexistent"),
             "Expected 'nonexistent' in error: {msg}"
         );
+    }
+
+    #[test]
+    fn select_provider_entry_priority_elevates_above_provider() {
+        let mut providers = IndexMap::new();
+        providers.insert("a".to_string(), provider_def("claude", 5));
+        providers.insert("b".to_string(), provider_def("copilot", 5));
+
+        let mut tools = IndexMap::new();
+        tools.insert(
+            "smart".to_string(),
+            vec![
+                tool_entry("a", "opus"),
+                ToolEntry {
+                    provider: "b".to_string(),
+                    model: "sonnet".parse().unwrap(),
+                    priority: Some(20),
+                },
+            ],
+        );
+
+        let dispatcher = make_dispatcher(providers, tools);
+
+        // Provider "b" has base priority 5 but entry priority 20 → should win.
+        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        assert_eq!(rp.name, "b", "elevated entry should be selected first");
+        assert_eq!(model.as_str(), "sonnet");
+
+        // When "b" is excluded, fall back to "a" (effective priority 5).
+        dispatcher.exclude_provider("b");
+        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        assert_eq!(rp.name, "a");
+        assert_eq!(model.as_str(), "opus");
     }
 }

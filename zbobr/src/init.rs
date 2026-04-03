@@ -46,11 +46,12 @@ pub async fn init_workspace(dest: &Path) -> anyhow::Result<()> {
     }
 
     // Serialize with toml pretty-printer, then post-process with toml_edit
-    // to convert stage definitions into inline tables.
+    // to convert stage definitions and dispatcher providers/tools into inline tables.
     let config = default_config_toml();
     let pretty = toml::to_string_pretty(&config)?;
     let mut doc: toml_edit::DocumentMut = pretty.parse()?;
     inline_stage_tables(&mut doc);
+    inline_dispatcher_tables(&mut doc);
     let config_content = format!(
         "# zbobr configuration\n# See documentation for all available options.\n\n{}",
         doc
@@ -122,29 +123,21 @@ fn default_config_toml() -> RootConfigToml {
                 access_key: None,
             },
         ),
-        (
-            "copilot_planner".to_string(),
-            ProviderDefinition {
-                executor: None,
-                parent: Some("copilot".to_string()),
-                priority: None,
-                plan_mode: Some(true),
-                access_key: None,
-            },
-        ),
     ]);
 
     let tools = IndexMap::from([
         (
-            "smart".to_string(),
+            "developer".to_string(),
             vec![
+                ToolEntry {
+                    provider: "claude".to_string(),
+                    model: "claude-opus-4.6".parse().unwrap(),
+                    priority: None,
+                },
                 ToolEntry {
                     provider: "copilot".to_string(),
                     model: "claude-opus-4.6".parse().unwrap(),
-                },
-                ToolEntry {
-                    provider: "claude".to_string(),
-                    model: "claude-opus-4-6".parse().unwrap(),
+                    priority: Some(0),
                 },
             ],
         ),
@@ -152,12 +145,9 @@ fn default_config_toml() -> RootConfigToml {
             "planner".to_string(),
             vec![
                 ToolEntry {
-                    provider: "copilot_planner".to_string(),
-                    model: "claude-opus-4.6".parse().unwrap(),
-                },
-                ToolEntry {
                     provider: "claude_planner".to_string(),
                     model: "claude-opus-4-6".parse().unwrap(),
+                    priority: None,
                 },
             ],
         ),
@@ -167,10 +157,12 @@ fn default_config_toml() -> RootConfigToml {
                 ToolEntry {
                     provider: "copilot".to_string(),
                     model: "gpt-5-mini".parse().unwrap(),
+                    priority: None,
                 },
                 ToolEntry {
                     provider: "claude".to_string(),
                     model: "claude-haiku-4-5".parse().unwrap(),
+                    priority: None,
                 },
             ],
         ),
@@ -344,7 +336,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("worker.md")),
-                tool: Some("smart".to_string()),
+                tool: Some("developer".to_string()),
                 ..Default::default()
             },
         ),
@@ -378,7 +370,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("test_worker.md")),
-                tool: Some("smart".to_string()),
+                tool: Some("developer".to_string()),
                 ..Default::default()
             },
         ),
@@ -395,7 +387,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("reviewer.md")),
-                tool: Some("smart".to_string()),
+                tool: Some("developer".to_string()),
                 ..Default::default()
             },
         ),
@@ -410,7 +402,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("tester.md")),
-                tool: Some("smart".to_string()),
+                tool: Some("developer".to_string()),
                 ..Default::default()
             },
         ),
@@ -461,6 +453,54 @@ fn inline_stage_tables(doc: &mut toml_edit::DocumentMut) {
             }
         }
         stages.set_dotted(true);
+    }
+}
+
+/// Convert `dispatcher.providers.*` and `dispatcher.tools.*` entries to inline tables/arrays.
+fn inline_dispatcher_tables(doc: &mut toml_edit::DocumentMut) {
+    let Some(toml_edit::Item::Table(dispatcher)) = doc.get_mut("dispatcher") else {
+        return;
+    };
+
+    if let Some(toml_edit::Item::Table(providers)) = dispatcher.get_mut("providers") {
+        let keys: Vec<String> = providers.iter().map(|(k, _)| k.to_string()).collect();
+        for key in &keys {
+            let Some(provider_item) = providers.get_mut(key) else {
+                continue;
+            };
+            if let Some(table) = provider_item.as_table_mut() {
+                let inline = table.clone().into_inline_table();
+                *provider_item = toml_edit::Item::Value(toml_edit::Value::InlineTable(inline));
+            }
+            if let Some(mut k) = providers.key_mut(key) {
+                k.fmt();
+            }
+        }
+    }
+
+    if let Some(toml_edit::Item::Table(tools)) = dispatcher.get_mut("tools") {
+        let keys: Vec<String> = tools.iter().map(|(k, _)| k.to_string()).collect();
+        for key in &keys {
+            let Some(tool_item) = tools.get_mut(key) else {
+                continue;
+            };
+            let inline_tables: Option<Vec<toml_edit::InlineTable>> =
+                if let toml_edit::Item::ArrayOfTables(aot) = tool_item {
+                    Some(aot.iter().map(|t| t.clone().into_inline_table()).collect())
+                } else {
+                    None
+                };
+            if let Some(inline_tables) = inline_tables {
+                let mut array = toml_edit::Array::new();
+                for inline in inline_tables {
+                    array.push(toml_edit::Value::InlineTable(inline));
+                }
+                *tool_item = toml_edit::Item::Value(toml_edit::Value::Array(array));
+            }
+            if let Some(mut k) = tools.key_mut(key) {
+                k.fmt();
+            }
+        }
     }
 }
 
@@ -892,5 +932,115 @@ mod tests {
                 name
             );
         }
+    }
+
+    // ── default config uses "developer" tool ─────────────────────────────
+
+    #[test]
+    fn default_config_roles_reference_developer_tool() {
+        let config = default_config_toml();
+        let dispatcher = config.dispatcher.as_ref().expect("dispatcher config present");
+        let tools = dispatcher.tools.as_ref().expect("tools present");
+        assert!(
+            tools.contains_key("developer"),
+            "default config must have a 'developer' tool, got keys: {:?}",
+            tools.keys().collect::<Vec<_>>()
+        );
+        // Ensure no role references the old "smart" tool name
+        let workflow = default_workflow();
+        for (role_name, role_def) in &workflow.roles {
+            if let Some(tool) = &role_def.tool {
+                assert_ne!(
+                    tool, "smart",
+                    "Role '{}' references old tool name 'smart'; should be 'developer'",
+                    role_name
+                );
+            }
+        }
+    }
+
+    // ── inline_dispatcher_tables unit tests ──────────────────────────────
+
+    #[test]
+    fn inline_dispatcher_tables_converts_providers_to_inline() {
+        let toml_str = r#"
+[dispatcher.providers.copilot]
+executor = "copilot"
+
+[dispatcher.providers.claude]
+executor = "claude"
+"#;
+        let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
+        inline_dispatcher_tables(&mut doc);
+        let output = doc.to_string();
+        // Should use inline table syntax, not section headers
+        assert!(
+            output.contains("copilot = {"),
+            "copilot should be inline table, got: {output}"
+        );
+        assert!(
+            output.contains("claude = {"),
+            "claude should be inline table, got: {output}"
+        );
+        assert!(
+            !output.contains("[dispatcher.providers.copilot]"),
+            "section header should be gone, got: {output}"
+        );
+    }
+
+    #[test]
+    fn inline_dispatcher_tables_converts_tools_to_inline_array() {
+        let toml_str = r#"
+[[dispatcher.tools.developer]]
+provider = "claude"
+model = "claude-opus-4.6"
+
+[[dispatcher.tools.developer]]
+provider = "copilot"
+model = "claude-opus-4.6"
+"#;
+        let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
+        inline_dispatcher_tables(&mut doc);
+        let output = doc.to_string();
+        assert!(
+            output.contains("developer = ["),
+            "developer should be inline array, got: {output}"
+        );
+        assert!(
+            !output.contains("[[dispatcher.tools.developer]]"),
+            "array-of-tables header should be gone, got: {output}"
+        );
+    }
+
+    #[test]
+    fn inline_dispatcher_tables_noop_when_dispatcher_absent() {
+        let toml_str = r#"
+[workflow]
+name = "test"
+"#;
+        let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
+        // Should not panic
+        inline_dispatcher_tables(&mut doc);
+    }
+
+    #[test]
+    fn default_config_toml_uses_inline_dispatcher_format() {
+        let config = default_config_toml();
+        let pretty = toml::to_string_pretty(&config).unwrap();
+        let mut doc: toml_edit::DocumentMut = pretty.parse().unwrap();
+        inline_dispatcher_tables(&mut doc);
+        let output = doc.to_string();
+        assert!(
+            output.contains("copilot = {"),
+            "copilot provider should be inline, got: {output}"
+        );
+        assert!(
+            output.contains("developer = ["),
+            "developer tool should be inline array, got: {output}"
+        );
+        assert!(
+            !output.contains("[[dispatcher.tools."),
+            "no array-of-tables headers should remain, got: {output}"
+        );
     }
 }
