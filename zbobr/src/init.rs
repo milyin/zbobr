@@ -232,6 +232,7 @@ fn default_config_toml() -> RootConfigToml {
         }),
         tasks: Some(ZbobrTaskBackendGithubToml {
             instance: None,
+            default_max_stage_count: Some(zbobr_api::task::DEFAULT_MAX_STAGE_COUNT),
             github_repo: Some("owner/repo".into()),
             github_token: Some(Secret::value(String::new())),
             reports_branch: None,
@@ -867,11 +868,12 @@ You have access to the task context and the repository:
    - Note exact commands and flags used in CI so you run the same checks
 3. **Run all formatting and linting checks** identified from CI:
    - Record each command executed and its full output
-4. **Fix any issues found**:
-   - Apply auto-fixes (e.g., `cargo fmt`, `gofmt -w`, `black .`, `prettier --write`)
-   - Address linting warnings or errors that have auto-fix options
-   - Commit fixes with a message like `chore: fix formatting and linting`
-   - Do NOT modify logic — only formatting and linting fixes are allowed here
+4. **Fix auto-fixable issues only**:
+   - Apply tool-based auto-fixes (e.g., `cargo fmt`, `gofmt -w`, `black .`, `prettier --write`)
+   - Address linting warnings or errors that can be auto-fixed by these tools
+   - Do not attempt manual fixes for issues that cannot be resolved automatically by formatter/linter
+   - If any issue remains after auto-fix and cannot be auto-fixed, call `{mcp_report_failure}` with a detailed report of the remaining issues
+   - Commit only auto-fix changes with a message like `chore: fix formatting and linting`
 5. Re-run the checks after fixing to confirm everything passes.
 6. Call `{mcp_report_success}` if all formatting and linting checks pass, or `{mcp_report_failure}` if issues remain that cannot be auto-fixed. Pass a brief report of what was checked and what was fixed.
 
@@ -1203,6 +1205,25 @@ name = "test"
     }
 
     #[test]
+    fn default_workflow_linting_stage_on_failure_goes_to_working() {
+        let workflow = default_workflow();
+        let main = workflow
+            .pipeline(Pipeline::MAIN)
+            .expect("main pipeline exists");
+
+        let linting = main.stages.get("linting").expect("linting stage exists");
+        let on_failure = linting
+            .on_failure
+            .as_ref()
+            .and_then(|t| t.next.as_deref());
+        assert_eq!(
+            on_failure,
+            Some("working"),
+            "linting stage on_failure must route back to working"
+        );
+    }
+
+    #[test]
     fn default_workflow_linter_role_uses_drudge_tool_and_linter_prompt() {
         let workflow = default_workflow();
         let linter = workflow.roles.get("linter").expect("linter role exists");
@@ -1295,6 +1316,15 @@ name = "test"
         assert!(
             !LINTER_PROMPT.to_lowercase().contains("run comprehensive test"),
             "LINTER_PROMPT must not instruct the linter to run tests"
+        );
+        assert!(
+            LINTER_PROMPT.to_lowercase().contains("report_failure"),
+            "LINTER_PROMPT must require report_failure for issues that cannot be auto-fixed"
+        );
+        assert!(
+            LINTER_PROMPT.to_lowercase().contains("cannot be resolved automatically") ||
+            LINTER_PROMPT.to_lowercase().contains("cannot be auto-fixed"),
+            "LINTER_PROMPT must explicitly disallow manual fixes for non-auto-fix issues"
         );
     }
 }
