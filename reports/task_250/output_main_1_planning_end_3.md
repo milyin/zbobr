@@ -1,0 +1,1 @@
+Plan is ready for review. All 6 implementation checklist items have been submitted to the task system. The plan covers adding the "drudge" tool, "linting" stage, "linter" role, new prompt, tester prompt update, and test updates — all in `zbobr/src/init.rs`.
