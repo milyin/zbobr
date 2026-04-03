@@ -237,12 +237,13 @@ fn run_without_backends(
             unreachable!("Init is handled before config loading in main()")
         }
         Command::Task {
-            subcommand: TaskSubcommand::Prompt {
-                id: None,
-                stage,
-                role,
-                pipeline,
-            },
+            subcommand:
+                TaskSubcommand::Prompt {
+                    id: None,
+                    stage,
+                    role,
+                    pipeline,
+                },
         } => {
             let workflow = prompt_builder.workflow_config();
             let stage_def = resolve_stage_def(workflow, &stage, &role, &pipeline)?;
@@ -305,7 +306,11 @@ async fn run_task_subcommand(
             }
             println!("Created task #{}", id);
         }
-        TaskSubcommand::List { state, json, select } => {
+        TaskSubcommand::List {
+            state,
+            json,
+            select,
+        } => {
             let state_filter = state
                 .as_deref()
                 .map(str::parse::<zbobr_api::State>)
@@ -338,7 +343,10 @@ async fn run_task_subcommand(
                 println!("No tasks found");
             } else {
                 for task in &tasks {
-                    println!("{}\t{}\t{:?}\t{}", task.id, task.stage_count, task.state, task.title);
+                    println!(
+                        "{}\t{}\t{:?}\t{}",
+                        task.id, task.stage_count, task.state, task.title
+                    );
                 }
             }
         }

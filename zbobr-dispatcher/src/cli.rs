@@ -1361,14 +1361,8 @@ pub async fn run_manager_loop(
                     pipeline_name,
                     stage_name,
                 );
-                let runner = CliStageRunner::new(
-                    zbobr,
-                    task.id,
-                    pipeline_name,
-                    stage_name,
-                    stage_def,
-                    None,
-                );
+                let runner =
+                    CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, None);
                 if let Err(e) = runner.run().await {
                     let msg = format!(
                         "Stage {}/{} failed for task #{}: {e}",
@@ -1925,8 +1919,8 @@ async fn perform_stash_and_push(
 mod tests {
     use super::*;
     use indexmap::IndexMap;
-    use zbobr_api::config::{PipelineConfig, WorkflowConfig};
     use zbobr_api::config::StageDefinition;
+    use zbobr_api::config::{PipelineConfig, WorkflowConfig};
     use zbobr_api::{Pipeline, StackEntry};
 
     // -- Test Helpers --
@@ -1948,7 +1942,13 @@ mod tests {
     }
 
     /// Construct a Task with the given fields, defaults for the rest.
-    fn make_task(id: u64, state: State, stage_count: u64, pause: bool, stack: Vec<StackEntry>) -> Task {
+    fn make_task(
+        id: u64,
+        state: State,
+        stage_count: u64,
+        pause: bool,
+        stack: Vec<StackEntry>,
+    ) -> Task {
         Task {
             id,
             title: format!("task {}", id),
@@ -2059,9 +2059,9 @@ mod tests {
             pipeline_run_id: 1,
         }];
         let tasks = [
-            make_task(1, State::Ready, 10, true, vec![]),           // paused
-            make_task(2, State::Done, 5, false, vec![]),            // done
-            make_task(3, State::Ready, 15, false, stack),           // ready with stack
+            make_task(1, State::Ready, 10, true, vec![]), // paused
+            make_task(2, State::Done, 5, false, vec![]),  // done
+            make_task(3, State::Ready, 15, false, stack), // ready with stack
         ];
 
         let selected = select_runnable_task(&wf, &tasks);
@@ -2086,7 +2086,8 @@ mod tests {
         let task = make_task(99, State::Pending(Pipeline::Main), 3, false, vec![]);
         let entry = TaskListEntry::from(&task);
         let json_str = serde_json::to_string(&entry).expect("failed to serialize");
-        let json_obj: serde_json::Value = serde_json::from_str(&json_str).expect("failed to parse json");
+        let json_obj: serde_json::Value =
+            serde_json::from_str(&json_str).expect("failed to parse json");
 
         // Check that all expected keys are present
         assert!(json_obj.is_object());
