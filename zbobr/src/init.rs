@@ -176,8 +176,8 @@ fn default_config_toml() -> RootConfigToml {
             agent_github_token: Some(Secret::value("not-configured")),
             providers: Some(providers),
             tools: Some(tools),
-            provider_exclusion_secs: None,
-            provider_exclusion_fail_count: None,
+            provider_exclusion_secs: Some(3600),
+            provider_exclusion_fail_count: Some(3),
             work_branch_prefix: Some("zbobr_fix".into()),
             git_user_name: Some("zbobr".into()),
             git_user_email: Some("zbobr@example.com".into()),
@@ -957,6 +957,14 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn default_config_toml_sets_provider_exclusion_defaults() {
+        let config = default_config_toml();
+        let dispatcher = config.dispatcher.as_ref().expect("dispatcher config present");
+        assert_eq!(dispatcher.provider_exclusion_secs, Some(3600));
+        assert_eq!(dispatcher.provider_exclusion_fail_count, Some(3));
     }
 
     // ── inline_dispatcher_tables unit tests ──────────────────────────────
