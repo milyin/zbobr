@@ -7,7 +7,7 @@ use zbobr_api::{
     config::{StageDefinition, WorkflowConfig},
     config_tools::McpTool,
     context::serialize_context,
-    task::{Pipeline, Stage},
+    task::{Pipeline, Stage, Tool},
 };
 
 use crate::{backend::TaskBackend, workflow::Workflow};
@@ -125,12 +125,14 @@ impl ConfiguredPromptBuilder {
 /// The values are non-trivial so that template variables such as `context`,
 /// `signal`, `stack`, `pr_url`, and comment `url` fields are exercised.
 pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
+    const SAMPLE_REPO_URL: &str = "https://github.com/example/repo";
+    const SAMPLE_ISSUE_URL: &str = "https://github.com/example/repo/issues/1";
     let stage_info = StageInfo {
         instance: "zbobr".to_string(),
         pipeline: Pipeline::from("main"),
         run_id: 1,
         stage: Stage::new("planning"),
-        tool: Some("claude".to_string()),
+        tool: Some(Tool::CLAUDE.to_string()),
         model: None,
         prompt_link: None,
         output_link: None,
@@ -143,9 +145,7 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
                 id: 1,
                 record_type: ContextRecordType::Success,
                 brief: "Plan approved and ready for implementation".to_string(),
-                report_link: Some(
-                    "https://github.com/example/repo/issues/1#issuecomment-100".to_string(),
-                ),
+                report_link: Some(format!("{SAMPLE_ISSUE_URL}#issuecomment-100")),
             }],
         }],
     };
@@ -155,7 +155,7 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
         description: "DESCRIPTION".to_string(),
         state: zbobr_api::State::Ready,
         work_branch: Some("zbobr_fix-1-sample-task".to_string()),
-        pr_url: Some("https://github.com/example/repo/pull/42".to_string()),
+        pr_url: Some(format!("{SAMPLE_REPO_URL}/pull/42")),
         context,
         signal: Some(Signal::Go(Stage::new("working"))),
         stack: vec![StackEntry {
@@ -177,17 +177,13 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
             timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
             username: "user".to_string(),
             body: "USER_REQUEST".to_string(),
-            url: Some(
-                "https://github.com/example/repo/issues/1#issuecomment-200".to_string(),
-            ),
+            url: Some(format!("{SAMPLE_ISSUE_URL}#issuecomment-200")),
         },
         Comment {
             timestamp: "2025-01-01T01:00:00Z".parse().unwrap(),
             username: "zbobr[bot]".to_string(),
             body: "[report_success]\nREPORT".to_string(),
-            url: Some(
-                "https://github.com/example/repo/issues/1#issuecomment-201".to_string(),
-            ),
+            url: Some(format!("{SAMPLE_ISSUE_URL}#issuecomment-201")),
         },
     ];
     (task, comments)
