@@ -2,10 +2,12 @@ use std::{borrow::Cow, collections::HashMap, path::PathBuf, sync::Arc};
 
 use simpleinterpolation::Interpolation;
 use zbobr_api::{
-    Comment, Task,
+    Comment, ContextRecord, ContextRecordType, Signal, StackEntry, StageContext, StageInfo, Task,
+    TaskContext,
     config::{StageDefinition, WorkflowConfig},
     config_tools::McpTool,
     context::serialize_context,
+    task::{Pipeline, Stage},
 };
 
 use crate::{backend::TaskBackend, workflow::Workflow};
@@ -68,29 +70,10 @@ impl ConfiguredPromptBuilder {
         .await
     }
 
-    /// Validate all prompts by rendering every stage's prompt with dummy data.
+    /// Validate all prompts by rendering every stage's prompt with sample data.
     /// Catches template parse errors and undefined variables at startup.
     pub fn validate_all_prompts(&self) -> anyhow::Result<()> {
-        let task = Task {
-            id: 0,
-            title: "TITLE".to_string(),
-            description: "DESCRIPTION".to_string(),
-            state: "READY".into(),
-            work_branch: Some("WORK_BRANCH".to_string()),
-            pr_url: None,
-            context: zbobr_api::task::TaskContext::default(),
-            signal: None,
-            stack: vec![],
-            status: None,
-            pause: false,
-            confirm: false,
-            pipeline_run_id: 0,
-            stage_count: 0,
-            max_stage_count: 0,
-            closed: false,
-            etag: None,
-        };
-        let comments: Vec<Comment> = vec![];
+        let (task, comments) = sample_task_and_comments();
         let mut errors: Vec<String> = Vec::new();
 
         for (pipeline, stage_name, stage_def) in self.workflow.config().all_stages() {
@@ -135,6 +118,79 @@ impl ConfiguredPromptBuilder {
             &self.extra_vars,
         )
     }
+}
+
+/// Returns a representative task and comments for prompt previewing and validation.
+///
+/// The values are non-trivial so that template variables such as `context`,
+/// `signal`, `stack`, `pr_url`, and comment `url` fields are exercised.
+pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
+    let stage_info = StageInfo {
+        instance: "zbobr".to_string(),
+        pipeline: Pipeline::from("main"),
+        run_id: 1,
+        stage: Stage::new("planning"),
+        tool: Some("claude".to_string()),
+        model: None,
+        prompt_link: None,
+        output_link: None,
+        timestamp: "2025-01-01T00:00:00+00:00".parse().unwrap(),
+    };
+    let context = TaskContext {
+        stages: vec![StageContext {
+            info: stage_info,
+            records: vec![ContextRecord {
+                id: 1,
+                record_type: ContextRecordType::Success,
+                brief: "Plan approved and ready for implementation".to_string(),
+                report_link: Some(
+                    "https://github.com/example/repo/issues/1#issuecomment-100".to_string(),
+                ),
+            }],
+        }],
+    };
+    let task = Task {
+        id: 1,
+        title: "TITLE".to_string(),
+        description: "DESCRIPTION".to_string(),
+        state: zbobr_api::State::Ready,
+        work_branch: Some("zbobr_fix-1-sample-task".to_string()),
+        pr_url: Some("https://github.com/example/repo/pull/42".to_string()),
+        context,
+        signal: Some(Signal::Go(Stage::new("working"))),
+        stack: vec![StackEntry {
+            pipeline: Pipeline::from("parent"),
+            pipeline_run_id: 1,
+            signal: Signal::Go(Stage::new("done")),
+        }],
+        status: None,
+        pause: false,
+        confirm: false,
+        pipeline_run_id: 1,
+        stage_count: 2,
+        max_stage_count: 10,
+        closed: false,
+        etag: None,
+    };
+    let comments = vec![
+        Comment {
+            timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
+            username: "user".to_string(),
+            body: "USER_REQUEST".to_string(),
+            url: Some(
+                "https://github.com/example/repo/issues/1#issuecomment-200".to_string(),
+            ),
+        },
+        Comment {
+            timestamp: "2025-01-01T01:00:00Z".parse().unwrap(),
+            username: "zbobr[bot]".to_string(),
+            body: "[report_success]\nREPORT".to_string(),
+            url: Some(
+                "https://github.com/example/repo/issues/1#issuecomment-201".to_string(),
+            ),
+        },
+    ];
+    (task, comments)
 }
 
 /// Collect prompt file paths from a StageDefinition.
