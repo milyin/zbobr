@@ -491,9 +491,6 @@ impl<'a> CliStageRunner<'a> {
         // Provider retry loop: on any failed execution attempt, retry with the next provider/model
         // selected by the existing priority + round-robin logic.
         let mut cycle_excluded_providers: HashSet<String> = HashSet::new();
-        let mut attempts_remaining = self
-            .zbobr
-            .available_provider_model_count_excluding(&tool_name, &cycle_excluded_providers)?;
         loop {
             let (resolved_provider, model) = self
                 .zbobr
@@ -614,7 +611,7 @@ impl<'a> CliStageRunner<'a> {
 
             if outcome.execution_failed {
                 cycle_excluded_providers.insert(resolved_provider.name.clone());
-                attempts_remaining = self
+                let attempts_remaining = self
                     .zbobr
                     .available_provider_model_count_excluding(&tool_name, &cycle_excluded_providers)?;
                 let excluded = self.zbobr.record_provider_failure(&resolved_provider.name);
