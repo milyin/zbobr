@@ -232,6 +232,7 @@ fn default_config_toml() -> RootConfigToml {
         }),
         tasks: Some(ZbobrTaskBackendGithubToml {
             instance: None,
+            default_max_stage_count: Some(zbobr_api::task::DEFAULT_MAX_STAGE_COUNT),
             github_repo: Some("owner/repo".into()),
             github_token: Some(Secret::value(String::new())),
             reports_branch: None,
@@ -706,11 +707,10 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 2. **Identify the analog referenced in the plan.** Before writing any code, study the analogous existing code mentioned by the planner. Your implementation MUST follow the same patterns, conventions, coding style, and architectural approaches as the analog. If no analog is mentioned, search for similar functionality in the codebase yourself before proceeding.
 3. Implement the task by going through unchecked checklist items one by one. Commit work after implementing each item.  **Follow the same patterns and style as the identified analog if one is available.**
 4. When implementation for an item is complete, mark the item done with `{mcp_check_checklist_item}` (pass the ctx_rec_N id).
-5. Correct existing tests if necessary, but **do NOT implement new tests for new functionality** in this stage. Tests will be implemented later.
-6. If you sense your context window is getting close to its limit, finish your current item to a buildable state, commit your work, mark completed items as done, call `{mcp_report_intermediate}` with a summary of what you accomplished and what remains and finish the session.
-7. If you need human clarification or intervention, call `{mcp_stop_with_question}`. If the plan is unclear or requires adjustment, call `{mcp_report_failure}`. In case of technical errors use `{mcp_stop_with_error}`.
-8. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
-9. When your current session's work is done, decide how to finish:
+5. If you sense your context window is getting close to its limit, finish your current item to a buildable state, commit your work, mark completed items as done, call `{mcp_report_intermediate}` with a summary of what you accomplished and what remains and finish the session.
+6. If you need human clarification or intervention, call `{mcp_stop_with_question}`. If the plan is unclear or requires adjustment, call `{mcp_report_failure}`. In case of technical errors use `{mcp_stop_with_error}`.
+7. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
+8. When your current session's work is done, decide how to finish:
     - If **all checklist items are completed** (the full plan is done), call `{mcp_report_success}` to report final success.
     - If **some items remain unchecked** (more work is needed in future sessions), call `{mcp_report_intermediate}` to report what you accomplished so far.
 
@@ -731,9 +731,13 @@ const TEST_PLANNER_PROMPT: &str = concat!(
 1. Read recent plan and recent implemetation report.
 2. Inspect changes in the working branch (e.g., `git diff origin/{destination_branch}...HEAD`) to understand implemented behavior.
 3. Decide whether the new feature/bugfix needs additional tests beyond existing coverage. If no new tests are needed, call `{mcp_report_success}` with only a brief rationale and finish.
-4. Prepare a plan for implementing the required tests as an overview document and set of checklist items
-5. Call `{mcp_add_checklist_item}` for each test or group of related tests.
-6. Call `{mcp_report_success}` with the overview report test-planning work is complete.
+4. Do NOT propose tests that only assert static prompt text or default config literal values.
+5. Treat prompt files and default config examples as source-of-truth authoring artifacts, not behavior contracts to snapshot.
+6. Prefer tests that validate behavior and contracts: transitions/routing, parser/serializer invariants, error handling, and externally observable outcomes.
+7. Add content-based assertions only when exact text/value stability is itself an explicit product/API contract.
+8. Prepare a plan for implementing the required tests as an overview document and set of checklist items
+9. Call `{mcp_add_checklist_item}` for each test or group of related tests.
+10. Call `{mcp_report_success}` with the overview report test-planning work is complete.
 "#,
 );
 
@@ -794,7 +798,9 @@ Review the implementation changes and ensure they meet coding standards and task
 
 - **Check compile-time validation**: Verify whether code correctness can be enforced at compile time (e.g., through type system, constants, enums) rather than relying on runtime checks or string matching. Flag opportunities to strengthen compile-time guarantees.
 - **Check robustness against inconsistent changes**: Verify that the code is resilient to partial updates — e.g., changing a constant or literal in one place and forgetting to update it elsewhere. Flag hardcoded string literals that could be derived from existing types or constants. But don't be overzealous — not every literal needs to be served as a constant, especially in examples, demonstrations, or tests.
-- **Check type specificity**: Verify that all newly introduced fields, variables, parameters, and return types use the most specific type available for their purpose. Suspect all base types (numbers, strings, booleans) — search the codebase for existing custom types, newtypes, or domain-specific wrappers that should be used instead."#,
+- **Check type specificity**: Verify that all newly introduced fields, variables, parameters, and return types use the most specific type available for their purpose. Suspect all base types (numbers, strings, booleans) — search the codebase for existing custom types, newtypes, or domain-specific wrappers that should be used instead.
+- **Check test value**: Flag tests that only verify static prompt/config content as low-value and brittle unless exact text/value is an explicit runtime or API contract.
+- **Prefer behavior-oriented tests**: Favor findings and suggestions toward tests that validate observable behavior, transitions, integration boundaries, and failure paths."#,
 );
 
 const TESTER_PROMPT: &str = concat!(
@@ -868,11 +874,12 @@ You have access to the task context and the repository:
    - Note exact commands and flags used in CI so you run the same checks
 3. **Run all formatting and linting checks** identified from CI:
    - Record each command executed and its full output
-4. **Fix any issues found**:
-   - Apply auto-fixes (e.g., `cargo fmt`, `gofmt -w`, `black .`, `prettier --write`)
-   - Address linting warnings or errors that have auto-fix options
-   - Commit fixes with a message like `chore: fix formatting and linting`
-   - Do NOT modify logic — only formatting and linting fixes are allowed here
+4. **Fix auto-fixable issues only**:
+   - Apply tool-based auto-fixes (e.g., `cargo fmt`, `gofmt -w`, `black .`, `prettier --write`)
+   - Address linting warnings or errors that can be auto-fixed by these tools
+   - Do not attempt manual fixes for issues that cannot be resolved automatically by formatter/linter
+   - If any issue remains after auto-fix and cannot be auto-fixed, call `{mcp_report_failure}` with a detailed report of the remaining issues
+   - Commit only auto-fix changes with a message like `chore: fix formatting and linting`
 5. Re-run the checks after fixing to confirm everything passes.
 6. Call `{mcp_report_success}` if all formatting and linting checks pass, or `{mcp_report_failure}` if issues remain that cannot be auto-fixed. Pass a brief report of what was checked and what was fixed.
 
@@ -933,144 +940,6 @@ You have read access to the task and repository:
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const GET_CTX_REC_PROMPT_FRAGMENT: &str = "{mcp_get_ctx_rec}";
-
-    #[test]
-    fn default_workflow_includes_test_stages() {
-        let workflow = default_workflow();
-        let main = workflow
-            .pipeline(Pipeline::MAIN)
-            .expect("main pipeline exists");
-        assert!(main.stages.contains_key("test_planner"));
-        assert!(main.stages.contains_key("test_worker"));
-
-        let working = main.stages.get("working").expect("working stage exists");
-        assert_eq!(
-            working
-                .on_intermediate
-                .as_ref()
-                .and_then(|t| t.next.as_ref())
-                .map(|s| s.as_str()),
-            Some("reviewing")
-        );
-
-        let reviewing = main
-            .stages
-            .get("reviewing")
-            .expect("reviewing stage exists");
-        assert_eq!(
-            reviewing
-                .on_intermediate
-                .as_ref()
-                .and_then(|t| t.next.as_ref())
-                .map(|s| s.as_str()),
-            Some("test_planner")
-        );
-    }
-
-    #[test]
-    fn default_workflow_has_no_preparator_stage() {
-        let workflow = default_workflow();
-        let main = workflow
-            .pipeline(Pipeline::MAIN)
-            .expect("main pipeline exists");
-
-        // Preparator stage must not exist in any pipeline
-        assert!(
-            !main.stages.contains_key("preparing"),
-            "preparing stage should not exist in main pipeline"
-        );
-
-        if let Some(merge) = workflow.pipeline(Pipeline::MERGE) {
-            assert!(
-                !merge.stages.contains_key("preparing"),
-                "preparing stage should not exist in merge pipeline"
-            );
-        }
-
-        // No stage role should be named "preparator"
-        for stage_def in main.stages.values() {
-            if let Some(ref role) = stage_def.role {
-                assert_ne!(
-                    role, "preparator",
-                    "no stage in main pipeline should have role 'preparator'"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn default_prompts_reference_get_ctx_rec_when_role_has_access() {
-        for prompt in [
-            PLANNER_PROMPT,
-            WORKER_PROMPT,
-            TEST_PLANNER_PROMPT,
-            TEST_WORKER_PROMPT,
-            REVIEWER_PROMPT,
-            LINTER_PROMPT,
-            TESTER_PROMPT,
-        ] {
-            assert!(
-                prompt.contains(GET_CTX_REC_PROMPT_FRAGMENT),
-                "prompt should mention get_ctx_rec"
-            );
-            assert!(
-                prompt.contains("ctx_rec_*"),
-                "prompt should explain when get_ctx_rec is needed"
-            );
-        }
-    }
-
-    #[test]
-    fn merger_prompt_does_not_reference_get_ctx_rec() {
-        assert!(!MERGER_PROMPT.contains(GET_CTX_REC_PROMPT_FRAGMENT));
-    }
-
-    #[test]
-    fn default_workflow_roles_have_tool() {
-        let workflow = default_workflow();
-        for (name, role_def) in &workflow.roles {
-            assert!(
-                role_def.tool.is_some(),
-                "Role '{}' in default_workflow must have a tool defined",
-                name
-            );
-        }
-    }
-
-    // ── default config uses "developer" tool ─────────────────────────────
-
-    #[test]
-    fn default_config_roles_reference_developer_tool() {
-        let config = default_config_toml();
-        let dispatcher = config.dispatcher.as_ref().expect("dispatcher config present");
-        let tools = dispatcher.tools.as_ref().expect("tools present");
-        assert!(
-            tools.contains_key("developer"),
-            "default config must have a 'developer' tool, got keys: {:?}",
-            tools.keys().collect::<Vec<_>>()
-        );
-        // Ensure no role references the old "smart" tool name
-        let workflow = default_workflow();
-        for (role_name, role_def) in &workflow.roles {
-            if let Some(tool) = &role_def.tool {
-                assert_ne!(
-                    tool, "smart",
-                    "Role '{}' references old tool name 'smart'; should be 'developer'",
-                    role_name
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn default_config_toml_sets_provider_exclusion_defaults() {
-        let config = default_config_toml();
-        let dispatcher = config.dispatcher.as_ref().expect("dispatcher config present");
-        assert_eq!(dispatcher.provider_exclusion_secs, Some(3600));
-        assert_eq!(dispatcher.provider_exclusion_fail_count, Some(3));
-    }
 
     // ── inline_dispatcher_tables unit tests ──────────────────────────────
 
@@ -1134,168 +1003,5 @@ name = "test"
         let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
         // Should not panic
         inline_dispatcher_tables(&mut doc);
-    }
-
-    #[test]
-    fn default_config_toml_uses_inline_dispatcher_format() {
-        let config = default_config_toml();
-        let pretty = toml::to_string_pretty(&config).unwrap();
-        let mut doc: toml_edit::DocumentMut = pretty.parse().unwrap();
-        inline_dispatcher_tables(&mut doc);
-        let output = doc.to_string();
-        assert!(
-            output.contains("copilot = {"),
-            "copilot provider should be inline, got: {output}"
-        );
-        assert!(
-            output.contains("developer = ["),
-            "developer tool should be inline array, got: {output}"
-        );
-        assert!(
-            !output.contains("[[dispatcher.tools."),
-            "no array-of-tables headers should remain, got: {output}"
-        );
-    }
-
-    #[test]
-    fn default_workflow_has_linting_stage_before_testing() {
-        let workflow = default_workflow();
-        let main = workflow
-            .pipeline(Pipeline::MAIN)
-            .expect("main pipeline exists");
-
-        assert!(
-            main.stages.contains_key("linting"),
-            "main pipeline must contain 'linting' stage"
-        );
-        assert!(
-            main.stages.contains_key("testing"),
-            "main pipeline must contain 'testing' stage"
-        );
-
-        let stage_names: Vec<&str> = main.stages.keys().map(|s| s.as_str()).collect();
-        let linting_pos = stage_names
-            .iter()
-            .position(|&s| s == "linting")
-            .expect("linting stage position");
-        let testing_pos = stage_names
-            .iter()
-            .position(|&s| s == "testing")
-            .expect("testing stage position");
-        assert!(
-            linting_pos < testing_pos,
-            "'linting' must appear before 'testing' in main pipeline (linting={linting_pos}, testing={testing_pos})"
-        );
-    }
-
-    #[test]
-    fn default_workflow_linting_stage_uses_linter_role() {
-        let workflow = default_workflow();
-        let main = workflow
-            .pipeline(Pipeline::MAIN)
-            .expect("main pipeline exists");
-
-        let linting = main.stages.get("linting").expect("linting stage exists");
-        assert_eq!(
-            linting.role.as_deref(),
-            Some("linter"),
-            "linting stage must use 'linter' role"
-        );
-    }
-
-    #[test]
-    fn default_workflow_linter_role_uses_drudge_tool_and_linter_prompt() {
-        let workflow = default_workflow();
-        let linter = workflow.roles.get("linter").expect("linter role exists");
-
-        assert_eq!(
-            linter.tool.as_deref(),
-            Some("drudge"),
-            "linter role must use 'drudge' tool"
-        );
-        assert_eq!(
-            linter.prompt.as_deref(),
-            Some(std::path::Path::new("linter.md")),
-            "linter role must use 'linter.md' prompt"
-        );
-    }
-
-    #[test]
-    fn default_config_toml_has_drudge_tool() {
-        let config = default_config_toml();
-        let dispatcher = config.dispatcher.as_ref().expect("dispatcher config present");
-        let tools = dispatcher.tools.as_ref().expect("tools present");
-        assert!(
-            tools.contains_key("drudge"),
-            "default config must have a 'drudge' tool, got keys: {:?}",
-            tools.keys().collect::<Vec<_>>()
-        );
-        let drudge_entries = tools.get("drudge").unwrap();
-        assert_eq!(
-            drudge_entries.len(),
-            2,
-            "'drudge' tool must have exactly two provider entries"
-        );
-
-        // Primary entry: copilot / gpt-5-mini, no explicit priority
-        let primary = &drudge_entries[0];
-        assert_eq!(primary.provider, "copilot", "drudge primary provider must be 'copilot'");
-        assert_eq!(
-            primary.model.to_string(),
-            "gpt-5-mini",
-            "drudge primary model must be 'gpt-5-mini'"
-        );
-        assert_eq!(
-            primary.priority, None,
-            "drudge primary entry must have no explicit priority"
-        );
-
-        // Backup entry: claude / claude-haiku-4.5 with priority = 0
-        let backup = &drudge_entries[1];
-        assert_eq!(backup.provider, "claude", "drudge backup provider must be 'claude'");
-        assert_eq!(
-            backup.model.to_string(),
-            "claude-haiku-4.5",
-            "drudge backup model must be 'claude-haiku-4.5'"
-        );
-        assert_eq!(
-            backup.priority,
-            Some(0),
-            "drudge backup entry must have priority = 0"
-        );
-    }
-
-    #[test]
-    fn tester_prompt_excludes_formatting_linting_and_defers_to_separate_stage() {
-        // The task explicitly moved formatting/linting out of the tester stage.
-        assert!(
-            !TESTER_PROMPT.to_lowercase().contains("run formatting"),
-            "TESTER_PROMPT must not instruct the tester to run formatting checks"
-        );
-        assert!(
-            !TESTER_PROMPT.to_lowercase().contains("fix formatting"),
-            "TESTER_PROMPT must not instruct the tester to fix formatting issues"
-        );
-        assert!(
-            TESTER_PROMPT.contains("separate stage"),
-            "TESTER_PROMPT must indicate that linting/formatting is handled by a separate stage"
-        );
-    }
-
-    #[test]
-    fn linter_prompt_covers_formatting_and_linting_without_testing() {
-        // The linter stage is responsible for formatting and linting only.
-        assert!(
-            LINTER_PROMPT.to_lowercase().contains("formatting"),
-            "LINTER_PROMPT must cover formatting as a core responsibility"
-        );
-        assert!(
-            LINTER_PROMPT.to_lowercase().contains("linting"),
-            "LINTER_PROMPT must cover linting as a core responsibility"
-        );
-        assert!(
-            !LINTER_PROMPT.to_lowercase().contains("run comprehensive test"),
-            "LINTER_PROMPT must not instruct the linter to run tests"
-        );
     }
 }

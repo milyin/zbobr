@@ -198,6 +198,10 @@ impl ZbobrTaskBackendGithubImpl {
         })
     }
 
+    fn default_max_stage_count(&self) -> u64 {
+        self.backend_config.default_max_stage_count
+    }
+
     /// Convert a state to its GitHub label representations (state:* label only).
     fn state_to_labels(state: &State) -> Vec<String> {
         let state_label = |name: &str| format!("{}{name}", STATE_PREFIX);
@@ -583,7 +587,7 @@ impl ZbobrTaskBackendGithubImpl {
     }
 
     /// Parse an IssueResponse into a Task.
-    fn issue_to_task(issue: IssueResponse) -> anyhow::Result<Task> {
+    fn issue_to_task(&self, issue: IssueResponse) -> anyhow::Result<Task> {
         let body = issue.body.unwrap_or_default();
         let (description, params_map, status, context) = parse_description_full(&body)?;
 
@@ -638,7 +642,7 @@ impl ZbobrTaskBackendGithubImpl {
             max_stage_count: params_map
                 .get(PARAM_MAX_STAGE_COUNT)
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
+                .unwrap_or(self.default_max_stage_count()),
             closed: issue.state == "closed",
             etag: Some(body),
         })
@@ -721,7 +725,7 @@ impl ZbobrTaskBackendGithubImpl {
     }
 
     fn hydrate_issue_to_task(&self, issue: IssueResponse) -> anyhow::Result<Task> {
-        let mut task = Self::issue_to_task(issue)?;
+        let mut task = self.issue_to_task(issue)?;
         Self::normalize_task_report_links_for_config(&self.backend_config, &mut task)?;
         Ok(task)
     }
@@ -1404,13 +1408,19 @@ mod flag_tests {
             reports_branch: Some("reports".to_string()),
             reports_path: Some("reports".to_string()),
             allowed_usernames: None,
+            default_max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
         }
+    }
+
+    fn issue_to_task(issue: IssueResponse) -> Task {
+        let backend = ZbobrTaskBackendGithubImpl::from_config(make_config()).unwrap();
+        backend.issue_to_task(issue).unwrap()
     }
 
     #[test]
     fn issue_to_task_reads_pause_from_params() {
         let issue = make_issue_with_params(PARAM_FLAG_PAUSE, PARAM_FLAG_VALUE_TRUE);
-        let task = ZbobrTaskBackendGithubImpl::issue_to_task(issue).unwrap();
+        let task = issue_to_task(issue);
         assert!(task.pause);
         assert!(!task.confirm);
     }
@@ -1418,7 +1428,7 @@ mod flag_tests {
     #[test]
     fn issue_to_task_reads_confirm_from_params() {
         let issue = make_issue_with_params(PARAM_FLAG_CONFIRM, PARAM_FLAG_VALUE_TRUE);
-        let task = ZbobrTaskBackendGithubImpl::issue_to_task(issue).unwrap();
+        let task = issue_to_task(issue);
         assert!(!task.pause);
         assert!(task.confirm);
     }
@@ -1442,7 +1452,7 @@ mod flag_tests {
             confirm: true,
             pipeline_run_id: 0,
             stage_count: 0,
-            max_stage_count: 0,
+            max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
         };
@@ -1498,7 +1508,7 @@ mod flag_tests {
             labels: vec![],
         };
 
-        let mut task = ZbobrTaskBackendGithubImpl::issue_to_task(issue).unwrap();
+        let mut task = issue_to_task(issue);
         ZbobrTaskBackendGithubImpl::normalize_task_report_links_for_config(&config, &mut task)
             .unwrap();
         let stage = &task.context.stages[0];
@@ -1555,7 +1565,7 @@ mod flag_tests {
             confirm: false,
             pipeline_run_id: 0,
             stage_count: 0,
-            max_stage_count: 0,
+            max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
         };
@@ -1606,7 +1616,7 @@ mod flag_tests {
             confirm: false,
             pipeline_run_id: 0,
             stage_count: 0,
-            max_stage_count: 0,
+            max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
         };
