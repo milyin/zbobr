@@ -15,7 +15,7 @@ use zbobr_dispatcher::{
 };
 use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
-use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
+use zbobr_executor_mcp_tester::McpTesterExecutor;
 use zbobr_repo_backend_github::{
     ZbobrRepoBackendGithub, ZbobrRepoBackendGithubConfig, normalize_github_repo,
 };
@@ -124,21 +124,6 @@ pub enum TaskSubcommand {
     Process {
         /// Task ID
         task: Option<u64>,
-        /// MCP tester scenario file for planning role
-        #[arg(long)]
-        executor_mcp_tester_planning: Option<PathBuf>,
-        /// MCP tester scenario file for working role
-        #[arg(long)]
-        executor_mcp_tester_working: Option<PathBuf>,
-        /// MCP tester scenario file for reviewing role
-        #[arg(long)]
-        executor_mcp_tester_reviewing: Option<PathBuf>,
-        /// MCP tester scenario file for testing role
-        #[arg(long)]
-        executor_mcp_tester_testing: Option<PathBuf>,
-        /// MCP tester scenario file for merging role
-        #[arg(long)]
-        executor_mcp_tester_merging: Option<PathBuf>,
     },
     /// Show the resolved prompt for a task stage
     Prompt {
@@ -206,6 +191,7 @@ pub async fn run(
             ConfiguredPromptBuilder::new(Some(config_dir), Arc::new(workflow.clone()))
                 .with_var(VAR_DESTINATION_REPOSITORY, &normalized_repo)
                 .with_var(VAR_DESTINATION_BRANCH, &repo_config.branch);
+        prompt_builder.validate_all_prompts()?;
         return run_without_backends(command, &prompt_builder);
     }
 
@@ -217,6 +203,7 @@ pub async fn run(
     let prompt_builder = ConfiguredPromptBuilder::new(Some(config_dir), Arc::new(workflow.clone()))
         .with_var(VAR_DESTINATION_REPOSITORY, repo_backend.repository())
         .with_var(VAR_DESTINATION_BRANCH, repo_backend.branch());
+    prompt_builder.validate_all_prompts()?;
 
     let claude = ClaudeExecutor::new(executor_config.claude);
     let copilot = CopilotExecutor::new(executor_config.copilot);
@@ -459,35 +446,10 @@ async fn run_task_subcommand(
             mutable.close().await?;
             println!("Deleted task #{}", id);
         }
-        TaskSubcommand::Process {
-            task,
-            executor_mcp_tester_planning,
-            executor_mcp_tester_working,
-            executor_mcp_tester_reviewing,
-            executor_mcp_tester_testing,
-            executor_mcp_tester_merging,
-        } => {
+        TaskSubcommand::Process { task } => {
             let task = require_task_id(task, "process")?;
             let task_obj = task_backend.get_task(task).await?.snapshot(false).await?;
-            let mcp_tester_config_override = if executor_mcp_tester_planning.is_some()
-                || executor_mcp_tester_working.is_some()
-                || executor_mcp_tester_reviewing.is_some()
-                || executor_mcp_tester_testing.is_some()
-                || executor_mcp_tester_merging.is_some()
-            {
-                Some(ZbobrExecutorMcpTesterConfig {
-                    planning: executor_mcp_tester_planning,
-                    working: executor_mcp_tester_working,
-                    reviewing: executor_mcp_tester_reviewing,
-                    testing: executor_mcp_tester_testing,
-                    merging: executor_mcp_tester_merging,
-                    scenarios: Default::default(),
-                })
-            } else {
-                None
-            };
-            zbobr_dispatcher::process_task(zbobr, &task_obj, mcp_tester_config_override.as_ref())
-                .await?;
+            zbobr_dispatcher::process_task(zbobr, &task_obj, None).await?;
         }
         TaskSubcommand::Prompt {
             id,
