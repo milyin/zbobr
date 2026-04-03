@@ -1231,9 +1231,37 @@ name = "test"
             tools.keys().collect::<Vec<_>>()
         );
         let drudge_entries = tools.get("drudge").unwrap();
-        assert!(
-            !drudge_entries.is_empty(),
-            "'drudge' tool must have at least one provider entry"
+        assert_eq!(
+            drudge_entries.len(),
+            2,
+            "'drudge' tool must have exactly two provider entries"
+        );
+
+        // Primary entry: copilot / gpt-5-mini, no explicit priority
+        let primary = &drudge_entries[0];
+        assert_eq!(primary.provider, "copilot", "drudge primary provider must be 'copilot'");
+        assert_eq!(
+            primary.model.to_string(),
+            "gpt-5-mini",
+            "drudge primary model must be 'gpt-5-mini'"
+        );
+        assert_eq!(
+            primary.priority, None,
+            "drudge primary entry must have no explicit priority"
+        );
+
+        // Backup entry: claude / claude-haiku-4.5 with priority = 0
+        let backup = &drudge_entries[1];
+        assert_eq!(backup.provider, "claude", "drudge backup provider must be 'claude'");
+        assert_eq!(
+            backup.model.to_string(),
+            "claude-haiku-4.5",
+            "drudge backup model must be 'claude-haiku-4.5'"
+        );
+        assert_eq!(
+            backup.priority,
+            Some(0),
+            "drudge backup entry must have priority = 0"
         );
     }
 }
