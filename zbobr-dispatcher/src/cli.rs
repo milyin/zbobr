@@ -315,7 +315,7 @@ pub fn select_runnable_task<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Optio
                 && !ready_with_stack
                 && matches!(
                     workflow.resolve_next_action(t),
-                    Ok(crate::workflow::StateAction::RunStage(_, _, ref def))
+                    Ok(crate::workflow::StateAction::RunStage(_, _, def))
                         if def.call_pipeline().is_none()
                 )
         })

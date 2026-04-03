@@ -755,7 +755,7 @@ mod comment_model_tests {
                 id,
                 title: title.to_string(),
                 description: description.to_string(),
-                state: state,
+                state,
                 work_branch: None,
                 pr_url: None,
                 context: TaskContext::default(),
