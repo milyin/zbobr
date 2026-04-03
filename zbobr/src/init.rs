@@ -123,6 +123,16 @@ fn default_config_toml() -> RootConfigToml {
                 access_key: None,
             },
         ),
+        (
+            "copilot_planner".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: Some("copilot".to_string()),
+                priority: None,
+                plan_mode: Some(true),
+                access_key: None,
+            },
+        ),
     ]);
 
     let tools = IndexMap::from([
@@ -136,7 +146,7 @@ fn default_config_toml() -> RootConfigToml {
                 },
                 ToolEntry {
                     provider: "copilot".to_string(),
-                    model: "claude-opus-4.6".parse().unwrap(),
+                    model: "claude-sonnet-4.6".parse().unwrap(),
                     priority: Some(0),
                 },
             ],
@@ -149,20 +159,40 @@ fn default_config_toml() -> RootConfigToml {
                     model: "claude-opus-4-6".parse().unwrap(),
                     priority: None,
                 },
+                ToolEntry {
+                    provider: "copilot_planner".to_string(),
+                    model: "claude-sonnet-4.6".parse().unwrap(),
+                    priority: Some(0),
+                },
             ],
         ),
         (
-            "silly".to_string(),
+            "helper".to_string(),
             vec![
                 ToolEntry {
                     provider: "copilot".to_string(),
-                    model: "gpt-5-mini".parse().unwrap(),
+                    model: "claude-haiku-4.5".parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
                     provider: "claude".to_string(),
-                    model: "claude-haiku-4-5".parse().unwrap(),
+                    model: "claude-haiku-4.5".parse().unwrap(),
+                    priority: Some(0),
+                },
+            ],
+        ),
+        (
+            "reviewer".to_string(),
+            vec![
+                ToolEntry {
+                    provider: "copilot".to_string(),
+                    model: "gpt-5.4".parse().unwrap(),
                     priority: None,
+                },
+                ToolEntry {
+                    provider: "claude".to_string(),
+                    model: "claude-sonnet-4.6".parse().unwrap(),
+                    priority: Some(0),
                 },
             ],
         ),
@@ -176,8 +206,8 @@ fn default_config_toml() -> RootConfigToml {
             agent_github_token: Some(Secret::value("not-configured")),
             providers: Some(providers),
             tools: Some(tools),
-            provider_exclusion_secs: None,
-            provider_exclusion_fail_count: None,
+            provider_exclusion_secs: Some(3600),
+            provider_exclusion_fail_count: Some(3),
             work_branch_prefix: Some("zbobr_fix".into()),
             git_user_name: Some("zbobr".into()),
             git_user_email: Some("zbobr@example.com".into()),
@@ -957,6 +987,14 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn default_config_toml_sets_provider_exclusion_defaults() {
+        let config = default_config_toml();
+        let dispatcher = config.dispatcher.as_ref().expect("dispatcher config present");
+        assert_eq!(dispatcher.provider_exclusion_secs, Some(3600));
+        assert_eq!(dispatcher.provider_exclusion_fail_count, Some(3));
     }
 
     // ── inline_dispatcher_tables unit tests ──────────────────────────────
