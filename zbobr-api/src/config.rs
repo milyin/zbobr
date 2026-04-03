@@ -68,6 +68,10 @@ pub struct ResolvedProvider {
 pub struct ToolEntry {
     pub provider: String,
     pub model: Model,
+    /// Per-entry priority override. When set, replaces the priority inherited from the provider.
+    /// Use a lower value than the provider's default to mark this entry as a fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<i32>,
 }
 
 /// A stage transition descriptor with an optional target stage and pause flag.
@@ -972,6 +976,7 @@ mod tests {
             vec![ToolEntry {
                 provider: "claude".to_string(),
                 model: "opus".parse().unwrap(),
+                priority: None,
             }],
         );
         let mut config = make_config(providers, tools);
@@ -1041,6 +1046,7 @@ mod tests {
             vec![ToolEntry {
                 provider: "ghost".to_string(),
                 model: "opus".parse().unwrap(),
+                priority: None,
             }],
         );
         let mut config = make_config(providers, tools);
@@ -1185,6 +1191,7 @@ mod tests {
             vec![ToolEntry {
                 provider: "claude".to_string(),
                 model: "opus".parse().unwrap(),
+                priority: None,
             }],
         );
         let config = make_config(providers, tools);
@@ -1216,6 +1223,7 @@ mod tests {
             vec![ToolEntry {
                 provider: "claude".to_string(),
                 model: "opus".parse().unwrap(),
+                priority: None,
             }],
         );
         let config = make_config(providers, tools);
@@ -1263,6 +1271,7 @@ mod tests {
             vec![ToolEntry {
                 provider: "claude".to_string(),
                 model: "opus".parse().unwrap(),
+                priority: None,
             }],
         );
         let config = make_config(providers, tools);
@@ -1314,6 +1323,7 @@ mod tests {
             vec![ToolEntry {
                 provider: "claude".to_string(),
                 model: "opus".parse().unwrap(),
+                priority: None,
             }],
         );
         let config = make_config(providers, tools);
