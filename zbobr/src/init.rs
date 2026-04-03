@@ -1156,4 +1156,84 @@ name = "test"
             "no array-of-tables headers should remain, got: {output}"
         );
     }
+
+    #[test]
+    fn default_workflow_has_linting_stage_before_testing() {
+        let workflow = default_workflow();
+        let main = workflow
+            .pipeline(Pipeline::MAIN)
+            .expect("main pipeline exists");
+
+        assert!(
+            main.stages.contains_key("linting"),
+            "main pipeline must contain 'linting' stage"
+        );
+        assert!(
+            main.stages.contains_key("testing"),
+            "main pipeline must contain 'testing' stage"
+        );
+
+        let stage_names: Vec<&str> = main.stages.keys().map(|s| s.as_str()).collect();
+        let linting_pos = stage_names
+            .iter()
+            .position(|&s| s == "linting")
+            .expect("linting stage position");
+        let testing_pos = stage_names
+            .iter()
+            .position(|&s| s == "testing")
+            .expect("testing stage position");
+        assert!(
+            linting_pos < testing_pos,
+            "'linting' must appear before 'testing' in main pipeline (linting={linting_pos}, testing={testing_pos})"
+        );
+    }
+
+    #[test]
+    fn default_workflow_linting_stage_uses_linter_role() {
+        let workflow = default_workflow();
+        let main = workflow
+            .pipeline(Pipeline::MAIN)
+            .expect("main pipeline exists");
+
+        let linting = main.stages.get("linting").expect("linting stage exists");
+        assert_eq!(
+            linting.role.as_deref(),
+            Some("linter"),
+            "linting stage must use 'linter' role"
+        );
+    }
+
+    #[test]
+    fn default_workflow_linter_role_uses_drudge_tool_and_linter_prompt() {
+        let workflow = default_workflow();
+        let linter = workflow.roles.get("linter").expect("linter role exists");
+
+        assert_eq!(
+            linter.tool.as_deref(),
+            Some("drudge"),
+            "linter role must use 'drudge' tool"
+        );
+        assert_eq!(
+            linter.prompt.as_deref(),
+            Some(std::path::Path::new("linter.md")),
+            "linter role must use 'linter.md' prompt"
+        );
+    }
+
+    #[test]
+    fn default_config_toml_has_drudge_tool() {
+        let config = default_config_toml();
+        let dispatcher = config.dispatcher.as_ref().expect("dispatcher config present");
+        let tools = dispatcher.tools.as_ref().expect("tools present");
+        assert!(
+            tools.contains_key("drudge"),
+            "default config must have a 'drudge' tool, got keys: {:?}",
+            tools.keys().collect::<Vec<_>>()
+        );
+        let drudge_entries = tools.get("drudge").unwrap();
+        assert!(
+            !drudge_entries.is_empty(),
+            "'drudge' tool must have at least one provider entry"
+        );
+    }
 }
