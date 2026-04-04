@@ -1,0 +1,1 @@
+In `zbobr-task-backend-fs/src/fs.rs`, in `read_comments_structured()` (around line 222), after deserializing comment timestamps, apply the same `.with_timezone()` conversion using the configured timezone. This keeps FS backend behavior consistent with the GitHub backend fix.
