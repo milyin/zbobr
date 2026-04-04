@@ -1,0 +1,1 @@
+After integrating `--logs` into `GlobalArgs`, verify that the flag works in both positions: before and after the subcommand. Add or update a test to confirm this.
