@@ -4,7 +4,7 @@ use simpleinterpolation::Interpolation;
 use zbobr_api::{
     Comment, ContextRecord, ContextRecordType, Signal, StackEntry, StageContext, StageInfo, Task,
     TaskContext,
-    config::{StageDefinition, WorkflowConfig},
+    config::{Role, StageDefinition, WorkflowConfig},
     config_tools::McpTool,
     context::serialize_context,
     task::{DEFAULT_MAX_STAGE_COUNT, Pipeline, Stage, Executor},
@@ -108,10 +108,11 @@ impl ConfiguredPromptBuilder {
     ) -> anyhow::Result<String> {
         let prompt_files = prompt_files_for_stage(stage_def, self.workflow.config());
         let base_prompt = load_prompts(&prompt_files, self.base_path.as_ref())?;
-        let role_name = stage_def.role().map_or("", |r| r.as_str());
+        let default_role = Role::new("");
+        let role = stage_def.role().unwrap_or(&default_role);
         build_prompt_with_task(
             &base_prompt,
-            role_name,
+            role,
             task,
             comments,
             self.workflow.config(),
@@ -338,7 +339,7 @@ pub async fn build_full_prompt(
 /// Build prompt using a provided task and comments (no backend needed).
 pub fn build_prompt_with_task(
     user_context: &str,
-    role_name: &str,
+    role: &Role,
     task: &Task,
     comments: &[Comment],
     workflow: &WorkflowConfig,
@@ -347,7 +348,7 @@ pub fn build_prompt_with_task(
     let mut vars = build_template_variables(task, comments);
 
     let allowed_tools: &[McpTool] = workflow
-        .role_definition(role_name)
+        .role_definition(role)
         .and_then(|d| d.mcp.as_deref())
         .unwrap_or(&[]);
     add_mcp_tool_variables(&mut vars, allowed_tools);
