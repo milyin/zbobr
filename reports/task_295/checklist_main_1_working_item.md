@@ -1,0 +1,1 @@
+The `--logs` flag was added only to `Cli` in `zbobr/src/main.rs`, but the global CLI hoisting mechanism in `zbobr-dispatcher/src/cli.rs` (`parse_cli` + `GlobalArgs`) doesn't know about it. This means `zbobr task process --logs` is rejected. Fix: add `logs` boolean to `GlobalArgs` so `parse_cli` hoists it, and remove the duplicate from `Cli` (or flatten `GlobalArgs` into `Cli`).
