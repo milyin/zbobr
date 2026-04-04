@@ -1,0 +1,1 @@
+In zbobr/src/commands.rs, change `tasks_config.timezone_offset_seconds = Some(dispatcher_config.fixed_offset().local_minus_utc());` to `tasks_config.timezone = dispatcher_config.timezone;`. This directly passes the Option<FixedOffsetTz> without lossy conversion.
