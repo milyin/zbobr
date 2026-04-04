@@ -979,7 +979,7 @@ impl ZbobrTaskBackendGithubImpl {
             })
             .map(|c| {
                 let body = c.body.unwrap_or_default();
-                let timestamp: chrono::DateTime<chrono::FixedOffset> = c
+                let parsed: chrono::DateTime<chrono::FixedOffset> = c
                     .created_at
                     .as_deref()
                     .unwrap_or("1970-01-01T00:00:00Z")
@@ -987,6 +987,12 @@ impl ZbobrTaskBackendGithubImpl {
                     .unwrap_or_else(|_| {
                         chrono::DateTime::parse_from_rfc3339("1970-01-01T00:00:00Z").unwrap()
                     });
+                let timestamp = match self.backend_config.timezone_offset_seconds {
+                    Some(secs) => parsed.with_timezone(
+                        &chrono::FixedOffset::east_opt(secs).unwrap_or(parsed.timezone()),
+                    ),
+                    None => parsed,
+                };
 
                 let username = c
                     .user
