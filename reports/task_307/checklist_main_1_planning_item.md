@@ -1,0 +1,1 @@
+Add `#[arg(long, short = 'f')] force: bool` field to the `Init` variant in `commands.rs`, following the exact same pattern as the `Setup` variant (line 37-38). Also update the two `Command::Init { .. }` match arms (lines 174 and 250/277) to include `force` in their destructuring patterns where needed.
