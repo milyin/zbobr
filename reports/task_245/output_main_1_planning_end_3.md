@@ -1,0 +1,1 @@
+Plan is ready for review. It follows the existing `instance` injection pattern to add timezone support to both task backends, converting comment timestamps from UTC to the configured timezone at the point where `Comment` objects are created.
