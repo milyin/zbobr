@@ -30,6 +30,9 @@ pub enum Command {
     Init {
         /// Destination directory for the new workspace
         directory: PathBuf,
+        /// Force overwrite existing files instead of creating .new
+        #[arg(long, short = 'f')]
+        force: bool,
     },
     /// Initialize a task project: create repo if needed, set up stages and labels
     Setup {
