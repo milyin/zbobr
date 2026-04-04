@@ -1,0 +1,1 @@
+Update the `Init` match arm in `main.rs` (line 80-81) to extract the `force` field and pass it to `init::init_workspace()`. Currently the call is `init::init_workspace(directory).await` — add `force` as a second argument.
