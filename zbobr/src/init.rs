@@ -333,6 +333,16 @@ fn default_workflow() -> WorkflowConfig {
             StageDefinition {
                 role: Some("linter".into()),
                 prompts: task_prompt.clone(),
+                on_failure: Some(StageTransition::stage("linter_worker")),
+                ..Default::default()
+            },
+        ),
+        (
+            Stage::from("linter_worker"),
+            StageDefinition {
+                role: Some("linter_worker".into()),
+                prompts: task_prompt.clone(),
+                on_success: Some(StageTransition::stage("linting")),
                 on_failure: Some(StageTransition::stage("working")),
                 ..Default::default()
             },
@@ -481,6 +491,20 @@ fn default_workflow() -> WorkflowConfig {
             },
         ),
         (
+            "linter_worker".into(),
+            RoleDefinition {
+                mcp: vec![
+                    StopWithError,
+                    ReportSuccess,
+                    ReportFailure,
+                    StopWithQuestion,
+                    GetCtxRec,
+                ],
+                prompt: Some(PathBuf::from("linter_worker.md")),
+                tool: Some("developer".to_string()),
+            },
+        ),
+        (
             "merger".into(),
             RoleDefinition {
                 mcp: vec![StopWithError, ReportSuccess, StopWithQuestion],
@@ -588,6 +612,7 @@ const PROMPT_FILES: &[(&str, &str)] = &[
     ("test_worker", TEST_WORKER_PROMPT),
     ("reviewer", REVIEWER_PROMPT),
     ("linter", LINTER_PROMPT),
+    ("linter_worker", LINTER_WORKER_PROMPT),
     ("tester", TESTER_PROMPT),
     ("merger", MERGER_PROMPT),
     ("task", TASK_TEMPLATE),
@@ -856,7 +881,7 @@ You have access to the task context and the repository for testing:
 const LINTER_PROMPT: &str = concat!(
     r#"# Linter Agent
 
-Check code formatting and linting, and fix any issues found.
+Check code formatting and linting and report any issues found.
 
 "#,
     get_ctx_rec_guidance!(),
@@ -877,20 +902,48 @@ You have access to the task context and the repository:
    - Note exact commands and flags used in CI so you run the same checks
 3. **Run all formatting and linting checks** identified from CI:
    - Record each command executed and its full output
-4. **Fix auto-fixable issues only**:
+4. Call `{mcp_report_success}` if all checks pass, or `{mcp_report_failure}` with a detailed list of ALL issues found if any checks fail.
+
+## Important Notes
+
+- **Only check formatting and linting** — do not modify logic, tests, or functionality.
+- **Do not fix anything** — fixing is handled by a separate stage.
+- **Do not run tests** — functional testing is handled by a separate stage."#,
+);
+
+const LINTER_WORKER_PROMPT: &str = concat!(
+    r#"# Linter Worker Agent
+
+Fix the formatting and linting issues reported by the linter stage.
+
+"#,
+    get_ctx_rec_guidance!(),
+    r#"
+## Access Model
+
+You have access to the task context and the repository:
+- The task description, work plan, worker's reports, and context are provided below in this prompt. The full history and checklist are available in the context section.
+- Your current working directory is the repository with the work branch checked out
+- Use `{mcp_stop_with_error}` only to report technical errors
+
+## Workflow
+
+1. Read the task context and the linter's failure report (which lists the issues found).
+2. **Discover formatting and linting setup** by examining CI and build configuration files:
+   - `.github/workflows/` — look for formatting/linting steps (e.g., `cargo fmt --check`, `cargo clippy`, `prettier`, `black`, `gofmt`, `eslint`)
+   - `Makefile`, `Cargo.toml`, `package.json`, `pyproject.toml`, or equivalent — identify lint/fmt commands
+3. **Run the linting/formatting tools** to confirm which issues remain.
+4. **Apply fixes**:
    - Apply tool-based auto-fixes (e.g., `cargo fmt`, `gofmt -w`, `black .`, `prettier --write`)
-   - Address linting warnings or errors that can be auto-fixed by these tools
-   - Do not attempt manual fixes for issues that cannot be resolved automatically by formatter/linter
-   - If any issue remains after auto-fix and cannot be auto-fixed, call `{mcp_report_failure}` with a detailed report of the remaining issues
-   - Commit only auto-fix changes with a message like `chore: fix formatting and linting`
-5. Re-run the checks after fixing to confirm everything passes.
-6. Call `{mcp_report_success}` if all formatting and linting checks pass, or `{mcp_report_failure}` if issues remain that cannot be auto-fixed. Pass a brief report of what was checked and what was fixed.
+   - Apply manual fixes for linting warnings/errors that require code changes
+5. Commit the fixes with a message like `chore: fix linting issues`.
+6. Call `{mcp_report_success}` if fixes were applied (the linter stage will re-verify).
+7. Call `{mcp_report_failure}` with details if some issues cannot be fixed (escalates to the general worker).
 
 ## Important Notes
 
 - **Only fix formatting and linting** — do not modify logic, tests, or functionality.
-- **Do not run tests** — functional testing is handled by a separate stage.
-- **Fix issues autonomously**: You are allowed and expected to fix formatting/linting issues directly and commit them."#,
+- **Do not run tests** — functional testing is handled by a separate stage."#,
 );
 
 const MERGER_PROMPT: &str = r#"# Merger Agent
