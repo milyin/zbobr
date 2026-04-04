@@ -1,0 +1,1 @@
+Add a `pub timezone: Option<chrono::FixedOffset>` field to the GitHub backend config struct in `zbobr-task-backend-github/src/config.rs`. Use the `#[config(skip_args)]` annotation, same as the existing `instance` field. Default to `None`. This follows the same injection pattern already used for `instance`.
