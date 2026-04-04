@@ -55,7 +55,7 @@ pub struct Workflow {
 /// Action determined by the state machine for the next step.
 pub enum StateAction<'a> {
     /// Execute this stage definition: (pipeline_name, stage_name, stage_def).
-    RunStage(&'a Pipeline, &'a str, &'a StageDefinition),
+    RunStage(&'a Pipeline, &'a Stage, &'a StageDefinition),
     /// Task is completed.
     Done,
     /// Task is paused, waiting for user.
@@ -140,7 +140,7 @@ impl Workflow {
     pub fn start_stage_for_pipeline(
         &self,
         pipeline: &Pipeline,
-    ) -> Option<(&str, &StageDefinition)> {
+    ) -> Option<(&Stage, &StageDefinition)> {
         self.config.start_stage_for_pipeline(pipeline.clone())
     }
 
@@ -356,11 +356,7 @@ impl Workflow {
                             "Signal '{signal}' references unknown stage '{target_stage}' in pipeline '{pipeline}'"
                         )
                     })?;
-                Ok(StateAction::RunStage(
-                    pipeline_key,
-                    stage_key.as_str(),
-                    stage_def,
-                ))
+                Ok(StateAction::RunStage(pipeline_key, stage_key, stage_def))
             }
             Signal::Call(target_pipeline) => {
                 tracing::info!(

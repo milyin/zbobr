@@ -304,29 +304,29 @@ impl PipelineConfig {
 
     /// Look up a stage by name.
     pub fn stage(&self, name: &Stage) -> Option<&StageDefinition> {
-        self.stages.get(name.as_str())
+        self.stages.get(name)
     }
 
     /// Get the index of a stage in the order.
     pub fn stage_index(&self, name: &Stage) -> Option<usize> {
-        self.stages.get_index_of(name.as_str())
+        self.stages.get_index_of(name)
     }
 
     /// Get the next stage after `name`.
-    pub fn next_stage(&self, name: &Stage) -> Option<(&str, &StageDefinition)> {
-        let idx = self.stages.get_index_of(name.as_str())?;
+    pub fn next_stage(&self, name: &Stage) -> Option<(&Stage, &StageDefinition)> {
+        let idx = self.stages.get_index_of(name)?;
         let (next_name, def) = self.stages.get_index(idx + 1)?;
-        Some((next_name.as_str(), def))
+        Some((next_name, def))
     }
 
     /// Get the first stage of this pipeline.
-    pub fn first_stage(&self) -> Option<(&str, &StageDefinition)> {
+    pub fn first_stage(&self) -> Option<(&Stage, &StageDefinition)> {
         let (name, def) = self.stages.first()?;
-        Some((name.as_str(), def))
+        Some((name, def))
     }
 
     /// Get the start stage for this pipeline (delegates to first_stage).
-    pub fn start_stage(&self) -> Option<(&str, &StageDefinition)> {
+    pub fn start_stage(&self) -> Option<(&Stage, &StageDefinition)> {
         self.first_stage()
     }
 
@@ -581,7 +581,7 @@ impl WorkflowConfig {
     pub fn start_stage_for_pipeline(
         &self,
         pipeline: impl Into<Pipeline>,
-    ) -> Option<(&str, &StageDefinition)> {
+    ) -> Option<(&Stage, &StageDefinition)> {
         self.pipelines.get(pipeline.into().as_str())?.start_stage()
     }
 

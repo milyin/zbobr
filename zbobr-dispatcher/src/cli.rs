@@ -803,7 +803,7 @@ async fn handle_call_stage(
             .pipeline(pipeline_name)
             .and_then(|p| p.next_stage(&stage))
         {
-            Some((next, _)) => Signal::go(next),
+            Some((next, _)) => Signal::go(next.as_str()),
             None => Signal::Return,
         }
     };
@@ -1006,7 +1006,14 @@ pub async fn process_task(
                     stage_name,
                     call_target
                 );
-                handle_call_stage(zbobr, task.id, pipeline_name, stage_name, call_target).await?;
+                handle_call_stage(
+                    zbobr,
+                    task.id,
+                    pipeline_name,
+                    stage_name.as_str(),
+                    call_target,
+                )
+                .await?;
             } else {
                 tracing::info!(
                     "Task #{}: running stage {}/{} (role={:?})",
@@ -1019,7 +1026,7 @@ pub async fn process_task(
                     zbobr,
                     task.id,
                     pipeline_name,
-                    stage_name,
+                    stage_name.as_str(),
                     stage_def,
                     mcp_tester_override,
                 );
@@ -1032,7 +1039,7 @@ pub async fn process_task(
                     let task_session = zbobr.task_session(task.id);
                     let status = format_error_status(zbobr, &msg);
                     if let Err(pause_err) = task_session
-                        .set_pause_with_status_and_signal(status, Signal::go(stage_name))
+                        .set_pause_with_status_and_signal(status, Signal::go(stage_name.as_str()))
                         .await
                     {
                         tracing::error!(
@@ -1395,7 +1402,7 @@ pub async fn run_manager_loop(
                     stage_name,
                 );
                 let runner =
-                    CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, None);
+                    CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name.as_str(), stage_def, None);
                 if let Err(e) = runner.run().await {
                     let msg = format!(
                         "Stage {}/{} failed for task #{}: {e}",
@@ -1405,7 +1412,7 @@ pub async fn run_manager_loop(
                     let task_session = zbobr.task_session(task.id);
                     let status = format_error_status(zbobr, &msg);
                     if let Err(pause_err) = task_session
-                        .set_pause_with_status_and_signal(status, Signal::go(stage_name))
+                        .set_pause_with_status_and_signal(status, Signal::go(stage_name.as_str()))
                         .await
                     {
                         tracing::error!(
