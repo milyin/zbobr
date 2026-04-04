@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::{collections::HashMap, path::PathBuf};
 
 use indexmap::IndexMap;
@@ -17,7 +18,7 @@ pub use stage::Stage;
 pub trait Config: Sized {
     type Toml: Default + for<'de> serde::Deserialize<'de>;
     type Args: clap::Args + zbobr_utility::PrefixedArgs + Default + Clone;
-    fn build(toml: Option<Self::Toml>, args: Self::Args, config_dir: &std::path::Path) -> Self;
+    fn build(toml: Option<Self::Toml>, args: Self::Args, config_dir: &Path) -> Self;
 }
 
 /// Definition of a role: which MCP tools it can access, an optional prompt file, and optional tool override.
@@ -39,7 +40,7 @@ pub struct RoleDefinition {
 
 impl RoleDefinition {
     /// Resolve relative path fields against the given base directory.
-    pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
+    pub fn resolve_paths(self, config_dir: &Path) -> Self {
         Self {
             prompt: self
                 .prompt
@@ -221,7 +222,7 @@ pub struct StageDefinition {
 
 impl StageDefinition {
     /// Resolve relative path fields against the given base directory.
-    pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
+    pub fn resolve_paths(self, config_dir: &Path) -> Self {
         Self {
             role_prompt: self
                 .role_prompt
@@ -292,7 +293,7 @@ pub struct PipelineConfig {
 
 impl PipelineConfig {
     /// Resolve relative path fields in all stages against the given base directory.
-    pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
+    pub fn resolve_paths(self, config_dir: &Path) -> Self {
         Self {
             stages: self
                 .stages
@@ -331,20 +332,20 @@ impl PipelineConfig {
     }
 
     /// Validate pipeline configuration.
-    pub fn validate(&self, pipeline_name: &str) -> anyhow::Result<()> {
+    pub fn validate(&self, pipeline: &Pipeline) -> anyhow::Result<()> {
         if self.stages.is_empty() {
-            anyhow::bail!("Pipeline '{}' has no stages", pipeline_name);
+            anyhow::bail!("Pipeline '{}' has no stages", pipeline);
         }
         for (sname, stage) in &self.stages {
             match (&stage.role, &stage.call) {
                 (Some(_), Some(_)) => anyhow::bail!(
                     "Pipeline '{}' stage '{}' has both 'role' and 'call' — only one is allowed",
-                    pipeline_name,
+                    pipeline,
                     sname
                 ),
                 (None, None) => anyhow::bail!(
                     "Pipeline '{}' stage '{}' has neither 'role' nor 'call' — one is required",
-                    pipeline_name,
+                    pipeline,
                     sname
                 ),
                 _ => {}
@@ -354,7 +355,7 @@ impl PipelineConfig {
             {
                 anyhow::bail!(
                     "Pipeline '{}' stage '{}' on_success references unknown stage '{}'",
-                    pipeline_name,
+                    pipeline,
                     sname,
                     target
                 );
@@ -364,7 +365,7 @@ impl PipelineConfig {
             {
                 anyhow::bail!(
                     "Pipeline '{}' stage '{}' on_failure references unknown stage '{}'",
-                    pipeline_name,
+                    pipeline,
                     sname,
                     target
                 );
@@ -374,7 +375,7 @@ impl PipelineConfig {
             {
                 anyhow::bail!(
                     "Pipeline '{}' stage '{}' on_intermediate references unknown stage '{}'",
-                    pipeline_name,
+                    pipeline,
                     sname,
                     target
                 );
@@ -514,11 +515,11 @@ impl WorkflowToml {
     /// *relative* paths with `prompts_dir`; by eagerly making paths absolute
     /// under the right base here, the dispatcher sees absolute paths and skips
     /// the prefix step correctly.
-    pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
+    pub fn resolve_paths(self, config_dir: &Path) -> Self {
         let resolved_prompts_dir = self
             .prompts_dir
             .map(|p| zbobr_utility::resolve_path(p, config_dir));
-        let prompt_base: &std::path::Path = resolved_prompts_dir.as_deref().unwrap_or(config_dir);
+        let prompt_base: &Path = resolved_prompts_dir.as_deref().unwrap_or(config_dir);
         let roles = self.roles.map(|roles| {
             roles
                 .into_iter()
@@ -551,7 +552,7 @@ impl Config for WorkflowConfig {
     type Toml = WorkflowToml;
     type Args = WorkflowArgs;
 
-    fn build(toml: Option<Self::Toml>, _args: Self::Args, _config_dir: &std::path::Path) -> Self {
+    fn build(toml: Option<Self::Toml>, _args: Self::Args, _config_dir: &Path) -> Self {
         match toml {
             Some(t) => WorkflowConfig {
                 prompts_dir: t.prompts_dir,
@@ -653,7 +654,7 @@ impl WorkflowConfig {
         // Each pipeline must have valid order/stages
         for pname in &pipeline_names {
             let pipeline = self.pipelines.get(pname.as_str()).unwrap();
-            pipeline.validate(pname.as_str())?;
+            pipeline.validate(pname)?;
         }
 
         // Every role-stage's role must exist in the roles map (if roles are configured)
