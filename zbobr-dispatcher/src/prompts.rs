@@ -5,7 +5,7 @@ use zbobr_api::{
     Comment, ContextRecord, ContextRecordType, Signal, StackEntry, StageContext, StageInfo, Task,
     TaskContext,
     config::{StageDefinition, WorkflowConfig},
-    config_tools::McpTool,
+    config_tools::{ALL_TOOLS, McpTool},
     context::serialize_context,
     task::{DEFAULT_MAX_STAGE_COUNT, Pipeline, Stage, Tool},
 };
@@ -314,7 +314,7 @@ pub async fn build_full_prompt(
     let allowed_tools: &[McpTool] = workflow
         .role_definition(role_name)
         .and_then(|d| d.mcp.as_deref())
-        .unwrap_or(&[]);
+        .unwrap_or(ALL_TOOLS);
     add_mcp_tool_variables(&mut vars, allowed_tools);
 
     // Inject extra variables from config.
@@ -348,7 +348,7 @@ pub fn build_prompt_with_task(
     let allowed_tools: &[McpTool] = workflow
         .role_definition(role_name)
         .and_then(|d| d.mcp.as_deref())
-        .unwrap_or(&[]);
+        .unwrap_or(ALL_TOOLS);
     add_mcp_tool_variables(&mut vars, allowed_tools);
 
     for (k, v) in extra_vars {
