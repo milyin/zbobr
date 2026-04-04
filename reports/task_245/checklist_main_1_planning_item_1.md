@@ -1,0 +1,1 @@
+Add the same `pub timezone: Option<chrono::FixedOffset>` field with `#[config(skip_args)]` to the FS backend config struct in `zbobr-task-backend-fs/src/config.rs`. Mirror the GitHub backend config change exactly.
