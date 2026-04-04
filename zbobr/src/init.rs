@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Secret, Stage,
     config::{
-        PipelineConfig, ProviderDefinition, Role, RoleDefinition, StageDefinition,
+        PipelineConfig, Provider, ProviderDefinition, Role, RoleDefinition, StageDefinition,
         StageTransition, ToolEntry, WorkflowConfig, WorkflowToml,
     },
     config_tools::McpTool,
@@ -58,21 +58,10 @@ const STAGE_LINTER_WORKER: &str = "linter_worker";
 const STAGE_TESTING: &str = "testing";
 const STAGE_MERGING: &str = "merging";
 
-#[derive(Copy, Clone, Debug)]
-struct Provider(&'static str);
-
-impl Provider {
-    const CLAUDE: Self = Provider("claude");
-    const COPILOT: Self = Provider("copilot");
-    const CLAUDE_PLANNER: Self = Provider("claude_planner");
-    const COPILOT_PLANNER: Self = Provider("copilot_planner");
-}
-
-impl From<Provider> for String {
-    fn from(provider: Provider) -> Self {
-        provider.0.to_string()
-    }
-}
+const PROVIDER_CLAUDE: Provider = Provider::new("claude");
+const PROVIDER_COPILOT: Provider = Provider::new("copilot");
+const PROVIDER_CLAUDE_PLANNER: Provider = Provider::new("claude_planner");
+const PROVIDER_COPILOT_PLANNER: Provider = Provider::new("copilot_planner");
 
 /// Initialize a new zbobr workspace at the given directory.
 ///
@@ -156,9 +145,9 @@ fn default_config_toml() -> RootConfigToml {
 
     let providers = IndexMap::from([
         (
-            Provider::CLAUDE.into(),
+            PROVIDER_CLAUDE.into(),
             ProviderDefinition {
-                executor: Some(Provider::CLAUDE.into()),
+                executor: Some(PROVIDER_CLAUDE.into()),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -166,9 +155,9 @@ fn default_config_toml() -> RootConfigToml {
             },
         ),
         (
-            Provider::COPILOT.into(),
+            PROVIDER_COPILOT.into(),
             ProviderDefinition {
-                executor: Some(Provider::COPILOT.into()),
+                executor: Some(PROVIDER_COPILOT.into()),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -176,20 +165,20 @@ fn default_config_toml() -> RootConfigToml {
             },
         ),
         (
-            Provider::CLAUDE_PLANNER.into(),
+            PROVIDER_CLAUDE_PLANNER.into(),
             ProviderDefinition {
                 executor: None,
-                parent: Some(Provider::CLAUDE.into()),
+                parent: Some(PROVIDER_CLAUDE.into()),
                 priority: None,
                 plan_mode: Some(true),
                 access_key: None,
             },
         ),
         (
-            Provider::COPILOT_PLANNER.into(),
+            PROVIDER_COPILOT_PLANNER.into(),
             ProviderDefinition {
                 executor: None,
-                parent: Some(Provider::COPILOT.into()),
+                parent: Some(PROVIDER_COPILOT.into()),
                 priority: None,
                 plan_mode: Some(true),
                 access_key: None,
@@ -202,12 +191,12 @@ fn default_config_toml() -> RootConfigToml {
             TOOL_DEVELOPER.to_string(),
             vec![
                 ToolEntry {
-                    provider: Provider::CLAUDE.into(),
+                    provider: PROVIDER_CLAUDE.into(),
                     model: CLAUDE_MODEL_OPUS.parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
-                    provider: Provider::COPILOT.into(),
+                    provider: PROVIDER_COPILOT.into(),
                     model: COPILOT_MODEL_SONNET.parse().unwrap(),
                     priority: Some(0),
                 },
@@ -217,12 +206,12 @@ fn default_config_toml() -> RootConfigToml {
             TOOL_PLANNER.to_string(),
             vec![
                 ToolEntry {
-                    provider: Provider::CLAUDE_PLANNER.into(),
+                    provider: PROVIDER_CLAUDE_PLANNER.into(),
                     model: CLAUDE_MODEL_OPUS.parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
-                    provider: Provider::COPILOT_PLANNER.into(),
+                    provider: PROVIDER_COPILOT_PLANNER.into(),
                     model: COPILOT_MODEL_SONNET.parse().unwrap(),
                     priority: Some(0),
                 },
@@ -232,12 +221,12 @@ fn default_config_toml() -> RootConfigToml {
             TOOL_HELPER.to_string(),
             vec![
                 ToolEntry {
-                    provider: Provider::COPILOT.into(),
+                    provider: PROVIDER_COPILOT.into(),
                     model: COPILOT_MODEL_HAIKU.parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
-                    provider: Provider::CLAUDE.into(),
+                    provider: PROVIDER_CLAUDE.into(),
                     model: CLAUDE_MODEL_HAIKU.parse().unwrap(),
                     priority: Some(0),
                 },
@@ -247,12 +236,12 @@ fn default_config_toml() -> RootConfigToml {
             TOOL_REVIEWER.to_string(),
             vec![
                 ToolEntry {
-                    provider: Provider::COPILOT.into(),
+                    provider: PROVIDER_COPILOT.into(),
                     model: COPILOT_MODEL_GPT_5_4.parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
-                    provider: Provider::CLAUDE.into(),
+                    provider: PROVIDER_CLAUDE.into(),
                     model: CLAUDE_MODEL_SONNET.parse().unwrap(),
                     priority: Some(0),
                 },
@@ -262,12 +251,12 @@ fn default_config_toml() -> RootConfigToml {
             TOOL_DRUDGE.to_string(),
             vec![
                 ToolEntry {
-                    provider: Provider::COPILOT.into(),
+                    provider: PROVIDER_COPILOT.into(),
                     model: COPILOT_MODEL_GPT_5_MINI.parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
-                    provider: Provider::CLAUDE.into(),
+                    provider: PROVIDER_CLAUDE.into(),
                     model: CLAUDE_MODEL_HAIKU.parse().unwrap(),
                     priority: Some(0),
                 },

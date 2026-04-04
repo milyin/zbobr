@@ -115,6 +115,8 @@ pub struct ToolEntry {
 
 mod role;
 pub use role::Role;
+mod provider;
+pub use provider::Provider;
 
 /// A stage transition descriptor with an optional target stage and pause flag.
 ///
