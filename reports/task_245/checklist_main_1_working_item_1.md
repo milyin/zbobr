@@ -1,0 +1,1 @@
+In zbobr-task-backend-fs/src/config.rs, rename `timezone_offset_seconds: Option<i32>` to `timezone: Option<zbobr_api::task::FixedOffsetTz>`. Update Default impl.
