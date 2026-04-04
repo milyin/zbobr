@@ -626,11 +626,14 @@ impl TaskBackend for ArcTaskBackendFs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Timelike;
     use std::path::Path;
     use zbobr_api::task::FixedOffsetTz;
-    use chrono::Timelike;
 
-    fn make_config_with_timezone(tasks_dir: PathBuf, tz: Option<FixedOffsetTz>) -> ZbobrTaskBackendFsConfig {
+    fn make_config_with_timezone(
+        tasks_dir: PathBuf,
+        tz: Option<FixedOffsetTz>,
+    ) -> ZbobrTaskBackendFsConfig {
         ZbobrTaskBackendFsConfig {
             tasks_dir,
             timezone: tz,

@@ -1215,7 +1215,10 @@ mod tests {
     #[test]
     fn fixed_offset_tz_parses_negative() {
         let tz: FixedOffsetTz = "-05:30".parse().unwrap();
-        assert_eq!(*tz, chrono::FixedOffset::west_opt(5 * 3600 + 30 * 60).unwrap());
+        assert_eq!(
+            *tz,
+            chrono::FixedOffset::west_opt(5 * 3600 + 30 * 60).unwrap()
+        );
     }
 
     #[test]
