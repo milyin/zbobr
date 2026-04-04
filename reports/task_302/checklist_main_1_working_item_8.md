@@ -1,0 +1,1 @@
+Add tests that verify partial overlays work: e.g., overlay changes only `priority` on a provider without restating `executor`, overlay changes only `tool` on a role without restating `mcp`/`prompt`, overlay changes one stage within a pipeline without restating all stages.
