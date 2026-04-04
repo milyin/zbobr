@@ -1,0 +1,1 @@
+In zbobr-api/src/config.rs, update WorkflowToml::merge_toml() so that `roles` and `pipelines` are merged entry-by-entry instead of using `other.roles.or(self.roles)`. Use the same pattern: extend base map with overlay entries.
