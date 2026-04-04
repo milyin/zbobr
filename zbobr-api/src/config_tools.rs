@@ -27,7 +27,6 @@ impl McpTool {
             Self::StopWithQuestion => "stop_with_question",
         }
     }
-
 }
 
 impl fmt::Display for McpTool {

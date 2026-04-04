@@ -208,7 +208,9 @@ pub async fn run(
     let task_backend = TaskBackendGithub::new(tasks_config).await?;
 
     let mut dispatcher_config = dispatcher_config;
-    dispatcher_config.workspaces = dispatcher_config.workspaces.join(&dispatcher_config.instance);
+    dispatcher_config.workspaces = dispatcher_config
+        .workspaces
+        .join(&dispatcher_config.instance);
 
     let mut repo_config = repo_config;
     repo_config.repos_dir = repo_config.repos_dir.join(&dispatcher_config.instance);
