@@ -76,6 +76,7 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
     let mut plain_args_fields = Vec::new();
     let mut merge_fields = Vec::new();
     let mut merge_toml_fields: Vec<TokenStream2> = Vec::new();
+    let mut resolve_paths_fields: Vec<TokenStream2> = Vec::new();
     let mut has_override_checks = Vec::new();
     let mut base_fields = Vec::new();
     // Steps that build the struct in PrefixedArgs::from_matches_prefixed (one per field).
@@ -188,6 +189,10 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                         (None, over) => over,
                         (base, None) => base,
                     },
+                });
+
+                resolve_paths_fields.push(quote! {
+                    #field_ident: self.#field_ident.map(|t| t.resolve_paths(config_dir)),
                 });
             }
 
@@ -317,6 +322,26 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 merge_toml_fields.push(quote! {
                     #field_ident: other.#field_ident.or(self.#field_ident),
                 });
+
+                if is_path {
+                    if vec_inner_type(&value_ty).is_some() {
+                        // Option<Vec<PathBuf>>: resolve each element
+                        resolve_paths_fields.push(quote! {
+                            #field_ident: self.#field_ident.map(|v| v.into_iter()
+                                .map(|p| ::zbobr_utility::resolve_path(p, config_dir))
+                                .collect()),
+                        });
+                    } else {
+                        // Option<PathBuf>: resolve the single path
+                        resolve_paths_fields.push(quote! {
+                            #field_ident: self.#field_ident.map(|p| ::zbobr_utility::resolve_path(p, config_dir)),
+                        });
+                    }
+                } else {
+                    resolve_paths_fields.push(quote! {
+                        #field_ident: self.#field_ident,
+                    });
+                }
             }
 
             if !config_meta.skip_args {
@@ -490,6 +515,15 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             pub fn merge_toml(self, other: Self) -> Self {
                 Self {
                     #(#merge_toml_fields)*
+                }
+            }
+
+            /// Resolve all relative path fields against the given base directory.
+            /// This should be called per-config-file before merging so that each
+            /// file's relative paths stay anchored to its own directory.
+            pub fn resolve_paths(self, config_dir: &::std::path::Path) -> Self {
+                Self {
+                    #(#resolve_paths_fields)*
                 }
             }
         }

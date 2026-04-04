@@ -95,9 +95,15 @@ async fn main() -> anyhow::Result<()> {
                 .with_context(|| format!("Failed to read {}", path.display()))?;
             let parsed: RootConfigToml = toml::from_str(&content)
                 .with_context(|| format!("Failed to parse {}", path.display()))?;
+            // Resolve relative paths against the config file's own directory
+            // so that paths from each config stay anchored to their source.
+            let file_dir = path
+                .parent()
+                .expect("config file must have a parent directory");
+            let resolved = parsed.resolve_paths(file_dir);
             merged = Some(match merged {
-                Some(base) => base.merge_toml(parsed),
-                None => parsed,
+                Some(base) => base.merge_toml(resolved),
+                None => resolved,
             });
         }
         merged

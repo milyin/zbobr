@@ -372,6 +372,17 @@ impl WorkflowToml {
         }
     }
 
+    /// Resolve relative path fields against the given base directory.
+    pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
+        Self {
+            prompts_dir: self
+                .prompts_dir
+                .map(|p| zbobr_utility::resolve_path(p, config_dir)),
+            roles: self.roles,
+            pipelines: self.pipelines,
+        }
+    }
+
     pub fn try_into_config(self) -> anyhow::Result<WorkflowConfig> {
         Ok(WorkflowConfig {
             prompts_dir: self.prompts_dir,
