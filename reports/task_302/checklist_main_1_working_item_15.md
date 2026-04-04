@@ -1,0 +1,1 @@
+Add a behavior-oriented test that verifies roles with omitted mcp field still get the full default tool set at runtime, not an empty set. This ensures the regression is covered and the test helper masking issue is addressed.
