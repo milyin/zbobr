@@ -1,0 +1,1 @@
+In `zbobr-dispatcher/tests/mcp_integration/env.rs`, update all backend config construction sites (around lines 137, 173, 237, 278) to set the new `timezone` field. This ensures tests compile and can optionally verify timezone behavior.
