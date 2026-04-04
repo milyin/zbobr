@@ -1,0 +1,1 @@
+Done. The only issue from the review — stale rustdoc on `init_workspace` — has been fixed and committed.
