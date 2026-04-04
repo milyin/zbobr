@@ -1960,7 +1960,7 @@ mod tests {
     /// Build a minimal Workflow with a single "main" pipeline containing one "working" stage.
     fn make_workflow() -> Workflow {
         let role_stage = StageDefinition {
-            role: Some("worker".to_string()),
+            role: Some("worker".to_string().into()),
             ..Default::default()
         };
         let main_pipeline = PipelineConfig {

@@ -385,7 +385,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
                 (
                     Stage::from("check"),
                     StageDefinition {
-                        role: Some("role_check".to_string()),
+                        role: Some("role_check".to_string().into()),
                         tool: Some("mcp-tester".to_string()),
                         ..Default::default()
                     },
@@ -393,7 +393,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
                 (
                     Stage::from("finish"),
                     StageDefinition {
-                        role: Some("role_finish".to_string()),
+                        role: Some("role_finish".to_string().into()),
                         tool: Some("mcp-tester".to_string()),
                         ..Default::default()
                     },

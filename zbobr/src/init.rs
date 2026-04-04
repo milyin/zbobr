@@ -7,8 +7,8 @@ use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Secret, Stage,
     config::{
-        PipelineConfig, ProviderDefinition, RoleDefinition, StageDefinition, StageTransition,
-        ToolEntry, WorkflowConfig, WorkflowToml,
+        PipelineConfig, ProviderDefinition, Role, RoleDefinition, StageDefinition,
+        StageTransition, ToolEntry, WorkflowConfig, WorkflowToml,
     },
     config_tools::McpTool,
 };
@@ -38,15 +38,15 @@ const TOOL_HELPER: &str = "helper";
 const TOOL_REVIEWER: &str = "reviewer";
 const TOOL_DRUDGE: &str = "drudge";
 
-const ROLE_PLANNER: &str = "planner";
-const ROLE_WORKER: &str = "worker";
-const ROLE_TEST_PLANNER: &str = "test_planner";
-const ROLE_TEST_WORKER: &str = "test_worker";
-const ROLE_REVIEWER: &str = "reviewer";
-const ROLE_TESTER: &str = "tester";
-const ROLE_LINTER: &str = "linter";
-const ROLE_LINTER_WORKER: &str = "linter_worker";
-const ROLE_MERGER: &str = "merger";
+const ROLE_PLANNER: Role = Role::new("planner");
+const ROLE_WORKER: Role = Role::new("worker");
+const ROLE_TEST_PLANNER: Role = Role::new("test_planner");
+const ROLE_TEST_WORKER: Role = Role::new("test_worker");
+const ROLE_REVIEWER: Role = Role::new("reviewer");
+const ROLE_TESTER: Role = Role::new("tester");
+const ROLE_LINTER: Role = Role::new("linter");
+const ROLE_LINTER_WORKER: Role = Role::new("linter_worker");
+const ROLE_MERGER: Role = Role::new("merger");
 
 const STAGE_PLANNING: &str = "planning";
 const STAGE_WORKING: &str = "working";
@@ -336,7 +336,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             Stage::from(STAGE_PLANNING),
             StageDefinition {
-                role: Some(ROLE_PLANNER.into()),
+                role: Some(ROLE_PLANNER),
                 prompts: Some(task_prompt.clone()),
                 on_intermediate: Some(StageTransition::pause()),
                 ..Default::default()
@@ -345,7 +345,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             Stage::from(STAGE_WORKING),
             StageDefinition {
-                role: Some(ROLE_WORKER.into()),
+                role: Some(ROLE_WORKER),
                 prompts: Some(task_prompt.clone()),
                 on_intermediate: Some(StageTransition::stage(STAGE_REVIEWING)),
                 ..Default::default()
@@ -354,7 +354,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             Stage::from(STAGE_REVIEWING),
             StageDefinition {
-                role: Some(ROLE_REVIEWER.into()),
+                role: Some(ROLE_REVIEWER),
                 prompts: Some(task_prompt.clone()),
                 on_failure: Some(StageTransition::stage(STAGE_WORKING)),
                 on_intermediate: Some(StageTransition::stage(STAGE_TEST_PLANNER)),
@@ -364,7 +364,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             Stage::from(STAGE_TEST_PLANNER),
             StageDefinition {
-                role: Some(ROLE_TEST_PLANNER.into()),
+                role: Some(ROLE_TEST_PLANNER),
                 prompts: Some(task_prompt.clone()),
                 on_failure: Some(StageTransition::stage(STAGE_WORKING)),
                 on_intermediate: Some(StageTransition::stage(STAGE_TEST_WORKER)),
@@ -374,7 +374,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             Stage::from(STAGE_TEST_WORKER),
             StageDefinition {
-                role: Some(ROLE_TEST_WORKER.into()),
+                role: Some(ROLE_TEST_WORKER),
                 prompts: Some(task_prompt.clone()),
                 on_failure: Some(StageTransition::stage(STAGE_WORKING)),
                 on_intermediate: Some(StageTransition::stage(STAGE_WORKING)),
@@ -384,7 +384,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             Stage::from(STAGE_LINTING),
             StageDefinition {
-                role: Some(ROLE_LINTER.into()),
+                role: Some(ROLE_LINTER),
                 prompts: Some(task_prompt.clone()),
                 on_success: Some(StageTransition::stage(STAGE_TESTING)),
                 on_failure: Some(StageTransition::stage(STAGE_LINTER_WORKER)),
@@ -394,7 +394,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             Stage::from(STAGE_LINTER_WORKER),
             StageDefinition {
-                role: Some(ROLE_LINTER_WORKER.into()),
+                role: Some(ROLE_LINTER_WORKER),
                 prompts: Some(task_prompt.clone()),
                 on_success: Some(StageTransition::stage(STAGE_LINTING)),
                 on_failure: Some(StageTransition::stage(STAGE_WORKING)),
@@ -404,7 +404,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             Stage::from(STAGE_TESTING),
             StageDefinition {
-                role: Some(ROLE_TESTER.into()),
+                role: Some(ROLE_TESTER),
                 prompts: Some(task_prompt.clone()),
                 on_failure: Some(StageTransition::stage(STAGE_WORKING)),
                 ..Default::default()
@@ -415,7 +415,7 @@ fn default_workflow() -> WorkflowConfig {
     let merge_stages = IndexMap::from([(
         Stage::from(STAGE_MERGING),
         StageDefinition {
-            role: Some(ROLE_MERGER.into()),
+            role: Some(ROLE_MERGER),
             prompts: Some(task_prompt),
             ..Default::default()
         },

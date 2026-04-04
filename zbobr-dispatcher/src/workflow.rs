@@ -68,7 +68,7 @@ impl Default for Workflow {
     fn default() -> Self {
         let mut pipelines = HashMap::new();
         let dummy_stage = StageDefinition {
-            role: Some("default".to_string()),
+            role: Some("default".to_string().into()),
             ..Default::default()
         };
         for name in [Pipeline::MAIN, Pipeline::MERGE] {

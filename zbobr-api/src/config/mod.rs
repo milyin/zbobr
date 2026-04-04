@@ -1243,7 +1243,7 @@ mod tests {
     fn resolve_tool_name_stage_overrides() {
         let stage = StageDefinition {
             tool: Some("stage-tool".to_string()),
-            role: Some("worker".to_string()),
+            role: Some("worker".to_string().into()),
             ..Default::default()
         };
         let workflow = make_workflow_with_role("worker", Some("role-tool".to_string()));
@@ -1258,7 +1258,7 @@ mod tests {
     fn resolve_tool_name_falls_back_to_role() {
         let stage = StageDefinition {
             tool: None,
-            role: Some("worker".to_string()),
+            role: Some("worker".to_string().into()),
             ..Default::default()
         };
         let workflow = make_workflow_with_role("worker", Some("role-tool".to_string()));
@@ -1273,7 +1273,7 @@ mod tests {
     fn resolve_tool_name_errors_when_no_tool() {
         let stage = StageDefinition {
             tool: None,
-            role: Some("worker".to_string()),
+            role: Some("worker".to_string().into()),
             ..Default::default()
         };
         let workflow = make_workflow_with_role("worker", None);
@@ -1285,7 +1285,7 @@ mod tests {
     fn resolve_tool_name_errors_when_no_role() {
         let stage = StageDefinition {
             tool: None,
-            role: Some("nonexistent".to_string()),
+            role: Some("nonexistent".to_string().into()),
             ..Default::default()
         };
         let workflow = WorkflowConfig::default();
@@ -1394,7 +1394,7 @@ mod tests {
         stages.insert(
             Stage::from("working"),
             StageDefinition {
-                role: Some("worker".to_string()),
+                role: Some("worker".to_string().into()),
                 tool: Some("bad".to_string()),
                 ..Default::default()
             },
@@ -1442,7 +1442,7 @@ mod tests {
         stages.insert(
             Stage::from("working"),
             StageDefinition {
-                role: Some("worker".to_string()),
+                role: Some("worker".to_string().into()),
                 tool: Some("smart".to_string()),
                 ..Default::default()
             },
@@ -1494,7 +1494,7 @@ mod tests {
         stages.insert(
             Stage::from("working"),
             StageDefinition {
-                role: Some("worker".to_string()),
+                role: Some("worker".to_string().into()),
                 tool: None,
                 ..Default::default()
             },
@@ -1649,7 +1649,7 @@ developer = [
     #[test]
     fn stage_definition_resolve_paths_resolves_all_prompt_fields() {
         let stage = StageDefinition {
-            role: Some("worker".to_string()),
+            role: Some("worker".to_string().into()),
             role_prompt: Some(PathBuf::from("worker.md")),
             prompts: Some(vec![
                 PathBuf::from("common.md"),
@@ -1673,7 +1673,7 @@ developer = [
         stages.insert(
             Stage::from("review"),
             StageDefinition {
-                role: Some("reviewer".to_string()),
+                role: Some("reviewer".to_string().into()),
                 role_prompt: Some(PathBuf::from("review.md")),
                 prompts: Some(vec![PathBuf::from("common.md")]),
                 ..Default::default()
@@ -1707,7 +1707,7 @@ developer = [
         stages.insert(
             Stage::from("review"),
             StageDefinition {
-                role: Some("reviewer".to_string()),
+                role: Some("reviewer".to_string().into()),
                 role_prompt: Some(PathBuf::from("review_stage.md")),
                 prompts: Some(vec![PathBuf::from("common.md")]),
                 ..Default::default()
@@ -1855,7 +1855,7 @@ developer = [
         main_stages.insert(
             Stage::from("planning"),
             StageDefinition {
-                role: Some("planner".to_string()),
+                role: Some("planner".to_string().into()),
                 ..Default::default()
             },
         );
@@ -1869,7 +1869,7 @@ developer = [
         fix_stages.insert(
             Stage::from("fixing"),
             StageDefinition {
-                role: Some("worker".to_string()),
+                role: Some("worker".to_string().into()),
                 ..Default::default()
             },
         );
@@ -1889,7 +1889,7 @@ developer = [
         overlay_stages.insert(
             Stage::from("planning"),
             StageDefinition {
-                role: Some("senior_planner".to_string()),
+                role: Some("senior_planner".to_string().into()),
                 ..Default::default()
             },
         );
@@ -2161,7 +2161,7 @@ developer = [
         base_stages.insert(
             Stage::from("planning"),
             StageDefinition {
-                role: Some("planner".to_string()),
+                role: Some("planner".to_string().into()),
                 tool: Some("fast".to_string()),
                 ..Default::default()
             },
@@ -2169,7 +2169,7 @@ developer = [
         base_stages.insert(
             Stage::from("working"),
             StageDefinition {
-                role: Some("worker".to_string()),
+                role: Some("worker".to_string().into()),
                 ..Default::default()
             },
         );
@@ -2193,7 +2193,7 @@ developer = [
         overlay_stages.insert(
             Stage::from("planning"),
             StageDefinition {
-                role: Some("senior_planner".to_string()),
+                role: Some("senior_planner".to_string().into()),
                 tool: None,
                 ..Default::default()
             },
@@ -2240,7 +2240,7 @@ developer = [
         base_stages.insert(
             Stage::from("planning"),
             StageDefinition {
-                role: Some("planner".to_string()),
+                role: Some("planner".to_string().into()),
                 prompts: Some(vec![PathBuf::from("/shared/common.md")]),
                 ..Default::default()
             },

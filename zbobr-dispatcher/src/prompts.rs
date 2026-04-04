@@ -680,7 +680,7 @@ mod tests {
         stages.insert(
             Stage::from("work"),
             StageDefinition {
-                role: Some("default".to_string()),
+                role: Some("default".to_string().into()),
                 prompts: Some(vec![prompt_path]),
                 ..Default::default()
             },
@@ -697,7 +697,7 @@ mod tests {
         stages.insert(
             Stage::from("work"),
             StageDefinition {
-                role: Some("default".to_string()),
+                role: Some("default".to_string().into()),
                 prompts: Some(vec![prompt_path]),
                 ..Default::default()
             },
@@ -718,7 +718,7 @@ mod tests {
         stages.insert(
             Stage::from("work"),
             StageDefinition {
-                role: Some("default".to_string()),
+                role: Some("default".to_string().into()),
                 prompts: Some(vec![PathBuf::from("/nonexistent/prompt.md")]),
                 ..Default::default()
             },
@@ -743,7 +743,7 @@ mod tests {
         stages.insert(
             Stage::from("stage_a"),
             StageDefinition {
-                role: Some("default".to_string()),
+                role: Some("default".to_string().into()),
                 prompts: Some(vec![PathBuf::from("/nonexistent/prompt.md")]),
                 ..Default::default()
             },
@@ -751,7 +751,7 @@ mod tests {
         stages.insert(
             Stage::from("stage_b"),
             StageDefinition {
-                role: Some("default".to_string()),
+                role: Some("default".to_string().into()),
                 prompts: Some(vec![bad_var_path]),
                 ..Default::default()
             },
@@ -793,7 +793,7 @@ mod tests {
         main_stages.insert(
             Stage::from("work"),
             StageDefinition {
-                role: Some("default".to_string()),
+                role: Some("default".to_string().into()),
                 prompts: Some(vec![valid_path]),
                 ..Default::default()
             },
@@ -803,7 +803,7 @@ mod tests {
         secondary_stages.insert(
             Stage::from("broken"),
             StageDefinition {
-                role: Some("default".to_string()),
+                role: Some("default".to_string().into()),
                 prompts: Some(vec![PathBuf::from("/nonexistent/secondary_prompt.md")]),
                 ..Default::default()
             },

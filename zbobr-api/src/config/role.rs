@@ -1,8 +1,12 @@
 /// A role name within workflow stages.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Role(pub String);
+pub struct Role(pub std::borrow::Cow<'static, str>);
 
 impl Role {
+    pub const fn new(value: &'static str) -> Self {
+        Role(std::borrow::Cow::Borrowed(value))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -29,13 +33,19 @@ impl std::borrow::Borrow<str> for Role {
 
 impl From<&str> for Role {
     fn from(s: &str) -> Self {
-        Role(s.to_string())
+        Role(std::borrow::Cow::Owned(s.to_string()))
     }
 }
 
 impl From<String> for Role {
     fn from(s: String) -> Self {
-        Role(s)
+        Role(std::borrow::Cow::Owned(s))
+    }
+}
+
+impl From<Role> for String {
+    fn from(role: Role) -> Self {
+        role.0.into_owned()
     }
 }
 
@@ -47,7 +57,7 @@ impl serde::Serialize for Role {
 
 impl<'de> serde::Deserialize<'de> for Role {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Role(String::deserialize(deserializer)?))
+        Ok(Role(std::borrow::Cow::Owned(String::deserialize(deserializer)?)))
     }
 }
 
