@@ -673,23 +673,37 @@ impl WorkflowToml {
     }
 
     /// Resolve relative path fields against the given base directory.
+    ///
+    /// `prompts_dir` is resolved against `config_dir`.  Role and stage prompt
+    /// paths are resolved against the *effective* prompt base: the resolved
+    /// `prompts_dir` when present, otherwise `config_dir`.  This preserves the
+    /// runtime contract in `prompt_files_for_stage`, which only prefixes
+    /// *relative* paths with `prompts_dir`; by eagerly making paths absolute
+    /// under the right base here, the dispatcher sees absolute paths and skips
+    /// the prefix step correctly.
     pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
+        let resolved_prompts_dir = self
+            .prompts_dir
+            .map(|p| zbobr_utility::resolve_path(p, config_dir));
+        let prompt_base: &std::path::Path = resolved_prompts_dir
+            .as_deref()
+            .unwrap_or(config_dir);
+        let roles = self.roles.map(|roles| {
+            roles
+                .into_iter()
+                .map(|(name, role)| (name, role.resolve_paths(prompt_base)))
+                .collect()
+        });
+        let pipelines = self.pipelines.map(|pipelines| {
+            pipelines
+                .into_iter()
+                .map(|(name, pipeline)| (name, pipeline.resolve_paths(prompt_base)))
+                .collect()
+        });
         Self {
-            prompts_dir: self
-                .prompts_dir
-                .map(|p| zbobr_utility::resolve_path(p, config_dir)),
-            roles: self.roles.map(|roles| {
-                roles
-                    .into_iter()
-                    .map(|(name, role)| (name, role.resolve_paths(config_dir)))
-                    .collect()
-            }),
-            pipelines: self.pipelines.map(|pipelines| {
-                pipelines
-                    .into_iter()
-                    .map(|(name, pipeline)| (name, pipeline.resolve_paths(config_dir)))
-                    .collect()
-            }),
+            prompts_dir: resolved_prompts_dir,
+            roles,
+            pipelines,
         }
     }
 
@@ -1914,20 +1928,20 @@ developer = [
             resolved.prompts_dir.unwrap(),
             PathBuf::from("/shared/prompts")
         );
-        // role prompt resolved
+        // role prompt resolved against prompts_dir
         let role = &resolved.roles.as_ref().unwrap()["reviewer"];
         assert_eq!(
             role.prompt.as_ref().unwrap(),
-            &PathBuf::from("/shared/reviewer.md")
+            &PathBuf::from("/shared/prompts/reviewer.md")
         );
-        // stage prompts resolved
+        // stage prompts resolved against prompts_dir
         let pipeline = &resolved.pipelines.as_ref().unwrap()[&Pipeline::Main];
         let stage = pipeline.stage("review").unwrap();
         assert_eq!(
             stage.role_prompt.as_ref().unwrap(),
-            &PathBuf::from("/shared/review_stage.md")
+            &PathBuf::from("/shared/prompts/review_stage.md")
         );
-        assert_eq!(stage.prompts.as_deref().unwrap()[0], PathBuf::from("/shared/common.md"));
+        assert_eq!(stage.prompts.as_deref().unwrap()[0], PathBuf::from("/shared/prompts/common.md"));
     }
 
     #[test]
@@ -1966,7 +1980,7 @@ developer = [
         let role = &merged.roles.as_ref().unwrap()["reviewer"];
         assert_eq!(
             role.prompt.as_ref().unwrap(),
-            &PathBuf::from("/shared/reviewer.md")
+            &PathBuf::from("/shared/prompts/reviewer.md")
         );
     }
 
