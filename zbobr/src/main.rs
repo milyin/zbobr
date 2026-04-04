@@ -74,9 +74,7 @@ async fn main() -> anyhow::Result<()> {
     } else {
         "off".into()
     };
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .init();
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     // Handle init before config loading — no existing config needed
     if let Command::Init { ref directory } = cli.command {

@@ -2187,7 +2187,10 @@ mod tests {
         let logs_arg = cmd
             .get_arguments()
             .find(|a| a.get_long().map(|l| l == "logs").unwrap_or(false));
-        assert!(logs_arg.is_some(), "GlobalArgs should declare a --logs flag");
+        assert!(
+            logs_arg.is_some(),
+            "GlobalArgs should declare a --logs flag"
+        );
         let action = logs_arg.unwrap().get_action();
         assert!(
             matches!(action, clap::ArgAction::SetTrue),
