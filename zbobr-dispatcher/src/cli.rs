@@ -76,6 +76,10 @@ pub fn resolve_config_location(
 /// This includes only dispatcher and executor config, not backend-specific settings.
 #[derive(Args, Clone)]
 pub struct GlobalArgs {
+    /// Enable log output to stderr
+    #[arg(long)]
+    pub logs: bool,
+
     #[command(
         flatten,
         next_help_heading = "[config] Meta options and config file overrides"
