@@ -602,7 +602,7 @@ impl<'a> CliStageRunner<'a> {
                 let instance = self.zbobr.config().instance.clone();
                 let pipeline_name = self.pipeline_name.clone();
                 let stage_name = Stage::new(self.stage_name);
-                let tool_val = Some(resolved_provider.name.clone());
+                let tool_val = Some(resolved_provider.provider.as_str().to_string());
                 let model_val = Some(model.clone());
                 let timestamp =
                     chrono::Utc::now().with_timezone(&self.zbobr.config().fixed_offset());
@@ -710,12 +710,12 @@ impl<'a> CliStageRunner<'a> {
             let last_mapped_tool = *tool_tracker.lock().unwrap();
 
             if outcome.execution_failed {
-                cycle_excluded_providers.insert(resolved_provider.name.clone());
+                cycle_excluded_providers.insert(resolved_provider.provider.as_str().to_string());
                 let attempts_remaining = self.zbobr.available_provider_model_count_excluding(
                     &tool_name,
                     &cycle_excluded_providers,
                 )?;
-                let excluded = self.zbobr.record_provider_failure(&resolved_provider.name);
+                let excluded = self.zbobr.record_provider_failure(resolved_provider.provider.as_str());
                 server_handle.abort();
                 if attempts_remaining > 0 {
                     let exclusion_hint = if excluded {
@@ -725,7 +725,7 @@ impl<'a> CliStageRunner<'a> {
                     };
                     tracing::warn!(
                         "Provider '{}' failed for tool '{}' — retrying with next available provider{}",
-                        resolved_provider.name,
+                        resolved_provider.provider.as_str(),
                         tool_name,
                         exclusion_hint,
                     );
@@ -736,7 +736,7 @@ impl<'a> CliStageRunner<'a> {
                     tool_name
                 );
             } else {
-                self.zbobr.record_provider_success(&resolved_provider.name);
+                self.zbobr.record_provider_success(resolved_provider.provider.as_str());
             }
 
             if let Some(e) = finalize_stage_session(

@@ -94,7 +94,7 @@ impl zbobr_utility::MergeToml for ProviderDefinition {
 /// A resolved provider with all inheritance fully flattened.
 #[derive(Clone, Debug)]
 pub struct ResolvedProvider {
-    pub name: String,
+    pub provider: Provider,
     pub executor: String,
     pub priority: i32,
     pub plan_mode: bool,
@@ -894,32 +894,32 @@ impl ZbobrDispatcherConfig {
     /// Returns an `IndexMap` from provider to `ResolvedProvider`.
     pub fn resolve_providers(&self) -> anyhow::Result<IndexMap<Provider, ResolvedProvider>> {
         let mut resolved = IndexMap::new();
-        for name in self.providers.keys() {
-            let rp = self.resolve_single_provider(name.clone(), &mut Vec::new())?;
-            resolved.insert(name.clone(), rp);
+        for provider in self.providers.keys() {
+            let rp = self.resolve_single_provider(provider.clone(), &mut Vec::new())?;
+            resolved.insert(provider.clone(), rp);
         }
         Ok(resolved)
     }
 
     fn resolve_single_provider(
         &self,
-        name: Provider,
+        provider: Provider,
         visited: &mut Vec<Provider>,
     ) -> anyhow::Result<ResolvedProvider> {
-        if visited.contains(&name) {
-            anyhow::bail!("Circular parent reference detected in provider '{}'", name.as_str());
+        if visited.contains(&provider) {
+            anyhow::bail!("Circular parent reference detected in provider '{}'", provider.as_str());
         }
-        visited.push(name.clone());
+        visited.push(provider.clone());
 
         let def = self
             .providers
-            .get(&name)
-            .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", name.as_str()))?;
+            .get(&provider)
+            .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", provider.as_str()))?;
 
         if let Some(ref parent_name) = def.parent {
             let parent = self.resolve_single_provider(parent_name.clone(), visited)?;
             Ok(ResolvedProvider {
-                name: name.as_str().to_string(),
+                provider: provider.clone(),
                 executor: def.executor.clone().unwrap_or(parent.executor),
                 priority: def.priority.unwrap_or(parent.priority),
                 plan_mode: def.plan_mode.unwrap_or(parent.plan_mode),
@@ -927,10 +927,10 @@ impl ZbobrDispatcherConfig {
             })
         } else {
             let executor = def.executor.clone().ok_or_else(|| {
-                anyhow::anyhow!("Provider '{}' has no executor and no parent", name)
+                anyhow::anyhow!("Provider '{}' has no executor and no parent", provider)
             })?;
             Ok(ResolvedProvider {
-                name: name.to_string(),
+                provider: provider.clone(),
                 executor,
                 priority: def.priority.unwrap_or(10),
                 plan_mode: def.plan_mode.unwrap_or(false),
@@ -976,7 +976,7 @@ mod tests {
 
         assert_eq!(resolved.len(), 1);
         let rp = &resolved[&Provider::new("claude")];
-        assert_eq!(rp.name, "claude");
+        assert_eq!(rp.provider.as_str(), "claude");
         assert_eq!(rp.executor, "claude");
         assert_eq!(rp.priority, 10);
         assert!(!rp.plan_mode);

@@ -303,7 +303,7 @@ impl ZbobrDispatcher {
             other => anyhow::bail!(
                 "Unknown executor '{}' for provider '{}'",
                 other,
-                provider.name
+                provider.provider.as_str()
             ),
         }
     }
@@ -580,7 +580,7 @@ mod tests {
 
         let dispatcher = make_dispatcher(providers, tools);
         let (rp, model) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.name, "claude");
+        assert_eq!(rp.provider.as_str(), "claude");
         assert_eq!(model.as_str(), "opus");
     }
 
@@ -619,7 +619,7 @@ mod tests {
         dispatcher.exclude_provider("a");
 
         let (rp, _) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.name, "b");
+        assert_eq!(rp.provider.as_str(), "b");
     }
 
     #[test]
@@ -641,7 +641,7 @@ mod tests {
         dispatcher.exclude_provider("primary");
 
         let (rp, model) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.name, "fallback");
+        assert_eq!(rp.provider.as_str(), "fallback");
         assert_eq!(model.as_str(), "haiku");
     }
 
@@ -667,7 +667,7 @@ mod tests {
         let (rp, model) = dispatcher
             .select_provider_excluding("smart", &excluded)
             .unwrap();
-        assert_eq!(rp.name, "fallback");
+        assert_eq!(rp.provider.as_str(), "fallback");
         assert_eq!(model.as_str(), "gpt-5.3-codex");
     }
 
@@ -696,7 +696,7 @@ mod tests {
             .select_provider_excluding("smart", &excluded)
             .unwrap();
 
-        assert_eq!(rp.name, "high_b");
+        assert_eq!(rp.provider.as_str(), "high_b");
         assert_eq!(model.as_str(), "gpt-5.4");
     }
 
@@ -724,13 +724,13 @@ mod tests {
         // Both providers have priority 10, but the fallback entry overrides to 0.
         // Without exclusions, the primary (effective priority 10) should be selected.
         let (rp, model) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.name, "primary");
+        assert_eq!(rp.provider.as_str(), "primary");
         assert_eq!(model.as_str(), "opus");
 
         // When primary is excluded, fallback (entry priority 0) is the only option.
         dispatcher.exclude_provider("primary");
         let (rp, model) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.name, "fallback");
+        assert_eq!(rp.provider.as_str(), "fallback");
         assert_eq!(model.as_str(), "haiku");
     }
 
@@ -939,13 +939,13 @@ mod tests {
 
         // Provider "b" has base priority 5 but entry priority 20 → should win.
         let (rp, model) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.name, "b", "elevated entry should be selected first");
+        assert_eq!(rp.provider.as_str(), "b", "elevated entry should be selected first");
         assert_eq!(model.as_str(), "sonnet");
 
         // When "b" is excluded, fall back to "a" (effective priority 5).
         dispatcher.exclude_provider("b");
         let (rp, model) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.name, "a");
+        assert_eq!(rp.provider.as_str(), "a");
         assert_eq!(model.as_str(), "opus");
     }
 }
