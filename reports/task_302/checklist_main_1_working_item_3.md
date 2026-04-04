@@ -1,0 +1,1 @@
+Add tests verifying that relative prompt paths in RoleDefinition.prompt, StageDefinition.role_prompt, and StageDefinition.prompts are correctly resolved per-config-file before merging, so shared configs work from different directories.
