@@ -634,7 +634,7 @@ impl<'a> CliStageRunner<'a> {
                 Arc::clone(self.zbobr),
                 role,
                 self.task_id,
-                Executor(resolved_provider.executor.clone()),
+                resolved_provider.executor.clone(),
                 model.clone(),
                 self.stage_name.to_string(),
                 allowed_tools.clone(),
@@ -652,7 +652,7 @@ impl<'a> CliStageRunner<'a> {
             let executor = self
                 .zbobr
                 .build_executor(&resolved_provider, self.mcp_tester_override)?;
-            let copilot_token_owned = if resolved_provider.executor == Executor::COPILOT {
+            let copilot_token_owned = if resolved_provider.executor == Executor::copilot() {
                 self.zbobr.copilot_github_token().to_owned()
             } else {
                 String::new()

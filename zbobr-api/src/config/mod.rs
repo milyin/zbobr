@@ -63,7 +63,7 @@ pub struct ProviderDefinition {
     /// Executor type (e.g. "claude", "copilot", "mcp-tester").
     /// Required unless `parent` is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub executor: Option<String>,
+    pub executor: Option<Executor>,
     /// Parent provider to inherit settings from. Child fields override parent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<Provider>,
@@ -95,7 +95,7 @@ impl zbobr_utility::MergeToml for ProviderDefinition {
 #[derive(Clone, Debug)]
 pub struct ResolvedProvider {
     pub provider: Provider,
-    pub executor: String,
+    pub executor: Executor,
     pub priority: i32,
     pub plan_mode: bool,
     pub access_key: Option<Secret>,
@@ -966,7 +966,7 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some("claude".to_string()),
+                executor: Some(Executor("claude".to_string())),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -990,7 +990,7 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude_base"),
             ProviderDefinition {
-                executor: Some("claude".to_string()),
+                executor: Some(Executor("claude".to_string())),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -1018,7 +1018,7 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("grandparent"),
             ProviderDefinition {
-                executor: Some("claude".to_string()),
+                executor: Some(Executor("claude".to_string())),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -1086,7 +1086,7 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("base"),
             ProviderDefinition {
-                executor: Some("claude".to_string()),
+                executor: Some(Executor("claude".to_string())),
                 parent: None,
                 priority: None,
                 plan_mode: Some(false),
@@ -1118,7 +1118,7 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some("claude".to_string()),
+                executor: Some(Executor("claude".to_string())),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -1184,7 +1184,7 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some("claude".to_string()),
+                executor: Some(Executor("claude".to_string())),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -1288,7 +1288,7 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("base"),
             ProviderDefinition {
-                executor: Some("claude".to_string()),
+                executor: Some(Executor("claude".to_string())),
                 parent: None,
                 priority: Some(3),
                 plan_mode: None,
@@ -1325,7 +1325,7 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some("claude".to_string()),
+                executor: Some(Executor("claude".to_string())),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -1355,7 +1355,7 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some("claude".to_string()),
+                executor: Some(Executor("claude".to_string())),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -1401,7 +1401,7 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some("claude".to_string()),
+                executor: Some(Executor("claude".to_string())),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -1450,7 +1450,7 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some("claude".to_string()),
+                executor: Some(Executor("claude".to_string())),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -1506,7 +1506,7 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("bad"),
             ProviderDefinition {
-                executor: Some("invalid_executor".to_string()),
+                executor: Some(Executor("invalid_executor".to_string())),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -1899,7 +1899,7 @@ developer = [
         let mut base_providers = IndexMap::new();
         base_providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some("claude".to_string()),
+                executor: Some(Executor("claude".to_string())),
                 parent: None,
                 priority: Some(10),
                 plan_mode: None,
@@ -1908,7 +1908,7 @@ developer = [
         );
         base_providers.insert(Provider::new("copilot"),
             ProviderDefinition {
-                executor: Some("copilot".to_string()),
+                executor: Some(Executor("copilot".to_string())),
                 parent: None,
                 priority: Some(5),
                 plan_mode: None,
@@ -1925,7 +1925,7 @@ developer = [
         let mut overlay_providers = IndexMap::new();
         overlay_providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some("claude".to_string()),
+                executor: Some(Executor("claude".to_string())),
                 parent: None,
                 priority: Some(20),
                 plan_mode: None,
@@ -1934,7 +1934,7 @@ developer = [
         );
         overlay_providers.insert(Provider::new("gpt"),
             ProviderDefinition {
-                executor: Some("openai".to_string()),
+                executor: Some(Executor("openai".to_string())),
                 parent: None,
                 priority: Some(15),
                 plan_mode: None,
@@ -1966,7 +1966,7 @@ developer = [
         let mut base_providers = IndexMap::new();
         base_providers.insert(Provider::new("shared"),
             ProviderDefinition {
-                executor: Some("claude".to_string()),
+                executor: Some(Executor("claude".to_string())),
                 parent: None,
                 priority: Some(10),
                 plan_mode: Some(false),
