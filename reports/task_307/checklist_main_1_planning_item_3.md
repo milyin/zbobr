@@ -1,0 +1,1 @@
+Run `cargo build` to verify compilation. Run `cargo test` if tests exist. Manually verify: `zbobr init /tmp/test-ws` creates files, `zbobr init /tmp/test-ws` creates `.new` files, `zbobr init --force /tmp/test-ws` overwrites in place.
