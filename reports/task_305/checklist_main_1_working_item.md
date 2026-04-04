@@ -1,0 +1,1 @@
+Run `cargo fmt --all` to fix formatting diffs reported in linting stage. Verify `cargo clippy --workspace --all-targets --all-features -- -D warnings` passes clean. Files affected: zbobr/src/commands.rs, zbobr/src/main.rs, zbobr-api/src/config.rs, zbobr-api/src/config_tools.rs, zbobr-dispatcher/src/cli.rs.
