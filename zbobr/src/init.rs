@@ -35,9 +35,10 @@ const COPILOT_MODEL_GPT_5_MINI: &str = "gpt-5-mini";
 /// config file, creates prompt files for each predefined role, and creates
 /// the required subdirectories.
 ///
-/// If a file already exists with different content, the new version is written
-/// next to it as `{filename}.new` instead of overwriting or refusing.
-pub async fn init_workspace(dest: &Path) -> anyhow::Result<()> {
+/// If a file already exists with different content, the behavior depends on the
+/// `force` flag: when `force` is `true` the existing file is overwritten in
+/// place; otherwise the new version is written next to it as `{filename}.new`.
+pub async fn init_workspace(dest: &Path, force: bool) -> anyhow::Result<()> {
     // Create destination directory
     tokio::fs::create_dir_all(dest).await?;
 
@@ -52,7 +53,7 @@ pub async fn init_workspace(dest: &Path) -> anyhow::Result<()> {
     // Write prompt files
     for (name, content) in PROMPT_FILES {
         let path = prompts_dir.join(format!("{name}.md"));
-        write_or_new(&path, content).await?;
+        write_or_new(&path, content, force).await?;
     }
 
     // Serialize with toml pretty-printer, then post-process with toml_edit
@@ -67,7 +68,7 @@ pub async fn init_workspace(dest: &Path) -> anyhow::Result<()> {
         doc
     );
     let config_path = dest.join("zbobr.toml");
-    write_or_new(&config_path, &config_content).await?;
+    write_or_new(&config_path, &config_content, force).await?;
 
     println!(
         "\nWorkspace initialized at {}.\nEdit zbobr.toml to configure backends and tokens before running.",
@@ -77,20 +78,26 @@ pub async fn init_workspace(dest: &Path) -> anyhow::Result<()> {
 }
 
 /// Write `content` to `path`. If the file already exists with identical content,
-/// skip it. If it exists with different content, write to `{path}.new` instead.
-async fn write_or_new(path: &Path, content: &str) -> anyhow::Result<()> {
+/// skip it. If it exists with different content, write to `{path}.new` instead
+/// — unless `force` is true, in which case overwrite in place.
+async fn write_or_new(path: &Path, content: &str, force: bool) -> anyhow::Result<()> {
     if path.exists() {
         let existing = tokio::fs::read_to_string(path).await?;
         if existing == content {
             println!("  unchanged {}", path.display());
             return Ok(());
         }
-        let new_path = path.with_extension(format!(
-            "{}.new",
-            path.extension().unwrap_or_default().to_string_lossy()
-        ));
-        tokio::fs::write(&new_path, content).await?;
-        println!("  wrote {} (existing file differs)", new_path.display());
+        if force {
+            tokio::fs::write(path, content).await?;
+            println!("  overwrote {}", path.display());
+        } else {
+            let new_path = path.with_extension(format!(
+                "{}.new",
+                path.extension().unwrap_or_default().to_string_lossy()
+            ));
+            tokio::fs::write(&new_path, content).await?;
+            println!("  wrote {} (existing file differs)", new_path.display());
+        }
     } else {
         tokio::fs::write(path, content).await?;
         println!("  wrote {}", path.display());
@@ -1132,5 +1139,122 @@ name = "test"
                 );
             }
         }
+    }
+
+    // ── write_or_new function tests ────────────────────────────────────
+
+    #[tokio::test]
+    async fn write_or_new_force_overwrites_existing_file() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let file_path = temp_dir.path().join("test.toml");
+
+        // Write initial content
+        tokio::fs::write(&file_path, "old content".as_bytes())
+            .await
+            .expect("Failed to write initial file");
+
+        // Call write_or_new with force=true and different content
+        write_or_new(&file_path, "new content", true)
+            .await
+            .expect("write_or_new failed");
+
+        // Check that original file was overwritten
+        let result = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("Failed to read file");
+        assert_eq!(result, "new content", "File should be overwritten in place");
+
+        // Check that no .new file was created
+        let new_file_path = file_path.with_extension("toml.new");
+        assert!(
+            !new_file_path.exists(),
+            "No .new file should exist when force=true"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_or_new_no_force_creates_dot_new_file() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let file_path = temp_dir.path().join("example.toml");
+
+        // Write initial content
+        tokio::fs::write(&file_path, "old content".as_bytes())
+            .await
+            .expect("Failed to write initial file");
+
+        // Call write_or_new with force=false and different content
+        write_or_new(&file_path, "new content", false)
+            .await
+            .expect("write_or_new failed");
+
+        // Check that original file is untouched
+        let original_content = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("Failed to read original file");
+        assert_eq!(
+            original_content, "old content",
+            "Original file should not be modified"
+        );
+
+        // Check that .new file was created with new content
+        let new_file_path = file_path.with_extension("toml.new");
+        assert!(new_file_path.exists(), ".new file should be created");
+        let new_content = tokio::fs::read_to_string(&new_file_path)
+            .await
+            .expect("Failed to read .new file");
+        assert_eq!(
+            new_content, "new content",
+            ".new file should contain new content"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_or_new_skips_identical_content() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let file_path = temp_dir.path().join("unchanged.toml");
+
+        // Write initial content
+        tokio::fs::write(&file_path, "same content".as_bytes())
+            .await
+            .expect("Failed to write initial file");
+
+        // Call write_or_new with identical content and force=true
+        write_or_new(&file_path, "same content", true)
+            .await
+            .expect("write_or_new failed");
+
+        // Check that file still contains the original content
+        let result = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("Failed to read file");
+        assert_eq!(result, "same content", "File should remain unchanged");
+
+        // Check that no .new file was created
+        let new_file_path = file_path.with_extension("toml.new");
+        assert!(
+            !new_file_path.exists(),
+            "No .new file should exist when content is identical"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_or_new_creates_new_file() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let file_path = temp_dir.path().join("newfile.toml");
+
+        // Path doesn't exist yet
+        assert!(!file_path.exists(), "File should not exist initially");
+
+        // Call write_or_new on non-existing path
+        write_or_new(&file_path, "new content", false)
+            .await
+            .expect("write_or_new failed");
+
+        // Check that file was created with correct content
+        assert!(file_path.exists(), "File should be created");
+        let result = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("Failed to read file");
+        assert_eq!(result, "new content", "File should contain the new content");
     }
 }
