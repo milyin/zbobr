@@ -35,5 +35,7 @@ toml = { workspace = true }
 toml_edit = { workspace = true }
 rustls = { workspace = true }
 indexmap = { workspace = true }
+
+[dev-dependencies]
 tempfile = { workspace = true }
 
