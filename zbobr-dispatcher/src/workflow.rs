@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::PathBuf};
 use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Signal, Stage, State, Task,
-    config::{PipelineConfig, RoleDefinition, StageDefinition, StageTransition, WorkflowConfig},
+    config::{PipelineConfig, Role, RoleDefinition, StageDefinition, StageTransition, WorkflowConfig},
     config_tools::McpTool,
 };
 
@@ -152,7 +152,7 @@ impl Workflow {
         self.config.prompts_dir.as_ref()
     }
 
-    pub fn roles(&self) -> &IndexMap<String, RoleDefinition> {
+    pub fn roles(&self) -> &IndexMap<Role, RoleDefinition> {
         &self.config.roles
     }
 

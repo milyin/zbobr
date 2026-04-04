@@ -406,7 +406,7 @@ pub struct WorkflowConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompts_dir: Option<PathBuf>,
     #[serde(default)]
-    pub roles: IndexMap<String, RoleDefinition>,
+    pub roles: IndexMap<Role, RoleDefinition>,
     #[serde(default)]
     pub pipelines: HashMap<Pipeline, PipelineConfig>,
 }
@@ -418,7 +418,7 @@ pub struct WorkflowToml {
     #[serde(default)]
     pub prompts_dir: Option<PathBuf>,
     #[serde(default)]
-    pub roles: Option<IndexMap<String, RoleDefinition>>,
+    pub roles: Option<IndexMap<Role, RoleDefinition>>,
     #[serde(default)]
     pub pipelines: Option<HashMap<Pipeline, PipelineConfig>>,
 }

@@ -48,7 +48,7 @@ impl StageDef {
 /// Optional `roles` map allows specifying tool lists for roles.
 fn build_workflow_with_roles(
     stages: Vec<StageDef>,
-    roles: IndexMap<String, RoleDefinition>,
+    roles: IndexMap<Role, RoleDefinition>,
 ) -> WorkflowConfig {
     let mut pipeline_stages: HashMap<Pipeline, IndexMap<Stage, StageDefinition>> = HashMap::new();
 
@@ -92,7 +92,7 @@ fn role_with_all_tools() -> RoleDefinition {
 fn build_workflow(stages: Vec<StageDef>) -> WorkflowConfig {
     let roles = stages
         .iter()
-        .map(|s| (s.role.to_string(), role_with_all_tools()))
+        .map(|s| (s.role.to_string().into(), role_with_all_tools()))
         .collect();
     build_workflow_with_roles(stages, roles)
 }
