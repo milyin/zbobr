@@ -1,0 +1,1 @@
+Revert formatting-only edits in files not part of this task. These files were changed by cargo fmt but are unrelated to the instance-scoped work directories feature. Restore them to their state on origin/main.
