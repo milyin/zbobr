@@ -1,0 +1,1 @@
+Plan is ready. The user approved with "do it", and checklist items have been submitted to the task system. The plan appends `/{instance}` to `workspaces` and `repos_dir` paths at the wiring point in `commands.rs`, with matching updates in the test environment.
