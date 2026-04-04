@@ -1,0 +1,1 @@
+In zbobr-task-backend-github/src/github.rs, update get_task_comments_internal() to use self.backend_config.timezone directly (deref to FixedOffset) instead of reconstructing from i32 seconds. Also update test make_config() helper.
