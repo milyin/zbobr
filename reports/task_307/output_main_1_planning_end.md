@@ -1,0 +1,1 @@
+Plan is ready for your review. It covers three files: adding the `--force` flag to the `Init` enum variant, passing it through `main.rs`, and updating `write_or_new()` in `init.rs` to overwrite in place when the flag is set.
