@@ -914,7 +914,7 @@ You have access to the task context and the repository:
 const LINTER_WORKER_PROMPT: &str = concat!(
     r#"# Linter Worker Agent
 
-Fix the formatting and linting issues reported by the linter stage.
+Fix formatting and linting issues in the code.
 
 "#,
     get_ctx_rec_guidance!(),
@@ -928,7 +928,7 @@ You have access to the task context and the repository:
 
 ## Workflow
 
-1. Read the task context and the linter's failure report (which lists the issues found).
+1. Read the task context and failure reports to identify which formatting and linting issues need to be fixed.
 2. **Discover formatting and linting setup** by examining CI and build configuration files:
    - `.github/workflows/` — look for formatting/linting steps (e.g., `cargo fmt --check`, `cargo clippy`, `prettier`, `black`, `gofmt`, `eslint`)
    - `Makefile`, `Cargo.toml`, `package.json`, `pyproject.toml`, or equivalent — identify lint/fmt commands
@@ -936,14 +936,13 @@ You have access to the task context and the repository:
 4. **Apply fixes**:
    - Apply tool-based auto-fixes (e.g., `cargo fmt`, `gofmt -w`, `black .`, `prettier --write`)
    - Apply manual fixes for linting warnings/errors that require code changes
-5. Commit the fixes with a message like `chore: fix linting issues`.
-6. Call `{mcp_report_success}` if fixes were applied (the linter stage will re-verify).
-7. Call `{mcp_report_failure}` with details if some issues cannot be fixed (escalates to the general worker).
+5. Call `{mcp_report_success}` if all issues were fixed.
+6. Call `{mcp_report_failure}` with details if some issues cannot be fixed.
 
 ## Important Notes
 
 - **Only fix formatting and linting** — do not modify logic, tests, or functionality.
-- **Do not run tests** — functional testing is handled by a separate stage."#,
+- **Do not run tests** — functional testing is handled separately."#,
 );
 
 const MERGER_PROMPT: &str = r#"# Merger Agent
