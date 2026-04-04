@@ -173,8 +173,26 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
         }
 
         let base = arg.split('=').next().unwrap_or(arg);
-        if let Some(&takes_value) = global_flags.get(base) {
-            if arg.contains('=') {
+        // Check for exact match (e.g. `-c`, `--config`, `--config=val`)
+        let matched = global_flags.get(base).copied();
+        // Also check for attached short-value form (e.g. `-cshared.toml`):
+        // a short flag like `-c` that takes a value may appear as `-c<value>`
+        // without a `=` separator.
+        let matched = matched.or_else(|| {
+            if arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 2 {
+                let short_key = &arg[..2]; // e.g. "-c"
+                global_flags
+                    .get(short_key)
+                    .copied()
+                    .filter(|&takes_value| takes_value)
+            } else {
+                None
+            }
+        });
+        if let Some(takes_value) = matched {
+            if arg.contains('=') || (arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 2)
+            {
+                // Attached value: --config=val or -cval
                 before_sub.push(arg.clone());
                 i += 1;
             } else if takes_value && i + 1 < raw_args.len() {
