@@ -77,7 +77,6 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
     }
 
     let base_path = make_base_path(name).await;
-    let workspaces_dir = base_path.join("workspaces");
 
     eprintln!(
         "[IntegrationTestEnv/{name}] base path: {}",
@@ -86,7 +85,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
 
     let (providers, tools) = test_providers_and_tools();
     let mut dispatcher_config = ZbobrDispatcherConfig {
-        workspaces: workspaces_dir.clone(),
+        workspaces: base_path.join("workspaces"),
         providers,
         tools,
         git_user_name: "test-bot".to_string(),
@@ -98,6 +97,12 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
         .agent_github_token
         .resolve()
         .expect("agent_github_token");
+
+    // Append instance name to workspaces and repos_dir for directory isolation.
+    dispatcher_config.workspaces = dispatcher_config
+        .workspaces
+        .join(&dispatcher_config.instance);
+    let workspaces_dir = dispatcher_config.workspaces.clone();
 
     // Create a shared test git repository for the FS repo backend.
     let test_repo_dir = base_path.join("test_repo");
@@ -142,7 +147,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
     let repo_backend_config = ZbobrRepoBackendFsConfig {
         repository: test_repo_dir.to_string_lossy().to_string(),
         branch: "main".to_string(),
-        repos_dir: base_path.join("repos"),
+        repos_dir: base_path.join("repos").join(&dispatcher_config.instance),
     };
 
     let task_backend =
@@ -216,7 +221,6 @@ pub async fn init_github_github(
     }
 
     let base_path = make_base_path(name).await;
-    let workspaces_dir = base_path.join("workspaces");
 
     eprintln!(
         "[IntegrationTestEnv/{name}] base path: {}",
@@ -225,7 +229,7 @@ pub async fn init_github_github(
 
     let (providers, tools) = test_providers_and_tools();
     let mut dispatcher_config = ZbobrDispatcherConfig {
-        workspaces: workspaces_dir.clone(),
+        workspaces: base_path.join("workspaces"),
         providers,
         tools,
         ..ZbobrDispatcherConfig::default()
@@ -234,6 +238,12 @@ pub async fn init_github_github(
         .agent_github_token
         .resolve()
         .expect("agent_github_token");
+
+    // Append instance name to workspaces and repos_dir for directory isolation.
+    dispatcher_config.workspaces = dispatcher_config
+        .workspaces
+        .join(&dispatcher_config.instance);
+    let workspaces_dir = dispatcher_config.workspaces.clone();
 
     let task_backend_config = ZbobrTaskBackendGithubConfig {
         instance: dispatcher_config.instance.clone(),
@@ -249,7 +259,7 @@ pub async fn init_github_github(
         repository: repository.clone(),
         branch: branch.clone(),
         github_token: Secret::value(repo_token),
-        repos_dir: base_path.join("repos"),
+        repos_dir: base_path.join("repos").join(&dispatcher_config.instance),
     };
 
     let task_backend = TaskBackendGithub::from_config(task_backend_config.clone()).ok()?;
