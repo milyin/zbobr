@@ -784,24 +784,23 @@ async fn handle_call_stage(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
     pipeline_name: &Pipeline,
-    stage_name: &str,
+    stage: &Stage,
     call_pipeline: &Pipeline,
 ) -> anyhow::Result<()> {
     let task_session = zbobr.task_session(task_id);
 
     // Determine what signal to emit when the called pipeline returns.
-    let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
+    let stage_def = zbobr.workflow().stage(pipeline_name, stage);
     let return_signal = if let Some(target) = stage_def
         .and_then(|s| s.on_success())
         .and_then(|t| t.next.as_ref())
     {
         Signal::go(target.as_str())
     } else {
-        let stage = Stage::from(stage_name);
         match zbobr
             .workflow()
             .pipeline(pipeline_name)
-            .and_then(|p| p.next_stage(&stage))
+            .and_then(|p| p.next_stage(stage))
         {
             Some((next, _)) => Signal::go(next.as_str()),
             None => Signal::Return,
@@ -844,7 +843,8 @@ async fn handle_call_stage(
         .await?;
 
     tracing::info!(
-        "Task #{task_id}: stage {pipeline_name}/{stage_name} calling pipeline '{call_pipeline}' (return → {return_signal})"
+        "Task #{task_id}: stage {pipeline_name}/{} calling pipeline '{call_pipeline}' (return → {return_signal})",
+        stage.as_str()
     );
 
     Ok(())
@@ -1010,7 +1010,7 @@ pub async fn process_task(
                     zbobr,
                     task.id,
                     pipeline_name,
-                    stage_name.as_str(),
+                    stage_name,
                     call_target,
                 )
                 .await?;
