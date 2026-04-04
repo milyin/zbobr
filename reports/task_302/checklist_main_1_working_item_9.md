@@ -1,0 +1,1 @@
+Add `MergeToml` trait to `zbobr-utility/src/lib.rs`, implement it for `ProviderDefinition`, `RoleDefinition`, `PipelineConfig`, `StageDefinition` in zbobr-api. Update the macro to call `MergeToml::merge_toml` on map values instead of simple extend. Update `WorkflowToml::merge_toml` to also call recursive merge.
