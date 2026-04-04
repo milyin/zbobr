@@ -1,0 +1,1 @@
+Plan is ready. Single-file change to `zbobr/src/main.rs`: add a `--logs` flag, move tracing init after CLI parsing, and conditionally set the filter to `"off"` by default.
