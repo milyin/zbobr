@@ -1126,7 +1126,8 @@ name = "test"
                 assert!(
                     registered.contains(key),
                     "Role '{}' references prompt file '{}' but it is not in PROMPT_FILES",
-                    role_name, key
+                    role_name,
+                    key
                 );
             }
         }

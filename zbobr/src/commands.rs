@@ -320,9 +320,10 @@ async fn run_task_subcommand(
             for w in &weak_tasks {
                 let task = w.snapshot(false).await?;
                 if let Some(ref filter) = state_filter
-                    && task.state != *filter {
-                        continue;
-                    }
+                    && task.state != *filter
+                {
+                    continue;
+                }
                 tasks.push(task);
             }
             tasks.sort_by_key(|t| t.id);
