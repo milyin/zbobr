@@ -1,0 +1,1 @@
+In zbobr-dispatcher/src/cli.rs:558-564, the allowed_tools computation defaults to empty set when role.mcp is None. This breaks backward compatibility for configs that omit mcp. Fix by using ALL_TOOLS as fallback, matching the prompt-layer fix already applied.
