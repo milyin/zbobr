@@ -159,4 +159,16 @@ mod tests {
             "should fail: task and --select are mutually exclusive"
         );
     }
+
+    #[test]
+    fn logs_flag_defaults_to_false() {
+        let cli = Cli::try_parse_from(["zbobr", "task", "process", "--select"]).unwrap();
+        assert!(!cli.logs, "logs flag should default to false");
+    }
+
+    #[test]
+    fn logs_flag_parses_when_present() {
+        let cli = Cli::try_parse_from(["zbobr", "--logs", "task", "process", "--select"]).unwrap();
+        assert!(cli.logs, "--logs flag should set logs to true");
+    }
 }
