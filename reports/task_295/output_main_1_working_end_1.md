@@ -1,0 +1,1 @@
+Done. The fix was a single addition: the `logs` boolean field added to `GlobalArgs` in `zbobr-dispatcher/src/cli.rs`, which makes `parse_cli` aware of `--logs` for hoisting. Now `--logs` works both before and after the subcommand, consistent with other global flags like `--config`.
