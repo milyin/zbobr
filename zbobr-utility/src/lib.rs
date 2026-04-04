@@ -10,8 +10,12 @@ pub use secret::Secret;
 /// Trait for merging two TOML configuration snapshots.
 ///
 /// The overlay's value wins for `Option` scalar fields; map fields are merged key-by-key
-/// with recursive merging for matching keys; list fields use the overlay when non-empty,
-/// otherwise keep the base.
+/// with recursive merging for matching keys; list fields replace the base wholesale.
+///
+/// For structured types that contain list fields (e.g. role `mcp` or stage `prompts`),
+/// use `Option<Vec<_>>` in the TOML representation and merge with `.or()` semantics:
+/// a `None` field means "inherit from base"; `Some(v)` (even `Some(vec![])`) means
+/// "replace base wholesale".
 pub trait MergeToml: Sized {
     fn merge_toml(self, other: Self) -> Self;
 }

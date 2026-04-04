@@ -7,8 +7,9 @@ use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Secret, Stage,
     config::{
-        PipelineConfig, ProviderDefinition, RoleDefinition, StageDefinition, StageTransition,
-        ToolEntry, WorkflowConfig, WorkflowToml,
+        PipelineConfig, PipelineConfigPatch, ProviderDefinition, RoleDefinition,
+        RoleDefinitionPatch, StageDefinition, StageTransition, ToolEntry, WorkflowConfig,
+        WorkflowToml,
     },
     config_tools::McpTool,
 };
@@ -265,8 +266,20 @@ fn default_config_toml() -> RootConfigToml {
         }),
         workflow: Some(WorkflowToml {
             prompts_dir: workflow.prompts_dir,
-            roles: Some(workflow.roles),
-            pipelines: Some(workflow.pipelines),
+            roles: Some(
+                workflow
+                    .roles
+                    .into_iter()
+                    .map(|(k, v)| (k, RoleDefinitionPatch::from(v)))
+                    .collect(),
+            ),
+            pipelines: Some(
+                workflow
+                    .pipelines
+                    .into_iter()
+                    .map(|(k, v)| (k, PipelineConfigPatch::from(v)))
+                    .collect(),
+            ),
         }),
     }
 }
