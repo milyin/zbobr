@@ -1,0 +1,1 @@
+Added `#[arg(conflicts_with = "select")]` to the `task: Option<u64>` field in `TaskSubcommand::Process`. Removed the runtime `anyhow::bail!` check from the handler. Clap now rejects `task process 123 --select` before dispatch with a standard error message.
