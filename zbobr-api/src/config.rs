@@ -1523,4 +1523,168 @@ developer = [
             "priority = 5 should be present, got: {serialized}"
         );
     }
+
+    // ── resolve_paths tests ─────────────────────────────────────────────
+
+    #[test]
+    fn role_definition_resolve_paths_makes_prompt_absolute() {
+        let role = RoleDefinition {
+            mcp: vec![],
+            prompt: Some(PathBuf::from("prompts/reviewer.md")),
+            tool: None,
+        };
+        let resolved = role.resolve_paths(std::path::Path::new("/shared/configs"));
+        assert_eq!(
+            resolved.prompt.unwrap(),
+            PathBuf::from("/shared/configs/prompts/reviewer.md")
+        );
+    }
+
+    #[test]
+    fn role_definition_resolve_paths_preserves_absolute() {
+        let role = RoleDefinition {
+            mcp: vec![],
+            prompt: Some(PathBuf::from("/abs/prompt.md")),
+            tool: None,
+        };
+        let resolved = role.resolve_paths(std::path::Path::new("/other"));
+        assert_eq!(
+            resolved.prompt.unwrap(),
+            PathBuf::from("/abs/prompt.md")
+        );
+    }
+
+    #[test]
+    fn stage_definition_resolve_paths_resolves_all_prompt_fields() {
+        let stage = StageDefinition {
+            role: Some("worker".to_string()),
+            role_prompt: Some(PathBuf::from("worker.md")),
+            prompts: vec![
+                PathBuf::from("common.md"),
+                PathBuf::from("/abs/special.md"),
+            ],
+            ..Default::default()
+        };
+        let resolved = stage.resolve_paths(std::path::Path::new("/shared"));
+        assert_eq!(
+            resolved.role_prompt.unwrap(),
+            PathBuf::from("/shared/worker.md")
+        );
+        assert_eq!(resolved.prompts[0], PathBuf::from("/shared/common.md"));
+        assert_eq!(resolved.prompts[1], PathBuf::from("/abs/special.md"));
+    }
+
+    #[test]
+    fn pipeline_config_resolve_paths_resolves_stage_prompts() {
+        let mut stages = IndexMap::new();
+        stages.insert(
+            Stage::from("review"),
+            StageDefinition {
+                role: Some("reviewer".to_string()),
+                role_prompt: Some(PathBuf::from("review.md")),
+                prompts: vec![PathBuf::from("common.md")],
+                ..Default::default()
+            },
+        );
+        let pipeline = PipelineConfig { stages };
+        let resolved = pipeline.resolve_paths(std::path::Path::new("/base"));
+        let stage = resolved.stage("review").unwrap();
+        assert_eq!(
+            stage.role_prompt.as_ref().unwrap(),
+            &PathBuf::from("/base/review.md")
+        );
+        assert_eq!(stage.prompts[0], PathBuf::from("/base/common.md"));
+    }
+
+    #[test]
+    fn workflow_toml_resolve_paths_resolves_nested_prompt_fields() {
+        let mut roles = IndexMap::new();
+        roles.insert(
+            "reviewer".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: Some(PathBuf::from("reviewer.md")),
+                tool: None,
+            },
+        );
+        let mut stages = IndexMap::new();
+        stages.insert(
+            Stage::from("review"),
+            StageDefinition {
+                role: Some("reviewer".to_string()),
+                role_prompt: Some(PathBuf::from("review_stage.md")),
+                prompts: vec![PathBuf::from("common.md")],
+                ..Default::default()
+            },
+        );
+        let mut pipelines = HashMap::new();
+        pipelines.insert(Pipeline::Main, PipelineConfig { stages });
+
+        let toml = WorkflowToml {
+            prompts_dir: Some(PathBuf::from("prompts")),
+            roles: Some(roles),
+            pipelines: Some(pipelines),
+        };
+        let resolved = toml.resolve_paths(std::path::Path::new("/shared"));
+
+        // prompts_dir resolved
+        assert_eq!(
+            resolved.prompts_dir.unwrap(),
+            PathBuf::from("/shared/prompts")
+        );
+        // role prompt resolved
+        let role = &resolved.roles.as_ref().unwrap()["reviewer"];
+        assert_eq!(
+            role.prompt.as_ref().unwrap(),
+            &PathBuf::from("/shared/reviewer.md")
+        );
+        // stage prompts resolved
+        let pipeline = &resolved.pipelines.as_ref().unwrap()[&Pipeline::Main];
+        let stage = pipeline.stage("review").unwrap();
+        assert_eq!(
+            stage.role_prompt.as_ref().unwrap(),
+            &PathBuf::from("/shared/review_stage.md")
+        );
+        assert_eq!(stage.prompts[0], PathBuf::from("/shared/common.md"));
+    }
+
+    #[test]
+    fn workflow_toml_merge_preserves_resolved_paths_from_base() {
+        // Simulate two config files from different directories:
+        // Base config (from /shared/) defines workflow with relative prompts.
+        // Overlay config (from /project/) has no workflow section.
+        // After per-file resolution + merge, the base paths should stay anchored to /shared/.
+        let mut roles = IndexMap::new();
+        roles.insert(
+            "reviewer".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: Some(PathBuf::from("reviewer.md")),
+                tool: None,
+            },
+        );
+        let base = WorkflowToml {
+            prompts_dir: Some(PathBuf::from("prompts")),
+            roles: Some(roles),
+            pipelines: None,
+        };
+        let base_resolved = base.resolve_paths(std::path::Path::new("/shared"));
+
+        // Overlay has no workflow fields
+        let overlay = WorkflowToml::default();
+        let overlay_resolved = overlay.resolve_paths(std::path::Path::new("/project"));
+
+        let merged = base_resolved.merge_toml(overlay_resolved);
+
+        // Base paths should remain anchored to /shared/
+        assert_eq!(
+            merged.prompts_dir.unwrap(),
+            PathBuf::from("/shared/prompts")
+        );
+        let role = &merged.roles.as_ref().unwrap()["reviewer"];
+        assert_eq!(
+            role.prompt.as_ref().unwrap(),
+            &PathBuf::from("/shared/reviewer.md")
+        );
+    }
 }
