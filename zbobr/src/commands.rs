@@ -324,9 +324,10 @@ async fn run_task_subcommand(
             for w in &weak_tasks {
                 let task = w.snapshot(false).await?;
                 if let Some(ref filter) = state_filter
-                    && task.state != *filter {
-                        continue;
-                    }
+                    && task.state != *filter
+                {
+                    continue;
+                }
                 tasks.push(task);
             }
             tasks.sort_by_key(|t| t.id);
@@ -446,7 +447,11 @@ async fn run_task_subcommand(
             } else {
                 require_task_id(task, "process")?
             };
-            let task_obj = task_backend.get_task(task_id).await?.snapshot(false).await?;
+            let task_obj = task_backend
+                .get_task(task_id)
+                .await?
+                .snapshot(false)
+                .await?;
             zbobr_dispatcher::process_task(zbobr, &task_obj, None).await?;
         }
         TaskSubcommand::Prompt {
@@ -639,4 +644,3 @@ async fn overwrite_author(
 
     Ok(())
 }
-
