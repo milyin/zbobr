@@ -29,6 +29,18 @@ pub struct RoleDefinition {
     pub tool: Option<String>,
 }
 
+impl RoleDefinition {
+    /// Resolve relative path fields against the given base directory.
+    pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
+        Self {
+            prompt: self
+                .prompt
+                .map(|p| zbobr_utility::resolve_path(p, config_dir)),
+            ..self
+        }
+    }
+}
+
 /// A provider definition: a named executor configuration with optional inheritance.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
@@ -169,6 +181,21 @@ pub struct StageDefinition {
 }
 
 impl StageDefinition {
+    /// Resolve relative path fields against the given base directory.
+    pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
+        Self {
+            role_prompt: self
+                .role_prompt
+                .map(|p| zbobr_utility::resolve_path(p, config_dir)),
+            prompts: self
+                .prompts
+                .into_iter()
+                .map(|p| zbobr_utility::resolve_path(p, config_dir))
+                .collect(),
+            ..self
+        }
+    }
+
     pub fn role_name(&self) -> Option<&str> {
         self.role.as_deref()
     }
@@ -209,6 +236,17 @@ pub struct PipelineConfig {
 }
 
 impl PipelineConfig {
+    /// Resolve relative path fields in all stages against the given base directory.
+    pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
+        Self {
+            stages: self
+                .stages
+                .into_iter()
+                .map(|(name, stage)| (name, stage.resolve_paths(config_dir)))
+                .collect(),
+        }
+    }
+
     /// Look up a stage by name.
     pub fn stage(&self, name: &str) -> Option<&StageDefinition> {
         self.stages.get(name)
@@ -378,8 +416,18 @@ impl WorkflowToml {
             prompts_dir: self
                 .prompts_dir
                 .map(|p| zbobr_utility::resolve_path(p, config_dir)),
-            roles: self.roles,
-            pipelines: self.pipelines,
+            roles: self.roles.map(|roles| {
+                roles
+                    .into_iter()
+                    .map(|(name, role)| (name, role.resolve_paths(config_dir)))
+                    .collect()
+            }),
+            pipelines: self.pipelines.map(|pipelines| {
+                pipelines
+                    .into_iter()
+                    .map(|(name, pipeline)| (name, pipeline.resolve_paths(config_dir)))
+                    .collect()
+            }),
         }
     }
 
