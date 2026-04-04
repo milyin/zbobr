@@ -206,6 +206,15 @@ pub async fn run(
     tasks_config.instance = dispatcher_config.instance.clone();
     tasks_config.timezone = dispatcher_config.timezone;
     let task_backend = TaskBackendGithub::new(tasks_config).await?;
+
+    let mut dispatcher_config = dispatcher_config;
+    dispatcher_config.workspaces = dispatcher_config
+        .workspaces
+        .join(&dispatcher_config.instance);
+
+    let mut repo_config = repo_config;
+    repo_config.repos_dir = repo_config.repos_dir.join(&dispatcher_config.instance);
+
     let repo_backend = ZbobrRepoBackendGithub::new(repo_config).await?;
 
     let prompt_builder = ConfiguredPromptBuilder::new(Some(config_dir), Arc::new(workflow.clone()))
