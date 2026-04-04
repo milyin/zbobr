@@ -39,6 +39,10 @@ struct RootConfig {
 
 #[derive(Parser)]
 struct Cli {
+    /// Enable log output to stderr
+    #[arg(long)]
+    logs: bool,
+
     #[command(
         flatten,
         next_help_heading = "[config] Meta options and config file overrides"
@@ -56,12 +60,6 @@ struct Cli {
 async fn main() -> anyhow::Result<()> {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
-
     let cli: Cli = zbobr_dispatcher::parse_cli(
         "zbobr",
         "GitHub-backed AI-powered task dispatcher",
@@ -70,6 +68,15 @@ async fn main() -> anyhow::Result<()> {
         Requires a GitHub token: set GH_TOKEN or GITHUB_TOKEN env var.\n\
         Easiest way: export GH_TOKEN=$(gh auth token)",
     );
+
+    let filter = if cli.logs {
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())
+    } else {
+        "off".into()
+    };
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .init();
 
     // Handle init before config loading — no existing config needed
     if let Command::Init { ref directory } = cli.command {
