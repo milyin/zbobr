@@ -2262,4 +2262,276 @@ developer = [
             "prompts should be cleared by explicit empty-list overlay"
         );
     }
+
+    // ── Option<Vec<T>> TOML deserialization round-trip tests ─────────────
+
+    #[test]
+    fn role_mcp_missing_deserializes_as_none() {
+        let toml_str = r#"
+[workflow.roles.worker]
+tool = "developer"
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            workflow: WorkflowToml,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let role = &root.workflow.roles.unwrap()["worker"];
+        assert!(role.mcp.is_none(), "missing mcp field should deserialize as None");
+    }
+
+    #[test]
+    fn role_mcp_empty_list_deserializes_as_some_empty() {
+        let toml_str = r#"
+[workflow.roles.worker]
+mcp = []
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            workflow: WorkflowToml,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let role = &root.workflow.roles.unwrap()["worker"];
+        assert!(
+            role.mcp.as_ref().is_some_and(|v| v.is_empty()),
+            "mcp = [] should deserialize as Some(vec![])"
+        );
+    }
+
+    #[test]
+    fn role_mcp_populated_list_deserializes_as_some_with_entries() {
+        let toml_str = r#"
+[workflow.roles.worker]
+mcp = ["report_success", "report_failure"]
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            workflow: WorkflowToml,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let role = &root.workflow.roles.unwrap()["worker"];
+        let mcp = role.mcp.as_ref().unwrap();
+        assert_eq!(mcp.len(), 2);
+        assert_eq!(mcp[0], McpTool::ReportSuccess);
+        assert_eq!(mcp[1], McpTool::ReportFailure);
+    }
+
+    #[test]
+    fn stage_prompts_missing_deserializes_as_none() {
+        let toml_str = r#"
+[workflow.pipelines.main.stages.planning]
+role = "planner"
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            workflow: WorkflowToml,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let pipelines = root.workflow.pipelines.unwrap();
+        let stage = &pipelines[&Pipeline::Main].stages["planning"];
+        assert!(stage.prompts.is_none(), "missing prompts should deserialize as None");
+    }
+
+    #[test]
+    fn stage_prompts_empty_list_deserializes_as_some_empty() {
+        let toml_str = r#"
+[workflow.pipelines.main.stages.planning]
+role = "planner"
+prompts = []
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            workflow: WorkflowToml,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let pipelines = root.workflow.pipelines.unwrap();
+        let stage = &pipelines[&Pipeline::Main].stages["planning"];
+        assert!(
+            stage.prompts.as_ref().is_some_and(|v| v.is_empty()),
+            "prompts = [] should deserialize as Some(vec![])"
+        );
+    }
+
+    #[test]
+    fn stage_prompts_populated_list_deserializes_as_some_with_entries() {
+        let toml_str = r#"
+[workflow.pipelines.main.stages.planning]
+role = "planner"
+prompts = ["common.md", "planning.md"]
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            workflow: WorkflowToml,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let pipelines = root.workflow.pipelines.unwrap();
+        let stage = &pipelines[&Pipeline::Main].stages["planning"];
+        let prompts = stage.prompts.as_ref().unwrap();
+        assert_eq!(prompts.len(), 2);
+        assert_eq!(prompts[0], PathBuf::from("common.md"));
+        assert_eq!(prompts[1], PathBuf::from("planning.md"));
+    }
+
+    // ── Tools map merge test (IndexMap<String, Vec<ToolEntry>>) ─────────
+
+    #[test]
+    fn dispatcher_toml_merge_tools_key_wise_with_wholesale_list_replacement() {
+        let mut base_tools = IndexMap::new();
+        base_tools.insert(
+            "developer".to_string(),
+            vec![
+                ToolEntry {
+                    provider: "claude".to_string(),
+                    model: "claude-opus-4.6".parse().unwrap(),
+                    priority: None,
+                },
+                ToolEntry {
+                    provider: "copilot".to_string(),
+                    model: "claude-sonnet-4.6".parse().unwrap(),
+                    priority: Some(5),
+                },
+            ],
+        );
+        base_tools.insert(
+            "reviewer".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "claude-opus-4.6".parse().unwrap(),
+                priority: None,
+            }],
+        );
+
+        let base_toml = ZbobrDispatcherConfigToml {
+            tools: Some(base_tools),
+            ..Default::default()
+        };
+
+        // Overlay replaces "developer" list entirely and adds "tester".
+        let mut overlay_tools = IndexMap::new();
+        overlay_tools.insert(
+            "developer".to_string(),
+            vec![ToolEntry {
+                provider: "gpt".to_string(),
+                model: "claude-opus-4.6".parse().unwrap(),
+                priority: Some(1),
+            }],
+        );
+        overlay_tools.insert(
+            "tester".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "claude-sonnet-4.6".parse().unwrap(),
+                priority: None,
+            }],
+        );
+
+        let overlay_toml = ZbobrDispatcherConfigToml {
+            tools: Some(overlay_tools),
+            ..Default::default()
+        };
+
+        let merged = base_toml.merge_toml(overlay_toml);
+        let tools = merged.tools.unwrap();
+
+        // "developer" list is fully replaced by overlay (1 entry, not 2).
+        assert_eq!(tools["developer"].len(), 1);
+        assert_eq!(tools["developer"][0].provider, "gpt");
+        assert_eq!(tools["developer"][0].priority, Some(1));
+        // "reviewer" survives unchanged from base.
+        assert_eq!(tools["reviewer"].len(), 1);
+        assert_eq!(tools["reviewer"][0].provider, "claude");
+        // "tester" added from overlay.
+        assert_eq!(tools["tester"].len(), 1);
+        assert_eq!(tools["tester"][0].provider, "claude");
+        // Total: 3 tool names.
+        assert_eq!(tools.len(), 3);
+    }
+
+    // ── End-to-end multi-config merge from TOML strings ─────────────────
+
+    #[test]
+    fn workflow_toml_end_to_end_merge_from_toml_strings() {
+        let base_toml_str = r#"
+[workflow.roles.worker]
+mcp = ["report_success", "report_failure"]
+prompt = "worker.md"
+
+[workflow.roles.reviewer]
+mcp = ["report_success"]
+prompt = "reviewer.md"
+
+[workflow.pipelines.main.stages.planning]
+role = "worker"
+prompts = ["common.md", "planning.md"]
+
+[workflow.pipelines.main.stages.working]
+role = "worker"
+prompts = ["common.md", "working.md"]
+"#;
+
+        let overlay_toml_str = r#"
+[workflow.roles.worker]
+mcp = ["report_success", "report_intermediate", "add_checklist_item"]
+
+[workflow.pipelines.main.stages.planning]
+prompts = []
+"#;
+
+        #[derive(serde::Deserialize)]
+        struct Root {
+            workflow: WorkflowToml,
+        }
+
+        let base: Root = toml::from_str(base_toml_str).unwrap();
+        let overlay: Root = toml::from_str(overlay_toml_str).unwrap();
+
+        let merged = base.workflow.merge_toml(overlay.workflow);
+
+        // Worker role: mcp overridden by overlay (3 entries instead of 2).
+        let roles = merged.roles.as_ref().unwrap();
+        let worker_mcp = roles["worker"].mcp.as_ref().unwrap();
+        assert_eq!(worker_mcp.len(), 3);
+        assert_eq!(worker_mcp[0], McpTool::ReportSuccess);
+        assert_eq!(worker_mcp[1], McpTool::ReportIntermediate);
+        assert_eq!(worker_mcp[2], McpTool::AddChecklistItem);
+
+        // Worker role: prompt inherits from base (overlay didn't specify it).
+        assert_eq!(
+            roles["worker"].prompt.as_deref(),
+            Some(std::path::Path::new("worker.md"))
+        );
+
+        // Reviewer role: completely inherited from base (not in overlay).
+        let reviewer_mcp = roles["reviewer"].mcp.as_ref().unwrap();
+        assert_eq!(reviewer_mcp.len(), 1);
+        assert_eq!(reviewer_mcp[0], McpTool::ReportSuccess);
+        assert_eq!(
+            roles["reviewer"].prompt.as_deref(),
+            Some(std::path::Path::new("reviewer.md"))
+        );
+
+        // Planning stage: prompts explicitly cleared by overlay.
+        let pipelines = merged.pipelines.as_ref().unwrap();
+        let main = &pipelines[&Pipeline::Main];
+        assert!(
+            main.stage("planning")
+                .unwrap()
+                .prompts
+                .as_ref()
+                .is_some_and(|v| v.is_empty()),
+            "planning prompts should be cleared by empty-list overlay"
+        );
+
+        // Planning stage: role inherited from base (overlay didn't specify it).
+        assert_eq!(
+            main.stage("planning").unwrap().role.as_deref(),
+            Some("worker")
+        );
+
+        // Working stage: completely inherited from base (not in overlay).
+        let working_prompts = main.stage("working").unwrap().prompts.as_ref().unwrap();
+        assert_eq!(working_prompts.len(), 2);
+        assert_eq!(working_prompts[0], PathBuf::from("common.md"));
+        assert_eq!(working_prompts[1], PathBuf::from("working.md"));
+    }
 }
