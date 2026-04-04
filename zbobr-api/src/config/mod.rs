@@ -235,8 +235,8 @@ impl StageDefinition {
         }
     }
 
-    pub fn role_name(&self) -> Option<&str> {
-        self.role.as_deref()
+    pub fn role(&self) -> Option<&Role> {
+        self.role.as_ref()
     }
 
     pub fn call_pipeline(&self) -> Option<&Pipeline> {
@@ -302,19 +302,19 @@ impl PipelineConfig {
         }
     }
 
-    /// Look up a stage by name.
-    pub fn stage(&self, name: &Stage) -> Option<&StageDefinition> {
-        self.stages.get(name)
+    /// Look up a stage
+    pub fn stage(&self, stage: &Stage) -> Option<&StageDefinition> {
+        self.stages.get(stage)
     }
 
     /// Get the index of a stage in the order.
-    pub fn stage_index(&self, name: &Stage) -> Option<usize> {
-        self.stages.get_index_of(name)
+    pub fn stage_index(&self, stage: &Stage) -> Option<usize> {
+        self.stages.get_index_of(stage)
     }
 
-    /// Get the next stage after `name`.
-    pub fn next_stage(&self, name: &Stage) -> Option<(&Stage, &StageDefinition)> {
-        let idx = self.stages.get_index_of(name)?;
+    /// Get the next stage after `stage`.
+    pub fn next_stage(&self, stage: &Stage) -> Option<(&Stage, &StageDefinition)> {
+        let idx = self.stages.get_index_of(stage)?;
         let (next_name, def) = self.stages.get_index(idx + 1)?;
         Some((next_name, def))
     }
@@ -601,7 +601,7 @@ impl WorkflowConfig {
             && let Some((name, stage)) = pipeline
                 .stages
                 .iter()
-                .find(|(_, s)| s.role_name() == Some(role))
+                .find(|(_, s)| s.role().map(|r| r.as_str()) == Some(role))
         {
             return self
                 .pipelines
@@ -612,7 +612,7 @@ impl WorkflowConfig {
             if let Some((sname, stage)) = pipeline
                 .stages
                 .iter()
-                .find(|(_, s)| s.role_name() == Some(role))
+                .find(|(_, s)| s.role().map(|r| r.as_str()) == Some(role))
             {
                 return Some((pname, sname.as_str(), stage));
             }
@@ -881,7 +881,7 @@ impl ZbobrDispatcherConfig {
         if let Some(ref tool) = stage_def.tool {
             return Ok(tool.clone().into());
         }
-        if let Some(role_name) = stage_def.role_name()
+        if let Some(role_name) = stage_def.role().map(|r| r.as_str())
             && let Some(role_def) = workflow.role_definition(role_name)
             && let Some(ref tool) = role_def.tool
         {
@@ -890,7 +890,7 @@ impl ZbobrDispatcherConfig {
         anyhow::bail!(
             "No tool found for stage {:?} with role {:?}",
             stage_def,
-            stage_def.role_name()
+            stage_def.role()
         );
     }
 

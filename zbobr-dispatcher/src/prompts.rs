@@ -61,7 +61,7 @@ impl ConfiguredPromptBuilder {
         let base_prompt = load_prompts(&prompt_files, self.base_path.as_ref())?;
         build_full_prompt(
             &base_prompt,
-            stage_def.role_name().unwrap_or(""),
+            stage_def.role().map_or("", |r| r.as_str()),
             task_id,
             task_backend,
             self.workflow.config(),
@@ -108,7 +108,7 @@ impl ConfiguredPromptBuilder {
     ) -> anyhow::Result<String> {
         let prompt_files = prompt_files_for_stage(stage_def, self.workflow.config());
         let base_prompt = load_prompts(&prompt_files, self.base_path.as_ref())?;
-        let role_name = stage_def.role_name().unwrap_or("");
+        let role_name = stage_def.role().map_or("", |r| r.as_str());
         build_prompt_with_task(
             &base_prompt,
             role_name,
@@ -200,7 +200,8 @@ pub fn prompt_files_for_stage(
     if let Some(ref main) = stage_def.role_prompt {
         files.push(main.clone());
     } else if let Some(role_def) = stage_def
-        .role_name()
+        .role()
+        .map(|r| r.as_str())
         .and_then(|r| workflow.role_definition(r))
         && let Some(ref prompt_path) = role_def.prompt
     {

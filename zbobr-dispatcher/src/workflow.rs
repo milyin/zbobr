@@ -229,7 +229,7 @@ impl Workflow {
                         task.id,
                         pipeline,
                         stage,
-                        def.role_name()
+                        def.role()
                     );
                 }
             }
@@ -521,13 +521,13 @@ role = "merger"
             .stage(&Pipeline::from("main"), &Stage::from("setup"))
             .unwrap();
         assert_eq!(setup.call_pipeline().map(|p| p.as_str()), Some("sub"));
-        assert_eq!(setup.role_name(), None);
+        assert_eq!(setup.role(), None);
         assert!(setup.is_call());
 
         let working = wf
             .stage(&Pipeline::from("main"), &Stage::from("working"))
             .unwrap();
-        assert_eq!(working.role_name(), Some("worker"));
+        assert_eq!(working.role().as_deref(), Some("worker"));
         assert_eq!(working.call_pipeline(), None);
         assert!(!working.is_call());
     }

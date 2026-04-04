@@ -549,7 +549,7 @@ fn resolve_stage_def<'a>(
                 pipeline_config
                     .stages
                     .values()
-                    .find(|s| s.role_name() == Some(role_name.as_str()))
+                    .find(|s| s.role().as_deref() == Some(role_name.as_str()))
                     .ok_or_else(|| {
                         anyhow::anyhow!(
                             "No stage with role '{}' found in pipeline '{}'",

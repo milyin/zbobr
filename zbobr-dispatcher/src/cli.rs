@@ -450,7 +450,7 @@ impl<'a> CliStageRunner<'a> {
     async fn run(&self) -> anyhow::Result<()> {
         let role = self
             .stage_def
-            .role_name()
+            .role()
             .expect("role stage must have role");
         let tool_name = self
             .zbobr
@@ -1020,7 +1020,7 @@ pub async fn process_task(
                     task.id,
                     pipeline_name,
                     stage_name,
-                    stage_def.role_name()
+                    stage_def.role()
                 );
                 let runner = CliStageRunner::new(
                     zbobr,
@@ -1153,7 +1153,7 @@ pub async fn run_manager_loop(
                 "Stage {}/{}: role={:?}, tool={:?}, prompts={:?}",
                 pipeline_name,
                 stage_name,
-                stage_def.role_name().unwrap_or("<none>"),
+                stage_def.role().map_or("<none>", |r| r.as_str()),
                 tool_name,
                 stage_def.role_prompt
             );
