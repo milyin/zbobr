@@ -1,0 +1,1 @@
+All formatting and lint issues are resolved. The commit `cb084fcc` applies `cargo fmt` fixes across 5 files, and both `cargo fmt --check` and `cargo clippy -D warnings` now pass cleanly.
