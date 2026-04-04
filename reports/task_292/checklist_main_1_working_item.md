@@ -1,0 +1,1 @@
+Add `#[arg(conflicts_with = "select")]` to the `task` positional arg in the `Process` variant, and remove the manual `anyhow::bail!` runtime check in the handler. This encodes the contract in the CLI definition so Clap rejects invalid invocations during parsing with a proper error message.
