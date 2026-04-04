@@ -285,7 +285,7 @@ fn default_workflow() -> WorkflowConfig {
             Stage::from("planning"),
             StageDefinition {
                 role: Some("planner".into()),
-                prompts: task_prompt.clone(),
+                prompts: Some(task_prompt.clone()),
                 on_intermediate: Some(StageTransition::pause()),
                 ..Default::default()
             },
@@ -294,7 +294,7 @@ fn default_workflow() -> WorkflowConfig {
             Stage::from("working"),
             StageDefinition {
                 role: Some("worker".into()),
-                prompts: task_prompt.clone(),
+                prompts: Some(task_prompt.clone()),
                 on_intermediate: Some(StageTransition::stage("reviewing")),
                 ..Default::default()
             },
@@ -303,7 +303,7 @@ fn default_workflow() -> WorkflowConfig {
             Stage::from("reviewing"),
             StageDefinition {
                 role: Some("reviewer".into()),
-                prompts: task_prompt.clone(),
+                prompts: Some(task_prompt.clone()),
                 on_failure: Some(StageTransition::stage("working")),
                 on_intermediate: Some(StageTransition::stage("test_planner")),
                 ..Default::default()
@@ -313,7 +313,7 @@ fn default_workflow() -> WorkflowConfig {
             Stage::from("test_planner"),
             StageDefinition {
                 role: Some("test_planner".into()),
-                prompts: task_prompt.clone(),
+                prompts: Some(task_prompt.clone()),
                 on_failure: Some(StageTransition::stage("working")),
                 on_intermediate: Some(StageTransition::stage("test_worker")),
                 ..Default::default()
@@ -323,7 +323,7 @@ fn default_workflow() -> WorkflowConfig {
             Stage::from("test_worker"),
             StageDefinition {
                 role: Some("test_worker".into()),
-                prompts: task_prompt.clone(),
+                prompts: Some(task_prompt.clone()),
                 on_failure: Some(StageTransition::stage("working")),
                 on_intermediate: Some(StageTransition::stage("working")),
                 ..Default::default()
@@ -333,7 +333,7 @@ fn default_workflow() -> WorkflowConfig {
             Stage::from("linting"),
             StageDefinition {
                 role: Some("linter".into()),
-                prompts: task_prompt.clone(),
+                prompts: Some(task_prompt.clone()),
                 on_success: Some(StageTransition::stage("testing")),
                 on_failure: Some(StageTransition::stage("linter_worker")),
                 ..Default::default()
@@ -343,7 +343,7 @@ fn default_workflow() -> WorkflowConfig {
             Stage::from("linter_worker"),
             StageDefinition {
                 role: Some("linter_worker".into()),
-                prompts: task_prompt.clone(),
+                prompts: Some(task_prompt.clone()),
                 on_success: Some(StageTransition::stage("linting")),
                 on_failure: Some(StageTransition::stage("working")),
                 ..Default::default()
@@ -353,7 +353,7 @@ fn default_workflow() -> WorkflowConfig {
             Stage::from("testing"),
             StageDefinition {
                 role: Some("tester".into()),
-                prompts: task_prompt.clone(),
+                prompts: Some(task_prompt.clone()),
                 on_failure: Some(StageTransition::stage("working")),
                 ..Default::default()
             },
@@ -364,7 +364,7 @@ fn default_workflow() -> WorkflowConfig {
         Stage::from("merging"),
         StageDefinition {
             role: Some("merger".into()),
-            prompts: task_prompt,
+            prompts: Some(task_prompt),
             ..Default::default()
         },
     )]);
@@ -387,14 +387,14 @@ fn default_workflow() -> WorkflowConfig {
         (
             "planner".into(),
             RoleDefinition {
-                mcp: vec![
+                mcp: Some(vec![
                     StopWithError,
                     StopWithQuestion,
                     ReportSuccess,
                     ReportIntermediate,
                     AddChecklistItem,
                     GetCtxRec,
-                ],
+                ]),
                 prompt: Some(PathBuf::from("planner.md")),
                 tool: Some("planner".to_string()),
             },
@@ -402,7 +402,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             "worker".into(),
             RoleDefinition {
-                mcp: vec![
+                mcp: Some(vec![
                     StopWithError,
                     ReportSuccess,
                     ReportFailure,
@@ -411,7 +411,7 @@ fn default_workflow() -> WorkflowConfig {
                     AddChecklistItem,
                     CheckChecklistItem,
                     GetCtxRec,
-                ],
+                ]),
                 prompt: Some(PathBuf::from("worker.md")),
                 tool: Some("developer".to_string()),
             },
@@ -419,14 +419,14 @@ fn default_workflow() -> WorkflowConfig {
         (
             "test_planner".into(),
             RoleDefinition {
-                mcp: vec![
+                mcp: Some(vec![
                     StopWithError,
                     StopWithQuestion,
                     ReportSuccess,
                     ReportIntermediate,
                     AddChecklistItem,
                     GetCtxRec,
-                ],
+                ]),
                 prompt: Some(PathBuf::from("test_planner.md")),
                 tool: Some("planner".to_string()),
             },
@@ -434,7 +434,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             "test_worker".into(),
             RoleDefinition {
-                mcp: vec![
+                mcp: Some(vec![
                     StopWithError,
                     ReportSuccess,
                     ReportFailure,
@@ -443,7 +443,7 @@ fn default_workflow() -> WorkflowConfig {
                     AddChecklistItem,
                     CheckChecklistItem,
                     GetCtxRec,
-                ],
+                ]),
                 prompt: Some(PathBuf::from("test_worker.md")),
                 tool: Some("developer".to_string()),
             },
@@ -451,7 +451,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             "reviewer".into(),
             RoleDefinition {
-                mcp: vec![
+                mcp: Some(vec![
                     StopWithError,
                     ReportSuccess,
                     ReportFailure,
@@ -459,7 +459,7 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithQuestion,
                     CheckChecklistItem,
                     GetCtxRec,
-                ],
+                ]),
                 prompt: Some(PathBuf::from("reviewer.md")),
                 tool: Some("developer".to_string()),
             },
@@ -467,13 +467,13 @@ fn default_workflow() -> WorkflowConfig {
         (
             "tester".into(),
             RoleDefinition {
-                mcp: vec![
+                mcp: Some(vec![
                     StopWithError,
                     ReportSuccess,
                     ReportFailure,
                     StopWithQuestion,
                     GetCtxRec,
-                ],
+                ]),
                 prompt: Some(PathBuf::from("tester.md")),
                 tool: Some("developer".to_string()),
             },
@@ -481,13 +481,13 @@ fn default_workflow() -> WorkflowConfig {
         (
             "linter".into(),
             RoleDefinition {
-                mcp: vec![
+                mcp: Some(vec![
                     StopWithError,
                     ReportSuccess,
                     ReportFailure,
                     StopWithQuestion,
                     GetCtxRec,
-                ],
+                ]),
                 prompt: Some(PathBuf::from("linter.md")),
                 tool: Some("drudge".to_string()),
             },
@@ -495,13 +495,13 @@ fn default_workflow() -> WorkflowConfig {
         (
             "linter_worker".into(),
             RoleDefinition {
-                mcp: vec![
+                mcp: Some(vec![
                     StopWithError,
                     ReportSuccess,
                     ReportFailure,
                     StopWithQuestion,
                     GetCtxRec,
-                ],
+                ]),
                 prompt: Some(PathBuf::from("linter_worker.md")),
                 tool: Some("developer".to_string()),
             },
@@ -509,7 +509,7 @@ fn default_workflow() -> WorkflowConfig {
         (
             "merger".into(),
             RoleDefinition {
-                mcp: vec![StopWithError, ReportSuccess, StopWithQuestion],
+                mcp: Some(vec![StopWithError, ReportSuccess, StopWithQuestion]),
                 prompt: Some(PathBuf::from("merger.md")),
                 tool: Some("silly".to_string()),
             },

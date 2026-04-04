@@ -2,6 +2,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use indexmap::IndexMap;
 use zbobr_utility::config_struct;
+use zbobr_utility::MergeToml;
 
 use crate::{
     config_tools::McpTool,
@@ -17,16 +18,42 @@ pub trait Config: Sized {
 }
 
 /// Definition of a role: which MCP tools it can access, an optional prompt file, and optional tool override.
+///
+/// `mcp = None` means the field was absent in the config (inherit from base during merging,
+/// or no tools at runtime). `mcp = Some(vec![])` explicitly allows no tools.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RoleDefinition {
-    pub mcp: Vec<McpTool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<Vec<McpTool>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<PathBuf>,
     /// Tool name override for this role. Overrides the global dispatcher `tool`.
     /// Stage-level `tool` takes precedence over this.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
+}
+
+impl RoleDefinition {
+    /// Resolve relative path fields against the given base directory.
+    pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
+        Self {
+            prompt: self
+                .prompt
+                .map(|p| zbobr_utility::resolve_path(p, config_dir)),
+            ..self
+        }
+    }
+}
+
+impl zbobr_utility::MergeToml for RoleDefinition {
+    fn merge_toml(self, other: Self) -> Self {
+        Self {
+            mcp: other.mcp.or(self.mcp),
+            prompt: other.prompt.or(self.prompt),
+            tool: other.tool.or(self.tool),
+        }
+    }
 }
 
 /// A provider definition: a named executor configuration with optional inheritance.
@@ -50,6 +77,18 @@ pub struct ProviderDefinition {
     /// API key for the executor (e.g. Anthropic API key for the claude executor).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access_key: Option<Secret>,
+}
+
+impl zbobr_utility::MergeToml for ProviderDefinition {
+    fn merge_toml(self, other: Self) -> Self {
+        Self {
+            executor: other.executor.or(self.executor),
+            parent: other.parent.or(self.parent),
+            priority: other.priority.or(self.priority),
+            plan_mode: other.plan_mode.or(self.plan_mode),
+            access_key: other.access_key.or(self.access_key),
+        }
+    }
 }
 
 /// A resolved provider with all inheritance fully flattened.
@@ -156,8 +195,10 @@ pub struct StageDefinition {
     pub tool: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role_prompt: Option<PathBuf>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub prompts: Vec<PathBuf>,
+    /// `None` means absent in config (inherit from base during merging, or no extra prompts at runtime).
+    /// `Some(vec![])` explicitly sets an empty list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompts: Option<Vec<PathBuf>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_success: Option<StageTransition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -169,6 +210,21 @@ pub struct StageDefinition {
 }
 
 impl StageDefinition {
+    /// Resolve relative path fields against the given base directory.
+    pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
+        Self {
+            role_prompt: self
+                .role_prompt
+                .map(|p| zbobr_utility::resolve_path(p, config_dir)),
+            prompts: self.prompts.map(|v| {
+                v.into_iter()
+                    .map(|p| zbobr_utility::resolve_path(p, config_dir))
+                    .collect()
+            }),
+            ..self
+        }
+    }
+
     pub fn role_name(&self) -> Option<&str> {
         self.role.as_deref()
     }
@@ -198,6 +254,22 @@ impl StageDefinition {
     }
 }
 
+impl zbobr_utility::MergeToml for StageDefinition {
+    fn merge_toml(self, other: Self) -> Self {
+        Self {
+            role: other.role.or(self.role),
+            call: other.call.or(self.call),
+            tool: other.tool.or(self.tool),
+            role_prompt: other.role_prompt.or(self.role_prompt),
+            prompts: other.prompts.or(self.prompts),
+            on_success: other.on_success.or(self.on_success),
+            on_failure: other.on_failure.or(self.on_failure),
+            on_intermediate: other.on_intermediate.or(self.on_intermediate),
+            on_no_report: other.on_no_report.or(self.on_no_report),
+        }
+    }
+}
+
 /// Per-pipeline configuration: an ordered sequence of stages.
 ///
 /// Stage order is determined by insertion order in the `IndexMap`.
@@ -209,6 +281,17 @@ pub struct PipelineConfig {
 }
 
 impl PipelineConfig {
+    /// Resolve relative path fields in all stages against the given base directory.
+    pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
+        Self {
+            stages: self
+                .stages
+                .into_iter()
+                .map(|(name, stage)| (name, stage.resolve_paths(config_dir)))
+                .collect(),
+        }
+    }
+
     /// Look up a stage by name.
     pub fn stage(&self, name: &str) -> Option<&StageDefinition> {
         self.stages.get(name)
@@ -291,6 +374,20 @@ impl PipelineConfig {
     }
 }
 
+impl zbobr_utility::MergeToml for PipelineConfig {
+    fn merge_toml(self, other: Self) -> Self {
+        let mut stages = self.stages;
+        for (k, v) in other.stages {
+            if let Some(base_v) = stages.get(&k).cloned() {
+                stages.insert(k, base_v.merge_toml(v));
+            } else {
+                stages.insert(k, v);
+            }
+        }
+        Self { stages }
+    }
+}
+
 /// Top-level workflow configuration: a container of named pipelines and shared roles.
 ///
 /// Defined manually (not via `#[config_struct]`) because it needs
@@ -362,6 +459,75 @@ impl WorkflowArgs {
 impl WorkflowToml {
     pub fn merge_with_args(self, _args: WorkflowArgs) -> Self {
         self
+    }
+
+    pub fn merge_toml(self, other: Self) -> Self {
+        Self {
+            prompts_dir: other.prompts_dir.or(self.prompts_dir),
+            roles: match (self.roles, other.roles) {
+                (Some(mut base), Some(over)) => {
+                    for (k, v) in over {
+                        if let Some(base_v) = base.get(&k).cloned() {
+                            base.insert(k, base_v.merge_toml(v));
+                        } else {
+                            base.insert(k, v);
+                        }
+                    }
+                    Some(base)
+                }
+                (None, over) => over,
+                (base, None) => base,
+            },
+            pipelines: match (self.pipelines, other.pipelines) {
+                (Some(mut base), Some(over)) => {
+                    for (k, v) in over {
+                        if let Some(base_v) = base.get(&k).cloned() {
+                            base.insert(k, base_v.merge_toml(v));
+                        } else {
+                            base.insert(k, v);
+                        }
+                    }
+                    Some(base)
+                }
+                (None, over) => over,
+                (base, None) => base,
+            },
+        }
+    }
+
+    /// Resolve relative path fields against the given base directory.
+    ///
+    /// `prompts_dir` is resolved against `config_dir`.  Role and stage prompt
+    /// paths are resolved against the *effective* prompt base: the resolved
+    /// `prompts_dir` when present, otherwise `config_dir`.  This preserves the
+    /// runtime contract in `prompt_files_for_stage`, which only prefixes
+    /// *relative* paths with `prompts_dir`; by eagerly making paths absolute
+    /// under the right base here, the dispatcher sees absolute paths and skips
+    /// the prefix step correctly.
+    pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
+        let resolved_prompts_dir = self
+            .prompts_dir
+            .map(|p| zbobr_utility::resolve_path(p, config_dir));
+        let prompt_base: &std::path::Path = resolved_prompts_dir
+            .as_deref()
+            .unwrap_or(config_dir);
+        let roles = self.roles.map(|roles| {
+            roles
+                .into_iter()
+                .map(|(name, role)| (name, role.resolve_paths(prompt_base)))
+                .collect()
+        });
+        let pipelines = self.pipelines.map(|pipelines| {
+            pipelines
+                .into_iter()
+                .map(|(name, pipeline)| (name, pipeline.resolve_paths(prompt_base)))
+                .collect()
+        });
+        Self {
+            prompts_dir: resolved_prompts_dir,
+            roles,
+            pipelines,
+        }
     }
 
     pub fn try_into_config(self) -> anyhow::Result<WorkflowConfig> {
@@ -460,11 +626,6 @@ impl WorkflowConfig {
             }
         }
         result
-    }
-
-    /// All static tool names.
-    pub fn all_tool_names(&self) -> Vec<String> {
-        McpTool::all().iter().map(|t| t.to_string()).collect()
     }
 
     /// Validate the entire workflow configuration.
@@ -1065,7 +1226,7 @@ mod tests {
         roles.insert(
             role_name.to_string(),
             RoleDefinition {
-                mcp: vec![],
+                mcp: None,
                 prompt: None,
                 tool,
             },
@@ -1291,7 +1452,7 @@ mod tests {
         roles.insert(
             "worker".to_string(),
             RoleDefinition {
-                mcp: vec![],
+                mcp: None,
                 prompt: None,
                 tool: Some("smart".to_string()),
             },
@@ -1343,7 +1504,7 @@ mod tests {
         roles.insert(
             "worker".to_string(),
             RoleDefinition {
-                mcp: vec![],
+                mcp: None,
                 prompt: None,
                 tool: None,
             },
@@ -1455,5 +1616,922 @@ developer = [
             serialized.contains("priority = 5"),
             "priority = 5 should be present, got: {serialized}"
         );
+    }
+
+    // ── resolve_paths tests ─────────────────────────────────────────────
+
+    #[test]
+    fn role_definition_resolve_paths_makes_prompt_absolute() {
+        let role = RoleDefinition {
+            mcp: None,
+            prompt: Some(PathBuf::from("prompts/reviewer.md")),
+            tool: None,
+        };
+        let resolved = role.resolve_paths(std::path::Path::new("/shared/configs"));
+        assert_eq!(
+            resolved.prompt.unwrap(),
+            PathBuf::from("/shared/configs/prompts/reviewer.md")
+        );
+    }
+
+    #[test]
+    fn role_definition_resolve_paths_preserves_absolute() {
+        let role = RoleDefinition {
+            mcp: None,
+            prompt: Some(PathBuf::from("/abs/prompt.md")),
+            tool: None,
+        };
+        let resolved = role.resolve_paths(std::path::Path::new("/other"));
+        assert_eq!(
+            resolved.prompt.unwrap(),
+            PathBuf::from("/abs/prompt.md")
+        );
+    }
+
+    #[test]
+    fn stage_definition_resolve_paths_resolves_all_prompt_fields() {
+        let stage = StageDefinition {
+            role: Some("worker".to_string()),
+            role_prompt: Some(PathBuf::from("worker.md")),
+            prompts: Some(vec![
+                PathBuf::from("common.md"),
+                PathBuf::from("/abs/special.md"),
+            ]),
+            ..Default::default()
+        };
+        let resolved = stage.resolve_paths(std::path::Path::new("/shared"));
+        assert_eq!(
+            resolved.role_prompt.unwrap(),
+            PathBuf::from("/shared/worker.md")
+        );
+        let prompts = resolved.prompts.as_deref().unwrap();
+        assert_eq!(prompts[0], PathBuf::from("/shared/common.md"));
+        assert_eq!(prompts[1], PathBuf::from("/abs/special.md"));
+    }
+
+    #[test]
+    fn pipeline_config_resolve_paths_resolves_stage_prompts() {
+        let mut stages = IndexMap::new();
+        stages.insert(
+            Stage::from("review"),
+            StageDefinition {
+                role: Some("reviewer".to_string()),
+                role_prompt: Some(PathBuf::from("review.md")),
+                prompts: Some(vec![PathBuf::from("common.md")]),
+                ..Default::default()
+            },
+        );
+        let pipeline = PipelineConfig { stages };
+        let resolved = pipeline.resolve_paths(std::path::Path::new("/base"));
+        let stage = resolved.stage("review").unwrap();
+        assert_eq!(
+            stage.role_prompt.as_ref().unwrap(),
+            &PathBuf::from("/base/review.md")
+        );
+        assert_eq!(stage.prompts.as_deref().unwrap()[0], PathBuf::from("/base/common.md"));
+    }
+
+    #[test]
+    fn workflow_toml_resolve_paths_resolves_nested_prompt_fields() {
+        let mut roles = IndexMap::new();
+        roles.insert(
+            "reviewer".to_string(),
+            RoleDefinition {
+                mcp: None,
+                prompt: Some(PathBuf::from("reviewer.md")),
+                tool: None,
+            },
+        );
+        let mut stages = IndexMap::new();
+        stages.insert(
+            Stage::from("review"),
+            StageDefinition {
+                role: Some("reviewer".to_string()),
+                role_prompt: Some(PathBuf::from("review_stage.md")),
+                prompts: Some(vec![PathBuf::from("common.md")]),
+                ..Default::default()
+            },
+        );
+        let mut pipelines = HashMap::new();
+        pipelines.insert(Pipeline::Main, PipelineConfig { stages });
+
+        let toml = WorkflowToml {
+            prompts_dir: Some(PathBuf::from("prompts")),
+            roles: Some(roles),
+            pipelines: Some(pipelines),
+        };
+        let resolved = toml.resolve_paths(std::path::Path::new("/shared"));
+
+        // prompts_dir resolved
+        assert_eq!(
+            resolved.prompts_dir.unwrap(),
+            PathBuf::from("/shared/prompts")
+        );
+        // role prompt resolved against prompts_dir
+        let role = &resolved.roles.as_ref().unwrap()["reviewer"];
+        assert_eq!(
+            role.prompt.as_ref().unwrap(),
+            &PathBuf::from("/shared/prompts/reviewer.md")
+        );
+        // stage prompts resolved against prompts_dir
+        let pipeline = &resolved.pipelines.as_ref().unwrap()[&Pipeline::Main];
+        let stage = pipeline.stage("review").unwrap();
+        assert_eq!(
+            stage.role_prompt.as_ref().unwrap(),
+            &PathBuf::from("/shared/prompts/review_stage.md")
+        );
+        assert_eq!(stage.prompts.as_deref().unwrap()[0], PathBuf::from("/shared/prompts/common.md"));
+    }
+
+    #[test]
+    fn workflow_toml_merge_preserves_resolved_paths_from_base() {
+        // Simulate two config files from different directories:
+        // Base config (from /shared/) defines workflow with relative prompts.
+        // Overlay config (from /project/) has no workflow section.
+        // After per-file resolution + merge, the base paths should stay anchored to /shared/.
+        let mut roles = IndexMap::new();
+        roles.insert(
+            "reviewer".to_string(),
+            RoleDefinition {
+                mcp: None,
+                prompt: Some(PathBuf::from("reviewer.md")),
+                tool: None,
+            },
+        );
+        let base = WorkflowToml {
+            prompts_dir: Some(PathBuf::from("prompts")),
+            roles: Some(roles),
+            pipelines: None,
+        };
+        let base_resolved = base.resolve_paths(std::path::Path::new("/shared"));
+
+        // Overlay has no workflow fields
+        let overlay = WorkflowToml::default();
+        let overlay_resolved = overlay.resolve_paths(std::path::Path::new("/project"));
+
+        let merged = base_resolved.merge_toml(overlay_resolved);
+
+        // Base paths should remain anchored to /shared/
+        assert_eq!(
+            merged.prompts_dir.unwrap(),
+            PathBuf::from("/shared/prompts")
+        );
+        let role = &merged.roles.as_ref().unwrap()["reviewer"];
+        assert_eq!(
+            role.prompt.as_ref().unwrap(),
+            &PathBuf::from("/shared/prompts/reviewer.md")
+        );
+    }
+
+    // ── merge_toml map-merge semantics ──────────────────────────────────
+
+    #[test]
+    fn workflow_toml_merge_roles_key_wise() {
+        // Base config defines two roles; overlay overrides only one.
+        // The unmodified role from base must survive the merge.
+        let mut base_roles = IndexMap::new();
+        base_roles.insert(
+            "reviewer".to_string(),
+            RoleDefinition {
+                mcp: None,
+                prompt: Some(PathBuf::from("/shared/reviewer.md")),
+                tool: None,
+            },
+        );
+        base_roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                mcp: None,
+                prompt: Some(PathBuf::from("/shared/worker.md")),
+                tool: None,
+            },
+        );
+        let base = WorkflowToml {
+            prompts_dir: None,
+            roles: Some(base_roles),
+            pipelines: None,
+        };
+
+        // Overlay only overrides "reviewer", with a different prompt.
+        let mut overlay_roles = IndexMap::new();
+        overlay_roles.insert(
+            "reviewer".to_string(),
+            RoleDefinition {
+                mcp: None,
+                prompt: Some(PathBuf::from("/project/reviewer_override.md")),
+                tool: None,
+            },
+        );
+        let overlay = WorkflowToml {
+            prompts_dir: None,
+            roles: Some(overlay_roles),
+            pipelines: None,
+        };
+
+        let merged = base.merge_toml(overlay);
+        let roles = merged.roles.unwrap();
+
+        // "reviewer" is overridden by the overlay.
+        assert_eq!(
+            roles["reviewer"].prompt.as_ref().unwrap(),
+            &PathBuf::from("/project/reviewer_override.md")
+        );
+        // "worker" survives from the base config unchanged.
+        assert_eq!(
+            roles["worker"].prompt.as_ref().unwrap(),
+            &PathBuf::from("/shared/worker.md")
+        );
+    }
+
+    #[test]
+    fn workflow_toml_merge_pipelines_key_wise() {
+        // Base config defines two pipelines; overlay overrides only one.
+        let mut base_pipelines = HashMap::new();
+        let mut main_stages = IndexMap::new();
+        main_stages.insert(
+            Stage::from("planning"),
+            StageDefinition {
+                role: Some("planner".to_string()),
+                ..Default::default()
+            },
+        );
+        base_pipelines.insert(Pipeline::Main, PipelineConfig { stages: main_stages });
+        let mut fix_stages = IndexMap::new();
+        fix_stages.insert(
+            Stage::from("fixing"),
+            StageDefinition {
+                role: Some("worker".to_string()),
+                ..Default::default()
+            },
+        );
+        base_pipelines.insert(
+            Pipeline::Custom("fix".to_string()),
+            PipelineConfig { stages: fix_stages },
+        );
+
+        let base = WorkflowToml {
+            prompts_dir: None,
+            roles: None,
+            pipelines: Some(base_pipelines),
+        };
+
+        // Overlay only overrides the Main pipeline.
+        let mut overlay_stages = IndexMap::new();
+        overlay_stages.insert(
+            Stage::from("planning"),
+            StageDefinition {
+                role: Some("senior_planner".to_string()),
+                ..Default::default()
+            },
+        );
+        let mut overlay_pipelines = HashMap::new();
+        overlay_pipelines.insert(
+            Pipeline::Main,
+            PipelineConfig {
+                stages: overlay_stages,
+            },
+        );
+        let overlay = WorkflowToml {
+            prompts_dir: None,
+            roles: None,
+            pipelines: Some(overlay_pipelines),
+        };
+
+        let merged = base.merge_toml(overlay);
+        let pipelines = merged.pipelines.unwrap();
+
+        // Main pipeline is overridden by the overlay.
+        let main = &pipelines[&Pipeline::Main];
+        assert_eq!(
+            main.stage("planning").unwrap().role.as_deref().unwrap(),
+            "senior_planner"
+        );
+        // Fix pipeline survives from the base config unchanged.
+        let fix = &pipelines[&Pipeline::Custom("fix".to_string())];
+        assert_eq!(fix.stage("fixing").unwrap().role.as_deref().unwrap(), "worker");
+    }
+
+    #[test]
+    fn dispatcher_toml_merge_providers_key_wise() {
+        // Base config defines two providers; overlay adds one and overrides one.
+        let mut base_providers = IndexMap::new();
+        base_providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: Some(10),
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        base_providers.insert(
+            "copilot".to_string(),
+            ProviderDefinition {
+                executor: Some("copilot".to_string()),
+                parent: None,
+                priority: Some(5),
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+
+        let base_toml = ZbobrDispatcherConfigToml {
+            providers: Some(base_providers),
+            ..Default::default()
+        };
+
+        // Overlay overrides "claude" with higher priority and adds "gpt".
+        let mut overlay_providers = IndexMap::new();
+        overlay_providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: Some(20),
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        overlay_providers.insert(
+            "gpt".to_string(),
+            ProviderDefinition {
+                executor: Some("openai".to_string()),
+                parent: None,
+                priority: Some(15),
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+
+        let overlay_toml = ZbobrDispatcherConfigToml {
+            providers: Some(overlay_providers),
+            ..Default::default()
+        };
+
+        let merged = base_toml.merge_toml(overlay_toml);
+        let providers = merged.providers.unwrap();
+
+        // "claude" is overridden with priority 20.
+        assert_eq!(providers["claude"].priority, Some(20));
+        // "copilot" survives from the base config.
+        assert_eq!(providers["copilot"].priority, Some(5));
+        // "gpt" is added by the overlay.
+        assert_eq!(providers["gpt"].executor.as_deref(), Some("openai"));
+        assert_eq!(providers.len(), 3);
+    }
+
+    #[test]
+    fn provider_partial_patch_preserves_base_fields() {
+        // Base defines a full provider; overlay only patches priority.
+        // The overlay must NOT lose executor or other fields from base.
+        let mut base_providers = IndexMap::new();
+        base_providers.insert(
+            "shared".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: Some(10),
+                plan_mode: Some(false),
+                access_key: None,
+            },
+        );
+
+        let base_toml = ZbobrDispatcherConfigToml {
+            providers: Some(base_providers),
+            ..Default::default()
+        };
+
+        // Overlay only overrides priority — executor and plan_mode are not restated.
+        let mut overlay_providers = IndexMap::new();
+        overlay_providers.insert(
+            "shared".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: None,
+                priority: Some(20),
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+
+        let overlay_toml = ZbobrDispatcherConfigToml {
+            providers: Some(overlay_providers),
+            ..Default::default()
+        };
+
+        let merged = base_toml.merge_toml(overlay_toml);
+        let providers = merged.providers.unwrap();
+
+        assert_eq!(providers["shared"].priority, Some(20), "priority should be overridden");
+        assert_eq!(
+            providers["shared"].executor.as_deref(),
+            Some("claude"),
+            "executor should be preserved from base"
+        );
+        assert_eq!(
+            providers["shared"].plan_mode,
+            Some(false),
+            "plan_mode should be preserved from base"
+        );
+    }
+
+    #[test]
+    fn role_partial_patch_preserves_base_fields() {
+        // Base defines a role with mcp and prompt; overlay only patches tool.
+        // mcp and prompt must survive because overlay uses mcp: None (field absent).
+        use crate::config_tools::McpTool;
+        let mut base_roles = IndexMap::new();
+        base_roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                mcp: Some(vec![McpTool::ReportSuccess]),
+                prompt: Some(PathBuf::from("/shared/worker.md")),
+                tool: None,
+            },
+        );
+
+        let base = WorkflowToml {
+            prompts_dir: None,
+            roles: Some(base_roles),
+            pipelines: None,
+        };
+
+        // Overlay sets only tool; mcp is None (not specified) so base mcp survives.
+        let mut overlay_roles = IndexMap::new();
+        overlay_roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                mcp: None,
+                prompt: None,
+                tool: Some("fast-tool".to_string()),
+            },
+        );
+
+        let overlay = WorkflowToml {
+            prompts_dir: None,
+            roles: Some(overlay_roles),
+            pipelines: None,
+        };
+
+        let merged = base.merge_toml(overlay);
+        let roles = merged.roles.unwrap();
+
+        assert_eq!(
+            roles["worker"].tool.as_deref(),
+            Some("fast-tool"),
+            "tool should be set by overlay"
+        );
+        assert_eq!(
+            roles["worker"].prompt.as_ref().unwrap(),
+            &PathBuf::from("/shared/worker.md"),
+            "prompt should be preserved from base"
+        );
+        assert!(
+            roles["worker"].mcp.as_ref().is_some_and(|v| !v.is_empty()),
+            "mcp should be preserved from base"
+        );
+    }
+
+    #[test]
+    fn role_mcp_cleared_by_empty_list_overlay() {
+        // An overlay that explicitly sets mcp = [] must clear the base mcp list.
+        use crate::config_tools::McpTool;
+        let mut base_roles = IndexMap::new();
+        base_roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                mcp: Some(vec![McpTool::ReportSuccess]),
+                prompt: None,
+                tool: None,
+            },
+        );
+        let base = WorkflowToml {
+            prompts_dir: None,
+            roles: Some(base_roles),
+            pipelines: None,
+        };
+
+        // Overlay explicitly sets mcp = [] (Some(vec![])) to clear the list.
+        let mut overlay_roles = IndexMap::new();
+        overlay_roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                mcp: Some(vec![]),
+                prompt: None,
+                tool: None,
+            },
+        );
+        let overlay = WorkflowToml {
+            prompts_dir: None,
+            roles: Some(overlay_roles),
+            pipelines: None,
+        };
+
+        let merged = base.merge_toml(overlay);
+        let roles = merged.roles.unwrap();
+
+        assert!(
+            roles["worker"].mcp.as_ref().is_some_and(|v| v.is_empty()),
+            "mcp should be cleared by explicit empty-list overlay"
+        );
+    }
+
+    #[test]
+    fn pipeline_partial_stage_patch_preserves_other_stages() {
+        // Base defines a pipeline with two stages; overlay patches only one stage's role
+        // while leaving the other stage and the patched stage's tool intact.
+        let mut base_stages = IndexMap::new();
+        base_stages.insert(
+            Stage::from("planning"),
+            StageDefinition {
+                role: Some("planner".to_string()),
+                tool: Some("fast".to_string()),
+                ..Default::default()
+            },
+        );
+        base_stages.insert(
+            Stage::from("working"),
+            StageDefinition {
+                role: Some("worker".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let mut base_pipelines = HashMap::new();
+        base_pipelines.insert(Pipeline::Main, PipelineConfig { stages: base_stages });
+
+        let base = WorkflowToml {
+            prompts_dir: None,
+            roles: None,
+            pipelines: Some(base_pipelines),
+        };
+
+        // Overlay patches "planning" stage: changes role but leaves tool as None (not restated).
+        let mut overlay_stages = IndexMap::new();
+        overlay_stages.insert(
+            Stage::from("planning"),
+            StageDefinition {
+                role: Some("senior_planner".to_string()),
+                tool: None,
+                ..Default::default()
+            },
+        );
+        let mut overlay_pipelines = HashMap::new();
+        overlay_pipelines
+            .insert(Pipeline::Main, PipelineConfig { stages: overlay_stages });
+
+        let overlay = WorkflowToml {
+            prompts_dir: None,
+            roles: None,
+            pipelines: Some(overlay_pipelines),
+        };
+
+        let merged = base.merge_toml(overlay);
+        let pipelines = merged.pipelines.unwrap();
+        let main = &pipelines[&Pipeline::Main];
+
+        assert_eq!(
+            main.stage("planning").unwrap().role.as_deref().unwrap(),
+            "senior_planner",
+            "planning role should be overridden"
+        );
+        assert_eq!(
+            main.stage("planning").unwrap().tool.as_deref(),
+            Some("fast"),
+            "planning tool should be preserved from base"
+        );
+        assert_eq!(
+            main.stage("working").unwrap().role.as_deref().unwrap(),
+            "worker",
+            "working stage should survive unchanged from base"
+        );
+    }
+
+    #[test]
+    fn stage_prompts_cleared_by_empty_list_overlay() {
+        // An overlay that explicitly sets prompts = [] must clear the base prompts list.
+        let mut base_stages = IndexMap::new();
+        base_stages.insert(
+            Stage::from("planning"),
+            StageDefinition {
+                role: Some("planner".to_string()),
+                prompts: Some(vec![PathBuf::from("/shared/common.md")]),
+                ..Default::default()
+            },
+        );
+        let mut base_pipelines = HashMap::new();
+        base_pipelines.insert(Pipeline::Main, PipelineConfig { stages: base_stages });
+
+        let base = WorkflowToml {
+            prompts_dir: None,
+            roles: None,
+            pipelines: Some(base_pipelines),
+        };
+
+        // Overlay explicitly sets prompts = [] to clear the inherited list.
+        let mut overlay_stages = IndexMap::new();
+        overlay_stages.insert(
+            Stage::from("planning"),
+            StageDefinition {
+                role: None,
+                prompts: Some(vec![]),
+                ..Default::default()
+            },
+        );
+        let mut overlay_pipelines = HashMap::new();
+        overlay_pipelines
+            .insert(Pipeline::Main, PipelineConfig { stages: overlay_stages });
+
+        let overlay = WorkflowToml {
+            prompts_dir: None,
+            roles: None,
+            pipelines: Some(overlay_pipelines),
+        };
+
+        let merged = base.merge_toml(overlay);
+        let pipelines = merged.pipelines.unwrap();
+        let main = &pipelines[&Pipeline::Main];
+
+        assert!(
+            main.stage("planning")
+                .unwrap()
+                .prompts
+                .as_ref()
+                .is_some_and(|v| v.is_empty()),
+            "prompts should be cleared by explicit empty-list overlay"
+        );
+    }
+
+    // ── Option<Vec<T>> TOML deserialization round-trip tests ─────────────
+
+    #[test]
+    fn role_mcp_missing_deserializes_as_none() {
+        let toml_str = r#"
+[workflow.roles.worker]
+tool = "developer"
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            workflow: WorkflowToml,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let role = &root.workflow.roles.unwrap()["worker"];
+        assert!(role.mcp.is_none(), "missing mcp field should deserialize as None");
+    }
+
+    #[test]
+    fn role_mcp_empty_list_deserializes_as_some_empty() {
+        let toml_str = r#"
+[workflow.roles.worker]
+mcp = []
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            workflow: WorkflowToml,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let role = &root.workflow.roles.unwrap()["worker"];
+        assert!(
+            role.mcp.as_ref().is_some_and(|v| v.is_empty()),
+            "mcp = [] should deserialize as Some(vec![])"
+        );
+    }
+
+    #[test]
+    fn role_mcp_populated_list_deserializes_as_some_with_entries() {
+        let toml_str = r#"
+[workflow.roles.worker]
+mcp = ["report_success", "report_failure"]
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            workflow: WorkflowToml,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let role = &root.workflow.roles.unwrap()["worker"];
+        let mcp = role.mcp.as_ref().unwrap();
+        assert_eq!(mcp.len(), 2);
+        assert_eq!(mcp[0], McpTool::ReportSuccess);
+        assert_eq!(mcp[1], McpTool::ReportFailure);
+    }
+
+    #[test]
+    fn stage_prompts_missing_deserializes_as_none() {
+        let toml_str = r#"
+[workflow.pipelines.main.stages.planning]
+role = "planner"
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            workflow: WorkflowToml,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let pipelines = root.workflow.pipelines.unwrap();
+        let stage = &pipelines[&Pipeline::Main].stages["planning"];
+        assert!(stage.prompts.is_none(), "missing prompts should deserialize as None");
+    }
+
+    #[test]
+    fn stage_prompts_empty_list_deserializes_as_some_empty() {
+        let toml_str = r#"
+[workflow.pipelines.main.stages.planning]
+role = "planner"
+prompts = []
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            workflow: WorkflowToml,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let pipelines = root.workflow.pipelines.unwrap();
+        let stage = &pipelines[&Pipeline::Main].stages["planning"];
+        assert!(
+            stage.prompts.as_ref().is_some_and(|v| v.is_empty()),
+            "prompts = [] should deserialize as Some(vec![])"
+        );
+    }
+
+    #[test]
+    fn stage_prompts_populated_list_deserializes_as_some_with_entries() {
+        let toml_str = r#"
+[workflow.pipelines.main.stages.planning]
+role = "planner"
+prompts = ["common.md", "planning.md"]
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            workflow: WorkflowToml,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let pipelines = root.workflow.pipelines.unwrap();
+        let stage = &pipelines[&Pipeline::Main].stages["planning"];
+        let prompts = stage.prompts.as_ref().unwrap();
+        assert_eq!(prompts.len(), 2);
+        assert_eq!(prompts[0], PathBuf::from("common.md"));
+        assert_eq!(prompts[1], PathBuf::from("planning.md"));
+    }
+
+    // ── Tools map merge test (IndexMap<String, Vec<ToolEntry>>) ─────────
+
+    #[test]
+    fn dispatcher_toml_merge_tools_key_wise_with_wholesale_list_replacement() {
+        let mut base_tools = IndexMap::new();
+        base_tools.insert(
+            "developer".to_string(),
+            vec![
+                ToolEntry {
+                    provider: "claude".to_string(),
+                    model: "claude-opus-4.6".parse().unwrap(),
+                    priority: None,
+                },
+                ToolEntry {
+                    provider: "copilot".to_string(),
+                    model: "claude-sonnet-4.6".parse().unwrap(),
+                    priority: Some(5),
+                },
+            ],
+        );
+        base_tools.insert(
+            "reviewer".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "claude-opus-4.6".parse().unwrap(),
+                priority: None,
+            }],
+        );
+
+        let base_toml = ZbobrDispatcherConfigToml {
+            tools: Some(base_tools),
+            ..Default::default()
+        };
+
+        // Overlay replaces "developer" list entirely and adds "tester".
+        let mut overlay_tools = IndexMap::new();
+        overlay_tools.insert(
+            "developer".to_string(),
+            vec![ToolEntry {
+                provider: "gpt".to_string(),
+                model: "claude-opus-4.6".parse().unwrap(),
+                priority: Some(1),
+            }],
+        );
+        overlay_tools.insert(
+            "tester".to_string(),
+            vec![ToolEntry {
+                provider: "claude".to_string(),
+                model: "claude-sonnet-4.6".parse().unwrap(),
+                priority: None,
+            }],
+        );
+
+        let overlay_toml = ZbobrDispatcherConfigToml {
+            tools: Some(overlay_tools),
+            ..Default::default()
+        };
+
+        let merged = base_toml.merge_toml(overlay_toml);
+        let tools = merged.tools.unwrap();
+
+        // "developer" list is fully replaced by overlay (1 entry, not 2).
+        assert_eq!(tools["developer"].len(), 1);
+        assert_eq!(tools["developer"][0].provider, "gpt");
+        assert_eq!(tools["developer"][0].priority, Some(1));
+        // "reviewer" survives unchanged from base.
+        assert_eq!(tools["reviewer"].len(), 1);
+        assert_eq!(tools["reviewer"][0].provider, "claude");
+        // "tester" added from overlay.
+        assert_eq!(tools["tester"].len(), 1);
+        assert_eq!(tools["tester"][0].provider, "claude");
+        // Total: 3 tool names.
+        assert_eq!(tools.len(), 3);
+    }
+
+    // ── End-to-end multi-config merge from TOML strings ─────────────────
+
+    #[test]
+    fn workflow_toml_end_to_end_merge_from_toml_strings() {
+        let base_toml_str = r#"
+[workflow.roles.worker]
+mcp = ["report_success", "report_failure"]
+prompt = "worker.md"
+
+[workflow.roles.reviewer]
+mcp = ["report_success"]
+prompt = "reviewer.md"
+
+[workflow.pipelines.main.stages.planning]
+role = "worker"
+prompts = ["common.md", "planning.md"]
+
+[workflow.pipelines.main.stages.working]
+role = "worker"
+prompts = ["common.md", "working.md"]
+"#;
+
+        let overlay_toml_str = r#"
+[workflow.roles.worker]
+mcp = ["report_success", "report_intermediate", "add_checklist_item"]
+
+[workflow.pipelines.main.stages.planning]
+prompts = []
+"#;
+
+        #[derive(serde::Deserialize)]
+        struct Root {
+            workflow: WorkflowToml,
+        }
+
+        let base: Root = toml::from_str(base_toml_str).unwrap();
+        let overlay: Root = toml::from_str(overlay_toml_str).unwrap();
+
+        let merged = base.workflow.merge_toml(overlay.workflow);
+
+        // Worker role: mcp overridden by overlay (3 entries instead of 2).
+        let roles = merged.roles.as_ref().unwrap();
+        let worker_mcp = roles["worker"].mcp.as_ref().unwrap();
+        assert_eq!(worker_mcp.len(), 3);
+        assert_eq!(worker_mcp[0], McpTool::ReportSuccess);
+        assert_eq!(worker_mcp[1], McpTool::ReportIntermediate);
+        assert_eq!(worker_mcp[2], McpTool::AddChecklistItem);
+
+        // Worker role: prompt inherits from base (overlay didn't specify it).
+        assert_eq!(
+            roles["worker"].prompt.as_deref(),
+            Some(std::path::Path::new("worker.md"))
+        );
+
+        // Reviewer role: completely inherited from base (not in overlay).
+        let reviewer_mcp = roles["reviewer"].mcp.as_ref().unwrap();
+        assert_eq!(reviewer_mcp.len(), 1);
+        assert_eq!(reviewer_mcp[0], McpTool::ReportSuccess);
+        assert_eq!(
+            roles["reviewer"].prompt.as_deref(),
+            Some(std::path::Path::new("reviewer.md"))
+        );
+
+        // Planning stage: prompts explicitly cleared by overlay.
+        let pipelines = merged.pipelines.as_ref().unwrap();
+        let main = &pipelines[&Pipeline::Main];
+        assert!(
+            main.stage("planning")
+                .unwrap()
+                .prompts
+                .as_ref()
+                .is_some_and(|v| v.is_empty()),
+            "planning prompts should be cleared by empty-list overlay"
+        );
+
+        // Planning stage: role inherited from base (overlay didn't specify it).
+        assert_eq!(
+            main.stage("planning").unwrap().role.as_deref(),
+            Some("worker")
+        );
+
+        // Working stage: completely inherited from base (not in overlay).
+        let working_prompts = main.stage("working").unwrap().prompts.as_ref().unwrap();
+        assert_eq!(working_prompts.len(), 2);
+        assert_eq!(working_prompts[0], PathBuf::from("common.md"));
+        assert_eq!(working_prompts[1], PathBuf::from("working.md"));
     }
 }

@@ -30,44 +30,59 @@ use zbobr_api::tool_executor::ExecutorOutput;
 // ---------------------------------------------------------------------------
 
 /// Configuration file path argument.
+///
+/// Multiple config files can be specified with repeated `-c` / `--config` flags.
+/// When one or more configs are given, the default `zbobr.toml` is ignored.
+/// Configs are applied in order: later files override earlier ones.
 #[derive(Args, Clone)]
 pub struct ConfigFileArg {
-    /// Path to TOML configuration file
-    #[arg(long = "config")]
-    pub path: Option<PathBuf>,
+    /// Path to TOML configuration file (repeatable; later files override earlier ones)
+    #[arg(short = 'c', long = "config")]
+    pub paths: Vec<PathBuf>,
 }
 
 /// Resolved config file location.
 pub struct ConfigLocation {
-    pub config_path: PathBuf,
+    /// Config file paths to load (in order). May contain a single default path
+    /// that doesn't necessarily exist on disk.
+    pub config_paths: Vec<PathBuf>,
     pub config_dir: PathBuf,
 }
 
-/// Resolve the config file path and its parent directory.
+/// Resolve config file paths and the base directory for relative path resolution.
 ///
-/// When `cli_path` is `Some`, the file must exist (its parent is used as
-/// `config_dir`).  When `None`, `default_config_name` in the current
-/// directory is used and `config_dir` is `std::env::current_dir()`.
+/// When `cli_paths` is non-empty, each file must exist and `config_dir` is
+/// derived from the **last** file's parent directory.
+/// When empty, `default_config_name` in the current directory is used and
+/// `config_dir` is `std::env::current_dir()`.
 pub fn resolve_config_location(
-    cli_path: &Option<PathBuf>,
+    cli_paths: &[PathBuf],
     default_config_name: &str,
 ) -> anyhow::Result<ConfigLocation> {
-    let config_path = cli_path
-        .clone()
-        .unwrap_or_else(|| default_config_name.into());
+    if cli_paths.is_empty() {
+        let config_dir = std::env::current_dir()?;
+        let config_paths = vec![PathBuf::from(default_config_name)];
+        return Ok(ConfigLocation {
+            config_paths,
+            config_dir,
+        });
+    }
 
-    let config_dir = if cli_path.is_some() {
-        std::fs::canonicalize(&config_path)
-            .with_context(|| format!("Cannot resolve config path: {}", config_path.display()))?
+    let mut config_paths = Vec::with_capacity(cli_paths.len());
+    let mut config_dir = std::env::current_dir()?;
+
+    for path in cli_paths {
+        let canonical = std::fs::canonicalize(path)
+            .with_context(|| format!("Cannot resolve config path: {}", path.display()))?;
+        config_dir = canonical
             .parent()
             .expect("config file must have a parent directory")
-            .to_path_buf()
-    } else {
-        std::env::current_dir()?
-    };
+            .to_path_buf();
+        config_paths.push(canonical);
+    }
 
     Ok(ConfigLocation {
-        config_path,
+        config_paths,
         config_dir,
     })
 }
@@ -119,14 +134,16 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
     let global_tmp = GlobalArgs::augment_args(clap::Command::new(""));
     let global_flags: std::collections::HashMap<String, bool> = global_tmp
         .get_arguments()
-        .filter_map(|a| {
-            a.get_long().map(|long| {
-                let takes_value = !matches!(
-                    a.get_action(),
-                    clap::ArgAction::SetTrue | clap::ArgAction::SetFalse | clap::ArgAction::Count
-                );
-                (format!("--{long}"), takes_value)
-            })
+        .flat_map(|a| {
+            let takes_value = !matches!(
+                a.get_action(),
+                clap::ArgAction::SetTrue | clap::ArgAction::SetFalse | clap::ArgAction::Count
+            );
+            let long_entry = a.get_long().map(|long| (format!("--{long}"), takes_value));
+            let short_entry = a
+                .get_short()
+                .map(|short| (format!("-{short}"), takes_value));
+            long_entry.into_iter().chain(short_entry)
         })
         .collect();
 
@@ -156,8 +173,26 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
         }
 
         let base = arg.split('=').next().unwrap_or(arg);
-        if let Some(&takes_value) = global_flags.get(base) {
-            if arg.contains('=') {
+        // Check for exact match (e.g. `-c`, `--config`, `--config=val`)
+        let matched = global_flags.get(base).copied();
+        // Also check for attached short-value form (e.g. `-cshared.toml`):
+        // a short flag like `-c` that takes a value may appear as `-c<value>`
+        // without a `=` separator.
+        let matched = matched.or_else(|| {
+            if arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 2 {
+                let short_key = &arg[..2]; // e.g. "-c"
+                global_flags
+                    .get(short_key)
+                    .copied()
+                    .filter(|&takes_value| takes_value)
+            } else {
+                None
+            }
+        });
+        if let Some(takes_value) = matched {
+            if arg.contains('=') || (arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 2)
+            {
+                // Attached value: --config=val or -cval
                 before_sub.push(arg.clone());
                 i += 1;
             } else if takes_value && i + 1 < raw_args.len() {
@@ -524,17 +559,9 @@ impl<'a> CliStageRunner<'a> {
             .zbobr
             .workflow()
             .role_definition(role)
-            .map(|d| d.mcp.iter().copied().collect())
-            .unwrap_or_else(|| {
-                // No explicit role definition — allow all tools for backward compatibility.
-                self.zbobr
-                    .workflow()
-                    .config()
-                    .all_tool_names()
-                    .into_iter()
-                    .filter_map(|name| name.parse::<McpTool>().ok())
-                    .collect()
-            });
+            .and_then(|d| d.mcp.as_ref())
+            .map(|tools| tools.iter().copied().collect())
+            .unwrap_or_default();
 
         // Read current pipeline_run_id for this session.
         let task_snap = self
@@ -2179,6 +2206,58 @@ mod tests {
         let title = "タスク".repeat(20); // 60 chars
         let result = sanitize_branch_postfix(&title);
         assert!(result.chars().count() <= 50);
+    }
+
+    // -- Tests for resolve_config_location --
+
+    #[test]
+    fn resolve_config_location_default_when_empty() {
+        let loc = resolve_config_location(&[], "zbobr.toml").unwrap();
+        assert_eq!(loc.config_paths.len(), 1);
+        assert_eq!(loc.config_paths[0], PathBuf::from("zbobr.toml"));
+        assert_eq!(loc.config_dir, std::env::current_dir().unwrap());
+    }
+
+    #[test]
+    fn resolve_config_location_multiple_paths() {
+        // Create temp files in different directories
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        let file_a = dir_a.path().join("a.toml");
+        let file_b = dir_b.path().join("b.toml");
+        std::fs::write(&file_a, "").unwrap();
+        std::fs::write(&file_b, "").unwrap();
+
+        let loc = resolve_config_location(&[file_a, file_b.clone()], "zbobr.toml").unwrap();
+        assert_eq!(loc.config_paths.len(), 2);
+        // config_dir should be the last file's parent
+        assert_eq!(
+            loc.config_dir,
+            std::fs::canonicalize(file_b.parent().unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn resolve_config_location_missing_file_errors() {
+        let result = resolve_config_location(&[PathBuf::from("/nonexistent/cfg.toml")], "z.toml");
+        assert!(result.is_err());
+    }
+
+    // -- Tests for ConfigFileArg short flag --
+
+    #[test]
+    fn config_file_arg_short_flag_registered() {
+        let cmd = GlobalArgs::augment_args(clap::Command::new(""));
+        let config_arg = cmd
+            .get_arguments()
+            .find(|a| a.get_long().map(|l| l == "config").unwrap_or(false));
+        assert!(config_arg.is_some(), "GlobalArgs should have --config arg");
+        let arg = config_arg.unwrap();
+        assert_eq!(
+            arg.get_short(),
+            Some('c'),
+            "--config should have -c short alias"
+        );
     }
 
     #[test]

@@ -895,7 +895,7 @@ mod tests {
         roles.insert(
             "worker".to_string(),
             RoleDefinition {
-                mcp: vec![],
+                mcp: None,
                 prompt: None,
                 tool: Some("nonexistent".to_string()),
             },
