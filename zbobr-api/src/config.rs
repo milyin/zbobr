@@ -2,6 +2,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use indexmap::IndexMap;
 use zbobr_utility::config_struct;
+use zbobr_utility::MergeToml;
 
 use crate::{
     config_tools::McpTool,
@@ -27,6 +28,16 @@ pub struct RoleDefinition {
     /// Stage-level `tool` takes precedence over this.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
+}
+
+impl zbobr_utility::MergeToml for RoleDefinition {
+    fn merge_toml(self, other: Self) -> Self {
+        Self {
+            mcp: if !other.mcp.is_empty() { other.mcp } else { self.mcp },
+            prompt: other.prompt.or(self.prompt),
+            tool: other.tool.or(self.tool),
+        }
+    }
 }
 
 impl RoleDefinition {
@@ -62,6 +73,18 @@ pub struct ProviderDefinition {
     /// API key for the executor (e.g. Anthropic API key for the claude executor).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access_key: Option<Secret>,
+}
+
+impl zbobr_utility::MergeToml for ProviderDefinition {
+    fn merge_toml(self, other: Self) -> Self {
+        Self {
+            executor: other.executor.or(self.executor),
+            parent: other.parent.or(self.parent),
+            priority: other.priority.or(self.priority),
+            plan_mode: other.plan_mode.or(self.plan_mode),
+            access_key: other.access_key.or(self.access_key),
+        }
+    }
 }
 
 /// A resolved provider with all inheritance fully flattened.
@@ -225,6 +248,26 @@ impl StageDefinition {
     }
 }
 
+impl zbobr_utility::MergeToml for StageDefinition {
+    fn merge_toml(self, other: Self) -> Self {
+        Self {
+            role: other.role.or(self.role),
+            call: other.call.or(self.call),
+            tool: other.tool.or(self.tool),
+            role_prompt: other.role_prompt.or(self.role_prompt),
+            prompts: if !other.prompts.is_empty() {
+                other.prompts
+            } else {
+                self.prompts
+            },
+            on_success: other.on_success.or(self.on_success),
+            on_failure: other.on_failure.or(self.on_failure),
+            on_intermediate: other.on_intermediate.or(self.on_intermediate),
+            on_no_report: other.on_no_report.or(self.on_no_report),
+        }
+    }
+}
+
 /// Per-pipeline configuration: an ordered sequence of stages.
 ///
 /// Stage order is determined by insertion order in the `IndexMap`.
@@ -329,6 +372,20 @@ impl PipelineConfig {
     }
 }
 
+impl zbobr_utility::MergeToml for PipelineConfig {
+    fn merge_toml(self, other: Self) -> Self {
+        let mut stages = self.stages;
+        for (k, v) in other.stages {
+            if let Some(base_v) = stages.get(&k).cloned() {
+                stages.insert(k, base_v.merge_toml(v));
+            } else {
+                stages.insert(k, v);
+            }
+        }
+        Self { stages }
+    }
+}
+
 /// Top-level workflow configuration: a container of named pipelines and shared roles.
 ///
 /// Defined manually (not via `#[config_struct]`) because it needs
@@ -407,7 +464,13 @@ impl WorkflowToml {
             prompts_dir: other.prompts_dir.or(self.prompts_dir),
             roles: match (self.roles, other.roles) {
                 (Some(mut base), Some(over)) => {
-                    base.extend(over);
+                    for (k, v) in over {
+                        if let Some(base_v) = base.get(&k).cloned() {
+                            base.insert(k, base_v.merge_toml(v));
+                        } else {
+                            base.insert(k, v);
+                        }
+                    }
                     Some(base)
                 }
                 (None, over) => over,
@@ -415,7 +478,13 @@ impl WorkflowToml {
             },
             pipelines: match (self.pipelines, other.pipelines) {
                 (Some(mut base), Some(over)) => {
-                    base.extend(over);
+                    for (k, v) in over {
+                        if let Some(base_v) = base.get(&k).cloned() {
+                            base.insert(k, base_v.merge_toml(v));
+                        } else {
+                            base.insert(k, v);
+                        }
+                    }
                     Some(base)
                 }
                 (None, over) => over,
@@ -1898,5 +1967,184 @@ developer = [
         // "gpt" is added by the overlay.
         assert_eq!(providers["gpt"].executor.as_deref(), Some("openai"));
         assert_eq!(providers.len(), 3);
+    }
+
+    #[test]
+    fn provider_partial_patch_preserves_base_fields() {
+        // Base defines a full provider; overlay only patches priority.
+        // The overlay must NOT lose executor or other fields from base.
+        let mut base_providers = IndexMap::new();
+        base_providers.insert(
+            "shared".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: Some(10),
+                plan_mode: Some(false),
+                access_key: None,
+            },
+        );
+
+        let base_toml = ZbobrDispatcherConfigToml {
+            providers: Some(base_providers),
+            ..Default::default()
+        };
+
+        // Overlay only overrides priority — executor and plan_mode are not restated.
+        let mut overlay_providers = IndexMap::new();
+        overlay_providers.insert(
+            "shared".to_string(),
+            ProviderDefinition {
+                executor: None,
+                parent: None,
+                priority: Some(20),
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+
+        let overlay_toml = ZbobrDispatcherConfigToml {
+            providers: Some(overlay_providers),
+            ..Default::default()
+        };
+
+        let merged = base_toml.merge_toml(overlay_toml);
+        let providers = merged.providers.unwrap();
+
+        assert_eq!(providers["shared"].priority, Some(20), "priority should be overridden");
+        assert_eq!(
+            providers["shared"].executor.as_deref(),
+            Some("claude"),
+            "executor should be preserved from base"
+        );
+        assert_eq!(
+            providers["shared"].plan_mode,
+            Some(false),
+            "plan_mode should be preserved from base"
+        );
+    }
+
+    #[test]
+    fn role_partial_patch_preserves_base_fields() {
+        // Base defines a role with mcp and prompt; overlay only patches tool.
+        // mcp and prompt must survive.
+        use crate::config_tools::McpTool;
+        let mut base_roles = IndexMap::new();
+        base_roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                mcp: vec![McpTool::ReportSuccess],
+                prompt: Some(PathBuf::from("/shared/worker.md")),
+                tool: None,
+            },
+        );
+
+        let base = WorkflowToml {
+            prompts_dir: None,
+            roles: Some(base_roles),
+            pipelines: None,
+        };
+
+        // Overlay sets only tool; mcp is empty (not specified) and prompt is None.
+        let mut overlay_roles = IndexMap::new();
+        overlay_roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: None,
+                tool: Some("fast-tool".to_string()),
+            },
+        );
+
+        let overlay = WorkflowToml {
+            prompts_dir: None,
+            roles: Some(overlay_roles),
+            pipelines: None,
+        };
+
+        let merged = base.merge_toml(overlay);
+        let roles = merged.roles.unwrap();
+
+        assert_eq!(
+            roles["worker"].tool.as_deref(),
+            Some("fast-tool"),
+            "tool should be set by overlay"
+        );
+        assert_eq!(
+            roles["worker"].prompt.as_ref().unwrap(),
+            &PathBuf::from("/shared/worker.md"),
+            "prompt should be preserved from base"
+        );
+        assert!(!roles["worker"].mcp.is_empty(), "mcp should be preserved from base");
+    }
+
+    #[test]
+    fn pipeline_partial_stage_patch_preserves_other_stages() {
+        // Base defines a pipeline with two stages; overlay patches only one stage's role
+        // while leaving the other stage and the patched stage's tool intact.
+        let mut base_stages = IndexMap::new();
+        base_stages.insert(
+            Stage::from("planning"),
+            StageDefinition {
+                role: Some("planner".to_string()),
+                tool: Some("fast".to_string()),
+                ..Default::default()
+            },
+        );
+        base_stages.insert(
+            Stage::from("working"),
+            StageDefinition {
+                role: Some("worker".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let mut base_pipelines = HashMap::new();
+        base_pipelines.insert(Pipeline::Main, PipelineConfig { stages: base_stages });
+
+        let base = WorkflowToml {
+            prompts_dir: None,
+            roles: None,
+            pipelines: Some(base_pipelines),
+        };
+
+        // Overlay patches "planning" stage: changes role but leaves tool as None (not restated).
+        let mut overlay_stages = IndexMap::new();
+        overlay_stages.insert(
+            Stage::from("planning"),
+            StageDefinition {
+                role: Some("senior_planner".to_string()),
+                tool: None,
+                ..Default::default()
+            },
+        );
+        let mut overlay_pipelines = HashMap::new();
+        overlay_pipelines.insert(Pipeline::Main, PipelineConfig { stages: overlay_stages });
+
+        let overlay = WorkflowToml {
+            prompts_dir: None,
+            roles: None,
+            pipelines: Some(overlay_pipelines),
+        };
+
+        let merged = base.merge_toml(overlay);
+        let pipelines = merged.pipelines.unwrap();
+        let main = &pipelines[&Pipeline::Main];
+
+        assert_eq!(
+            main.stage("planning").unwrap().role.as_deref().unwrap(),
+            "senior_planner",
+            "planning role should be overridden"
+        );
+        assert_eq!(
+            main.stage("planning").unwrap().tool.as_deref(),
+            Some("fast"),
+            "planning tool should be preserved from base"
+        );
+        assert_eq!(
+            main.stage("working").unwrap().role.as_deref().unwrap(),
+            "worker",
+            "working stage should survive unchanged from base"
+        );
     }
 }

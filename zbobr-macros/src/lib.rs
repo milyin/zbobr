@@ -323,7 +323,13 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                     merge_toml_fields.push(quote! {
                         #field_ident: match (self.#field_ident, other.#field_ident) {
                             (Some(mut base), Some(over)) => {
-                                base.extend(over);
+                                for (k, over_v) in over {
+                                    if let Some(base_v) = base.get(&k).cloned() {
+                                        base.insert(k, ::zbobr_utility::MergeToml::merge_toml(base_v, over_v));
+                                    } else {
+                                        base.insert(k, over_v);
+                                    }
+                                }
                                 Some(base)
                             }
                             (None, over) => over,
