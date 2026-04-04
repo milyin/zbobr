@@ -25,7 +25,7 @@ const COPILOT_MODEL_HAIKU: &str = "claude-haiku-4.5";
 const CLAUDE_MODEL_HAIKU: &str = "claude-haiku-4-5";
 const COPILOT_MODEL_SONNET: &str = "claude-sonnet-4.6";
 const CLAUDE_MODEL_OPUS: &str = "claude-opus-4-6";
-const CLAUDE_MODEL_SONNET: &str = "claude-sonnet-4.6";
+const CLAUDE_MODEL_SONNET: &str = "claude-sonnet-4-6";
 const COPILOT_MODEL_GPT_5_4: &str = "gpt-5.4";
 const COPILOT_MODEL_GPT_5_MINI: &str = "gpt-5-mini";
 
