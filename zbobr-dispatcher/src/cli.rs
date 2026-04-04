@@ -2216,6 +2216,58 @@ mod tests {
         assert!(result.chars().count() <= 50);
     }
 
+    // -- Tests for resolve_config_location --
+
+    #[test]
+    fn resolve_config_location_default_when_empty() {
+        let loc = resolve_config_location(&[], "zbobr.toml").unwrap();
+        assert_eq!(loc.config_paths.len(), 1);
+        assert_eq!(loc.config_paths[0], PathBuf::from("zbobr.toml"));
+        assert_eq!(loc.config_dir, std::env::current_dir().unwrap());
+    }
+
+    #[test]
+    fn resolve_config_location_multiple_paths() {
+        // Create temp files in different directories
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        let file_a = dir_a.path().join("a.toml");
+        let file_b = dir_b.path().join("b.toml");
+        std::fs::write(&file_a, "").unwrap();
+        std::fs::write(&file_b, "").unwrap();
+
+        let loc = resolve_config_location(&[file_a, file_b.clone()], "zbobr.toml").unwrap();
+        assert_eq!(loc.config_paths.len(), 2);
+        // config_dir should be the last file's parent
+        assert_eq!(
+            loc.config_dir,
+            std::fs::canonicalize(file_b.parent().unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn resolve_config_location_missing_file_errors() {
+        let result = resolve_config_location(&[PathBuf::from("/nonexistent/cfg.toml")], "z.toml");
+        assert!(result.is_err());
+    }
+
+    // -- Tests for ConfigFileArg short flag --
+
+    #[test]
+    fn config_file_arg_short_flag_registered() {
+        let cmd = GlobalArgs::augment_args(clap::Command::new(""));
+        let config_arg = cmd
+            .get_arguments()
+            .find(|a| a.get_long().map(|l| l == "config").unwrap_or(false));
+        assert!(config_arg.is_some(), "GlobalArgs should have --config arg");
+        let arg = config_arg.unwrap();
+        assert_eq!(
+            arg.get_short(),
+            Some('c'),
+            "--config should have -c short alias"
+        );
+    }
+
     #[test]
     fn global_args_includes_logs_flag() {
         let cmd = GlobalArgs::augment_args(clap::Command::new(""));
