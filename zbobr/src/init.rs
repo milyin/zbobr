@@ -1202,7 +1202,10 @@ name = "test"
         let new_content = tokio::fs::read_to_string(&new_file_path)
             .await
             .expect("Failed to read .new file");
-        assert_eq!(new_content, "new content", ".new file should contain new content");
+        assert_eq!(
+            new_content, "new content",
+            ".new file should contain new content"
+        );
     }
 
     #[tokio::test]

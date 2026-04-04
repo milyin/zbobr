@@ -85,8 +85,7 @@ async fn main() -> anyhow::Result<()> {
         return init::init_workspace(directory, force).await;
     }
 
-    let location =
-        zbobr_dispatcher::resolve_config_location(&cli.config_file.paths, "zbobr.toml")?;
+    let location = zbobr_dispatcher::resolve_config_location(&cli.config_file.paths, "zbobr.toml")?;
 
     let root_toml = {
         let mut merged: Option<RootConfigToml> = None;
