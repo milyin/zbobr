@@ -319,9 +319,22 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                     #field_ident: args.#field_ident.or(self.#field_ident),
                 });
 
-                merge_toml_fields.push(quote! {
-                    #field_ident: other.#field_ident.or(self.#field_ident),
-                });
+                if is_map_type(&value_ty) {
+                    merge_toml_fields.push(quote! {
+                        #field_ident: match (self.#field_ident, other.#field_ident) {
+                            (Some(mut base), Some(over)) => {
+                                base.extend(over);
+                                Some(base)
+                            }
+                            (None, over) => over,
+                            (base, None) => base,
+                        },
+                    });
+                } else {
+                    merge_toml_fields.push(quote! {
+                        #field_ident: other.#field_ident.or(self.#field_ident),
+                    });
+                }
 
                 if is_path {
                     if vec_inner_type(&value_ty).is_some() {
@@ -856,6 +869,16 @@ fn vec_inner_type(ty: &Type) -> Option<Type> {
         }
     }
     None
+}
+
+/// Returns `true` if `ty` is `IndexMap<K, V>` or `HashMap<K, V>`.
+fn is_map_type(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty {
+        if let Some(last) = type_path.path.segments.last() {
+            return last.ident == "IndexMap" || last.ident == "HashMap";
+        }
+    }
+    false
 }
 
 fn doc_comment(attrs: &[Attribute]) -> Option<String> {

@@ -405,8 +405,22 @@ impl WorkflowToml {
     pub fn merge_toml(self, other: Self) -> Self {
         Self {
             prompts_dir: other.prompts_dir.or(self.prompts_dir),
-            roles: other.roles.or(self.roles),
-            pipelines: other.pipelines.or(self.pipelines),
+            roles: match (self.roles, other.roles) {
+                (Some(mut base), Some(over)) => {
+                    base.extend(over);
+                    Some(base)
+                }
+                (None, over) => over,
+                (base, None) => base,
+            },
+            pipelines: match (self.pipelines, other.pipelines) {
+                (Some(mut base), Some(over)) => {
+                    base.extend(over);
+                    Some(base)
+                }
+                (None, over) => over,
+                (base, None) => base,
+            },
         }
     }
 
@@ -1686,5 +1700,203 @@ developer = [
             role.prompt.as_ref().unwrap(),
             &PathBuf::from("/shared/reviewer.md")
         );
+    }
+
+    // ── merge_toml map-merge semantics ──────────────────────────────────
+
+    #[test]
+    fn workflow_toml_merge_roles_key_wise() {
+        // Base config defines two roles; overlay overrides only one.
+        // The unmodified role from base must survive the merge.
+        let mut base_roles = IndexMap::new();
+        base_roles.insert(
+            "reviewer".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: Some(PathBuf::from("/shared/reviewer.md")),
+                tool: None,
+            },
+        );
+        base_roles.insert(
+            "worker".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: Some(PathBuf::from("/shared/worker.md")),
+                tool: None,
+            },
+        );
+        let base = WorkflowToml {
+            prompts_dir: None,
+            roles: Some(base_roles),
+            pipelines: None,
+        };
+
+        // Overlay only overrides "reviewer", with a different prompt.
+        let mut overlay_roles = IndexMap::new();
+        overlay_roles.insert(
+            "reviewer".to_string(),
+            RoleDefinition {
+                mcp: vec![],
+                prompt: Some(PathBuf::from("/project/reviewer_override.md")),
+                tool: None,
+            },
+        );
+        let overlay = WorkflowToml {
+            prompts_dir: None,
+            roles: Some(overlay_roles),
+            pipelines: None,
+        };
+
+        let merged = base.merge_toml(overlay);
+        let roles = merged.roles.unwrap();
+
+        // "reviewer" is overridden by the overlay.
+        assert_eq!(
+            roles["reviewer"].prompt.as_ref().unwrap(),
+            &PathBuf::from("/project/reviewer_override.md")
+        );
+        // "worker" survives from the base config unchanged.
+        assert_eq!(
+            roles["worker"].prompt.as_ref().unwrap(),
+            &PathBuf::from("/shared/worker.md")
+        );
+    }
+
+    #[test]
+    fn workflow_toml_merge_pipelines_key_wise() {
+        // Base config defines two pipelines; overlay overrides only one.
+        let mut base_pipelines = HashMap::new();
+        let mut main_stages = IndexMap::new();
+        main_stages.insert(
+            Stage::from("planning"),
+            StageDefinition {
+                role: Some("planner".to_string()),
+                ..Default::default()
+            },
+        );
+        base_pipelines.insert(Pipeline::Main, PipelineConfig { stages: main_stages });
+        let mut fix_stages = IndexMap::new();
+        fix_stages.insert(
+            Stage::from("fixing"),
+            StageDefinition {
+                role: Some("worker".to_string()),
+                ..Default::default()
+            },
+        );
+        base_pipelines.insert(
+            Pipeline::Custom("fix".to_string()),
+            PipelineConfig { stages: fix_stages },
+        );
+
+        let base = WorkflowToml {
+            prompts_dir: None,
+            roles: None,
+            pipelines: Some(base_pipelines),
+        };
+
+        // Overlay only overrides the Main pipeline.
+        let mut overlay_stages = IndexMap::new();
+        overlay_stages.insert(
+            Stage::from("planning"),
+            StageDefinition {
+                role: Some("senior_planner".to_string()),
+                ..Default::default()
+            },
+        );
+        let mut overlay_pipelines = HashMap::new();
+        overlay_pipelines.insert(
+            Pipeline::Main,
+            PipelineConfig {
+                stages: overlay_stages,
+            },
+        );
+        let overlay = WorkflowToml {
+            prompts_dir: None,
+            roles: None,
+            pipelines: Some(overlay_pipelines),
+        };
+
+        let merged = base.merge_toml(overlay);
+        let pipelines = merged.pipelines.unwrap();
+
+        // Main pipeline is overridden by the overlay.
+        let main = &pipelines[&Pipeline::Main];
+        assert_eq!(
+            main.stage("planning").unwrap().role.as_deref().unwrap(),
+            "senior_planner"
+        );
+        // Fix pipeline survives from the base config unchanged.
+        let fix = &pipelines[&Pipeline::Custom("fix".to_string())];
+        assert_eq!(fix.stage("fixing").unwrap().role.as_deref().unwrap(), "worker");
+    }
+
+    #[test]
+    fn dispatcher_toml_merge_providers_key_wise() {
+        // Base config defines two providers; overlay adds one and overrides one.
+        let mut base_providers = IndexMap::new();
+        base_providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: Some(10),
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        base_providers.insert(
+            "copilot".to_string(),
+            ProviderDefinition {
+                executor: Some("copilot".to_string()),
+                parent: None,
+                priority: Some(5),
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+
+        let base_toml = ZbobrDispatcherConfigToml {
+            providers: Some(base_providers),
+            ..Default::default()
+        };
+
+        // Overlay overrides "claude" with higher priority and adds "gpt".
+        let mut overlay_providers = IndexMap::new();
+        overlay_providers.insert(
+            "claude".to_string(),
+            ProviderDefinition {
+                executor: Some("claude".to_string()),
+                parent: None,
+                priority: Some(20),
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+        overlay_providers.insert(
+            "gpt".to_string(),
+            ProviderDefinition {
+                executor: Some("openai".to_string()),
+                parent: None,
+                priority: Some(15),
+                plan_mode: None,
+                access_key: None,
+            },
+        );
+
+        let overlay_toml = ZbobrDispatcherConfigToml {
+            providers: Some(overlay_providers),
+            ..Default::default()
+        };
+
+        let merged = base_toml.merge_toml(overlay_toml);
+        let providers = merged.providers.unwrap();
+
+        // "claude" is overridden with priority 20.
+        assert_eq!(providers["claude"].priority, Some(20));
+        // "copilot" survives from the base config.
+        assert_eq!(providers["copilot"].priority, Some(5));
+        // "gpt" is added by the overlay.
+        assert_eq!(providers["gpt"].executor.as_deref(), Some("openai"));
+        assert_eq!(providers.len(), 3);
     }
 }
