@@ -1409,6 +1409,7 @@ mod flag_tests {
     fn make_config() -> ZbobrTaskBackendGithubConfig {
         ZbobrTaskBackendGithubConfig {
             instance: "default".to_string(),
+            timezone_offset_seconds: None,
             github_repo: "org/repo".to_string(),
             github_token: Secret::value("test-token"),
             reports_branch: Some("reports".to_string()),

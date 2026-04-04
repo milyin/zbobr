@@ -137,6 +137,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
     let task_backend_config = ZbobrTaskBackendFsConfig {
         tasks_dir: base_path.join("tasks"),
         default_max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
+        timezone_offset_seconds: None,
     };
     let repo_backend_config = ZbobrRepoBackendFsConfig {
         repository: test_repo_dir.to_string_lossy().to_string(),
@@ -236,6 +237,7 @@ pub async fn init_github_github(
 
     let task_backend_config = ZbobrTaskBackendGithubConfig {
         instance: dispatcher_config.instance.clone(),
+        timezone_offset_seconds: None,
         github_repo: task_repo.clone(),
         github_token: Secret::value(task_token),
         reports_branch: None,
