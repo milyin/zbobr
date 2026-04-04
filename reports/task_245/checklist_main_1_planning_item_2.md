@@ -1,0 +1,1 @@
+In `zbobr-task-backend-github/src/github.rs`, in `get_task_comments_internal()` (around line 997), after parsing the UTC timestamp from the GitHub API, apply `.with_timezone()` using the timezone from `self.backend_config.timezone`. If `None`, fall back to local offset. This ensures comment timestamps are displayed in the configured timezone instead of always showing `+0000`.
