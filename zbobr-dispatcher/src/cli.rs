@@ -411,8 +411,8 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
 struct CliStageRunner<'a> {
     zbobr: &'a Arc<ZbobrDispatcher>,
     task_id: u64,
-    pipeline_name: &'a Pipeline,
-    stage_name: &'a str,
+    pipeline: &'a Pipeline,
+    stage: &'a Stage,
     stage_def: &'a StageDefinition,
     mcp_tester_override: Option<&'a ZbobrExecutorMcpTesterConfig>,
 }
@@ -421,23 +421,23 @@ impl<'a> CliStageRunner<'a> {
     fn new(
         zbobr: &'a Arc<ZbobrDispatcher>,
         task_id: u64,
-        pipeline_name: &'a Pipeline,
-        stage_name: &'a str,
+        pipeline: &'a Pipeline,
+        stage: &'a Stage,
         stage_def: &'a StageDefinition,
         mcp_tester_override: Option<&'a ZbobrExecutorMcpTesterConfig>,
     ) -> Self {
         Self {
             zbobr,
             task_id,
-            pipeline_name,
-            stage_name,
+            pipeline,
+            stage,
             stage_def,
             mcp_tester_override,
         }
     }
 
     fn running_state(&self) -> State {
-        State::running(self.pipeline_name.clone(), self.stage_name)
+        State::running(self.pipeline.clone(), self.stage.clone())
     }
 
     async fn prompt(&self, _pipeline_run_id: u64) -> anyhow::Result<String> {
@@ -473,8 +473,8 @@ impl<'a> CliStageRunner<'a> {
         let work_dir = match detect_and_handle_worktree(
             self.zbobr,
             self.task_id,
-            self.pipeline_name,
-            self.stage_name,
+            self.pipeline,
+            self.stage,
             task_dir.path(),
         )
         .await?
@@ -581,7 +581,7 @@ impl<'a> CliStageRunner<'a> {
             let role_session = self.zbobr.role_session(self.task_id);
             let base_name = format!(
                 "prompt_{}_{}_{}_start",
-                self.pipeline_name, pipeline_run_id, self.stage_name
+                self.pipeline, pipeline_run_id, self.stage
             );
             role_session.store_report(&base_name, &prompt_text).await?
         };
@@ -600,8 +600,8 @@ impl<'a> CliStageRunner<'a> {
             // Add a new StageContext to the task's context for this attempt.
             {
                 let instance = self.zbobr.config().instance.clone();
-                let pipeline_name = self.pipeline_name.clone();
-                let stage_name = Stage::new(self.stage_name);
+                let pipeline_name = self.pipeline.clone();
+                let stage_name = self.stage.clone();
                 let tool_val = Some(resolved_provider.provider.as_str().to_string());
                 let model_val = Some(model.clone());
                 let timestamp =
@@ -636,10 +636,10 @@ impl<'a> CliStageRunner<'a> {
                 self.task_id,
                 resolved_provider.executor.clone(),
                 model.clone(),
-                self.stage_name.to_string(),
+                self.stage.to_string(),
                 allowed_tools.clone(),
                 Arc::clone(&tool_tracker),
-                self.pipeline_name.to_string(),
+                self.pipeline.to_string(),
                 pipeline_run_id,
             )
             .await?;
@@ -678,7 +678,7 @@ impl<'a> CliStageRunner<'a> {
                 let role_session = self.zbobr.role_session(self.task_id);
                 let base_name = format!(
                     "output_{}_{}_{}_end",
-                    self.pipeline_name, pipeline_run_id, self.stage_name
+                    self.pipeline, pipeline_run_id, self.stage
                 );
                 match role_session.store_report(&base_name, output).await {
                     Ok(output_link) => {
@@ -742,8 +742,8 @@ impl<'a> CliStageRunner<'a> {
             if let Some(e) = finalize_stage_session(
                 self.zbobr,
                 self.task_id,
-                self.pipeline_name,
-                &Stage::new(self.stage_name),
+                self.pipeline,
+                self.stage,
                 &work_dir,
                 outcome,
                 last_mapped_tool,
@@ -1026,7 +1026,7 @@ pub async fn process_task(
                     zbobr,
                     task.id,
                     pipeline_name,
-                    stage_name.as_str(),
+                    stage_name,
                     stage_def,
                     mcp_tester_override,
                 );
@@ -1402,7 +1402,7 @@ pub async fn run_manager_loop(
                     stage_name,
                 );
                 let runner =
-                    CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name.as_str(), stage_def, None);
+                    CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, None);
                 if let Err(e) = runner.run().await {
                     let msg = format!(
                         "Stage {}/{} failed for task #{}: {e}",
