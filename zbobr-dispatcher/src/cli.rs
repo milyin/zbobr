@@ -61,7 +61,7 @@ pub fn resolve_config_location(
 ) -> anyhow::Result<ConfigLocation> {
     if cli_paths.is_empty() {
         let config_dir = std::env::current_dir()?;
-        let config_paths = vec![PathBuf::from(default_config_name)];
+        let config_paths = vec![config_dir.join(default_config_name)];
         return Ok(ConfigLocation {
             config_paths,
             config_dir,
@@ -2213,9 +2213,10 @@ mod tests {
     #[test]
     fn resolve_config_location_default_when_empty() {
         let loc = resolve_config_location(&[], "zbobr.toml").unwrap();
+        let cwd = std::env::current_dir().unwrap();
         assert_eq!(loc.config_paths.len(), 1);
-        assert_eq!(loc.config_paths[0], PathBuf::from("zbobr.toml"));
-        assert_eq!(loc.config_dir, std::env::current_dir().unwrap());
+        assert_eq!(loc.config_paths[0], cwd.join("zbobr.toml"));
+        assert_eq!(loc.config_dir, cwd);
     }
 
     #[test]
