@@ -12,7 +12,7 @@ use std::{
 use indexmap::IndexMap;
 use zbobr_api::{
     Model, Secret,
-    config::{ProviderDefinition, ToolEntry, WorkflowConfig},
+    config::{Provider, ProviderDefinition, ToolEntry, WorkflowConfig},
 };
 use zbobr_dispatcher::{
     Comment, Task, Workflow, ZbobrDispatcher, ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
@@ -31,7 +31,7 @@ static SCENARIO_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Defines one provider "mcp-tester" backed by the mcp-tester executor, and one
 /// tool also named "mcp-tester" that selects that provider with model "test-model".
 fn test_providers_and_tools() -> (
-    IndexMap<String, ProviderDefinition>,
+    IndexMap<Provider, ProviderDefinition>,
     IndexMap<String, Vec<ToolEntry>>,
 ) {
     let provider = ProviderDefinition {
@@ -42,11 +42,11 @@ fn test_providers_and_tools() -> (
         access_key: None,
     };
     let entry = ToolEntry {
-        provider: "mcp-tester".to_string(),
+        provider: "mcp-tester".to_string().into(),
         model: Model::try_new("test-model").expect("valid model name"),
         priority: None,
     };
-    let providers = IndexMap::from([("mcp-tester".to_string(), provider)]);
+    let providers = IndexMap::from([("mcp-tester".to_string().into(), provider)]);
     let tools = IndexMap::from([("mcp-tester".to_string(), vec![entry])]);
     (providers, tools)
 }

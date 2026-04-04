@@ -411,7 +411,7 @@ mod tests {
     /// Helper: build a minimal valid WorkflowConfig with main/init/merge pipelines.
     fn base_workflow() -> WorkflowConfig {
         let role_stage = |role: &str| StageDefinition {
-            role: Some(role.to_string()),
+            role: Some(role.to_string().into()),
             ..Default::default()
         };
         let single_pipeline = |stage_name: &str, role: &str| PipelineConfig {

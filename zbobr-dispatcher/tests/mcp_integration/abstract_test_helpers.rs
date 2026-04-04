@@ -59,7 +59,7 @@ fn build_workflow_with_roles(
             .insert(
                 Stage::from(s.name),
                 StageDefinition {
-                    role: Some(s.role.to_string()),
+                    role: Some(s.role.to_string().into()),
                     tool: Some("mcp-tester".to_string()),
                     on_success: s.on_success,
                     on_failure: s.on_failure,

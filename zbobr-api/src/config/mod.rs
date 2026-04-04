@@ -1124,7 +1124,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert(Provider::new("smart"),
+        tools.insert("smart".to_string(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1190,7 +1190,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert(Provider::new("smart"),
+        tools.insert("smart".to_string(),
             vec![ToolEntry {
                 provider: Provider::new("ghost"),
                 model: "opus".parse().unwrap(),
@@ -1331,7 +1331,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert(Provider::new("smart"),
+        tools.insert("smart".to_string(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1361,7 +1361,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert(Provider::new("smart"),
+        tools.insert("smart".to_string(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1407,7 +1407,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert(Provider::new("smart"),
+        tools.insert("smart".to_string(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1428,7 +1428,7 @@ mod tests {
         let mut pipelines = HashMap::new();
         pipelines.insert(Pipeline::Main, PipelineConfig { stages });
         let mut roles = IndexMap::new();
-        roles.insert(Provider::new("worker"),
+        roles.insert("worker".to_string(),
             RoleDefinition {
                 mcp: None,
                 prompt: None,
@@ -1456,7 +1456,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert(Provider::new("smart"),
+        tools.insert("smart".to_string(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1477,7 +1477,7 @@ mod tests {
         let mut pipelines = HashMap::new();
         pipelines.insert(Pipeline::Main, PipelineConfig { stages });
         let mut roles = IndexMap::new();
-        roles.insert(Provider::new("worker"),
+        roles.insert("worker".to_string(),
             RoleDefinition {
                 mcp: None,
                 prompt: None,
@@ -1668,7 +1668,7 @@ developer = [
     #[test]
     fn workflow_toml_resolve_paths_resolves_nested_prompt_fields() {
         let mut roles = IndexMap::new();
-        roles.insert(Provider::new("reviewer"),
+        roles.insert("reviewer".to_string(),
             RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("reviewer.md")),
@@ -1726,7 +1726,7 @@ developer = [
         // Overlay config (from /project/) has no workflow section.
         // After per-file resolution + merge, the base paths should stay anchored to /shared/.
         let mut roles = IndexMap::new();
-        roles.insert(Provider::new("reviewer"),
+        roles.insert("reviewer".to_string(),
             RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("reviewer.md")),
@@ -1765,14 +1765,14 @@ developer = [
         // Base config defines two roles; overlay overrides only one.
         // The unmodified role from base must survive the merge.
         let mut base_roles = IndexMap::new();
-        base_roles.insert(Provider::new("reviewer"),
+        base_roles.insert("reviewer".to_string(),
             RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("/shared/reviewer.md")),
                 tool: None,
             },
         );
-        base_roles.insert(Provider::new("worker"),
+        base_roles.insert("worker".to_string(),
             RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("/shared/worker.md")),
@@ -1787,7 +1787,7 @@ developer = [
 
         // Overlay only overrides "reviewer", with a different prompt.
         let mut overlay_roles = IndexMap::new();
-        overlay_roles.insert(Provider::new("reviewer"),
+        overlay_roles.insert("reviewer".to_string(),
             RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("/project/reviewer_override.md")),
@@ -2020,7 +2020,7 @@ developer = [
         // mcp and prompt must survive because overlay uses mcp: None (field absent).
         use crate::config_tools::McpTool;
         let mut base_roles = IndexMap::new();
-        base_roles.insert(Provider::new("worker"),
+        base_roles.insert("worker".to_string(),
             RoleDefinition {
                 mcp: Some(vec![McpTool::ReportSuccess]),
                 prompt: Some(PathBuf::from("/shared/worker.md")),
@@ -2036,7 +2036,7 @@ developer = [
 
         // Overlay sets only tool; mcp is None (not specified) so base mcp survives.
         let mut overlay_roles = IndexMap::new();
-        overlay_roles.insert(Provider::new("worker"),
+        overlay_roles.insert("worker".to_string(),
             RoleDefinition {
                 mcp: None,
                 prompt: None,
@@ -2074,7 +2074,7 @@ developer = [
         // An overlay that explicitly sets mcp = [] must clear the base mcp list.
         use crate::config_tools::McpTool;
         let mut base_roles = IndexMap::new();
-        base_roles.insert(Provider::new("worker"),
+        base_roles.insert("worker".to_string(),
             RoleDefinition {
                 mcp: Some(vec![McpTool::ReportSuccess]),
                 prompt: None,
@@ -2089,7 +2089,7 @@ developer = [
 
         // Overlay explicitly sets mcp = [] (Some(vec![])) to clear the list.
         let mut overlay_roles = IndexMap::new();
-        overlay_roles.insert(Provider::new("worker"),
+        overlay_roles.insert("worker".to_string(),
             RoleDefinition {
                 mcp: Some(vec![]),
                 prompt: None,
@@ -2375,7 +2375,7 @@ prompts = ["common.md", "planning.md"]
     #[test]
     fn dispatcher_toml_merge_tools_key_wise_with_wholesale_list_replacement() {
         let mut base_tools = IndexMap::new();
-        base_tools.insert(Provider::new("developer"),
+        base_tools.insert("developer".to_string(),
             vec![
                 ToolEntry {
                     provider: Provider::new("claude"),
@@ -2389,7 +2389,7 @@ prompts = ["common.md", "planning.md"]
                 },
             ],
         );
-        base_tools.insert(Provider::new("reviewer"),
+        base_tools.insert("reviewer".to_string(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "claude-opus-4.6".parse().unwrap(),
@@ -2404,14 +2404,14 @@ prompts = ["common.md", "planning.md"]
 
         // Overlay replaces "developer" list entirely and adds "tester".
         let mut overlay_tools = IndexMap::new();
-        overlay_tools.insert(Provider::new("developer"),
+        overlay_tools.insert("developer".to_string(),
             vec![ToolEntry {
                 provider: Provider::new("gpt"),
                 model: "claude-opus-4.6".parse().unwrap(),
                 priority: Some(1),
             }],
         );
-        overlay_tools.insert(Provider::new("tester"),
+        overlay_tools.insert("tester".to_string(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "claude-sonnet-4.6".parse().unwrap(),
@@ -2429,14 +2429,14 @@ prompts = ["common.md", "planning.md"]
 
         // "developer" list is fully replaced by overlay (1 entry, not 2).
         assert_eq!(tools["developer"].len(), 1);
-        assert_eq!(tools["developer"][0].provider, "gpt");
+        assert_eq!(tools["developer"][0].provider, "gpt".into());
         assert_eq!(tools["developer"][0].priority, Some(1));
         // "reviewer" survives unchanged from base.
         assert_eq!(tools["reviewer"].len(), 1);
-        assert_eq!(tools["reviewer"][0].provider, "claude");
+        assert_eq!(tools["reviewer"][0].provider, "claude".into());
         // "tester" added from overlay.
         assert_eq!(tools["tester"].len(), 1);
-        assert_eq!(tools["tester"][0].provider, "claude");
+        assert_eq!(tools["tester"][0].provider, "claude".into());
         // Total: 3 tool names.
         assert_eq!(tools.len(), 3);
     }

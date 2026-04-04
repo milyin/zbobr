@@ -517,7 +517,7 @@ mod tests {
         workflow: Workflow,
     ) -> ZbobrDispatcher {
         let config = ZbobrDispatcherConfig {
-            providers,
+            providers: providers.into_iter().map(|(name, def)| (name.into(), def)).collect(),
             tools,
             ..Default::default()
         };
@@ -541,7 +541,7 @@ mod tests {
 
     fn tool_entry(provider: &str, model: &str) -> ToolEntry {
         ToolEntry {
-            provider: provider.to_string(),
+            provider: provider.to_string().into(),
             model: model.parse().unwrap(),
             priority: None,
         }
@@ -587,7 +587,7 @@ mod tests {
     #[test]
     fn select_provider_round_robin_same_priority() {
         let mut providers = IndexMap::new();
-        providers.insert("a".to_string(), provider_def("claude", 10));
+        providers.insert("a".to_string().into(), provider_def("claude", 10));
         providers.insert("b".to_string(), provider_def("copilot", 10));
 
         let mut tools = IndexMap::new();
@@ -600,13 +600,13 @@ mod tests {
 
         let (rp1, _) = dispatcher.select_provider("smart").unwrap();
         let (rp2, _) = dispatcher.select_provider("smart").unwrap();
-        assert_ne!(rp1.name, rp2.name, "Round-robin should alternate providers");
+        assert_ne!(rp1.provider, rp2.provider, "Round-robin should alternate providers");
     }
 
     #[test]
     fn select_provider_skips_excluded() {
         let mut providers = IndexMap::new();
-        providers.insert("a".to_string(), provider_def("claude", 10));
+        providers.insert("a".to_string().into(), provider_def("claude", 10));
         providers.insert("b".to_string(), provider_def("copilot", 10));
 
         let mut tools = IndexMap::new();
@@ -712,7 +712,7 @@ mod tests {
             vec![
                 tool_entry("primary", "opus"),
                 ToolEntry {
-                    provider: "fallback".to_string(),
+                    provider: "fallback".to_string().into(),
                     model: "haiku".parse().unwrap(),
                     priority: Some(0),
                 },
@@ -767,7 +767,7 @@ mod tests {
     #[test]
     fn record_provider_failure_excludes_on_threshold() {
         let mut providers = IndexMap::new();
-        providers.insert("a".to_string(), provider_def("claude", 10));
+        providers.insert("a".to_string().into(), provider_def("claude", 10));
 
         let mut tools = IndexMap::new();
         tools.insert("smart".to_string(), vec![tool_entry("a", "model-a")]);
@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn record_provider_success_resets_failures() {
         let mut providers = IndexMap::new();
-        providers.insert("a".to_string(), provider_def("claude", 10));
+        providers.insert("a".to_string().into(), provider_def("claude", 10));
 
         let mut tools = IndexMap::new();
         tools.insert("smart".to_string(), vec![tool_entry("a", "model-a")]);
@@ -835,7 +835,7 @@ mod tests {
     fn build_executor_unknown_executor_error() {
         let dispatcher = make_dispatcher(IndexMap::new(), IndexMap::new());
         let bad_provider = zbobr_api::config::ResolvedProvider {
-            name: "broken".to_string(),
+            provider: "broken".to_string().into(),
             executor: "nonexistent".to_string(),
             priority: 10,
             plan_mode: false,
@@ -859,7 +859,7 @@ mod tests {
             "a".to_string(),
             ProviderDefinition {
                 executor: None,
-                parent: Some("b".to_string()),
+                parent: Some("b".to_string().into()),
                 priority: None,
                 plan_mode: None,
                 access_key: None,
@@ -869,7 +869,7 @@ mod tests {
             "b".to_string(),
             ProviderDefinition {
                 executor: None,
-                parent: Some("a".to_string()),
+                parent: Some("a".to_string().into()),
                 priority: None,
                 plan_mode: None,
                 access_key: None,
@@ -919,8 +919,8 @@ mod tests {
     #[test]
     fn select_provider_entry_priority_elevates_above_provider() {
         let mut providers = IndexMap::new();
-        providers.insert("a".to_string(), provider_def("claude", 5));
-        providers.insert("b".to_string(), provider_def("copilot", 5));
+        providers.insert("a".to_string().into(), provider_def("claude", 5));
+        providers.insert("b".to_string().into(), provider_def("copilot", 5));
 
         let mut tools = IndexMap::new();
         tools.insert(
@@ -928,7 +928,7 @@ mod tests {
             vec![
                 tool_entry("a", "opus"),
                 ToolEntry {
-                    provider: "b".to_string(),
+                    provider: "b".to_string().into(),
                     model: "sonnet".parse().unwrap(),
                     priority: Some(20),
                 },
