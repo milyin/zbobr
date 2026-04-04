@@ -77,8 +77,12 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     // Handle init before config loading — no existing config needed
-    if let Command::Init { ref directory } = cli.command {
-        return init::init_workspace(directory).await;
+    if let Command::Init {
+        ref directory,
+        force,
+    } = cli.command
+    {
+        return init::init_workspace(directory, force).await;
     }
 
     let location =
