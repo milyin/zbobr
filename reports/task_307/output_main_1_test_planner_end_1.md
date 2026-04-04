@@ -1,0 +1,1 @@
+Test analysis complete. No additional tests are needed — the existing 4 `write_or_new` tests already cover all branches of the `--force` flag behavior.
