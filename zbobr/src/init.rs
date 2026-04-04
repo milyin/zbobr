@@ -35,8 +35,9 @@ const COPILOT_MODEL_GPT_5_MINI: &str = "gpt-5-mini";
 /// config file, creates prompt files for each predefined role, and creates
 /// the required subdirectories.
 ///
-/// If a file already exists with different content, the new version is written
-/// next to it as `{filename}.new` instead of overwriting or refusing.
+/// If a file already exists with different content, the behavior depends on the
+/// `force` flag: when `force` is `true` the existing file is overwritten in
+/// place; otherwise the new version is written next to it as `{filename}.new`.
 pub async fn init_workspace(dest: &Path, force: bool) -> anyhow::Result<()> {
     // Create destination directory
     tokio::fs::create_dir_all(dest).await?;
