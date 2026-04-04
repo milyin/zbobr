@@ -1,8 +1,8 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use indexmap::IndexMap;
-use zbobr_utility::MergeToml;
 use zbobr_utility::config_struct;
+use zbobr_utility::MergeToml;
 
 use crate::{
     config_tools::McpTool,
@@ -508,7 +508,9 @@ impl WorkflowToml {
         let resolved_prompts_dir = self
             .prompts_dir
             .map(|p| zbobr_utility::resolve_path(p, config_dir));
-        let prompt_base: &std::path::Path = resolved_prompts_dir.as_deref().unwrap_or(config_dir);
+        let prompt_base: &std::path::Path = resolved_prompts_dir
+            .as_deref()
+            .unwrap_or(config_dir);
         let roles = self.roles.map(|roles| {
             roles
                 .into_iter()
@@ -1640,7 +1642,10 @@ developer = [
             tool: None,
         };
         let resolved = role.resolve_paths(std::path::Path::new("/other"));
-        assert_eq!(resolved.prompt.unwrap(), PathBuf::from("/abs/prompt.md"));
+        assert_eq!(
+            resolved.prompt.unwrap(),
+            PathBuf::from("/abs/prompt.md")
+        );
     }
 
     #[test]
@@ -1683,10 +1688,7 @@ developer = [
             stage.role_prompt.as_ref().unwrap(),
             &PathBuf::from("/base/review.md")
         );
-        assert_eq!(
-            stage.prompts.as_deref().unwrap()[0],
-            PathBuf::from("/base/common.md")
-        );
+        assert_eq!(stage.prompts.as_deref().unwrap()[0], PathBuf::from("/base/common.md"));
     }
 
     #[test]
@@ -1738,10 +1740,7 @@ developer = [
             stage.role_prompt.as_ref().unwrap(),
             &PathBuf::from("/shared/prompts/review_stage.md")
         );
-        assert_eq!(
-            stage.prompts.as_deref().unwrap()[0],
-            PathBuf::from("/shared/prompts/common.md")
-        );
+        assert_eq!(stage.prompts.as_deref().unwrap()[0], PathBuf::from("/shared/prompts/common.md"));
     }
 
     #[test]
@@ -1856,12 +1855,7 @@ developer = [
                 ..Default::default()
             },
         );
-        base_pipelines.insert(
-            Pipeline::Main,
-            PipelineConfig {
-                stages: main_stages,
-            },
-        );
+        base_pipelines.insert(Pipeline::Main, PipelineConfig { stages: main_stages });
         let mut fix_stages = IndexMap::new();
         fix_stages.insert(
             Stage::from("fixing"),
@@ -1914,10 +1908,7 @@ developer = [
         );
         // Fix pipeline survives from the base config unchanged.
         let fix = &pipelines[&Pipeline::Custom("fix".to_string())];
-        assert_eq!(
-            fix.stage("fixing").unwrap().role.as_deref().unwrap(),
-            "worker"
-        );
+        assert_eq!(fix.stage("fixing").unwrap().role.as_deref().unwrap(), "worker");
     }
 
     #[test]
@@ -2032,11 +2023,7 @@ developer = [
         let merged = base_toml.merge_toml(overlay_toml);
         let providers = merged.providers.unwrap();
 
-        assert_eq!(
-            providers["shared"].priority,
-            Some(20),
-            "priority should be overridden"
-        );
+        assert_eq!(providers["shared"].priority, Some(20), "priority should be overridden");
         assert_eq!(
             providers["shared"].executor.as_deref(),
             Some("claude"),
@@ -2172,12 +2159,7 @@ developer = [
         );
 
         let mut base_pipelines = HashMap::new();
-        base_pipelines.insert(
-            Pipeline::Main,
-            PipelineConfig {
-                stages: base_stages,
-            },
-        );
+        base_pipelines.insert(Pipeline::Main, PipelineConfig { stages: base_stages });
 
         let base = WorkflowToml {
             prompts_dir: None,
@@ -2196,12 +2178,8 @@ developer = [
             },
         );
         let mut overlay_pipelines = HashMap::new();
-        overlay_pipelines.insert(
-            Pipeline::Main,
-            PipelineConfig {
-                stages: overlay_stages,
-            },
-        );
+        overlay_pipelines
+            .insert(Pipeline::Main, PipelineConfig { stages: overlay_stages });
 
         let overlay = WorkflowToml {
             prompts_dir: None,
@@ -2243,12 +2221,7 @@ developer = [
             },
         );
         let mut base_pipelines = HashMap::new();
-        base_pipelines.insert(
-            Pipeline::Main,
-            PipelineConfig {
-                stages: base_stages,
-            },
-        );
+        base_pipelines.insert(Pipeline::Main, PipelineConfig { stages: base_stages });
 
         let base = WorkflowToml {
             prompts_dir: None,
@@ -2267,12 +2240,8 @@ developer = [
             },
         );
         let mut overlay_pipelines = HashMap::new();
-        overlay_pipelines.insert(
-            Pipeline::Main,
-            PipelineConfig {
-                stages: overlay_stages,
-            },
-        );
+        overlay_pipelines
+            .insert(Pipeline::Main, PipelineConfig { stages: overlay_stages });
 
         let overlay = WorkflowToml {
             prompts_dir: None,
@@ -2308,10 +2277,7 @@ tool = "developer"
         }
         let root: Root = toml::from_str(toml_str).unwrap();
         let role = &root.workflow.roles.unwrap()["worker"];
-        assert!(
-            role.mcp.is_none(),
-            "missing mcp field should deserialize as None"
-        );
+        assert!(role.mcp.is_none(), "missing mcp field should deserialize as None");
     }
 
     #[test]
@@ -2363,10 +2329,7 @@ role = "planner"
         let root: Root = toml::from_str(toml_str).unwrap();
         let pipelines = root.workflow.pipelines.unwrap();
         let stage = &pipelines[&Pipeline::Main].stages["planning"];
-        assert!(
-            stage.prompts.is_none(),
-            "missing prompts should deserialize as None"
-        );
+        assert!(stage.prompts.is_none(), "missing prompts should deserialize as None");
     }
 
     #[test]

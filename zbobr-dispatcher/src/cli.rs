@@ -190,8 +190,7 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
             }
         });
         if let Some(takes_value) = matched {
-            if arg.contains('=')
-                || (arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 2)
+            if arg.contains('=') || (arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 2)
             {
                 // Attached value: --config=val or -cval
                 before_sub.push(arg.clone());
