@@ -220,19 +220,15 @@ impl ZbobrTaskBackendFs {
             Ok(content) => {
                 let comments_file: CommentsFile =
                     serde_yaml::from_str(&content).context("Failed to parse comments file")?;
-                let comments = if let Some(secs) = self.config.timezone_offset_seconds {
-                    if let Some(tz) = chrono::FixedOffset::east_opt(secs) {
-                        comments_file
-                            .comments
-                            .into_iter()
-                            .map(|mut c| {
-                                c.timestamp = c.timestamp.with_timezone(&tz);
-                                c
-                            })
-                            .collect()
-                    } else {
-                        comments_file.comments
-                    }
+                let comments = if let Some(tz) = self.config.timezone {
+                    comments_file
+                        .comments
+                        .into_iter()
+                        .map(|mut c| {
+                            c.timestamp = c.timestamp.with_timezone(&*tz);
+                            c
+                        })
+                        .collect()
                 } else {
                     comments_file.comments
                 };

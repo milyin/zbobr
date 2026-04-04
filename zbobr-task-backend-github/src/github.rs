@@ -987,10 +987,8 @@ impl ZbobrTaskBackendGithubImpl {
                     .unwrap_or_else(|_| {
                         chrono::DateTime::parse_from_rfc3339("1970-01-01T00:00:00Z").unwrap()
                     });
-                let timestamp = match self.backend_config.timezone_offset_seconds {
-                    Some(secs) => parsed.with_timezone(
-                        &chrono::FixedOffset::east_opt(secs).unwrap_or(parsed.timezone()),
-                    ),
+                let timestamp = match self.backend_config.timezone {
+                    Some(tz) => parsed.with_timezone(&*tz),
                     None => parsed,
                 };
 
@@ -1409,7 +1407,7 @@ mod flag_tests {
     fn make_config() -> ZbobrTaskBackendGithubConfig {
         ZbobrTaskBackendGithubConfig {
             instance: "default".to_string(),
-            timezone_offset_seconds: None,
+            timezone: None,
             github_repo: "org/repo".to_string(),
             github_token: Secret::value("test-token"),
             reports_branch: Some("reports".to_string()),

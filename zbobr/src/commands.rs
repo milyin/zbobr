@@ -200,8 +200,7 @@ pub async fn run(
 
     let mut tasks_config = tasks_config;
     tasks_config.instance = dispatcher_config.instance.clone();
-    tasks_config.timezone_offset_seconds =
-        Some(dispatcher_config.fixed_offset().local_minus_utc());
+    tasks_config.timezone = dispatcher_config.timezone;
     let task_backend = TaskBackendGithub::new(tasks_config).await?;
     let repo_backend = ZbobrRepoBackendGithub::new(repo_config).await?;
 
