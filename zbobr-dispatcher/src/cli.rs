@@ -76,6 +76,10 @@ pub fn resolve_config_location(
 /// This includes only dispatcher and executor config, not backend-specific settings.
 #[derive(Args, Clone)]
 pub struct GlobalArgs {
+    /// Enable log output to stderr
+    #[arg(long)]
+    pub logs: bool,
+
     #[command(
         flatten,
         next_help_heading = "[config] Meta options and config file overrides"
@@ -2175,5 +2179,22 @@ mod tests {
         let title = "タスク".repeat(20); // 60 chars
         let result = sanitize_branch_postfix(&title);
         assert!(result.chars().count() <= 50);
+    }
+
+    #[test]
+    fn global_args_includes_logs_flag() {
+        let cmd = GlobalArgs::augment_args(clap::Command::new(""));
+        let logs_arg = cmd
+            .get_arguments()
+            .find(|a| a.get_long().map(|l| l == "logs").unwrap_or(false));
+        assert!(
+            logs_arg.is_some(),
+            "GlobalArgs should declare a --logs flag"
+        );
+        let action = logs_arg.unwrap().get_action();
+        assert!(
+            matches!(action, clap::ArgAction::SetTrue),
+            "--logs should be a boolean flag (SetTrue action)"
+        );
     }
 }
