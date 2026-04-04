@@ -333,6 +333,7 @@ fn default_workflow() -> WorkflowConfig {
             StageDefinition {
                 role: Some("linter".into()),
                 prompts: task_prompt.clone(),
+                on_success: Some(StageTransition::stage("testing")),
                 on_failure: Some(StageTransition::stage("linter_worker")),
                 ..Default::default()
             },
