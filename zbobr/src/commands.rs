@@ -129,7 +129,11 @@ pub enum TaskSubcommand {
     /// Process a task according to its current stage (single-step)
     Process {
         /// Task ID
+        #[arg(conflicts_with = "select")]
         task: Option<u64>,
+        /// Select the highest-priority ready task and process it; exits with code 1 if none
+        #[arg(long)]
+        select: bool,
     },
     /// Show the resolved prompt for a task stage
     Prompt {
@@ -200,6 +204,7 @@ pub async fn run(
 
     let mut tasks_config = tasks_config;
     tasks_config.instance = dispatcher_config.instance.clone();
+    tasks_config.timezone = dispatcher_config.timezone;
     let task_backend = TaskBackendGithub::new(tasks_config).await?;
     let repo_backend = ZbobrRepoBackendGithub::new(repo_config).await?;
 
@@ -320,9 +325,10 @@ async fn run_task_subcommand(
             for w in &weak_tasks {
                 let task = w.snapshot(false).await?;
                 if let Some(ref filter) = state_filter
-                    && task.state != *filter {
-                        continue;
-                    }
+                    && task.state != *filter
+                {
+                    continue;
+                }
                 tasks.push(task);
             }
             tasks.sort_by_key(|t| t.id);
@@ -427,9 +433,26 @@ async fn run_task_subcommand(
             mutable.close().await?;
             println!("Deleted task #{}", id);
         }
-        TaskSubcommand::Process { task } => {
-            let task = require_task_id(task, "process")?;
-            let task_obj = task_backend.get_task(task).await?.snapshot(false).await?;
+        TaskSubcommand::Process { task, select } => {
+            let task_id = if select {
+                let weak_tasks = task_backend.list_tasks().await?;
+                let mut tasks = Vec::new();
+                for w in &weak_tasks {
+                    tasks.push(w.snapshot(false).await?);
+                }
+                tasks.sort_by_key(|t| t.id);
+                match select_runnable_task(zbobr.workflow(), &tasks) {
+                    Some(t) => t.id,
+                    None => std::process::exit(1),
+                }
+            } else {
+                require_task_id(task, "process")?
+            };
+            let task_obj = task_backend
+                .get_task(task_id)
+                .await?
+                .snapshot(false)
+                .await?;
             zbobr_dispatcher::process_task(zbobr, &task_obj, None).await?;
         }
         TaskSubcommand::Prompt {

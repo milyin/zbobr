@@ -242,6 +242,7 @@ fn default_config_toml() -> RootConfigToml {
         }),
         tasks: Some(ZbobrTaskBackendGithubToml {
             instance: None,
+            timezone: None,
             default_max_stage_count: Some(zbobr_api::task::DEFAULT_MAX_STAGE_COUNT),
             github_repo: Some("owner/repo".into()),
             github_token: Some(Secret::value(String::new())),
@@ -333,6 +334,17 @@ fn default_workflow() -> WorkflowConfig {
             StageDefinition {
                 role: Some("linter".into()),
                 prompts: task_prompt.clone(),
+                on_success: Some(StageTransition::stage("testing")),
+                on_failure: Some(StageTransition::stage("linter_worker")),
+                ..Default::default()
+            },
+        ),
+        (
+            Stage::from("linter_worker"),
+            StageDefinition {
+                role: Some("linter_worker".into()),
+                prompts: task_prompt.clone(),
+                on_success: Some(StageTransition::stage("linting")),
                 on_failure: Some(StageTransition::stage("working")),
                 ..Default::default()
             },
@@ -481,6 +493,20 @@ fn default_workflow() -> WorkflowConfig {
             },
         ),
         (
+            "linter_worker".into(),
+            RoleDefinition {
+                mcp: vec![
+                    StopWithError,
+                    ReportSuccess,
+                    ReportFailure,
+                    StopWithQuestion,
+                    GetCtxRec,
+                ],
+                prompt: Some(PathBuf::from("linter_worker.md")),
+                tool: Some("developer".to_string()),
+            },
+        ),
+        (
             "merger".into(),
             RoleDefinition {
                 mcp: vec![StopWithError, ReportSuccess, StopWithQuestion],
@@ -588,6 +614,7 @@ const PROMPT_FILES: &[(&str, &str)] = &[
     ("test_worker", TEST_WORKER_PROMPT),
     ("reviewer", REVIEWER_PROMPT),
     ("linter", LINTER_PROMPT),
+    ("linter_worker", LINTER_WORKER_PROMPT),
     ("tester", TESTER_PROMPT),
     ("merger", MERGER_PROMPT),
     ("task", TASK_TEMPLATE),
@@ -856,7 +883,7 @@ You have access to the task context and the repository for testing:
 const LINTER_PROMPT: &str = concat!(
     r#"# Linter Agent
 
-Check code formatting and linting, and fix any issues found.
+Check code formatting and linting and report any issues found.
 
 "#,
     get_ctx_rec_guidance!(),
@@ -877,20 +904,47 @@ You have access to the task context and the repository:
    - Note exact commands and flags used in CI so you run the same checks
 3. **Run all formatting and linting checks** identified from CI:
    - Record each command executed and its full output
-4. **Fix auto-fixable issues only**:
+4. Call `{mcp_report_success}` if all checks pass, or `{mcp_report_failure}` with a detailed list of ALL issues found if any checks fail.
+
+## Important Notes
+
+- **Only check formatting and linting** — do not modify logic, tests, or functionality.
+- **Do not fix anything** — fixing is handled by a separate stage.
+- **Do not run tests** — functional testing is handled by a separate stage."#,
+);
+
+const LINTER_WORKER_PROMPT: &str = concat!(
+    r#"# Linter Worker Agent
+
+Fix formatting and linting issues in the code.
+
+"#,
+    get_ctx_rec_guidance!(),
+    r#"
+## Access Model
+
+You have access to the task context and the repository:
+- The task description, work plan, worker's reports, and context are provided below in this prompt. The full history and checklist are available in the context section.
+- Your current working directory is the repository with the work branch checked out
+- Use `{mcp_stop_with_error}` only to report technical errors
+
+## Workflow
+
+1. Read the task context and failure reports to identify which formatting and linting issues need to be fixed.
+2. **Discover formatting and linting setup** by examining CI and build configuration files:
+   - `.github/workflows/` — look for formatting/linting steps (e.g., `cargo fmt --check`, `cargo clippy`, `prettier`, `black`, `gofmt`, `eslint`)
+   - `Makefile`, `Cargo.toml`, `package.json`, `pyproject.toml`, or equivalent — identify lint/fmt commands
+3. **Run the linting/formatting tools** to confirm which issues remain.
+4. **Apply fixes**:
    - Apply tool-based auto-fixes (e.g., `cargo fmt`, `gofmt -w`, `black .`, `prettier --write`)
-   - Address linting warnings or errors that can be auto-fixed by these tools
-   - Do not attempt manual fixes for issues that cannot be resolved automatically by formatter/linter
-   - If any issue remains after auto-fix and cannot be auto-fixed, call `{mcp_report_failure}` with a detailed report of the remaining issues
-   - Commit only auto-fix changes with a message like `chore: fix formatting and linting`
-5. Re-run the checks after fixing to confirm everything passes.
-6. Call `{mcp_report_success}` if all formatting and linting checks pass, or `{mcp_report_failure}` if issues remain that cannot be auto-fixed. Pass a brief report of what was checked and what was fixed.
+   - Apply manual fixes for linting warnings/errors that require code changes
+5. Call `{mcp_report_success}` if all issues were fixed.
+6. Call `{mcp_report_failure}` with details if some issues cannot be fixed.
 
 ## Important Notes
 
 - **Only fix formatting and linting** — do not modify logic, tests, or functionality.
-- **Do not run tests** — functional testing is handled by a separate stage.
-- **Fix issues autonomously**: You are allowed and expected to fix formatting/linting issues directly and commit them."#,
+- **Do not run tests** — functional testing is handled separately."#,
 );
 
 const MERGER_PROMPT: &str = r#"# Merger Agent
@@ -1006,5 +1060,77 @@ name = "test"
         let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
         // Should not panic
         inline_dispatcher_tables(&mut doc);
+    }
+
+    // ── default_workflow validation tests ──────────────────────────────
+
+    #[test]
+    fn default_workflow_is_valid() {
+        let workflow = default_workflow();
+        assert!(
+            workflow.validate().is_ok(),
+            "default workflow must pass validation"
+        );
+    }
+
+    // ── linting and linter_worker stage transition routing tests ──────
+
+    #[test]
+    fn linting_on_success_routes_to_testing() {
+        let wf = default_workflow();
+        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
+        let linting = main.stages.get(&Stage::from("linting")).unwrap();
+        let target = linting.on_success().and_then(|t| t.next.as_deref());
+        assert_eq!(target, Some("testing"));
+    }
+
+    #[test]
+    fn linting_on_failure_routes_to_linter_worker() {
+        let wf = default_workflow();
+        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
+        let linting = main.stages.get(&Stage::from("linting")).unwrap();
+        let target = linting.on_failure().and_then(|t| t.next.as_deref());
+        assert_eq!(target, Some("linter_worker"));
+    }
+
+    #[test]
+    fn linter_worker_on_success_routes_to_linting() {
+        let wf = default_workflow();
+        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
+        let lw = main.stages.get(&Stage::from("linter_worker")).unwrap();
+        let target = lw.on_success().and_then(|t| t.next.as_deref());
+        assert_eq!(target, Some("linting"));
+    }
+
+    #[test]
+    fn linter_worker_on_failure_routes_to_working() {
+        let wf = default_workflow();
+        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
+        let lw = main.stages.get(&Stage::from("linter_worker")).unwrap();
+        let target = lw.on_failure().and_then(|t| t.next.as_deref());
+        assert_eq!(target, Some("working"));
+    }
+
+    // ── PROMPT_FILES completeness tests ────────────────────────────────
+
+    #[test]
+    fn all_default_workflow_role_prompts_are_registered() {
+        let wf = default_workflow();
+        let registered: std::collections::HashSet<&str> =
+            PROMPT_FILES.iter().map(|(name, _)| *name).collect();
+        for (role_name, role_def) in &wf.roles {
+            if let Some(prompt_path) = &role_def.prompt {
+                let key = prompt_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .expect("prompt path has no file stem");
+                assert!(
+                    registered.contains(key),
+                    "Role '{}' references prompt file '{}' but it is not in PROMPT_FILES",
+                    role_name,
+                    key
+                );
+            }
+        }
     }
 }
