@@ -129,6 +129,7 @@ pub enum TaskSubcommand {
     /// Process a task according to its current stage (single-step)
     Process {
         /// Task ID
+        #[arg(conflicts_with = "select")]
         task: Option<u64>,
         /// Select the highest-priority ready task and process it; exits with code 1 if none
         #[arg(long)]
@@ -431,9 +432,6 @@ async fn run_task_subcommand(
             println!("Deleted task #{}", id);
         }
         TaskSubcommand::Process { task, select } => {
-            if task.is_some() && select {
-                anyhow::bail!("--select and a task ID are mutually exclusive");
-            }
             let task_id = if select {
                 let weak_tasks = task_backend.list_tasks().await?;
                 let mut tasks = Vec::new();
