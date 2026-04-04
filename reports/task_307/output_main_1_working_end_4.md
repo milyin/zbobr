@@ -1,0 +1,1 @@
+Done. The formatting issues were pre-existing in files outside our feature scope (`config.rs`, `config_tools.rs`, `cli.rs`). Applied `cargo fmt --all` and verified both fmt and clippy pass cleanly.
