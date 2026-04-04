@@ -9,6 +9,10 @@ pub struct ZbobrTaskBackendGithubConfig {
     /// Injected from ZbobrDispatcherConfig; any TOML value is overwritten at runtime.
     #[config(skip_args)]
     pub instance: String,
+    /// Timezone offset in seconds east of UTC for displaying comment timestamps.
+    /// Injected from ZbobrDispatcherConfig; any TOML value is overwritten at runtime.
+    #[config(skip_args)]
+    pub timezone_offset_seconds: Option<i32>,
     /// Optional default maximum number of stages for new tasks (0 disables limit).
     /// If absent, falls back to zbobr_api::task::DEFAULT_MAX_STAGE_COUNT.
     #[arg(long)]
@@ -36,6 +40,7 @@ impl Default for ZbobrTaskBackendGithubConfig {
     fn default() -> Self {
         Self {
             instance: String::new(),
+            timezone_offset_seconds: None,
             github_repo: String::new(),
             github_token: Secret::value("not-configured"),
             reports_branch: None,

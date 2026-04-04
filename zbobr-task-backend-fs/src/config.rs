@@ -6,6 +6,10 @@ use zbobr_utility::config_struct;
 #[config_struct]
 /// Configuration for the filesystem task backend.
 pub struct ZbobrTaskBackendFsConfig {
+    /// Timezone offset in seconds east of UTC for displaying comment timestamps.
+    /// Injected from ZbobrDispatcherConfig; any TOML value is overwritten at runtime.
+    #[config(skip_args)]
+    pub timezone_offset_seconds: Option<i32>,
     #[arg(long)]
     #[config(path)]
     pub tasks_dir: PathBuf,
@@ -18,6 +22,7 @@ pub struct ZbobrTaskBackendFsConfig {
 impl Default for ZbobrTaskBackendFsConfig {
     fn default() -> Self {
         Self {
+            timezone_offset_seconds: None,
             tasks_dir: PathBuf::from("./tasks"),
             default_max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
         }
