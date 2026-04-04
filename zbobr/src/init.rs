@@ -1140,4 +1140,118 @@ name = "test"
             }
         }
     }
+
+    // ── write_or_new function tests ────────────────────────────────────
+
+    #[tokio::test]
+    async fn write_or_new_force_overwrites_existing_file() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let file_path = temp_dir.path().join("test.toml");
+
+        // Write initial content
+        tokio::fs::write(&file_path, "old content".as_bytes())
+            .await
+            .expect("Failed to write initial file");
+
+        // Call write_or_new with force=true and different content
+        write_or_new(&file_path, "new content", true)
+            .await
+            .expect("write_or_new failed");
+
+        // Check that original file was overwritten
+        let result = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("Failed to read file");
+        assert_eq!(result, "new content", "File should be overwritten in place");
+
+        // Check that no .new file was created
+        let new_file_path = file_path.with_extension("toml.new");
+        assert!(
+            !new_file_path.exists(),
+            "No .new file should exist when force=true"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_or_new_no_force_creates_dot_new_file() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let file_path = temp_dir.path().join("example.toml");
+
+        // Write initial content
+        tokio::fs::write(&file_path, "old content".as_bytes())
+            .await
+            .expect("Failed to write initial file");
+
+        // Call write_or_new with force=false and different content
+        write_or_new(&file_path, "new content", false)
+            .await
+            .expect("write_or_new failed");
+
+        // Check that original file is untouched
+        let original_content = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("Failed to read original file");
+        assert_eq!(
+            original_content, "old content",
+            "Original file should not be modified"
+        );
+
+        // Check that .new file was created with new content
+        let new_file_path = file_path.with_extension("toml.new");
+        assert!(new_file_path.exists(), ".new file should be created");
+        let new_content = tokio::fs::read_to_string(&new_file_path)
+            .await
+            .expect("Failed to read .new file");
+        assert_eq!(new_content, "new content", ".new file should contain new content");
+    }
+
+    #[tokio::test]
+    async fn write_or_new_skips_identical_content() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let file_path = temp_dir.path().join("unchanged.toml");
+
+        // Write initial content
+        tokio::fs::write(&file_path, "same content".as_bytes())
+            .await
+            .expect("Failed to write initial file");
+
+        // Call write_or_new with identical content and force=true
+        write_or_new(&file_path, "same content", true)
+            .await
+            .expect("write_or_new failed");
+
+        // Check that file still contains the original content
+        let result = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("Failed to read file");
+        assert_eq!(result, "same content", "File should remain unchanged");
+
+        // Check that no .new file was created
+        let new_file_path = file_path.with_extension("toml.new");
+        assert!(
+            !new_file_path.exists(),
+            "No .new file should exist when content is identical"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_or_new_creates_new_file() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let file_path = temp_dir.path().join("newfile.toml");
+
+        // Path doesn't exist yet
+        assert!(!file_path.exists(), "File should not exist initially");
+
+        // Call write_or_new on non-existing path
+        write_or_new(&file_path, "new content", false)
+            .await
+            .expect("write_or_new failed");
+
+        // Check that file was created with correct content
+        assert!(file_path.exists(), "File should be created");
+        let result = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("Failed to read file");
+        assert_eq!(result, "new content", "File should contain the new content");
+    }
 }
