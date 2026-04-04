@@ -1,0 +1,1 @@
+Done. Reverted the 4 unrelated formatting-only files (`config.rs`, `config_tools.rs`, `cli.rs`, `main.rs`) back to `origin/main`. The branch now cleanly contains only the two task-relevant files: `commands.rs` and `env.rs`.
