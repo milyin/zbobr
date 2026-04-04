@@ -1,0 +1,1 @@
+Formatting fixed. Applied `cargo fmt` to our two files (`init.rs` and `main.rs`), verified clean clippy and all tests passing.
