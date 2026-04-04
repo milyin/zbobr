@@ -622,3 +622,58 @@ impl TaskBackend for ArcTaskBackendFs {
         self.inner.debug_state()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use zbobr_api::task::FixedOffsetTz;
+    use chrono::Timelike;
+
+    fn make_config_with_timezone(tasks_dir: PathBuf, tz: Option<FixedOffsetTz>) -> ZbobrTaskBackendFsConfig {
+        ZbobrTaskBackendFsConfig {
+            tasks_dir,
+            timezone: tz,
+            default_max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
+        }
+    }
+
+    async fn write_comment_fixture(dir: &Path, task_id: u64, timestamp_str: &str) {
+        let yaml = format!(
+            "comments:\n  - timestamp: \"{}\"\n    username: user\n    body: hello\n",
+            timestamp_str
+        );
+        let path = dir.join(format!("{}.comments.yaml", task_id));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, yaml).unwrap();
+    }
+
+    #[tokio::test]
+    async fn read_comments_converts_to_configured_timezone() {
+        let dir = tempfile::tempdir().unwrap();
+        write_comment_fixture(dir.path(), 1, "2025-01-01T12:00:00+00:00").await;
+
+        let tz: FixedOffsetTz = "+03:00".parse().unwrap();
+        let config = make_config_with_timezone(dir.path().to_path_buf(), Some(tz));
+        let backend = ZbobrTaskBackendFs::from_config(config).unwrap();
+        let comments = backend.read_comments_structured(1).await.unwrap();
+
+        assert_eq!(comments.len(), 1);
+        // The timestamp should be at UTC+3 = 15:00
+        assert_eq!(comments[0].timestamp.offset().local_minus_utc(), 3 * 3600);
+        assert_eq!(comments[0].timestamp.hour(), 15);
+    }
+
+    #[tokio::test]
+    async fn read_comments_unchanged_when_no_timezone() {
+        let dir = tempfile::tempdir().unwrap();
+        write_comment_fixture(dir.path(), 1, "2025-01-01T12:00:00+00:00").await;
+
+        let config = make_config_with_timezone(dir.path().to_path_buf(), None);
+        let backend = ZbobrTaskBackendFs::from_config(config).unwrap();
+        let comments = backend.read_comments_structured(1).await.unwrap();
+
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].timestamp.offset().local_minus_utc(), 0);
+    }
+}
