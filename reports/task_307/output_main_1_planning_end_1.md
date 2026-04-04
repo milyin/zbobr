@@ -1,0 +1,1 @@
+Plan is ready for review. It adds the `--force` flag to `init` following the existing `Setup` command pattern, touching three files: `commands.rs`, `main.rs`, and `init.rs`.
