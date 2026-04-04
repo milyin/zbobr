@@ -10,6 +10,7 @@ use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Signal, Stage, StageTransition, State,
     config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig},
+    config_tools::ALL_TOOLS,
 };
 use zbobr_dispatcher::backend::TaskBackendExt;
 
@@ -80,8 +81,20 @@ fn build_workflow_with_roles(
     }
 }
 
+fn role_with_all_tools() -> RoleDefinition {
+    RoleDefinition {
+        mcp: Some(ALL_TOOLS.to_vec()),
+        prompt: None,
+        tool: Some("mcp-tester".to_string()),
+    }
+}
+
 fn build_workflow(stages: Vec<StageDef>) -> WorkflowConfig {
-    build_workflow_with_roles(stages, Default::default())
+    let roles = stages
+        .iter()
+        .map(|s| (s.role.to_string(), role_with_all_tools()))
+        .collect();
+    build_workflow_with_roles(stages, roles)
 }
 
 fn scenarios_map(entries: Vec<(&str, String)>) -> HashMap<String, String> {
@@ -391,7 +404,10 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     let workflow = WorkflowConfig {
         prompts_dir: None,
         pipelines,
-        roles: Default::default(),
+        roles: IndexMap::from([
+            ("role_check".to_string(), role_with_all_tools()),
+            ("role_finish".to_string(), role_with_all_tools()),
+        ]),
     };
 
     // First run: failure → return_failure → root pipeline pauses
@@ -554,7 +570,11 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
     let workflow = WorkflowConfig {
         prompts_dir: None,
         pipelines,
-        roles: Default::default(),
+        roles: IndexMap::from([
+            ("role_work".to_string(), role_with_all_tools()),
+            ("role_finish".to_string(), role_with_all_tools()),
+            ("role_merge".to_string(), role_with_all_tools()),
+        ]),
     };
 
     let scenarios = scenarios_map(vec![

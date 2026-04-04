@@ -206,7 +206,7 @@ pub fn prompt_files_for_stage(
     {
         files.push(prompt_path.clone());
     }
-    files.extend(stage_def.prompts.iter().cloned());
+    files.extend(stage_def.prompts.iter().flatten().cloned());
     if let Some(ref prompts_dir) = workflow.prompts_dir {
         files = files
             .into_iter()
@@ -311,12 +311,11 @@ pub async fn build_full_prompt(
     let comments = weak.get_comments().await?;
     let mut vars = build_template_variables(&task, &comments);
 
-    // Look up allowed tools for this role; fall back to all static tools.
-    let allowed_tools: Vec<McpTool> = workflow
+    let allowed_tools: &[McpTool] = workflow
         .role_definition(role_name)
-        .map(|d| d.mcp.clone())
-        .unwrap_or_else(|| McpTool::all().to_vec());
-    add_mcp_tool_variables(&mut vars, &allowed_tools);
+        .and_then(|d| d.mcp.as_deref())
+        .unwrap_or(&[]);
+    add_mcp_tool_variables(&mut vars, allowed_tools);
 
     // Inject extra variables from config.
     for (k, v) in extra_vars {
@@ -346,11 +345,11 @@ pub fn build_prompt_with_task(
 ) -> anyhow::Result<String> {
     let mut vars = build_template_variables(task, comments);
 
-    let allowed_tools: Vec<McpTool> = workflow
+    let allowed_tools: &[McpTool] = workflow
         .role_definition(role_name)
-        .map(|d| d.mcp.clone())
-        .unwrap_or_else(|| McpTool::all().to_vec());
-    add_mcp_tool_variables(&mut vars, &allowed_tools);
+        .and_then(|d| d.mcp.as_deref())
+        .unwrap_or(&[]);
+    add_mcp_tool_variables(&mut vars, allowed_tools);
 
     for (k, v) in extra_vars {
         vars.insert(Cow::Owned(k.clone()), Cow::Owned(v.clone()));
@@ -682,7 +681,7 @@ mod tests {
             Stage::from("work"),
             StageDefinition {
                 role: Some("default".to_string()),
-                prompts: vec![prompt_path],
+                prompts: Some(vec![prompt_path]),
                 ..Default::default()
             },
         );
@@ -699,7 +698,7 @@ mod tests {
             Stage::from("work"),
             StageDefinition {
                 role: Some("default".to_string()),
-                prompts: vec![prompt_path],
+                prompts: Some(vec![prompt_path]),
                 ..Default::default()
             },
         );
@@ -720,7 +719,7 @@ mod tests {
             Stage::from("work"),
             StageDefinition {
                 role: Some("default".to_string()),
-                prompts: vec![PathBuf::from("/nonexistent/prompt.md")],
+                prompts: Some(vec![PathBuf::from("/nonexistent/prompt.md")]),
                 ..Default::default()
             },
         );
@@ -745,7 +744,7 @@ mod tests {
             Stage::from("stage_a"),
             StageDefinition {
                 role: Some("default".to_string()),
-                prompts: vec![PathBuf::from("/nonexistent/prompt.md")],
+                prompts: Some(vec![PathBuf::from("/nonexistent/prompt.md")]),
                 ..Default::default()
             },
         );
@@ -753,7 +752,7 @@ mod tests {
             Stage::from("stage_b"),
             StageDefinition {
                 role: Some("default".to_string()),
-                prompts: vec![bad_var_path],
+                prompts: Some(vec![bad_var_path]),
                 ..Default::default()
             },
         );
@@ -795,7 +794,7 @@ mod tests {
             Stage::from("work"),
             StageDefinition {
                 role: Some("default".to_string()),
-                prompts: vec![valid_path],
+                prompts: Some(vec![valid_path]),
                 ..Default::default()
             },
         );
@@ -805,7 +804,7 @@ mod tests {
             Stage::from("broken"),
             StageDefinition {
                 role: Some("default".to_string()),
-                prompts: vec![PathBuf::from("/nonexistent/secondary_prompt.md")],
+                prompts: Some(vec![PathBuf::from("/nonexistent/secondary_prompt.md")]),
                 ..Default::default()
             },
         );

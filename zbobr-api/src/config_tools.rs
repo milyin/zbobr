@@ -28,9 +28,6 @@ impl McpTool {
         }
     }
 
-    pub const fn all() -> &'static [Self] {
-        ALL_TOOLS
-    }
 }
 
 impl fmt::Display for McpTool {

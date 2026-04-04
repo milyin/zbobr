@@ -18,10 +18,14 @@ pub trait Config: Sized {
 }
 
 /// Definition of a role: which MCP tools it can access, an optional prompt file, and optional tool override.
+///
+/// `mcp = None` means the field was absent in the config (inherit from base during merging,
+/// or no tools at runtime). `mcp = Some(vec![])` explicitly allows no tools.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RoleDefinition {
-    pub mcp: Vec<McpTool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<Vec<McpTool>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<PathBuf>,
     /// Tool name override for this role. Overrides the global dispatcher `tool`.
@@ -42,59 +46,12 @@ impl RoleDefinition {
     }
 }
 
-/// TOML overlay type for [`RoleDefinition`] used during multi-config merging.
-///
-/// Uses `Option<Vec<McpTool>>` for the `mcp` field so that an explicit `mcp = []`
-/// in an overlay file (→ `Some(vec![])`) is distinguished from a fully-absent field
-/// (→ `None`).  A `None` field means "inherit from the base config"; `Some(v)`
-/// means "replace the base value with `v`" (even if `v` is empty).
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct RoleDefinitionPatch {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mcp: Option<Vec<McpTool>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt: Option<PathBuf>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<String>,
-}
-
-impl zbobr_utility::MergeToml for RoleDefinitionPatch {
+impl zbobr_utility::MergeToml for RoleDefinition {
     fn merge_toml(self, other: Self) -> Self {
         Self {
             mcp: other.mcp.or(self.mcp),
             prompt: other.prompt.or(self.prompt),
             tool: other.tool.or(self.tool),
-        }
-    }
-}
-
-impl RoleDefinitionPatch {
-    /// Resolve relative path fields against the given base directory.
-    pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
-        Self {
-            prompt: self.prompt.map(|p| zbobr_utility::resolve_path(p, config_dir)),
-            ..self
-        }
-    }
-}
-
-impl From<RoleDefinitionPatch> for RoleDefinition {
-    fn from(patch: RoleDefinitionPatch) -> Self {
-        Self {
-            mcp: patch.mcp.unwrap_or_default(),
-            prompt: patch.prompt,
-            tool: patch.tool,
-        }
-    }
-}
-
-impl From<RoleDefinition> for RoleDefinitionPatch {
-    fn from(def: RoleDefinition) -> Self {
-        Self {
-            mcp: Some(def.mcp),
-            prompt: def.prompt,
-            tool: def.tool,
         }
     }
 }
@@ -238,8 +195,10 @@ pub struct StageDefinition {
     pub tool: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role_prompt: Option<PathBuf>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub prompts: Vec<PathBuf>,
+    /// `None` means absent in config (inherit from base during merging, or no extra prompts at runtime).
+    /// `Some(vec![])` explicitly sets an empty list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompts: Option<Vec<PathBuf>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_success: Option<StageTransition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -257,11 +216,11 @@ impl StageDefinition {
             role_prompt: self
                 .role_prompt
                 .map(|p| zbobr_utility::resolve_path(p, config_dir)),
-            prompts: self
-                .prompts
-                .into_iter()
-                .map(|p| zbobr_utility::resolve_path(p, config_dir))
-                .collect(),
+            prompts: self.prompts.map(|v| {
+                v.into_iter()
+                    .map(|p| zbobr_utility::resolve_path(p, config_dir))
+                    .collect()
+            }),
             ..self
         }
     }
@@ -295,36 +254,7 @@ impl StageDefinition {
     }
 }
 
-/// TOML overlay type for [`StageDefinition`] used during multi-config merging.
-///
-/// Uses `Option<Vec<PathBuf>>` for the `prompts` field so that an explicit `prompts = []`
-/// in an overlay file (→ `Some(vec![])`) is distinguished from a fully-absent field
-/// (→ `None`).  A `None` field means "inherit from the base config"; `Some(v)`
-/// means "replace the base value with `v`" (even if `v` is empty).
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct StageDefinitionPatch {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub call: Option<Pipeline>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role_prompt: Option<PathBuf>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompts: Option<Vec<PathBuf>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub on_success: Option<StageTransition>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub on_failure: Option<StageTransition>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub on_intermediate: Option<StageTransition>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub on_no_report: Option<StageTransition>,
-}
-
-impl zbobr_utility::MergeToml for StageDefinitionPatch {
+impl zbobr_utility::MergeToml for StageDefinition {
     fn merge_toml(self, other: Self) -> Self {
         Self {
             role: other.role.or(self.role),
@@ -336,55 +266,6 @@ impl zbobr_utility::MergeToml for StageDefinitionPatch {
             on_failure: other.on_failure.or(self.on_failure),
             on_intermediate: other.on_intermediate.or(self.on_intermediate),
             on_no_report: other.on_no_report.or(self.on_no_report),
-        }
-    }
-}
-
-impl StageDefinitionPatch {
-    /// Resolve relative path fields against the given base directory.
-    pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
-        Self {
-            role_prompt: self
-                .role_prompt
-                .map(|p| zbobr_utility::resolve_path(p, config_dir)),
-            prompts: self.prompts.map(|v| {
-                v.into_iter()
-                    .map(|p| zbobr_utility::resolve_path(p, config_dir))
-                    .collect()
-            }),
-            ..self
-        }
-    }
-}
-
-impl From<StageDefinitionPatch> for StageDefinition {
-    fn from(patch: StageDefinitionPatch) -> Self {
-        Self {
-            role: patch.role,
-            call: patch.call,
-            tool: patch.tool,
-            role_prompt: patch.role_prompt,
-            prompts: patch.prompts.unwrap_or_default(),
-            on_success: patch.on_success,
-            on_failure: patch.on_failure,
-            on_intermediate: patch.on_intermediate,
-            on_no_report: patch.on_no_report,
-        }
-    }
-}
-
-impl From<StageDefinition> for StageDefinitionPatch {
-    fn from(def: StageDefinition) -> Self {
-        Self {
-            role: def.role,
-            call: def.call,
-            tool: def.tool,
-            role_prompt: def.role_prompt,
-            prompts: Some(def.prompts),
-            on_success: def.on_success,
-            on_failure: def.on_failure,
-            on_intermediate: def.on_intermediate,
-            on_no_report: def.on_no_report,
         }
     }
 }
@@ -493,18 +374,7 @@ impl PipelineConfig {
     }
 }
 
-/// TOML overlay type for [`PipelineConfig`] used during multi-config merging.
-///
-/// Holds [`StageDefinitionPatch`] entries so that per-stage list fields (such as
-/// `prompts`) are merged with presence-aware semantics.
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct PipelineConfigPatch {
-    #[serde(default)]
-    pub stages: IndexMap<Stage, StageDefinitionPatch>,
-}
-
-impl zbobr_utility::MergeToml for PipelineConfigPatch {
+impl zbobr_utility::MergeToml for PipelineConfig {
     fn merge_toml(self, other: Self) -> Self {
         let mut stages = self.stages;
         for (k, v) in other.stages {
@@ -515,48 +385,6 @@ impl zbobr_utility::MergeToml for PipelineConfigPatch {
             }
         }
         Self { stages }
-    }
-}
-
-impl PipelineConfigPatch {
-    /// Look up a stage patch by name.
-    pub fn stage(&self, name: &str) -> Option<&StageDefinitionPatch> {
-        self.stages.get(name)
-    }
-
-    /// Resolve relative path fields in all stages against the given base directory.
-    pub fn resolve_paths(self, config_dir: &std::path::Path) -> Self {
-        Self {
-            stages: self
-                .stages
-                .into_iter()
-                .map(|(name, stage)| (name, stage.resolve_paths(config_dir)))
-                .collect(),
-        }
-    }
-}
-
-impl From<PipelineConfigPatch> for PipelineConfig {
-    fn from(patch: PipelineConfigPatch) -> Self {
-        Self {
-            stages: patch
-                .stages
-                .into_iter()
-                .map(|(k, v)| (k, StageDefinition::from(v)))
-                .collect(),
-        }
-    }
-}
-
-impl From<PipelineConfig> for PipelineConfigPatch {
-    fn from(config: PipelineConfig) -> Self {
-        Self {
-            stages: config
-                .stages
-                .into_iter()
-                .map(|(k, v)| (k, StageDefinitionPatch::from(v)))
-                .collect(),
-        }
     }
 }
 
@@ -577,20 +405,15 @@ pub struct WorkflowConfig {
 }
 
 /// TOML representation of WorkflowConfig (all fields optional).
-///
-/// Uses [`RoleDefinitionPatch`] and [`PipelineConfigPatch`] for the `roles` and
-/// `pipelines` fields so that list-valued sub-fields (e.g. `mcp`, `prompts`) are
-/// merged with presence-aware semantics: an explicit `[]` in an overlay file clears
-/// the base value, while an absent field inherits it.
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowToml {
     #[serde(default)]
     pub prompts_dir: Option<PathBuf>,
     #[serde(default)]
-    pub roles: Option<IndexMap<String, RoleDefinitionPatch>>,
+    pub roles: Option<IndexMap<String, RoleDefinition>>,
     #[serde(default)]
-    pub pipelines: Option<HashMap<Pipeline, PipelineConfigPatch>>,
+    pub pipelines: Option<HashMap<Pipeline, PipelineConfig>>,
 }
 
 /// CLI arguments for WorkflowConfig (empty — no CLI-overridable fields).
@@ -710,18 +533,8 @@ impl WorkflowToml {
     pub fn try_into_config(self) -> anyhow::Result<WorkflowConfig> {
         Ok(WorkflowConfig {
             prompts_dir: self.prompts_dir,
-            roles: self
-                .roles
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(k, v)| (k, RoleDefinition::from(v)))
-                .collect(),
-            pipelines: self
-                .pipelines
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(k, v)| (k, PipelineConfig::from(v)))
-                .collect(),
+            roles: self.roles.unwrap_or_default(),
+            pipelines: self.pipelines.unwrap_or_default(),
         })
     }
 }
@@ -734,18 +547,8 @@ impl Config for WorkflowConfig {
         match toml {
             Some(t) => WorkflowConfig {
                 prompts_dir: t.prompts_dir,
-                roles: t
-                    .roles
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|(k, v)| (k, RoleDefinition::from(v)))
-                    .collect(),
-                pipelines: t
-                    .pipelines
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|(k, v)| (k, PipelineConfig::from(v)))
-                    .collect(),
+                roles: t.roles.unwrap_or_default(),
+                pipelines: t.pipelines.unwrap_or_default(),
             },
             None => WorkflowConfig::default(),
         }
@@ -823,11 +626,6 @@ impl WorkflowConfig {
             }
         }
         result
-    }
-
-    /// All static tool names.
-    pub fn all_tool_names(&self) -> Vec<String> {
-        McpTool::all().iter().map(|t| t.to_string()).collect()
     }
 
     /// Validate the entire workflow configuration.
@@ -1428,7 +1226,7 @@ mod tests {
         roles.insert(
             role_name.to_string(),
             RoleDefinition {
-                mcp: vec![],
+                mcp: None,
                 prompt: None,
                 tool,
             },
@@ -1654,7 +1452,7 @@ mod tests {
         roles.insert(
             "worker".to_string(),
             RoleDefinition {
-                mcp: vec![],
+                mcp: None,
                 prompt: None,
                 tool: Some("smart".to_string()),
             },
@@ -1706,7 +1504,7 @@ mod tests {
         roles.insert(
             "worker".to_string(),
             RoleDefinition {
-                mcp: vec![],
+                mcp: None,
                 prompt: None,
                 tool: None,
             },
@@ -1825,7 +1623,7 @@ developer = [
     #[test]
     fn role_definition_resolve_paths_makes_prompt_absolute() {
         let role = RoleDefinition {
-            mcp: vec![],
+            mcp: None,
             prompt: Some(PathBuf::from("prompts/reviewer.md")),
             tool: None,
         };
@@ -1839,7 +1637,7 @@ developer = [
     #[test]
     fn role_definition_resolve_paths_preserves_absolute() {
         let role = RoleDefinition {
-            mcp: vec![],
+            mcp: None,
             prompt: Some(PathBuf::from("/abs/prompt.md")),
             tool: None,
         };
@@ -1855,10 +1653,10 @@ developer = [
         let stage = StageDefinition {
             role: Some("worker".to_string()),
             role_prompt: Some(PathBuf::from("worker.md")),
-            prompts: vec![
+            prompts: Some(vec![
                 PathBuf::from("common.md"),
                 PathBuf::from("/abs/special.md"),
-            ],
+            ]),
             ..Default::default()
         };
         let resolved = stage.resolve_paths(std::path::Path::new("/shared"));
@@ -1866,8 +1664,9 @@ developer = [
             resolved.role_prompt.unwrap(),
             PathBuf::from("/shared/worker.md")
         );
-        assert_eq!(resolved.prompts[0], PathBuf::from("/shared/common.md"));
-        assert_eq!(resolved.prompts[1], PathBuf::from("/abs/special.md"));
+        let prompts = resolved.prompts.as_deref().unwrap();
+        assert_eq!(prompts[0], PathBuf::from("/shared/common.md"));
+        assert_eq!(prompts[1], PathBuf::from("/abs/special.md"));
     }
 
     #[test]
@@ -1878,7 +1677,7 @@ developer = [
             StageDefinition {
                 role: Some("reviewer".to_string()),
                 role_prompt: Some(PathBuf::from("review.md")),
-                prompts: vec![PathBuf::from("common.md")],
+                prompts: Some(vec![PathBuf::from("common.md")]),
                 ..Default::default()
             },
         );
@@ -1889,7 +1688,7 @@ developer = [
             stage.role_prompt.as_ref().unwrap(),
             &PathBuf::from("/base/review.md")
         );
-        assert_eq!(stage.prompts[0], PathBuf::from("/base/common.md"));
+        assert_eq!(stage.prompts.as_deref().unwrap()[0], PathBuf::from("/base/common.md"));
     }
 
     #[test]
@@ -1897,7 +1696,7 @@ developer = [
         let mut roles = IndexMap::new();
         roles.insert(
             "reviewer".to_string(),
-            RoleDefinitionPatch {
+            RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("reviewer.md")),
                 tool: None,
@@ -1906,7 +1705,7 @@ developer = [
         let mut stages = IndexMap::new();
         stages.insert(
             Stage::from("review"),
-            StageDefinitionPatch {
+            StageDefinition {
                 role: Some("reviewer".to_string()),
                 role_prompt: Some(PathBuf::from("review_stage.md")),
                 prompts: Some(vec![PathBuf::from("common.md")]),
@@ -1914,7 +1713,7 @@ developer = [
             },
         );
         let mut pipelines = HashMap::new();
-        pipelines.insert(Pipeline::Main, PipelineConfigPatch { stages });
+        pipelines.insert(Pipeline::Main, PipelineConfig { stages });
 
         let toml = WorkflowToml {
             prompts_dir: Some(PathBuf::from("prompts")),
@@ -1953,7 +1752,7 @@ developer = [
         let mut roles = IndexMap::new();
         roles.insert(
             "reviewer".to_string(),
-            RoleDefinitionPatch {
+            RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("reviewer.md")),
                 tool: None,
@@ -1993,7 +1792,7 @@ developer = [
         let mut base_roles = IndexMap::new();
         base_roles.insert(
             "reviewer".to_string(),
-            RoleDefinitionPatch {
+            RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("/shared/reviewer.md")),
                 tool: None,
@@ -2001,7 +1800,7 @@ developer = [
         );
         base_roles.insert(
             "worker".to_string(),
-            RoleDefinitionPatch {
+            RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("/shared/worker.md")),
                 tool: None,
@@ -2017,7 +1816,7 @@ developer = [
         let mut overlay_roles = IndexMap::new();
         overlay_roles.insert(
             "reviewer".to_string(),
-            RoleDefinitionPatch {
+            RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("/project/reviewer_override.md")),
                 tool: None,
@@ -2051,23 +1850,23 @@ developer = [
         let mut main_stages = IndexMap::new();
         main_stages.insert(
             Stage::from("planning"),
-            StageDefinitionPatch {
+            StageDefinition {
                 role: Some("planner".to_string()),
                 ..Default::default()
             },
         );
-        base_pipelines.insert(Pipeline::Main, PipelineConfigPatch { stages: main_stages });
+        base_pipelines.insert(Pipeline::Main, PipelineConfig { stages: main_stages });
         let mut fix_stages = IndexMap::new();
         fix_stages.insert(
             Stage::from("fixing"),
-            StageDefinitionPatch {
+            StageDefinition {
                 role: Some("worker".to_string()),
                 ..Default::default()
             },
         );
         base_pipelines.insert(
             Pipeline::Custom("fix".to_string()),
-            PipelineConfigPatch { stages: fix_stages },
+            PipelineConfig { stages: fix_stages },
         );
 
         let base = WorkflowToml {
@@ -2080,7 +1879,7 @@ developer = [
         let mut overlay_stages = IndexMap::new();
         overlay_stages.insert(
             Stage::from("planning"),
-            StageDefinitionPatch {
+            StageDefinition {
                 role: Some("senior_planner".to_string()),
                 ..Default::default()
             },
@@ -2088,7 +1887,7 @@ developer = [
         let mut overlay_pipelines = HashMap::new();
         overlay_pipelines.insert(
             Pipeline::Main,
-            PipelineConfigPatch {
+            PipelineConfig {
                 stages: overlay_stages,
             },
         );
@@ -2245,7 +2044,7 @@ developer = [
         let mut base_roles = IndexMap::new();
         base_roles.insert(
             "worker".to_string(),
-            RoleDefinitionPatch {
+            RoleDefinition {
                 mcp: Some(vec![McpTool::ReportSuccess]),
                 prompt: Some(PathBuf::from("/shared/worker.md")),
                 tool: None,
@@ -2262,7 +2061,7 @@ developer = [
         let mut overlay_roles = IndexMap::new();
         overlay_roles.insert(
             "worker".to_string(),
-            RoleDefinitionPatch {
+            RoleDefinition {
                 mcp: None,
                 prompt: None,
                 tool: Some("fast-tool".to_string()),
@@ -2301,7 +2100,7 @@ developer = [
         let mut base_roles = IndexMap::new();
         base_roles.insert(
             "worker".to_string(),
-            RoleDefinitionPatch {
+            RoleDefinition {
                 mcp: Some(vec![McpTool::ReportSuccess]),
                 prompt: None,
                 tool: None,
@@ -2317,7 +2116,7 @@ developer = [
         let mut overlay_roles = IndexMap::new();
         overlay_roles.insert(
             "worker".to_string(),
-            RoleDefinitionPatch {
+            RoleDefinition {
                 mcp: Some(vec![]),
                 prompt: None,
                 tool: None,
@@ -2345,7 +2144,7 @@ developer = [
         let mut base_stages = IndexMap::new();
         base_stages.insert(
             Stage::from("planning"),
-            StageDefinitionPatch {
+            StageDefinition {
                 role: Some("planner".to_string()),
                 tool: Some("fast".to_string()),
                 ..Default::default()
@@ -2353,14 +2152,14 @@ developer = [
         );
         base_stages.insert(
             Stage::from("working"),
-            StageDefinitionPatch {
+            StageDefinition {
                 role: Some("worker".to_string()),
                 ..Default::default()
             },
         );
 
         let mut base_pipelines = HashMap::new();
-        base_pipelines.insert(Pipeline::Main, PipelineConfigPatch { stages: base_stages });
+        base_pipelines.insert(Pipeline::Main, PipelineConfig { stages: base_stages });
 
         let base = WorkflowToml {
             prompts_dir: None,
@@ -2372,7 +2171,7 @@ developer = [
         let mut overlay_stages = IndexMap::new();
         overlay_stages.insert(
             Stage::from("planning"),
-            StageDefinitionPatch {
+            StageDefinition {
                 role: Some("senior_planner".to_string()),
                 tool: None,
                 ..Default::default()
@@ -2380,7 +2179,7 @@ developer = [
         );
         let mut overlay_pipelines = HashMap::new();
         overlay_pipelines
-            .insert(Pipeline::Main, PipelineConfigPatch { stages: overlay_stages });
+            .insert(Pipeline::Main, PipelineConfig { stages: overlay_stages });
 
         let overlay = WorkflowToml {
             prompts_dir: None,
@@ -2415,14 +2214,14 @@ developer = [
         let mut base_stages = IndexMap::new();
         base_stages.insert(
             Stage::from("planning"),
-            StageDefinitionPatch {
+            StageDefinition {
                 role: Some("planner".to_string()),
                 prompts: Some(vec![PathBuf::from("/shared/common.md")]),
                 ..Default::default()
             },
         );
         let mut base_pipelines = HashMap::new();
-        base_pipelines.insert(Pipeline::Main, PipelineConfigPatch { stages: base_stages });
+        base_pipelines.insert(Pipeline::Main, PipelineConfig { stages: base_stages });
 
         let base = WorkflowToml {
             prompts_dir: None,
@@ -2434,7 +2233,7 @@ developer = [
         let mut overlay_stages = IndexMap::new();
         overlay_stages.insert(
             Stage::from("planning"),
-            StageDefinitionPatch {
+            StageDefinition {
                 role: None,
                 prompts: Some(vec![]),
                 ..Default::default()
@@ -2442,7 +2241,7 @@ developer = [
         );
         let mut overlay_pipelines = HashMap::new();
         overlay_pipelines
-            .insert(Pipeline::Main, PipelineConfigPatch { stages: overlay_stages });
+            .insert(Pipeline::Main, PipelineConfig { stages: overlay_stages });
 
         let overlay = WorkflowToml {
             prompts_dir: None,

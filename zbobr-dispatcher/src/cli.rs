@@ -559,17 +559,9 @@ impl<'a> CliStageRunner<'a> {
             .zbobr
             .workflow()
             .role_definition(role)
-            .map(|d| d.mcp.iter().copied().collect())
-            .unwrap_or_else(|| {
-                // No explicit role definition — allow all tools for backward compatibility.
-                self.zbobr
-                    .workflow()
-                    .config()
-                    .all_tool_names()
-                    .into_iter()
-                    .filter_map(|name| name.parse::<McpTool>().ok())
-                    .collect()
-            });
+            .and_then(|d| d.mcp.as_ref())
+            .map(|tools| tools.iter().copied().collect())
+            .unwrap_or_default();
 
         // Read current pipeline_run_id for this session.
         let task_snap = self

@@ -916,10 +916,7 @@ mod comment_model_tests {
         let tracker = Arc::new(std::sync::Mutex::new(None::<McpTool>));
         let session = zbobr.role_session_with_tracker(task_id, tracker, "main".to_string(), 1);
         let allowed_tools: std::collections::HashSet<zbobr_api::config_tools::McpTool> =
-            zbobr_api::config_tools::McpTool::all()
-                .iter()
-                .copied()
-                .collect();
+            zbobr_api::config_tools::ALL_TOOLS.iter().copied().collect();
         crate::mcp::unified::UnifiedMcp::new(
             session,
             allowed_tools,
