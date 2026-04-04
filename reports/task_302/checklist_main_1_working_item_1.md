@@ -1,0 +1,1 @@
+Extend the hoist detection in parse_cli to recognize attached short-value forms. When a short flag like `-c` takes a value, `-c<anything>` should be recognized as that flag with an attached value. Add tests for this behavior.
