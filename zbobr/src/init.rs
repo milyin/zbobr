@@ -145,9 +145,9 @@ fn default_config_toml() -> RootConfigToml {
 
     let providers = IndexMap::from([
         (
-            PROVIDER_CLAUDE.into(),
+            PROVIDER_CLAUDE.as_str().to_string(),
             ProviderDefinition {
-                executor: Some(PROVIDER_CLAUDE.into()),
+                executor: Some(PROVIDER_CLAUDE.as_str().to_string()),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -155,9 +155,9 @@ fn default_config_toml() -> RootConfigToml {
             },
         ),
         (
-            PROVIDER_COPILOT.into(),
+            PROVIDER_COPILOT.as_str().to_string(),
             ProviderDefinition {
-                executor: Some(PROVIDER_COPILOT.into()),
+                executor: Some(PROVIDER_COPILOT.as_str().to_string()),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -165,20 +165,20 @@ fn default_config_toml() -> RootConfigToml {
             },
         ),
         (
-            PROVIDER_CLAUDE_PLANNER.into(),
+            PROVIDER_CLAUDE_PLANNER.as_str().to_string(),
             ProviderDefinition {
                 executor: None,
-                parent: Some(PROVIDER_CLAUDE.into()),
+                parent: Some(PROVIDER_CLAUDE),
                 priority: None,
                 plan_mode: Some(true),
                 access_key: None,
             },
         ),
         (
-            PROVIDER_COPILOT_PLANNER.into(),
+            PROVIDER_COPILOT_PLANNER.as_str().to_string(),
             ProviderDefinition {
                 executor: None,
-                parent: Some(PROVIDER_COPILOT.into()),
+                parent: Some(PROVIDER_COPILOT),
                 priority: None,
                 plan_mode: Some(true),
                 access_key: None,
@@ -191,12 +191,12 @@ fn default_config_toml() -> RootConfigToml {
             TOOL_DEVELOPER.to_string(),
             vec![
                 ToolEntry {
-                    provider: PROVIDER_CLAUDE.into(),
+                    provider: PROVIDER_CLAUDE,
                     model: CLAUDE_MODEL_OPUS.parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
-                    provider: PROVIDER_COPILOT.into(),
+                    provider: PROVIDER_COPILOT,
                     model: COPILOT_MODEL_SONNET.parse().unwrap(),
                     priority: Some(0),
                 },
@@ -206,12 +206,12 @@ fn default_config_toml() -> RootConfigToml {
             TOOL_PLANNER.to_string(),
             vec![
                 ToolEntry {
-                    provider: PROVIDER_CLAUDE_PLANNER.into(),
+                    provider: PROVIDER_CLAUDE_PLANNER,
                     model: CLAUDE_MODEL_OPUS.parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
-                    provider: PROVIDER_COPILOT_PLANNER.into(),
+                    provider: PROVIDER_COPILOT_PLANNER,
                     model: COPILOT_MODEL_SONNET.parse().unwrap(),
                     priority: Some(0),
                 },
@@ -221,12 +221,12 @@ fn default_config_toml() -> RootConfigToml {
             TOOL_HELPER.to_string(),
             vec![
                 ToolEntry {
-                    provider: PROVIDER_COPILOT.into(),
+                    provider: PROVIDER_COPILOT,
                     model: COPILOT_MODEL_HAIKU.parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
-                    provider: PROVIDER_CLAUDE.into(),
+                    provider: PROVIDER_CLAUDE,
                     model: CLAUDE_MODEL_HAIKU.parse().unwrap(),
                     priority: Some(0),
                 },
@@ -236,12 +236,12 @@ fn default_config_toml() -> RootConfigToml {
             TOOL_REVIEWER.to_string(),
             vec![
                 ToolEntry {
-                    provider: PROVIDER_COPILOT.into(),
+                    provider: PROVIDER_COPILOT,
                     model: COPILOT_MODEL_GPT_5_4.parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
-                    provider: PROVIDER_CLAUDE.into(),
+                    provider: PROVIDER_CLAUDE,
                     model: CLAUDE_MODEL_SONNET.parse().unwrap(),
                     priority: Some(0),
                 },
@@ -251,12 +251,12 @@ fn default_config_toml() -> RootConfigToml {
             TOOL_DRUDGE.to_string(),
             vec![
                 ToolEntry {
-                    provider: PROVIDER_COPILOT.into(),
+                    provider: PROVIDER_COPILOT,
                     model: COPILOT_MODEL_GPT_5_MINI.parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
-                    provider: PROVIDER_CLAUDE.into(),
+                    provider: PROVIDER_CLAUDE,
                     model: CLAUDE_MODEL_HAIKU.parse().unwrap(),
                     priority: Some(0),
                 },

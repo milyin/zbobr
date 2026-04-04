@@ -151,8 +151,8 @@ impl ZbobrDispatcher {
             .iter()
             .enumerate()
             .filter(|(_, entry)| {
-                !excluded_set.contains(&entry.provider)
-                    && !additional_excluded.contains(&entry.provider)
+                !excluded_set.contains(entry.provider.as_str())
+                    && !additional_excluded.contains(entry.provider.as_str())
             })
             .collect();
 
@@ -167,7 +167,7 @@ impl ZbobrDispatcher {
         let mut priority_groups: HashMap<i32, Vec<(usize, &ToolEntry)>> = HashMap::new();
         for (idx, entry) in &available {
             let rp = resolved_providers
-                .get(&entry.provider)
+                .get(entry.provider.as_str())
                 .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", entry.provider))?;
             priority_groups
                 .entry(entry.priority.unwrap_or(rp.priority))
@@ -187,7 +187,7 @@ impl ZbobrDispatcher {
         drop(rr);
 
         let (_, entry) = &top_group[pick];
-        let rp = resolved_providers.get(&entry.provider).unwrap().clone();
+        let rp = resolved_providers.get(entry.provider.as_str()).unwrap().clone();
         Ok((rp, entry.model.clone()))
     }
 
@@ -237,8 +237,8 @@ impl ZbobrDispatcher {
         Ok(entries
             .iter()
             .filter(|entry| {
-                !excluded_set.contains(&entry.provider)
-                    && !additional_excluded.contains(&entry.provider)
+                !excluded_set.contains(entry.provider.as_str())
+                    && !additional_excluded.contains(entry.provider.as_str())
             })
             .count())
     }

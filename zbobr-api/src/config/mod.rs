@@ -66,7 +66,7 @@ pub struct ProviderDefinition {
     pub executor: Option<String>,
     /// Parent provider to inherit settings from. Child fields override parent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent: Option<String>,
+    pub parent: Option<Provider>,
     /// Selection priority. Higher values are preferred. Omit to inherit from
     /// parent (root providers default to 10).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -105,7 +105,7 @@ pub struct ResolvedProvider {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolEntry {
-    pub provider: String,
+    pub provider: Provider,
     pub model: Model,
     /// Per-entry priority override. When set, replaces the priority inherited from the provider.
     /// Use a lower value than the provider's default to mark this entry as a fallback.
@@ -792,7 +792,7 @@ impl ZbobrDispatcherConfig {
                 anyhow::bail!(
                     "Provider '{}' references unknown parent '{}'",
                     provider_name,
-                    parent
+                    parent.as_str()
                 );
             }
             if provider.executor.is_none() && provider.parent.is_none() {
@@ -917,7 +917,7 @@ impl ZbobrDispatcherConfig {
             .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", name))?;
 
         if let Some(ref parent_name) = def.parent {
-            let parent = self.resolve_single_provider(parent_name, visited)?;
+            let parent = self.resolve_single_provider(parent_name.as_str(), visited)?;
             Ok(ResolvedProvider {
                 name: name.to_string(),
                 executor: def.executor.clone().unwrap_or(parent.executor),
@@ -1001,7 +1001,7 @@ mod tests {
             "claude_child".to_string(),
             ProviderDefinition {
                 executor: None,
-                parent: Some("claude_base".to_string()),
+                parent: Some(Provider::new("claude_base")),
                 priority: None,
                 plan_mode: None,
                 access_key: None,
@@ -1031,7 +1031,7 @@ mod tests {
             "parent".to_string(),
             ProviderDefinition {
                 executor: None,
-                parent: Some("grandparent".to_string()),
+                parent: Some(Provider::new("grandparent")),
                 priority: None,
                 plan_mode: Some(true),
                 access_key: None,
@@ -1041,7 +1041,7 @@ mod tests {
             "child".to_string(),
             ProviderDefinition {
                 executor: None,
-                parent: Some("parent".to_string()),
+                parent: Some(Provider::new("parent")),
                 priority: None,
                 plan_mode: None,
                 access_key: None,
@@ -1062,7 +1062,7 @@ mod tests {
             "a".to_string(),
             ProviderDefinition {
                 executor: None,
-                parent: Some("b".to_string()),
+                parent: Some(Provider::new("b")),
                 priority: None,
                 plan_mode: None,
                 access_key: None,
@@ -1072,7 +1072,7 @@ mod tests {
             "b".to_string(),
             ProviderDefinition {
                 executor: None,
-                parent: Some("a".to_string()),
+                parent: Some(Provider::new("a")),
                 priority: None,
                 plan_mode: None,
                 access_key: None,
@@ -1104,7 +1104,7 @@ mod tests {
             "child".to_string(),
             ProviderDefinition {
                 executor: None,
-                parent: Some("base".to_string()),
+                parent: Some(Provider::new("base")),
                 priority: Some(5),
                 plan_mode: Some(true),
                 access_key: None,
@@ -1138,7 +1138,7 @@ mod tests {
         tools.insert(
             "smart".to_string(),
             vec![ToolEntry {
-                provider: "claude".to_string(),
+                provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
                 priority: None,
             }],
@@ -1154,7 +1154,7 @@ mod tests {
             "child".to_string(),
             ProviderDefinition {
                 executor: None,
-                parent: Some("nonexistent".to_string()),
+                parent: Some(Provider::new("nonexistent")),
                 priority: None,
                 plan_mode: None,
                 access_key: None,
@@ -1208,7 +1208,7 @@ mod tests {
         tools.insert(
             "smart".to_string(),
             vec![ToolEntry {
-                provider: "ghost".to_string(),
+                provider: Provider::new("ghost"),
                 model: "opus".parse().unwrap(),
                 priority: None,
             }],
@@ -1314,7 +1314,7 @@ mod tests {
             "child".to_string(),
             ProviderDefinition {
                 executor: None,
-                parent: Some("base".to_string()),
+                parent: Some(Provider::new("base")),
                 priority: None,
                 plan_mode: None,
                 access_key: None,
@@ -1353,7 +1353,7 @@ mod tests {
         tools.insert(
             "smart".to_string(),
             vec![ToolEntry {
-                provider: "claude".to_string(),
+                provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
                 priority: None,
             }],
@@ -1385,7 +1385,7 @@ mod tests {
         tools.insert(
             "smart".to_string(),
             vec![ToolEntry {
-                provider: "claude".to_string(),
+                provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
                 priority: None,
             }],
@@ -1433,7 +1433,7 @@ mod tests {
         tools.insert(
             "smart".to_string(),
             vec![ToolEntry {
-                provider: "claude".to_string(),
+                provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
                 priority: None,
             }],
@@ -1485,7 +1485,7 @@ mod tests {
         tools.insert(
             "smart".to_string(),
             vec![ToolEntry {
-                provider: "claude".to_string(),
+                provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
                 priority: None,
             }],
@@ -1596,7 +1596,7 @@ developer = [
     #[test]
     fn tool_entry_priority_none_skipped_in_serialization() {
         let entry = ToolEntry {
-            provider: "claude".to_string(),
+            provider: Provider::new("claude"),
             model: "claude-opus-4.6".parse().unwrap(),
             priority: None,
         };
@@ -1610,7 +1610,7 @@ developer = [
     #[test]
     fn tool_entry_priority_some_included_in_serialization() {
         let entry = ToolEntry {
-            provider: "copilot".to_string(),
+            provider: Provider::new("copilot"),
             model: "claude-sonnet-4.6".parse().unwrap(),
             priority: Some(5),
         };
@@ -2423,12 +2423,12 @@ prompts = ["common.md", "planning.md"]
             "developer".to_string(),
             vec![
                 ToolEntry {
-                    provider: "claude".to_string(),
+                    provider: Provider::new("claude"),
                     model: "claude-opus-4.6".parse().unwrap(),
                     priority: None,
                 },
                 ToolEntry {
-                    provider: "copilot".to_string(),
+                    provider: Provider::new("copilot"),
                     model: "claude-sonnet-4.6".parse().unwrap(),
                     priority: Some(5),
                 },
@@ -2437,7 +2437,7 @@ prompts = ["common.md", "planning.md"]
         base_tools.insert(
             "reviewer".to_string(),
             vec![ToolEntry {
-                provider: "claude".to_string(),
+                provider: Provider::new("claude"),
                 model: "claude-opus-4.6".parse().unwrap(),
                 priority: None,
             }],
@@ -2453,7 +2453,7 @@ prompts = ["common.md", "planning.md"]
         overlay_tools.insert(
             "developer".to_string(),
             vec![ToolEntry {
-                provider: "gpt".to_string(),
+                provider: Provider::new("gpt"),
                 model: "claude-opus-4.6".parse().unwrap(),
                 priority: Some(1),
             }],
@@ -2461,7 +2461,7 @@ prompts = ["common.md", "planning.md"]
         overlay_tools.insert(
             "tester".to_string(),
             vec![ToolEntry {
-                provider: "claude".to_string(),
+                provider: Provider::new("claude"),
                 model: "claude-sonnet-4.6".parse().unwrap(),
                 priority: None,
             }],
