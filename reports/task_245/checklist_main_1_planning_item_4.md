@@ -1,0 +1,1 @@
+In `zbobr/src/commands.rs` (around line 202), after the existing `tasks_config.instance = ...` line, add `tasks_config.timezone = Some(dispatcher_config.fixed_offset())`. This mirrors the existing `instance` injection pattern exactly and propagates the dispatcher's configured timezone to both backend configs.
