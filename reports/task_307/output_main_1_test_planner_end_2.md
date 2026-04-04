@@ -1,0 +1,1 @@
+No additional tests are needed. The existing 4 tests for `write_or_new` already cover every behavioral branch introduced by the `--force` flag. The remaining diff is formatting-only or trivial plumbing.
