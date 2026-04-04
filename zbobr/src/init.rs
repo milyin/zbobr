@@ -1060,4 +1060,75 @@ name = "test"
         // Should not panic
         inline_dispatcher_tables(&mut doc);
     }
+
+    // ── default_workflow validation tests ──────────────────────────────
+
+    #[test]
+    fn default_workflow_is_valid() {
+        let workflow = default_workflow();
+        assert!(
+            workflow.validate().is_ok(),
+            "default workflow must pass validation"
+        );
+    }
+
+    // ── linting and linter_worker stage transition routing tests ──────
+
+    #[test]
+    fn linting_on_success_routes_to_testing() {
+        let wf = default_workflow();
+        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
+        let linting = main.stages.get(&Stage::from("linting")).unwrap();
+        let target = linting.on_success().and_then(|t| t.next.as_deref());
+        assert_eq!(target, Some("testing"));
+    }
+
+    #[test]
+    fn linting_on_failure_routes_to_linter_worker() {
+        let wf = default_workflow();
+        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
+        let linting = main.stages.get(&Stage::from("linting")).unwrap();
+        let target = linting.on_failure().and_then(|t| t.next.as_deref());
+        assert_eq!(target, Some("linter_worker"));
+    }
+
+    #[test]
+    fn linter_worker_on_success_routes_to_linting() {
+        let wf = default_workflow();
+        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
+        let lw = main.stages.get(&Stage::from("linter_worker")).unwrap();
+        let target = lw.on_success().and_then(|t| t.next.as_deref());
+        assert_eq!(target, Some("linting"));
+    }
+
+    #[test]
+    fn linter_worker_on_failure_routes_to_working() {
+        let wf = default_workflow();
+        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
+        let lw = main.stages.get(&Stage::from("linter_worker")).unwrap();
+        let target = lw.on_failure().and_then(|t| t.next.as_deref());
+        assert_eq!(target, Some("working"));
+    }
+
+    // ── PROMPT_FILES completeness tests ────────────────────────────────
+
+    #[test]
+    fn all_default_workflow_role_prompts_are_registered() {
+        let wf = default_workflow();
+        let registered: std::collections::HashSet<&str> =
+            PROMPT_FILES.iter().map(|(name, _)| *name).collect();
+        for (role_name, role_def) in &wf.roles {
+            if let Some(prompt_path) = &role_def.prompt {
+                let key = prompt_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .expect("prompt path has no file stem");
+                assert!(
+                    registered.contains(key),
+                    "Role '{}' references prompt file '{}' but it is not in PROMPT_FILES",
+                    role_name, key
+                );
+            }
+        }
+    }
 }
