@@ -200,6 +200,7 @@ pub async fn run(
 
     let mut tasks_config = tasks_config;
     tasks_config.instance = dispatcher_config.instance.clone();
+    tasks_config.timezone = dispatcher_config.timezone;
     let task_backend = TaskBackendGithub::new(tasks_config).await?;
     let repo_backend = ZbobrRepoBackendGithub::new(repo_config).await?;
 
@@ -320,9 +321,10 @@ async fn run_task_subcommand(
             for w in &weak_tasks {
                 let task = w.snapshot(false).await?;
                 if let Some(ref filter) = state_filter
-                    && task.state != *filter {
-                        continue;
-                    }
+                    && task.state != *filter
+                {
+                    continue;
+                }
                 tasks.push(task);
             }
             tasks.sort_by_key(|t| t.id);

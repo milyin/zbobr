@@ -11,8 +11,8 @@ mod stage_title;
 use chrono::{DateTime, FixedOffset};
 pub use stage_title::format_timestamp;
 
-use std::{borrow::Cow, fmt};
 use std::str::FromStr;
+use std::{borrow::Cow, fmt};
 
 use anyhow::{Result, bail};
 
@@ -156,9 +156,12 @@ impl fmt::Display for MdRecord {
                 self.brief
                     .chars()
                     .take(COMPACT_COMMENT_MAX_LEN)
-                    .collect::<String>()
+                    .collect::<String>(),
             )
-        }).lines().collect::<Vec<_>>().join(" ");
+        })
+        .lines()
+        .collect::<Vec<_>>()
+        .join(" ");
 
         write!(f, "{}{}", self.record_type.prefix(), brief)?;
         let id_tag = format!("ctx_rec_{}", self.id);
