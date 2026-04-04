@@ -891,35 +891,35 @@ impl ZbobrDispatcherConfig {
 
     /// Resolve all providers by flattening inheritance chains.
     ///
-    /// Returns an `IndexMap` from provider name to `ResolvedProvider`.
-    pub fn resolve_providers(&self) -> anyhow::Result<IndexMap<String, ResolvedProvider>> {
+    /// Returns an `IndexMap` from provider to `ResolvedProvider`.
+    pub fn resolve_providers(&self) -> anyhow::Result<IndexMap<Provider, ResolvedProvider>> {
         let mut resolved = IndexMap::new();
         for name in self.providers.keys() {
-            let rp = self.resolve_single_provider(name.as_str(), &mut Vec::new())?;
-            resolved.insert(name.as_str().to_string(), rp);
+            let rp = self.resolve_single_provider(name.clone(), &mut Vec::new())?;
+            resolved.insert(name.clone(), rp);
         }
         Ok(resolved)
     }
 
     fn resolve_single_provider(
         &self,
-        name: &str,
-        visited: &mut Vec<String>,
+        name: Provider,
+        visited: &mut Vec<Provider>,
     ) -> anyhow::Result<ResolvedProvider> {
-        if visited.contains(&name.to_string()) {
-            anyhow::bail!("Circular parent reference detected in provider '{}'", name);
+        if visited.contains(&name) {
+            anyhow::bail!("Circular parent reference detected in provider '{}'", name.as_str());
         }
-        visited.push(name.to_string());
+        visited.push(name.clone());
 
         let def = self
             .providers
-            .get(name)
-            .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", name))?;
+            .get(&name)
+            .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", name.as_str()))?;
 
         if let Some(ref parent_name) = def.parent {
-            let parent = self.resolve_single_provider(parent_name.as_str(), visited)?;
+            let parent = self.resolve_single_provider(parent_name.clone(), visited)?;
             Ok(ResolvedProvider {
-                name: name.to_string(),
+                name: name.as_str().to_string(),
                 executor: def.executor.clone().unwrap_or(parent.executor),
                 priority: def.priority.unwrap_or(parent.priority),
                 plan_mode: def.plan_mode.unwrap_or(parent.plan_mode),
@@ -975,7 +975,7 @@ mod tests {
         let resolved = config.resolve_providers().unwrap();
 
         assert_eq!(resolved.len(), 1);
-        let rp = &resolved["claude"];
+        let rp = &resolved[&Provider::new("claude")];
         assert_eq!(rp.name, "claude");
         assert_eq!(rp.executor, "claude");
         assert_eq!(rp.priority, 10);
@@ -1007,7 +1007,7 @@ mod tests {
         let config = make_config(providers, IndexMap::new());
         let resolved = config.resolve_providers().unwrap();
 
-        let child = &resolved["claude_child"];
+        let child = &resolved[&Provider::new("claude_child")];
         assert_eq!(child.executor, "claude");
     }
 
@@ -1044,7 +1044,7 @@ mod tests {
         let config = make_config(providers, IndexMap::new());
         let resolved = config.resolve_providers().unwrap();
 
-        let child = &resolved["child"];
+        let child = &resolved[&Provider::new("child")];
         assert_eq!(child.executor, "claude");
         assert!(child.plan_mode);
     }
@@ -1103,7 +1103,7 @@ mod tests {
         let config = make_config(providers, IndexMap::new());
         let resolved = config.resolve_providers().unwrap();
 
-        let child = &resolved["child"];
+        let child = &resolved[&Provider::new("child")];
         assert_eq!(child.executor, "claude");
         assert_eq!(child.priority, 5);
         assert!(child.plan_mode);
@@ -1305,7 +1305,7 @@ mod tests {
         let config = make_config(providers, IndexMap::new());
         let resolved = config.resolve_providers().unwrap();
 
-        let child = &resolved["child"];
+        let child = &resolved[&Provider::new("child")];
         assert_eq!(
             child.priority, 3,
             "Child should inherit parent's priority (3), not default (10)"
