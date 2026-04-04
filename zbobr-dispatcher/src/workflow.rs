@@ -110,11 +110,11 @@ impl Workflow {
     // -- Delegated getters --
 
     pub fn pipeline(&self, name: &Pipeline) -> Option<&PipelineConfig> {
-        self.config.pipeline(name.clone())
+        self.config.pipeline(name)
     }
 
-    pub fn stage(&self, pipeline: &Pipeline, stage: &str) -> Option<&StageDefinition> {
-        self.config.stage(pipeline.clone(), stage)
+    pub fn stage(&self, pipeline: &Pipeline, stage: &Stage) -> Option<&StageDefinition> {
+        self.config.stage(pipeline, stage)
     }
 
     pub fn all_stages(&self) -> Vec<(&Pipeline, &str, &StageDefinition)> {
@@ -141,7 +141,7 @@ impl Workflow {
         &self,
         pipeline: &Pipeline,
     ) -> Option<(&Stage, &StageDefinition)> {
-        self.config.start_stage_for_pipeline(pipeline.clone())
+        self.config.start_stage_for_pipeline(pipeline)
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
@@ -517,12 +517,16 @@ role = "merger"
         let wf: WorkflowConfig = toml::from_str(toml_str).unwrap();
         assert!(wf.validate().is_ok());
 
-        let setup = wf.stage("main", "setup").unwrap();
+        let setup = wf
+            .stage(&Pipeline::from("main"), &Stage::from("setup"))
+            .unwrap();
         assert_eq!(setup.call_pipeline().map(|p| p.as_str()), Some("sub"));
         assert_eq!(setup.role_name(), None);
         assert!(setup.is_call());
 
-        let working = wf.stage("main", "working").unwrap();
+        let working = wf
+            .stage(&Pipeline::from("main"), &Stage::from("working"))
+            .unwrap();
         assert_eq!(working.role_name(), Some("worker"));
         assert_eq!(working.call_pipeline(), None);
         assert!(!working.is_call());
@@ -678,7 +682,9 @@ role = "merger"
         let wf: WorkflowConfig = toml::from_str(toml_str).unwrap();
         assert!(wf.validate().is_ok());
 
-        let working = wf.stage("main", "working").unwrap();
+        let working = wf
+            .stage(&Pipeline::from("main"), &Stage::from("working"))
+            .unwrap();
         assert_eq!(
             working
                 .on_failure()
@@ -688,7 +694,9 @@ role = "merger"
         );
         assert!(working.on_success().is_none());
 
-        let planning = wf.stage("main", "planning").unwrap();
+        let planning = wf
+            .stage(&Pipeline::from("main"), &Stage::from("planning"))
+            .unwrap();
         assert_eq!(
             planning
                 .on_success()
@@ -716,12 +724,16 @@ role = "merger"
         let wf: WorkflowConfig = toml::from_str(toml_str).unwrap();
         assert!(wf.validate().is_ok());
 
-        let working = wf.stage("main", "working").unwrap();
+        let working = wf
+            .stage(&Pipeline::from("main"), &Stage::from("working"))
+            .unwrap();
         let t = working.on_success().unwrap();
         assert!(t.next.is_none());
         assert!(t.pause);
 
-        let reviewing = wf.stage("main", "reviewing").unwrap();
+        let reviewing = wf
+            .stage(&Pipeline::from("main"), &Stage::from("reviewing"))
+            .unwrap();
         let t = reviewing.on_success().unwrap();
         assert_eq!(t.next.as_ref().map(|s| s.as_str()), Some("working"));
         assert!(t.pause);

@@ -565,24 +565,21 @@ impl Config for WorkflowConfig {
 
 impl WorkflowConfig {
     /// Look up a pipeline by name.
-    pub fn pipeline(&self, name: impl Into<Pipeline>) -> Option<&PipelineConfig> {
-        self.pipelines.get(name.into().as_str())
+    pub fn pipeline(&self, name: &Pipeline) -> Option<&PipelineConfig> {
+        self.pipelines.get(name.as_str())
     }
 
     /// Look up a stage in a specific pipeline.
-    pub fn stage(&self, pipeline: impl Into<Pipeline>, stage: &str) -> Option<&StageDefinition> {
-        let stage = Stage::from(stage);
-        self.pipelines
-            .get(pipeline.into().as_str())?
-            .stage(&stage)
+    pub fn stage(&self, pipeline: &Pipeline, stage: &Stage) -> Option<&StageDefinition> {
+        self.pipelines.get(pipeline.as_str())?.stage(stage)
     }
 
     /// Get the start stage for a pipeline.
     pub fn start_stage_for_pipeline(
         &self,
-        pipeline: impl Into<Pipeline>,
+        pipeline: &Pipeline,
     ) -> Option<(&Stage, &StageDefinition)> {
-        self.pipelines.get(pipeline.into().as_str())?.start_stage()
+        self.pipelines.get(pipeline.as_str())?.start_stage()
     }
 
     /// The default pipeline name.

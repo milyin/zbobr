@@ -516,7 +516,7 @@ fn resolve_stage_def<'a>(
         (Some(stage_name), None) => {
             if let Some(p) = pipeline {
                 workflow
-                    .stage(p.clone(), stage_name.as_str())
+                    .stage(p, stage_name)
                     .ok_or_else(|| {
                         anyhow::anyhow!("Stage '{}' not found in pipeline '{}'", stage_name, p)
                     })
@@ -544,7 +544,7 @@ fn resolve_stage_def<'a>(
         (None, Some(role_name)) => {
             if let Some(p) = pipeline {
                 let pipeline_config = workflow
-                    .pipeline(p.clone())
+                    .pipeline(p)
                     .ok_or_else(|| anyhow::anyhow!("Pipeline '{}' not found", p))?;
                 pipeline_config
                     .stages
