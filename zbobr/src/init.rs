@@ -242,6 +242,7 @@ fn default_config_toml() -> RootConfigToml {
         }),
         tasks: Some(ZbobrTaskBackendGithubToml {
             instance: None,
+            timezone_offset_seconds: None,
             default_max_stage_count: Some(zbobr_api::task::DEFAULT_MAX_STAGE_COUNT),
             github_repo: Some("owner/repo".into()),
             github_token: Some(Secret::value(String::new())),
