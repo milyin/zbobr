@@ -101,3 +101,55 @@ async fn main() -> anyhow::Result<()> {
     )
     .await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    // Test-only Cli struct for testing the Command parser without config parts
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(subcommand)]
+        command: commands::Command,
+    }
+
+    #[test]
+    fn task_process_select_flag_parses_without_task_id() {
+        let cli = TestCli::try_parse_from(["zbobr", "task", "process", "--select"]).unwrap();
+        match cli.command {
+            commands::Command::Task { subcommand } => match subcommand {
+                commands::TaskSubcommand::Process { task, select } => {
+                    assert_eq!(task, None, "task should be None when --select is used");
+                    assert!(select, "--select flag should be true");
+                }
+                _ => panic!("expected Process subcommand"),
+            },
+            _ => panic!("expected Task command"),
+        }
+    }
+
+    #[test]
+    fn task_process_explicit_id_parses_without_select() {
+        let cli = TestCli::try_parse_from(["zbobr", "task", "process", "42"]).unwrap();
+        match cli.command {
+            commands::Command::Task { subcommand } => match subcommand {
+                commands::TaskSubcommand::Process { task, select } => {
+                    assert_eq!(task, Some(42), "task should be Some(42)");
+                    assert!(!select, "--select flag should be false");
+                }
+                _ => panic!("expected Process subcommand"),
+            },
+            _ => panic!("expected Task command"),
+        }
+    }
+
+    #[test]
+    fn task_process_select_and_task_id_together_is_rejected() {
+        let result = TestCli::try_parse_from(["zbobr", "task", "process", "42", "--select"]);
+        assert!(
+            result.is_err(),
+            "should fail: task and --select are mutually exclusive"
+        );
+    }
+}
