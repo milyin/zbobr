@@ -797,10 +797,11 @@ async fn handle_call_stage(
     {
         Signal::go(target.as_str())
     } else {
+        let stage = Stage::from(stage_name);
         match zbobr
             .workflow()
             .pipeline(pipeline_name)
-            .and_then(|p| p.next_stage(stage_name))
+            .and_then(|p| p.next_stage(&stage))
         {
             Some((next, _)) => Signal::go(next),
             None => Signal::Return,
@@ -1831,9 +1832,10 @@ async fn finalize_stage_session(
         .await?;
     if !current_task.pause && current_task.signal.is_none() {
         let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
+        let stage = Stage::from(stage_name);
         let seq_signal = zbobr.workflow().sequential_signal(
             pipeline_name,
-            stage_name,
+            &stage,
             stage_def,
             last_mapped_tool,
         );

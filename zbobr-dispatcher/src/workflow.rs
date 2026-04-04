@@ -166,13 +166,13 @@ impl Workflow {
     pub(crate) fn sequential_signal(
         &self,
         pipeline_name: &Pipeline,
-        stage_name: &str,
+        stage: &Stage,
         stage_def: Option<&StageDefinition>,
         last_mapped_tool: Option<McpTool>,
     ) -> SequentialSignal {
         let next_stage = || {
             self.pipeline(pipeline_name)
-                .and_then(|p| p.next_stage(stage_name))
+                .and_then(|p| p.next_stage(stage))
                 .map(|(n, _)| n.to_string())
         };
         match last_mapped_tool {
@@ -188,7 +188,7 @@ impl Workflow {
             ),
             Some(McpTool::ReportIntermediate) => apply_transition(
                 stage_def.and_then(|s| s.on_intermediate()),
-                Some(stage_name.to_string()),
+                Some(stage.to_string()),
                 Signal::Return,
             ),
             // No report tool called — use on_no_report if configured, else advance (same as on_success).

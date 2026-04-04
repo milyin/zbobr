@@ -303,18 +303,18 @@ impl PipelineConfig {
     }
 
     /// Look up a stage by name.
-    pub fn stage(&self, name: &str) -> Option<&StageDefinition> {
-        self.stages.get(name)
+    pub fn stage(&self, name: &Stage) -> Option<&StageDefinition> {
+        self.stages.get(name.as_str())
     }
 
     /// Get the index of a stage in the order.
-    pub fn stage_index(&self, name: &str) -> Option<usize> {
-        self.stages.get_index_of(name)
+    pub fn stage_index(&self, name: &Stage) -> Option<usize> {
+        self.stages.get_index_of(name.as_str())
     }
 
     /// Get the next stage after `name`.
-    pub fn next_stage(&self, name: &str) -> Option<(&str, &StageDefinition)> {
-        let idx = self.stages.get_index_of(name)?;
+    pub fn next_stage(&self, name: &Stage) -> Option<(&str, &StageDefinition)> {
+        let idx = self.stages.get_index_of(name.as_str())?;
         let (next_name, def) = self.stages.get_index(idx + 1)?;
         Some((next_name.as_str(), def))
     }
@@ -571,7 +571,10 @@ impl WorkflowConfig {
 
     /// Look up a stage in a specific pipeline.
     pub fn stage(&self, pipeline: impl Into<Pipeline>, stage: &str) -> Option<&StageDefinition> {
-        self.pipelines.get(pipeline.into().as_str())?.stage(stage)
+        let stage = Stage::from(stage);
+        self.pipelines
+            .get(pipeline.into().as_str())?
+            .stage(&stage)
     }
 
     /// Get the start stage for a pipeline.
@@ -1659,7 +1662,7 @@ developer = [
         );
         let pipeline = PipelineConfig { stages };
         let resolved = pipeline.resolve_paths(std::path::Path::new("/base"));
-        let stage = resolved.stage("review").unwrap();
+        let stage = resolved.stage(&Stage::from("review")).unwrap();
         assert_eq!(
             stage.role_prompt.as_ref().unwrap(),
             &PathBuf::from("/base/review.md")
@@ -1713,7 +1716,7 @@ developer = [
         );
         // stage prompts resolved against prompts_dir
         let pipeline = &resolved.pipelines.as_ref().unwrap()[&Pipeline::Main];
-        let stage = pipeline.stage("review").unwrap();
+        let stage = pipeline.stage(&Stage::from("review")).unwrap();
         assert_eq!(
             stage.role_prompt.as_ref().unwrap(),
             &PathBuf::from("/shared/prompts/review_stage.md")
@@ -1885,13 +1888,13 @@ developer = [
         // Main pipeline is overridden by the overlay.
         let main = &pipelines[&Pipeline::Main];
         assert_eq!(
-            main.stage("planning").unwrap().role.as_deref().unwrap(),
+            main.stage(&Stage::from("planning")).unwrap().role.as_deref().unwrap(),
             "senior_planner"
         );
         // Fix pipeline survives from the base config unchanged.
         let fix = &pipelines[&Pipeline::Custom("fix".to_string())];
         assert_eq!(
-            fix.stage("fixing").unwrap().role.as_deref().unwrap(),
+            fix.stage(&Stage::from("fixing")).unwrap().role.as_deref().unwrap(),
             "worker"
         );
     }
@@ -2180,17 +2183,17 @@ developer = [
         let main = &pipelines[&Pipeline::Main];
 
         assert_eq!(
-            main.stage("planning").unwrap().role.as_deref().unwrap(),
+            main.stage(&Stage::from("planning")).unwrap().role.as_deref().unwrap(),
             "senior_planner",
             "planning role should be overridden"
         );
         assert_eq!(
-            main.stage("planning").unwrap().tool.as_deref(),
+            main.stage(&Stage::from("planning")).unwrap().tool.as_deref(),
             Some("fast"),
             "planning tool should be preserved from base"
         );
         assert_eq!(
-            main.stage("working").unwrap().role.as_deref().unwrap(),
+            main.stage(&Stage::from("working")).unwrap().role.as_deref().unwrap(),
             "worker",
             "working stage should survive unchanged from base"
         );
@@ -2513,7 +2516,7 @@ prompts = []
         let pipelines = merged.pipelines.as_ref().unwrap();
         let main = &pipelines[&Pipeline::Main];
         assert!(
-            main.stage("planning")
+            main.stage(&Stage::from("planning"))
                 .unwrap()
                 .prompts
                 .as_ref()
@@ -2523,12 +2526,17 @@ prompts = []
 
         // Planning stage: role inherited from base (overlay didn't specify it).
         assert_eq!(
-            main.stage("planning").unwrap().role.as_deref(),
+            main.stage(&Stage::from("planning")).unwrap().role.as_deref(),
             Some("worker")
         );
 
         // Working stage: completely inherited from base (not in overlay).
-        let working_prompts = main.stage("working").unwrap().prompts.as_ref().unwrap();
+        let working_prompts = main
+            .stage(&Stage::from("working"))
+            .unwrap()
+            .prompts
+            .as_ref()
+            .unwrap();
         assert_eq!(working_prompts.len(), 2);
         assert_eq!(working_prompts[0], PathBuf::from("common.md"));
         assert_eq!(working_prompts[1], PathBuf::from("working.md"));
