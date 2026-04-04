@@ -30,44 +30,59 @@ use zbobr_api::tool_executor::ExecutorOutput;
 // ---------------------------------------------------------------------------
 
 /// Configuration file path argument.
+///
+/// Multiple config files can be specified with repeated `-c` / `--config` flags.
+/// When one or more configs are given, the default `zbobr.toml` is ignored.
+/// Configs are applied in order: later files override earlier ones.
 #[derive(Args, Clone)]
 pub struct ConfigFileArg {
-    /// Path to TOML configuration file
-    #[arg(long = "config")]
-    pub path: Option<PathBuf>,
+    /// Path to TOML configuration file (repeatable; later files override earlier ones)
+    #[arg(short = 'c', long = "config")]
+    pub paths: Vec<PathBuf>,
 }
 
 /// Resolved config file location.
 pub struct ConfigLocation {
-    pub config_path: PathBuf,
+    /// Config file paths to load (in order). May contain a single default path
+    /// that doesn't necessarily exist on disk.
+    pub config_paths: Vec<PathBuf>,
     pub config_dir: PathBuf,
 }
 
-/// Resolve the config file path and its parent directory.
+/// Resolve config file paths and the base directory for relative path resolution.
 ///
-/// When `cli_path` is `Some`, the file must exist (its parent is used as
-/// `config_dir`).  When `None`, `default_config_name` in the current
-/// directory is used and `config_dir` is `std::env::current_dir()`.
+/// When `cli_paths` is non-empty, each file must exist and `config_dir` is
+/// derived from the **last** file's parent directory.
+/// When empty, `default_config_name` in the current directory is used and
+/// `config_dir` is `std::env::current_dir()`.
 pub fn resolve_config_location(
-    cli_path: &Option<PathBuf>,
+    cli_paths: &[PathBuf],
     default_config_name: &str,
 ) -> anyhow::Result<ConfigLocation> {
-    let config_path = cli_path
-        .clone()
-        .unwrap_or_else(|| default_config_name.into());
+    if cli_paths.is_empty() {
+        let config_dir = std::env::current_dir()?;
+        let config_paths = vec![PathBuf::from(default_config_name)];
+        return Ok(ConfigLocation {
+            config_paths,
+            config_dir,
+        });
+    }
 
-    let config_dir = if cli_path.is_some() {
-        std::fs::canonicalize(&config_path)
-            .with_context(|| format!("Cannot resolve config path: {}", config_path.display()))?
+    let mut config_paths = Vec::with_capacity(cli_paths.len());
+    let mut config_dir = std::env::current_dir()?;
+
+    for path in cli_paths {
+        let canonical = std::fs::canonicalize(path)
+            .with_context(|| format!("Cannot resolve config path: {}", path.display()))?;
+        config_dir = canonical
             .parent()
             .expect("config file must have a parent directory")
-            .to_path_buf()
-    } else {
-        std::env::current_dir()?
-    };
+            .to_path_buf();
+        config_paths.push(canonical);
+    }
 
     Ok(ConfigLocation {
-        config_path,
+        config_paths,
         config_dir,
     })
 }
@@ -119,14 +134,16 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
     let global_tmp = GlobalArgs::augment_args(clap::Command::new(""));
     let global_flags: std::collections::HashMap<String, bool> = global_tmp
         .get_arguments()
-        .filter_map(|a| {
-            a.get_long().map(|long| {
-                let takes_value = !matches!(
-                    a.get_action(),
-                    clap::ArgAction::SetTrue | clap::ArgAction::SetFalse | clap::ArgAction::Count
-                );
-                (format!("--{long}"), takes_value)
-            })
+        .flat_map(|a| {
+            let takes_value = !matches!(
+                a.get_action(),
+                clap::ArgAction::SetTrue | clap::ArgAction::SetFalse | clap::ArgAction::Count
+            );
+            let long_entry = a.get_long().map(|long| (format!("--{long}"), takes_value));
+            let short_entry = a
+                .get_short()
+                .map(|short| (format!("-{short}"), takes_value));
+            long_entry.into_iter().chain(short_entry)
         })
         .collect();
 

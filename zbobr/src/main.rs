@@ -81,16 +81,26 @@ async fn main() -> anyhow::Result<()> {
         return init::init_workspace(directory).await;
     }
 
-    let location = zbobr_dispatcher::resolve_config_location(&cli.config_file.path, "zbobr.toml")?;
+    let location =
+        zbobr_dispatcher::resolve_config_location(&cli.config_file.paths, "zbobr.toml")?;
 
-    let root_toml = if location.config_path.exists() {
-        let content = std::fs::read_to_string(&location.config_path)
-            .with_context(|| format!("Failed to read {}", location.config_path.display()))?;
-        let parsed: RootConfigToml = toml::from_str(&content)
-            .with_context(|| format!("Failed to parse {}", location.config_path.display()))?;
-        Some(parsed)
-    } else {
-        None
+    let root_toml = {
+        let mut merged: Option<RootConfigToml> = None;
+        for path in &location.config_paths {
+            if !path.exists() {
+                // When no explicit configs given, the default file may not exist — skip it.
+                continue;
+            }
+            let content = std::fs::read_to_string(path)
+                .with_context(|| format!("Failed to read {}", path.display()))?;
+            let parsed: RootConfigToml = toml::from_str(&content)
+                .with_context(|| format!("Failed to parse {}", path.display()))?;
+            merged = Some(match merged {
+                Some(base) => base.merge_toml(parsed),
+                None => parsed,
+            });
+        }
+        merged
     };
 
     let config = RootConfig::build(root_toml, cli.settings, &location.config_dir);

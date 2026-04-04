@@ -364,6 +364,14 @@ impl WorkflowToml {
         self
     }
 
+    pub fn merge_toml(self, other: Self) -> Self {
+        Self {
+            prompts_dir: other.prompts_dir.or(self.prompts_dir),
+            roles: other.roles.or(self.roles),
+            pipelines: other.pipelines.or(self.pipelines),
+        }
+    }
+
     pub fn try_into_config(self) -> anyhow::Result<WorkflowConfig> {
         Ok(WorkflowConfig {
             prompts_dir: self.prompts_dir,

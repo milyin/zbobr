@@ -75,6 +75,7 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
     let mut derived_args_fields = Vec::new();
     let mut plain_args_fields = Vec::new();
     let mut merge_fields = Vec::new();
+    let mut merge_toml_fields: Vec<TokenStream2> = Vec::new();
     let mut has_override_checks = Vec::new();
     let mut base_fields = Vec::new();
     // Steps that build the struct in PrefixedArgs::from_matches_prefixed (one per field).
@@ -178,6 +179,14 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                                 }
                             }
                         }
+                    },
+                });
+
+                merge_toml_fields.push(quote! {
+                    #field_ident: match (self.#field_ident, other.#field_ident) {
+                        (Some(base), Some(over)) => Some(base.merge_toml(over)),
+                        (None, over) => over,
+                        (base, None) => base,
                     },
                 });
             }
@@ -303,6 +312,10 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
 
                 merge_fields.push(quote! {
                     #field_ident: args.#field_ident.or(self.#field_ident),
+                });
+
+                merge_toml_fields.push(quote! {
+                    #field_ident: other.#field_ident.or(self.#field_ident),
                 });
             }
 
@@ -468,6 +481,15 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             pub fn merge_with_args(self, args: #args_ident #ty_generics) -> Self {
                 Self {
                     #(#merge_fields)*
+                }
+            }
+
+            /// Merge two Toml configs. Fields from `other` (later config) take
+            /// precedence over `self` (earlier config). Nested sections are
+            /// merged recursively; leaf and list fields are fully replaced.
+            pub fn merge_toml(self, other: Self) -> Self {
+                Self {
+                    #(#merge_toml_fields)*
                 }
             }
         }
