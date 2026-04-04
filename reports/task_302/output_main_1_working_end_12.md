@@ -1,0 +1,1 @@
+Fixed the blocking regression. The issue was in `zbobr-dispatcher/src/prompts.rs` where `.unwrap_or(&[])` was used instead of `.unwrap_or(ALL_TOOLS)` when a role's `mcp` field is `None`. This caused roles without an explicit `mcp` list to get no MCP tool variables in their prompts. The fix restores the "all tools by default" behavior. All relevant tests pass.
