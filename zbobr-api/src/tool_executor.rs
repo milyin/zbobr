@@ -34,26 +34,6 @@ pub struct ExecutorOutput {
     pub output: String,
     /// `true` if the process exited with status 0.
     pub exit_ok: bool,
-    /// `true` if the output indicates a quota or account-limit failure (rate
-    /// limiting, billing limits, etc.).  Such failures are treated as provider
-    /// unavailability and trigger temporary provider exclusion, just like
-    /// connectivity failures.
-    pub quota_failure: bool,
-}
-
-/// Scan combined executor output for known quota / rate-limit / account-limit
-/// error signatures.  Returns `true` when any known pattern is found.
-///
-/// The patterns are deliberately specific to avoid false positives on task
-/// output that happens to mention these words in a different context.
-pub fn detect_quota_failure(output: &str) -> bool {
-    let lower = output.to_lowercase();
-    lower.contains("rate limit")
-        || lower.contains("too many requests")
-        || lower.contains("quota exceeded")
-        || lower.contains("usage limit")
-        || lower.contains("account limit")
-        || lower.contains("rate_limit_error")
 }
 
 /// Trait for executing AI tools with specific configurations.
@@ -92,51 +72,4 @@ pub trait ToolExecutor: Send + Sync {
         agent_github_token: &str,
         copilot_github_token: &str,
     ) -> anyhow::Result<ExecutorOutput>;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn detect_quota_failure_rate_limit() {
-        assert!(detect_quota_failure(
-            "Error: rate limit exceeded, try again later"
-        ));
-    }
-
-    #[test]
-    fn detect_quota_failure_too_many_requests() {
-        assert!(detect_quota_failure("HTTP 429: too many requests"));
-    }
-
-    #[test]
-    fn detect_quota_failure_quota_exceeded() {
-        assert!(detect_quota_failure(
-            "API quota exceeded for this billing period"
-        ));
-    }
-
-    #[test]
-    fn detect_quota_failure_usage_limit() {
-        // Verifies case-insensitivity: "Usage Limit" with mixed case
-        assert!(detect_quota_failure("Your Usage Limit has been reached"));
-    }
-
-    #[test]
-    fn detect_quota_failure_account_limit() {
-        assert!(detect_quota_failure(
-            "account limit reached, upgrade your plan"
-        ));
-    }
-
-    #[test]
-    fn detect_quota_failure_rate_limit_error() {
-        assert!(detect_quota_failure("Received rate_limit_error from API"));
-    }
-
-    #[test]
-    fn detect_quota_failure_no_match() {
-        assert!(!detect_quota_failure("Command failed with exit code 1"));
-    }
 }

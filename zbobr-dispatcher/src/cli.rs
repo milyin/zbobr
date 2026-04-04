@@ -1,6 +1,7 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -18,7 +19,7 @@ use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
-    Comment, Task, TaskDir, ToolExecutor, ZbobrDispatcher,
+    Comment, Task, TaskDir, ToolExecutor, Workflow, ZbobrDispatcher,
     task::{Model, Tool},
     workflow::SequentialSignal,
 };
@@ -258,6 +259,74 @@ async fn ensure_work_branch(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyho
 }
 
 // ---------------------------------------------------------------------------
+// Task list entry
+// ---------------------------------------------------------------------------
+
+/// Compact projection of a [`Task`] for one-line list display and JSON output.
+#[derive(Debug, serde::Serialize)]
+pub struct TaskListEntry {
+    pub id: u64,
+    pub stage_count: u64,
+    pub state: State,
+    pub title: String,
+}
+
+impl From<&Task> for TaskListEntry {
+    fn from(task: &Task) -> Self {
+        Self {
+            id: task.id,
+            stage_count: task.stage_count,
+            state: task.state.clone(),
+            title: task.title.clone(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Ready-task selection
+// ---------------------------------------------------------------------------
+
+/// Priority key for task scheduling: higher value → processed first.
+///
+/// This is the single source of truth for task priority ordering used by both
+/// [`select_runnable_task`] and [`run_manager_loop`].
+fn task_priority(task: &Task) -> u64 {
+    task.stage_count
+}
+
+/// Return the highest-priority task that the workflow is ready to run (non-call [`StateAction::RunStage`]).
+///
+/// Uses full workflow resolution via [`Workflow::resolve_next_action`] so that the predicate
+/// matches exactly the tasks that [`run_manager_loop`] would schedule in Phase 2.
+///
+/// Tasks in `READY` state with a non-empty stack are excluded because the loop normalises them
+/// via `apply_ready_from_state` in Phase 1 and defers them to the next cycle — they are never
+/// present in Phase 2 `runstage_candidates`.  Calling `resolve_next_action` on such tasks
+/// would use the wrong pipeline (default instead of the saved stack pipeline).
+///
+/// Returns `None` if no runnable task exists.
+pub fn select_runnable_task<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Option<&'a Task> {
+    tasks
+        .iter()
+        .filter(|t| {
+            // READY-with-stack tasks are normalised in loop Phase 1 and deferred; skip them.
+            let ready_with_stack = t.state.is_ready() && !t.stack.is_empty();
+            !t.pause
+                && !ready_with_stack
+                && matches!(
+                    workflow.resolve_next_action(t),
+                    Ok(crate::workflow::StateAction::RunStage(_, _, def))
+                        if def.call_pipeline().is_none()
+                )
+        })
+        .max_by(|a, b| {
+            task_priority(a)
+                .cmp(&task_priority(b))
+                .then_with(|| b.id.cmp(&a.id))
+        })
+}
+
+// ---------------------------------------------------------------------------
 // Task display
 // ---------------------------------------------------------------------------
 
@@ -487,11 +556,13 @@ impl<'a> CliStageRunner<'a> {
 
         let agent_token_owned = self.zbobr.config().agent_github_token.as_ref().to_owned();
 
-        // Provider retry loop: on connectivity/quota failure, exclude the failing provider and
-        // immediately retry with the next available one.  select_provider() returns an error when
-        // all providers for the tool are exhausted, which terminates the loop.
+        // Provider retry loop: on any failed execution attempt, retry with the next provider/model
+        // selected by the existing priority + round-robin logic.
+        let mut cycle_excluded_providers: HashSet<String> = HashSet::new();
         loop {
-            let (resolved_provider, model) = self.zbobr.select_provider(&tool_name)?;
+            let (resolved_provider, model) = self
+                .zbobr
+                .select_provider_excluding(&tool_name, &cycle_excluded_providers)?;
             let plan_mode = resolved_provider.plan_mode;
 
             // Add a new StageContext to the task's context for this attempt.
@@ -570,12 +641,6 @@ impl<'a> CliStageRunner<'a> {
             )
             .await;
 
-            // Exclude provider on connectivity/quota failures so subsequent attempts and stage
-            // runs skip it until the exclusion expires.
-            if outcome.connectivity_failure {
-                self.zbobr.exclude_provider(&resolved_provider.name);
-            }
-
             // Store the captured output and link it to the stage context entry.
             if let Some(ref output) = outcome.execution_output {
                 let role_session = self.zbobr.role_session(self.task_id);
@@ -612,15 +677,34 @@ impl<'a> CliStageRunner<'a> {
             // Read the last mapped tool from the shared tracker.
             let last_mapped_tool = *tool_tracker.lock().unwrap();
 
-            // Retry immediately with the next provider if this was a connectivity/quota failure.
-            if outcome.connectivity_failure {
+            if outcome.execution_failed {
+                cycle_excluded_providers.insert(resolved_provider.name.clone());
+                let attempts_remaining = self.zbobr.available_provider_model_count_excluding(
+                    &tool_name,
+                    &cycle_excluded_providers,
+                )?;
+                let excluded = self.zbobr.record_provider_failure(&resolved_provider.name);
                 server_handle.abort();
+                if attempts_remaining > 0 {
+                    let exclusion_hint = if excluded {
+                        " (provider temporarily excluded)"
+                    } else {
+                        ""
+                    };
+                    tracing::warn!(
+                        "Provider '{}' failed for tool '{}' — retrying with next available provider{}",
+                        resolved_provider.name,
+                        tool_name,
+                        exclusion_hint,
+                    );
+                    continue;
+                }
                 tracing::warn!(
-                    "Provider '{}' failed for tool '{}' — retrying with next available provider",
-                    resolved_provider.name,
-                    tool_name,
+                    "Provider/model attempts exhausted for tool '{}' after a full cycle",
+                    tool_name
                 );
-                continue;
+            } else {
+                self.zbobr.record_provider_success(&resolved_provider.name);
             }
 
             if let Some(e) = finalize_stage_session(
@@ -1063,10 +1147,15 @@ pub async fn run_manager_loop(
                 Err(e) => tracing::warn!("Failed to snapshot task: {e}"),
             }
         }
-        // Sort by stage_count descending so tasks closest to completion are processed first.
-        all_tasks.sort_by(|a, b| b.stage_count.cmp(&a.stage_count));
+        // Sort by task_priority descending so tasks closest to completion are processed first.
+        all_tasks.sort_by_key(|b| std::cmp::Reverse(task_priority(b)));
 
         let mut session_run = false;
+
+        // Phase 1: apply transitions and handle Done / instant call-stage actions for all
+        // tasks eagerly.  Non-call RunStage tasks are collected for priority-based selection
+        // in Phase 2 below.
+        let mut runstage_candidates: Vec<Task> = Vec::new();
         for task in &all_tasks {
             if task.state.is_done() {
                 continue;
@@ -1112,15 +1201,16 @@ pub async fn run_manager_loop(
 
             match action {
                 crate::workflow::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
-                    tracing::info!(
-                        "Processing task #{} (state={:?}, signal={:?}) — running stage {}/{}",
-                        task.id,
-                        task.state,
-                        task.signal,
-                        pipeline_name,
-                        stage_name,
-                    );
                     if let Some(call_target) = stage_def.call_pipeline() {
+                        // Call stages are instant — process eagerly without consuming the slot
+                        tracing::info!(
+                            "Processing task #{} (state={:?}, signal={:?}) — running stage {}/{}",
+                            task.id,
+                            task.state,
+                            task.signal,
+                            pipeline_name,
+                            stage_name,
+                        );
                         if let Err(e) = handle_call_stage(
                             zbobr,
                             task.id,
@@ -1137,37 +1227,10 @@ pub async fn run_manager_loop(
                                 task.id
                             );
                         }
-                        // Don't break — call stages are instant, continue processing
-                        continue;
+                    } else {
+                        // Non-call RunStage — collect for priority-based selection in Phase 2
+                        runstage_candidates.push(task.clone());
                     }
-                    let runner = CliStageRunner::new(
-                        zbobr,
-                        task.id,
-                        pipeline_name,
-                        stage_name,
-                        stage_def,
-                        None,
-                    );
-                    if let Err(e) = runner.run().await {
-                        let msg = format!(
-                            "Stage {}/{} failed for task #{}: {e}",
-                            pipeline_name, stage_name, task.id
-                        );
-                        tracing::error!("{msg}");
-                        let task_session = zbobr.task_session(task.id);
-                        let status = format_error_status(zbobr, &msg);
-                        if let Err(pause_err) = task_session
-                            .set_pause_with_status_and_signal(status, Signal::go(stage_name))
-                            .await
-                        {
-                            tracing::error!(
-                                "Failed to pause task #{} after stage error: {pause_err}",
-                                task.id
-                            );
-                        }
-                    }
-                    session_run = true;
-                    break;
                 }
                 crate::workflow::StateAction::Done => {
                     let task_session = zbobr.task_session(task.id);
@@ -1273,6 +1336,52 @@ pub async fn run_manager_loop(
                     }
                 }
                 crate::workflow::StateAction::Paused | crate::workflow::StateAction::Idle => {}
+            }
+        }
+
+        // Phase 2: use select_runnable_task to pick the highest-priority RunStage candidate
+        // and run its stage.  This shares the exact same ready-task selection logic as the
+        // `task list --select` CLI flag.
+        if let Some(task) = select_runnable_task(workflow, &runstage_candidates) {
+            let action = match workflow.resolve_next_action(task) {
+                Ok(a) => a,
+                Err(e) => {
+                    tracing::warn!("State machine error for task #{}: {e}", task.id);
+                    continue;
+                }
+            };
+            if let crate::workflow::StateAction::RunStage(pipeline_name, stage_name, stage_def) =
+                action
+            {
+                tracing::info!(
+                    "Processing task #{} (state={:?}, signal={:?}) — running stage {}/{}",
+                    task.id,
+                    task.state,
+                    task.signal,
+                    pipeline_name,
+                    stage_name,
+                );
+                let runner =
+                    CliStageRunner::new(zbobr, task.id, pipeline_name, stage_name, stage_def, None);
+                if let Err(e) = runner.run().await {
+                    let msg = format!(
+                        "Stage {}/{} failed for task #{}: {e}",
+                        pipeline_name, stage_name, task.id
+                    );
+                    tracing::error!("{msg}");
+                    let task_session = zbobr.task_session(task.id);
+                    let status = format_error_status(zbobr, &msg);
+                    if let Err(pause_err) = task_session
+                        .set_pause_with_status_and_signal(status, Signal::go(stage_name))
+                        .await
+                    {
+                        tracing::error!(
+                            "Failed to pause task #{} after stage error: {pause_err}",
+                            task.id
+                        );
+                    }
+                }
+                session_run = true;
             }
         }
 
@@ -1555,10 +1664,8 @@ struct SessionOutcome {
     execution_interrupted: bool,
     execution_error: Option<anyhow::Error>,
     execution_output: Option<String>,
-    /// True only when the executor could not be spawned or a connectivity-level
-    /// error occurred (i.e. the provider itself was unavailable). False for
-    /// ordinary non-zero exit codes, which represent task-level failures.
-    connectivity_failure: bool,
+    /// True when execution failed and the stage should try another provider/model.
+    execution_failed: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1582,19 +1689,16 @@ async fn execute_tool(
                     execution_interrupted: false,
                     execution_error: None,
                     execution_output: Some(output),
-                    connectivity_failure: false,
+                    execution_failed: false,
                 },
-                Ok(ExecutorOutput { output, exit_ok: false, quota_failure }) => {
+                Ok(ExecutorOutput { output, exit_ok: false, .. }) => {
                     let e = anyhow::anyhow!("Tool exited with non-zero status");
                     tracing::error!("Tool execution failed: {e}");
-                    if quota_failure {
-                        tracing::warn!("Quota/rate-limit failure detected in executor output — treating as provider unavailability");
-                    }
                     SessionOutcome {
                         execution_interrupted: false,
                         execution_error: Some(e),
                         execution_output: Some(output),
-                        connectivity_failure: quota_failure,
+                        execution_failed: true,
                     }
                 }
                 Err(e) => {
@@ -1603,7 +1707,7 @@ async fn execute_tool(
                         execution_interrupted: false,
                         execution_error: Some(e),
                         execution_output: None,
-                        connectivity_failure: true,
+                        execution_failed: true,
                     }
                 }
             }
@@ -1614,7 +1718,7 @@ async fn execute_tool(
                 execution_interrupted: true,
                 execution_error: None,
                 execution_output: None,
-                connectivity_failure: false,
+                execution_failed: false,
             }
         }
     }
@@ -1814,6 +1918,192 @@ async fn perform_stash_and_push(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use indexmap::IndexMap;
+    use zbobr_api::config::StageDefinition;
+    use zbobr_api::config::{PipelineConfig, WorkflowConfig};
+    use zbobr_api::{Pipeline, StackEntry};
+
+    // -- Test Helpers --
+
+    /// Build a minimal Workflow with a single "main" pipeline containing one "working" stage.
+    fn make_workflow() -> Workflow {
+        let role_stage = StageDefinition {
+            role: Some("worker".to_string()),
+            ..Default::default()
+        };
+        let main_pipeline = PipelineConfig {
+            stages: IndexMap::from([("working".into(), role_stage)]),
+        };
+        let config = WorkflowConfig {
+            pipelines: [("main".into(), main_pipeline)].into(),
+            ..Default::default()
+        };
+        Workflow::from_config(config)
+    }
+
+    /// Construct a Task with the given fields, defaults for the rest.
+    fn make_task(
+        id: u64,
+        state: State,
+        stage_count: u64,
+        pause: bool,
+        stack: Vec<StackEntry>,
+    ) -> Task {
+        Task {
+            id,
+            title: format!("task {}", id),
+            description: "test description".to_string(),
+            state,
+            work_branch: None,
+            pr_url: None,
+            context: Default::default(),
+            signal: None,
+            stack,
+            status: None,
+            pause,
+            confirm: false,
+            pipeline_run_id: 0,
+            stage_count,
+            max_stage_count: 0,
+            closed: false,
+            etag: None,
+        }
+    }
+
+    // -- Tests for select_runnable_task --
+
+    #[test]
+    fn select_runnable_task_selects_highest_stage_count() {
+        let wf = make_workflow();
+        let tasks = [
+            make_task(1, State::Ready, 2, false, vec![]),
+            make_task(2, State::Ready, 5, false, vec![]),
+            make_task(3, State::Ready, 3, false, vec![]),
+        ];
+
+        let selected = select_runnable_task(&wf, &tasks);
+        assert!(selected.is_some());
+        assert_eq!(selected.unwrap().id, 2);
+    }
+
+    #[test]
+    fn select_runnable_task_deterministic_tie_break() {
+        let wf = make_workflow();
+        // Two tasks with same stage_count but different IDs
+        let tasks1 = [
+            make_task(5, State::Ready, 10, false, vec![]),
+            make_task(3, State::Ready, 10, false, vec![]),
+        ];
+        let tasks2 = [
+            make_task(3, State::Ready, 10, false, vec![]),
+            make_task(5, State::Ready, 10, false, vec![]),
+        ];
+
+        let selected1 = select_runnable_task(&wf, &tasks1);
+        let selected2 = select_runnable_task(&wf, &tasks2);
+
+        // Both should select the same task regardless of input order (deterministic)
+        // The implementation uses b.id.cmp(&a.id) which selects the lower ID on ties
+        assert_eq!(selected1.map(|t| t.id), Some(3));
+        assert_eq!(selected2.map(|t| t.id), Some(3));
+    }
+
+    #[test]
+    fn select_runnable_task_excludes_paused_tasks() {
+        let wf = make_workflow();
+        let tasks = [make_task(1, State::Ready, 10, true, vec![])];
+
+        let selected = select_runnable_task(&wf, &tasks);
+        assert!(selected.is_none());
+    }
+
+    #[test]
+    fn select_runnable_task_excludes_ready_with_stack() {
+        let wf = make_workflow();
+        let stack = vec![StackEntry {
+            pipeline: Pipeline::Main,
+            signal: Signal::go("working"),
+            pipeline_run_id: 1,
+        }];
+        let tasks = [make_task(1, State::Ready, 10, false, stack)];
+
+        let selected = select_runnable_task(&wf, &tasks);
+        // READY-with-stack tasks are excluded (Phase 1 normalization)
+        assert!(selected.is_none());
+    }
+
+    #[test]
+    fn select_runnable_task_excludes_done_tasks() {
+        let wf = make_workflow();
+        let tasks = [make_task(1, State::Done, 10, false, vec![])];
+
+        let selected = select_runnable_task(&wf, &tasks);
+        assert!(selected.is_none());
+    }
+
+    #[test]
+    fn select_runnable_task_returns_none_on_empty_input() {
+        let wf = make_workflow();
+        let tasks: [Task; 0] = [];
+
+        let selected = select_runnable_task(&wf, &tasks);
+        assert!(selected.is_none());
+    }
+
+    #[test]
+    fn select_runnable_task_returns_none_when_all_filtered() {
+        let wf = make_workflow();
+        let stack = vec![StackEntry {
+            pipeline: Pipeline::Main,
+            signal: Signal::go("working"),
+            pipeline_run_id: 1,
+        }];
+        let tasks = [
+            make_task(1, State::Ready, 10, true, vec![]), // paused
+            make_task(2, State::Done, 5, false, vec![]),  // done
+            make_task(3, State::Ready, 15, false, stack), // ready with stack
+        ];
+
+        let selected = select_runnable_task(&wf, &tasks);
+        assert!(selected.is_none());
+    }
+
+    // -- Tests for TaskListEntry --
+
+    #[test]
+    fn task_list_entry_from_task_projects_correct_fields() {
+        let task = make_task(42, State::Ready, 7, false, vec![]);
+        let entry = TaskListEntry::from(&task);
+
+        assert_eq!(entry.id, 42);
+        assert_eq!(entry.stage_count, 7);
+        assert_eq!(entry.state, State::Ready);
+        assert_eq!(entry.title, "task 42");
+    }
+
+    #[test]
+    fn task_list_entry_json_serialization_has_expected_keys() {
+        let task = make_task(99, State::Pending(Pipeline::Main), 3, false, vec![]);
+        let entry = TaskListEntry::from(&task);
+        let json_str = serde_json::to_string(&entry).expect("failed to serialize");
+        let json_obj: serde_json::Value =
+            serde_json::from_str(&json_str).expect("failed to parse json");
+
+        // Check that all expected keys are present
+        assert!(json_obj.is_object());
+        let obj = json_obj.as_object().unwrap();
+        assert!(obj.contains_key("id"));
+        assert!(obj.contains_key("stage_count"));
+        assert!(obj.contains_key("state"));
+        assert!(obj.contains_key("title"));
+
+        // Verify values
+        assert_eq!(obj["id"].as_u64(), Some(99));
+        assert_eq!(obj["stage_count"].as_u64(), Some(3));
+        assert_eq!(obj["title"].as_str(), Some("task 99"));
+    }
+
+    // -- Existing tests for sanitize_branch_postfix --
 
     #[test]
     fn sanitize_branch_postfix_basic() {

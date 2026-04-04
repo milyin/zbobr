@@ -9,12 +9,17 @@ pub struct ZbobrTaskBackendFsConfig {
     #[arg(long)]
     #[config(path)]
     pub tasks_dir: PathBuf,
+    /// Optional default maximum number of stages for new tasks (0 disables limit).
+    /// If absent, falls back to zbobr_api::task::DEFAULT_MAX_STAGE_COUNT.
+    #[arg(long)]
+    pub default_max_stage_count: u64,
 }
 
 impl Default for ZbobrTaskBackendFsConfig {
     fn default() -> Self {
         Self {
             tasks_dir: PathBuf::from("./tasks"),
+            default_max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
         }
     }
 }

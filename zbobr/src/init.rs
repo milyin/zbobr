@@ -19,6 +19,16 @@ use zbobr_task_backend_github::ZbobrTaskBackendGithubToml;
 
 use super::RootConfigToml;
 
+// Default model names used by init workspace. Copilot paths use dot notation
+// for some claude models, while actual Claude executor uses hyphen notation.
+const COPILOT_MODEL_HAIKU: &str = "claude-haiku-4.5";
+const CLAUDE_MODEL_HAIKU: &str = "claude-haiku-4-5";
+const COPILOT_MODEL_SONNET: &str = "claude-sonnet-4.6";
+const CLAUDE_MODEL_OPUS: &str = "claude-opus-4-6";
+const CLAUDE_MODEL_SONNET: &str = "claude-sonnet-4.6";
+const COPILOT_MODEL_GPT_5_4: &str = "gpt-5.4";
+const COPILOT_MODEL_GPT_5_MINI: &str = "gpt-5-mini";
+
 /// Initialize a new zbobr workspace at the given directory.
 ///
 /// Creates the directory (if it does not exist), writes a complete `zbobr.toml`
@@ -46,11 +56,12 @@ pub async fn init_workspace(dest: &Path) -> anyhow::Result<()> {
     }
 
     // Serialize with toml pretty-printer, then post-process with toml_edit
-    // to convert stage definitions into inline tables.
+    // to convert stage definitions and dispatcher providers/tools into inline tables.
     let config = default_config_toml();
     let pretty = toml::to_string_pretty(&config)?;
     let mut doc: toml_edit::DocumentMut = pretty.parse()?;
     inline_stage_tables(&mut doc);
+    inline_dispatcher_tables(&mut doc);
     let config_content = format!(
         "# zbobr configuration\n# See documentation for all available options.\n\n{}",
         doc
@@ -136,15 +147,17 @@ fn default_config_toml() -> RootConfigToml {
 
     let tools = IndexMap::from([
         (
-            "smart".to_string(),
+            "developer".to_string(),
             vec![
                 ToolEntry {
-                    provider: "copilot".to_string(),
-                    model: "claude-opus-4.6".parse().unwrap(),
+                    provider: "claude".to_string(),
+                    model: CLAUDE_MODEL_OPUS.parse().unwrap(),
+                    priority: None,
                 },
                 ToolEntry {
-                    provider: "claude".to_string(),
-                    model: "claude-opus-4-6".parse().unwrap(),
+                    provider: "copilot".to_string(),
+                    model: COPILOT_MODEL_SONNET.parse().unwrap(),
+                    priority: Some(0),
                 },
             ],
         ),
@@ -152,25 +165,59 @@ fn default_config_toml() -> RootConfigToml {
             "planner".to_string(),
             vec![
                 ToolEntry {
-                    provider: "copilot_planner".to_string(),
-                    model: "claude-opus-4.6".parse().unwrap(),
+                    provider: "claude_planner".to_string(),
+                    model: CLAUDE_MODEL_OPUS.parse().unwrap(),
+                    priority: None,
                 },
                 ToolEntry {
-                    provider: "claude_planner".to_string(),
-                    model: "claude-opus-4-6".parse().unwrap(),
+                    provider: "copilot_planner".to_string(),
+                    model: COPILOT_MODEL_SONNET.parse().unwrap(),
+                    priority: Some(0),
                 },
             ],
         ),
         (
-            "silly".to_string(),
+            "helper".to_string(),
             vec![
                 ToolEntry {
                     provider: "copilot".to_string(),
-                    model: "gpt-5-mini".parse().unwrap(),
+                    model: COPILOT_MODEL_HAIKU.parse().unwrap(),
+                    priority: None,
                 },
                 ToolEntry {
                     provider: "claude".to_string(),
-                    model: "claude-haiku-4-5".parse().unwrap(),
+                    model: CLAUDE_MODEL_HAIKU.parse().unwrap(),
+                    priority: Some(0),
+                },
+            ],
+        ),
+        (
+            "reviewer".to_string(),
+            vec![
+                ToolEntry {
+                    provider: "copilot".to_string(),
+                    model: COPILOT_MODEL_GPT_5_4.parse().unwrap(),
+                    priority: None,
+                },
+                ToolEntry {
+                    provider: "claude".to_string(),
+                    model: CLAUDE_MODEL_SONNET.parse().unwrap(),
+                    priority: Some(0),
+                },
+            ],
+        ),
+        (
+            "drudge".to_string(),
+            vec![
+                ToolEntry {
+                    provider: "copilot".to_string(),
+                    model: COPILOT_MODEL_GPT_5_MINI.parse().unwrap(),
+                    priority: None,
+                },
+                ToolEntry {
+                    provider: "claude".to_string(),
+                    model: CLAUDE_MODEL_HAIKU.parse().unwrap(),
+                    priority: Some(0),
                 },
             ],
         ),
@@ -184,7 +231,8 @@ fn default_config_toml() -> RootConfigToml {
             agent_github_token: Some(Secret::value("not-configured")),
             providers: Some(providers),
             tools: Some(tools),
-            provider_exclusion_secs: None,
+            provider_exclusion_secs: Some(3600),
+            provider_exclusion_fail_count: Some(3),
             work_branch_prefix: Some("zbobr_fix".into()),
             git_user_name: Some("zbobr".into()),
             git_user_email: Some("zbobr@example.com".into()),
@@ -194,6 +242,7 @@ fn default_config_toml() -> RootConfigToml {
         }),
         tasks: Some(ZbobrTaskBackendGithubToml {
             instance: None,
+            default_max_stage_count: Some(zbobr_api::task::DEFAULT_MAX_STAGE_COUNT),
             github_repo: Some("owner/repo".into()),
             github_token: Some(Secret::value(String::new())),
             reports_branch: None,
@@ -280,6 +329,15 @@ fn default_workflow() -> WorkflowConfig {
             },
         ),
         (
+            Stage::from("linting"),
+            StageDefinition {
+                role: Some("linter".into()),
+                prompts: task_prompt.clone(),
+                on_failure: Some(StageTransition::stage("working")),
+                ..Default::default()
+            },
+        ),
+        (
             Stage::from("testing"),
             StageDefinition {
                 role: Some("tester".into()),
@@ -343,8 +401,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("worker.md")),
-                tool: Some("smart".to_string()),
-                ..Default::default()
+                tool: Some("developer".to_string()),
             },
         ),
         (
@@ -360,7 +417,6 @@ fn default_workflow() -> WorkflowConfig {
                 ],
                 prompt: Some(PathBuf::from("test_planner.md")),
                 tool: Some("planner".to_string()),
-                ..Default::default()
             },
         ),
         (
@@ -377,8 +433,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("test_worker.md")),
-                tool: Some("smart".to_string()),
-                ..Default::default()
+                tool: Some("developer".to_string()),
             },
         ),
         (
@@ -394,8 +449,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("reviewer.md")),
-                tool: Some("smart".to_string()),
-                ..Default::default()
+                tool: Some("developer".to_string()),
             },
         ),
         (
@@ -409,8 +463,21 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ],
                 prompt: Some(PathBuf::from("tester.md")),
-                tool: Some("smart".to_string()),
-                ..Default::default()
+                tool: Some("developer".to_string()),
+            },
+        ),
+        (
+            "linter".into(),
+            RoleDefinition {
+                mcp: vec![
+                    StopWithError,
+                    ReportSuccess,
+                    ReportFailure,
+                    StopWithQuestion,
+                    GetCtxRec,
+                ],
+                prompt: Some(PathBuf::from("linter.md")),
+                tool: Some("drudge".to_string()),
             },
         ),
         (
@@ -419,7 +486,6 @@ fn default_workflow() -> WorkflowConfig {
                 mcp: vec![StopWithError, ReportSuccess, StopWithQuestion],
                 prompt: Some(PathBuf::from("merger.md")),
                 tool: Some("silly".to_string()),
-                ..Default::default()
             },
         ),
     ]);
@@ -463,6 +529,54 @@ fn inline_stage_tables(doc: &mut toml_edit::DocumentMut) {
     }
 }
 
+/// Convert `dispatcher.providers.*` and `dispatcher.tools.*` entries to inline tables/arrays.
+fn inline_dispatcher_tables(doc: &mut toml_edit::DocumentMut) {
+    let Some(toml_edit::Item::Table(dispatcher)) = doc.get_mut("dispatcher") else {
+        return;
+    };
+
+    if let Some(toml_edit::Item::Table(providers)) = dispatcher.get_mut("providers") {
+        let keys: Vec<String> = providers.iter().map(|(k, _)| k.to_string()).collect();
+        for key in &keys {
+            let Some(provider_item) = providers.get_mut(key) else {
+                continue;
+            };
+            if let Some(table) = provider_item.as_table_mut() {
+                let inline = table.clone().into_inline_table();
+                *provider_item = toml_edit::Item::Value(toml_edit::Value::InlineTable(inline));
+            }
+            if let Some(mut k) = providers.key_mut(key) {
+                k.fmt();
+            }
+        }
+    }
+
+    if let Some(toml_edit::Item::Table(tools)) = dispatcher.get_mut("tools") {
+        let keys: Vec<String> = tools.iter().map(|(k, _)| k.to_string()).collect();
+        for key in &keys {
+            let Some(tool_item) = tools.get_mut(key) else {
+                continue;
+            };
+            let inline_tables: Option<Vec<toml_edit::InlineTable>> =
+                if let toml_edit::Item::ArrayOfTables(aot) = tool_item {
+                    Some(aot.iter().map(|t| t.clone().into_inline_table()).collect())
+                } else {
+                    None
+                };
+            if let Some(inline_tables) = inline_tables {
+                let mut array = toml_edit::Array::new();
+                for inline in inline_tables {
+                    array.push(toml_edit::Value::InlineTable(inline));
+                }
+                *tool_item = toml_edit::Item::Value(toml_edit::Value::Array(array));
+            }
+            if let Some(mut k) = tools.key_mut(key) {
+                k.fmt();
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Default prompt files
 // ---------------------------------------------------------------------------
@@ -473,6 +587,7 @@ const PROMPT_FILES: &[(&str, &str)] = &[
     ("test_planner", TEST_PLANNER_PROMPT),
     ("test_worker", TEST_WORKER_PROMPT),
     ("reviewer", REVIEWER_PROMPT),
+    ("linter", LINTER_PROMPT),
     ("tester", TESTER_PROMPT),
     ("merger", MERGER_PROMPT),
     ("task", TASK_TEMPLATE),
@@ -595,11 +710,10 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 2. **Identify the analog referenced in the plan.** Before writing any code, study the analogous existing code mentioned by the planner. Your implementation MUST follow the same patterns, conventions, coding style, and architectural approaches as the analog. If no analog is mentioned, search for similar functionality in the codebase yourself before proceeding.
 3. Implement the task by going through unchecked checklist items one by one. Commit work after implementing each item.  **Follow the same patterns and style as the identified analog if one is available.**
 4. When implementation for an item is complete, mark the item done with `{mcp_check_checklist_item}` (pass the ctx_rec_N id).
-5. Correct existing tests if necessary, but **do NOT implement new tests for new functionality** in this stage. Tests will be implemented later.
-6. If you sense your context window is getting close to its limit, finish your current item to a buildable state, commit your work, mark completed items as done, call `{mcp_report_intermediate}` with a summary of what you accomplished and what remains and finish the session.
-7. If you need human clarification or intervention, call `{mcp_stop_with_question}`. If the plan is unclear or requires adjustment, call `{mcp_report_failure}`. In case of technical errors use `{mcp_stop_with_error}`.
-8. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
-9. When your current session's work is done, decide how to finish:
+5. If you sense your context window is getting close to its limit, finish your current item to a buildable state, commit your work, mark completed items as done, call `{mcp_report_intermediate}` with a summary of what you accomplished and what remains and finish the session.
+6. If you need human clarification or intervention, call `{mcp_stop_with_question}`. If the plan is unclear or requires adjustment, call `{mcp_report_failure}`. In case of technical errors use `{mcp_stop_with_error}`.
+7. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
+8. When your current session's work is done, decide how to finish:
     - If **all checklist items are completed** (the full plan is done), call `{mcp_report_success}` to report final success.
     - If **some items remain unchecked** (more work is needed in future sessions), call `{mcp_report_intermediate}` to report what you accomplished so far.
 
@@ -620,9 +734,13 @@ const TEST_PLANNER_PROMPT: &str = concat!(
 1. Read recent plan and recent implemetation report.
 2. Inspect changes in the working branch (e.g., `git diff origin/{destination_branch}...HEAD`) to understand implemented behavior.
 3. Decide whether the new feature/bugfix needs additional tests beyond existing coverage. If no new tests are needed, call `{mcp_report_success}` with only a brief rationale and finish.
-4. Prepare a plan for implementing the required tests as an overview document and set of checklist items
-5. Call `{mcp_add_checklist_item}` for each test or group of related tests.
-6. Call `{mcp_report_success}` with the overview report test-planning work is complete.
+4. Do NOT propose tests that only assert static prompt text or default config literal values.
+5. Treat prompt files and default config examples as source-of-truth authoring artifacts, not behavior contracts to snapshot.
+6. Prefer tests that validate behavior and contracts: transitions/routing, parser/serializer invariants, error handling, and externally observable outcomes.
+7. Add content-based assertions only when exact text/value stability is itself an explicit product/API contract.
+8. Prepare a plan for implementing the required tests as an overview document and set of checklist items
+9. Call `{mcp_add_checklist_item}` for each test or group of related tests.
+10. Call `{mcp_report_success}` with the overview report test-planning work is complete.
 "#,
 );
 
@@ -682,8 +800,10 @@ Review the implementation changes and ensure they meet coding standards and task
 ## Review Guidelines
 
 - **Check compile-time validation**: Verify whether code correctness can be enforced at compile time (e.g., through type system, constants, enums) rather than relying on runtime checks or string matching. Flag opportunities to strengthen compile-time guarantees.
-- **Check robustness against inconsistent changes**: Verify that the code is resilient to partial updates — e.g., changing a constant or literal in one place and forgetting to update it elsewhere. Flag hardcoded string literals that could be derived from existing types or constants.
-- **Check type specificity**: Verify that all newly introduced fields, variables, parameters, and return types use the most specific type available for their purpose. Suspect all base types (numbers, strings, booleans) — search the codebase for existing custom types, newtypes, or domain-specific wrappers that should be used instead."#,
+- **Check robustness against inconsistent changes**: Verify that the code is resilient to partial updates — e.g., changing a constant or literal in one place and forgetting to update it elsewhere. Flag hardcoded string literals that could be derived from existing types or constants. But don't be overzealous — not every literal needs to be served as a constant, especially in examples, demonstrations, or tests.
+- **Check type specificity**: Verify that all newly introduced fields, variables, parameters, and return types use the most specific type available for their purpose. Suspect all base types (numbers, strings, booleans) — search the codebase for existing custom types, newtypes, or domain-specific wrappers that should be used instead.
+- **Check test value**: Flag tests that only verify static prompt/config content as low-value and brittle unless exact text/value is an explicit runtime or API contract.
+- **Prefer behavior-oriented tests**: Favor findings and suggestions toward tests that validate observable behavior, transitions, integration boundaries, and failure paths."#,
 );
 
 const TESTER_PROMPT: &str = concat!(
@@ -694,7 +814,6 @@ Run comprehensive tests to verify the implementation meets all testing requireme
 "#,
     get_ctx_rec_guidance!(),
     r#"
-
 ## Access Model
 
 You have access to the task context and the repository for testing:
@@ -709,33 +828,69 @@ You have access to the task context and the repository for testing:
 2. **Independently discover testing infrastructure:**
    - Examine CI and build configuration files (`.github/workflows/`, `Makefile`, `Cargo.toml`, `tox.ini`, `CMakeLists.txt`, or equivalent)
    - Identify test frameworks and commands (cargo test, npm test, pytest, etc.)
-   - Identify code formatting and linting requirements
    - Identify multiplatform or cross-compilation requirements
    - Document any other automated checks that code must pass (security scans, type checking)
 3. **Run comprehensive test suite** matching the project's requirements:
    - Execute all test commands you identified from the CI configuration
    - Record test framework versions, commands executed, and full output
    - Measure code coverage if available
-   - Run formatting/linting checks to ensure code quality
    - Verify all CI requirements are met
-4. **Fix formatting/linting issues if found**: If the only failures are formatting/linting issues (e.g., `cargo fmt`, `cargo clippy`, `prettier`, `black`, `gofmt`), fix them directly, commit with a message like `chore: fix formatting`, and repeat formatting/linting test.
-5. In case of test failures run the failed tests on the original branch to determine if the failure is due to new changes or existing issues in the codebase.
-6. **Document all testing performed:**
+4. In case of test failures run the failed tests on the original branch to determine if the failure is due to new changes or existing issues in the codebase.
+5. **Document all testing performed:**
    - Test frameworks and versions used
    - All commands executed with full output
    - Test results (passed/failed/skipped counts)
    - Any failures found
    - Code coverage metrics
-   - Formatting/linting issues (and whether you fixed them)
-7. Call `{mcp_report_success}` if all tests pass and all requirements are met, or `{mcp_report_failure}` if any tests fail or requirements are not met. Pass your comprehensive test report as a parameter.
+6. Call `{mcp_report_success}` if all tests pass and all requirements are met, or `{mcp_report_failure}` if any tests fail or requirements are not met. Pass your comprehensive test report as a parameter.
 
 ## Important Notes
 
-- **Formatting fixes are allowed**: If the only issue is code style/formatting, fix it and commit — do not reject the task for formatting alone.
-- **Do not modify logic**: Only fix formatting/linting issues automatically. Any substantive code changes must go back to the worker.
+- **Linting and formatting checks are handled by a separate stage — do not run them here.**
+- **Do not modify logic or formatting**: Any substantive code changes must go back to the worker.
 - **Comprehensive testing**: Run all test commands discovered from the CI unless they require complex environment configuration. Mention skipped tests in the report.
 - **Concise but exhaustive reporting**: Include to the report exact command line of each test executed. In case of error append the extract of test log with the error message.
 - **Early termination if necessary**: If some test run shows massive failures indicating a fundamental issue with the implementation, you may stop further testing and make `{mcp_report_failure}` report immediately. Otherwise execute full test suite."#,
+);
+
+const LINTER_PROMPT: &str = concat!(
+    r#"# Linter Agent
+
+Check code formatting and linting, and fix any issues found.
+
+"#,
+    get_ctx_rec_guidance!(),
+    r#"
+## Access Model
+
+You have access to the task context and the repository:
+- The task description, work plan, worker's reports, and context are provided below in this prompt. The full history and checklist are available in the context section.
+- Your current working directory is the repository with the work branch checked out
+- Use `{mcp_stop_with_error}` only to report technical errors
+
+## Workflow
+
+1. Read the task description and context provided below in this prompt.
+2. **Discover formatting and linting setup** by examining CI and build configuration files:
+   - `.github/workflows/` — look for formatting/linting steps (e.g., `cargo fmt --check`, `cargo clippy`, `prettier`, `black`, `gofmt`, `eslint`)
+   - `Makefile`, `Cargo.toml`, `package.json`, `pyproject.toml`, or equivalent — identify lint/fmt commands
+   - Note exact commands and flags used in CI so you run the same checks
+3. **Run all formatting and linting checks** identified from CI:
+   - Record each command executed and its full output
+4. **Fix auto-fixable issues only**:
+   - Apply tool-based auto-fixes (e.g., `cargo fmt`, `gofmt -w`, `black .`, `prettier --write`)
+   - Address linting warnings or errors that can be auto-fixed by these tools
+   - Do not attempt manual fixes for issues that cannot be resolved automatically by formatter/linter
+   - If any issue remains after auto-fix and cannot be auto-fixed, call `{mcp_report_failure}` with a detailed report of the remaining issues
+   - Commit only auto-fix changes with a message like `chore: fix formatting and linting`
+5. Re-run the checks after fixing to confirm everything passes.
+6. Call `{mcp_report_success}` if all formatting and linting checks pass, or `{mcp_report_failure}` if issues remain that cannot be auto-fixed. Pass a brief report of what was checked and what was fixed.
+
+## Important Notes
+
+- **Only fix formatting and linting** — do not modify logic, tests, or functionality.
+- **Do not run tests** — functional testing is handled by a separate stage.
+- **Fix issues autonomously**: You are allowed and expected to fix formatting/linting issues directly and commit them."#,
 );
 
 const MERGER_PROMPT: &str = r#"# Merger Agent
@@ -789,107 +944,67 @@ You have read access to the task and repository:
 mod tests {
     use super::*;
 
-    const GET_CTX_REC_PROMPT_FRAGMENT: &str = "{mcp_get_ctx_rec}";
+    // ── inline_dispatcher_tables unit tests ──────────────────────────────
 
     #[test]
-    fn default_workflow_includes_test_stages() {
-        let workflow = default_workflow();
-        let main = workflow
-            .pipeline(Pipeline::MAIN)
-            .expect("main pipeline exists");
-        assert!(main.stages.contains_key("test_planner"));
-        assert!(main.stages.contains_key("test_worker"));
+    fn inline_dispatcher_tables_converts_providers_to_inline() {
+        let toml_str = r#"
+[dispatcher.providers.copilot]
+executor = "copilot"
 
-        let working = main.stages.get("working").expect("working stage exists");
-        assert_eq!(
-            working
-                .on_intermediate
-                .as_ref()
-                .and_then(|t| t.next.as_ref())
-                .map(|s| s.as_str()),
-            Some("reviewing")
-        );
-
-        let reviewing = main
-            .stages
-            .get("reviewing")
-            .expect("reviewing stage exists");
-        assert_eq!(
-            reviewing
-                .on_intermediate
-                .as_ref()
-                .and_then(|t| t.next.as_ref())
-                .map(|s| s.as_str()),
-            Some("test_planner")
-        );
-    }
-
-    #[test]
-    fn default_workflow_has_no_preparator_stage() {
-        let workflow = default_workflow();
-        let main = workflow
-            .pipeline(Pipeline::MAIN)
-            .expect("main pipeline exists");
-
-        // Preparator stage must not exist in any pipeline
+[dispatcher.providers.claude]
+executor = "claude"
+"#;
+        let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
+        inline_dispatcher_tables(&mut doc);
+        let output = doc.to_string();
+        // Should use inline table syntax, not section headers
         assert!(
-            !main.stages.contains_key("preparing"),
-            "preparing stage should not exist in main pipeline"
+            output.contains("copilot = {"),
+            "copilot should be inline table, got: {output}"
         );
-
-        if let Some(merge) = workflow.pipeline(Pipeline::MERGE) {
-            assert!(
-                !merge.stages.contains_key("preparing"),
-                "preparing stage should not exist in merge pipeline"
-            );
-        }
-
-        // No stage role should be named "preparator"
-        for stage_def in main.stages.values() {
-            if let Some(ref role) = stage_def.role {
-                assert_ne!(
-                    role, "preparator",
-                    "no stage in main pipeline should have role 'preparator'"
-                );
-            }
-        }
+        assert!(
+            output.contains("claude = {"),
+            "claude should be inline table, got: {output}"
+        );
+        assert!(
+            !output.contains("[dispatcher.providers.copilot]"),
+            "section header should be gone, got: {output}"
+        );
     }
 
     #[test]
-    fn default_prompts_reference_get_ctx_rec_when_role_has_access() {
-        for prompt in [
-            PLANNER_PROMPT,
-            WORKER_PROMPT,
-            TEST_PLANNER_PROMPT,
-            TEST_WORKER_PROMPT,
-            REVIEWER_PROMPT,
-            TESTER_PROMPT,
-        ] {
-            assert!(
-                prompt.contains(GET_CTX_REC_PROMPT_FRAGMENT),
-                "prompt should mention get_ctx_rec"
-            );
-            assert!(
-                prompt.contains("ctx_rec_*"),
-                "prompt should explain when get_ctx_rec is needed"
-            );
-        }
+    fn inline_dispatcher_tables_converts_tools_to_inline_array() {
+        let toml_str = r#"
+[[dispatcher.tools.developer]]
+provider = "claude"
+model = "claude-opus-4.6"
+
+[[dispatcher.tools.developer]]
+provider = "copilot"
+model = "claude-opus-4.6"
+"#;
+        let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
+        inline_dispatcher_tables(&mut doc);
+        let output = doc.to_string();
+        assert!(
+            output.contains("developer = ["),
+            "developer should be inline array, got: {output}"
+        );
+        assert!(
+            !output.contains("[[dispatcher.tools.developer]]"),
+            "array-of-tables header should be gone, got: {output}"
+        );
     }
 
     #[test]
-    fn merger_prompt_does_not_reference_get_ctx_rec() {
-        assert!(!MERGER_PROMPT.contains(GET_CTX_REC_PROMPT_FRAGMENT));
-    }
-
-    #[test]
-    fn default_workflow_roles_have_tool() {
-        let workflow = default_workflow();
-        for (name, role_def) in &workflow.roles {
-            assert!(
-                role_def.tool.is_some(),
-                "Role '{}' in default_workflow must have a tool defined",
-                name
-            );
-        }
+    fn inline_dispatcher_tables_noop_when_dispatcher_absent() {
+        let toml_str = r#"
+[workflow]
+name = "test"
+"#;
+        let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
+        // Should not panic
+        inline_dispatcher_tables(&mut doc);
     }
 }

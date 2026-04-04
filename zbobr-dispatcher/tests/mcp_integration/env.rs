@@ -44,6 +44,7 @@ fn test_providers_and_tools() -> (
     let entry = ToolEntry {
         provider: "mcp-tester".to_string(),
         model: Model::try_new("test-model").expect("valid model name"),
+        priority: None,
     };
     let providers = IndexMap::from([("mcp-tester".to_string(), provider)]);
     let tools = IndexMap::from([("mcp-tester".to_string(), vec![entry])]);
@@ -135,6 +136,7 @@ pub async fn init_fs_fs(name: &'static str) -> Option<Arc<IntegrationTestEnv>> {
 
     let task_backend_config = ZbobrTaskBackendFsConfig {
         tasks_dir: base_path.join("tasks"),
+        default_max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
     };
     let repo_backend_config = ZbobrRepoBackendFsConfig {
         repository: test_repo_dir.to_string_lossy().to_string(),
@@ -239,6 +241,7 @@ pub async fn init_github_github(
         reports_branch: None,
         reports_path: None,
         allowed_usernames: None,
+        default_max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
     };
     let repo_backend_config = ZbobrRepoBackendGithubConfig {
         repository: repository.clone(),
@@ -453,7 +456,6 @@ impl IntegrationTestEnv {
 
         let mcp_tester_config = ZbobrExecutorMcpTesterConfig {
             scenarios: scenario_paths,
-            ..Default::default()
         };
 
         let task = self.get_task(task_id).await;
@@ -512,7 +514,6 @@ impl IntegrationTestEnv {
 
             let mcp_tester_config = ZbobrExecutorMcpTesterConfig {
                 scenarios: scenario_paths,
-                ..Default::default()
             };
 
             let task = self.get_task(task_id).await;
@@ -557,7 +558,6 @@ impl IntegrationTestEnv {
 
         let mcp_tester_config = ZbobrExecutorMcpTesterConfig {
             scenarios: scenario_paths,
-            ..Default::default()
         };
 
         let task = self.get_task(task_id).await;

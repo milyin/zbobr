@@ -68,6 +68,10 @@ pub struct ResolvedProvider {
 pub struct ToolEntry {
     pub provider: String,
     pub model: Model,
+    /// Per-entry priority override. When set, replaces the priority inherited from the provider.
+    /// Use a lower value than the provider's default to mark this entry as a fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<i32>,
 }
 
 /// A stage transition descriptor with an optional target stage and pause flag.
@@ -552,6 +556,9 @@ pub struct ZbobrDispatcherConfig {
     /// Seconds a provider is excluded from selection after a failure.
     #[config(skip_args)]
     pub provider_exclusion_secs: u64,
+    /// Consecutive failures required before excluding a provider.
+    #[config(skip_args)]
+    pub provider_exclusion_fail_count: u32,
     /// Prefix for work branches (default: "zbobr_fix").
     pub work_branch_prefix: String,
     /// Git user name for commits made by the tool.
@@ -580,6 +587,7 @@ impl Default for ZbobrDispatcherConfig {
             providers: IndexMap::new(),
             tools: IndexMap::new(),
             provider_exclusion_secs: 300,
+            provider_exclusion_fail_count: 1,
             work_branch_prefix: "zbobr_fix".to_string(),
             git_user_name: String::new(),
             git_user_email: String::new(),
@@ -968,6 +976,7 @@ mod tests {
             vec![ToolEntry {
                 provider: "claude".to_string(),
                 model: "opus".parse().unwrap(),
+                priority: None,
             }],
         );
         let mut config = make_config(providers, tools);
@@ -1037,6 +1046,7 @@ mod tests {
             vec![ToolEntry {
                 provider: "ghost".to_string(),
                 model: "opus".parse().unwrap(),
+                priority: None,
             }],
         );
         let mut config = make_config(providers, tools);
@@ -1181,6 +1191,7 @@ mod tests {
             vec![ToolEntry {
                 provider: "claude".to_string(),
                 model: "opus".parse().unwrap(),
+                priority: None,
             }],
         );
         let config = make_config(providers, tools);
@@ -1212,6 +1223,7 @@ mod tests {
             vec![ToolEntry {
                 provider: "claude".to_string(),
                 model: "opus".parse().unwrap(),
+                priority: None,
             }],
         );
         let config = make_config(providers, tools);
@@ -1259,6 +1271,7 @@ mod tests {
             vec![ToolEntry {
                 provider: "claude".to_string(),
                 model: "opus".parse().unwrap(),
+                priority: None,
             }],
         );
         let config = make_config(providers, tools);
@@ -1310,6 +1323,7 @@ mod tests {
             vec![ToolEntry {
                 provider: "claude".to_string(),
                 model: "opus".parse().unwrap(),
+                priority: None,
             }],
         );
         let config = make_config(providers, tools);
@@ -1368,6 +1382,78 @@ mod tests {
         assert!(
             msg.contains("unknown executor"),
             "Expected 'unknown executor' in error: {msg}"
+        );
+    }
+
+    // ── ToolEntry priority serde round-trips ─────────────────────────────
+
+    #[test]
+    fn tool_entry_priority_deserializes_from_toml() {
+        let toml_str = r#"
+[dispatcher.tools]
+developer = [
+  { provider = "claude", model = "claude-opus-4.6", priority = 0 }
+]
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            dispatcher: Dispatcher,
+        }
+        #[derive(serde::Deserialize)]
+        struct Dispatcher {
+            tools: IndexMap<String, Vec<ToolEntry>>,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let entry = &root.dispatcher.tools["developer"][0];
+        assert_eq!(entry.priority, Some(0));
+    }
+
+    #[test]
+    fn tool_entry_priority_defaults_to_none() {
+        let toml_str = r#"
+[dispatcher.tools]
+developer = [
+  { provider = "claude", model = "claude-opus-4.6" }
+]
+"#;
+        #[derive(serde::Deserialize)]
+        struct Root {
+            dispatcher: Dispatcher,
+        }
+        #[derive(serde::Deserialize)]
+        struct Dispatcher {
+            tools: IndexMap<String, Vec<ToolEntry>>,
+        }
+        let root: Root = toml::from_str(toml_str).unwrap();
+        let entry = &root.dispatcher.tools["developer"][0];
+        assert_eq!(entry.priority, None);
+    }
+
+    #[test]
+    fn tool_entry_priority_none_skipped_in_serialization() {
+        let entry = ToolEntry {
+            provider: "claude".to_string(),
+            model: "claude-opus-4.6".parse().unwrap(),
+            priority: None,
+        };
+        let serialized = toml::to_string(&entry).unwrap();
+        assert!(
+            !serialized.contains("priority"),
+            "priority should be absent when None, got: {serialized}"
+        );
+    }
+
+    #[test]
+    fn tool_entry_priority_some_included_in_serialization() {
+        let entry = ToolEntry {
+            provider: "copilot".to_string(),
+            model: "claude-sonnet-4.6".parse().unwrap(),
+            priority: Some(5),
+        };
+        let serialized = toml::to_string(&entry).unwrap();
+        assert!(
+            serialized.contains("priority = 5"),
+            "priority = 5 should be present, got: {serialized}"
         );
     }
 }
