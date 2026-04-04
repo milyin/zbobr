@@ -145,7 +145,7 @@ fn default_config_toml() -> RootConfigToml {
 
     let providers = IndexMap::from([
         (
-            PROVIDER_CLAUDE.as_str().to_string(),
+            PROVIDER_CLAUDE,
             ProviderDefinition {
                 executor: Some(PROVIDER_CLAUDE.as_str().to_string()),
                 parent: None,
@@ -155,7 +155,7 @@ fn default_config_toml() -> RootConfigToml {
             },
         ),
         (
-            PROVIDER_COPILOT.as_str().to_string(),
+            PROVIDER_COPILOT,
             ProviderDefinition {
                 executor: Some(PROVIDER_COPILOT.as_str().to_string()),
                 parent: None,
@@ -165,7 +165,7 @@ fn default_config_toml() -> RootConfigToml {
             },
         ),
         (
-            PROVIDER_CLAUDE_PLANNER.as_str().to_string(),
+            PROVIDER_CLAUDE_PLANNER,
             ProviderDefinition {
                 executor: None,
                 parent: Some(PROVIDER_CLAUDE),
@@ -175,7 +175,7 @@ fn default_config_toml() -> RootConfigToml {
             },
         ),
         (
-            PROVIDER_COPILOT_PLANNER.as_str().to_string(),
+            PROVIDER_COPILOT_PLANNER,
             ProviderDefinition {
                 executor: None,
                 parent: Some(PROVIDER_COPILOT),

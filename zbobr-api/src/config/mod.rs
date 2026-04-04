@@ -713,7 +713,7 @@ pub struct ZbobrDispatcherConfig {
     pub agent_github_token: Secret,
     /// Named provider definitions. Providers map a name to an executor + settings.
     #[config(skip_args)]
-    pub providers: IndexMap<String, ProviderDefinition>,
+    pub providers: IndexMap<Provider, ProviderDefinition>,
     /// Named tool definitions. Each tool is a list of (provider, model) pairs.
     #[config(skip_args)]
     pub tools: IndexMap<String, Vec<ToolEntry>>,
@@ -895,8 +895,8 @@ impl ZbobrDispatcherConfig {
     pub fn resolve_providers(&self) -> anyhow::Result<IndexMap<String, ResolvedProvider>> {
         let mut resolved = IndexMap::new();
         for name in self.providers.keys() {
-            let rp = self.resolve_single_provider(name, &mut Vec::new())?;
-            resolved.insert(name.clone(), rp);
+            let rp = self.resolve_single_provider(name.as_str(), &mut Vec::new())?;
+            resolved.insert(name.as_str().to_string(), rp);
         }
         Ok(resolved)
     }
@@ -947,7 +947,7 @@ mod tests {
 
     /// Helper: build a minimal ZbobrDispatcherConfig with given providers and tools.
     fn make_config(
-        providers: IndexMap<String, ProviderDefinition>,
+        providers: IndexMap<Provider, ProviderDefinition>,
         tools: IndexMap<String, Vec<ToolEntry>>,
     ) -> ZbobrDispatcherConfig {
         ZbobrDispatcherConfig {
@@ -962,8 +962,7 @@ mod tests {
     #[test]
     fn resolve_providers_basic() {
         let mut providers = IndexMap::new();
-        providers.insert(
-            "claude".to_string(),
+        providers.insert(Provider::new("claude"),
             ProviderDefinition {
                 executor: Some("claude".to_string()),
                 parent: None,
@@ -987,8 +986,7 @@ mod tests {
     #[test]
     fn resolve_providers_single_level_inheritance() {
         let mut providers = IndexMap::new();
-        providers.insert(
-            "claude_base".to_string(),
+        providers.insert(Provider::new("claude_base"),
             ProviderDefinition {
                 executor: Some("claude".to_string()),
                 parent: None,
@@ -997,8 +995,7 @@ mod tests {
                 access_key: None,
             },
         );
-        providers.insert(
-            "claude_child".to_string(),
+        providers.insert(Provider::new("claude_child"),
             ProviderDefinition {
                 executor: None,
                 parent: Some(Provider::new("claude_base")),
@@ -1017,8 +1014,7 @@ mod tests {
     #[test]
     fn resolve_providers_multi_level_chain() {
         let mut providers = IndexMap::new();
-        providers.insert(
-            "grandparent".to_string(),
+        providers.insert(Provider::new("grandparent"),
             ProviderDefinition {
                 executor: Some("claude".to_string()),
                 parent: None,
@@ -1027,8 +1023,7 @@ mod tests {
                 access_key: None,
             },
         );
-        providers.insert(
-            "parent".to_string(),
+        providers.insert(Provider::new("parent"),
             ProviderDefinition {
                 executor: None,
                 parent: Some(Provider::new("grandparent")),
@@ -1037,8 +1032,7 @@ mod tests {
                 access_key: None,
             },
         );
-        providers.insert(
-            "child".to_string(),
+        providers.insert(Provider::new("child"),
             ProviderDefinition {
                 executor: None,
                 parent: Some(Provider::new("parent")),
@@ -1058,8 +1052,7 @@ mod tests {
     #[test]
     fn resolve_providers_circular_reference() {
         let mut providers = IndexMap::new();
-        providers.insert(
-            "a".to_string(),
+        providers.insert(Provider::new("a"),
             ProviderDefinition {
                 executor: None,
                 parent: Some(Provider::new("b")),
@@ -1068,8 +1061,7 @@ mod tests {
                 access_key: None,
             },
         );
-        providers.insert(
-            "b".to_string(),
+        providers.insert(Provider::new("b"),
             ProviderDefinition {
                 executor: None,
                 parent: Some(Provider::new("a")),
@@ -1090,8 +1082,7 @@ mod tests {
     #[test]
     fn resolve_providers_child_overrides_parent() {
         let mut providers = IndexMap::new();
-        providers.insert(
-            "base".to_string(),
+        providers.insert(Provider::new("base"),
             ProviderDefinition {
                 executor: Some("claude".to_string()),
                 parent: None,
@@ -1100,8 +1091,7 @@ mod tests {
                 access_key: None,
             },
         );
-        providers.insert(
-            "child".to_string(),
+        providers.insert(Provider::new("child"),
             ProviderDefinition {
                 executor: None,
                 parent: Some(Provider::new("base")),
@@ -1124,8 +1114,7 @@ mod tests {
     #[test]
     fn validate_valid_config() {
         let mut providers = IndexMap::new();
-        providers.insert(
-            "claude".to_string(),
+        providers.insert(Provider::new("claude"),
             ProviderDefinition {
                 executor: Some("claude".to_string()),
                 parent: None,
@@ -1135,8 +1124,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert(
-            "smart".to_string(),
+        tools.insert(Provider::new("smart"),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1150,8 +1138,7 @@ mod tests {
     #[test]
     fn validate_unknown_parent() {
         let mut providers = IndexMap::new();
-        providers.insert(
-            "child".to_string(),
+        providers.insert(Provider::new("child"),
             ProviderDefinition {
                 executor: None,
                 parent: Some(Provider::new("nonexistent")),
@@ -1172,8 +1159,7 @@ mod tests {
     #[test]
     fn validate_no_executor_no_parent() {
         let mut providers = IndexMap::new();
-        providers.insert(
-            "broken".to_string(),
+        providers.insert(Provider::new("broken"),
             ProviderDefinition {
                 executor: None,
                 parent: None,
@@ -1194,8 +1180,7 @@ mod tests {
     #[test]
     fn validate_tool_references_unknown_provider() {
         let mut providers = IndexMap::new();
-        providers.insert(
-            "claude".to_string(),
+        providers.insert(Provider::new("claude"),
             ProviderDefinition {
                 executor: Some("claude".to_string()),
                 parent: None,
@@ -1205,8 +1190,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert(
-            "smart".to_string(),
+        tools.insert(Provider::new("smart"),
             vec![ToolEntry {
                 provider: Provider::new("ghost"),
                 model: "opus".parse().unwrap(),
@@ -1300,8 +1284,7 @@ mod tests {
     #[test]
     fn resolve_providers_inherits_priority_from_parent() {
         let mut providers = IndexMap::new();
-        providers.insert(
-            "base".to_string(),
+        providers.insert(Provider::new("base"),
             ProviderDefinition {
                 executor: Some("claude".to_string()),
                 parent: None,
@@ -1310,8 +1293,7 @@ mod tests {
                 access_key: None,
             },
         );
-        providers.insert(
-            "child".to_string(),
+        providers.insert(Provider::new("child"),
             ProviderDefinition {
                 executor: None,
                 parent: Some(Provider::new("base")),
@@ -1339,8 +1321,7 @@ mod tests {
     #[test]
     fn validate_workflow_refs_rejects_unknown_role_tool() {
         let mut providers = IndexMap::new();
-        providers.insert(
-            "claude".to_string(),
+        providers.insert(Provider::new("claude"),
             ProviderDefinition {
                 executor: Some("claude".to_string()),
                 parent: None,
@@ -1350,8 +1331,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert(
-            "smart".to_string(),
+        tools.insert(Provider::new("smart"),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1371,8 +1351,7 @@ mod tests {
     #[test]
     fn validate_workflow_refs_rejects_unknown_stage_tool() {
         let mut providers = IndexMap::new();
-        providers.insert(
-            "claude".to_string(),
+        providers.insert(Provider::new("claude"),
             ProviderDefinition {
                 executor: Some("claude".to_string()),
                 parent: None,
@@ -1382,8 +1361,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert(
-            "smart".to_string(),
+        tools.insert(Provider::new("smart"),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1419,8 +1397,7 @@ mod tests {
     #[test]
     fn validate_workflow_refs_passes_valid_refs() {
         let mut providers = IndexMap::new();
-        providers.insert(
-            "claude".to_string(),
+        providers.insert(Provider::new("claude"),
             ProviderDefinition {
                 executor: Some("claude".to_string()),
                 parent: None,
@@ -1430,8 +1407,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert(
-            "smart".to_string(),
+        tools.insert(Provider::new("smart"),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1452,8 +1428,7 @@ mod tests {
         let mut pipelines = HashMap::new();
         pipelines.insert(Pipeline::Main, PipelineConfig { stages });
         let mut roles = IndexMap::new();
-        roles.insert(
-            "worker".to_string(),
+        roles.insert(Provider::new("worker"),
             RoleDefinition {
                 mcp: None,
                 prompt: None,
@@ -1471,8 +1446,7 @@ mod tests {
     #[test]
     fn validate_workflow_refs_rejects_role_without_tool() {
         let mut providers = IndexMap::new();
-        providers.insert(
-            "claude".to_string(),
+        providers.insert(Provider::new("claude"),
             ProviderDefinition {
                 executor: Some("claude".to_string()),
                 parent: None,
@@ -1482,8 +1456,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert(
-            "smart".to_string(),
+        tools.insert(Provider::new("smart"),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1504,8 +1477,7 @@ mod tests {
         let mut pipelines = HashMap::new();
         pipelines.insert(Pipeline::Main, PipelineConfig { stages });
         let mut roles = IndexMap::new();
-        roles.insert(
-            "worker".to_string(),
+        roles.insert(Provider::new("worker"),
             RoleDefinition {
                 mcp: None,
                 prompt: None,
@@ -1530,8 +1502,7 @@ mod tests {
     #[test]
     fn validate_unknown_executor() {
         let mut providers = IndexMap::new();
-        providers.insert(
-            "bad".to_string(),
+        providers.insert(Provider::new("bad"),
             ProviderDefinition {
                 executor: Some("invalid_executor".to_string()),
                 parent: None,
@@ -1697,8 +1668,7 @@ developer = [
     #[test]
     fn workflow_toml_resolve_paths_resolves_nested_prompt_fields() {
         let mut roles = IndexMap::new();
-        roles.insert(
-            "reviewer".to_string(),
+        roles.insert(Provider::new("reviewer"),
             RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("reviewer.md")),
@@ -1756,8 +1726,7 @@ developer = [
         // Overlay config (from /project/) has no workflow section.
         // After per-file resolution + merge, the base paths should stay anchored to /shared/.
         let mut roles = IndexMap::new();
-        roles.insert(
-            "reviewer".to_string(),
+        roles.insert(Provider::new("reviewer"),
             RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("reviewer.md")),
@@ -1796,16 +1765,14 @@ developer = [
         // Base config defines two roles; overlay overrides only one.
         // The unmodified role from base must survive the merge.
         let mut base_roles = IndexMap::new();
-        base_roles.insert(
-            "reviewer".to_string(),
+        base_roles.insert(Provider::new("reviewer"),
             RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("/shared/reviewer.md")),
                 tool: None,
             },
         );
-        base_roles.insert(
-            "worker".to_string(),
+        base_roles.insert(Provider::new("worker"),
             RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("/shared/worker.md")),
@@ -1820,8 +1787,7 @@ developer = [
 
         // Overlay only overrides "reviewer", with a different prompt.
         let mut overlay_roles = IndexMap::new();
-        overlay_roles.insert(
-            "reviewer".to_string(),
+        overlay_roles.insert(Provider::new("reviewer"),
             RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("/project/reviewer_override.md")),
@@ -1929,8 +1895,7 @@ developer = [
     fn dispatcher_toml_merge_providers_key_wise() {
         // Base config defines two providers; overlay adds one and overrides one.
         let mut base_providers = IndexMap::new();
-        base_providers.insert(
-            "claude".to_string(),
+        base_providers.insert(Provider::new("claude"),
             ProviderDefinition {
                 executor: Some("claude".to_string()),
                 parent: None,
@@ -1939,8 +1904,7 @@ developer = [
                 access_key: None,
             },
         );
-        base_providers.insert(
-            "copilot".to_string(),
+        base_providers.insert(Provider::new("copilot"),
             ProviderDefinition {
                 executor: Some("copilot".to_string()),
                 parent: None,
@@ -1957,8 +1921,7 @@ developer = [
 
         // Overlay overrides "claude" with higher priority and adds "gpt".
         let mut overlay_providers = IndexMap::new();
-        overlay_providers.insert(
-            "claude".to_string(),
+        overlay_providers.insert(Provider::new("claude"),
             ProviderDefinition {
                 executor: Some("claude".to_string()),
                 parent: None,
@@ -1967,8 +1930,7 @@ developer = [
                 access_key: None,
             },
         );
-        overlay_providers.insert(
-            "gpt".to_string(),
+        overlay_providers.insert(Provider::new("gpt"),
             ProviderDefinition {
                 executor: Some("openai".to_string()),
                 parent: None,
@@ -2000,8 +1962,7 @@ developer = [
         // Base defines a full provider; overlay only patches priority.
         // The overlay must NOT lose executor or other fields from base.
         let mut base_providers = IndexMap::new();
-        base_providers.insert(
-            "shared".to_string(),
+        base_providers.insert(Provider::new("shared"),
             ProviderDefinition {
                 executor: Some("claude".to_string()),
                 parent: None,
@@ -2018,8 +1979,7 @@ developer = [
 
         // Overlay only overrides priority — executor and plan_mode are not restated.
         let mut overlay_providers = IndexMap::new();
-        overlay_providers.insert(
-            "shared".to_string(),
+        overlay_providers.insert(Provider::new("shared"),
             ProviderDefinition {
                 executor: None,
                 parent: None,
@@ -2060,8 +2020,7 @@ developer = [
         // mcp and prompt must survive because overlay uses mcp: None (field absent).
         use crate::config_tools::McpTool;
         let mut base_roles = IndexMap::new();
-        base_roles.insert(
-            "worker".to_string(),
+        base_roles.insert(Provider::new("worker"),
             RoleDefinition {
                 mcp: Some(vec![McpTool::ReportSuccess]),
                 prompt: Some(PathBuf::from("/shared/worker.md")),
@@ -2077,8 +2036,7 @@ developer = [
 
         // Overlay sets only tool; mcp is None (not specified) so base mcp survives.
         let mut overlay_roles = IndexMap::new();
-        overlay_roles.insert(
-            "worker".to_string(),
+        overlay_roles.insert(Provider::new("worker"),
             RoleDefinition {
                 mcp: None,
                 prompt: None,
@@ -2116,8 +2074,7 @@ developer = [
         // An overlay that explicitly sets mcp = [] must clear the base mcp list.
         use crate::config_tools::McpTool;
         let mut base_roles = IndexMap::new();
-        base_roles.insert(
-            "worker".to_string(),
+        base_roles.insert(Provider::new("worker"),
             RoleDefinition {
                 mcp: Some(vec![McpTool::ReportSuccess]),
                 prompt: None,
@@ -2132,8 +2089,7 @@ developer = [
 
         // Overlay explicitly sets mcp = [] (Some(vec![])) to clear the list.
         let mut overlay_roles = IndexMap::new();
-        overlay_roles.insert(
-            "worker".to_string(),
+        overlay_roles.insert(Provider::new("worker"),
             RoleDefinition {
                 mcp: Some(vec![]),
                 prompt: None,
@@ -2419,8 +2375,7 @@ prompts = ["common.md", "planning.md"]
     #[test]
     fn dispatcher_toml_merge_tools_key_wise_with_wholesale_list_replacement() {
         let mut base_tools = IndexMap::new();
-        base_tools.insert(
-            "developer".to_string(),
+        base_tools.insert(Provider::new("developer"),
             vec![
                 ToolEntry {
                     provider: Provider::new("claude"),
@@ -2434,8 +2389,7 @@ prompts = ["common.md", "planning.md"]
                 },
             ],
         );
-        base_tools.insert(
-            "reviewer".to_string(),
+        base_tools.insert(Provider::new("reviewer"),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "claude-opus-4.6".parse().unwrap(),
@@ -2450,16 +2404,14 @@ prompts = ["common.md", "planning.md"]
 
         // Overlay replaces "developer" list entirely and adds "tester".
         let mut overlay_tools = IndexMap::new();
-        overlay_tools.insert(
-            "developer".to_string(),
+        overlay_tools.insert(Provider::new("developer"),
             vec![ToolEntry {
                 provider: Provider::new("gpt"),
                 model: "claude-opus-4.6".parse().unwrap(),
                 priority: Some(1),
             }],
         );
-        overlay_tools.insert(
-            "tester".to_string(),
+        overlay_tools.insert(Provider::new("tester"),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "claude-sonnet-4.6".parse().unwrap(),
