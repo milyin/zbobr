@@ -743,7 +743,7 @@ impl<'a> CliStageRunner<'a> {
                 self.zbobr,
                 self.task_id,
                 self.pipeline_name,
-                self.stage_name,
+                &Stage::new(self.stage_name),
                 &work_dir,
                 outcome,
                 last_mapped_tool,
@@ -1768,7 +1768,7 @@ async fn finalize_stage_session(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
     pipeline: &Pipeline,
-    stage: &str,
+    stage: &Stage,
     work_dir: &Path,
     outcome: SessionOutcome,
     last_mapped_tool: Option<McpTool>,
@@ -1778,7 +1778,7 @@ async fn finalize_stage_session(
 
     if outcome.execution_interrupted {
         if let Err(e) =
-            perform_stash_and_push(zbobr, task_id, work_dir, stage, pipeline).await
+            perform_stash_and_push(zbobr, task_id, work_dir, stage.as_str(), pipeline).await
         {
             tracing::warn!("Stash/push failed during interruption for task #{task_id}: {e}");
         }
@@ -1789,7 +1789,7 @@ async fn finalize_stage_session(
 
     if let Some(e) = outcome.execution_error.as_ref() {
         if let Err(e) =
-            perform_stash_and_push(zbobr, task_id, work_dir, stage, pipeline).await
+            perform_stash_and_push(zbobr, task_id, work_dir, stage.as_str(), pipeline).await
         {
             tracing::warn!("Stash/push failed during error handling for task #{task_id}: {e}");
         }
@@ -1797,7 +1797,7 @@ async fn finalize_stage_session(
         let status = format_error_status(zbobr, &error_msg);
         let stage = stage.to_string();
         if let Err(pause_err) = task_session
-            .set_pause_with_status_and_signal(status, Signal::go(stage))
+            .set_pause_with_status_and_signal(status, Signal::go(stage.as_str()))
             .await
         {
             tracing::error!("Failed to set pause for task #{task_id}: {pause_err}");
@@ -1810,14 +1810,14 @@ async fn finalize_stage_session(
     tracing::info!("Session complete for task #{task_id}");
 
     if let Err(e) =
-        perform_stash_and_push(zbobr, task_id, work_dir, stage, pipeline).await
+        perform_stash_and_push(zbobr, task_id, work_dir, stage.as_str(), pipeline).await
     {
         tracing::error!("Stash/push failed for task #{task_id}: {e}");
         let msg = format!("Stash/push failed: {e}");
         let status = format_error_status(zbobr, &msg);
         let stage = stage.to_string();
         if let Err(pause_err) = task_session
-            .set_pause_with_status_and_signal(status, Signal::go(stage))
+            .set_pause_with_status_and_signal(status, Signal::go(stage.as_str()))
             .await
         {
             tracing::error!(
@@ -1838,11 +1838,11 @@ async fn finalize_stage_session(
         .snapshot(false)
         .await?;
     if !current_task.pause && current_task.signal.is_none() {
-        let stage = Stage::from(stage);
-        let stage_def = zbobr.workflow().stage(pipeline, &stage);
+        let current_stage = stage.clone();
+        let stage_def = zbobr.workflow().stage(pipeline, &current_stage);
         let seq_signal = zbobr.workflow().sequential_signal(
             pipeline,
-            &stage,
+            &current_stage,
             stage_def,
             last_mapped_tool,
         );
@@ -1868,7 +1868,7 @@ async fn finalize_stage_session(
     // signal to re-run the current stage on resume.
     if current_task.pause && current_task.signal.is_none() {
         task_session
-            .set_signal(Some(Signal::go(stage)))
+            .set_signal(Some(Signal::go(stage.as_str())))
             .await?;
     }
     task_session.set_state(pending_state).await?;
