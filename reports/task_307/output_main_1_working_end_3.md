@@ -1,0 +1,1 @@
+Done. Moved `tempfile` from `[dependencies]` to `[dev-dependencies]` in `zbobr/Cargo.toml` to match the workspace convention. Build and all tests pass.
