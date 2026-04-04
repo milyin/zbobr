@@ -3,7 +3,7 @@ use zbobr_api::task::ContextRecordType;
 
 use crate::{
     mcp::common::parse_ctx_rec_id,
-    task::{Model, RoleSession, Tool},
+    task::{Model, RoleSession, Executor},
 };
 
 /// Log a string response from MCP methods.
@@ -49,7 +49,7 @@ pub trait CommonMcpImpl: Send + Sync {
     fn role_name(&self) -> &str;
 
     /// Returns the tool that is executing this MCP session
-    fn mcp_tool(&self) -> Tool;
+    fn mcp_tool(&self) -> Executor;
 
     /// Returns the concrete model currently in use by the agent tool
     fn mcp_model(&self) -> Model;

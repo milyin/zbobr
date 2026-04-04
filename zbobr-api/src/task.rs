@@ -739,9 +739,9 @@ pub type Role = String;
 /// A transparent newtype over `String`. Serializes as the inner string so
 /// existing TOML/JSON representations remain backward-compatible.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, schemars::JsonSchema)]
-pub struct Tool(pub String);
+pub struct Executor(pub String);
 
-impl Tool {
+impl Executor {
     pub const CLAUDE: &'static str = "claude";
     pub const COPILOT: &'static str = "copilot";
     pub const MCP_TESTER: &'static str = "mcp-tester";
@@ -751,41 +751,41 @@ impl Tool {
     }
 
     pub fn claude() -> Self {
-        Tool(Self::CLAUDE.to_string())
+        Executor(Self::CLAUDE.to_string())
     }
 
     pub fn copilot() -> Self {
-        Tool(Self::COPILOT.to_string())
+        Executor(Self::COPILOT.to_string())
     }
 
     pub fn mcp_tester() -> Self {
-        Tool(Self::MCP_TESTER.to_string())
+        Executor(Self::MCP_TESTER.to_string())
     }
 }
 
-impl std::fmt::Display for Tool {
+impl std::fmt::Display for Executor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
     }
 }
 
-impl std::str::FromStr for Tool {
+impl std::str::FromStr for Executor {
     type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Tool(s.to_string()))
+        Ok(Executor(s.to_string()))
     }
 }
 
-impl serde::Serialize for Tool {
+impl serde::Serialize for Executor {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.0)
     }
 }
 
-impl<'de> serde::Deserialize<'de> for Tool {
+impl<'de> serde::Deserialize<'de> for Executor {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        Ok(Tool(s))
+        Ok(Executor(s))
     }
 }
 

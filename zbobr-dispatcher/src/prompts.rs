@@ -7,7 +7,7 @@ use zbobr_api::{
     config::{StageDefinition, WorkflowConfig},
     config_tools::McpTool,
     context::serialize_context,
-    task::{DEFAULT_MAX_STAGE_COUNT, Pipeline, Stage, Tool},
+    task::{DEFAULT_MAX_STAGE_COUNT, Pipeline, Stage, Executor},
 };
 
 use crate::{backend::TaskBackend, workflow::Workflow};
@@ -132,7 +132,7 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
         pipeline: Pipeline::from("main"),
         run_id: 1,
         stage: Stage::new("planning"),
-        tool: Some(Tool::CLAUDE.to_string()),
+        tool: Some(Executor::CLAUDE.to_string()),
         model: None,
         prompt_link: None,
         output_link: None,

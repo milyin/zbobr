@@ -6,7 +6,7 @@ use zbobr_utility::config_struct;
 
 use crate::{
     config_tools::McpTool,
-    task::{Model, Pipeline, Stage, Tool},
+    task::{Model, Pipeline, Stage, Executor},
 };
 use zbobr_utility::Secret;
 
@@ -31,7 +31,7 @@ pub struct RoleDefinition {
     /// Tool name override for this role. Overrides the global dispatcher `tool`.
     /// Stage-level `tool` takes precedence over this.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<String>,
+    pub tool: Option<Tool>,
 }
 
 impl RoleDefinition {
@@ -117,6 +117,8 @@ mod role;
 pub use role::Role;
 mod provider;
 pub use provider::Provider;
+mod tool;
+pub use tool::Tool;
 
 /// A stage transition descriptor with an optional target stage and pause flag.
 ///
@@ -197,7 +199,7 @@ pub struct StageDefinition {
     pub call: Option<Pipeline>,
     /// Tool name override for this stage. Overrides role-level and global `tool`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<String>,
+    pub tool: Option<Tool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role_prompt: Option<PathBuf>,
     /// `None` means absent in config (inherit from base during merging, or no extra prompts at runtime).
@@ -802,7 +804,7 @@ impl ZbobrDispatcherConfig {
                 );
             }
             if let Some(ref executor) = provider.executor {
-                let valid = [Tool::CLAUDE, Tool::COPILOT, Tool::MCP_TESTER];
+                let valid = [Executor::CLAUDE, Executor::COPILOT, Executor::MCP_TESTER];
                 if !valid.contains(&executor.as_str()) {
                     anyhow::bail!(
                         "Provider '{}' has unknown executor '{}' — must be one of 'claude', 'copilot', 'mcp-tester'",
@@ -874,13 +876,13 @@ impl ZbobrDispatcherConfig {
         workflow: &WorkflowConfig,
     ) -> anyhow::Result<String> {
         if let Some(ref tool) = stage_def.tool {
-            return Ok(tool.clone());
+            return Ok(tool.clone().into());
         }
         if let Some(role_name) = stage_def.role_name()
             && let Some(role_def) = workflow.role_definition(role_name)
             && let Some(ref tool) = role_def.tool
         {
-            return Ok(tool.clone());
+            return Ok(tool.clone().into());
         }
         anyhow::bail!(
             "No tool found for stage {:?} with role {:?}",
@@ -1208,7 +1210,7 @@ mod tests {
 
     // ── resolve_tool_name tests ─────────────────────────────────────────
 
-    fn make_workflow_with_role(role_name: &str, tool: Option<String>) -> WorkflowConfig {
+    fn make_workflow_with_role(role_name: &str, tool: Option<Tool>) -> WorkflowConfig {
         let mut roles = IndexMap::new();
         roles.insert(
             role_name.to_string(),
@@ -1228,11 +1230,11 @@ mod tests {
     #[test]
     fn resolve_tool_name_stage_overrides() {
         let stage = StageDefinition {
-            tool: Some("stage-tool".to_string()),
+            tool: Some("stage-tool".into()),
             role: Some("worker".to_string().into()),
             ..Default::default()
         };
-        let workflow = make_workflow_with_role("worker", Some("role-tool".to_string()));
+        let workflow = make_workflow_with_role("worker", Some("role-tool".into()));
         let config = ZbobrDispatcherConfig::default();
         assert_eq!(
             config.resolve_tool_name(&stage, &workflow).unwrap(),
@@ -1247,7 +1249,7 @@ mod tests {
             role: Some("worker".to_string().into()),
             ..Default::default()
         };
-        let workflow = make_workflow_with_role("worker", Some("role-tool".to_string()));
+        let workflow = make_workflow_with_role("worker", Some("role-tool".into()));
         let config = ZbobrDispatcherConfig::default();
         assert_eq!(
             config.resolve_tool_name(&stage, &workflow).unwrap(),
@@ -1375,7 +1377,7 @@ mod tests {
             Stage::from("working"),
             StageDefinition {
                 role: Some("worker".to_string().into()),
-                tool: Some("bad".to_string()),
+                tool: Some("bad".into()),
                 ..Default::default()
             },
         );
@@ -1421,7 +1423,7 @@ mod tests {
             Stage::from("working"),
             StageDefinition {
                 role: Some("worker".to_string().into()),
-                tool: Some("smart".to_string()),
+                tool: Some("smart".into()),
                 ..Default::default()
             },
         );
@@ -1432,7 +1434,7 @@ mod tests {
             RoleDefinition {
                 mcp: None,
                 prompt: None,
-                tool: Some("smart".to_string()),
+                tool: Some("smart".into()),
             },
         );
         let workflow = WorkflowConfig {
@@ -2040,7 +2042,7 @@ developer = [
             RoleDefinition {
                 mcp: None,
                 prompt: None,
-                tool: Some("fast-tool".to_string()),
+                tool: Some("fast-tool".into()),
             },
         );
 
@@ -2120,7 +2122,7 @@ developer = [
             Stage::from("planning"),
             StageDefinition {
                 role: Some("planner".to_string().into()),
-                tool: Some("fast".to_string()),
+                tool: Some("fast".into()),
                 ..Default::default()
             },
         );

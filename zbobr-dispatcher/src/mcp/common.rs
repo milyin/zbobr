@@ -4,7 +4,7 @@ use zbobr_api::config_tools::McpTool;
 
 use crate::{
     ZbobrDispatcher,
-    task::{Model, RoleSession, Tool},
+    task::{Model, RoleSession, Executor},
 };
 
 /// Get the current hostname, or "unknown" if it cannot be determined.
@@ -138,7 +138,7 @@ pub async fn run_role_mcp_server(
     zbobr: std::sync::Arc<ZbobrDispatcher>,
     role_name: &str,
     task_id: u64,
-    tool: Tool,
+    tool: Executor,
     model: Model,
     stage_name: String,
     allowed_tools: HashSet<McpTool>,

@@ -20,7 +20,7 @@ use crate::{
         },
         traits::CommonMcpImpl,
     },
-    task::{Model, RoleSession, Tool},
+    task::{Model, RoleSession, Executor},
 };
 
 /// A single unified MCP server that defines ALL possible tools and filters them
@@ -31,7 +31,7 @@ pub struct UnifiedMcp {
     tool_router: ToolRouter<Self>,
     allowed_tools: HashSet<McpTool>,
     role_name: String,
-    tool: Tool,
+    tool: Executor,
     model: Model,
     stage_name: String,
     /// Pipeline name for this session.
@@ -49,7 +49,7 @@ impl CommonMcpImpl for UnifiedMcp {
         &self.role_name
     }
 
-    fn mcp_tool(&self) -> Tool {
+    fn mcp_tool(&self) -> Executor {
         self.tool.clone()
     }
 
@@ -80,7 +80,7 @@ impl UnifiedMcp {
         session: RoleSession,
         allowed_tools: HashSet<McpTool>,
         role_name: String,
-        tool: Tool,
+        tool: Executor,
         model: Model,
         stage_name: String,
         pipeline_name: String,

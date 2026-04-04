@@ -16,7 +16,7 @@ use zbobr_api::{
 };
 use zbobr_dispatcher::{
     Comment, Task, Workflow, ZbobrDispatcher, ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
-    backend::TaskBackendExt, cli::process_task, prompts::ConfiguredPromptBuilder, task::Tool,
+    backend::TaskBackendExt, cli::process_task, prompts::ConfiguredPromptBuilder, task::Executor,
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_repo_backend_fs::{ZbobrRepoBackendFs, ZbobrRepoBackendFsConfig};
@@ -35,7 +35,7 @@ fn test_providers_and_tools() -> (
     IndexMap<String, Vec<ToolEntry>>,
 ) {
     let provider = ProviderDefinition {
-        executor: Some(Tool::MCP_TESTER.to_string()),
+        executor: Some(Executor::MCP_TESTER.to_string()),
         parent: None,
         priority: None,
         plan_mode: None,

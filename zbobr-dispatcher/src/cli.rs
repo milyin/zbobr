@@ -20,7 +20,7 @@ use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
     Comment, Task, TaskDir, ToolExecutor, Workflow, ZbobrDispatcher,
-    task::{Model, Tool},
+    task::{Model, Executor},
     workflow::SequentialSignal,
 };
 use zbobr_api::tool_executor::ExecutorOutput;
@@ -634,7 +634,7 @@ impl<'a> CliStageRunner<'a> {
                 Arc::clone(self.zbobr),
                 role,
                 self.task_id,
-                Tool(resolved_provider.executor.clone()),
+                Executor(resolved_provider.executor.clone()),
                 model.clone(),
                 self.stage_name.to_string(),
                 allowed_tools.clone(),
@@ -652,7 +652,7 @@ impl<'a> CliStageRunner<'a> {
             let executor = self
                 .zbobr
                 .build_executor(&resolved_provider, self.mcp_tester_override)?;
-            let copilot_token_owned = if resolved_provider.executor == Tool::COPILOT {
+            let copilot_token_owned = if resolved_provider.executor == Executor::COPILOT {
                 self.zbobr.copilot_github_token().to_owned()
             } else {
                 String::new()
@@ -1649,7 +1649,7 @@ async fn start_mcp_server(
     zbobr: Arc<ZbobrDispatcher>,
     role_name: &str,
     task_id: u64,
-    tool: Tool,
+    tool: Executor,
     model: Model,
     stage_name: String,
     allowed_tools: std::collections::HashSet<McpTool>,
