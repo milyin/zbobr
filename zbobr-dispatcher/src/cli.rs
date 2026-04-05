@@ -639,7 +639,7 @@ impl<'a> CliStageRunner<'a> {
                 self.stage.clone(),
                 allowed_tools.clone(),
                 Arc::clone(&tool_tracker),
-                self.pipeline.to_string(),
+                self.pipeline.clone(),
                 pipeline_run_id,
             )
             .await?;
@@ -1661,7 +1661,7 @@ async fn start_mcp_server(
     stage: Stage,
     allowed_tools: std::collections::HashSet<McpTool>,
     tool_tracker: Arc<std::sync::Mutex<Option<McpTool>>>,
-    pipeline_name: String,
+    pipeline: Pipeline,
     pipeline_run_id: u64,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
@@ -1675,7 +1675,7 @@ async fn start_mcp_server(
             stage,
             allowed_tools,
             tool_tracker,
-            pipeline_name,
+            pipeline,
             pipeline_run_id,
         )
         .await

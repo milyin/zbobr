@@ -1,6 +1,6 @@
 use std::{collections::HashSet, sync::{Arc, Mutex}};
 
-use zbobr_api::{Stage, config::Role, config_tools::McpTool};
+use zbobr_api::{Pipeline, Stage, config::Role, config_tools::McpTool};
 
 use crate::{
     ZbobrDispatcher,
@@ -143,7 +143,7 @@ pub async fn run_role_mcp_server(
     stage: Stage,
     allowed_tools: HashSet<McpTool>,
     tool_tracker: Arc<Mutex<Option<McpTool>>>,
-    pipeline_name: String,
+    pipeline: Pipeline,
     pipeline_run_id: u64,
 ) -> anyhow::Result<u16> {
     let base_port = zbobr.config().base_port;
@@ -156,7 +156,7 @@ pub async fn run_role_mcp_server(
     let session: RoleSession = zbobr.role_session_with_tracker(
         task_id,
         tool_tracker,
-        pipeline_name.clone(),
+        pipeline.clone(),
         pipeline_run_id,
     );
 
@@ -176,7 +176,7 @@ pub async fn run_role_mcp_server(
                 tool.clone(),
                 model.clone(),
                 stage.clone(),
-                pipeline_name.clone(),
+                pipeline.clone(),
                 pipeline_run_id,
             ))
         },
