@@ -652,8 +652,8 @@ impl WorkflowConfig {
         let pipeline_names = self.pipeline_names();
 
         // Each pipeline must have valid order/stages
-        for pname in &pipeline_names {
-            let pipeline = self.pipelines.get(pname.as_str()).unwrap();
+        for pname in pipeline_names {
+            let pipeline = self.pipelines.get(pname).unwrap();
             pipeline.validate(pname)?;
         }
 
@@ -722,7 +722,7 @@ pub struct ZbobrDispatcherConfig {
     pub providers: IndexMap<Provider, ProviderDefinition>,
     /// Named tool definitions. Each tool is a list of (provider, model) pairs.
     #[config(skip_args)]
-    pub tools: IndexMap<String, Vec<ToolEntry>>,
+    pub tools: IndexMap<Tool, Vec<ToolEntry>>,
     /// Seconds a provider is excluded from selection after a failure.
     #[config(skip_args)]
     pub provider_exclusion_secs: u64,
@@ -954,7 +954,7 @@ mod tests {
     /// Helper: build a minimal ZbobrDispatcherConfig with given providers and tools.
     fn make_config(
         providers: IndexMap<Provider, ProviderDefinition>,
-        tools: IndexMap<String, Vec<ToolEntry>>,
+        tools: IndexMap<Tool, Vec<ToolEntry>>,
     ) -> ZbobrDispatcherConfig {
         ZbobrDispatcherConfig {
             providers,
@@ -1130,7 +1130,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(),
+        tools.insert("smart".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1196,7 +1196,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(),
+        tools.insert("smart".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("ghost"),
                 model: "opus".parse().unwrap(),
@@ -1337,7 +1337,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(),
+        tools.insert("smart".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1345,7 +1345,7 @@ mod tests {
             }],
         );
         let config = make_config(providers, tools);
-        let workflow = make_workflow_with_role("worker", Some("nonexistent".to_string()));
+        let workflow = make_workflow_with_role("worker", Some("nonexistent".to_string().into()));
         let err = config.validate_workflow_refs(&workflow).unwrap_err();
         let msg = err.to_string();
         assert!(
@@ -1367,7 +1367,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(),
+        tools.insert("smart".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1413,7 +1413,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(),
+        tools.insert("smart".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1462,7 +1462,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(),
+        tools.insert("smart".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1542,10 +1542,10 @@ developer = [
         }
         #[derive(serde::Deserialize)]
         struct Dispatcher {
-            tools: IndexMap<String, Vec<ToolEntry>>,
+            tools: IndexMap<Tool, Vec<ToolEntry>>,
         }
         let root: Root = toml::from_str(toml_str).unwrap();
-        let entry = &root.dispatcher.tools["developer"][0];
+        let entry = &root.dispatcher.tools[&Tool::from("developer")][0];
         assert_eq!(entry.priority, Some(0));
     }
 
@@ -1563,10 +1563,10 @@ developer = [
         }
         #[derive(serde::Deserialize)]
         struct Dispatcher {
-            tools: IndexMap<String, Vec<ToolEntry>>,
+            tools: IndexMap<Tool, Vec<ToolEntry>>,
         }
         let root: Root = toml::from_str(toml_str).unwrap();
-        let entry = &root.dispatcher.tools["developer"][0];
+        let entry = &root.dispatcher.tools[&Tool::from("developer")][0];
         assert_eq!(entry.priority, None);
     }
 
@@ -2376,12 +2376,12 @@ prompts = ["common.md", "planning.md"]
         assert_eq!(prompts[1], PathBuf::from("planning.md"));
     }
 
-    // ── Tools map merge test (IndexMap<String, Vec<ToolEntry>>) ─────────
+    // ── Tools map merge test (IndexMap<Tool, Vec<ToolEntry>>) ─────────
 
     #[test]
     fn dispatcher_toml_merge_tools_key_wise_with_wholesale_list_replacement() {
         let mut base_tools = IndexMap::new();
-        base_tools.insert("developer".to_string(),
+        base_tools.insert("developer".to_string().into(),
             vec![
                 ToolEntry {
                     provider: Provider::new("claude"),
@@ -2410,14 +2410,14 @@ prompts = ["common.md", "planning.md"]
 
         // Overlay replaces "developer" list entirely and adds "tester".
         let mut overlay_tools = IndexMap::new();
-        overlay_tools.insert("developer".to_string(),
+        overlay_tools.insert("developer".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("gpt"),
                 model: "claude-opus-4.6".parse().unwrap(),
                 priority: Some(1),
             }],
         );
-        overlay_tools.insert("tester".to_string(),
+        overlay_tools.insert("tester".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "claude-sonnet-4.6".parse().unwrap(),

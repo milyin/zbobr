@@ -506,14 +506,14 @@ mod tests {
     /// Build a minimal dispatcher with given providers and tools.
     fn make_dispatcher(
         providers: IndexMap<String, ProviderDefinition>,
-        tools: IndexMap<String, Vec<ToolEntry>>,
+        tools: IndexMap<Tool, Vec<ToolEntry>>,
     ) -> ZbobrDispatcher {
         make_dispatcher_with_workflow(providers, tools, Workflow::default())
     }
 
     fn make_dispatcher_with_workflow(
         providers: IndexMap<String, ProviderDefinition>,
-        tools: IndexMap<String, Vec<ToolEntry>>,
+        tools: IndexMap<Tool, Vec<ToolEntry>>,
         workflow: Workflow,
     ) -> ZbobrDispatcher {
         let config = ZbobrDispatcherConfig {
@@ -555,7 +555,7 @@ mod tests {
         providers.insert("claude".to_string(), provider_def("claude", 10));
 
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(), vec![tool_entry("claude", "opus")]);
+        tools.insert("smart".to_string().into(), vec![tool_entry("claude", "opus")]);
 
         let dispatcher = make_dispatcher(providers, tools);
         let (rp, model) = dispatcher.select_provider("smart").unwrap();
@@ -571,7 +571,7 @@ mod tests {
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![
                 tool_entry("fallback", "haiku"),
                 tool_entry("claude", "opus"),
@@ -592,7 +592,7 @@ mod tests {
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![tool_entry("a", "model-a"), tool_entry("b", "model-b")],
         );
 
@@ -611,7 +611,7 @@ mod tests {
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![tool_entry("a", "model-a"), tool_entry("b", "model-b")],
         );
 
@@ -630,7 +630,7 @@ mod tests {
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![
                 tool_entry("primary", "opus"),
                 tool_entry("fallback", "haiku"),
@@ -653,7 +653,7 @@ mod tests {
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![
                 tool_entry("primary", "opus"),
                 tool_entry("fallback", "gpt-5.3-codex"),
@@ -680,7 +680,7 @@ mod tests {
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![
                 tool_entry("high_a", "claude-opus-4-6"),
                 tool_entry("low", "gpt-5.3-codex"),
@@ -708,7 +708,7 @@ mod tests {
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![
                 tool_entry("primary", "opus"),
                 ToolEntry {
@@ -740,7 +740,7 @@ mod tests {
         providers.insert("only".to_string(), provider_def("claude", 10));
 
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(), vec![tool_entry("only", "opus")]);
+        tools.insert("smart".to_string().into(), vec![tool_entry("only", "opus")]);
 
         let dispatcher = make_dispatcher(providers, tools);
         dispatcher.exclude_provider("only");
@@ -770,7 +770,7 @@ mod tests {
         providers.insert("a".to_string().into(), provider_def("claude", 10));
 
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(), vec![tool_entry("a", "model-a")]);
+        tools.insert("smart".to_string().into(), vec![tool_entry("a", "model-a")]);
 
         let dispatcher = make_dispatcher(providers, tools);
         dispatcher
@@ -798,7 +798,7 @@ mod tests {
         providers.insert("a".to_string().into(), provider_def("claude", 10));
 
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(), vec![tool_entry("a", "model-a")]);
+        tools.insert("smart".to_string().into(), vec![tool_entry("a", "model-a")]);
 
         let mut cfg = ZbobrDispatcherConfig {
             providers,
@@ -876,7 +876,7 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(), vec![tool_entry("a", "m1")]);
+        tools.insert("smart".to_string().into(), vec![tool_entry("a", "m1")]);
         let dispatcher = make_dispatcher(providers, tools);
         let result = dispatcher.validated();
         assert!(result.is_err(), "Expected Err for circular providers");
@@ -890,7 +890,7 @@ mod tests {
     #[test]
     fn validated_catches_invalid_workflow_refs() {
         let providers = IndexMap::from([("cp".to_string(), provider_def("copilot", 10))]);
-        let tools = IndexMap::from([("smart".to_string(), vec![tool_entry("cp", "some-model")])]);
+        let tools = IndexMap::from([("smart".to_string().into(), vec![tool_entry("cp", "some-model")])]);
         let mut roles = IndexMap::new();
         roles.insert(
             "worker".to_string(),
@@ -924,7 +924,7 @@ mod tests {
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![
                 tool_entry("a", "opus"),
                 ToolEntry {

@@ -32,7 +32,7 @@ static SCENARIO_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// tool also named "mcp-tester" that selects that provider with model "test-model".
 fn test_providers_and_tools() -> (
     IndexMap<Provider, ProviderDefinition>,
-    IndexMap<String, Vec<ToolEntry>>,
+    IndexMap<Tool, Vec<ToolEntry>>,
 ) {
     let provider = ProviderDefinition {
         executor: Some(Executor::MCP_TESTER.to_string()),
@@ -47,7 +47,7 @@ fn test_providers_and_tools() -> (
         priority: None,
     };
     let providers = IndexMap::from([("mcp-tester".to_string().into(), provider)]);
-    let tools = IndexMap::from([("mcp-tester".to_string(), vec![entry])]);
+    let tools = IndexMap::from([("mcp-tester".to_string().into(), vec![entry])]);
     (providers, tools)
 }
 
