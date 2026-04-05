@@ -403,7 +403,7 @@ fn default_workflow() -> WorkflowConfig {
     ]);
 
     let merge_stages = IndexMap::from([(
-        Stage::from(STAGE_MERGING),
+        STAGE_MERGING,
         StageDefinition {
             role: Some(ROLE_MERGER),
             prompts: Some(task_prompt),
