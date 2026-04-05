@@ -1,3 +1,4 @@
+use zbobr_api::Stage;
 use zbobr_api::config::Role;
 use zbobr_api::{config_tools::McpTool};
 use zbobr_api::task::ContextRecordType;
@@ -56,7 +57,7 @@ pub trait CommonMcpImpl: Send + Sync {
     fn model(&self) -> &Model;
 
     /// Returns the name of the current stage.
-    fn stage_name(&self) -> &str;
+    fn stage(&self) -> &Stage;
 
     /// Returns the pipeline name for this session.
     fn pipeline_name(&self) -> &str;
@@ -92,7 +93,7 @@ pub trait CommonMcpImpl: Send + Sync {
             "report_{}_{}_{}_{}",
             self.pipeline_name(),
             self.pipeline_run_id(),
-            self.stage_name(),
+            self.stage(),
             tool_name,
         );
         let report_link = match self.session().store_report(&base_name, full_report).await {
@@ -167,7 +168,7 @@ pub trait CommonMcpImpl: Send + Sync {
             "checklist_{}_{}_{}_item",
             self.pipeline_name(),
             self.pipeline_run_id(),
-            self.stage_name(),
+            self.stage(),
         );
         let report_link = match self.session().store_report(&base_name, full_report).await {
             Ok(filename) => Some(filename),

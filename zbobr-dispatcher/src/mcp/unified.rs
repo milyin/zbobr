@@ -10,7 +10,7 @@ use rmcp::{
     service::RequestContext,
     tool, tool_router,
 };
-use zbobr_api::{Executor, config::Role, config_tools::McpTool};
+use zbobr_api::{Executor, Stage, config::Role, config_tools::McpTool};
 
 use crate::{
     mcp::{
@@ -33,7 +33,7 @@ pub struct UnifiedMcp {
     role: Role,
     tool: Executor,
     model: Model,
-    stage_name: String,
+    stage: Stage,
     /// Pipeline name for this session.
     pipeline_name: String,
     /// Pipeline run ID for this session.
@@ -57,8 +57,8 @@ impl CommonMcpImpl for UnifiedMcp {
         &self.model
     }
 
-    fn stage_name(&self) -> &str {
-        &self.stage_name
+    fn stage(&self) -> &Stage {
+        &self.stage
     }
 
     fn pipeline_name(&self) -> &str {
@@ -82,7 +82,7 @@ impl UnifiedMcp {
         role: Role,
         tool: Executor,
         model: Model,
-        stage_name: String,
+        stage: Stage,
         pipeline_name: String,
         pipeline_run_id: u64,
     ) -> Self {
@@ -93,7 +93,7 @@ impl UnifiedMcp {
             role,
             tool,
             model,
-            stage_name,
+            stage,
             pipeline_name,
             pipeline_run_id,
         }

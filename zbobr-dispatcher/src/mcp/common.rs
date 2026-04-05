@@ -1,6 +1,6 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::{Arc, Mutex}};
 
-use zbobr_api::{config::Role, config_tools::McpTool};
+use zbobr_api::{Stage, config::Role, config_tools::McpTool};
 
 use crate::{
     ZbobrDispatcher,
@@ -135,14 +135,14 @@ pub(crate) async fn serve_mcp(
 /// Returns the actual port that was assigned (spawns server in background).
 #[allow(clippy::too_many_arguments)]
 pub async fn run_role_mcp_server(
-    zbobr: std::sync::Arc<ZbobrDispatcher>,
+    zbobr: Arc<ZbobrDispatcher>,
     role: Role,
     task_id: u64,
     tool: Executor,
     model: Model,
-    stage_name: String,
+    stage: Stage,
     allowed_tools: HashSet<McpTool>,
-    tool_tracker: std::sync::Arc<std::sync::Mutex<Option<McpTool>>>,
+    tool_tracker: Arc<Mutex<Option<McpTool>>>,
     pipeline_name: String,
     pipeline_run_id: u64,
 ) -> anyhow::Result<u16> {
@@ -175,12 +175,12 @@ pub async fn run_role_mcp_server(
                 role.clone(),
                 tool.clone(),
                 model.clone(),
-                stage_name.clone(),
+                stage.clone(),
                 pipeline_name.clone(),
                 pipeline_run_id,
             ))
         },
-        std::sync::Arc::new(LocalSessionManager::default()),
+        Arc::new(LocalSessionManager::default()),
         Default::default(),
     );
     let router = axum::Router::new().nest_service(&path, svc);
