@@ -337,6 +337,10 @@ fn default_workflow() -> WorkflowConfig {
             StageDefinition {
                 role: Some(ROLE_WORKER),
                 prompts: Some(task_prompt.clone()),
+                on_failure: Some(StageTransition {
+                    next: Some(STAGE_WORKING),
+                    pause: true,
+                }),
                 on_intermediate: Some(StageTransition::stage(STAGE_REVIEWING)),
                 ..Default::default()
             },
@@ -366,7 +370,10 @@ fn default_workflow() -> WorkflowConfig {
             StageDefinition {
                 role: Some(ROLE_TEST_WORKER),
                 prompts: Some(task_prompt.clone()),
-                on_failure: Some(StageTransition::stage(STAGE_WORKING)),
+                on_failure: Some(StageTransition {
+                    next: Some(STAGE_TEST_WORKER),
+                    pause: true,
+                }),
                 on_intermediate: Some(StageTransition::stage(STAGE_WORKING)),
                 ..Default::default()
             },
