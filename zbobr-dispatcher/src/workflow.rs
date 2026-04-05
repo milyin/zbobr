@@ -527,7 +527,7 @@ role = "merger"
         let working = wf
             .stage(&Pipeline::from("main"), &Stage::from("working"))
             .unwrap();
-        assert_eq!(working.role().as_deref(), Some("worker"));
+        assert_eq!(working.role().as_ref().map(|role| role.as_str()), Some("worker"));
         assert_eq!(working.call_pipeline(), None);
         assert!(!working.is_call());
     }
@@ -581,7 +581,7 @@ role = "merger"
         match action {
             StateAction::RunStage(pipeline, stage, def) => {
                 assert_eq!(pipeline, &Pipeline::Main);
-                assert_eq!(stage, "call_sub");
+                assert_eq!(stage.as_str(), "call_sub");
                 assert!(def.is_call());
                 assert_eq!(def.call_pipeline().map(|p| p.as_str()), Some("sub"));
             }

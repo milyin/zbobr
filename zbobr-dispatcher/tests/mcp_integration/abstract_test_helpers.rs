@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Signal, Stage, StageTransition, State,
-    config::{PipelineConfig, RoleDefinition, StageDefinition, WorkflowConfig},
+    config::{PipelineConfig, Role, RoleDefinition, StageDefinition, Tool, WorkflowConfig},
     config_tools::ALL_TOOLS,
 };
 use zbobr_dispatcher::backend::TaskBackendExt;
@@ -60,7 +60,7 @@ fn build_workflow_with_roles(
                 Stage::from(s.name),
                 StageDefinition {
                     role: Some(s.role.to_string().into()),
-                    tool: Some("mcp-tester".to_string()),
+                    tool: Some("mcp-tester".to_string().into()),
                     on_success: s.on_success,
                     on_failure: s.on_failure,
                     on_intermediate: s.on_intermediate,
@@ -85,7 +85,7 @@ fn role_with_all_tools() -> RoleDefinition {
     RoleDefinition {
         mcp: Some(ALL_TOOLS.to_vec()),
         prompt: None,
-        tool: Some("mcp-tester".to_string()),
+        tool: Some("mcp-tester".to_string().into()),
     }
 }
 
@@ -386,7 +386,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
                     Stage::from("check"),
                     StageDefinition {
                         role: Some("role_check".to_string().into()),
-                        tool: Some("mcp-tester".to_string()),
+                        tool: Some("mcp-tester".to_string().into()),
                         ..Default::default()
                     },
                 ),
@@ -394,7 +394,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
                     Stage::from("finish"),
                     StageDefinition {
                         role: Some("role_finish".to_string().into()),
-                        tool: Some("mcp-tester".to_string()),
+                        tool: Some("mcp-tester".to_string().into()),
                         ..Default::default()
                     },
                 ),
@@ -405,8 +405,8 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
         prompts_dir: None,
         pipelines,
         roles: IndexMap::from([
-            ("role_check".to_string(), role_with_all_tools()),
-            ("role_finish".to_string(), role_with_all_tools()),
+            ("role_check".to_string().into(), role_with_all_tools()),
+            ("role_finish".to_string().into(), role_with_all_tools()),
         ]),
     };
 
@@ -534,7 +534,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
                     "finish".into(),
                     StageDefinition {
                         role: Some("role_finish".into()),
-                        tool: Some("mcp-tester".to_string()),
+                        tool: Some("mcp-tester".to_string().into()),
                         ..Default::default()
                     },
                 ),
@@ -548,7 +548,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
                 "work".into(),
                 StageDefinition {
                     role: Some("role_work".into()),
-                    tool: Some("mcp-tester".to_string()),
+                    tool: Some("mcp-tester".to_string().into()),
                     ..Default::default()
                 },
             )]),
@@ -561,7 +561,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
                 "merging".into(),
                 StageDefinition {
                     role: Some("role_merge".into()),
-                    tool: Some("mcp-tester".to_string()),
+                    tool: Some("mcp-tester".to_string().into()),
                     ..Default::default()
                 },
             )]),
@@ -571,9 +571,9 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
         prompts_dir: None,
         pipelines,
         roles: IndexMap::from([
-            ("role_work".to_string(), role_with_all_tools()),
-            ("role_finish".to_string(), role_with_all_tools()),
-            ("role_merge".to_string(), role_with_all_tools()),
+            ("role_work".to_string().into(), role_with_all_tools()),
+            ("role_finish".to_string().into(), role_with_all_tools()),
+            ("role_merge".to_string().into(), role_with_all_tools()),
         ]),
     };
 

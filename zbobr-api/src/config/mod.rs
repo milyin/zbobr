@@ -983,7 +983,7 @@ mod tests {
         assert_eq!(resolved.len(), 1);
         let rp = &resolved[&Provider::new("claude")];
         assert_eq!(rp.provider.as_str(), "claude");
-        assert_eq!(rp.executor, "claude");
+        assert_eq!(rp.executor.as_str(), "claude");
         assert_eq!(rp.priority, 10);
         assert!(!rp.plan_mode);
         assert!(rp.access_key.is_none());
@@ -1014,7 +1014,7 @@ mod tests {
         let resolved = config.resolve_providers().unwrap();
 
         let child = &resolved[&Provider::new("claude_child")];
-        assert_eq!(child.executor, "claude");
+        assert_eq!(child.executor.as_str(), "claude");
     }
 
     #[test]
@@ -1051,7 +1051,7 @@ mod tests {
         let resolved = config.resolve_providers().unwrap();
 
         let child = &resolved[&Provider::new("child")];
-        assert_eq!(child.executor, "claude");
+        assert_eq!(child.executor.as_str(), "claude");
         assert!(child.plan_mode);
     }
 
@@ -1110,7 +1110,7 @@ mod tests {
         let resolved = config.resolve_providers().unwrap();
 
         let child = &resolved[&Provider::new("child")];
-        assert_eq!(child.executor, "claude");
+        assert_eq!(child.executor.as_str(), "claude");
         assert_eq!(child.priority, 5);
         assert!(child.plan_mode);
     }
@@ -1217,7 +1217,7 @@ mod tests {
     fn make_workflow_with_role(role_name: &str, tool: Option<Tool>) -> WorkflowConfig {
         let mut roles = IndexMap::new();
         roles.insert(
-            role_name.to_string(),
+            role_name.to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompt: None,
@@ -1241,7 +1241,7 @@ mod tests {
         let workflow = make_workflow_with_role("worker", Some("role-tool".into()));
         let config = ZbobrDispatcherConfig::default();
         assert_eq!(
-            config.resolve_tool(&stage, &workflow).unwrap(),
+            config.resolve_tool(&stage, &workflow).unwrap().as_str(),
             "stage-tool"
         );
     }
@@ -1256,7 +1256,7 @@ mod tests {
         let workflow = make_workflow_with_role("worker", Some("role-tool".into()));
         let config = ZbobrDispatcherConfig::default();
         assert_eq!(
-            config.resolve_tool(&stage, &workflow).unwrap(),
+            config.resolve_tool(&stage, &workflow).unwrap().as_str(),
             "role-tool"
         );
     }
@@ -1434,7 +1434,7 @@ mod tests {
         let mut pipelines = HashMap::new();
         pipelines.insert(Pipeline::Main, PipelineConfig { stages });
         let mut roles = IndexMap::new();
-        roles.insert("worker".to_string(),
+        roles.insert("worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompt: None,
@@ -1483,7 +1483,7 @@ mod tests {
         let mut pipelines = HashMap::new();
         pipelines.insert(Pipeline::Main, PipelineConfig { stages });
         let mut roles = IndexMap::new();
-        roles.insert("worker".to_string(),
+        roles.insert("worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompt: None,
@@ -1674,7 +1674,7 @@ developer = [
     #[test]
     fn workflow_toml_resolve_paths_resolves_nested_prompt_fields() {
         let mut roles = IndexMap::new();
-        roles.insert("reviewer".to_string(),
+        roles.insert("reviewer".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("reviewer.md")),
@@ -1732,7 +1732,7 @@ developer = [
         // Overlay config (from /project/) has no workflow section.
         // After per-file resolution + merge, the base paths should stay anchored to /shared/.
         let mut roles = IndexMap::new();
-        roles.insert("reviewer".to_string(),
+        roles.insert("reviewer".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("reviewer.md")),
@@ -1771,14 +1771,14 @@ developer = [
         // Base config defines two roles; overlay overrides only one.
         // The unmodified role from base must survive the merge.
         let mut base_roles = IndexMap::new();
-        base_roles.insert("reviewer".to_string(),
+        base_roles.insert("reviewer".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("/shared/reviewer.md")),
                 tool: None,
             },
         );
-        base_roles.insert("worker".to_string(),
+        base_roles.insert("worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("/shared/worker.md")),
@@ -1793,7 +1793,7 @@ developer = [
 
         // Overlay only overrides "reviewer", with a different prompt.
         let mut overlay_roles = IndexMap::new();
-        overlay_roles.insert("reviewer".to_string(),
+        overlay_roles.insert("reviewer".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompt: Some(PathBuf::from("/project/reviewer_override.md")),
@@ -1959,7 +1959,7 @@ developer = [
         // "copilot" survives from the base config.
         assert_eq!(providers["copilot"].priority, Some(5));
         // "gpt" is added by the overlay.
-        assert_eq!(providers["gpt"].executor.as_deref(), Some("openai"));
+        assert_eq!(providers["gpt"].executor.as_ref().map(|e| e.as_str()), Some("openai"));
         assert_eq!(providers.len(), 3);
     }
 
@@ -2009,7 +2009,7 @@ developer = [
             "priority should be overridden"
         );
         assert_eq!(
-            providers["shared"].executor.as_deref(),
+            providers["shared"].executor.as_ref().map(|e| e.as_str()),
             Some("claude"),
             "executor should be preserved from base"
         );
@@ -2026,7 +2026,7 @@ developer = [
         // mcp and prompt must survive because overlay uses mcp: None (field absent).
         use crate::config_tools::McpTool;
         let mut base_roles = IndexMap::new();
-        base_roles.insert("worker".to_string(),
+        base_roles.insert("worker".to_string().into(),
             RoleDefinition {
                 mcp: Some(vec![McpTool::ReportSuccess]),
                 prompt: Some(PathBuf::from("/shared/worker.md")),
@@ -2042,7 +2042,7 @@ developer = [
 
         // Overlay sets only tool; mcp is None (not specified) so base mcp survives.
         let mut overlay_roles = IndexMap::new();
-        overlay_roles.insert("worker".to_string(),
+        overlay_roles.insert("worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompt: None,
@@ -2080,7 +2080,7 @@ developer = [
         // An overlay that explicitly sets mcp = [] must clear the base mcp list.
         use crate::config_tools::McpTool;
         let mut base_roles = IndexMap::new();
-        base_roles.insert("worker".to_string(),
+        base_roles.insert("worker".to_string().into(),
             RoleDefinition {
                 mcp: Some(vec![McpTool::ReportSuccess]),
                 prompt: None,
@@ -2095,7 +2095,7 @@ developer = [
 
         // Overlay explicitly sets mcp = [] (Some(vec![])) to clear the list.
         let mut overlay_roles = IndexMap::new();
-        overlay_roles.insert("worker".to_string(),
+        overlay_roles.insert("worker".to_string().into(),
             RoleDefinition {
                 mcp: Some(vec![]),
                 prompt: None,
@@ -2252,7 +2252,7 @@ developer = [
         let main = &pipelines[&Pipeline::Main];
 
         assert!(
-            main.stage("planning")
+            main.stage(&Stage::from("planning"))
                 .unwrap()
                 .prompts
                 .as_ref()
@@ -2395,7 +2395,7 @@ prompts = ["common.md", "planning.md"]
                 },
             ],
         );
-        base_tools.insert("reviewer".to_string(),
+        base_tools.insert("reviewer".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "claude-opus-4.6".parse().unwrap(),

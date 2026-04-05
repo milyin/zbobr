@@ -1472,7 +1472,7 @@ async fn detect_and_handle_worktree(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
     pipeline_name: &Pipeline,
-    stage_name: &str,
+    stage: &Stage,
     task_dir: &Path,
 ) -> anyhow::Result<WorktreeResult> {
     let task_backend = zbobr.task_backend();
@@ -1544,7 +1544,7 @@ async fn detect_and_handle_worktree(
     // Merge failed in a normal mode — abort and dispatch to conflict handler
     let _ = git(&work_dir, &["merge", "--abort"]).await;
 
-    handle_merge_conflict(zbobr, task_id, pipeline_name, stage_name).await
+    handle_merge_conflict(zbobr, task_id, pipeline_name, stage).await
 }
 
 /// Dispatch to the merge conflict handler pipeline.
@@ -1554,20 +1554,19 @@ async fn detect_and_handle_worktree(
 async fn handle_merge_conflict(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
-    pipeline_name: &Pipeline,
-    stage_name: &str,
+    pipeline: &Pipeline,
+    stage: &Stage,
 ) -> anyhow::Result<WorktreeResult> {
     let task_session = zbobr.task_session(task_id);
-    let pending_state = State::pending(pipeline_name.clone());
+    let pending_state = State::pending(pipeline.clone());
 
     // Recursion guard: if already inside the merge pipeline, pause
-    if pipeline_name.as_str() == Pipeline::MERGE {
+    if pipeline.as_str() == Pipeline::MERGE {
         tracing::error!("Task #{task_id}: merge conflict inside merge pipeline — pausing");
         let msg = "Merge conflict inside merge pipeline. Manual intervention required.";
         let status = format_error_status(zbobr, msg);
-        let stage = stage_name.to_string();
         task_session
-            .set_pause_with_status_and_signal(status, Signal::go(stage))
+            .set_pause_with_status_and_signal(status, Signal::go(stage.clone()))
             .await?;
         task_session.set_state(pending_state.clone()).await?;
         return Ok(WorktreeResult::Paused);
@@ -1575,7 +1574,7 @@ async fn handle_merge_conflict(
 
     // Push stack: re-run the interrupted stage upon return
     task_session
-        .push_stack(pipeline_name.clone(), Signal::go(stage_name))
+        .push_stack(pipeline.clone(), Signal::go(stage.clone()))
         .await?;
     task_session.allocate_pipeline_run_id().await?;
     task_session

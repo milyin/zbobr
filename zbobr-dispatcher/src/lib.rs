@@ -531,7 +531,7 @@ mod tests {
 
     fn provider_def(executor: &str, priority: i32) -> ProviderDefinition {
         ProviderDefinition {
-            executor: Some(executor.to_string()),
+            executor: Some(Executor(executor.to_string())),
             parent: None,
             priority: Some(priority),
             plan_mode: None,
@@ -558,8 +558,8 @@ mod tests {
         tools.insert("smart".to_string().into(), vec![tool_entry("claude", "opus")]);
 
         let dispatcher = make_dispatcher(providers, tools);
-        let (rp, model) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.executor, "claude");
+        let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
+        assert_eq!(rp.executor.as_str(), "claude");
         assert_eq!(model.as_str(), "opus");
     }
 
@@ -579,7 +579,7 @@ mod tests {
         );
 
         let dispatcher = make_dispatcher(providers, tools);
-        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
         assert_eq!(rp.provider.as_str(), "claude");
         assert_eq!(model.as_str(), "opus");
     }
@@ -598,8 +598,8 @@ mod tests {
 
         let dispatcher = make_dispatcher(providers, tools);
 
-        let (rp1, _) = dispatcher.select_provider("smart").unwrap();
-        let (rp2, _) = dispatcher.select_provider("smart").unwrap();
+        let (rp1, _) = dispatcher.select_provider(&"smart".into()).unwrap();
+        let (rp2, _) = dispatcher.select_provider(&"smart".into()).unwrap();
         assert_ne!(rp1.provider, rp2.provider, "Round-robin should alternate providers");
     }
 
@@ -618,7 +618,7 @@ mod tests {
         let dispatcher = make_dispatcher(providers, tools);
         dispatcher.exclude_provider("a");
 
-        let (rp, _) = dispatcher.select_provider("smart").unwrap();
+        let (rp, _) = dispatcher.select_provider(&"smart".into()).unwrap();
         assert_eq!(rp.provider.as_str(), "b");
     }
 
@@ -640,7 +640,7 @@ mod tests {
         let dispatcher = make_dispatcher(providers, tools);
         dispatcher.exclude_provider("primary");
 
-        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
         assert_eq!(rp.provider.as_str(), "fallback");
         assert_eq!(model.as_str(), "haiku");
     }
@@ -665,7 +665,7 @@ mod tests {
         excluded.insert("primary".to_string());
 
         let (rp, model) = dispatcher
-            .select_provider_excluding("smart", &excluded)
+            .select_provider_excluding(&"smart".into(), &excluded)
             .unwrap();
         assert_eq!(rp.provider.as_str(), "fallback");
         assert_eq!(model.as_str(), "gpt-5.3-codex");
@@ -693,7 +693,7 @@ mod tests {
         excluded.insert("high_a".to_string());
 
         let (rp, model) = dispatcher
-            .select_provider_excluding("smart", &excluded)
+            .select_provider_excluding(&"smart".into(), &excluded)
             .unwrap();
 
         assert_eq!(rp.provider.as_str(), "high_b");
@@ -723,13 +723,13 @@ mod tests {
 
         // Both providers have priority 10, but the fallback entry overrides to 0.
         // Without exclusions, the primary (effective priority 10) should be selected.
-        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
         assert_eq!(rp.provider.as_str(), "primary");
         assert_eq!(model.as_str(), "opus");
 
         // When primary is excluded, fallback (entry priority 0) is the only option.
         dispatcher.exclude_provider("primary");
-        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
         assert_eq!(rp.provider.as_str(), "fallback");
         assert_eq!(model.as_str(), "haiku");
     }
@@ -745,7 +745,7 @@ mod tests {
         let dispatcher = make_dispatcher(providers, tools);
         dispatcher.exclude_provider("only");
 
-        let err = dispatcher.select_provider("smart").unwrap_err();
+        let err = dispatcher.select_provider(&"smart".into()).unwrap_err();
         let msg = err.to_string().to_lowercase();
         assert!(
             msg.contains("excluded"),
@@ -756,7 +756,7 @@ mod tests {
     #[test]
     fn select_provider_unknown_tool_error() {
         let dispatcher = make_dispatcher(IndexMap::new(), IndexMap::new());
-        let err = dispatcher.select_provider("nonexistent").unwrap_err();
+        let err = dispatcher.select_provider(&"nonexistent".into()).unwrap_err();
         let msg = err.to_string().to_lowercase();
         assert!(
             msg.contains("not found"),
@@ -836,7 +836,7 @@ mod tests {
         let dispatcher = make_dispatcher(IndexMap::new(), IndexMap::new());
         let bad_provider = zbobr_api::config::ResolvedProvider {
             provider: "broken".to_string().into(),
-            executor: "nonexistent".to_string(),
+            executor: Executor("nonexistent".to_string()),
             priority: 10,
             plan_mode: false,
             access_key: None,
@@ -893,11 +893,11 @@ mod tests {
         let tools = IndexMap::from([("smart".to_string().into(), vec![tool_entry("cp", "some-model")])]);
         let mut roles = IndexMap::new();
         roles.insert(
-            "worker".to_string(),
+            "worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompt: None,
-                tool: Some("nonexistent".to_string()),
+                tool: Some("nonexistent".to_string().into()),
             },
         );
         let wf_config = WorkflowConfig {
@@ -938,13 +938,13 @@ mod tests {
         let dispatcher = make_dispatcher(providers, tools);
 
         // Provider "b" has base priority 5 but entry priority 20 → should win.
-        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
         assert_eq!(rp.provider.as_str(), "b", "elevated entry should be selected first");
         assert_eq!(model.as_str(), "sonnet");
 
         // When "b" is excluded, fall back to "a" (effective priority 5).
         dispatcher.exclude_provider("b");
-        let (rp, model) = dispatcher.select_provider("smart").unwrap();
+        let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
         assert_eq!(rp.provider.as_str(), "a");
         assert_eq!(model.as_str(), "opus");
     }

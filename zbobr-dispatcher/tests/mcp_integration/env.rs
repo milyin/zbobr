@@ -12,7 +12,7 @@ use std::{
 use indexmap::IndexMap;
 use zbobr_api::{
     Model, Secret,
-    config::{Provider, ProviderDefinition, ToolEntry, WorkflowConfig},
+    config::{Provider, ProviderDefinition, Tool, ToolEntry, WorkflowConfig},
 };
 use zbobr_dispatcher::{
     Comment, Task, Workflow, ZbobrDispatcher, ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
@@ -35,7 +35,7 @@ fn test_providers_and_tools() -> (
     IndexMap<Tool, Vec<ToolEntry>>,
 ) {
     let provider = ProviderDefinition {
-        executor: Some(Executor::MCP_TESTER.to_string()),
+        executor: Some(Executor(Executor::MCP_TESTER.to_string())),
         parent: None,
         priority: None,
         plan_mode: None,
