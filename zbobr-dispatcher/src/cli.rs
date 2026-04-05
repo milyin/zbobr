@@ -452,10 +452,10 @@ impl<'a> CliStageRunner<'a> {
             .stage_def
             .role()
             .expect("role stage must have role");
-        let tool_name = self
+        let tool = self
             .zbobr
             .config()
-            .resolve_tool_name(self.stage_def, self.zbobr.workflow().config())?;
+            .resolve_tool(self.stage_def, self.zbobr.workflow().config())?;
 
         // Set state to running
         self.zbobr
@@ -594,7 +594,7 @@ impl<'a> CliStageRunner<'a> {
         loop {
             let (resolved_provider, model) = self
                 .zbobr
-                .select_provider_excluding(&tool_name, &cycle_excluded_providers)?;
+                .select_provider_excluding(&tool, &cycle_excluded_providers)?;
             let plan_mode = resolved_provider.plan_mode;
 
             // Add a new StageContext to the task's context for this attempt.
@@ -712,7 +712,7 @@ impl<'a> CliStageRunner<'a> {
             if outcome.execution_failed {
                 cycle_excluded_providers.insert(resolved_provider.provider.as_str().to_string());
                 let attempts_remaining = self.zbobr.available_provider_model_count_excluding(
-                    &tool_name,
+                    &tool,
                     &cycle_excluded_providers,
                 )?;
                 let excluded = self.zbobr.record_provider_failure(resolved_provider.provider.as_str());
@@ -726,14 +726,14 @@ impl<'a> CliStageRunner<'a> {
                     tracing::warn!(
                         "Provider '{}' failed for tool '{}' — retrying with next available provider{}",
                         resolved_provider.provider.as_str(),
-                        tool_name,
+                        tool,
                         exclusion_hint,
                     );
                     continue;
                 }
                 tracing::warn!(
                     "Provider/model attempts exhausted for tool '{}' after a full cycle",
-                    tool_name
+                    tool
                 );
             } else {
                 self.zbobr.record_provider_success(resolved_provider.provider.as_str());
@@ -1148,7 +1148,7 @@ pub async fn run_manager_loop(
         } else {
             let tool_name = zbobr
                 .config()
-                .resolve_tool_name(stage_def, zbobr.workflow().config());
+                .resolve_tool(stage_def, zbobr.workflow().config());
             tracing::info!(
                 "Stage {}/{}: role={:?}, tool={:?}, prompts={:?}",
                 pipeline_name,

@@ -874,19 +874,19 @@ impl ZbobrDispatcherConfig {
     /// Determine the effective tool name for a stage.
     ///
     /// Precedence: stage.tool → role.tool
-    pub fn resolve_tool_name(
+    pub fn resolve_tool(
         &self,
         stage_def: &StageDefinition,
         workflow: &WorkflowConfig,
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<Tool> {
         if let Some(ref tool) = stage_def.tool {
-            return Ok(tool.clone().into());
+            return Ok(tool.clone());
         }
         if let Some(role_name) = stage_def.role().map(|r| r.as_str())
             && let Some(role_def) = workflow.role_definition(role_name)
             && let Some(ref tool) = role_def.tool
         {
-            return Ok(tool.clone().into());
+            return Ok(tool.clone());
         }
         anyhow::bail!(
             "No tool found for stage {:?} with role {:?}",
@@ -1241,7 +1241,7 @@ mod tests {
         let workflow = make_workflow_with_role("worker", Some("role-tool".into()));
         let config = ZbobrDispatcherConfig::default();
         assert_eq!(
-            config.resolve_tool_name(&stage, &workflow).unwrap(),
+            config.resolve_tool(&stage, &workflow).unwrap(),
             "stage-tool"
         );
     }
@@ -1256,7 +1256,7 @@ mod tests {
         let workflow = make_workflow_with_role("worker", Some("role-tool".into()));
         let config = ZbobrDispatcherConfig::default();
         assert_eq!(
-            config.resolve_tool_name(&stage, &workflow).unwrap(),
+            config.resolve_tool(&stage, &workflow).unwrap(),
             "role-tool"
         );
     }
@@ -1270,7 +1270,7 @@ mod tests {
         };
         let workflow = make_workflow_with_role("worker", None);
         let config = ZbobrDispatcherConfig::default();
-        assert!(config.resolve_tool_name(&stage, &workflow).is_err());
+        assert!(config.resolve_tool(&stage, &workflow).is_err());
     }
 
     #[test]
@@ -1282,7 +1282,7 @@ mod tests {
         };
         let workflow = WorkflowConfig::default();
         let config = ZbobrDispatcherConfig::default();
-        assert!(config.resolve_tool_name(&stage, &workflow).is_err());
+        assert!(config.resolve_tool(&stage, &workflow).is_err());
     }
 
     // ── resolve_providers – priority inheritance ────────────────────────

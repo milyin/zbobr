@@ -38,7 +38,7 @@ use typesafe_builder::{_TypesafeBuilderEmpty, _TypesafeBuilderFilled, Builder};
 pub use workflow::{StateAction, Workflow};
 use zbobr_api::{
     State,
-    config::{ResolvedProvider, ToolEntry},
+    config::{ResolvedProvider, Tool, ToolEntry},
 };
 
 pub use zbobr_api::config::Config;
@@ -122,19 +122,19 @@ impl ZbobrDispatcher {
     ///
     /// Filters out currently excluded providers, groups remaining entries by priority,
     /// and selects within the highest-priority group using round-robin.
-    pub fn select_provider(&self, tool_name: &str) -> anyhow::Result<(ResolvedProvider, Model)> {
-        self.select_provider_excluding(tool_name, &HashSet::new())
+    pub fn select_provider(&self, tool: &Tool) -> anyhow::Result<(ResolvedProvider, Model)> {
+        self.select_provider_excluding(tool, &HashSet::new())
     }
 
     /// Select a provider/model pair while additionally excluding provider names
     /// for the current selection cycle.
     pub fn select_provider_excluding(
         &self,
-        tool_name: &str,
+        tool: &Tool,
         additional_excluded: &HashSet<String>,
     ) -> anyhow::Result<(ResolvedProvider, Model)> {
-        let entries: &Vec<ToolEntry> = self.config.tools.get(tool_name).ok_or_else(|| {
-            anyhow::anyhow!("Tool '{}' not found in dispatcher config", tool_name)
+        let entries: &Vec<ToolEntry> = self.config.tools.get(tool).ok_or_else(|| {
+            anyhow::anyhow!("Tool '{}' not found in dispatcher config", tool)
         })?;
 
         let resolved_providers = self.config.resolve_providers()?;
@@ -159,7 +159,7 @@ impl ZbobrDispatcher {
         if available.is_empty() {
             anyhow::bail!(
                 "All providers for tool '{}' are currently excluded",
-                tool_name
+                tool
             );
         }
 
@@ -181,7 +181,7 @@ impl ZbobrDispatcher {
 
         // Round-robin within the top group
         let mut rr = self.round_robin_state.lock().unwrap();
-        let counter = rr.entry(tool_name.to_string()).or_insert(0);
+        let counter = rr.entry(tool.to_string()).or_insert(0);
         let pick = *counter % top_group.len();
         *counter = counter.wrapping_add(1);
         drop(rr);
