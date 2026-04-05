@@ -10,7 +10,7 @@ use rmcp::{
     service::RequestContext,
     tool, tool_router,
 };
-use zbobr_api::config_tools::McpTool;
+use zbobr_api::{Executor, Pipeline, Stage, config::Role, config_tools::McpTool};
 
 use crate::{
     mcp::{
@@ -20,7 +20,7 @@ use crate::{
         },
         traits::CommonMcpImpl,
     },
-    task::{Model, RoleSession, Tool},
+    task::{Model, RoleSession},
 };
 
 /// A single unified MCP server that defines ALL possible tools and filters them
@@ -30,12 +30,12 @@ pub struct UnifiedMcp {
     session: RoleSession,
     tool_router: ToolRouter<Self>,
     allowed_tools: HashSet<McpTool>,
-    role_name: String,
-    tool: Tool,
+    role: Role,
+    tool: Executor,
     model: Model,
-    stage_name: String,
-    /// Pipeline name for this session.
-    pipeline_name: String,
+    stage: Stage,
+    /// Pipeline for this session.
+    pipeline: Pipeline,
     /// Pipeline run ID for this session.
     pipeline_run_id: u64,
 }
@@ -45,24 +45,24 @@ impl CommonMcpImpl for UnifiedMcp {
         &self.session
     }
 
-    fn role_name(&self) -> &str {
-        &self.role_name
+    fn role(&self) -> &Role {
+        &self.role
     }
 
-    fn mcp_tool(&self) -> Tool {
-        self.tool.clone()
+    fn executor(&self) -> &Executor {
+        &self.tool
     }
 
-    fn mcp_model(&self) -> Model {
-        self.model.clone()
+    fn model(&self) -> &Model {
+        &self.model
     }
 
-    fn stage_name(&self) -> &str {
-        &self.stage_name
+    fn stage(&self) -> &Stage {
+        &self.stage
     }
 
-    fn pipeline_name(&self) -> &str {
-        &self.pipeline_name
+    fn pipeline(&self) -> &Pipeline {
+        &self.pipeline
     }
 
     fn pipeline_run_id(&self) -> u64 {
@@ -79,22 +79,22 @@ impl UnifiedMcp {
     pub fn new(
         session: RoleSession,
         allowed_tools: HashSet<McpTool>,
-        role_name: String,
-        tool: Tool,
+        role: Role,
+        tool: Executor,
         model: Model,
-        stage_name: String,
-        pipeline_name: String,
+        stage: Stage,
+        pipeline: Pipeline,
         pipeline_run_id: u64,
     ) -> Self {
         Self {
             session,
             tool_router: Self::tool_router(),
             allowed_tools,
-            role_name,
+            role,
             tool,
             model,
-            stage_name,
-            pipeline_name,
+            stage,
+            pipeline,
             pipeline_run_id,
         }
     }
@@ -173,7 +173,7 @@ impl ServerHandler for UnifiedMcp {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             instructions: Some(format!(
                 "{} tools: MCP server for task management.",
-                self.role_name
+                self.role
             )),
             ..Default::default()
         }
@@ -214,7 +214,7 @@ impl ServerHandler for UnifiedMcp {
             return Ok(CallToolResult {
                 content: vec![Content::text(format!(
                     "Error: tool '{}' is not available for role '{}'",
-                    tool_name, self.role_name
+                    tool_name, self.role
                 ))],
                 structured_content: None,
                 is_error: Some(true),

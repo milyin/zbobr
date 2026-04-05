@@ -10,7 +10,7 @@ use anyhow::Context;
 use clap::{Args, Parser};
 use zbobr_api::{
     Pipeline, Signal, StackEntry, State,
-    config::StageDefinition,
+    config::{Role, StageDefinition},
     config_tools::McpTool,
     task::{Stage, StageContext, StageInfo},
 };
@@ -20,7 +20,7 @@ use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
     Comment, Task, TaskDir, ToolExecutor, Workflow, ZbobrDispatcher,
-    task::{Model, Tool},
+    task::{Model, Executor},
     workflow::SequentialSignal,
 };
 use zbobr_api::tool_executor::ExecutorOutput;
@@ -411,8 +411,8 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
 struct CliStageRunner<'a> {
     zbobr: &'a Arc<ZbobrDispatcher>,
     task_id: u64,
-    pipeline_name: &'a Pipeline,
-    stage_name: &'a str,
+    pipeline: &'a Pipeline,
+    stage: &'a Stage,
     stage_def: &'a StageDefinition,
     mcp_tester_override: Option<&'a ZbobrExecutorMcpTesterConfig>,
 }
@@ -421,23 +421,23 @@ impl<'a> CliStageRunner<'a> {
     fn new(
         zbobr: &'a Arc<ZbobrDispatcher>,
         task_id: u64,
-        pipeline_name: &'a Pipeline,
-        stage_name: &'a str,
+        pipeline: &'a Pipeline,
+        stage: &'a Stage,
         stage_def: &'a StageDefinition,
         mcp_tester_override: Option<&'a ZbobrExecutorMcpTesterConfig>,
     ) -> Self {
         Self {
             zbobr,
             task_id,
-            pipeline_name,
-            stage_name,
+            pipeline,
+            stage,
             stage_def,
             mcp_tester_override,
         }
     }
 
     fn running_state(&self) -> State {
-        State::running(self.pipeline_name.clone(), self.stage_name)
+        State::running(self.pipeline.clone(), self.stage.clone())
     }
 
     async fn prompt(&self, _pipeline_run_id: u64) -> anyhow::Result<String> {
@@ -450,12 +450,12 @@ impl<'a> CliStageRunner<'a> {
     async fn run(&self) -> anyhow::Result<()> {
         let role = self
             .stage_def
-            .role_name()
+            .role()
             .expect("role stage must have role");
-        let tool_name = self
+        let tool = self
             .zbobr
             .config()
-            .resolve_tool_name(self.stage_def, self.zbobr.workflow().config())?;
+            .resolve_tool(self.stage_def, self.zbobr.workflow().config())?;
 
         // Set state to running
         self.zbobr
@@ -473,8 +473,8 @@ impl<'a> CliStageRunner<'a> {
         let work_dir = match detect_and_handle_worktree(
             self.zbobr,
             self.task_id,
-            self.pipeline_name,
-            self.stage_name,
+            self.pipeline,
+            self.stage,
             task_dir.path(),
         )
         .await?
@@ -581,7 +581,7 @@ impl<'a> CliStageRunner<'a> {
             let role_session = self.zbobr.role_session(self.task_id);
             let base_name = format!(
                 "prompt_{}_{}_{}_start",
-                self.pipeline_name, pipeline_run_id, self.stage_name
+                self.pipeline, pipeline_run_id, self.stage
             );
             role_session.store_report(&base_name, &prompt_text).await?
         };
@@ -594,15 +594,15 @@ impl<'a> CliStageRunner<'a> {
         loop {
             let (resolved_provider, model) = self
                 .zbobr
-                .select_provider_excluding(&tool_name, &cycle_excluded_providers)?;
+                .select_provider_excluding(&tool, &cycle_excluded_providers)?;
             let plan_mode = resolved_provider.plan_mode;
 
             // Add a new StageContext to the task's context for this attempt.
             {
                 let instance = self.zbobr.config().instance.clone();
-                let pipeline_name = self.pipeline_name.clone();
-                let stage_name = Stage::new(self.stage_name);
-                let tool_val = Some(resolved_provider.name.clone());
+                let pipeline_name = self.pipeline.clone();
+                let stage_name = self.stage.clone();
+                let tool_val = Some(resolved_provider.provider.as_str().to_string());
                 let model_val = Some(model.clone());
                 let timestamp =
                     chrono::Utc::now().with_timezone(&self.zbobr.config().fixed_offset());
@@ -632,14 +632,14 @@ impl<'a> CliStageRunner<'a> {
             let tool_tracker = Arc::new(std::sync::Mutex::new(None::<McpTool>));
             let (assigned_port, server_handle) = start_mcp_server(
                 Arc::clone(self.zbobr),
-                role,
+                role.clone(),
                 self.task_id,
-                Tool(resolved_provider.executor.clone()),
+                resolved_provider.executor.clone(),
                 model.clone(),
-                self.stage_name.to_string(),
+                self.stage.clone(),
                 allowed_tools.clone(),
                 Arc::clone(&tool_tracker),
-                self.pipeline_name.to_string(),
+                self.pipeline.clone(),
                 pipeline_run_id,
             )
             .await?;
@@ -652,7 +652,7 @@ impl<'a> CliStageRunner<'a> {
             let executor = self
                 .zbobr
                 .build_executor(&resolved_provider, self.mcp_tester_override)?;
-            let copilot_token_owned = if resolved_provider.executor == Tool::COPILOT {
+            let copilot_token_owned = if resolved_provider.executor == Executor::copilot() {
                 self.zbobr.copilot_github_token().to_owned()
             } else {
                 String::new()
@@ -678,7 +678,7 @@ impl<'a> CliStageRunner<'a> {
                 let role_session = self.zbobr.role_session(self.task_id);
                 let base_name = format!(
                     "output_{}_{}_{}_end",
-                    self.pipeline_name, pipeline_run_id, self.stage_name
+                    self.pipeline, pipeline_run_id, self.stage
                 );
                 match role_session.store_report(&base_name, output).await {
                     Ok(output_link) => {
@@ -710,12 +710,12 @@ impl<'a> CliStageRunner<'a> {
             let last_mapped_tool = *tool_tracker.lock().unwrap();
 
             if outcome.execution_failed {
-                cycle_excluded_providers.insert(resolved_provider.name.clone());
+                cycle_excluded_providers.insert(resolved_provider.provider.as_str().to_string());
                 let attempts_remaining = self.zbobr.available_provider_model_count_excluding(
-                    &tool_name,
+                    &tool,
                     &cycle_excluded_providers,
                 )?;
-                let excluded = self.zbobr.record_provider_failure(&resolved_provider.name);
+                let excluded = self.zbobr.record_provider_failure(resolved_provider.provider.as_str());
                 server_handle.abort();
                 if attempts_remaining > 0 {
                     let exclusion_hint = if excluded {
@@ -725,25 +725,25 @@ impl<'a> CliStageRunner<'a> {
                     };
                     tracing::warn!(
                         "Provider '{}' failed for tool '{}' — retrying with next available provider{}",
-                        resolved_provider.name,
-                        tool_name,
+                        resolved_provider.provider.as_str(),
+                        tool,
                         exclusion_hint,
                     );
                     continue;
                 }
                 tracing::warn!(
                     "Provider/model attempts exhausted for tool '{}' after a full cycle",
-                    tool_name
+                    tool
                 );
             } else {
-                self.zbobr.record_provider_success(&resolved_provider.name);
+                self.zbobr.record_provider_success(resolved_provider.provider.as_str());
             }
 
             if let Some(e) = finalize_stage_session(
                 self.zbobr,
                 self.task_id,
-                self.pipeline_name,
-                self.stage_name,
+                self.pipeline,
+                self.stage,
                 &work_dir,
                 outcome,
                 last_mapped_tool,
@@ -784,13 +784,13 @@ async fn handle_call_stage(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
     pipeline_name: &Pipeline,
-    stage_name: &str,
+    stage: &Stage,
     call_pipeline: &Pipeline,
 ) -> anyhow::Result<()> {
     let task_session = zbobr.task_session(task_id);
 
     // Determine what signal to emit when the called pipeline returns.
-    let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
+    let stage_def = zbobr.workflow().stage(pipeline_name, stage);
     let return_signal = if let Some(target) = stage_def
         .and_then(|s| s.on_success())
         .and_then(|t| t.next.as_ref())
@@ -800,9 +800,9 @@ async fn handle_call_stage(
         match zbobr
             .workflow()
             .pipeline(pipeline_name)
-            .and_then(|p| p.next_stage(stage_name))
+            .and_then(|p| p.next_stage(stage))
         {
-            Some((next, _)) => Signal::go(next),
+            Some((next, _)) => Signal::go(next.as_str()),
             None => Signal::Return,
         }
     };
@@ -843,7 +843,8 @@ async fn handle_call_stage(
         .await?;
 
     tracing::info!(
-        "Task #{task_id}: stage {pipeline_name}/{stage_name} calling pipeline '{call_pipeline}' (return → {return_signal})"
+        "Task #{task_id}: stage {pipeline_name}/{} calling pipeline '{call_pipeline}' (return → {return_signal})",
+        stage.as_str()
     );
 
     Ok(())
@@ -1005,14 +1006,21 @@ pub async fn process_task(
                     stage_name,
                     call_target
                 );
-                handle_call_stage(zbobr, task.id, pipeline_name, stage_name, call_target).await?;
+                handle_call_stage(
+                    zbobr,
+                    task.id,
+                    pipeline_name,
+                    stage_name,
+                    call_target,
+                )
+                .await?;
             } else {
                 tracing::info!(
                     "Task #{}: running stage {}/{} (role={:?})",
                     task.id,
                     pipeline_name,
                     stage_name,
-                    stage_def.role_name()
+                    stage_def.role()
                 );
                 let runner = CliStageRunner::new(
                     zbobr,
@@ -1031,7 +1039,7 @@ pub async fn process_task(
                     let task_session = zbobr.task_session(task.id);
                     let status = format_error_status(zbobr, &msg);
                     if let Err(pause_err) = task_session
-                        .set_pause_with_status_and_signal(status, Signal::go(stage_name))
+                        .set_pause_with_status_and_signal(status, Signal::go(stage_name.as_str()))
                         .await
                     {
                         tracing::error!(
@@ -1140,12 +1148,12 @@ pub async fn run_manager_loop(
         } else {
             let tool_name = zbobr
                 .config()
-                .resolve_tool_name(stage_def, zbobr.workflow().config());
+                .resolve_tool(stage_def, zbobr.workflow().config());
             tracing::info!(
                 "Stage {}/{}: role={:?}, tool={:?}, prompts={:?}",
                 pipeline_name,
                 stage_name,
-                stage_def.role_name().unwrap_or("<none>"),
+                stage_def.role().map_or("<none>", |r| r.as_str()),
                 tool_name,
                 stage_def.role_prompt
             );
@@ -1404,7 +1412,7 @@ pub async fn run_manager_loop(
                     let task_session = zbobr.task_session(task.id);
                     let status = format_error_status(zbobr, &msg);
                     if let Err(pause_err) = task_session
-                        .set_pause_with_status_and_signal(status, Signal::go(stage_name))
+                        .set_pause_with_status_and_signal(status, Signal::go(stage_name.as_str()))
                         .await
                     {
                         tracing::error!(
@@ -1464,7 +1472,7 @@ async fn detect_and_handle_worktree(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
     pipeline_name: &Pipeline,
-    stage_name: &str,
+    stage: &Stage,
     task_dir: &Path,
 ) -> anyhow::Result<WorktreeResult> {
     let task_backend = zbobr.task_backend();
@@ -1536,7 +1544,7 @@ async fn detect_and_handle_worktree(
     // Merge failed in a normal mode — abort and dispatch to conflict handler
     let _ = git(&work_dir, &["merge", "--abort"]).await;
 
-    handle_merge_conflict(zbobr, task_id, pipeline_name, stage_name).await
+    handle_merge_conflict(zbobr, task_id, pipeline_name, stage).await
 }
 
 /// Dispatch to the merge conflict handler pipeline.
@@ -1546,20 +1554,19 @@ async fn detect_and_handle_worktree(
 async fn handle_merge_conflict(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
-    pipeline_name: &Pipeline,
-    stage_name: &str,
+    pipeline: &Pipeline,
+    stage: &Stage,
 ) -> anyhow::Result<WorktreeResult> {
     let task_session = zbobr.task_session(task_id);
-    let pending_state = State::pending(pipeline_name.clone());
+    let pending_state = State::pending(pipeline.clone());
 
     // Recursion guard: if already inside the merge pipeline, pause
-    if pipeline_name.as_str() == Pipeline::MERGE {
+    if pipeline.as_str() == Pipeline::MERGE {
         tracing::error!("Task #{task_id}: merge conflict inside merge pipeline — pausing");
         let msg = "Merge conflict inside merge pipeline. Manual intervention required.";
         let status = format_error_status(zbobr, msg);
-        let stage = stage_name.to_string();
         task_session
-            .set_pause_with_status_and_signal(status, Signal::go(stage))
+            .set_pause_with_status_and_signal(status, Signal::go(stage.clone()))
             .await?;
         task_session.set_state(pending_state.clone()).await?;
         return Ok(WorktreeResult::Paused);
@@ -1567,7 +1574,7 @@ async fn handle_merge_conflict(
 
     // Push stack: re-run the interrupted stage upon return
     task_session
-        .push_stack(pipeline_name.clone(), Signal::go(stage_name))
+        .push_stack(pipeline.clone(), Signal::go(stage.clone()))
         .await?;
     task_session.allocate_pipeline_run_id().await?;
     task_session
@@ -1647,29 +1654,28 @@ async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Re
 #[allow(clippy::too_many_arguments)]
 async fn start_mcp_server(
     zbobr: Arc<ZbobrDispatcher>,
-    role_name: &str,
+    role: Role,
     task_id: u64,
-    tool: Tool,
+    tool: Executor,
     model: Model,
-    stage_name: String,
+    stage: Stage,
     allowed_tools: std::collections::HashSet<McpTool>,
     tool_tracker: Arc<std::sync::Mutex<Option<McpTool>>>,
-    pipeline_name: String,
+    pipeline: Pipeline,
     pipeline_run_id: u64,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
-    let role_name = role_name.to_string();
     let server_handle = tokio::spawn(async move {
         match crate::mcp::run_role_mcp_server(
             zbobr,
-            &role_name,
+            role,
             task_id,
             tool,
             model,
-            stage_name,
+            stage,
             allowed_tools,
             tool_tracker,
-            pipeline_name,
+            pipeline,
             pipeline_run_id,
         )
         .await
@@ -1759,18 +1765,18 @@ async fn execute_tool(
 async fn finalize_stage_session(
     zbobr: &Arc<ZbobrDispatcher>,
     task_id: u64,
-    pipeline_name: &Pipeline,
-    stage_name: &str,
+    pipeline: &Pipeline,
+    stage: &Stage,
     work_dir: &Path,
     outcome: SessionOutcome,
     last_mapped_tool: Option<McpTool>,
 ) -> anyhow::Result<Option<anyhow::Error>> {
     let task_session = zbobr.task_session(task_id);
-    let pending_state = State::pending(pipeline_name.clone());
+    let pending_state = State::pending(pipeline.clone());
 
     if outcome.execution_interrupted {
         if let Err(e) =
-            perform_stash_and_push(zbobr, task_id, work_dir, stage_name, pipeline_name).await
+            perform_stash_and_push(zbobr, task_id, work_dir, stage.as_str(), pipeline).await
         {
             tracing::warn!("Stash/push failed during interruption for task #{task_id}: {e}");
         }
@@ -1781,15 +1787,15 @@ async fn finalize_stage_session(
 
     if let Some(e) = outcome.execution_error.as_ref() {
         if let Err(e) =
-            perform_stash_and_push(zbobr, task_id, work_dir, stage_name, pipeline_name).await
+            perform_stash_and_push(zbobr, task_id, work_dir, stage.as_str(), pipeline).await
         {
             tracing::warn!("Stash/push failed during error handling for task #{task_id}: {e}");
         }
         let error_msg = format!("Execution failed: {e}");
         let status = format_error_status(zbobr, &error_msg);
-        let stage = stage_name.to_string();
+        let stage = stage.to_string();
         if let Err(pause_err) = task_session
-            .set_pause_with_status_and_signal(status, Signal::go(stage))
+            .set_pause_with_status_and_signal(status, Signal::go(stage.as_str()))
             .await
         {
             tracing::error!("Failed to set pause for task #{task_id}: {pause_err}");
@@ -1802,14 +1808,14 @@ async fn finalize_stage_session(
     tracing::info!("Session complete for task #{task_id}");
 
     if let Err(e) =
-        perform_stash_and_push(zbobr, task_id, work_dir, stage_name, pipeline_name).await
+        perform_stash_and_push(zbobr, task_id, work_dir, stage.as_str(), pipeline).await
     {
         tracing::error!("Stash/push failed for task #{task_id}: {e}");
         let msg = format!("Stash/push failed: {e}");
         let status = format_error_status(zbobr, &msg);
-        let stage = stage_name.to_string();
+        let stage = stage.to_string();
         if let Err(pause_err) = task_session
-            .set_pause_with_status_and_signal(status, Signal::go(stage))
+            .set_pause_with_status_and_signal(status, Signal::go(stage.as_str()))
             .await
         {
             tracing::error!(
@@ -1830,10 +1836,11 @@ async fn finalize_stage_session(
         .snapshot(false)
         .await?;
     if !current_task.pause && current_task.signal.is_none() {
-        let stage_def = zbobr.workflow().stage(pipeline_name, stage_name);
+        let current_stage = stage.clone();
+        let stage_def = zbobr.workflow().stage(pipeline, &current_stage);
         let seq_signal = zbobr.workflow().sequential_signal(
-            pipeline_name,
-            stage_name,
+            pipeline,
+            &current_stage,
             stage_def,
             last_mapped_tool,
         );
@@ -1859,7 +1866,7 @@ async fn finalize_stage_session(
     // signal to re-run the current stage on resume.
     if current_task.pause && current_task.signal.is_none() {
         task_session
-            .set_signal(Some(Signal::go(stage_name)))
+            .set_signal(Some(Signal::go(stage.as_str())))
             .await?;
     }
     task_session.set_state(pending_state).await?;
@@ -1960,7 +1967,7 @@ mod tests {
     /// Build a minimal Workflow with a single "main" pipeline containing one "working" stage.
     fn make_workflow() -> Workflow {
         let role_stage = StageDefinition {
-            role: Some("worker".to_string()),
+            role: Some("worker".to_string().into()),
             ..Default::default()
         };
         let main_pipeline = PipelineConfig {

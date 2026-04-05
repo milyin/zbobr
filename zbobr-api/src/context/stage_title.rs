@@ -259,7 +259,7 @@ fn parse_next_pipeline_stage(rest: &mut &str) -> Result<(String, Pipeline, u64, 
         instance_str.to_string(),
         pipeline_str.parse().unwrap(),
         run_id,
-        Stage::new(stage_str),
+        Stage::from(stage_str),
     ))
 }
 

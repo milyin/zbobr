@@ -298,71 +298,7 @@ pub fn classify_comment(text: &str) -> HistoryRecordType {
     }
 }
 
-/// A stage name within a pipeline (user-defined, dynamically configured).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Stage(pub String);
-
-impl Stage {
-    pub fn new(s: impl Into<String>) -> Self {
-        Stage(s.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for Stage {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::ops::Deref for Stage {
-    type Target = str;
-    fn deref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::borrow::Borrow<str> for Stage {
-    fn borrow(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<&str> for Stage {
-    fn from(s: &str) -> Self {
-        Stage(s.to_string())
-    }
-}
-
-impl From<String> for Stage {
-    fn from(s: String) -> Self {
-        Stage(s)
-    }
-}
-
-impl serde::Serialize for Stage {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.0)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for Stage {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Stage(String::deserialize(deserializer)?))
-    }
-}
-
-impl schemars::JsonSchema for Stage {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "Stage".into()
-    }
-    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({ "type": "string" })
-    }
-}
+pub use crate::config::Stage;
 
 /// Task lifecycle state.
 ///
@@ -673,10 +609,10 @@ impl std::fmt::Display for Signal {
 impl std::str::FromStr for Signal {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(stage) = s.strip_prefix("go_") {
-            Ok(Signal::Go(Stage::new(stage)))
-        } else if let Some(pipeline) = s.strip_prefix("call_") {
-            Ok(Signal::Call(Pipeline::from(pipeline)))
+        if let Some(stage_name) = s.strip_prefix("go_") {
+            Ok(Signal::Go(Stage::from(stage_name)))
+        } else if let Some(pipeline_name) = s.strip_prefix("call_") {
+            Ok(Signal::Call(Pipeline::from(pipeline_name)))
         } else if s == "return" {
             Ok(Signal::Return)
         } else if s == "return_failure" {
@@ -731,17 +667,14 @@ pub enum WorktreeProblem {
     Conflict,
 }
 
-/// Role for task execution — now a plain string to support configurable roles.
-pub type Role = String;
-
 /// Executor type identifier.
 ///
 /// A transparent newtype over `String`. Serializes as the inner string so
 /// existing TOML/JSON representations remain backward-compatible.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, schemars::JsonSchema)]
-pub struct Tool(pub String);
+pub struct Executor(pub String);
 
-impl Tool {
+impl Executor {
     pub const CLAUDE: &'static str = "claude";
     pub const COPILOT: &'static str = "copilot";
     pub const MCP_TESTER: &'static str = "mcp-tester";
@@ -751,41 +684,41 @@ impl Tool {
     }
 
     pub fn claude() -> Self {
-        Tool(Self::CLAUDE.to_string())
+        Executor(Self::CLAUDE.to_string())
     }
 
     pub fn copilot() -> Self {
-        Tool(Self::COPILOT.to_string())
+        Executor(Self::COPILOT.to_string())
     }
 
     pub fn mcp_tester() -> Self {
-        Tool(Self::MCP_TESTER.to_string())
+        Executor(Self::MCP_TESTER.to_string())
     }
 }
 
-impl std::fmt::Display for Tool {
+impl std::fmt::Display for Executor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
     }
 }
 
-impl std::str::FromStr for Tool {
+impl std::str::FromStr for Executor {
     type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Tool(s.to_string()))
+        Ok(Executor(s.to_string()))
     }
 }
 
-impl serde::Serialize for Tool {
+impl serde::Serialize for Executor {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.0)
     }
 }
 
-impl<'de> serde::Deserialize<'de> for Tool {
+impl<'de> serde::Deserialize<'de> for Executor {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        Ok(Tool(s))
+        Ok(Executor(s))
     }
 }
 
@@ -795,15 +728,20 @@ impl<'de> serde::Deserialize<'de> for Tool {
 /// passed verbatim to executor CLIs — there is no longer a closed set of
 /// known models. Whitespace is not allowed (enforced at construction time).
 #[derive(Debug, Clone, PartialEq, Eq, Default, schemars::JsonSchema)]
-pub struct Model(pub String);
+pub struct Model(pub std::borrow::Cow<'static, str>);
 
 impl Model {
+    /// Construct a `Model` from a static string.
+    pub const fn new(s: &'static str) -> Self {
+        Model(std::borrow::Cow::Borrowed(s))
+    }
+
     /// Construct a `Model`, returning `Err` if the string contains any whitespace.
     pub fn try_new(s: &str) -> Result<Self, String> {
         if s.chars().any(|c| c.is_whitespace()) {
             return Err(format!("model name must not contain whitespace: {:?}", s));
         }
-        Ok(Model(s.to_string()))
+        Ok(Model(std::borrow::Cow::Owned(s.to_string())))
     }
 
     pub fn as_str(&self) -> &str {
@@ -824,6 +762,18 @@ impl std::str::FromStr for Model {
     }
 }
 
+impl From<String> for Model {
+    fn from(s: String) -> Self {
+        Model(std::borrow::Cow::Owned(s))
+    }
+}
+
+impl From<&str> for Model {
+    fn from(s: &str) -> Self {
+        Model(std::borrow::Cow::Owned(s.to_string()))
+    }
+}
+
 impl serde::Serialize for Model {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.0)
@@ -832,8 +782,7 @@ impl serde::Serialize for Model {
 
 impl<'de> serde::Deserialize<'de> for Model {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        Model::try_new(&s).map_err(serde::de::Error::custom)
+        Ok(Model(std::borrow::Cow::Owned(String::deserialize(deserializer)?)))
     }
 }
 

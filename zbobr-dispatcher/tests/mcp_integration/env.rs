@@ -12,11 +12,11 @@ use std::{
 use indexmap::IndexMap;
 use zbobr_api::{
     Model, Secret,
-    config::{ProviderDefinition, ToolEntry, WorkflowConfig},
+    config::{Provider, ProviderDefinition, Tool, ToolEntry, WorkflowConfig},
 };
 use zbobr_dispatcher::{
     Comment, Task, Workflow, ZbobrDispatcher, ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
-    backend::TaskBackendExt, cli::process_task, prompts::ConfiguredPromptBuilder, task::Tool,
+    backend::TaskBackendExt, cli::process_task, prompts::ConfiguredPromptBuilder, task::Executor,
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_repo_backend_fs::{ZbobrRepoBackendFs, ZbobrRepoBackendFsConfig};
@@ -31,23 +31,23 @@ static SCENARIO_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Defines one provider "mcp-tester" backed by the mcp-tester executor, and one
 /// tool also named "mcp-tester" that selects that provider with model "test-model".
 fn test_providers_and_tools() -> (
-    IndexMap<String, ProviderDefinition>,
-    IndexMap<String, Vec<ToolEntry>>,
+    IndexMap<Provider, ProviderDefinition>,
+    IndexMap<Tool, Vec<ToolEntry>>,
 ) {
     let provider = ProviderDefinition {
-        executor: Some(Tool::MCP_TESTER.to_string()),
+        executor: Some(Executor(Executor::MCP_TESTER.to_string())),
         parent: None,
         priority: None,
         plan_mode: None,
         access_key: None,
     };
     let entry = ToolEntry {
-        provider: "mcp-tester".to_string(),
+        provider: "mcp-tester".to_string().into(),
         model: Model::try_new("test-model").expect("valid model name"),
         priority: None,
     };
-    let providers = IndexMap::from([("mcp-tester".to_string(), provider)]);
-    let tools = IndexMap::from([("mcp-tester".to_string(), vec![entry])]);
+    let providers = IndexMap::from([("mcp-tester".to_string().into(), provider)]);
+    let tools = IndexMap::from([("mcp-tester".to_string().into(), vec![entry])]);
     (providers, tools)
 }
 

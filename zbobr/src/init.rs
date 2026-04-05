@@ -7,11 +7,12 @@ use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Secret, Stage,
     config::{
-        PipelineConfig, ProviderDefinition, RoleDefinition, StageDefinition, StageTransition,
-        ToolEntry, WorkflowConfig, WorkflowToml,
+        PipelineConfig, Provider, ProviderDefinition, Role, RoleDefinition, StageDefinition,
+        StageTransition, Tool, ToolEntry, WorkflowConfig, WorkflowToml,
     },
     config_tools::McpTool,
 };
+use zbobr_api::task::{Executor, Model};
 use zbobr_dispatcher::config::{ZbobrDispatcherToml, ZbobrExecutorToml};
 use zbobr_executor_copilot::ZbobrExecutorCopilotToml;
 use zbobr_repo_backend_github::ZbobrRepoBackendGithubToml;
@@ -21,13 +22,47 @@ use super::RootConfigToml;
 
 // Default model names used by init workspace. Copilot paths use dot notation
 // for some claude models, while actual Claude executor uses hyphen notation.
-const COPILOT_MODEL_HAIKU: &str = "claude-haiku-4.5";
-const CLAUDE_MODEL_HAIKU: &str = "claude-haiku-4-5";
-const COPILOT_MODEL_SONNET: &str = "claude-sonnet-4.6";
-const CLAUDE_MODEL_OPUS: &str = "claude-opus-4-6";
-const CLAUDE_MODEL_SONNET: &str = "claude-sonnet-4-6";
-const COPILOT_MODEL_GPT_5_4: &str = "gpt-5.4";
-const COPILOT_MODEL_GPT_5_MINI: &str = "gpt-5-mini";
+const COPILOT_MODEL_HAIKU: Model = Model::new("claude-haiku-4.5");
+const CLAUDE_MODEL_HAIKU: Model = Model::new("claude-haiku-4-5");
+const COPILOT_MODEL_SONNET: Model = Model::new("claude-sonnet-4.6");
+const CLAUDE_MODEL_OPUS: Model = Model::new("claude-opus-4-6");
+const CLAUDE_MODEL_SONNET: Model = Model::new("claude-sonnet-4-6");
+const COPILOT_MODEL_GPT_5_4: Model = Model::new("gpt-5.4");
+const COPILOT_MODEL_GPT_5_MINI: Model = Model::new("gpt-5-mini");
+
+const WORKFLOW_PROMPTS_DIR: &str = "prompts";
+const TASK_PROMPT: &str = "task.md";
+
+const TOOL_DEVELOPER: Tool = Tool::new("developer");
+const TOOL_PLANNER: Tool = Tool::new("planner");
+const TOOL_HELPER: Tool = Tool::new("helper");
+const TOOL_REVIEWER: Tool = Tool::new("reviewer");
+const TOOL_DRUDGE: Tool = Tool::new("drudge");
+
+const ROLE_PLANNER: Role = Role::new("planner");
+const ROLE_WORKER: Role = Role::new("worker");
+const ROLE_TEST_PLANNER: Role = Role::new("test_planner");
+const ROLE_TEST_WORKER: Role = Role::new("test_worker");
+const ROLE_REVIEWER: Role = Role::new("reviewer");
+const ROLE_TESTER: Role = Role::new("tester");
+const ROLE_LINTER: Role = Role::new("linter");
+const ROLE_LINTER_WORKER: Role = Role::new("linter_worker");
+const ROLE_MERGER: Role = Role::new("merger");
+
+const STAGE_PLANNING: Stage = Stage::new("planning");
+const STAGE_WORKING: Stage = Stage::new("working");
+const STAGE_REVIEWING: Stage = Stage::new("reviewing");
+const STAGE_TEST_PLANNER: Stage = Stage::new("test_planner");
+const STAGE_TEST_WORKER: Stage = Stage::new("test_worker");
+const STAGE_LINTING: Stage = Stage::new("linting");
+const STAGE_LINTER_WORKER: Stage = Stage::new("linter_worker");
+const STAGE_TESTING: Stage = Stage::new("testing");
+const STAGE_MERGING: Stage = Stage::new("merging");
+
+const PROVIDER_CLAUDE: Provider = Provider::new("claude");
+const PROVIDER_COPILOT: Provider = Provider::new("copilot");
+const PROVIDER_CLAUDE_PLANNER: Provider = Provider::new("claude_planner");
+const PROVIDER_COPILOT_PLANNER: Provider = Provider::new("copilot_planner");
 
 /// Initialize a new zbobr workspace at the given directory.
 ///
@@ -111,9 +146,9 @@ fn default_config_toml() -> RootConfigToml {
 
     let providers = IndexMap::from([
         (
-            "claude".to_string(),
+            PROVIDER_CLAUDE,
             ProviderDefinition {
-                executor: Some("claude".to_string()),
+                executor: Some(Executor::claude()),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -121,9 +156,9 @@ fn default_config_toml() -> RootConfigToml {
             },
         ),
         (
-            "copilot".to_string(),
+            PROVIDER_COPILOT,
             ProviderDefinition {
-                executor: Some("copilot".to_string()),
+                executor: Some(Executor::copilot()),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -131,20 +166,20 @@ fn default_config_toml() -> RootConfigToml {
             },
         ),
         (
-            "claude_planner".to_string(),
+            PROVIDER_CLAUDE_PLANNER,
             ProviderDefinition {
                 executor: None,
-                parent: Some("claude".to_string()),
+                parent: Some(PROVIDER_CLAUDE),
                 priority: None,
                 plan_mode: Some(true),
                 access_key: None,
             },
         ),
         (
-            "copilot_planner".to_string(),
+            PROVIDER_COPILOT_PLANNER,
             ProviderDefinition {
                 executor: None,
-                parent: Some("copilot".to_string()),
+                parent: Some(PROVIDER_COPILOT),
                 priority: None,
                 plan_mode: Some(true),
                 access_key: None,
@@ -154,76 +189,76 @@ fn default_config_toml() -> RootConfigToml {
 
     let tools = IndexMap::from([
         (
-            "developer".to_string(),
+            TOOL_DEVELOPER,
             vec![
                 ToolEntry {
-                    provider: "claude".to_string(),
-                    model: CLAUDE_MODEL_OPUS.parse().unwrap(),
+                    provider: PROVIDER_CLAUDE,
+                    model: CLAUDE_MODEL_OPUS,
                     priority: None,
                 },
                 ToolEntry {
-                    provider: "copilot".to_string(),
-                    model: COPILOT_MODEL_SONNET.parse().unwrap(),
+                    provider: PROVIDER_COPILOT,
+                    model: COPILOT_MODEL_SONNET,
                     priority: Some(0),
                 },
             ],
         ),
         (
-            "planner".to_string(),
+            TOOL_PLANNER,
             vec![
                 ToolEntry {
-                    provider: "claude_planner".to_string(),
-                    model: CLAUDE_MODEL_OPUS.parse().unwrap(),
+                    provider: PROVIDER_CLAUDE_PLANNER,
+                    model: CLAUDE_MODEL_OPUS,
                     priority: None,
                 },
                 ToolEntry {
-                    provider: "copilot_planner".to_string(),
-                    model: COPILOT_MODEL_SONNET.parse().unwrap(),
+                    provider: PROVIDER_COPILOT_PLANNER,
+                    model: COPILOT_MODEL_SONNET,
                     priority: Some(0),
                 },
             ],
         ),
         (
-            "helper".to_string(),
+            TOOL_HELPER,
             vec![
                 ToolEntry {
-                    provider: "copilot".to_string(),
-                    model: COPILOT_MODEL_HAIKU.parse().unwrap(),
+                    provider: PROVIDER_COPILOT,
+                    model: COPILOT_MODEL_HAIKU,
                     priority: None,
                 },
                 ToolEntry {
-                    provider: "claude".to_string(),
-                    model: CLAUDE_MODEL_HAIKU.parse().unwrap(),
+                    provider: PROVIDER_CLAUDE,
+                    model: CLAUDE_MODEL_HAIKU,
                     priority: Some(0),
                 },
             ],
         ),
         (
-            "reviewer".to_string(),
+            TOOL_REVIEWER,
             vec![
                 ToolEntry {
-                    provider: "copilot".to_string(),
-                    model: COPILOT_MODEL_GPT_5_4.parse().unwrap(),
+                    provider: PROVIDER_COPILOT,
+                    model: COPILOT_MODEL_GPT_5_4,
                     priority: None,
                 },
                 ToolEntry {
-                    provider: "claude".to_string(),
-                    model: CLAUDE_MODEL_SONNET.parse().unwrap(),
+                    provider: PROVIDER_CLAUDE,
+                    model: CLAUDE_MODEL_SONNET,
                     priority: Some(0),
                 },
             ],
         ),
         (
-            "drudge".to_string(),
+            TOOL_DRUDGE,
             vec![
                 ToolEntry {
-                    provider: "copilot".to_string(),
-                    model: COPILOT_MODEL_GPT_5_MINI.parse().unwrap(),
+                    provider: PROVIDER_COPILOT,
+                    model: COPILOT_MODEL_GPT_5_MINI,
                     priority: None,
                 },
                 ToolEntry {
-                    provider: "claude".to_string(),
-                    model: CLAUDE_MODEL_HAIKU.parse().unwrap(),
+                    provider: PROVIDER_CLAUDE,
+                    model: CLAUDE_MODEL_HAIKU,
                     priority: Some(0),
                 },
             ],
@@ -285,92 +320,99 @@ fn default_workflow() -> WorkflowConfig {
         ReportSuccess, StopWithError, StopWithQuestion,
     };
 
-    let task_prompt = vec![PathBuf::from("task.md")];
+    let task_prompt = vec![PathBuf::from(TASK_PROMPT)];
 
     let main_stages = IndexMap::from([
         (
-            Stage::from("planning"),
+            STAGE_PLANNING,
             StageDefinition {
-                role: Some("planner".into()),
+                role: Some(ROLE_PLANNER),
                 prompts: Some(task_prompt.clone()),
                 on_intermediate: Some(StageTransition::pause()),
                 ..Default::default()
             },
         ),
         (
-            Stage::from("working"),
+            STAGE_WORKING,
             StageDefinition {
-                role: Some("worker".into()),
+                role: Some(ROLE_WORKER),
                 prompts: Some(task_prompt.clone()),
-                on_intermediate: Some(StageTransition::stage("reviewing")),
+                on_failure: Some(StageTransition {
+                    next: Some(STAGE_WORKING),
+                    pause: true,
+                }),
+                on_intermediate: Some(StageTransition::stage(STAGE_REVIEWING)),
                 ..Default::default()
             },
         ),
         (
-            Stage::from("reviewing"),
+            STAGE_REVIEWING,
             StageDefinition {
-                role: Some("reviewer".into()),
+                role: Some(ROLE_REVIEWER),
                 prompts: Some(task_prompt.clone()),
-                on_failure: Some(StageTransition::stage("working")),
-                on_intermediate: Some(StageTransition::stage("test_planner")),
+                on_failure: Some(StageTransition::stage(STAGE_WORKING)),
+                on_intermediate: Some(StageTransition::stage(STAGE_TEST_PLANNER)),
                 ..Default::default()
             },
         ),
         (
-            Stage::from("test_planner"),
+            STAGE_TEST_PLANNER,
             StageDefinition {
-                role: Some("test_planner".into()),
+                role: Some(ROLE_TEST_PLANNER),
                 prompts: Some(task_prompt.clone()),
-                on_failure: Some(StageTransition::stage("working")),
-                on_intermediate: Some(StageTransition::stage("test_worker")),
+                on_failure: Some(StageTransition::stage(STAGE_WORKING)),
+                on_intermediate: Some(StageTransition::stage(STAGE_TEST_WORKER)),
                 ..Default::default()
             },
         ),
         (
-            Stage::from("test_worker"),
+            STAGE_TEST_WORKER,
             StageDefinition {
-                role: Some("test_worker".into()),
+                role: Some(ROLE_TEST_WORKER),
                 prompts: Some(task_prompt.clone()),
-                on_failure: Some(StageTransition::stage("working")),
-                on_intermediate: Some(StageTransition::stage("working")),
+                on_failure: Some(StageTransition {
+                    next: Some(STAGE_TEST_WORKER),
+                    pause: true,
+                }),
+                on_intermediate: Some(StageTransition::stage(STAGE_WORKING)),
                 ..Default::default()
             },
         ),
         (
-            Stage::from("linting"),
+            STAGE_LINTING,
             StageDefinition {
-                role: Some("linter".into()),
+                role: Some(ROLE_LINTER),
                 prompts: Some(task_prompt.clone()),
-                on_success: Some(StageTransition::stage("testing")),
-                on_failure: Some(StageTransition::stage("linter_worker")),
+                on_success: Some(StageTransition::stage(STAGE_TESTING)),
+                on_failure: Some(StageTransition::stage(STAGE_LINTER_WORKER)),
                 ..Default::default()
             },
         ),
         (
-            Stage::from("linter_worker"),
+            STAGE_LINTER_WORKER,
             StageDefinition {
-                role: Some("linter_worker".into()),
+                role: Some(ROLE_LINTER_WORKER),
                 prompts: Some(task_prompt.clone()),
-                on_success: Some(StageTransition::stage("linting")),
-                on_failure: Some(StageTransition::stage("working")),
+                on_success: Some(StageTransition::stage(STAGE_LINTING)),
+                on_failure: Some(StageTransition::stage(STAGE_WORKING)),
                 ..Default::default()
             },
         ),
         (
-            Stage::from("testing"),
+            STAGE_TESTING,
             StageDefinition {
-                role: Some("tester".into()),
+                role: Some(ROLE_TESTER),
                 prompts: Some(task_prompt.clone()),
-                on_failure: Some(StageTransition::stage("working")),
+                on_failure: Some(StageTransition::stage(STAGE_WORKING)),
                 ..Default::default()
             },
         ),
     ]);
 
     let merge_stages = IndexMap::from([(
-        Stage::from("merging"),
+        STAGE_MERGING,
         StageDefinition {
-            role: Some("merger".into()),
+            role: Some(ROLE_MERGER),
             prompts: Some(task_prompt),
             ..Default::default()
         },
@@ -392,7 +434,7 @@ fn default_workflow() -> WorkflowConfig {
 
     let roles = IndexMap::from([
         (
-            "planner".into(),
+            ROLE_PLANNER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -403,11 +445,11 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("planner.md")),
-                tool: Some("planner".to_string()),
+                tool: Some(TOOL_PLANNER),
             },
         ),
         (
-            "worker".into(),
+            ROLE_WORKER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -420,11 +462,11 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("worker.md")),
-                tool: Some("developer".to_string()),
+                tool: Some(TOOL_DEVELOPER),
             },
         ),
         (
-            "test_planner".into(),
+            ROLE_TEST_PLANNER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -435,11 +477,11 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("test_planner.md")),
-                tool: Some("planner".to_string()),
+                tool: Some(TOOL_PLANNER),
             },
         ),
         (
-            "test_worker".into(),
+            ROLE_TEST_WORKER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -452,11 +494,11 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("test_worker.md")),
-                tool: Some("developer".to_string()),
+                tool: Some(TOOL_HELPER),
             },
         ),
         (
-            "reviewer".into(),
+            ROLE_REVIEWER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -468,11 +510,11 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("reviewer.md")),
-                tool: Some("developer".to_string()),
+                tool: Some(TOOL_REVIEWER),
             },
         ),
         (
-            "tester".into(),
+            ROLE_TESTER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -482,11 +524,11 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("tester.md")),
-                tool: Some("developer".to_string()),
+                tool: Some(TOOL_HELPER),
             },
         ),
         (
-            "linter".into(),
+            ROLE_LINTER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -496,11 +538,11 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("linter.md")),
-                tool: Some("drudge".to_string()),
+                tool: Some(TOOL_DRUDGE),
             },
         ),
         (
-            "linter_worker".into(),
+            ROLE_LINTER_WORKER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -510,21 +552,21 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("linter_worker.md")),
-                tool: Some("developer".to_string()),
+                tool: Some(TOOL_DEVELOPER),
             },
         ),
         (
-            "merger".into(),
+            ROLE_MERGER,
             RoleDefinition {
                 mcp: Some(vec![StopWithError, ReportSuccess, StopWithQuestion]),
                 prompt: Some(PathBuf::from("merger.md")),
-                tool: Some("silly".to_string()),
+                tool: Some(TOOL_HELPER),
             },
         ),
     ]);
 
     WorkflowConfig {
-        prompts_dir: Some(PathBuf::from("prompts")),
+        prompts_dir: Some(PathBuf::from(WORKFLOW_PROMPTS_DIR)),
         pipelines,
         roles,
     }

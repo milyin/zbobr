@@ -22,8 +22,8 @@ pub struct RoleSession {
     task_id: u64,
     /// Tracks the last MCP tool call that matched a transition key.
     last_mapped_tool: Arc<std::sync::Mutex<Option<McpTool>>>,
-    /// Pipeline name for this session's comments.
-    pipeline_name: String,
+    /// Pipeline for this session's comments.
+    pipeline: Option<Pipeline>,
     /// Pipeline run ID for this session's comments.
     pipeline_run_id: u64,
 }
@@ -34,7 +34,7 @@ impl RoleSession {
             zbobr,
             task_id,
             last_mapped_tool: Arc::new(std::sync::Mutex::new(None)),
-            pipeline_name: String::new(),
+            pipeline: None,
             pipeline_run_id: 0,
         }
     }
@@ -43,14 +43,14 @@ impl RoleSession {
         zbobr: Arc<ZbobrDispatcher>,
         task_id: u64,
         tracker: Arc<std::sync::Mutex<Option<McpTool>>>,
-        pipeline_name: String,
+        pipeline: Pipeline,
         pipeline_run_id: u64,
     ) -> Self {
         Self {
             zbobr,
             task_id,
             last_mapped_tool: tracker,
-            pipeline_name,
+            pipeline: Some(pipeline),
             pipeline_run_id,
         }
     }
@@ -99,9 +99,9 @@ impl RoleSession {
         self.zbobr.config()
     }
 
-    /// Get pipeline name for this session.
-    pub fn pipeline_name(&self) -> &str {
-        &self.pipeline_name
+    /// Get pipeline for this session.
+    pub fn pipeline(&self) -> &Option<Pipeline> {
+        &self.pipeline
     }
 
     /// Get pipeline run ID for this session.
@@ -872,9 +872,9 @@ mod comment_model_tests {
         let planner = crate::mcp::unified::UnifiedMcp::new(
             session,
             allowed_tools,
-            "planner".to_string(),
-            Tool::copilot(),
-            Model("gpt-5-mini".to_string()),
+            Role::new("planner"),
+            Executor::copilot(),
+            Model::from("gpt-5-mini".to_string()),
             "planning".to_string(),
             "main".to_string(),
             1,
@@ -920,9 +920,9 @@ mod comment_model_tests {
         crate::mcp::unified::UnifiedMcp::new(
             session,
             allowed_tools,
-            "worker".to_string(),
-            Tool::copilot(),
-            Model("gpt-5-mini".to_string()),
+            Role::new("worker"),
+            Executor::copilot(),
+            Model::from("gpt-5-mini".to_string()),
             "working".to_string(),
             "main".to_string(),
             1,

@@ -3,7 +3,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Subcommand;
-use zbobr_api::{Pipeline, Stage, WorktreeBackend, config::WorkflowConfig};
+use zbobr_api::{Pipeline, Stage, WorktreeBackend, config::{Role, StageDefinition, WorkflowConfig}};
 use zbobr_dispatcher::{
     ConfiguredPromptBuilder, TaskDir, TaskListEntry, VAR_DESTINATION_BRANCH,
     VAR_DESTINATION_REPOSITORY, Workflow, ZbobrDispatcher,
@@ -263,6 +263,7 @@ fn run_without_backends(
                 },
         } => {
             let workflow = prompt_builder.workflow_config();
+            let role = role.as_ref().map(|r| r.clone().into());
             let stage_def = resolve_stage_def(workflow, &stage, &role, &pipeline)?;
             let (task, comments) = sample_task_and_comments();
             let prompt = prompt_builder.build_for_stage_with_task(stage_def, &task, &comments)?;
@@ -474,6 +475,7 @@ async fn run_task_subcommand(
             pipeline,
         } => {
             let workflow = zbobr.workflow().config();
+            let role = role.as_ref().map(|r| r.clone().into());
             let stage_def = resolve_stage_def(workflow, &stage, &role, &pipeline)?;
             let prompt = if let Some(task_id) = id {
                 zbobr
@@ -503,9 +505,9 @@ async fn run_task_subcommand(
 fn resolve_stage_def<'a>(
     workflow: &'a WorkflowConfig,
     stage: &Option<Stage>,
-    role: &Option<String>,
+    role: &Option<Role>,
     pipeline: &Option<Pipeline>,
-) -> anyhow::Result<&'a zbobr_api::config::StageDefinition> {
+) -> anyhow::Result<&'a StageDefinition> {
     match (stage, role) {
         (None, None) => {
             anyhow::bail!("Either --stage or --role must be specified");
@@ -513,55 +515,55 @@ fn resolve_stage_def<'a>(
         (Some(_), Some(_)) => {
             anyhow::bail!("Only one of --stage or --role may be specified, not both");
         }
-        (Some(stage_name), None) => {
+        (Some(stage), None) => {
             if let Some(p) = pipeline {
                 workflow
-                    .stage(p.clone(), stage_name.as_str())
+                    .stage(p, stage)
                     .ok_or_else(|| {
-                        anyhow::anyhow!("Stage '{}' not found in pipeline '{}'", stage_name, p)
+                        anyhow::anyhow!("Stage '{}' not found in pipeline '{}'", stage, p)
                     })
             } else {
                 let matches: Vec<_> = workflow
                     .all_stages()
                     .into_iter()
-                    .filter(|(_, sname, _)| *sname == stage_name.as_str())
+                    .filter(|(_, sname, _)| *sname == stage.as_str())
                     .collect();
                 match matches.len() {
-                    0 => anyhow::bail!("Stage '{}' not found in any pipeline", stage_name),
+                    0 => anyhow::bail!("Stage '{}' not found in any pipeline", stage),
                     1 => Ok(matches[0].2),
                     _ => {
                         let pipelines: Vec<_> =
                             matches.iter().map(|(p, _, _)| p.to_string()).collect();
                         anyhow::bail!(
                             "Stage '{}' exists in multiple pipelines: {}. Use --pipeline to disambiguate.",
-                            stage_name,
+                            stage,
                             pipelines.join(", ")
                         );
                     }
                 }
             }
         }
-        (None, Some(role_name)) => {
+        (None, Some(role)) => {
             if let Some(p) = pipeline {
                 let pipeline_config = workflow
-                    .pipeline(p.clone())
+                    .pipeline(p)
                     .ok_or_else(|| anyhow::anyhow!("Pipeline '{}' not found", p))?;
                 pipeline_config
                     .stages
                     .values()
-                    .find(|s| s.role_name() == Some(role_name.as_str()))
+                    .find(|s| s.role().map(|r| r.as_str()) == Some(role.as_str()))
                     .ok_or_else(|| {
                         anyhow::anyhow!(
                             "No stage with role '{}' found in pipeline '{}'",
-                            role_name,
+                            role,
                             p
                         )
                     })
             } else {
                 workflow
-                    .find_stage_by_role(role_name)
+                    .find_stage_by_role(role.as_str())
                     .map(|(_, _, def)| def)
-                    .ok_or_else(|| anyhow::anyhow!("No stage with role '{}' found", role_name))
+                    .ok_or_else(|| anyhow::anyhow!("No stage with role '{}' found", role))
             }
         }
     }

@@ -1,10 +1,10 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::{Arc, Mutex}};
 
-use zbobr_api::config_tools::McpTool;
+use zbobr_api::{Pipeline, Stage, config::Role, config_tools::McpTool};
 
 use crate::{
     ZbobrDispatcher,
-    task::{Model, RoleSession, Tool},
+    task::{Model, RoleSession, Executor},
 };
 
 /// Get the current hostname, or "unknown" if it cannot be determined.
@@ -135,15 +135,15 @@ pub(crate) async fn serve_mcp(
 /// Returns the actual port that was assigned (spawns server in background).
 #[allow(clippy::too_many_arguments)]
 pub async fn run_role_mcp_server(
-    zbobr: std::sync::Arc<ZbobrDispatcher>,
-    role_name: &str,
+    zbobr: Arc<ZbobrDispatcher>,
+    role: Role,
     task_id: u64,
-    tool: Tool,
+    tool: Executor,
     model: Model,
-    stage_name: String,
+    stage: Stage,
     allowed_tools: HashSet<McpTool>,
-    tool_tracker: std::sync::Arc<std::sync::Mutex<Option<McpTool>>>,
-    pipeline_name: String,
+    tool_tracker: Arc<Mutex<Option<McpTool>>>,
+    pipeline: Pipeline,
     pipeline_run_id: u64,
 ) -> anyhow::Result<u16> {
     let base_port = zbobr.config().base_port;
@@ -151,37 +151,36 @@ pub async fn run_role_mcp_server(
         StreamableHttpService, session::local::LocalSessionManager,
     };
 
-    let path = format!("/{}/{}", role_name, task_id);
+    let path = format!("/{}/{}", role, task_id);
 
     let session: RoleSession = zbobr.role_session_with_tracker(
         task_id,
         tool_tracker,
-        pipeline_name.clone(),
+        pipeline.clone(),
         pipeline_run_id,
     );
 
-    let role_name_owned = role_name.to_string();
     tracing::info!(
-        "Creating UnifiedMcp service for task {task_id} role '{role_name}' at path {path}"
+        "Creating UnifiedMcp service for task {task_id} role '{role}' at path {path}"
     );
     let svc = StreamableHttpService::new(
         move || {
             tracing::debug!(
-                "Creating new UnifiedMcp instance for task {task_id} role '{}'",
-                role_name_owned
+                "Creating new UnifiedMcp instance for task {task_id} role '{role}' with allowed tools: {:?}",
+                allowed_tools
             );
             Ok(super::unified::UnifiedMcp::new(
                 session.clone(),
                 allowed_tools.clone(),
-                role_name_owned.clone(),
+                role.clone(),
                 tool.clone(),
                 model.clone(),
-                stage_name.clone(),
-                pipeline_name.clone(),
+                stage.clone(),
+                pipeline.clone(),
                 pipeline_run_id,
             ))
         },
-        std::sync::Arc::new(LocalSessionManager::default()),
+        Arc::new(LocalSessionManager::default()),
         Default::default(),
     );
     let router = axum::Router::new().nest_service(&path, svc);

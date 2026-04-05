@@ -31,14 +31,13 @@ pub use prompts::{
     ConfiguredPromptBuilder, VAR_DESTINATION_BRANCH, VAR_DESTINATION_REPOSITORY,
     add_mcp_tool_variables, build_full_prompt, load_prompts, sample_task_and_comments,
 };
-pub use task::{Comment, Model, RoleSession, StackEntry, Task, TaskSession, Tool};
+pub use task::{Comment, Model, RoleSession, StackEntry, Task, TaskSession, Executor};
 pub use task_dir::TaskDir;
 pub use tool_executor::ToolExecutor;
 use typesafe_builder::{_TypesafeBuilderEmpty, _TypesafeBuilderFilled, Builder};
 pub use workflow::{StateAction, Workflow};
 use zbobr_api::{
-    State,
-    config::{ResolvedProvider, ToolEntry},
+    Pipeline, State, config::{ResolvedProvider, Tool, ToolEntry}
 };
 
 pub use zbobr_api::config::Config;
@@ -122,19 +121,19 @@ impl ZbobrDispatcher {
     ///
     /// Filters out currently excluded providers, groups remaining entries by priority,
     /// and selects within the highest-priority group using round-robin.
-    pub fn select_provider(&self, tool_name: &str) -> anyhow::Result<(ResolvedProvider, Model)> {
-        self.select_provider_excluding(tool_name, &HashSet::new())
+    pub fn select_provider(&self, tool: &Tool) -> anyhow::Result<(ResolvedProvider, Model)> {
+        self.select_provider_excluding(tool, &HashSet::new())
     }
 
     /// Select a provider/model pair while additionally excluding provider names
     /// for the current selection cycle.
     pub fn select_provider_excluding(
         &self,
-        tool_name: &str,
+        tool: &Tool,
         additional_excluded: &HashSet<String>,
     ) -> anyhow::Result<(ResolvedProvider, Model)> {
-        let entries: &Vec<ToolEntry> = self.config.tools.get(tool_name).ok_or_else(|| {
-            anyhow::anyhow!("Tool '{}' not found in dispatcher config", tool_name)
+        let entries: &Vec<ToolEntry> = self.config.tools.get(tool).ok_or_else(|| {
+            anyhow::anyhow!("Tool '{}' not found in dispatcher config", tool)
         })?;
 
         let resolved_providers = self.config.resolve_providers()?;
@@ -151,15 +150,15 @@ impl ZbobrDispatcher {
             .iter()
             .enumerate()
             .filter(|(_, entry)| {
-                !excluded_set.contains(&entry.provider)
-                    && !additional_excluded.contains(&entry.provider)
+                !excluded_set.contains(entry.provider.as_str())
+                    && !additional_excluded.contains(entry.provider.as_str())
             })
             .collect();
 
         if available.is_empty() {
             anyhow::bail!(
                 "All providers for tool '{}' are currently excluded",
-                tool_name
+                tool
             );
         }
 
@@ -167,7 +166,7 @@ impl ZbobrDispatcher {
         let mut priority_groups: HashMap<i32, Vec<(usize, &ToolEntry)>> = HashMap::new();
         for (idx, entry) in &available {
             let rp = resolved_providers
-                .get(&entry.provider)
+                .get(entry.provider.as_str())
                 .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", entry.provider))?;
             priority_groups
                 .entry(entry.priority.unwrap_or(rp.priority))
@@ -181,13 +180,13 @@ impl ZbobrDispatcher {
 
         // Round-robin within the top group
         let mut rr = self.round_robin_state.lock().unwrap();
-        let counter = rr.entry(tool_name.to_string()).or_insert(0);
+        let counter = rr.entry(tool.to_string()).or_insert(0);
         let pick = *counter % top_group.len();
         *counter = counter.wrapping_add(1);
         drop(rr);
 
         let (_, entry) = &top_group[pick];
-        let rp = resolved_providers.get(&entry.provider).unwrap().clone();
+        let rp = resolved_providers.get(entry.provider.as_str()).unwrap().clone();
         Ok((rp, entry.model.clone()))
     }
 
@@ -237,8 +236,8 @@ impl ZbobrDispatcher {
         Ok(entries
             .iter()
             .filter(|entry| {
-                !excluded_set.contains(&entry.provider)
-                    && !additional_excluded.contains(&entry.provider)
+                !excluded_set.contains(entry.provider.as_str())
+                    && !additional_excluded.contains(entry.provider.as_str())
             })
             .count())
     }
@@ -303,7 +302,7 @@ impl ZbobrDispatcher {
             other => anyhow::bail!(
                 "Unknown executor '{}' for provider '{}'",
                 other,
-                provider.name
+                provider.provider.as_str()
             ),
         }
     }
@@ -410,14 +409,14 @@ impl ZbobrDispatcher {
         self: &Arc<Self>,
         task_id: u64,
         tracker: Arc<std::sync::Mutex<Option<zbobr_api::config_tools::McpTool>>>,
-        pipeline_name: String,
+        pipeline: Pipeline,
         pipeline_run_id: u64,
     ) -> RoleSession {
         RoleSession::with_shared_tracker(
             Arc::clone(self),
             task_id,
             tracker,
-            pipeline_name,
+            pipeline,
             pipeline_run_id,
         )
     }
@@ -506,18 +505,18 @@ mod tests {
     /// Build a minimal dispatcher with given providers and tools.
     fn make_dispatcher(
         providers: IndexMap<String, ProviderDefinition>,
-        tools: IndexMap<String, Vec<ToolEntry>>,
+        tools: IndexMap<Tool, Vec<ToolEntry>>,
     ) -> ZbobrDispatcher {
         make_dispatcher_with_workflow(providers, tools, Workflow::default())
     }
 
     fn make_dispatcher_with_workflow(
         providers: IndexMap<String, ProviderDefinition>,
-        tools: IndexMap<String, Vec<ToolEntry>>,
+        tools: IndexMap<Tool, Vec<ToolEntry>>,
         workflow: Workflow,
     ) -> ZbobrDispatcher {
         let config = ZbobrDispatcherConfig {
-            providers,
+            providers: providers.into_iter().map(|(name, def)| (name.into(), def)).collect(),
             tools,
             ..Default::default()
         };
@@ -531,7 +530,7 @@ mod tests {
 
     fn provider_def(executor: &str, priority: i32) -> ProviderDefinition {
         ProviderDefinition {
-            executor: Some(executor.to_string()),
+            executor: Some(Executor(executor.to_string())),
             parent: None,
             priority: Some(priority),
             plan_mode: None,
@@ -541,7 +540,7 @@ mod tests {
 
     fn tool_entry(provider: &str, model: &str) -> ToolEntry {
         ToolEntry {
-            provider: provider.to_string(),
+            provider: provider.to_string().into(),
             model: model.parse().unwrap(),
             priority: None,
         }
@@ -555,11 +554,11 @@ mod tests {
         providers.insert("claude".to_string(), provider_def("claude", 10));
 
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(), vec![tool_entry("claude", "opus")]);
+        tools.insert("smart".to_string().into(), vec![tool_entry("claude", "opus")]);
 
         let dispatcher = make_dispatcher(providers, tools);
-        let (rp, model) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.executor, "claude");
+        let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
+        assert_eq!(rp.executor.as_str(), "claude");
         assert_eq!(model.as_str(), "opus");
     }
 
@@ -571,7 +570,7 @@ mod tests {
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![
                 tool_entry("fallback", "haiku"),
                 tool_entry("claude", "opus"),
@@ -579,47 +578,47 @@ mod tests {
         );
 
         let dispatcher = make_dispatcher(providers, tools);
-        let (rp, model) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.name, "claude");
+        let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
+        assert_eq!(rp.provider.as_str(), "claude");
         assert_eq!(model.as_str(), "opus");
     }
 
     #[test]
     fn select_provider_round_robin_same_priority() {
         let mut providers = IndexMap::new();
-        providers.insert("a".to_string(), provider_def("claude", 10));
+        providers.insert("a".to_string().into(), provider_def("claude", 10));
         providers.insert("b".to_string(), provider_def("copilot", 10));
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![tool_entry("a", "model-a"), tool_entry("b", "model-b")],
         );
 
         let dispatcher = make_dispatcher(providers, tools);
 
-        let (rp1, _) = dispatcher.select_provider("smart").unwrap();
-        let (rp2, _) = dispatcher.select_provider("smart").unwrap();
-        assert_ne!(rp1.name, rp2.name, "Round-robin should alternate providers");
+        let (rp1, _) = dispatcher.select_provider(&"smart".into()).unwrap();
+        let (rp2, _) = dispatcher.select_provider(&"smart".into()).unwrap();
+        assert_ne!(rp1.provider, rp2.provider, "Round-robin should alternate providers");
     }
 
     #[test]
     fn select_provider_skips_excluded() {
         let mut providers = IndexMap::new();
-        providers.insert("a".to_string(), provider_def("claude", 10));
+        providers.insert("a".to_string().into(), provider_def("claude", 10));
         providers.insert("b".to_string(), provider_def("copilot", 10));
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![tool_entry("a", "model-a"), tool_entry("b", "model-b")],
         );
 
         let dispatcher = make_dispatcher(providers, tools);
         dispatcher.exclude_provider("a");
 
-        let (rp, _) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.name, "b");
+        let (rp, _) = dispatcher.select_provider(&"smart".into()).unwrap();
+        assert_eq!(rp.provider.as_str(), "b");
     }
 
     #[test]
@@ -630,7 +629,7 @@ mod tests {
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![
                 tool_entry("primary", "opus"),
                 tool_entry("fallback", "haiku"),
@@ -640,8 +639,8 @@ mod tests {
         let dispatcher = make_dispatcher(providers, tools);
         dispatcher.exclude_provider("primary");
 
-        let (rp, model) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.name, "fallback");
+        let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
+        assert_eq!(rp.provider.as_str(), "fallback");
         assert_eq!(model.as_str(), "haiku");
     }
 
@@ -653,7 +652,7 @@ mod tests {
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![
                 tool_entry("primary", "opus"),
                 tool_entry("fallback", "gpt-5.3-codex"),
@@ -665,9 +664,9 @@ mod tests {
         excluded.insert("primary".to_string());
 
         let (rp, model) = dispatcher
-            .select_provider_excluding("smart", &excluded)
+            .select_provider_excluding(&"smart".into(), &excluded)
             .unwrap();
-        assert_eq!(rp.name, "fallback");
+        assert_eq!(rp.provider.as_str(), "fallback");
         assert_eq!(model.as_str(), "gpt-5.3-codex");
     }
 
@@ -680,7 +679,7 @@ mod tests {
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![
                 tool_entry("high_a", "claude-opus-4-6"),
                 tool_entry("low", "gpt-5.3-codex"),
@@ -693,10 +692,10 @@ mod tests {
         excluded.insert("high_a".to_string());
 
         let (rp, model) = dispatcher
-            .select_provider_excluding("smart", &excluded)
+            .select_provider_excluding(&"smart".into(), &excluded)
             .unwrap();
 
-        assert_eq!(rp.name, "high_b");
+        assert_eq!(rp.provider.as_str(), "high_b");
         assert_eq!(model.as_str(), "gpt-5.4");
     }
 
@@ -708,11 +707,11 @@ mod tests {
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![
                 tool_entry("primary", "opus"),
                 ToolEntry {
-                    provider: "fallback".to_string(),
+                    provider: "fallback".to_string().into(),
                     model: "haiku".parse().unwrap(),
                     priority: Some(0),
                 },
@@ -723,14 +722,14 @@ mod tests {
 
         // Both providers have priority 10, but the fallback entry overrides to 0.
         // Without exclusions, the primary (effective priority 10) should be selected.
-        let (rp, model) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.name, "primary");
+        let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
+        assert_eq!(rp.provider.as_str(), "primary");
         assert_eq!(model.as_str(), "opus");
 
         // When primary is excluded, fallback (entry priority 0) is the only option.
         dispatcher.exclude_provider("primary");
-        let (rp, model) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.name, "fallback");
+        let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
+        assert_eq!(rp.provider.as_str(), "fallback");
         assert_eq!(model.as_str(), "haiku");
     }
 
@@ -740,12 +739,12 @@ mod tests {
         providers.insert("only".to_string(), provider_def("claude", 10));
 
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(), vec![tool_entry("only", "opus")]);
+        tools.insert("smart".to_string().into(), vec![tool_entry("only", "opus")]);
 
         let dispatcher = make_dispatcher(providers, tools);
         dispatcher.exclude_provider("only");
 
-        let err = dispatcher.select_provider("smart").unwrap_err();
+        let err = dispatcher.select_provider(&"smart".into()).unwrap_err();
         let msg = err.to_string().to_lowercase();
         assert!(
             msg.contains("excluded"),
@@ -756,7 +755,7 @@ mod tests {
     #[test]
     fn select_provider_unknown_tool_error() {
         let dispatcher = make_dispatcher(IndexMap::new(), IndexMap::new());
-        let err = dispatcher.select_provider("nonexistent").unwrap_err();
+        let err = dispatcher.select_provider(&"nonexistent".into()).unwrap_err();
         let msg = err.to_string().to_lowercase();
         assert!(
             msg.contains("not found"),
@@ -767,10 +766,10 @@ mod tests {
     #[test]
     fn record_provider_failure_excludes_on_threshold() {
         let mut providers = IndexMap::new();
-        providers.insert("a".to_string(), provider_def("claude", 10));
+        providers.insert("a".to_string().into(), provider_def("claude", 10));
 
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(), vec![tool_entry("a", "model-a")]);
+        tools.insert("smart".to_string().into(), vec![tool_entry("a", "model-a")]);
 
         let dispatcher = make_dispatcher(providers, tools);
         dispatcher
@@ -795,10 +794,10 @@ mod tests {
     #[test]
     fn record_provider_success_resets_failures() {
         let mut providers = IndexMap::new();
-        providers.insert("a".to_string(), provider_def("claude", 10));
+        providers.insert("a".to_string().into(), provider_def("claude", 10));
 
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(), vec![tool_entry("a", "model-a")]);
+        tools.insert("smart".to_string().into(), vec![tool_entry("a", "model-a")]);
 
         let mut cfg = ZbobrDispatcherConfig {
             providers,
@@ -835,8 +834,8 @@ mod tests {
     fn build_executor_unknown_executor_error() {
         let dispatcher = make_dispatcher(IndexMap::new(), IndexMap::new());
         let bad_provider = zbobr_api::config::ResolvedProvider {
-            name: "broken".to_string(),
-            executor: "nonexistent".to_string(),
+            provider: "broken".to_string().into(),
+            executor: Executor("nonexistent".to_string()),
             priority: 10,
             plan_mode: false,
             access_key: None,
@@ -859,7 +858,7 @@ mod tests {
             "a".to_string(),
             ProviderDefinition {
                 executor: None,
-                parent: Some("b".to_string()),
+                parent: Some("b".to_string().into()),
                 priority: None,
                 plan_mode: None,
                 access_key: None,
@@ -869,14 +868,14 @@ mod tests {
             "b".to_string(),
             ProviderDefinition {
                 executor: None,
-                parent: Some("a".to_string()),
+                parent: Some("a".to_string().into()),
                 priority: None,
                 plan_mode: None,
                 access_key: None,
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string(), vec![tool_entry("a", "m1")]);
+        tools.insert("smart".to_string().into(), vec![tool_entry("a", "m1")]);
         let dispatcher = make_dispatcher(providers, tools);
         let result = dispatcher.validated();
         assert!(result.is_err(), "Expected Err for circular providers");
@@ -890,14 +889,14 @@ mod tests {
     #[test]
     fn validated_catches_invalid_workflow_refs() {
         let providers = IndexMap::from([("cp".to_string(), provider_def("copilot", 10))]);
-        let tools = IndexMap::from([("smart".to_string(), vec![tool_entry("cp", "some-model")])]);
+        let tools = IndexMap::from([("smart".to_string().into(), vec![tool_entry("cp", "some-model")])]);
         let mut roles = IndexMap::new();
         roles.insert(
-            "worker".to_string(),
+            "worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompt: None,
-                tool: Some("nonexistent".to_string()),
+                tool: Some("nonexistent".to_string().into()),
             },
         );
         let wf_config = WorkflowConfig {
@@ -919,16 +918,16 @@ mod tests {
     #[test]
     fn select_provider_entry_priority_elevates_above_provider() {
         let mut providers = IndexMap::new();
-        providers.insert("a".to_string(), provider_def("claude", 5));
-        providers.insert("b".to_string(), provider_def("copilot", 5));
+        providers.insert("a".to_string().into(), provider_def("claude", 5));
+        providers.insert("b".to_string().into(), provider_def("copilot", 5));
 
         let mut tools = IndexMap::new();
         tools.insert(
-            "smart".to_string(),
+            "smart".to_string().into(),
             vec![
                 tool_entry("a", "opus"),
                 ToolEntry {
-                    provider: "b".to_string(),
+                    provider: "b".to_string().into(),
                     model: "sonnet".parse().unwrap(),
                     priority: Some(20),
                 },
@@ -938,14 +937,14 @@ mod tests {
         let dispatcher = make_dispatcher(providers, tools);
 
         // Provider "b" has base priority 5 but entry priority 20 → should win.
-        let (rp, model) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.name, "b", "elevated entry should be selected first");
+        let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
+        assert_eq!(rp.provider.as_str(), "b", "elevated entry should be selected first");
         assert_eq!(model.as_str(), "sonnet");
 
         // When "b" is excluded, fall back to "a" (effective priority 5).
         dispatcher.exclude_provider("b");
-        let (rp, model) = dispatcher.select_provider("smart").unwrap();
-        assert_eq!(rp.name, "a");
+        let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
+        assert_eq!(rp.provider.as_str(), "a");
         assert_eq!(model.as_str(), "opus");
     }
 }

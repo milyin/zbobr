@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::PathBuf};
 use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Signal, Stage, State, Task,
-    config::{PipelineConfig, RoleDefinition, StageDefinition, StageTransition, WorkflowConfig},
+    config::{PipelineConfig, Role, RoleDefinition, StageDefinition, StageTransition, WorkflowConfig},
     config_tools::McpTool,
 };
 
@@ -55,7 +55,7 @@ pub struct Workflow {
 /// Action determined by the state machine for the next step.
 pub enum StateAction<'a> {
     /// Execute this stage definition: (pipeline_name, stage_name, stage_def).
-    RunStage(&'a Pipeline, &'a str, &'a StageDefinition),
+    RunStage(&'a Pipeline, &'a Stage, &'a StageDefinition),
     /// Task is completed.
     Done,
     /// Task is paused, waiting for user.
@@ -68,7 +68,7 @@ impl Default for Workflow {
     fn default() -> Self {
         let mut pipelines = HashMap::new();
         let dummy_stage = StageDefinition {
-            role: Some("default".to_string()),
+            role: Some("default".to_string().into()),
             ..Default::default()
         };
         for name in [Pipeline::MAIN, Pipeline::MERGE] {
@@ -110,11 +110,11 @@ impl Workflow {
     // -- Delegated getters --
 
     pub fn pipeline(&self, name: &Pipeline) -> Option<&PipelineConfig> {
-        self.config.pipeline(name.clone())
+        self.config.pipeline(name)
     }
 
-    pub fn stage(&self, pipeline: &Pipeline, stage: &str) -> Option<&StageDefinition> {
-        self.config.stage(pipeline.clone(), stage)
+    pub fn stage(&self, pipeline: &Pipeline, stage: &Stage) -> Option<&StageDefinition> {
+        self.config.stage(pipeline, stage)
     }
 
     pub fn all_stages(&self) -> Vec<(&Pipeline, &str, &StageDefinition)> {
@@ -140,8 +140,8 @@ impl Workflow {
     pub fn start_stage_for_pipeline(
         &self,
         pipeline: &Pipeline,
-    ) -> Option<(&str, &StageDefinition)> {
-        self.config.start_stage_for_pipeline(pipeline.clone())
+    ) -> Option<(&Stage, &StageDefinition)> {
+        self.config.start_stage_for_pipeline(pipeline)
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
@@ -152,7 +152,7 @@ impl Workflow {
         self.config.prompts_dir.as_ref()
     }
 
-    pub fn roles(&self) -> &IndexMap<String, RoleDefinition> {
+    pub fn roles(&self) -> &IndexMap<Role, RoleDefinition> {
         &self.config.roles
     }
 
@@ -166,13 +166,13 @@ impl Workflow {
     pub(crate) fn sequential_signal(
         &self,
         pipeline_name: &Pipeline,
-        stage_name: &str,
+        stage: &Stage,
         stage_def: Option<&StageDefinition>,
         last_mapped_tool: Option<McpTool>,
     ) -> SequentialSignal {
         let next_stage = || {
             self.pipeline(pipeline_name)
-                .and_then(|p| p.next_stage(stage_name))
+                .and_then(|p| p.next_stage(stage))
                 .map(|(n, _)| n.to_string())
         };
         match last_mapped_tool {
@@ -188,7 +188,7 @@ impl Workflow {
             ),
             Some(McpTool::ReportIntermediate) => apply_transition(
                 stage_def.and_then(|s| s.on_intermediate()),
-                Some(stage_name.to_string()),
+                Some(stage.to_string()),
                 Signal::Return,
             ),
             // No report tool called — use on_no_report if configured, else advance (same as on_success).
@@ -229,7 +229,7 @@ impl Workflow {
                         task.id,
                         pipeline,
                         stage,
-                        def.role_name()
+                        def.role()
                     );
                 }
             }
@@ -356,11 +356,7 @@ impl Workflow {
                             "Signal '{signal}' references unknown stage '{target_stage}' in pipeline '{pipeline}'"
                         )
                     })?;
-                Ok(StateAction::RunStage(
-                    pipeline_key,
-                    stage_key.as_str(),
-                    stage_def,
-                ))
+                Ok(StateAction::RunStage(pipeline_key, stage_key, stage_def))
             }
             Signal::Call(target_pipeline) => {
                 tracing::info!(
@@ -411,7 +407,7 @@ mod tests {
     /// Helper: build a minimal valid WorkflowConfig with main/init/merge pipelines.
     fn base_workflow() -> WorkflowConfig {
         let role_stage = |role: &str| StageDefinition {
-            role: Some(role.to_string()),
+            role: Some(role.to_string().into()),
             ..Default::default()
         };
         let single_pipeline = |stage_name: &str, role: &str| PipelineConfig {
@@ -521,13 +517,17 @@ role = "merger"
         let wf: WorkflowConfig = toml::from_str(toml_str).unwrap();
         assert!(wf.validate().is_ok());
 
-        let setup = wf.stage("main", "setup").unwrap();
+        let setup = wf
+            .stage(&Pipeline::from("main"), &Stage::from("setup"))
+            .unwrap();
         assert_eq!(setup.call_pipeline().map(|p| p.as_str()), Some("sub"));
-        assert_eq!(setup.role_name(), None);
+        assert_eq!(setup.role(), None);
         assert!(setup.is_call());
 
-        let working = wf.stage("main", "working").unwrap();
-        assert_eq!(working.role_name(), Some("worker"));
+        let working = wf
+            .stage(&Pipeline::from("main"), &Stage::from("working"))
+            .unwrap();
+        assert_eq!(working.role().as_ref().map(|role| role.as_str()), Some("worker"));
         assert_eq!(working.call_pipeline(), None);
         assert!(!working.is_call());
     }
@@ -581,7 +581,7 @@ role = "merger"
         match action {
             StateAction::RunStage(pipeline, stage, def) => {
                 assert_eq!(pipeline, &Pipeline::Main);
-                assert_eq!(stage, "call_sub");
+                assert_eq!(stage.as_str(), "call_sub");
                 assert!(def.is_call());
                 assert_eq!(def.call_pipeline().map(|p| p.as_str()), Some("sub"));
             }
@@ -682,7 +682,9 @@ role = "merger"
         let wf: WorkflowConfig = toml::from_str(toml_str).unwrap();
         assert!(wf.validate().is_ok());
 
-        let working = wf.stage("main", "working").unwrap();
+        let working = wf
+            .stage(&Pipeline::from("main"), &Stage::from("working"))
+            .unwrap();
         assert_eq!(
             working
                 .on_failure()
@@ -692,7 +694,9 @@ role = "merger"
         );
         assert!(working.on_success().is_none());
 
-        let planning = wf.stage("main", "planning").unwrap();
+        let planning = wf
+            .stage(&Pipeline::from("main"), &Stage::from("planning"))
+            .unwrap();
         assert_eq!(
             planning
                 .on_success()
@@ -720,12 +724,16 @@ role = "merger"
         let wf: WorkflowConfig = toml::from_str(toml_str).unwrap();
         assert!(wf.validate().is_ok());
 
-        let working = wf.stage("main", "working").unwrap();
+        let working = wf
+            .stage(&Pipeline::from("main"), &Stage::from("working"))
+            .unwrap();
         let t = working.on_success().unwrap();
         assert!(t.next.is_none());
         assert!(t.pause);
 
-        let reviewing = wf.stage("main", "reviewing").unwrap();
+        let reviewing = wf
+            .stage(&Pipeline::from("main"), &Stage::from("reviewing"))
+            .unwrap();
         let t = reviewing.on_success().unwrap();
         assert_eq!(t.next.as_ref().map(|s| s.as_str()), Some("working"));
         assert!(t.pause);
