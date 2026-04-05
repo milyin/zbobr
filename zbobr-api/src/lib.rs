@@ -20,7 +20,7 @@ pub use config::{
 pub use context::format_timestamp;
 pub use secret::Secret;
 pub use task::{
-    Comment, ContextRecord, ContextRecordType, HistoryRecordType, Model, Pipeline, Role, Signal,
+    Comment, ContextRecord, ContextRecordType, HistoryRecordType, Model, Pipeline, Signal,
     StackEntry, Stage, StageContext, StageInfo, State, Task, TaskContext, TaskIdentity, Executor,
     classify_comment, extract_repo_name,
 };

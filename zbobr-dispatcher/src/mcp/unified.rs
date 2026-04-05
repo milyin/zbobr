@@ -10,7 +10,7 @@ use rmcp::{
     service::RequestContext,
     tool, tool_router,
 };
-use zbobr_api::config_tools::McpTool;
+use zbobr_api::{Executor, config::Role, config_tools::McpTool};
 
 use crate::{
     mcp::{
@@ -20,7 +20,7 @@ use crate::{
         },
         traits::CommonMcpImpl,
     },
-    task::{Model, RoleSession, Executor},
+    task::{Model, RoleSession},
 };
 
 /// A single unified MCP server that defines ALL possible tools and filters them
@@ -30,7 +30,7 @@ pub struct UnifiedMcp {
     session: RoleSession,
     tool_router: ToolRouter<Self>,
     allowed_tools: HashSet<McpTool>,
-    role_name: String,
+    role: Role,
     tool: Executor,
     model: Model,
     stage_name: String,
@@ -45,16 +45,16 @@ impl CommonMcpImpl for UnifiedMcp {
         &self.session
     }
 
-    fn role_name(&self) -> &str {
-        &self.role_name
+    fn role(&self) -> &Role {
+        &self.role
     }
 
-    fn mcp_tool(&self) -> Executor {
-        self.tool.clone()
+    fn executor(&self) -> &Executor {
+        &self.tool
     }
 
-    fn mcp_model(&self) -> Model {
-        self.model.clone()
+    fn model(&self) -> &Model {
+        &self.model
     }
 
     fn stage_name(&self) -> &str {
@@ -79,7 +79,7 @@ impl UnifiedMcp {
     pub fn new(
         session: RoleSession,
         allowed_tools: HashSet<McpTool>,
-        role_name: String,
+        role: Role,
         tool: Executor,
         model: Model,
         stage_name: String,
@@ -90,7 +90,7 @@ impl UnifiedMcp {
             session,
             tool_router: Self::tool_router(),
             allowed_tools,
-            role_name,
+            role,
             tool,
             model,
             stage_name,
@@ -173,7 +173,7 @@ impl ServerHandler for UnifiedMcp {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             instructions: Some(format!(
                 "{} tools: MCP server for task management.",
-                self.role_name
+                self.role
             )),
             ..Default::default()
         }
@@ -214,7 +214,7 @@ impl ServerHandler for UnifiedMcp {
             return Ok(CallToolResult {
                 content: vec![Content::text(format!(
                     "Error: tool '{}' is not available for role '{}'",
-                    tool_name, self.role_name
+                    tool_name, self.role
                 ))],
                 structured_content: None,
                 is_error: Some(true),

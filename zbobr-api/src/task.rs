@@ -667,9 +667,6 @@ pub enum WorktreeProblem {
     Conflict,
 }
 
-/// Role for task execution — now a plain string to support configurable roles.
-pub type Role = String;
-
 /// Executor type identifier.
 ///
 /// A transparent newtype over `String`. Serializes as the inner string so

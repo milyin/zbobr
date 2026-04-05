@@ -10,7 +10,7 @@ use anyhow::Context;
 use clap::{Args, Parser};
 use zbobr_api::{
     Pipeline, Signal, StackEntry, State,
-    config::StageDefinition,
+    config::{Role, StageDefinition},
     config_tools::McpTool,
     task::{Stage, StageContext, StageInfo},
 };
@@ -632,7 +632,7 @@ impl<'a> CliStageRunner<'a> {
             let tool_tracker = Arc::new(std::sync::Mutex::new(None::<McpTool>));
             let (assigned_port, server_handle) = start_mcp_server(
                 Arc::clone(self.zbobr),
-                role,
+                role.clone(),
                 self.task_id,
                 resolved_provider.executor.clone(),
                 model.clone(),
@@ -1654,7 +1654,7 @@ async fn ensure_pr_url(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Re
 #[allow(clippy::too_many_arguments)]
 async fn start_mcp_server(
     zbobr: Arc<ZbobrDispatcher>,
-    role_name: &str,
+    role: Role,
     task_id: u64,
     tool: Executor,
     model: Model,
@@ -1665,11 +1665,10 @@ async fn start_mcp_server(
     pipeline_run_id: u64,
 ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
     let (port_tx, port_rx) = tokio::sync::oneshot::channel();
-    let role_name = role_name.to_string();
     let server_handle = tokio::spawn(async move {
         match crate::mcp::run_role_mcp_server(
             zbobr,
-            &role_name,
+            role,
             task_id,
             tool,
             model,

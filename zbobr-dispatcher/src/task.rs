@@ -872,7 +872,7 @@ mod comment_model_tests {
         let planner = crate::mcp::unified::UnifiedMcp::new(
             session,
             allowed_tools,
-            "planner".to_string(),
+            Role::new("planner"),
             Executor::copilot(),
             Model("gpt-5-mini".to_string()),
             "planning".to_string(),
@@ -920,7 +920,7 @@ mod comment_model_tests {
         crate::mcp::unified::UnifiedMcp::new(
             session,
             allowed_tools,
-            "worker".to_string(),
+            Role::new("worker"),
             Executor::copilot(),
             Model("gpt-5-mini".to_string()),
             "working".to_string(),

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use zbobr_api::config_tools::McpTool;
+use zbobr_api::{config::Role, config_tools::McpTool};
 
 use crate::{
     ZbobrDispatcher,
@@ -136,7 +136,7 @@ pub(crate) async fn serve_mcp(
 #[allow(clippy::too_many_arguments)]
 pub async fn run_role_mcp_server(
     zbobr: std::sync::Arc<ZbobrDispatcher>,
-    role_name: &str,
+    role: Role,
     task_id: u64,
     tool: Executor,
     model: Model,
@@ -151,7 +151,7 @@ pub async fn run_role_mcp_server(
         StreamableHttpService, session::local::LocalSessionManager,
     };
 
-    let path = format!("/{}/{}", role_name, task_id);
+    let path = format!("/{}/{}", role, task_id);
 
     let session: RoleSession = zbobr.role_session_with_tracker(
         task_id,
@@ -160,20 +160,19 @@ pub async fn run_role_mcp_server(
         pipeline_run_id,
     );
 
-    let role_name_owned = role_name.to_string();
     tracing::info!(
-        "Creating UnifiedMcp service for task {task_id} role '{role_name}' at path {path}"
+        "Creating UnifiedMcp service for task {task_id} role '{role}' at path {path}"
     );
     let svc = StreamableHttpService::new(
         move || {
             tracing::debug!(
-                "Creating new UnifiedMcp instance for task {task_id} role '{}'",
-                role_name_owned
+                "Creating new UnifiedMcp instance for task {task_id} role '{role}' with allowed tools: {:?}",
+                allowed_tools
             );
             Ok(super::unified::UnifiedMcp::new(
                 session.clone(),
                 allowed_tools.clone(),
-                role_name_owned.clone(),
+                role.clone(),
                 tool.clone(),
                 model.clone(),
                 stage_name.clone(),

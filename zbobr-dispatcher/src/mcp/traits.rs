@@ -1,4 +1,5 @@
-use zbobr_api::config_tools::McpTool;
+use zbobr_api::config::Role;
+use zbobr_api::{config_tools::McpTool};
 use zbobr_api::task::ContextRecordType;
 
 use crate::{
@@ -46,13 +47,13 @@ fn log_mcp_string_response(role_name: &str, task_id: u64, tool_name: &str, respo
 pub trait CommonMcpImpl: Send + Sync {
     fn session(&self) -> &RoleSession;
 
-    fn role_name(&self) -> &str;
+    fn role(&self) -> &Role;
 
     /// Returns the tool that is executing this MCP session
-    fn mcp_tool(&self) -> Executor;
+    fn executor(&self) -> &Executor;
 
     /// Returns the concrete model currently in use by the agent tool
-    fn mcp_model(&self) -> Model;
+    fn model(&self) -> &Model;
 
     /// Returns the name of the current stage.
     fn stage_name(&self) -> &str;
@@ -74,7 +75,7 @@ pub trait CommonMcpImpl: Send + Sync {
         let tool_name = tool.as_str();
         tracing::info!(
             "[{}#{}] {}",
-            self.role_name(),
+            self.role(),
             self.session().task_id(),
             tool_name,
         );
@@ -99,7 +100,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Err(e) => {
                 let response = format!("Error storing report: {e}");
                 log_mcp_string_response(
-                    self.role_name(),
+                    self.role(),
                     self.session().task_id(),
                     tool_name,
                     &response,
@@ -116,7 +117,7 @@ pub trait CommonMcpImpl: Send + Sync {
         {
             let response = format!("Error adding context record: {e}");
             log_mcp_string_response(
-                self.role_name(),
+                self.role(),
                 self.session().task_id(),
                 tool_name,
                 &response,
@@ -128,7 +129,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         let response = "Report stored".to_string();
         log_mcp_string_response(
-            self.role_name(),
+            self.role(),
             self.session().task_id(),
             tool_name,
             &response,
@@ -157,7 +158,7 @@ pub trait CommonMcpImpl: Send + Sync {
         let tool_name = McpTool::AddChecklistItem.as_str();
         tracing::info!(
             "[{}#{}] {}",
-            self.role_name(),
+            self.role(),
             self.session().task_id(),
             tool_name,
         );
@@ -173,7 +174,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Err(e) => {
                 let response = format!("Error storing full report: {e}");
                 log_mcp_string_response(
-                    self.role_name(),
+                    self.role(),
                     self.session().task_id(),
                     tool_name,
                     &response,
@@ -191,7 +192,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(id) => {
                 let response = format!("Checklist item added (ctx_rec_{id})");
                 log_mcp_string_response(
-                    self.role_name(),
+                    self.role(),
                     self.session().task_id(),
                     tool_name,
                     &response,
@@ -201,7 +202,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Err(e) => {
                 let response = format!("Error: {e}");
                 log_mcp_string_response(
-                    self.role_name(),
+                    self.role(),
                     self.session().task_id(),
                     tool_name,
                     &response,
@@ -215,7 +216,7 @@ pub trait CommonMcpImpl: Send + Sync {
         let tool_name = McpTool::CheckChecklistItem.as_str();
         tracing::info!(
             "[{}#{}] {} id={}",
-            self.role_name(),
+            self.role(),
             self.session().task_id(),
             tool_name,
             id_str,
@@ -226,7 +227,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Err(e) => {
                 let response = format!("Error: {e}");
                 log_mcp_string_response(
-                    self.role_name(),
+                    self.role(),
                     self.session().task_id(),
                     tool_name,
                     &response,
@@ -241,7 +242,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Err(e) => {
                 let response = format!("Error: {e}");
                 log_mcp_string_response(
-                    self.role_name(),
+                    self.role(),
                     self.session().task_id(),
                     tool_name,
                     &response,
@@ -258,7 +259,7 @@ pub trait CommonMcpImpl: Send + Sync {
                         record_id, record.record_type
                     );
                     log_mcp_string_response(
-                        self.role_name(),
+                        self.role(),
                         self.session().task_id(),
                         tool_name,
                         &response,
@@ -269,7 +270,7 @@ pub trait CommonMcpImpl: Send + Sync {
             None => {
                 let response = format!("Error: record ctx_rec_{} not found", record_id);
                 log_mcp_string_response(
-                    self.role_name(),
+                    self.role(),
                     self.session().task_id(),
                     tool_name,
                     &response,
@@ -282,7 +283,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(()) => {
                 let response = format!("Checklist item ctx_rec_{} checked", record_id);
                 log_mcp_string_response(
-                    self.role_name(),
+                    self.role(),
                     self.session().task_id(),
                     tool_name,
                     &response,
@@ -292,7 +293,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Err(e) => {
                 let response = format!("Error: {e}");
                 log_mcp_string_response(
-                    self.role_name(),
+                    self.role(),
                     self.session().task_id(),
                     tool_name,
                     &response,
@@ -306,7 +307,7 @@ pub trait CommonMcpImpl: Send + Sync {
         let tool_name = McpTool::GetCtxRec.as_str();
         tracing::info!(
             "[{}#{}] {} id={}",
-            self.role_name(),
+            self.role(),
             self.session().task_id(),
             tool_name,
             id_str,
@@ -317,7 +318,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Err(e) => {
                 let response = format!("Error: {e}");
                 log_mcp_string_response(
-                    self.role_name(),
+                    self.role(),
                     self.session().task_id(),
                     tool_name,
                     &response,
@@ -329,7 +330,7 @@ pub trait CommonMcpImpl: Send + Sync {
         match self.session().get_context_record_content(record_id).await {
             Ok(Some(content)) => {
                 log_mcp_string_response(
-                    self.role_name(),
+                    self.role(),
                     self.session().task_id(),
                     tool_name,
                     &content,
@@ -339,7 +340,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Ok(None) => {
                 let response = format!("Error: record ctx_rec_{} not found", record_id);
                 log_mcp_string_response(
-                    self.role_name(),
+                    self.role(),
                     self.session().task_id(),
                     tool_name,
                     &response,
@@ -349,7 +350,7 @@ pub trait CommonMcpImpl: Send + Sync {
             Err(e) => {
                 let response = format!("Error: {e}");
                 log_mcp_string_response(
-                    self.role_name(),
+                    self.role(),
                     self.session().task_id(),
                     tool_name,
                     &response,
@@ -380,7 +381,7 @@ pub trait CommonMcpImpl: Send + Sync {
             );
             let response = format!("Error setting status on task: {e}");
             log_mcp_string_response(
-                self.role_name(),
+                self.role(),
                 self.session().task_id(),
                 tool.as_str(),
                 &response,
@@ -404,7 +405,7 @@ pub trait CommonMcpImpl: Send + Sync {
             );
             let response = format!("Error adding question to context: {e}");
             log_mcp_string_response(
-                self.role_name(),
+                self.role(),
                 self.session().task_id(),
                 tool.as_str(),
                 &response,
@@ -418,7 +419,7 @@ pub trait CommonMcpImpl: Send + Sync {
             "Error reported - task paused pending response".to_string()
         };
         log_mcp_string_response(
-            self.role_name(),
+            self.role(),
             self.session().task_id(),
             tool.as_str(),
             &response,
@@ -429,7 +430,7 @@ pub trait CommonMcpImpl: Send + Sync {
     async fn stop_with_error_impl(&self, message: &str) -> String {
         tracing::info!(
             "[{}#{}] stop_with_error",
-            self.role_name(),
+            self.role(),
             self.session().task_id()
         );
         self.pause_with_status_impl(
@@ -444,7 +445,7 @@ pub trait CommonMcpImpl: Send + Sync {
     async fn stop_with_question_impl(&self, message: &str) -> String {
         tracing::info!(
             "[{}#{}] stop_with_question",
-            self.role_name(),
+            self.role(),
             self.session().task_id()
         );
         self.pause_with_status_impl(
