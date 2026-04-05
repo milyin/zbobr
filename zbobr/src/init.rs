@@ -427,7 +427,7 @@ fn default_workflow() -> WorkflowConfig {
 
     let roles = IndexMap::from([
         (
-            ROLE_PLANNER.into(),
+            ROLE_PLANNER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -442,7 +442,7 @@ fn default_workflow() -> WorkflowConfig {
             },
         ),
         (
-            ROLE_WORKER.into(),
+            ROLE_WORKER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -459,7 +459,7 @@ fn default_workflow() -> WorkflowConfig {
             },
         ),
         (
-            ROLE_TEST_PLANNER.into(),
+            ROLE_TEST_PLANNER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -474,7 +474,7 @@ fn default_workflow() -> WorkflowConfig {
             },
         ),
         (
-            ROLE_TEST_WORKER.into(),
+            ROLE_TEST_WORKER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -491,7 +491,7 @@ fn default_workflow() -> WorkflowConfig {
             },
         ),
         (
-            ROLE_REVIEWER.into(),
+            ROLE_REVIEWER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -507,7 +507,7 @@ fn default_workflow() -> WorkflowConfig {
             },
         ),
         (
-            ROLE_TESTER.into(),
+            ROLE_TESTER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -521,7 +521,7 @@ fn default_workflow() -> WorkflowConfig {
             },
         ),
         (
-            ROLE_LINTER.into(),
+            ROLE_LINTER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -535,7 +535,7 @@ fn default_workflow() -> WorkflowConfig {
             },
         ),
         (
-            ROLE_LINTER_WORKER.into(),
+            ROLE_LINTER_WORKER,
             RoleDefinition {
                 mcp: Some(vec![
                     StopWithError,
@@ -549,7 +549,7 @@ fn default_workflow() -> WorkflowConfig {
             },
         ),
         (
-            ROLE_MERGER.into(),
+            ROLE_MERGER,
             RoleDefinition {
                 mcp: Some(vec![StopWithError, ReportSuccess, StopWithQuestion]),
                 prompt: Some(PathBuf::from("merger.md")),
