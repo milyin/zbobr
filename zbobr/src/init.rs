@@ -8,10 +8,11 @@ use zbobr_api::{
     Pipeline, Secret, Stage,
     config::{
         PipelineConfig, Provider, ProviderDefinition, Role, RoleDefinition, StageDefinition,
-        StageTransition, ToolEntry, WorkflowConfig, WorkflowToml,
+        StageTransition, Tool, ToolEntry, WorkflowConfig, WorkflowToml,
     },
     config_tools::McpTool,
 };
+use zbobr_api::task::Executor;
 use zbobr_dispatcher::config::{ZbobrDispatcherToml, ZbobrExecutorToml};
 use zbobr_executor_copilot::ZbobrExecutorCopilotToml;
 use zbobr_repo_backend_github::ZbobrRepoBackendGithubToml;
@@ -147,7 +148,7 @@ fn default_config_toml() -> RootConfigToml {
         (
             PROVIDER_CLAUDE,
             ProviderDefinition {
-                executor: Some(PROVIDER_CLAUDE.as_str().to_string()),
+                executor: Some(Executor::claude()),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -157,7 +158,7 @@ fn default_config_toml() -> RootConfigToml {
         (
             PROVIDER_COPILOT,
             ProviderDefinition {
-                executor: Some(PROVIDER_COPILOT.as_str().to_string()),
+                executor: Some(Executor::copilot()),
                 parent: None,
                 priority: None,
                 plan_mode: None,
@@ -188,7 +189,7 @@ fn default_config_toml() -> RootConfigToml {
 
     let tools = IndexMap::from([
         (
-            TOOL_DEVELOPER.to_string(),
+            Tool::from(TOOL_DEVELOPER),
             vec![
                 ToolEntry {
                     provider: PROVIDER_CLAUDE,
@@ -203,7 +204,7 @@ fn default_config_toml() -> RootConfigToml {
             ],
         ),
         (
-            TOOL_PLANNER.to_string(),
+            Tool::from(TOOL_PLANNER),
             vec![
                 ToolEntry {
                     provider: PROVIDER_CLAUDE_PLANNER,
@@ -218,7 +219,7 @@ fn default_config_toml() -> RootConfigToml {
             ],
         ),
         (
-            TOOL_HELPER.to_string(),
+            Tool::from(TOOL_HELPER),
             vec![
                 ToolEntry {
                     provider: PROVIDER_COPILOT,
@@ -233,7 +234,7 @@ fn default_config_toml() -> RootConfigToml {
             ],
         ),
         (
-            TOOL_REVIEWER.to_string(),
+            Tool::from(TOOL_REVIEWER),
             vec![
                 ToolEntry {
                     provider: PROVIDER_COPILOT,
@@ -248,7 +249,7 @@ fn default_config_toml() -> RootConfigToml {
             ],
         ),
         (
-            TOOL_DRUDGE.to_string(),
+            Tool::from(TOOL_DRUDGE),
             vec![
                 ToolEntry {
                     provider: PROVIDER_COPILOT,
@@ -437,7 +438,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("planner.md")),
-                tool: Some(TOOL_PLANNER.to_string()),
+                tool: Some(TOOL_PLANNER.into()),
             },
         ),
         (
@@ -454,7 +455,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("worker.md")),
-                tool: Some(TOOL_DEVELOPER.to_string()),
+                tool: Some(TOOL_DEVELOPER.into()),
             },
         ),
         (
@@ -469,7 +470,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("test_planner.md")),
-                tool: Some(TOOL_PLANNER.to_string()),
+                tool: Some(TOOL_PLANNER.into()),
             },
         ),
         (
@@ -486,7 +487,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("test_worker.md")),
-                tool: Some(TOOL_HELPER.to_string()),
+                tool: Some(TOOL_HELPER.into()),
             },
         ),
         (
@@ -502,7 +503,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("reviewer.md")),
-                tool: Some(TOOL_REVIEWER.to_string()),
+                tool: Some(TOOL_REVIEWER.into()),
             },
         ),
         (
@@ -516,7 +517,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("tester.md")),
-                tool: Some(TOOL_HELPER.to_string()),
+                tool: Some(TOOL_HELPER.into()),
             },
         ),
         (
@@ -530,7 +531,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("linter.md")),
-                tool: Some(TOOL_DRUDGE.to_string()),
+                tool: Some(TOOL_DRUDGE.into()),
             },
         ),
         (
@@ -544,7 +545,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompt: Some(PathBuf::from("linter_worker.md")),
-                tool: Some(TOOL_DEVELOPER.to_string()),
+                tool: Some(TOOL_DEVELOPER.into()),
             },
         ),
         (
@@ -552,7 +553,7 @@ fn default_workflow() -> WorkflowConfig {
             RoleDefinition {
                 mcp: Some(vec![StopWithError, ReportSuccess, StopWithQuestion]),
                 prompt: Some(PathBuf::from("merger.md")),
-                tool: Some(TOOL_HELPER.to_string()),
+                tool: Some(TOOL_HELPER.into()),
             },
         ),
     ]);
