@@ -1,10 +1,11 @@
-use std::path::Path;
-use std::{collections::HashMap, path::PathBuf};
+use std::path::{Path, PathBuf};
+use std::{collections::HashMap};
 
 use indexmap::IndexMap;
 use zbobr_utility::MergeToml;
 use zbobr_utility::config_struct;
 
+use crate::task::FixedOffsetTz;
 use crate::{
     config_tools::McpTool,
     task::{Model, Pipeline, Executor},
@@ -704,7 +705,7 @@ pub struct ZbobrDispatcherConfig {
     pub instance: String,
     /// Workspaces directory; each task gets a separate subdirectory.
     #[config(path)]
-    pub workspaces: std::path::PathBuf,
+    pub workspaces: PathBuf,
     /// Base port for the MCP server; zbobr scans upward from this port to find
     /// an available one.
     #[arg(default_value = "3000")]
@@ -744,14 +745,14 @@ pub struct ZbobrDispatcherConfig {
     pub max_task_stage_count: u64,
     /// Timezone for timestamps (e.g. "+0300", "-0500", "+03:00").
     /// If not set, the operating system's local timezone is used.
-    pub timezone: Option<crate::task::FixedOffsetTz>,
+    pub timezone: Option<FixedOffsetTz>,
 }
 
 impl Default for ZbobrDispatcherConfig {
     fn default() -> Self {
         Self {
             instance: "default".to_string(),
-            workspaces: std::path::PathBuf::from("./workspaces"),
+            workspaces: PathBuf::from("./workspaces"),
             base_port: 3000,
             agent_github_token: Secret::value("not-configured"),
             providers: IndexMap::new(),

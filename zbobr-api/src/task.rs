@@ -728,15 +728,20 @@ impl<'de> serde::Deserialize<'de> for Executor {
 /// passed verbatim to executor CLIs — there is no longer a closed set of
 /// known models. Whitespace is not allowed (enforced at construction time).
 #[derive(Debug, Clone, PartialEq, Eq, Default, schemars::JsonSchema)]
-pub struct Model(pub String);
+pub struct Model(pub std::borrow::Cow<'static, str>);
 
 impl Model {
+    /// Construct a `Model` from a static string.
+    pub const fn new_static(s: &'static str) -> Self {
+        Model(std::borrow::Cow::Borrowed(s))
+    }
+
     /// Construct a `Model`, returning `Err` if the string contains any whitespace.
     pub fn try_new(s: &str) -> Result<Self, String> {
         if s.chars().any(|c| c.is_whitespace()) {
             return Err(format!("model name must not contain whitespace: {:?}", s));
         }
-        Ok(Model(s.to_string()))
+        Ok(Model(std::borrow::Cow::Owned(s.to_string())))
     }
 
     pub fn as_str(&self) -> &str {
@@ -757,6 +762,18 @@ impl std::str::FromStr for Model {
     }
 }
 
+impl From<String> for Model {
+    fn from(s: String) -> Self {
+        Model(std::borrow::Cow::Owned(s))
+    }
+}
+
+impl From<&str> for Model {
+    fn from(s: &str) -> Self {
+        Model(std::borrow::Cow::Owned(s.to_string()))
+    }
+}
+
 impl serde::Serialize for Model {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.0)
@@ -765,8 +782,7 @@ impl serde::Serialize for Model {
 
 impl<'de> serde::Deserialize<'de> for Model {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        Model::try_new(&s).map_err(serde::de::Error::custom)
+        Ok(Model(std::borrow::Cow::Owned(String::deserialize(deserializer)?)))
     }
 }
 

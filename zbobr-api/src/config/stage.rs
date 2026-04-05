@@ -1,10 +1,14 @@
 /// A stage name within a pipeline (user-defined, dynamically configured).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Stage(pub String);
+pub struct Stage(pub std::borrow::Cow<'static, str>);
 
 impl Stage {
+    pub const fn new_static(s: &'static str) -> Self {
+        Stage(std::borrow::Cow::Borrowed(s))
+    }
+
     pub fn new(s: impl Into<String>) -> Self {
-        Stage(s.into())
+        Stage(std::borrow::Cow::Owned(s.into()))
     }
 
     pub fn as_str(&self) -> &str {
@@ -33,13 +37,13 @@ impl std::borrow::Borrow<str> for Stage {
 
 impl From<&str> for Stage {
     fn from(s: &str) -> Self {
-        Stage(s.to_string())
+        Stage(std::borrow::Cow::Owned(s.to_string()))
     }
 }
 
 impl From<String> for Stage {
     fn from(s: String) -> Self {
-        Stage(s)
+        Stage(std::borrow::Cow::Owned(s))
     }
 }
 
@@ -51,7 +55,7 @@ impl serde::Serialize for Stage {
 
 impl<'de> serde::Deserialize<'de> for Stage {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Stage(String::deserialize(deserializer)?))
+        Ok(Stage(std::borrow::Cow::Owned(String::deserialize(deserializer)?)))
     }
 }
 
