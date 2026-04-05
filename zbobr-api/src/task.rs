@@ -609,10 +609,10 @@ impl std::fmt::Display for Signal {
 impl std::str::FromStr for Signal {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(stage) = s.strip_prefix("go_") {
-            Ok(Signal::Go(Stage::new(stage)))
-        } else if let Some(pipeline) = s.strip_prefix("call_") {
-            Ok(Signal::Call(Pipeline::from(pipeline)))
+        if let Some(stage_name) = s.strip_prefix("go_") {
+            Ok(Signal::Go(Stage::from(stage_name)))
+        } else if let Some(pipeline_name) = s.strip_prefix("call_") {
+            Ok(Signal::Call(Pipeline::from(pipeline_name)))
         } else if s == "return" {
             Ok(Signal::Return)
         } else if s == "return_failure" {
@@ -732,7 +732,7 @@ pub struct Model(pub std::borrow::Cow<'static, str>);
 
 impl Model {
     /// Construct a `Model` from a static string.
-    pub const fn new_static(s: &'static str) -> Self {
+    pub const fn new(s: &'static str) -> Self {
         Model(std::borrow::Cow::Borrowed(s))
     }
 

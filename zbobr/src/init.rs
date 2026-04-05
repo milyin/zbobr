@@ -22,13 +22,13 @@ use super::RootConfigToml;
 
 // Default model names used by init workspace. Copilot paths use dot notation
 // for some claude models, while actual Claude executor uses hyphen notation.
-const COPILOT_MODEL_HAIKU: Model = Model::new_static("claude-haiku-4.5");
-const CLAUDE_MODEL_HAIKU: Model = Model::new_static("claude-haiku-4-5");
-const COPILOT_MODEL_SONNET: Model = Model::new_static("claude-sonnet-4.6");
-const CLAUDE_MODEL_OPUS: Model = Model::new_static("claude-opus-4-6");
-const CLAUDE_MODEL_SONNET: Model = Model::new_static("claude-sonnet-4-6");
-const COPILOT_MODEL_GPT_5_4: Model = Model::new_static("gpt-5.4");
-const COPILOT_MODEL_GPT_5_MINI: Model = Model::new_static("gpt-5-mini");
+const COPILOT_MODEL_HAIKU: Model = Model::new("claude-haiku-4.5");
+const CLAUDE_MODEL_HAIKU: Model = Model::new("claude-haiku-4-5");
+const COPILOT_MODEL_SONNET: Model = Model::new("claude-sonnet-4.6");
+const CLAUDE_MODEL_OPUS: Model = Model::new("claude-opus-4-6");
+const CLAUDE_MODEL_SONNET: Model = Model::new("claude-sonnet-4-6");
+const COPILOT_MODEL_GPT_5_4: Model = Model::new("gpt-5.4");
+const COPILOT_MODEL_GPT_5_MINI: Model = Model::new("gpt-5-mini");
 
 const WORKFLOW_PROMPTS_DIR: &str = "prompts";
 const TASK_PROMPT: &str = "task.md";
@@ -49,15 +49,15 @@ const ROLE_LINTER: Role = Role::new("linter");
 const ROLE_LINTER_WORKER: Role = Role::new("linter_worker");
 const ROLE_MERGER: Role = Role::new("merger");
 
-const STAGE_PLANNING: Stage = Stage::new_static("planning");
-const STAGE_WORKING: Stage = Stage::new_static("working");
-const STAGE_REVIEWING: Stage = Stage::new_static("reviewing");
-const STAGE_TEST_PLANNER: Stage = Stage::new_static("test_planner");
-const STAGE_TEST_WORKER: Stage = Stage::new_static("test_worker");
-const STAGE_LINTING: Stage = Stage::new_static("linting");
-const STAGE_LINTER_WORKER: Stage = Stage::new_static("linter_worker");
-const STAGE_TESTING: Stage = Stage::new_static("testing");
-const STAGE_MERGING: Stage = Stage::new_static("merging");
+const STAGE_PLANNING: Stage = Stage::new("planning");
+const STAGE_WORKING: Stage = Stage::new("working");
+const STAGE_REVIEWING: Stage = Stage::new("reviewing");
+const STAGE_TEST_PLANNER: Stage = Stage::new("test_planner");
+const STAGE_TEST_WORKER: Stage = Stage::new("test_worker");
+const STAGE_LINTING: Stage = Stage::new("linting");
+const STAGE_LINTER_WORKER: Stage = Stage::new("linter_worker");
+const STAGE_TESTING: Stage = Stage::new("testing");
+const STAGE_MERGING: Stage = Stage::new("merging");
 
 const PROVIDER_CLAUDE: Provider = Provider::new("claude");
 const PROVIDER_COPILOT: Provider = Provider::new("copilot");

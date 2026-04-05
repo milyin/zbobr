@@ -3,12 +3,8 @@
 pub struct Stage(pub std::borrow::Cow<'static, str>);
 
 impl Stage {
-    pub const fn new_static(s: &'static str) -> Self {
+    pub const fn new(s: &'static str) -> Self {
         Stage(std::borrow::Cow::Borrowed(s))
-    }
-
-    pub fn new(s: impl Into<String>) -> Self {
-        Stage(std::borrow::Cow::Owned(s.into()))
     }
 
     pub fn as_str(&self) -> &str {
