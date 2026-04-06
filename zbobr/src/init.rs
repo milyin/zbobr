@@ -3,6 +3,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Secret, Stage,
@@ -140,6 +143,13 @@ pub async fn init_workspace(dest: &Path, force: bool) -> anyhow::Result<()> {
 
     let loop_script_path = dest.join(LOOP_SCRIPT);
     write_or_new(&loop_script_path, LOOP_SCRIPT_CONTENT, force).await?;
+
+    #[cfg(unix)]
+    {
+        let mut perms = tokio::fs::metadata(&loop_script_path).await?.permissions();
+        perms.set_mode(perms.mode() | 0o755);
+        tokio::fs::set_permissions(&loop_script_path, perms).await?;
+    }
 
     println!(
         "\nWorkspace initialized at {}.\nEdit zbobr.toml to configure backends and tokens before running.",
@@ -1366,5 +1376,16 @@ name = "test"
             loop_script.contains("\"$ZBOBR_CMD\" task cleanup"),
             "loop.sh should run task cleanup"
         );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = tokio::fs::metadata(&loop_script_path)
+                .await
+                .expect("Failed to stat loop.sh")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o111, 0o111, "loop.sh should be executable");
+        }
     }
 }
