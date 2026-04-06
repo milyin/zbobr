@@ -784,6 +784,11 @@ enum WorktreeResult {
     Paused,
 }
 
+fn format_error_status(offset: chrono::FixedOffset, message: &str) -> String {
+    let ts = chrono::Utc::now().with_timezone(&offset);
+    zbobr_api::format_status(zbobr_api::ERROR_PREFIX, &ts, message)
+}
+
 // ---------------------------------------------------------------------------
 // Stage processing helpers
 // ---------------------------------------------------------------------------
@@ -1123,10 +1128,7 @@ impl ZbobrDispatcher {
         }
         Ok(())
     }
-}
 
-/// Main manager loop: polls for tasks and dispatches role sessions.
-impl ZbobrDispatcher {
     /// Main manager loop: polls for tasks and dispatches role sessions.
     pub async fn run_manager_loop(
         self: &Arc<Self>,
@@ -1273,13 +1275,7 @@ impl ZbobrDispatcher {
         tracing::info!("Manager loop terminated gracefully");
         Ok(())
     }
-}
 
-/// Run manager-loop "Phase 1" once over all tasks.
-///
-/// Applies pause/ready normalization and processes instant transitions (Done and call stages).
-/// Returns the current task snapshot list.
-impl ZbobrDispatcher {
     /// Run manager-loop "Phase 1" once over all tasks.
     ///
     /// Applies pause/ready normalization and processes instant transitions (Done and call stages).
@@ -1476,7 +1472,6 @@ impl ZbobrDispatcher {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Low-level helpers
 // ---------------------------------------------------------------------------
@@ -1565,13 +1560,11 @@ impl ZbobrDispatcher {
 
         self.handle_merge_conflict(task_id, pipeline_name, stage).await
     }
-}
 
-/// Dispatch to the merge conflict handler pipeline.
-///
-/// Pushes the current stage onto the stack and calls the merge pipeline.
-/// If already inside the merge pipeline, pauses the task.
-impl ZbobrDispatcher {
+    /// Dispatch to the merge conflict handler pipeline.
+    ///
+    /// Pushes the current stage onto the stack and calls the merge pipeline.
+    /// If already inside the merge pipeline, pauses the task.
     async fn handle_merge_conflict(
         self: &Arc<Self>,
         task_id: u64,
@@ -1606,14 +1599,7 @@ impl ZbobrDispatcher {
         tracing::info!("Task #{task_id}: merge conflict — calling merge pipeline");
         Ok(WorktreeResult::HandlerCalled)
     }
-}
 
-fn format_error_status(offset: chrono::FixedOffset, message: &str) -> String {
-    let ts = chrono::Utc::now().with_timezone(&offset);
-    zbobr_api::format_status(zbobr_api::ERROR_PREFIX, &ts, message)
-}
-
-impl ZbobrDispatcher {
     async fn set_task_status_with_log(
         self: &Arc<Self>,
         task_id: u64,
@@ -1626,9 +1612,7 @@ impl ZbobrDispatcher {
             tracing::warn!("Failed to set task status for task #{task_id} ({context}): {set_err}");
         }
     }
-}
 
-impl ZbobrDispatcher {
     async fn ensure_pr_url(self: &Arc<Self>, task_id: u64) -> anyhow::Result<()> {
         let role_session = self.role_session(task_id);
         let task = role_session.get_task().await?;
@@ -1672,14 +1656,12 @@ impl ZbobrDispatcher {
             }
         }
     }
-}
 
-/// Pre-populate task parameters from dispatcher config defaults.
-/// Only sets a parameter if it is not already present, so a previously
-/// prepared task keeps its values unchanged. Called unconditionally at
-/// the start of every stage run.
-#[allow(clippy::too_many_arguments)]
-impl ZbobrDispatcher {
+    /// Pre-populate task parameters from dispatcher config defaults.
+    /// Only sets a parameter if it is not already present, so a previously
+    /// prepared task keeps its values unchanged. Called unconditionally at
+    /// the start of every stage run.
+    #[allow(clippy::too_many_arguments)]
     async fn start_mcp_server(
         self: &Arc<Self>,
         role: Role,
@@ -1904,9 +1886,7 @@ impl ZbobrDispatcher {
 
         Ok(None)
     }
-}
 
-impl ZbobrDispatcher {
     async fn perform_stash_and_push(
         self: &Arc<Self>,
         task_id: u64,
