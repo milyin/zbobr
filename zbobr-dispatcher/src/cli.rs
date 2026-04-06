@@ -1145,7 +1145,10 @@ impl ZbobrDispatcher {
             }
 
             let mut session_run = false;
-
+            // Run manager-loop "Phase 1" once over all tasks.
+            //
+            // Applies pause/ready normalization and processes instant transitions (Done and call stages).
+            // Returns the current task snapshot list.
             let all_tasks = self.advance_tasks().await?;
 
             // Phase 2: use select_runnable_task to pick the highest-priority RunStage candidate

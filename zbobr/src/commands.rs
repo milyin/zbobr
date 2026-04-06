@@ -129,7 +129,7 @@ pub enum TaskSubcommand {
         /// Task ID
         id: Option<u64>,
     },
-    /// Process a task according to its current stage (single-step)
+    /// Process eligible task by ID, or if --select is used then select the highest-priority ready task
     Process {
         /// Task ID
         #[arg(conflicts_with = "select")]
@@ -138,7 +138,7 @@ pub enum TaskSubcommand {
         #[arg(long)]
         select: bool,
     },
-    /// Run one manager "Phase 1" pass over all tasks
+    /// Moves forward task states accordingly to their current state
     Advance,
     /// Show the resolved prompt for a task stage
     Prompt {
