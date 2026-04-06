@@ -528,7 +528,7 @@ impl<'a> CliStageRunner<'a> {
                     task.max_stage_count
                 );
                 let status = format_error_status(
-                    self.zbobr,
+                    self.zbobr.config().fixed_offset(),
                     &format!(
                         "Stage count limit ({}) reached - auto-paused",
                         task.max_stage_count
@@ -750,16 +750,17 @@ impl<'a> CliStageRunner<'a> {
                 self.zbobr.record_provider_success(resolved_provider.provider.as_str());
             }
 
-            if let Some(e) = finalize_stage_session(
-                self.zbobr,
-                self.task_id,
-                self.pipeline,
-                self.stage,
-                &work_dir,
-                outcome,
-                last_mapped_tool,
-            )
-            .await?
+            if let Some(e) = self
+                .zbobr
+                .finalize_stage_session(
+                    self.task_id,
+                    self.pipeline,
+                    self.stage,
+                    &work_dir,
+                    outcome,
+                    last_mapped_tool,
+                )
+                .await?
             {
                 server_handle.abort();
                 return Err(e);
@@ -837,7 +838,7 @@ impl ZbobrDispatcher {
                     task.max_stage_count
                 );
                 let status = format_error_status(
-                    self,
+                    self.config().fixed_offset(),
                     &format!(
                         "Stage count limit ({}) reached - auto-paused",
                         task.max_stage_count
@@ -1043,7 +1044,7 @@ impl ZbobrDispatcher {
                         );
                         tracing::error!("{msg}");
                         let task_session = self.task_session(task.id);
-                        let status = format_error_status(self, &msg);
+                        let status = format_error_status(self.config().fixed_offset(), &msg);
                         if let Err(pause_err) = task_session
                             .set_pause_with_status_and_signal(status, Signal::go(stage_name.as_str()))
                             .await
@@ -1083,7 +1084,7 @@ impl ZbobrDispatcher {
                             .map(|(name, _)| name.to_string())
                             .unwrap_or_default();
                         let status = format_error_status(
-                            self,
+                            self.config().fixed_offset(),
                             "Pipeline failed at root — manual intervention required",
                         );
                         task_session
@@ -1223,7 +1224,7 @@ impl ZbobrDispatcher {
                         );
                         tracing::error!("{msg}");
                         let task_session = self.task_session(task.id);
-                        let status = format_error_status(self, &msg);
+                        let status = format_error_status(self.config().fixed_offset(), &msg);
                         if let Err(pause_err) = task_session
                             .set_pause_with_status_and_signal(status, Signal::go(stage_name.as_str()))
                             .await
@@ -1415,7 +1416,7 @@ impl ZbobrDispatcher {
                                     .map(|(name, _)| name.to_string())
                                     .unwrap_or_default();
                                 let status = format_error_status(
-                                    self,
+                                    self.config().fixed_offset(),
                                     "Pipeline failed at root — manual intervention required",
                                 );
                                 if let Err(e) = task_session
@@ -1584,7 +1585,7 @@ impl ZbobrDispatcher {
         if pipeline.as_str() == Pipeline::MERGE {
             tracing::error!("Task #{task_id}: merge conflict inside merge pipeline — pausing");
             let msg = "Merge conflict inside merge pipeline. Manual intervention required.";
-            let status = format_error_status(self, msg);
+            let status = format_error_status(self.config().fixed_offset(), msg);
             task_session
                 .set_pause_with_status_and_signal(status, Signal::go(stage.clone()))
                 .await?;
@@ -1607,8 +1608,8 @@ impl ZbobrDispatcher {
     }
 }
 
-fn format_error_status(zbobr: &ZbobrDispatcher, message: &str) -> String {
-    let ts = chrono::Utc::now().with_timezone(&zbobr.config().fixed_offset());
+fn format_error_status(offset: chrono::FixedOffset, message: &str) -> String {
+    let ts = chrono::Utc::now().with_timezone(&offset);
     zbobr_api::format_status(zbobr_api::ERROR_PREFIX, &ts, message)
 }
 
@@ -1620,7 +1621,7 @@ impl ZbobrDispatcher {
         message: &str,
     ) {
         let role_session = self.role_session(task_id);
-        let status = format_error_status(self, message);
+        let status = format_error_status(self.config().fixed_offset(), message);
         if let Err(set_err) = role_session.set_status(Some(status)).await {
             tracing::warn!("Failed to set task status for task #{task_id} ({context}): {set_err}");
         }
@@ -1791,116 +1792,118 @@ async fn execute_tool(
     }
 }
 
-async fn finalize_stage_session(
-    zbobr: &Arc<ZbobrDispatcher>,
-    task_id: u64,
-    pipeline: &Pipeline,
-    stage: &Stage,
-    work_dir: &Path,
-    outcome: SessionOutcome,
-    last_mapped_tool: Option<McpTool>,
-) -> anyhow::Result<Option<anyhow::Error>> {
-    let task_session = zbobr.task_session(task_id);
-    let pending_state = State::pending(pipeline.clone());
+impl ZbobrDispatcher {
+    async fn finalize_stage_session(
+        self: &Arc<Self>,
+        task_id: u64,
+        pipeline: &Pipeline,
+        stage: &Stage,
+        work_dir: &Path,
+        outcome: SessionOutcome,
+        last_mapped_tool: Option<McpTool>,
+    ) -> anyhow::Result<Option<anyhow::Error>> {
+        let task_session = self.task_session(task_id);
+        let pending_state = State::pending(pipeline.clone());
 
-    if outcome.execution_interrupted {
+        if outcome.execution_interrupted {
+            if let Err(e) =
+                perform_stash_and_push(self, task_id, work_dir, stage.as_str(), pipeline).await
+            {
+                tracing::warn!("Stash/push failed during interruption for task #{task_id}: {e}");
+            }
+            task_session.set_state(pending_state.clone()).await?;
+            tracing::info!("Session interrupted for task #{task_id}, moved to {pending_state:?}");
+            return Ok(None);
+        }
+
+        if let Some(e) = outcome.execution_error.as_ref() {
+            if let Err(e) =
+                perform_stash_and_push(self, task_id, work_dir, stage.as_str(), pipeline).await
+            {
+                tracing::warn!("Stash/push failed during error handling for task #{task_id}: {e}");
+            }
+            let error_msg = format!("Execution failed: {e}");
+            let status = format_error_status(self.config().fixed_offset(), &error_msg);
+            let stage = stage.to_string();
+            if let Err(pause_err) = task_session
+                .set_pause_with_status_and_signal(status, Signal::go(stage.as_str()))
+                .await
+            {
+                tracing::error!("Failed to set pause for task #{task_id}: {pause_err}");
+            }
+            task_session.set_state(pending_state.clone()).await?;
+            tracing::info!("Session failed for task #{task_id}, moved to {pending_state:?} with pause");
+            return Ok(outcome.execution_error);
+        }
+
+        tracing::info!("Session complete for task #{task_id}");
+
         if let Err(e) =
-            perform_stash_and_push(zbobr, task_id, work_dir, stage.as_str(), pipeline).await
+            perform_stash_and_push(self, task_id, work_dir, stage.as_str(), pipeline).await
         {
-            tracing::warn!("Stash/push failed during interruption for task #{task_id}: {e}");
-        }
-        task_session.set_state(pending_state.clone()).await?;
-        tracing::info!("Session interrupted for task #{task_id}, moved to {pending_state:?}");
-        return Ok(None);
-    }
-
-    if let Some(e) = outcome.execution_error.as_ref() {
-        if let Err(e) =
-            perform_stash_and_push(zbobr, task_id, work_dir, stage.as_str(), pipeline).await
-        {
-            tracing::warn!("Stash/push failed during error handling for task #{task_id}: {e}");
-        }
-        let error_msg = format!("Execution failed: {e}");
-        let status = format_error_status(zbobr, &error_msg);
-        let stage = stage.to_string();
-        if let Err(pause_err) = task_session
-            .set_pause_with_status_and_signal(status, Signal::go(stage.as_str()))
-            .await
-        {
-            tracing::error!("Failed to set pause for task #{task_id}: {pause_err}");
-        }
-        task_session.set_state(pending_state.clone()).await?;
-        tracing::info!("Session failed for task #{task_id}, moved to {pending_state:?} with pause");
-        return Ok(outcome.execution_error);
-    }
-
-    tracing::info!("Session complete for task #{task_id}");
-
-    if let Err(e) =
-        perform_stash_and_push(zbobr, task_id, work_dir, stage.as_str(), pipeline).await
-    {
-        tracing::error!("Stash/push failed for task #{task_id}: {e}");
-        let msg = format!("Stash/push failed: {e}");
-        let status = format_error_status(zbobr, &msg);
-        let stage = stage.to_string();
-        if let Err(pause_err) = task_session
-            .set_pause_with_status_and_signal(status, Signal::go(stage.as_str()))
-            .await
-        {
-            tracing::error!(
-                "Failed to pause task #{task_id} after stash/push failure: {pause_err}"
-            );
-        }
-        task_session.set_state(pending_state.clone()).await?;
-        return Ok(None);
-    }
-
-    // Compute post-stage signal using the sequential pipeline model.
-    // If the agent already set a signal during the session (e.g. stop_with_error),
-    // that signal takes priority.
-    let current_task = zbobr
-        .task_backend()
-        .get_task(task_id)
-        .await?
-        .snapshot(false)
-        .await?;
-    if !current_task.go_pause && current_task.signal.is_none() {
-        let current_stage = stage.clone();
-        let stage_def = zbobr.workflow().stage(pipeline, &current_stage);
-        let seq_signal = zbobr.workflow().sequential_signal(
-            pipeline,
-            &current_stage,
-            stage_def,
-            last_mapped_tool,
-        );
-        match seq_signal {
-            SequentialSignal::ReturnFailure => {
-                task_session.set_signal(Some(Signal::ReturnFailure)).await?;
+            tracing::error!("Stash/push failed for task #{task_id}: {e}");
+            let msg = format!("Stash/push failed: {e}");
+            let status = format_error_status(self.config().fixed_offset(), &msg);
+            let stage = stage.to_string();
+            if let Err(pause_err) = task_session
+                .set_pause_with_status_and_signal(status, Signal::go(stage.as_str()))
+                .await
+            {
+                tracing::error!(
+                    "Failed to pause task #{task_id} after stash/push failure: {pause_err}"
+                );
             }
-            SequentialSignal::Advance(next) => {
-                task_session.set_signal(Some(Signal::go(next))).await?;
-            }
-            SequentialSignal::Return => {
-                task_session.set_signal(Some(Signal::Return)).await?;
-            }
-            SequentialSignal::PauseThenSignal(signal) => {
-                let status = format_error_status(zbobr, "Auto-pause: stage completed");
-                task_session
-                    .set_pause_with_status_and_signal(status, signal)
-                    .await?;
-            }
+            task_session.set_state(pending_state.clone()).await?;
+            return Ok(None);
         }
-    }
-    // If pause was set by MCP tool (e.g. stop_with_error) but no signal, set
-    // signal to re-run the current stage on resume.
-    if current_task.go_pause && current_task.signal.is_none() {
-        task_session
-            .set_signal(Some(Signal::go(stage.as_str())))
+
+        // Compute post-stage signal using the sequential pipeline model.
+        // If the agent already set a signal during the session (e.g. stop_with_error),
+        // that signal takes priority.
+        let current_task = self
+            .task_backend()
+            .get_task(task_id)
+            .await?
+            .snapshot(false)
             .await?;
-    }
-    task_session.set_state(pending_state).await?;
+        if !current_task.go_pause && current_task.signal.is_none() {
+            let current_stage = stage.clone();
+            let stage_def = self.workflow().stage(pipeline, &current_stage);
+            let seq_signal = self.workflow().sequential_signal(
+                pipeline,
+                &current_stage,
+                stage_def,
+                last_mapped_tool,
+            );
+            match seq_signal {
+                SequentialSignal::ReturnFailure => {
+                    task_session.set_signal(Some(Signal::ReturnFailure)).await?;
+                }
+                SequentialSignal::Advance(next) => {
+                    task_session.set_signal(Some(Signal::go(next))).await?;
+                }
+                SequentialSignal::Return => {
+                    task_session.set_signal(Some(Signal::Return)).await?;
+                }
+                SequentialSignal::PauseThenSignal(signal) => {
+                    let status = format_error_status(self.config().fixed_offset(), "Auto-pause: stage completed");
+                    task_session
+                        .set_pause_with_status_and_signal(status, signal)
+                        .await?;
+                }
+            }
+        }
+        // If pause was set by MCP tool (e.g. stop_with_error) but no signal, set
+        // signal to re-run the current stage on resume.
+        if current_task.go_pause && current_task.signal.is_none() {
+            task_session
+                .set_signal(Some(Signal::go(stage.as_str())))
+                .await?;
+        }
+        task_session.set_state(pending_state).await?;
 
-    Ok(None)
+        Ok(None)
+    }
 }
 
 async fn perform_stash_and_push(
