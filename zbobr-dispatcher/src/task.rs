@@ -182,7 +182,7 @@ impl RoleSession {
     pub async fn set_pause_with_status(&self, status: String) -> anyhow::Result<()> {
         self.modify_task(move |mut task| {
             task.status = Some(status);
-            task.pause = true;
+            task.go_pause = true;
             task
         })
         .await
@@ -197,7 +197,7 @@ impl RoleSession {
     ) -> anyhow::Result<()> {
         self.modify_task(move |mut task| {
             task.status = Some(status);
-            task.pause = true;
+            task.go_pause = true;
             task.signal = Some(signal);
             task
         })
@@ -404,7 +404,7 @@ impl TaskSession {
         };
         self.modify_task(move |mut task| {
             if task.confirm && task.state != state {
-                task.pause = true;
+                task.go_pause = true;
                 task.status = Some(confirm_status);
             }
             if !task.state.is_running() && state.is_running() {
@@ -439,7 +439,7 @@ impl TaskSession {
     pub async fn set_pause_with_status(&self, status: String) -> anyhow::Result<()> {
         self.modify_task(move |mut task| {
             task.status = Some(status);
-            task.pause = true;
+            task.go_pause = true;
             task
         })
         .await
@@ -454,7 +454,7 @@ impl TaskSession {
     ) -> anyhow::Result<()> {
         self.modify_task(move |mut task| {
             task.status = Some(status);
-            task.pause = true;
+            task.go_pause = true;
             task.signal = Some(signal);
             task
         })
@@ -762,7 +762,7 @@ mod comment_model_tests {
                 signal: None,
                 stack: vec![],
                 status: None,
-                pause: false,
+                go_pause: false,
                 confirm: false,
                 pipeline_run_id: 0,
                 stage_count: 0,
@@ -902,7 +902,7 @@ mod comment_model_tests {
             after_icon.starts_with(|c: char| c.is_ascii_digit()),
             "status should contain a timestamp after ❌, got: {status:?}"
         );
-        assert!(task.pause, "stop_with_error should set pause flag");
+        assert!(task.go_pause, "stop_with_error should set pause flag");
     }
 
     // -----------------------------------------------------------------------

@@ -178,6 +178,18 @@ mod tests {
     }
 
     #[test]
+    fn task_advance_parses_without_arguments() {
+        let cli = TestCli::try_parse_from(["zbobr", "task", "advance"]).unwrap();
+        match cli.command {
+            commands::Command::Task { subcommand } => match subcommand {
+                commands::TaskSubcommand::Advance => {}
+                _ => panic!("expected Advance subcommand"),
+            },
+            _ => panic!("expected Task command"),
+        }
+    }
+
+    #[test]
     fn logs_flag_defaults_to_false() {
         let cli = Cli::try_parse_from(["zbobr", "task", "process", "--select"]).unwrap();
         assert!(!cli.logs, "logs flag should default to false");

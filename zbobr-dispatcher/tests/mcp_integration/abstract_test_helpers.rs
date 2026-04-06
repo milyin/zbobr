@@ -312,7 +312,7 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
     env.run_pipeline(task_id, &workflow, &scenarios).await;
 
     let task = env.get_task(task_id).await;
-    assert!(task.pause, "stop_with_error should set pause flag");
+    assert!(task.go_pause, "stop_with_error should set pause flag");
     assert_eq!(
         task.state,
         State::Pending(Pipeline::Main),
@@ -432,7 +432,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
         .await;
     let task = env.get_task(task_id).await;
     assert_eq!(task.state, State::Pending(Pipeline::Main));
-    assert!(task.pause, "Should be paused at root on failure");
+    assert!(task.go_pause, "Should be paused at root on failure");
     assert_eq!(
         task.signal,
         Some(Signal::go("check")),
@@ -462,7 +462,7 @@ pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
     env.run_pipeline(task_id, &workflow, &scenarios).await;
 
     let task = env.get_task(task_id).await;
-    assert!(task.pause, "stop_with_question should set pause flag");
+    assert!(task.go_pause, "stop_with_question should set pause flag");
     assert_eq!(
         task.signal,
         Some(Signal::go("work")),
@@ -647,7 +647,7 @@ pub async fn run_pause_state_conversion(env: &IntegrationTestEnv) {
     env.run_pipeline(task_id, &workflow, &scenarios).await;
 
     let task = env.get_task(task_id).await;
-    assert!(task.pause, "stop_with_error should set pause flag");
+    assert!(task.go_pause, "stop_with_error should set pause flag");
     assert_eq!(task.state, State::Pending(Pipeline::Main));
     assert_eq!(task.signal, Some(Signal::go("work")));
 
@@ -655,7 +655,7 @@ pub async fn run_pause_state_conversion(env: &IntegrationTestEnv) {
     env.continue_pipeline(task_id, &workflow, &scenarios).await;
 
     let task = env.get_task(task_id).await;
-    assert!(!task.pause, "Pause flag should be cleared");
+    assert!(!task.go_pause, "Pause flag should be cleared");
     assert_eq!(task.state, State::Pause, "State should be PAUSE");
     assert!(task.signal.is_none(), "Signal should be cleared");
     assert_eq!(task.stack.len(), 1, "Stack should have one entry");
@@ -693,7 +693,7 @@ pub async fn run_pause_resume_cycle(env: &IntegrationTestEnv) {
     env.run_pipeline(task_id, &workflow, &err_scenarios).await;
 
     let task = env.get_task(task_id).await;
-    assert!(task.pause, "Should be paused after stop_with_error");
+    assert!(task.go_pause, "Should be paused after stop_with_error");
 
     // Step 2: convert pause to PAUSE state
     env.continue_pipeline(task_id, &workflow, &err_scenarios)
@@ -804,7 +804,7 @@ pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert!(
-        task.pause,
+        task.go_pause,
         "Stage with on_success.pause should set pause flag after report_success"
     );
     assert_eq!(
@@ -819,7 +819,7 @@ pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert_eq!(task.state, State::Pause);
-    assert!(!task.pause, "Pause flag should be cleared");
+    assert!(!task.go_pause, "Pause flag should be cleared");
     assert!(task.signal.is_none(), "Signal should be cleared");
     assert_eq!(task.stack.len(), 1, "Stack should have one entry");
     assert_eq!(
@@ -880,7 +880,7 @@ pub async fn run_pause_on_runner_error(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert!(
-        task.pause,
+        task.go_pause,
         "runner.run() error should set pause flag for graceful pause"
     );
     assert_eq!(
@@ -906,7 +906,7 @@ pub async fn run_pause_on_runner_error(env: &IntegrationTestEnv) {
     env.continue_pipeline(task_id, &workflow, &scenarios).await;
 
     let task = env.get_task(task_id).await;
-    assert!(!task.pause, "Pause flag should be cleared");
+    assert!(!task.go_pause, "Pause flag should be cleared");
     assert_eq!(task.state, State::Pause, "State should be PAUSE");
     assert!(task.signal.is_none(), "Signal should be cleared");
     assert_eq!(task.stack.len(), 1, "Stack should have one entry");

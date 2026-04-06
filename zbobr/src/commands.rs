@@ -6,7 +6,7 @@ use clap::Subcommand;
 use zbobr_api::{Pipeline, Stage, WorktreeBackend, config::{Role, StageDefinition, WorkflowConfig}};
 use zbobr_dispatcher::{
     ConfiguredPromptBuilder, TaskDir, TaskListEntry, VAR_DESTINATION_BRANCH,
-    VAR_DESTINATION_REPOSITORY, Workflow, ZbobrDispatcher,
+    VAR_DESTINATION_REPOSITORY, Workflow, ZbobrDispatcher, eligible_runnable_tasks,
     config::{ZbobrDispatcherConfig, ZbobrExecutorConfig},
     print_task, sample_task_and_comments, select_runnable_task,
 };
@@ -129,7 +129,7 @@ pub enum TaskSubcommand {
         /// Task ID
         id: Option<u64>,
     },
-    /// Process a task according to its current stage (single-step)
+    /// Process eligible task by ID, or if --select is used then select the highest-priority ready task
     Process {
         /// Task ID
         #[arg(conflicts_with = "select")]
@@ -138,6 +138,8 @@ pub enum TaskSubcommand {
         #[arg(long)]
         select: bool,
     },
+    /// Moves forward task states accordingly to their current state
+    Advance,
     /// Show the resolved prompt for a task stage
     Prompt {
         /// Task ID (if omitted, placeholders are used instead of real task data)
@@ -293,7 +295,7 @@ async fn run_with_dispatcher(zbobr: ZbobrDispatcher, command: Command) -> anyhow
             cleanup_interval,
             ..
         } => {
-            zbobr_dispatcher::run_manager_loop(&zbobr, interval, cleanup_interval).await?;
+            zbobr.run_manager_loop(interval, cleanup_interval).await?;
         }
     }
     Ok(())
@@ -347,9 +349,24 @@ async fn run_task_subcommand(
             tasks.sort_by_key(|t| t.id);
 
             if select {
+                let eligible = eligible_runnable_tasks(zbobr.workflow(), &tasks);
+                tracing::info!(
+                    "Select requested: {} eligible runnable task(s)",
+                    eligible.len()
+                );
+                if eligible.is_empty() {
+                    tracing::info!("No runnable tasks available for selection");
+                    std::process::exit(1);
+                }
                 match select_runnable_task(zbobr.workflow(), &tasks) {
-                    Some(task) => println!("{}", task.id),
-                    None => std::process::exit(1),
+                    Some(task) => {
+                        tracing::info!("Selected task #{} for task list select", task.id);
+                        println!("{}", task.id)
+                    }
+                    None => {
+                        tracing::info!("No runnable tasks available for selection");
+                        std::process::exit(1)
+                    }
                 }
                 return Ok(());
             }
@@ -424,7 +441,7 @@ async fn run_task_subcommand(
                     }
                     if let Some(s) = parsed_state {
                         if task.confirm && task.state != s {
-                            task.pause = true;
+                            task.go_pause = true;
                         }
                         task.state = s;
                     }
@@ -455,8 +472,14 @@ async fn run_task_subcommand(
                 }
                 tasks.sort_by_key(|t| t.id);
                 match select_runnable_task(zbobr.workflow(), &tasks) {
-                    Some(t) => t.id,
-                    None => std::process::exit(1),
+                    Some(t) => {
+                        tracing::info!("Selected task #{} for processing", t.id);
+                        t.id
+                    }
+                    None => {
+                        tracing::info!("No runnable task found for process --select");
+                        std::process::exit(1)
+                    }
                 }
             } else {
                 require_task_id(task, "process")?
@@ -466,7 +489,21 @@ async fn run_task_subcommand(
                 .await?
                 .snapshot(false)
                 .await?;
-            zbobr_dispatcher::process_task(zbobr, &task_obj, None).await?;
+            zbobr.process_task(&task_obj, None).await?;
+        }
+        TaskSubcommand::Advance => {
+            let tasks = zbobr.advance_tasks().await?;
+            let eligible = eligible_runnable_tasks(zbobr.workflow(), &tasks);
+            tracing::info!(
+                "Advance requested: {} tasks advanced; {} runnable stage candidate(s) ready",
+                tasks.len(),
+                eligible.len()
+            );
+            println!(
+                "Advanced {} tasks; {} runnable stage candidate(s) ready",
+                tasks.len(),
+                eligible.len()
+            );
         }
         TaskSubcommand::Prompt {
             id,

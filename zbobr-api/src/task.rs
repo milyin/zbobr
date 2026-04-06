@@ -814,7 +814,11 @@ pub struct Task {
     /// Contains the last error or question with icon, timestamp, and message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
-    pub pause: bool,
+    /// Transient request to pause processing at the next dispatcher boundary.
+    ///
+    /// When set, dispatcher converts this flag into `State::Pause`, stores resume
+    /// context on the stack, then clears `go_pause`.
+    pub go_pause: bool,
     /// When true the dispatcher will automatically set the pause flag any time
     /// the task's state is changed.  This gives human operators an opportunity to
     /// review a transition before the next processing step occurs.
@@ -1084,7 +1088,7 @@ mod tests {
             signal: None,
             stack: Vec::new(),
             status: None,
-            pause: false,
+            go_pause: false,
             confirm: false,
             pipeline_run_id: 0,
             stage_count: 0,
