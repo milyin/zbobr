@@ -311,6 +311,12 @@ pub struct TaskListEntry {
     pub title: String,
 }
 
+/// Result of running a single "Phase 1" advancement pass over all tasks.
+pub struct AdvanceTasksResult {
+    pub all_tasks: Vec<Task>,
+    pub runstage_candidates: Vec<Task>,
+}
+
 impl From<&Task> for TaskListEntry {
     fn from(task: &Task) -> Self {
         Self {
@@ -1173,211 +1179,12 @@ pub async fn run_manager_loop(
             last_cleanup = std::time::Instant::now();
         }
 
-        let all_weak = match task_backend.list_tasks().await {
-            Ok(tasks) => tasks,
-            Err(e) => {
-                tracing::error!("Failed to list tasks: {e}");
-                vec![]
-            }
-        };
-        let mut all_tasks: Vec<Task> = Vec::new();
-        for w in &all_weak {
-            match w.snapshot(false).await {
-                Ok(t) => all_tasks.push(t),
-                Err(e) => tracing::warn!("Failed to snapshot task: {e}"),
-            }
-        }
-        // Sort by task_priority descending so tasks closest to completion are processed first.
-        all_tasks.sort_by_key(|b| std::cmp::Reverse(task_priority(b)));
-
         let mut session_run = false;
 
-        // Phase 1: apply transitions and handle Done / instant call-stage actions for all
-        // tasks eagerly.  Non-call RunStage tasks are collected for priority-based selection
-        // in Phase 2 below.
-        let mut runstage_candidates: Vec<Task> = Vec::new();
-        for task in &all_tasks {
-            if task.state.is_done() {
-                continue;
-            }
-
-            // Centralized pause handler: convert pause flag → PAUSE state + stack push
-            match apply_pause_to_state(zbobr, task).await {
-                Ok(true) => {
-                    tracing::info!("Task #{} paused — state set to PAUSE", task.id);
-                    continue;
-                }
-                Err(e) => {
-                    tracing::error!("Failed to apply pause for task #{}: {e}", task.id);
-                    continue;
-                }
-                _ => {}
-            }
-
-            if task.state.is_pause() {
-                continue;
-            }
-
-            // Handle READY with stack (resume from pause)
-            match apply_ready_from_state(zbobr, task).await {
-                Ok(true) => continue, // will be processed next poll cycle
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to apply ready-from-state for task #{}: {e}",
-                        task.id
-                    );
-                    continue;
-                }
-                _ => {}
-            }
-
-            let action = match workflow.resolve_next_action(task) {
-                Ok(a) => a,
-                Err(e) => {
-                    tracing::warn!("State machine error for task #{}: {e}", task.id);
-                    continue;
-                }
-            };
-
-            match action {
-                crate::workflow::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
-                    if let Some(call_target) = stage_def.call_pipeline() {
-                        // Call stages are instant — process eagerly without consuming the slot
-                        tracing::info!(
-                            "Processing task #{} (state={:?}, signal={:?}) — running stage {}/{}",
-                            task.id,
-                            task.state,
-                            task.signal,
-                            pipeline_name,
-                            stage_name,
-                        );
-                        if let Err(e) = handle_call_stage(
-                            zbobr,
-                            task.id,
-                            pipeline_name,
-                            stage_name,
-                            call_target,
-                        )
-                        .await
-                        {
-                            tracing::error!(
-                                "Call stage {}/{} failed for task #{}: {e}",
-                                pipeline_name,
-                                stage_name,
-                                task.id
-                            );
-                        }
-                    } else {
-                        // Non-call RunStage — collect for priority-based selection in Phase 2
-                        runstage_candidates.push(task.clone());
-                    }
-                }
-                crate::workflow::StateAction::Done => {
-                    let task_session = zbobr.task_session(task.id);
-                    let is_failure = task.signal.as_ref() == Some(&Signal::ReturnFailure);
-                    if is_failure {
-                        // Pipeline failed — return to caller or pause at root
-                        match task_session.pop_stack().await {
-                            Ok(Some(entry)) => {
-                                tracing::info!(
-                                    "Task #{}: pipeline failed — returning failure to pipeline '{}'",
-                                    task.id,
-                                    entry.pipeline
-                                );
-                                if let Err(e) =
-                                    task_session.set_signal(Some(Signal::ReturnFailure)).await
-                                {
-                                    tracing::error!(
-                                        "Failed to set return_failure signal for task #{}: {e}",
-                                        task.id
-                                    );
-                                }
-                                if let Err(e) = task_session
-                                    .set_state(State::pending(entry.pipeline.clone()))
-                                    .await
-                                {
-                                    tracing::error!(
-                                        "Failed to set return state for task #{}: {e}",
-                                        task.id
-                                    );
-                                }
-                            }
-                            Ok(None) => {
-                                tracing::info!(
-                                    "Task #{}: pipeline failed at root — paused",
-                                    task.id
-                                );
-                                let pipeline = task
-                                    .state
-                                    .pipeline()
-                                    .cloned()
-                                    .unwrap_or_else(|| zbobr.workflow().default_pipeline());
-                                let first_stage = zbobr
-                                    .workflow()
-                                    .start_stage_for_pipeline(&pipeline)
-                                    .map(|(name, _)| name.to_string())
-                                    .unwrap_or_default();
-                                let status = format_error_status(
-                                    zbobr,
-                                    "Pipeline failed at root — manual intervention required",
-                                );
-                                if let Err(e) = task_session
-                                    .set_pause_with_status_and_signal(
-                                        status,
-                                        Signal::go(first_stage),
-                                    )
-                                    .await
-                                {
-                                    tracing::error!("Failed to pause task #{}: {e}", task.id);
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to pop stack for task #{}: {e}", task.id)
-                            }
-                        }
-                    } else {
-                        match task_session.pop_stack().await {
-                            Ok(Some(entry)) => {
-                                // Success return from sub-pipeline — re-run calling stage
-                                tracing::info!(
-                                    "Task #{}: returning to pipeline '{}' with signal '{}'",
-                                    task.id,
-                                    entry.pipeline,
-                                    entry.signal
-                                );
-                                if let Err(e) =
-                                    task_session.set_signal(Some(entry.signal.clone())).await
-                                {
-                                    tracing::error!(
-                                        "Failed to set return signal for task #{}: {e}",
-                                        task.id
-                                    );
-                                }
-                                if let Err(e) = task_session
-                                    .set_state(State::pending(entry.pipeline.clone()))
-                                    .await
-                                {
-                                    tracing::error!(
-                                        "Failed to set return state for task #{}: {e}",
-                                        task.id
-                                    );
-                                }
-                            }
-                            Ok(None) => {
-                                tracing::info!("Task #{}: completed", task.id);
-                                if let Err(e) = task_session.finish().await {
-                                    tracing::error!("Failed to finish task #{}: {e}", task.id);
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to pop stack for task #{}: {e}", task.id);
-                            }
-                        }
-                    }
-                }
-                crate::workflow::StateAction::Paused | crate::workflow::StateAction::Idle => {}
-            }
-        }
+        let AdvanceTasksResult {
+            all_tasks,
+            runstage_candidates,
+        } = advance_tasks(zbobr).await?;
 
         // Phase 2: use select_runnable_task to pick the highest-priority RunStage candidate
         // and run its stage.  This shares the exact same ready-task selection logic as the
@@ -1458,6 +1265,209 @@ pub async fn run_manager_loop(
 
     tracing::info!("Manager loop terminated gracefully");
     Ok(())
+}
+
+/// Run manager-loop "Phase 1" once over all tasks.
+///
+/// Applies pause/ready normalization and processes instant transitions (Done and call stages).
+/// Returns the current task snapshot list and non-call `RunStage` candidates for optional
+/// priority-based scheduling by the caller.
+pub async fn advance_tasks(zbobr: &Arc<ZbobrDispatcher>) -> anyhow::Result<AdvanceTasksResult> {
+    let task_backend = zbobr.task_backend();
+    let workflow = zbobr.workflow();
+
+    let all_weak = match task_backend.list_tasks().await {
+        Ok(tasks) => tasks,
+        Err(e) => {
+            tracing::error!("Failed to list tasks: {e}");
+            vec![]
+        }
+    };
+    let mut all_tasks: Vec<Task> = Vec::new();
+    for w in &all_weak {
+        match w.snapshot(false).await {
+            Ok(t) => all_tasks.push(t),
+            Err(e) => tracing::warn!("Failed to snapshot task: {e}"),
+        }
+    }
+    // Sort by task_priority descending so tasks closest to completion are processed first.
+    all_tasks.sort_by_key(|b| std::cmp::Reverse(task_priority(b)));
+
+    // Phase 1: apply transitions and handle Done / instant call-stage actions for all
+    // tasks eagerly. Non-call RunStage tasks are collected for optional Phase 2 selection.
+    let mut runstage_candidates: Vec<Task> = Vec::new();
+    for task in &all_tasks {
+        if task.state.is_done() {
+            continue;
+        }
+
+        // Centralized pause handler: convert pause flag → PAUSE state + stack push
+        match apply_pause_to_state(zbobr, task).await {
+            Ok(true) => {
+                tracing::info!("Task #{} paused — state set to PAUSE", task.id);
+                continue;
+            }
+            Err(e) => {
+                tracing::error!("Failed to apply pause for task #{}: {e}", task.id);
+                continue;
+            }
+            _ => {}
+        }
+
+        if task.state.is_pause() {
+            continue;
+        }
+
+        // Handle READY with stack (resume from pause)
+        match apply_ready_from_state(zbobr, task).await {
+            Ok(true) => continue, // will be processed on the next pass
+            Err(e) => {
+                tracing::error!(
+                    "Failed to apply ready-from-state for task #{}: {e}",
+                    task.id
+                );
+                continue;
+            }
+            _ => {}
+        }
+
+        let action = match workflow.resolve_next_action(task) {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::warn!("State machine error for task #{}: {e}", task.id);
+                continue;
+            }
+        };
+
+        match action {
+            crate::workflow::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
+                if let Some(call_target) = stage_def.call_pipeline() {
+                    // Call stages are instant — process eagerly without consuming a run slot.
+                    tracing::info!(
+                        "Processing task #{} (state={:?}, signal={:?}) — running stage {}/{}",
+                        task.id,
+                        task.state,
+                        task.signal,
+                        pipeline_name,
+                        stage_name,
+                    );
+                    if let Err(e) =
+                        handle_call_stage(zbobr, task.id, pipeline_name, stage_name, call_target)
+                            .await
+                    {
+                        tracing::error!(
+                            "Call stage {}/{} failed for task #{}: {e}",
+                            pipeline_name,
+                            stage_name,
+                            task.id
+                        );
+                    }
+                } else {
+                    runstage_candidates.push(task.clone());
+                }
+            }
+            crate::workflow::StateAction::Done => {
+                let task_session = zbobr.task_session(task.id);
+                let is_failure = task.signal.as_ref() == Some(&Signal::ReturnFailure);
+                if is_failure {
+                    // Pipeline failed — return to caller or pause at root
+                    match task_session.pop_stack().await {
+                        Ok(Some(entry)) => {
+                            tracing::info!(
+                                "Task #{}: pipeline failed — returning failure to pipeline '{}'",
+                                task.id,
+                                entry.pipeline
+                            );
+                            if let Err(e) = task_session.set_signal(Some(Signal::ReturnFailure)).await
+                            {
+                                tracing::error!(
+                                    "Failed to set return_failure signal for task #{}: {e}",
+                                    task.id
+                                );
+                            }
+                            if let Err(e) = task_session
+                                .set_state(State::pending(entry.pipeline.clone()))
+                                .await
+                            {
+                                tracing::error!(
+                                    "Failed to set return state for task #{}: {e}",
+                                    task.id
+                                );
+                            }
+                        }
+                        Ok(None) => {
+                            tracing::info!("Task #{}: pipeline failed at root — paused", task.id);
+                            let pipeline = task
+                                .state
+                                .pipeline()
+                                .cloned()
+                                .unwrap_or_else(|| zbobr.workflow().default_pipeline());
+                            let first_stage = zbobr
+                                .workflow()
+                                .start_stage_for_pipeline(&pipeline)
+                                .map(|(name, _)| name.to_string())
+                                .unwrap_or_default();
+                            let status = format_error_status(
+                                zbobr,
+                                "Pipeline failed at root — manual intervention required",
+                            );
+                            if let Err(e) = task_session
+                                .set_pause_with_status_and_signal(status, Signal::go(first_stage))
+                                .await
+                            {
+                                tracing::error!("Failed to pause task #{}: {e}", task.id);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to pop stack for task #{}: {e}", task.id)
+                        }
+                    }
+                } else {
+                    match task_session.pop_stack().await {
+                        Ok(Some(entry)) => {
+                            // Success return from sub-pipeline — re-run calling stage
+                            tracing::info!(
+                                "Task #{}: returning to pipeline '{}' with signal '{}'",
+                                task.id,
+                                entry.pipeline,
+                                entry.signal
+                            );
+                            if let Err(e) = task_session.set_signal(Some(entry.signal.clone())).await {
+                                tracing::error!(
+                                    "Failed to set return signal for task #{}: {e}",
+                                    task.id
+                                );
+                            }
+                            if let Err(e) = task_session
+                                .set_state(State::pending(entry.pipeline.clone()))
+                                .await
+                            {
+                                tracing::error!(
+                                    "Failed to set return state for task #{}: {e}",
+                                    task.id
+                                );
+                            }
+                        }
+                        Ok(None) => {
+                            tracing::info!("Task #{}: completed", task.id);
+                            if let Err(e) = task_session.finish().await {
+                                tracing::error!("Failed to finish task #{}: {e}", task.id);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to pop stack for task #{}: {e}", task.id);
+                        }
+                    }
+                }
+            }
+            crate::workflow::StateAction::Paused | crate::workflow::StateAction::Idle => {}
+        }
+    }
+
+    Ok(AdvanceTasksResult {
+        all_tasks,
+        runstage_candidates,
+    })
 }
 
 // ---------------------------------------------------------------------------

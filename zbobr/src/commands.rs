@@ -138,6 +138,8 @@ pub enum TaskSubcommand {
         #[arg(long)]
         select: bool,
     },
+    /// Run one manager "Phase 1" pass over all tasks
+    Advance,
     /// Show the resolved prompt for a task stage
     Prompt {
         /// Task ID (if omitted, placeholders are used instead of real task data)
@@ -467,6 +469,14 @@ async fn run_task_subcommand(
                 .snapshot(false)
                 .await?;
             zbobr_dispatcher::process_task(zbobr, &task_obj, None).await?;
+        }
+        TaskSubcommand::Advance => {
+            let result = zbobr_dispatcher::advance_tasks(zbobr).await?;
+            println!(
+                "Advanced {} tasks; {} runnable stage candidate(s) ready",
+                result.all_tasks.len(),
+                result.runstage_candidates.len()
+            );
         }
         TaskSubcommand::Prompt {
             id,
