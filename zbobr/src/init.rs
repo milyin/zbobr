@@ -47,12 +47,7 @@ ZBOBR_CLEANUP_INTERVAL="${ZBOBR_CLEANUP_INTERVAL:-600}"
 
 last_cleanup_ts="$(date +%s)"
 
-while true; do
-    if ! sh -c "$ZBOBR_LOOP_CMD"; then
-        echo "ZBOBR_LOOP_CMD returned non-zero, exiting loop" >&2
-        break
-    fi
-
+while sh -c "$ZBOBR_LOOP_CMD"; do
     "$ZBOBR_CMD" task advance
 
     if ! "$ZBOBR_CMD" task process --select; then
