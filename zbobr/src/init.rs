@@ -50,7 +50,9 @@ last_cleanup_ts="$(date +%s)"
 while sh -c "$ZBOBR_LOOP_CMD"; do
     eval "$ZBOBR_CMD task advance"
 
-    if ! eval "$ZBOBR_CMD task process --select"; then
+    if eval "$ZBOBR_CMD task process --select"; then
+        :
+    else
         rc="$?"
         if [ "$rc" -ne 1 ]; then
             echo "task process --select failed with exit code $rc" >&2
