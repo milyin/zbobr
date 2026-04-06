@@ -1807,7 +1807,7 @@ impl ZbobrDispatcher {
 
         if outcome.execution_interrupted {
             if let Err(e) =
-                perform_stash_and_push(self, task_id, work_dir, stage.as_str(), pipeline).await
+                self.perform_stash_and_push(task_id, work_dir, stage.as_str(), pipeline).await
             {
                 tracing::warn!("Stash/push failed during interruption for task #{task_id}: {e}");
             }
@@ -1818,7 +1818,7 @@ impl ZbobrDispatcher {
 
         if let Some(e) = outcome.execution_error.as_ref() {
             if let Err(e) =
-                perform_stash_and_push(self, task_id, work_dir, stage.as_str(), pipeline).await
+                self.perform_stash_and_push(task_id, work_dir, stage.as_str(), pipeline).await
             {
                 tracing::warn!("Stash/push failed during error handling for task #{task_id}: {e}");
             }
@@ -1839,7 +1839,7 @@ impl ZbobrDispatcher {
         tracing::info!("Session complete for task #{task_id}");
 
         if let Err(e) =
-            perform_stash_and_push(self, task_id, work_dir, stage.as_str(), pipeline).await
+            self.perform_stash_and_push(task_id, work_dir, stage.as_str(), pipeline).await
         {
             tracing::error!("Stash/push failed for task #{task_id}: {e}");
             let msg = format!("Stash/push failed: {e}");
@@ -1906,14 +1906,15 @@ impl ZbobrDispatcher {
     }
 }
 
-async fn perform_stash_and_push(
-    zbobr: &Arc<ZbobrDispatcher>,
-    task_id: u64,
-    work_dir: &Path,
-    role: &str,
-    pipeline_name: &Pipeline,
-) -> anyhow::Result<()> {
-    let task_backend = zbobr.task_backend();
+impl ZbobrDispatcher {
+    async fn perform_stash_and_push(
+        self: &Arc<Self>,
+        task_id: u64,
+        work_dir: &Path,
+        role: &str,
+        pipeline_name: &Pipeline,
+    ) -> anyhow::Result<()> {
+    let task_backend = self.task_backend();
 
     // Stash uncommitted changes if work_dir is a git repository.
     // The work_dir may not yet be a git repo on the first run,
@@ -1959,13 +1960,13 @@ async fn perform_stash_and_push(
         .await?;
     if let Some(identity) = task.identity() {
         let is_conflict_handler = pipeline_name.as_str() == Pipeline::MERGE;
-        let is_uptodate = zbobr.update_worktree(&identity).await?;
+        let is_uptodate = self.update_worktree(&identity).await?;
         if !is_uptodate && !is_conflict_handler {
             anyhow::bail!("Merge conflict while syncing work branch for task #{task_id}");
         }
-        let config = zbobr.config();
+        let config = self.config();
         if config.overwrite_author && is_uptodate && is_git_repo {
-            let base_branch = zbobr.repo_backend().branch().to_string();
+            let base_branch = self.repo_backend().branch().to_string();
             zbobr_utility::rewrite_authors_on_worktree(
                 work_dir,
                 &base_branch,
@@ -1974,7 +1975,7 @@ async fn perform_stash_and_push(
             )
             .await?;
             // Push rewritten commits
-            let is_uptodate = zbobr.update_worktree(&identity).await?;
+            let is_uptodate = self.update_worktree(&identity).await?;
             if !is_uptodate {
                 anyhow::bail!("Merge conflict while pushing rewritten commits for task #{task_id}");
             }
@@ -1984,6 +1985,7 @@ async fn perform_stash_and_push(
     }
 
     Ok(())
+}
 }
 
 #[cfg(test)]
