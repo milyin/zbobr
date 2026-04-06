@@ -190,6 +190,27 @@ mod tests {
     }
 
     #[test]
+    fn task_select_parses_without_arguments() {
+        let cli = TestCli::try_parse_from(["zbobr", "task", "select"]).unwrap();
+        match cli.command {
+            commands::Command::Task { subcommand } => match subcommand {
+                commands::TaskSubcommand::Select => {}
+                _ => panic!("expected Select subcommand"),
+            },
+            _ => panic!("expected Task command"),
+        }
+    }
+
+    #[test]
+    fn task_list_no_longer_accepts_select_flag() {
+        let result = TestCli::try_parse_from(["zbobr", "task", "list", "--select"]);
+        assert!(
+            result.is_err(),
+            "task list should no longer accept --select flag"
+        );
+    }
+
+    #[test]
     fn logs_flag_defaults_to_false() {
         let cli = Cli::try_parse_from(["zbobr", "task", "process", "--select"]).unwrap();
         assert!(!cli.logs, "logs flag should default to false");

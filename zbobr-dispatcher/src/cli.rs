@@ -1153,7 +1153,7 @@ impl ZbobrDispatcher {
 
             // Phase 2: use select_runnable_task to pick the highest-priority RunStage candidate
             // and run its stage.  This shares the exact same ready-task selection logic as the
-            // `task list --select` CLI flag.
+            // `task select` CLI subcommand.
             if let Some(task) = select_runnable_task(workflow, &all_tasks) {
                 let action = match workflow.resolve_next_action(task) {
                     Ok(a) => a,
