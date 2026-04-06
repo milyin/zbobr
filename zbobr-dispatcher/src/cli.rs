@@ -257,47 +257,6 @@ fn sanitize_branch_postfix(title: &str) -> String {
     }
 }
 
-/// Ensure the task has a work_branch set. If not, derive one from the task title.
-async fn ensure_work_branch(zbobr: &Arc<ZbobrDispatcher>, task_id: u64) -> anyhow::Result<()> {
-    let task = zbobr
-        .task_backend()
-        .get_task(task_id)
-        .await?
-        .snapshot(false)
-        .await?;
-
-    if task.work_branch.is_some() {
-        return Ok(());
-    }
-
-    let postfix = sanitize_branch_postfix(&task.title);
-    let postfix = if postfix.is_empty() {
-        "task".to_string()
-    } else {
-        postfix
-    };
-
-    let prefix = &zbobr.config().work_branch_prefix;
-    let work_branch = format!("{}-{}-{}", prefix, task_id, postfix);
-
-    tracing::info!(
-        "Task #{task_id}: auto-deriving work branch '{}' from title '{}'",
-        work_branch,
-        task.title
-    );
-
-    let weak = zbobr.task_backend().get_task(task_id).await?;
-    let mutable = weak.upgrade().await?;
-    mutable
-        .modify_task(Box::new(move |mut task| {
-            task.work_branch = Some(work_branch);
-            task
-        }))
-        .await?;
-
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
 // Task list entry
 // ---------------------------------------------------------------------------
@@ -476,7 +435,7 @@ impl<'a> CliStageRunner<'a> {
         tokio::fs::create_dir_all(task_dir.path()).await?;
 
         // Auto-derive work branch if not yet set
-        ensure_work_branch(self.zbobr, self.task_id).await?;
+        self.zbobr.ensure_work_branch(self.task_id).await?;
 
         // Unified worktree detection and problem handling
         let work_dir = match self
@@ -1611,6 +1570,46 @@ impl ZbobrDispatcher {
         if let Err(set_err) = role_session.set_status(Some(status)).await {
             tracing::warn!("Failed to set task status for task #{task_id} ({context}): {set_err}");
         }
+    }
+
+    async fn ensure_work_branch(&self, task_id: u64) -> anyhow::Result<()> {
+        let task = self
+            .task_backend()
+            .get_task(task_id)
+            .await?
+            .snapshot(false)
+            .await?;
+
+        if task.work_branch.is_some() {
+            return Ok(());
+        }
+
+        let postfix = sanitize_branch_postfix(&task.title);
+        let postfix = if postfix.is_empty() {
+            "task".to_string()
+        } else {
+            postfix
+        };
+
+        let prefix = &self.config().work_branch_prefix;
+        let work_branch = format!("{}-{}-{}", prefix, task_id, postfix);
+
+        tracing::info!(
+            "Task #{task_id}: auto-deriving work branch '{}' from title '{}'",
+            work_branch,
+            task.title
+        );
+
+        let weak = self.task_backend().get_task(task_id).await?;
+        let mutable = weak.upgrade().await?;
+        mutable
+            .modify_task(Box::new(move |mut task| {
+                task.work_branch = Some(work_branch);
+                task
+            }))
+            .await?;
+
+        Ok(())
     }
 
     async fn ensure_pr_url(self: &Arc<Self>, task_id: u64) -> anyhow::Result<()> {
