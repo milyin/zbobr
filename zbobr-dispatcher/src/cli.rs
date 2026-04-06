@@ -311,12 +311,6 @@ pub struct TaskListEntry {
     pub title: String,
 }
 
-/// Result of running a single "Phase 1" advancement pass over all tasks.
-pub struct AdvanceTasksResult {
-    pub all_tasks: Vec<Task>,
-    pub runstage_candidates: Vec<Task>,
-}
-
 impl From<&Task> for TaskListEntry {
     fn from(task: &Task) -> Self {
         Self {
@@ -350,8 +344,8 @@ fn task_priority(task: &Task) -> u64 {
 /// present in Phase 2 `runstage_candidates`.  Calling `resolve_next_action` on such tasks
 /// would use the wrong pipeline (default instead of the saved stack pipeline).
 ///
-/// Returns `None` if no runnable task exists.
-pub fn select_runnable_task<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Option<&'a Task> {
+/// Returns all tasks eligible for non-call `RunStage` processing.
+pub fn eligible_runnable_tasks<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Vec<&'a Task> {
     tasks
         .iter()
         .filter(|t| {
@@ -365,6 +359,15 @@ pub fn select_runnable_task<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Optio
                         if def.call_pipeline().is_none()
                 )
         })
+        .collect()
+}
+
+/// Return the highest-priority task from [`eligible_runnable_tasks`].
+///
+/// Returns `None` if no runnable task exists.
+pub fn select_runnable_task<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Option<&'a Task> {
+    eligible_runnable_tasks(workflow, tasks)
+        .into_iter()
         .max_by(|a, b| {
             task_priority(a)
                 .cmp(&task_priority(b))
@@ -1181,15 +1184,12 @@ pub async fn run_manager_loop(
 
         let mut session_run = false;
 
-        let AdvanceTasksResult {
-            all_tasks,
-            runstage_candidates,
-        } = advance_tasks(zbobr).await?;
+        let all_tasks = advance_tasks(zbobr).await?;
 
         // Phase 2: use select_runnable_task to pick the highest-priority RunStage candidate
         // and run its stage.  This shares the exact same ready-task selection logic as the
         // `task list --select` CLI flag.
-        if let Some(task) = select_runnable_task(workflow, &runstage_candidates) {
+        if let Some(task) = select_runnable_task(workflow, &all_tasks) {
             let action = match workflow.resolve_next_action(task) {
                 Ok(a) => a,
                 Err(e) => {
@@ -1270,9 +1270,8 @@ pub async fn run_manager_loop(
 /// Run manager-loop "Phase 1" once over all tasks.
 ///
 /// Applies pause/ready normalization and processes instant transitions (Done and call stages).
-/// Returns the current task snapshot list and non-call `RunStage` candidates for optional
-/// priority-based scheduling by the caller.
-pub async fn advance_tasks(zbobr: &Arc<ZbobrDispatcher>) -> anyhow::Result<AdvanceTasksResult> {
+/// Returns the current task snapshot list.
+pub async fn advance_tasks(zbobr: &Arc<ZbobrDispatcher>) -> anyhow::Result<Vec<Task>> {
     let task_backend = zbobr.task_backend();
     let workflow = zbobr.workflow();
 
@@ -1293,9 +1292,7 @@ pub async fn advance_tasks(zbobr: &Arc<ZbobrDispatcher>) -> anyhow::Result<Advan
     // Sort by task_priority descending so tasks closest to completion are processed first.
     all_tasks.sort_by_key(|b| std::cmp::Reverse(task_priority(b)));
 
-    // Phase 1: apply transitions and handle Done / instant call-stage actions for all
-    // tasks eagerly. Non-call RunStage tasks are collected for optional Phase 2 selection.
-    let mut runstage_candidates: Vec<Task> = Vec::new();
+    // Phase 1: apply transitions and handle Done / instant call-stage actions for all tasks.
     for task in &all_tasks {
         if task.state.is_done() {
             continue;
@@ -1362,8 +1359,6 @@ pub async fn advance_tasks(zbobr: &Arc<ZbobrDispatcher>) -> anyhow::Result<Advan
                             task.id
                         );
                     }
-                } else {
-                    runstage_candidates.push(task.clone());
                 }
             }
             crate::workflow::StateAction::Done => {
@@ -1464,10 +1459,7 @@ pub async fn advance_tasks(zbobr: &Arc<ZbobrDispatcher>) -> anyhow::Result<Advan
         }
     }
 
-    Ok(AdvanceTasksResult {
-        all_tasks,
-        runstage_candidates,
-    })
+    Ok(all_tasks)
 }
 
 // ---------------------------------------------------------------------------

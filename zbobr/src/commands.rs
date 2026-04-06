@@ -6,7 +6,7 @@ use clap::Subcommand;
 use zbobr_api::{Pipeline, Stage, WorktreeBackend, config::{Role, StageDefinition, WorkflowConfig}};
 use zbobr_dispatcher::{
     ConfiguredPromptBuilder, TaskDir, TaskListEntry, VAR_DESTINATION_BRANCH,
-    VAR_DESTINATION_REPOSITORY, Workflow, ZbobrDispatcher,
+    VAR_DESTINATION_REPOSITORY, Workflow, ZbobrDispatcher, eligible_runnable_tasks,
     config::{ZbobrDispatcherConfig, ZbobrExecutorConfig},
     print_task, sample_task_and_comments, select_runnable_task,
 };
@@ -349,6 +349,10 @@ async fn run_task_subcommand(
             tasks.sort_by_key(|t| t.id);
 
             if select {
+                let eligible = eligible_runnable_tasks(zbobr.workflow(), &tasks);
+                if eligible.is_empty() {
+                    std::process::exit(1);
+                }
                 match select_runnable_task(zbobr.workflow(), &tasks) {
                     Some(task) => println!("{}", task.id),
                     None => std::process::exit(1),
@@ -471,11 +475,12 @@ async fn run_task_subcommand(
             zbobr_dispatcher::process_task(zbobr, &task_obj, None).await?;
         }
         TaskSubcommand::Advance => {
-            let result = zbobr_dispatcher::advance_tasks(zbobr).await?;
+            let tasks = zbobr_dispatcher::advance_tasks(zbobr).await?;
+            let eligible = eligible_runnable_tasks(zbobr.workflow(), &tasks);
             println!(
                 "Advanced {} tasks; {} runnable stage candidate(s) ready",
-                result.all_tasks.len(),
-                result.runstage_candidates.len()
+                tasks.len(),
+                eligible.len()
             );
         }
         TaskSubcommand::Prompt {
