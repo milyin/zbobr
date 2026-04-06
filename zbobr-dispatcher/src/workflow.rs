@@ -569,7 +569,7 @@ role = "merger"
             signal: None,
             stack: vec![],
             status: None,
-            pause: false,
+            go_pause: false,
             confirm: false,
             pipeline_run_id: 0,
             stage_count: 0,

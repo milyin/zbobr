@@ -105,7 +105,7 @@ pub trait TaskMut: Send + Sync {
     async fn set_pause_with_status(&self, status: String) -> anyhow::Result<()> {
         self.modify_task(Box::new(move |mut task| {
             task.status = Some(status);
-            task.pause = true;
+            task.go_pause = true;
             task
         }))
         .await
@@ -120,7 +120,7 @@ pub trait TaskMut: Send + Sync {
     ) -> anyhow::Result<()> {
         self.modify_task(Box::new(move |mut task| {
             task.status = Some(status);
-            task.pause = true;
+            task.go_pause = true;
             task.signal = Some(signal);
             task
         }))

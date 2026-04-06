@@ -32,6 +32,39 @@ const COPILOT_MODEL_GPT_5_MINI: Model = Model::new("gpt-5-mini");
 
 const WORKFLOW_PROMPTS_DIR: &str = "prompts";
 const TASK_PROMPT: &str = "task.md";
+const LOOP_SCRIPT: &str = "loop.sh";
+
+const LOOP_SCRIPT_CONTENT: &str = r#"#!/usr/bin/env sh
+set -eu
+
+ZBOBR_CMD="${ZBOBR_CMD:-zbobr}"
+ZBOBR_LOOP_INTERVAL="${ZBOBR_LOOP_INTERVAL:-60}"
+ZBOBR_CLEANUP_INTERVAL="${ZBOBR_CLEANUP_INTERVAL:-600}"
+
+last_cleanup_ts="$(date +%s)"
+
+while true; do
+    "$ZBOBR_CMD" task advance
+
+    if ! "$ZBOBR_CMD" task process --select; then
+        rc="$?"
+        if [ "$rc" -ne 1 ]; then
+            echo "task process --select failed with exit code $rc" >&2
+            exit "$rc"
+        fi
+    fi
+
+    now_ts="$(date +%s)"
+    if [ $((now_ts - last_cleanup_ts)) -ge "$ZBOBR_CLEANUP_INTERVAL" ]; then
+        if ! "$ZBOBR_CMD" task cleanup; then
+            echo "warning: task cleanup failed" >&2
+        fi
+        last_cleanup_ts="$now_ts"
+    fi
+
+    sleep "$ZBOBR_LOOP_INTERVAL"
+done
+"#;
 
 const TOOL_DEVELOPER: Tool = Tool::new("developer");
 const TOOL_PLANNER: Tool = Tool::new("planner");
@@ -104,6 +137,9 @@ pub async fn init_workspace(dest: &Path, force: bool) -> anyhow::Result<()> {
     );
     let config_path = dest.join("zbobr.toml");
     write_or_new(&config_path, &config_content, force).await?;
+
+    let loop_script_path = dest.join(LOOP_SCRIPT);
+    write_or_new(&loop_script_path, LOOP_SCRIPT_CONTENT, force).await?;
 
     println!(
         "\nWorkspace initialized at {}.\nEdit zbobr.toml to configure backends and tokens before running.",
@@ -1298,5 +1334,37 @@ name = "test"
             .await
             .expect("Failed to read file");
         assert_eq!(result, "new content", "File should contain the new content");
+    }
+
+    #[tokio::test]
+    async fn init_workspace_creates_loop_script_with_default_cmd() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        init_workspace(temp_dir.path(), false)
+            .await
+            .expect("init_workspace failed");
+
+        let loop_script_path = temp_dir.path().join("loop.sh");
+        assert!(loop_script_path.exists(), "loop.sh should be created");
+
+        let loop_script = tokio::fs::read_to_string(&loop_script_path)
+            .await
+            .expect("Failed to read loop.sh");
+        assert!(
+            loop_script.contains("ZBOBR_CMD=\"${ZBOBR_CMD:-zbobr}\""),
+            "loop.sh should default ZBOBR_CMD to zbobr"
+        );
+        assert!(
+            loop_script.contains("\"$ZBOBR_CMD\" task advance"),
+            "loop.sh should run task advance"
+        );
+        assert!(
+            loop_script.contains("\"$ZBOBR_CMD\" task process --select"),
+            "loop.sh should run task process --select"
+        );
+        assert!(
+            loop_script.contains("\"$ZBOBR_CMD\" task cleanup"),
+            "loop.sh should run task cleanup"
+        );
     }
 }
