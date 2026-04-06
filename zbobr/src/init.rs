@@ -60,7 +60,7 @@ while sh -c "$ZBOBR_LOOP_CMD"; do
 
     now_ts="$(date +%s)"
     if [ $((now_ts - last_cleanup_ts)) -ge "$ZBOBR_CLEANUP_INTERVAL" ]; then
-        if ! "$ZBOBR_CMD" task cleanup; then
+        if ! eval "$ZBOBR_CMD task cleanup"; then
             echo "warning: task cleanup failed" >&2
         fi
         last_cleanup_ts="$now_ts"
