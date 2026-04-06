@@ -629,7 +629,7 @@ impl ZbobrTaskBackendGithubImpl {
             signal,
             stack,
             status,
-            pause,
+            go_pause: pause,
             confirm,
             pipeline_run_id: params_map
                 .get(PARAM_PIPELINE_RUN_ID)
@@ -774,7 +774,7 @@ impl ZbobrTaskBackendGithubImpl {
                 task.max_stage_count.to_string(),
             );
         }
-        if task.pause {
+        if task.go_pause {
             params.insert(
                 PARAM_FLAG_PAUSE.to_string(),
                 PARAM_FLAG_VALUE_TRUE.to_string(),
@@ -1426,7 +1426,7 @@ mod flag_tests {
     fn issue_to_task_reads_pause_from_params() {
         let issue = make_issue_with_params(PARAM_FLAG_PAUSE, PARAM_FLAG_VALUE_TRUE);
         let task = issue_to_task(issue);
-        assert!(task.pause);
+        assert!(task.go_pause);
         assert!(!task.confirm);
     }
 
@@ -1434,7 +1434,7 @@ mod flag_tests {
     fn issue_to_task_reads_confirm_from_params() {
         let issue = make_issue_with_params(PARAM_FLAG_CONFIRM, PARAM_FLAG_VALUE_TRUE);
         let task = issue_to_task(issue);
-        assert!(!task.pause);
+        assert!(!task.go_pause);
         assert!(task.confirm);
     }
 
@@ -1453,7 +1453,7 @@ mod flag_tests {
             signal: None,
             stack: vec![],
             status: None,
-            pause: true,
+            go_pause: true,
             confirm: true,
             pipeline_run_id: 0,
             stage_count: 0,
@@ -1566,7 +1566,7 @@ mod flag_tests {
             signal: None,
             stack: vec![],
             status: None,
-            pause: false,
+            go_pause: false,
             confirm: false,
             pipeline_run_id: 0,
             stage_count: 0,
@@ -1617,7 +1617,7 @@ mod flag_tests {
             signal: None,
             stack: vec![],
             status: None,
-            pause: false,
+            go_pause: false,
             confirm: false,
             pipeline_run_id: 0,
             stage_count: 0,

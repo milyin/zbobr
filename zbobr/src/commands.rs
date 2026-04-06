@@ -424,7 +424,7 @@ async fn run_task_subcommand(
                     }
                     if let Some(s) = parsed_state {
                         if task.confirm && task.state != s {
-                            task.pause = true;
+                            task.go_pause = true;
                         }
                         task.state = s;
                     }

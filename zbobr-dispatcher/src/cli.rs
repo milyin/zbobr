@@ -351,7 +351,7 @@ pub fn select_runnable_task<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Optio
         .filter(|t| {
             // READY-with-stack tasks are normalised in loop Phase 1 and deferred; skip them.
             let ready_with_stack = t.state.is_ready() && !t.stack.is_empty();
-            !t.pause
+            !t.go_pause
                 && !ready_with_stack
                 && matches!(
                     workflow.resolve_next_action(t),
@@ -386,7 +386,7 @@ pub fn print_task(task: &Task, discussion: &[Comment]) {
     if !task.stack.is_empty() {
         println!("Stack:       {:?}", task.stack);
     }
-    println!("Pause:       {}", task.pause);
+    println!("Pause:       {}", task.go_pause);
     if let Some(ref branch) = task.work_branch {
         println!("Work Branch: {}", branch);
     }
@@ -856,14 +856,14 @@ async fn handle_call_stage(
 
 /// Centralized pause handler.  Called before dispatching any task.
 ///
-/// When `task.pause` is true the handler atomically:
+/// When `task.go_pause` is true the handler atomically:
 ///   1. pushes `(pipeline, signal)` onto the task stack,
 ///   2. sets state to `State::Pause`,
 ///   3. clears signal and pause flag.
 ///
 /// Returns `Ok(true)` when the task was paused (caller should skip it).
 async fn apply_pause_to_state(zbobr: &Arc<ZbobrDispatcher>, task: &Task) -> anyhow::Result<bool> {
-    if !task.pause {
+    if !task.go_pause {
         return Ok(false);
     }
 
@@ -913,7 +913,7 @@ async fn apply_pause_to_state(zbobr: &Arc<ZbobrDispatcher>, task: &Task) -> anyh
             });
             t.state = State::Pause;
             t.signal = None;
-            t.pause = false;
+            t.go_pause = false;
             t
         })
         .await?;
@@ -1835,7 +1835,7 @@ async fn finalize_stage_session(
         .await?
         .snapshot(false)
         .await?;
-    if !current_task.pause && current_task.signal.is_none() {
+    if !current_task.go_pause && current_task.signal.is_none() {
         let current_stage = stage.clone();
         let stage_def = zbobr.workflow().stage(pipeline, &current_stage);
         let seq_signal = zbobr.workflow().sequential_signal(
@@ -1864,7 +1864,7 @@ async fn finalize_stage_session(
     }
     // If pause was set by MCP tool (e.g. stop_with_error) but no signal, set
     // signal to re-run the current stage on resume.
-    if current_task.pause && current_task.signal.is_none() {
+    if current_task.go_pause && current_task.signal.is_none() {
         task_session
             .set_signal(Some(Signal::go(stage.as_str())))
             .await?;
@@ -1999,7 +1999,7 @@ mod tests {
             signal: None,
             stack,
             status: None,
-            pause,
+            go_pause: pause,
             confirm: false,
             pipeline_run_id: 0,
             stage_count,
