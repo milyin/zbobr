@@ -41,12 +41,18 @@ const LOOP_SCRIPT_CONTENT: &str = r#"#!/usr/bin/env sh
 set -eu
 
 ZBOBR_CMD="${ZBOBR_CMD:-zbobr}"
+ZBOBR_LOOP_CMD="${ZBOBR_LOOP_CMD:-true}"
 ZBOBR_LOOP_INTERVAL="${ZBOBR_LOOP_INTERVAL:-60}"
 ZBOBR_CLEANUP_INTERVAL="${ZBOBR_CLEANUP_INTERVAL:-600}"
 
 last_cleanup_ts="$(date +%s)"
 
 while true; do
+    if ! sh -c "$ZBOBR_LOOP_CMD"; then
+        echo "ZBOBR_LOOP_CMD returned non-zero, exiting loop" >&2
+        break
+    fi
+
     "$ZBOBR_CMD" task advance
 
     if ! "$ZBOBR_CMD" task process --select; then
@@ -1363,6 +1369,14 @@ name = "test"
         assert!(
             loop_script.contains("ZBOBR_CMD=\"${ZBOBR_CMD:-zbobr}\""),
             "loop.sh should default ZBOBR_CMD to zbobr"
+        );
+        assert!(
+            loop_script.contains("ZBOBR_LOOP_CMD=\"${ZBOBR_LOOP_CMD:-true}\""),
+            "loop.sh should default ZBOBR_LOOP_CMD to true"
+        );
+        assert!(
+            loop_script.contains("sh -c \"$ZBOBR_LOOP_CMD\""),
+            "loop.sh should check ZBOBR_LOOP_CMD before each iteration"
         );
         assert!(
             loop_script.contains("\"$ZBOBR_CMD\" task advance"),
