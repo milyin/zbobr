@@ -475,7 +475,7 @@ async fn run_task_subcommand(
             zbobr.process_task(&task_obj, None).await?;
         }
         TaskSubcommand::Advance => {
-            let tasks = zbobr_dispatcher::advance_tasks(zbobr).await?;
+            let tasks = zbobr.advance_tasks().await?;
             let eligible = eligible_runnable_tasks(zbobr.workflow(), &tasks);
             println!(
                 "Advanced {} tasks; {} runnable stage candidate(s) ready",

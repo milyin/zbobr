@@ -479,14 +479,15 @@ impl<'a> CliStageRunner<'a> {
         ensure_work_branch(self.zbobr, self.task_id).await?;
 
         // Unified worktree detection and problem handling
-        let work_dir = match detect_and_handle_worktree(
-            self.zbobr,
-            self.task_id,
-            self.pipeline,
-            self.stage,
-            task_dir.path(),
-        )
-        .await?
+        let work_dir = match self
+            .zbobr
+            .detect_and_handle_worktree(
+                self.task_id,
+                self.pipeline,
+                self.stage,
+                task_dir.path(),
+            )
+            .await?
         {
             WorktreeResult::Ready(path) => path,
             WorktreeResult::HandlerCalled | WorktreeResult::Paused => return Ok(()),
@@ -1474,13 +1475,6 @@ impl ZbobrDispatcher {
     }
 }
 
-/// Run manager-loop "Phase 1" once over all tasks.
-///
-/// Applies pause/ready normalization and processes instant transitions (Done and call stages).
-/// Returns the current task snapshot list.
-pub async fn advance_tasks(zbobr: &Arc<ZbobrDispatcher>) -> anyhow::Result<Vec<Task>> {
-    zbobr.advance_tasks().await
-}
 
 // ---------------------------------------------------------------------------
 // Low-level helpers
@@ -1490,124 +1484,127 @@ pub async fn advance_tasks(zbobr: &Arc<ZbobrDispatcher>) -> anyhow::Result<Vec<T
 ///
 /// Sets up the worktree for the task and attempts to merge upstream.
 /// If a merge conflict is detected, dispatches to the configured merge handler.
-async fn detect_and_handle_worktree(
-    zbobr: &Arc<ZbobrDispatcher>,
-    task_id: u64,
-    pipeline_name: &Pipeline,
-    stage: &Stage,
-    task_dir: &Path,
-) -> anyhow::Result<WorktreeResult> {
-    let task_backend = zbobr.task_backend();
-    let task = task_backend
-        .get_task(task_id)
-        .await?
-        .snapshot(false)
-        .await?;
+impl ZbobrDispatcher {
+    async fn detect_and_handle_worktree(
+        self: &Arc<Self>,
+        task_id: u64,
+        pipeline_name: &Pipeline,
+        stage: &Stage,
+        task_dir: &Path,
+    ) -> anyhow::Result<WorktreeResult> {
+        let task_backend = self.task_backend();
+        let task = task_backend
+            .get_task(task_id)
+            .await?
+            .snapshot(false)
+            .await?;
 
-    // 1. Check if identity is defined (work_branch set)
-    let identity = match task.identity() {
-        Some(id) => id,
-        None => {
-            // work_branch not set — proceed with task_dir.
-            // This should only happen if no stages have run yet.
-            return Ok(WorktreeResult::Ready(task_dir.to_path_buf()));
+        // 1. Check if identity is defined (work_branch set)
+        let identity = match task.identity() {
+            Some(id) => id,
+            None => {
+                // work_branch not set — proceed with task_dir.
+                // This should only happen if no stages have run yet.
+                return Ok(WorktreeResult::Ready(task_dir.to_path_buf()));
+            }
+        };
+
+        // 2. Update worktree
+        let is_uptodate = match self.update_worktree(&identity).await {
+            Ok(up) => up,
+            Err(e) => {
+                let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
+                tracing::error!("{msg}");
+                self.set_task_status_with_log(task_id, "workspace preparation", &msg)
+                    .await;
+                return Err(anyhow::anyhow!(msg));
+            }
+        };
+
+        // 3. Compute work_dir from backend repo name
+        let repo_name = self.repo_backend().repo_name();
+        let work_dir = TaskDir::new(self.config().workspaces.as_path(), task_id)
+            .path()
+            .join(repo_name);
+
+        // 4. If up-to-date, no merge needed
+        if is_uptodate {
+            return Ok(WorktreeResult::Ready(work_dir));
         }
-    };
 
-    // 2. Update worktree
-    let is_uptodate = match zbobr.update_worktree(&identity).await {
-        Ok(up) => up,
-        Err(e) => {
-            let msg = format!("Failed to prepare workspace for task #{task_id}: {e:#}");
-            tracing::error!("{msg}");
-            zbobr
-                .set_task_status_with_log(task_id, "workspace preparation", &msg)
-                .await;
-            return Err(anyhow::anyhow!(msg));
+        // 5. Attempt merge with base branch from backend config
+        let base_branch = self.repo_backend().branch();
+
+        // If we ARE the conflict handler, start the merge but don't abort on failure —
+        // the agent needs to see conflict markers in the working tree.
+        let is_conflict_handler = pipeline_name.as_str() == Pipeline::MERGE;
+
+        let merged_ok = git_check(
+            &work_dir,
+            &["merge", &format!("origin/{}", base_branch), "--no-edit"],
+        )
+        .await
+        .context("Failed to run git merge for upstream sync")?;
+
+        if merged_ok {
+            return Ok(WorktreeResult::Ready(work_dir));
         }
-    };
 
-    // 3. Compute work_dir from backend repo name
-    let repo_name = zbobr.repo_backend().repo_name();
-    let work_dir = TaskDir::new(zbobr.config().workspaces.as_path(), task_id)
-        .path()
-        .join(repo_name);
+        if is_conflict_handler {
+            // We're the conflict handler — leave the tree in conflicted state
+            // so the agent can resolve the merge markers.
+            tracing::info!(
+                "Task #{task_id}: merge failed inside conflict handler — agent will resolve"
+            );
+            return Ok(WorktreeResult::Ready(work_dir));
+        }
 
-    // 4. If up-to-date, no merge needed
-    if is_uptodate {
-        return Ok(WorktreeResult::Ready(work_dir));
+        // Merge failed in a normal mode — abort and dispatch to conflict handler
+        let _ = git(&work_dir, &["merge", "--abort"]).await;
+
+        self.handle_merge_conflict(task_id, pipeline_name, stage).await
     }
-
-    // 5. Attempt merge with base branch from backend config
-    let base_branch = zbobr.repo_backend().branch();
-
-    // If we ARE the conflict handler, start the merge but don't abort on failure —
-    // the agent needs to see conflict markers in the working tree.
-    let is_conflict_handler = pipeline_name.as_str() == Pipeline::MERGE;
-
-    let merged_ok = git_check(
-        &work_dir,
-        &["merge", &format!("origin/{}", base_branch), "--no-edit"],
-    )
-    .await
-    .context("Failed to run git merge for upstream sync")?;
-
-    if merged_ok {
-        return Ok(WorktreeResult::Ready(work_dir));
-    }
-
-    if is_conflict_handler {
-        // We're the conflict handler — leave the tree in conflicted state
-        // so the agent can resolve the merge markers.
-        tracing::info!(
-            "Task #{task_id}: merge failed inside conflict handler — agent will resolve"
-        );
-        return Ok(WorktreeResult::Ready(work_dir));
-    }
-
-    // Merge failed in a normal mode — abort and dispatch to conflict handler
-    let _ = git(&work_dir, &["merge", "--abort"]).await;
-
-    handle_merge_conflict(zbobr, task_id, pipeline_name, stage).await
 }
 
 /// Dispatch to the merge conflict handler pipeline.
 ///
 /// Pushes the current stage onto the stack and calls the merge pipeline.
 /// If already inside the merge pipeline, pauses the task.
-async fn handle_merge_conflict(
-    zbobr: &Arc<ZbobrDispatcher>,
-    task_id: u64,
-    pipeline: &Pipeline,
-    stage: &Stage,
-) -> anyhow::Result<WorktreeResult> {
-    let task_session = zbobr.task_session(task_id);
-    let pending_state = State::pending(pipeline.clone());
+impl ZbobrDispatcher {
+    async fn handle_merge_conflict(
+        self: &Arc<Self>,
+        task_id: u64,
+        pipeline: &Pipeline,
+        stage: &Stage,
+    ) -> anyhow::Result<WorktreeResult> {
+        let task_session = self.task_session(task_id);
+        let pending_state = State::pending(pipeline.clone());
 
-    // Recursion guard: if already inside the merge pipeline, pause
-    if pipeline.as_str() == Pipeline::MERGE {
-        tracing::error!("Task #{task_id}: merge conflict inside merge pipeline — pausing");
-        let msg = "Merge conflict inside merge pipeline. Manual intervention required.";
-        let status = format_error_status(zbobr, msg);
+        // Recursion guard: if already inside the merge pipeline, pause
+        if pipeline.as_str() == Pipeline::MERGE {
+            tracing::error!("Task #{task_id}: merge conflict inside merge pipeline — pausing");
+            let msg = "Merge conflict inside merge pipeline. Manual intervention required.";
+            let status = format_error_status(self, msg);
+            task_session
+                .set_pause_with_status_and_signal(status, Signal::go(stage.clone()))
+                .await?;
+            task_session.set_state(pending_state.clone()).await?;
+            return Ok(WorktreeResult::Paused);
+        }
+
+        // Push stack: re-run the interrupted stage upon return
         task_session
-            .set_pause_with_status_and_signal(status, Signal::go(stage.clone()))
+            .push_stack(pipeline.clone(), Signal::go(stage.clone()))
             .await?;
-        task_session.set_state(pending_state.clone()).await?;
-        return Ok(WorktreeResult::Paused);
+        task_session.allocate_pipeline_run_id().await?;
+        task_session
+            .set_signal(Some(Signal::call(Pipeline::MERGE)))
+            .await?;
+        task_session.set_state(pending_state).await?;
+
+        tracing::info!("Task #{task_id}: merge conflict — calling merge pipeline");
+        Ok(WorktreeResult::HandlerCalled)
     }
-
-    // Push stack: re-run the interrupted stage upon return
-    task_session
-        .push_stack(pipeline.clone(), Signal::go(stage.clone()))
-        .await?;
-    task_session.allocate_pipeline_run_id().await?;
-    task_session
-        .set_signal(Some(Signal::call(Pipeline::MERGE)))
-        .await?;
-    task_session.set_state(pending_state).await?;
-
-    tracing::info!("Task #{task_id}: merge conflict — calling merge pipeline");
-    Ok(WorktreeResult::HandlerCalled)
 }
 
 fn format_error_status(zbobr: &ZbobrDispatcher, message: &str) -> String {
