@@ -3,6 +3,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Secret, Stage,
@@ -38,12 +41,13 @@ const LOOP_SCRIPT_CONTENT: &str = r#"#!/usr/bin/env sh
 set -eu
 
 ZBOBR_CMD="${ZBOBR_CMD:-zbobr}"
+ZBOBR_LOOP_CMD="${ZBOBR_LOOP_CMD:-true}"
 ZBOBR_LOOP_INTERVAL="${ZBOBR_LOOP_INTERVAL:-60}"
 ZBOBR_CLEANUP_INTERVAL="${ZBOBR_CLEANUP_INTERVAL:-600}"
 
 last_cleanup_ts="$(date +%s)"
 
-while true; do
+while sh -c "$ZBOBR_LOOP_CMD"; do
     "$ZBOBR_CMD" task advance
 
     if ! "$ZBOBR_CMD" task process --select; then
@@ -140,6 +144,13 @@ pub async fn init_workspace(dest: &Path, force: bool) -> anyhow::Result<()> {
 
     let loop_script_path = dest.join(LOOP_SCRIPT);
     write_or_new(&loop_script_path, LOOP_SCRIPT_CONTENT, force).await?;
+
+    #[cfg(unix)]
+    {
+        let mut perms = tokio::fs::metadata(&loop_script_path).await?.permissions();
+        perms.set_mode(perms.mode() | 0o755);
+        tokio::fs::set_permissions(&loop_script_path, perms).await?;
+    }
 
     println!(
         "\nWorkspace initialized at {}.\nEdit zbobr.toml to configure backends and tokens before running.",
@@ -1355,6 +1366,14 @@ name = "test"
             "loop.sh should default ZBOBR_CMD to zbobr"
         );
         assert!(
+            loop_script.contains("ZBOBR_LOOP_CMD=\"${ZBOBR_LOOP_CMD:-true}\""),
+            "loop.sh should default ZBOBR_LOOP_CMD to true"
+        );
+        assert!(
+            loop_script.contains("sh -c \"$ZBOBR_LOOP_CMD\""),
+            "loop.sh should check ZBOBR_LOOP_CMD before each iteration"
+        );
+        assert!(
             loop_script.contains("\"$ZBOBR_CMD\" task advance"),
             "loop.sh should run task advance"
         );
@@ -1366,5 +1385,16 @@ name = "test"
             loop_script.contains("\"$ZBOBR_CMD\" task cleanup"),
             "loop.sh should run task cleanup"
         );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = tokio::fs::metadata(&loop_script_path)
+                .await
+                .expect("Failed to stat loop.sh")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o111, 0o111, "loop.sh should be executable");
+        }
     }
 }
