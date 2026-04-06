@@ -39,9 +39,9 @@ struct RootConfig {
 
 #[derive(Parser)]
 struct Cli {
-    /// Enable log output to stderr
-    #[arg(long)]
-    logs: bool,
+    /// Enable log output to stderr (accepts optional value: --logs, --logs=true, --logs=false)
+    #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true, action = clap::ArgAction::Append)]
+    logs: Vec<String>,
 
     #[command(
         flatten,
@@ -54,6 +54,14 @@ struct Cli {
 
     #[command(subcommand)]
     command: Command,
+}
+
+/// Resolve the final logs boolean from collected `--logs` values (last value wins).
+fn resolve_logs(values: &[String]) -> bool {
+    values
+        .last()
+        .map(|v| !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(false)
 }
 
 #[tokio::main]
@@ -69,7 +77,8 @@ async fn main() -> anyhow::Result<()> {
         Easiest way: export GH_TOKEN=$(gh auth token)",
     );
 
-    let filter = if cli.logs {
+    let logs_enabled = resolve_logs(&cli.logs);
+    let filter = if logs_enabled {
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())
     } else {
         "off".into()
@@ -213,12 +222,63 @@ mod tests {
     #[test]
     fn logs_flag_defaults_to_false() {
         let cli = Cli::try_parse_from(["zbobr", "task", "process", "--select"]).unwrap();
-        assert!(!cli.logs, "logs flag should default to false");
+        assert!(!resolve_logs(&cli.logs), "logs should default to false");
     }
 
     #[test]
     fn logs_flag_parses_when_present() {
         let cli = Cli::try_parse_from(["zbobr", "--logs", "task", "process", "--select"]).unwrap();
-        assert!(cli.logs, "--logs flag should set logs to true");
+        assert!(resolve_logs(&cli.logs), "--logs should set logs to true");
+    }
+
+    #[test]
+    fn logs_flag_explicit_true() {
+        let cli =
+            Cli::try_parse_from(["zbobr", "--logs=true", "task", "process", "--select"]).unwrap();
+        assert!(resolve_logs(&cli.logs), "--logs=true should be true");
+    }
+
+    #[test]
+    fn logs_flag_explicit_false() {
+        let cli =
+            Cli::try_parse_from(["zbobr", "--logs=false", "task", "process", "--select"]).unwrap();
+        assert!(
+            !resolve_logs(&cli.logs),
+            "--logs=false should be false"
+        );
+    }
+
+    #[test]
+    fn logs_flag_last_value_wins() {
+        let cli = Cli::try_parse_from([
+            "zbobr",
+            "--logs",
+            "--logs=false",
+            "task",
+            "process",
+            "--select",
+        ])
+        .unwrap();
+        assert!(
+            !resolve_logs(&cli.logs),
+            "--logs --logs=false: last value wins = false"
+        );
+    }
+
+    #[test]
+    fn logs_flag_last_value_wins_true() {
+        let cli = Cli::try_parse_from([
+            "zbobr",
+            "--logs=false",
+            "--logs",
+            "task",
+            "process",
+            "--select",
+        ])
+        .unwrap();
+        assert!(
+            resolve_logs(&cli.logs),
+            "--logs=false --logs: last value wins = true"
+        );
     }
 }
