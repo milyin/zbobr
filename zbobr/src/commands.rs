@@ -350,12 +350,23 @@ async fn run_task_subcommand(
 
             if select {
                 let eligible = eligible_runnable_tasks(zbobr.workflow(), &tasks);
+                tracing::info!(
+                    "Select requested: {} eligible runnable task(s)",
+                    eligible.len()
+                );
                 if eligible.is_empty() {
+                    tracing::info!("No runnable tasks available for selection");
                     std::process::exit(1);
                 }
                 match select_runnable_task(zbobr.workflow(), &tasks) {
-                    Some(task) => println!("{}", task.id),
-                    None => std::process::exit(1),
+                    Some(task) => {
+                        tracing::info!("Selected task #{} for task list select", task.id);
+                        println!("{}", task.id)
+                    }
+                    None => {
+                        tracing::info!("No runnable tasks available for selection");
+                        std::process::exit(1)
+                    }
                 }
                 return Ok(());
             }
@@ -461,8 +472,14 @@ async fn run_task_subcommand(
                 }
                 tasks.sort_by_key(|t| t.id);
                 match select_runnable_task(zbobr.workflow(), &tasks) {
-                    Some(t) => t.id,
-                    None => std::process::exit(1),
+                    Some(t) => {
+                        tracing::info!("Selected task #{} for processing", t.id);
+                        t.id
+                    }
+                    None => {
+                        tracing::info!("No runnable task found for process --select");
+                        std::process::exit(1)
+                    }
                 }
             } else {
                 require_task_id(task, "process")?
@@ -477,6 +494,11 @@ async fn run_task_subcommand(
         TaskSubcommand::Advance => {
             let tasks = zbobr.advance_tasks().await?;
             let eligible = eligible_runnable_tasks(zbobr.workflow(), &tasks);
+            tracing::info!(
+                "Advance requested: {} tasks advanced; {} runnable stage candidate(s) ready",
+                tasks.len(),
+                eligible.len()
+            );
             println!(
                 "Advanced {} tasks; {} runnable stage candidate(s) ready",
                 tasks.len(),
