@@ -295,7 +295,7 @@ async fn run_with_dispatcher(zbobr: ZbobrDispatcher, command: Command) -> anyhow
             cleanup_interval,
             ..
         } => {
-            zbobr_dispatcher::run_manager_loop(&zbobr, interval, cleanup_interval).await?;
+            zbobr.run_manager_loop(interval, cleanup_interval).await?;
         }
     }
     Ok(())
@@ -472,7 +472,7 @@ async fn run_task_subcommand(
                 .await?
                 .snapshot(false)
                 .await?;
-            zbobr_dispatcher::process_task(zbobr, &task_obj, None).await?;
+            zbobr.process_task(&task_obj, None).await?;
         }
         TaskSubcommand::Advance => {
             let tasks = zbobr_dispatcher::advance_tasks(zbobr).await?;

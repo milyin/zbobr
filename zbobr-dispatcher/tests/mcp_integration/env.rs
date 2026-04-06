@@ -16,7 +16,7 @@ use zbobr_api::{
 };
 use zbobr_dispatcher::{
     Comment, Task, Workflow, ZbobrDispatcher, ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
-    backend::TaskBackendExt, cli::process_task, prompts::ConfiguredPromptBuilder, task::Executor,
+    backend::TaskBackendExt, prompts::ConfiguredPromptBuilder, task::Executor,
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_repo_backend_fs::{ZbobrRepoBackendFs, ZbobrRepoBackendFsConfig};
@@ -473,7 +473,7 @@ impl IntegrationTestEnv {
         let task = self.get_task(task_id).await;
         let zbobr = self.make_dispatcher(workflow.clone());
 
-        process_task(&zbobr, &task, Some(&mcp_tester_config))
+        zbobr.process_task(&task, Some(&mcp_tester_config))
             .await
             .unwrap_or_else(|e| {
                 panic!(
@@ -501,7 +501,7 @@ impl IntegrationTestEnv {
             if task.go_pause {
                 // One more process_task call to convert pause flag to PAUSE state
                 let mcp_cfg = ZbobrExecutorMcpTesterConfig::default();
-                process_task(&zbobr, &task, Some(&mcp_cfg)).await.ok();
+                zbobr.process_task(&task, Some(&mcp_cfg)).await.ok();
                 return i;
             }
             // If state is PENDING but no signal, nothing to do
@@ -530,7 +530,7 @@ impl IntegrationTestEnv {
 
             let task = self.get_task(task_id).await;
 
-            process_task(&zbobr, &task, Some(&mcp_tester_config))
+            zbobr.process_task(&task, Some(&mcp_tester_config))
                 .await
                 .unwrap_or_else(|e| {
                     panic!(
@@ -575,7 +575,7 @@ impl IntegrationTestEnv {
         let task = self.get_task(task_id).await;
         let zbobr = self.make_dispatcher(workflow.clone());
 
-        process_task(&zbobr, &task, Some(&mcp_tester_config))
+        zbobr.process_task(&task, Some(&mcp_tester_config))
             .await
             .unwrap_or_else(|e| {
                 panic!(
