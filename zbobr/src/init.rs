@@ -48,9 +48,9 @@ ZBOBR_CLEANUP_INTERVAL="${ZBOBR_CLEANUP_INTERVAL:-600}"
 last_cleanup_ts="$(date +%s)"
 
 while sh -c "$ZBOBR_LOOP_CMD"; do
-    "$ZBOBR_CMD" task advance
+    eval "$ZBOBR_CMD task advance"
 
-    if ! "$ZBOBR_CMD" task process --select; then
+    if ! eval "$ZBOBR_CMD task process --select"; then
         rc="$?"
         if [ "$rc" -ne 1 ]; then
             echo "task process --select failed with exit code $rc" >&2
@@ -1374,15 +1374,15 @@ name = "test"
             "loop.sh should check ZBOBR_LOOP_CMD before each iteration"
         );
         assert!(
-            loop_script.contains("\"$ZBOBR_CMD\" task advance"),
+            loop_script.contains("eval \"$ZBOBR_CMD task advance\""),
             "loop.sh should run task advance"
         );
         assert!(
-            loop_script.contains("\"$ZBOBR_CMD\" task process --select"),
+            loop_script.contains("eval \"$ZBOBR_CMD task process --select\""),
             "loop.sh should run task process --select"
         );
         assert!(
-            loop_script.contains("\"$ZBOBR_CMD\" task cleanup"),
+            loop_script.contains("eval \"$ZBOBR_CMD task cleanup\""),
             "loop.sh should run task cleanup"
         );
 
