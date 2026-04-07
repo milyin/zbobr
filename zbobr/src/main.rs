@@ -41,7 +41,7 @@ struct RootConfig {
 struct Cli {
     /// Enable log output to stderr (accepts optional value: --logs, --logs=true, --logs=false)
     #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true, action = clap::ArgAction::Append)]
-    logs: Vec<String>,
+    logs: Vec<bool>,
 
     #[command(
         flatten,
@@ -57,11 +57,8 @@ struct Cli {
 }
 
 /// Resolve the final logs boolean from collected `--logs` values (last value wins).
-fn resolve_logs(values: &[String]) -> bool {
-    values
-        .last()
-        .map(|v| !v.eq_ignore_ascii_case("false"))
-        .unwrap_or(false)
+fn resolve_logs(values: &[bool]) -> bool {
+    values.last().copied().unwrap_or(false)
 }
 
 #[tokio::main]

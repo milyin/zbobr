@@ -93,7 +93,7 @@ pub fn resolve_config_location(
 pub struct GlobalArgs {
     /// Enable log output to stderr (accepts optional value: --logs, --logs=true, --logs=false)
     #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true, action = clap::ArgAction::Append)]
-    pub logs: Vec<String>,
+    pub logs: Vec<bool>,
 
     #[command(
         flatten,
@@ -167,6 +167,11 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
         return C::from_arg_matches(&m).unwrap_or_else(|e| e.exit());
     }
 
+    // Helper: returns true if the token is a valid boolean literal for optional-value args.
+    fn is_bool_literal(s: &str) -> bool {
+        s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("false")
+    }
+
     let mut before_sub = vec![raw_args[0].clone()];
     let mut sub_and_after: Vec<String> = Vec::new();
     let mut found_sub = false;
@@ -179,10 +184,28 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
             if subcommands.contains(arg.as_str()) {
                 found_sub = true;
                 sub_and_after.push(arg.clone());
+                i += 1;
+                continue;
+            }
+            // Normalize optional-value globals before the subcommand.
+            // For `--logs false`, join into `--logs=false` so clap (with
+            // require_equals) sees an attached value.
+            let base = arg.split('=').next().unwrap_or(arg);
+            if let Some(ArgValence::OptionalValue) = global_flags.get(base).copied() {
+                if !arg.contains('=')
+                    && i + 1 < raw_args.len()
+                    && is_bool_literal(&raw_args[i + 1])
+                {
+                    before_sub.push(format!("{}={}", arg, raw_args[i + 1]));
+                    i += 2;
+                } else {
+                    before_sub.push(arg.clone());
+                    i += 1;
+                }
             } else {
                 before_sub.push(arg.clone());
+                i += 1;
             }
-            i += 1;
             continue;
         }
 
@@ -216,10 +239,10 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
                 i += 2;
             } else if matches!(valence, ArgValence::OptionalValue)
                 && i + 1 < raw_args.len()
-                && !raw_args[i + 1].starts_with('-')
+                && is_bool_literal(&raw_args[i + 1])
             {
-                // Optional value: consume the next token only if it doesn't
-                // look like another flag. Join with '=' so clap sees it as
+                // Optional value: consume the next token only if it is a
+                // valid boolean literal. Join with '=' so clap sees it as
                 // an attached value (required by require_equals = true).
                 before_sub.push(format!("{}={}", arg, raw_args[i + 1]));
                 i += 2;
