@@ -278,4 +278,14 @@ mod tests {
             "--logs=false --logs: last value wins = true"
         );
     }
+
+    #[test]
+    fn logs_invalid_value_rejected() {
+        let result =
+            Cli::try_parse_from(["zbobr", "--logs=maybe", "task", "process", "--select"]);
+        assert!(
+            result.is_err(),
+            "--logs=maybe should be rejected as an invalid boolean"
+        );
+    }
 }
