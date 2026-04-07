@@ -26,6 +26,7 @@ const PARAM_MAX_STAGE_COUNT: &str = "max_stage_count";
 const PARAM_FLAG_PAUSE: &str = "pause";
 const PARAM_FLAG_CONFIRM: &str = "confirm";
 const PARAM_FLAG_VALUE_TRUE: &str = "true";
+const DEFAULT_REPORTS_PATH: &str = "reports";
 
 // -- Label prefix constants (GitHub-backend-specific) --
 
@@ -158,11 +159,22 @@ struct CommentResponse {
 #[allow(dead_code)]
 struct RepoResponse {
     full_name: String,
+    default_branch: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct ContentResponse {
     content: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GitRefObject {
+    sha: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GitRefResponse {
+    object: GitRefObject,
 }
 
 // ============================================================================
@@ -298,7 +310,93 @@ impl ZbobrTaskBackendGithubImpl {
         self.backend_config
             .reports_path
             .as_deref()
-            .unwrap_or("reports")
+            .unwrap_or(DEFAULT_REPORTS_PATH)
+    }
+
+    async fn repo_info(&self, owner: &str, repo: &str) -> anyhow::Result<RepoResponse> {
+        retry_github("read repository metadata", || {
+            self.octocrab
+                .get::<RepoResponse, _, _>(format!("/repos/{owner}/{repo}"), None::<&()>)
+        })
+        .await
+    }
+
+    async fn branch_exists(&self, owner: &str, repo: &str, branch: &str) -> anyhow::Result<bool> {
+        match self
+            .octocrab
+            .get::<serde_json::Value, _, _>(
+                format!("/repos/{owner}/{repo}/git/ref/heads/{branch}"),
+                None::<&()>,
+            )
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(octocrab::Error::GitHub { source, .. }) if source.status_code.as_u16() == 404 => {
+                Ok(false)
+            }
+            Err(error) => Err(octocrab_to_anyhow(error)),
+        }
+    }
+
+    async fn ensure_reports_branch_exists(&self) -> anyhow::Result<()> {
+        let Some(reports_branch) = self.reports_branch() else {
+            return Ok(());
+        };
+
+        let (owner, repo) = self.parse_repo()?;
+        let repo_info = self.repo_info(owner, repo).await?;
+
+        if reports_branch == repo_info.default_branch {
+            return Ok(());
+        }
+
+        if self.branch_exists(owner, repo, reports_branch).await? {
+            return Ok(());
+        }
+
+        let default_ref: GitRefResponse = retry_github("read default branch ref", || {
+            self.octocrab.get(
+                format!(
+                    "/repos/{owner}/{repo}/git/ref/heads/{}",
+                    repo_info.default_branch
+                ),
+                None::<&()>,
+            )
+        })
+        .await?;
+
+        let body = serde_json::json!({
+            "ref": format!("refs/heads/{reports_branch}"),
+            "sha": default_ref.object.sha,
+        });
+
+        let create_result: Result<serde_json::Value, octocrab::Error> = self
+            .octocrab
+            .post(format!("/repos/{owner}/{repo}/git/refs"), Some(&body))
+            .await;
+
+        match create_result {
+            Ok(_) => {
+                tracing::info!(
+                    "Created reports branch '{}' from '{}' in {}/{}",
+                    reports_branch,
+                    repo_info.default_branch,
+                    owner,
+                    repo
+                );
+                Ok(())
+            }
+            Err(octocrab::Error::GitHub { source, .. }) if source.status_code.as_u16() == 422 => {
+                tracing::info!(
+                    "Reports branch '{}' already exists in {}/{}",
+                    reports_branch,
+                    owner,
+                    repo
+                );
+                Ok(())
+            }
+            Err(error) => Err(octocrab_to_anyhow(error)),
+        }
     }
 
     /// Low-level: write the raw serialized task body.
@@ -520,6 +618,7 @@ impl ZbobrTaskBackendGithubImpl {
 
         // Ensure the task repo exists
         self.ensure_task_repo_exists().await?;
+        self.ensure_reports_branch_exists().await?;
 
         let existing_labels = self.list_labels().await?;
 
@@ -1022,6 +1121,8 @@ impl ZbobrTaskBackendGithubImpl {
         base_name: &str,
         content: &str,
     ) -> anyhow::Result<String> {
+        self.ensure_reports_branch_exists().await?;
+
         let (owner, repo) = self.parse_repo()?;
         let reports_path = self.reports_path();
         let reports_branch = self.reports_branch();
