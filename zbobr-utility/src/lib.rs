@@ -5,6 +5,11 @@ use anyhow::{Context, Result};
 pub mod macros;
 pub mod secret;
 pub mod toml_option;
+
+/// Re-export of the `config_struct` proc macro from `zbobr_macros`.
+///
+/// This attribute is intended for `*Config` structs and generates associated TOML,
+/// CLI, merge, and build helpers automatically.
 pub use macros::config_struct;
 pub use secret::Secret;
 pub use toml_option::TomlOption;

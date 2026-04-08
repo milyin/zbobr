@@ -1,3 +1,9 @@
+//! Procedural macro crate for generating TOML, CLI, and merge boilerplate for `*Config` structs.
+//!
+//! The `#[config_struct]` attribute is used on a struct named `FooConfig` to derive
+//! supporting types and implementations for TOML-deserialization, CLI argument parsing,
+//! merge behavior, and final config construction.
+
 use heck::ToSnakeCase;
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -8,6 +14,38 @@ use syn::{
 };
 
 #[proc_macro_attribute]
+/// Derive TOML / CLI / merge support for a config struct.
+///
+/// Apply this attribute to a struct named `FooConfig` with named fields. The macro
+/// generates:
+///
+/// - `FooConfigToml` for optional TOML deserialization
+/// - `FooConfigArgs` for CLI/override arguments
+/// - `FooConfigArgsDerived` for internal `clap::Args` support
+/// - `FooToml` and `FooArgs` aliases when the source struct name is `FooConfig`
+///
+/// The generated code supports:
+///
+/// - `serde`-based TOML loading with optional fields
+/// - `clap` argument registration and parsing
+/// - merge semantics where CLI args override TOML values
+/// - nested config sections via `#[config(nested)]`
+/// - path resolution via `#[config(path)]`
+///
+/// Supported field-level `#[config(...)]` options:
+///
+/// - `nested`
+/// - `skip_toml`
+/// - `skip_args`
+/// - `path`
+/// - `help_heading = "..."`
+/// - `heading_prefix = "..."`
+/// - `args_type = Type`
+/// - `toml_type = Type`
+/// - `toml_rename = "..."`
+/// - `toml_alias = "..."`
+///
+/// The input struct must use named fields and its name must end with `Config`.
 pub fn config_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     if !attr.is_empty() {
         return syn::Error::new(
