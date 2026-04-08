@@ -2624,6 +2624,53 @@ role = nan
         assert!(stage.role.clone().into_option().is_none());
     }
 
+    #[test]
+    fn stage_on_success_nan_in_overlay_clears_base_transition() {
+        let base_toml = r#"
+[pipelines.main.stages.working]
+on_success = "reviewing"
+"#;
+        let overlay_toml = r#"
+[pipelines.main.stages.working]
+on_success = nan
+"#;
+        let base: WorkflowToml = toml::from_str(base_toml).unwrap();
+        let overlay: WorkflowToml = toml::from_str(overlay_toml).unwrap();
+
+        let merged = base.merge_toml(overlay);
+        let stage = merged
+            .pipelines.as_ref().unwrap()[&Pipeline::Main]
+            .stage(&Stage::from("working")).unwrap();
+
+        // ExplicitNone should clear the inherited on_success transition
+        assert_eq!(stage.on_success, TomlOption::ExplicitNone);
+        assert!(stage.on_success().is_none(),
+            "nan on_success must produce None at runtime, got: {:?}", stage.on_success());
+    }
+
+    #[test]
+    fn workflow_prompts_dir_nan_in_overlay_clears_base() {
+        let base_toml = r#"prompts_dir = "/some/dir""#;
+        let overlay_toml = r#"prompts_dir = nan"#;
+
+        let base: WorkflowToml = toml::from_str(base_toml).unwrap();
+        let overlay: WorkflowToml = toml::from_str(overlay_toml).unwrap();
+        let merged = base.merge_toml(overlay);
+
+        assert_eq!(merged.prompts_dir, TomlOption::ExplicitNone);
+        // into_option() must return None
+        assert!(merged.prompts_dir.into_option().is_none());
+    }
+
+    #[test]
+    fn workflow_prompts_dir_nan_resolves_to_none_in_config() {
+        let toml_str = r#"prompts_dir = nan"#;
+        let workflow_toml: WorkflowToml = toml::from_str(toml_str).unwrap();
+        // try_into_config converts ExplicitNone → None
+        let config = workflow_toml.try_into_config().unwrap();
+        assert!(config.prompts_dir.is_none());
+    }
+
     // ── ExplicitNone semantics in consumer layer ─────────────────────────
 
     #[test]
@@ -2768,5 +2815,38 @@ role = nan
             err.to_string().to_lowercase().contains("executor"),
             "Expected executor-related error, got: {err}"
         );
+    }
+
+    // ── config_struct macro-generated TomlOption handling ───────────────
+
+    #[test]
+    fn config_struct_generated_toml_nan_produces_explicit_none() {
+        let toml_str = r#"
+[providers.main]
+executor = nan
+"#;
+        let root: ZbobrDispatcherConfigToml = toml::from_str(toml_str).unwrap();
+        let providers = root.providers.as_ref().unwrap();
+        let main = &providers["main"];
+        assert_eq!(main.executor, TomlOption::ExplicitNone);
+    }
+
+    #[test]
+    fn config_struct_generated_toml_merge_nan_clears_base() {
+        let base_str = r#"
+[providers.main]
+executor = "claude"
+"#;
+        let overlay_str = r#"
+[providers.main]
+executor = nan
+"#;
+        let base: ZbobrDispatcherConfigToml = toml::from_str(base_str).unwrap();
+        let overlay: ZbobrDispatcherConfigToml = toml::from_str(overlay_str).unwrap();
+        let merged = base.merge_toml(overlay);
+        let providers = merged.providers.as_ref().unwrap();
+        let main = &providers["main"];
+        assert_eq!(main.executor, TomlOption::ExplicitNone);
+        assert!(main.executor.clone().into_option().is_none());
     }
 }
