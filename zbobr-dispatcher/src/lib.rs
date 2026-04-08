@@ -293,10 +293,10 @@ impl ZbobrDispatcher {
             "claude" => {
                 let mut executor = ClaudeExecutor {
                     config: self.claude.config.clone(),
-                    access_key: None,
+                    access_key: Default::default(),
                 };
                 if let Some(ref key) = provider.access_key {
-                    executor.access_key = Some(key.clone());
+                    executor.access_key = Some(key.clone()).into();
                 }
                 Ok(Box::new(executor))
             }
@@ -531,11 +531,11 @@ mod tests {
 
     fn provider_def(executor: &str, priority: i32) -> ProviderDefinition {
         ProviderDefinition {
-            executor: Some(Executor(executor.to_string())),
-            parent: None,
-            priority: Some(priority),
-            plan_mode: None,
-            access_key: None,
+            executor: Some(Executor(executor.to_string())).into(),
+            parent: Default::default(),
+            priority: Some(priority).into(),
+            plan_mode: Default::default(),
+            access_key: Default::default(),
         }
     }
 
@@ -543,7 +543,7 @@ mod tests {
         ToolEntry {
             provider: provider.to_string().into(),
             model: model.parse().unwrap(),
-            priority: None,
+            priority: Default::default(),
         }
     }
 
@@ -714,7 +714,7 @@ mod tests {
                 ToolEntry {
                     provider: "fallback".to_string().into(),
                     model: "haiku".parse().unwrap(),
-                    priority: Some(0),
+                    priority: Some(0).into(),
                 },
             ],
         );
@@ -839,7 +839,7 @@ mod tests {
             executor: Executor("nonexistent".to_string()),
             priority: 10,
             plan_mode: false,
-            access_key: None,
+            access_key: Default::default(),
         };
         let result = dispatcher.build_executor(&bad_provider, None);
         assert!(result.is_err(), "Expected Err for unknown executor");
@@ -858,21 +858,21 @@ mod tests {
         providers.insert(
             "a".to_string(),
             ProviderDefinition {
-                executor: None,
-                parent: Some("b".to_string().into()),
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Default::default(),
+                parent: Some("b".to_string().into()).into(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         providers.insert(
             "b".to_string(),
             ProviderDefinition {
-                executor: None,
-                parent: Some("a".to_string().into()),
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Default::default(),
+                parent: Some("a".to_string().into()).into(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         let mut tools = IndexMap::new();
@@ -896,8 +896,8 @@ mod tests {
             "worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
-                prompt: None,
-                tool: Some("nonexistent".to_string().into()),
+                prompt: Default::default(),
+                tool: Some("nonexistent".to_string().into()).into(),
             },
         );
         let wf_config = WorkflowConfig {
@@ -930,7 +930,7 @@ mod tests {
                 ToolEntry {
                     provider: "b".to_string().into(),
                     model: "sonnet".parse().unwrap(),
-                    priority: Some(20),
+                    priority: Some(20).into(),
                 },
             ],
         );

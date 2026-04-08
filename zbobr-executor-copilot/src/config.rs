@@ -18,6 +18,7 @@ impl ZbobrExecutorCopilotConfig {
 
         let copilot_github_token = merged
             .copilot_github_token
+            .into_option()
             .unwrap_or(defaults.copilot_github_token);
 
         Self {

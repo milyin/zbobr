@@ -1487,12 +1487,21 @@ impl TaskBackend for TaskBackendGithub {
 
 #[cfg(test)]
 mod flag_tests {
+    use std::sync::Once;
+
     use super::*;
     use crate::separator::{PARAMETERS_SEPARATOR, serialize_description_full};
     use zbobr_api::{
         Secret,
         task::{ContextRecord, ContextRecordType, Pipeline, Stage, StageContext, StageInfo},
     };
+
+    fn init_rustls() {
+        static RUSTLS_INIT: Once = Once::new();
+        RUSTLS_INIT.call_once(|| {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        });
+    }
 
     fn make_issue_with_params(key: &str, value: &str) -> IssueResponse {
         let body = format!("desc{PARAMETERS_SEPARATOR}{key}: {value}\n");
@@ -1506,6 +1515,7 @@ mod flag_tests {
     }
 
     fn make_config() -> ZbobrTaskBackendGithubConfig {
+        init_rustls();
         ZbobrTaskBackendGithubConfig {
             instance: "default".to_string(),
             timezone: None,
@@ -1518,8 +1528,16 @@ mod flag_tests {
         }
     }
 
+    fn make_backend() -> ZbobrTaskBackendGithubImpl {
+        init_rustls();
+        let config = make_config();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        ZbobrTaskBackendGithubImpl::from_config(config).unwrap()
+    }
+
     fn issue_to_task(issue: IssueResponse) -> Task {
-        let backend = ZbobrTaskBackendGithubImpl::from_config(make_config()).unwrap();
+        let backend = make_backend();
         backend.issue_to_task(issue).unwrap()
     }
 

@@ -15,6 +15,7 @@ use zbobr_api::{
     },
     config_tools::McpTool,
 };
+use zbobr_utility::TomlOption;
 use zbobr_api::task::{Executor, Model};
 use zbobr_dispatcher::config::{ZbobrDispatcherToml, ZbobrExecutorToml};
 use zbobr_executor_copilot::ZbobrExecutorCopilotToml;
@@ -197,41 +198,41 @@ fn default_config_toml() -> RootConfigToml {
         (
             PROVIDER_CLAUDE,
             ProviderDefinition {
-                executor: Some(Executor::claude()),
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: TomlOption::Value(Executor::claude()),
+                parent: TomlOption::Absent,
+                priority: TomlOption::Absent,
+                plan_mode: TomlOption::Absent,
+                access_key: TomlOption::Absent,
             },
         ),
         (
             PROVIDER_COPILOT,
             ProviderDefinition {
-                executor: Some(Executor::copilot()),
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: TomlOption::Value(Executor::copilot()),
+                parent: TomlOption::Absent,
+                priority: TomlOption::Absent,
+                plan_mode: TomlOption::Absent,
+                access_key: TomlOption::Absent,
             },
         ),
         (
             PROVIDER_CLAUDE_PLANNER,
             ProviderDefinition {
-                executor: None,
-                parent: Some(PROVIDER_CLAUDE),
-                priority: None,
-                plan_mode: Some(true),
-                access_key: None,
+                executor: TomlOption::Absent,
+                parent: TomlOption::Value(PROVIDER_CLAUDE),
+                priority: TomlOption::Absent,
+                plan_mode: TomlOption::Value(true),
+                access_key: TomlOption::Absent,
             },
         ),
         (
             PROVIDER_COPILOT_PLANNER,
             ProviderDefinition {
-                executor: None,
-                parent: Some(PROVIDER_COPILOT),
-                priority: None,
-                plan_mode: Some(true),
-                access_key: None,
+                executor: TomlOption::Absent,
+                parent: TomlOption::Value(PROVIDER_COPILOT),
+                priority: TomlOption::Absent,
+                plan_mode: TomlOption::Value(true),
+                access_key: TomlOption::Absent,
             },
         ),
     ]);
@@ -316,46 +317,46 @@ fn default_config_toml() -> RootConfigToml {
 
     RootConfigToml {
         dispatcher: Some(ZbobrDispatcherToml {
-            instance: Some("default".into()),
-            workspaces: Some(PathBuf::from("./workspaces")),
-            base_port: Some(3000),
-            agent_github_token: Some(Secret::value("not-configured")),
+            instance: TomlOption::Value("default".into()),
+            workspaces: TomlOption::Value(PathBuf::from("./workspaces")),
+            base_port: TomlOption::Value(3000),
+            agent_github_token: TomlOption::Value(Secret::value("not-configured")),
             providers: Some(providers),
             tools: Some(tools),
-            provider_exclusion_secs: Some(3600),
-            provider_exclusion_fail_count: Some(3),
-            work_branch_prefix: Some("zbobr_fix".into()),
-            git_user_name: Some("zbobr".into()),
-            git_user_email: Some("zbobr@example.com".into()),
-            overwrite_author: Some(false),
-            max_task_stage_count: None,
-            timezone: None,
+            provider_exclusion_secs: TomlOption::Value(3600),
+            provider_exclusion_fail_count: TomlOption::Value(3),
+            work_branch_prefix: TomlOption::Value("zbobr_fix".into()),
+            git_user_name: TomlOption::Value("zbobr".into()),
+            git_user_email: TomlOption::Value("zbobr@example.com".into()),
+            overwrite_author: TomlOption::Value(false),
+            max_task_stage_count: TomlOption::Absent,
+            timezone: TomlOption::Absent,
         }),
         tasks: Some(ZbobrTaskBackendGithubToml {
-            instance: None,
-            timezone: None,
-            default_max_stage_count: Some(zbobr_api::task::DEFAULT_MAX_STAGE_COUNT),
-            github_repo: Some("owner/repo".into()),
-            github_token: Some(Secret::value(String::new())),
-            reports_branch: None,
-            reports_path: None,
-            allowed_usernames: None,
+            instance: TomlOption::Absent,
+            timezone: TomlOption::Absent,
+            default_max_stage_count: TomlOption::Value(zbobr_api::task::DEFAULT_MAX_STAGE_COUNT),
+            github_repo: TomlOption::Value("owner/repo".into()),
+            github_token: TomlOption::Value(Secret::value(String::new())),
+            reports_branch: TomlOption::Absent,
+            reports_path: TomlOption::Absent,
+            allowed_usernames: TomlOption::Absent,
         }),
         repo: Some(ZbobrRepoBackendGithubToml {
-            repository: Some("owner/repo".into()),
-            branch: Some("main".into()),
-            github_token: Some(Secret::value(String::new())),
-            repos_dir: Some(PathBuf::from("./repos")),
+            repository: TomlOption::Value("owner/repo".into()),
+            branch: TomlOption::Value("main".into()),
+            github_token: TomlOption::Value(Secret::value(String::new())),
+            repos_dir: TomlOption::Value(PathBuf::from("./repos")),
         }),
         executor: Some(ZbobrExecutorToml {
             claude: None,
             copilot: Some(ZbobrExecutorCopilotToml {
-                copilot_github_token: None,
+                copilot_github_token: TomlOption::Absent,
             }),
             mcp_tester: None,
         }),
         workflow: Some(WorkflowToml {
-            prompts_dir: workflow.prompts_dir,
+            prompts_dir: workflow.prompts_dir.into(),
             roles: Some(workflow.roles),
             pipelines: Some(workflow.pipelines),
         }),
@@ -375,84 +376,84 @@ fn default_workflow() -> WorkflowConfig {
         (
             STAGE_PLANNING,
             StageDefinition {
-                role: Some(ROLE_PLANNER),
+                role: TomlOption::Value(ROLE_PLANNER),
                 prompts: Some(task_prompt.clone()),
-                on_intermediate: Some(StageTransition::pause()),
+                on_intermediate: TomlOption::Value(StageTransition::pause()),
                 ..Default::default()
             },
         ),
         (
             STAGE_WORKING,
             StageDefinition {
-                role: Some(ROLE_WORKER),
+                role: TomlOption::Value(ROLE_WORKER),
                 prompts: Some(task_prompt.clone()),
-                on_failure: Some(StageTransition {
+                on_failure: TomlOption::Value(StageTransition {
                     next: Some(STAGE_WORKING),
                     pause: true,
                 }),
-                on_intermediate: Some(StageTransition::stage(STAGE_REVIEWING)),
+                on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_REVIEWING)),
                 ..Default::default()
             },
         ),
         (
             STAGE_REVIEWING,
             StageDefinition {
-                role: Some(ROLE_REVIEWER),
+                role: TomlOption::Value(ROLE_REVIEWER),
                 prompts: Some(task_prompt.clone()),
-                on_failure: Some(StageTransition::stage(STAGE_WORKING)),
-                on_intermediate: Some(StageTransition::stage(STAGE_TEST_PLANNER)),
+                on_failure: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
+                on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_TEST_PLANNER)),
                 ..Default::default()
             },
         ),
         (
             STAGE_TEST_PLANNER,
             StageDefinition {
-                role: Some(ROLE_TEST_PLANNER),
+                role: TomlOption::Value(ROLE_TEST_PLANNER),
                 prompts: Some(task_prompt.clone()),
-                on_failure: Some(StageTransition::stage(STAGE_WORKING)),
-                on_intermediate: Some(StageTransition::stage(STAGE_TEST_WORKER)),
+                on_failure: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
+                on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_TEST_WORKER)),
                 ..Default::default()
             },
         ),
         (
             STAGE_TEST_WORKER,
             StageDefinition {
-                role: Some(ROLE_TEST_WORKER),
+                role: TomlOption::Value(ROLE_TEST_WORKER),
                 prompts: Some(task_prompt.clone()),
-                on_failure: Some(StageTransition {
+                on_failure: TomlOption::Value(StageTransition {
                     next: Some(STAGE_TEST_WORKER),
                     pause: true,
                 }),
-                on_intermediate: Some(StageTransition::stage(STAGE_WORKING)),
+                on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
                 ..Default::default()
             },
         ),
         (
             STAGE_LINTING,
             StageDefinition {
-                role: Some(ROLE_LINTER),
+                role: TomlOption::Value(ROLE_LINTER),
                 prompts: Some(task_prompt.clone()),
-                on_success: Some(StageTransition::stage(STAGE_TESTING)),
-                on_failure: Some(StageTransition::stage(STAGE_LINTER_WORKER)),
+                on_success: TomlOption::Value(StageTransition::stage(STAGE_TESTING)),
+                on_failure: TomlOption::Value(StageTransition::stage(STAGE_LINTER_WORKER)),
                 ..Default::default()
             },
         ),
         (
             STAGE_LINTER_WORKER,
             StageDefinition {
-                role: Some(ROLE_LINTER_WORKER),
+                role: TomlOption::Value(ROLE_LINTER_WORKER),
                 prompts: Some(task_prompt.clone()),
-                on_success: Some(StageTransition::stage(STAGE_LINTING)),
-                on_failure: Some(StageTransition::stage(STAGE_WORKING)),
+                on_success: TomlOption::Value(StageTransition::stage(STAGE_LINTING)),
+                on_failure: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
                 ..Default::default()
             },
         ),
         (
             STAGE_TESTING,
             StageDefinition {
-                role: Some(ROLE_TESTER),
+                role: TomlOption::Value(ROLE_TESTER),
                 prompts: Some(task_prompt.clone()),
-                on_failure: Some(StageTransition::stage(STAGE_WORKING)),
+                on_failure: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
                 ..Default::default()
             },
         ),
@@ -461,7 +462,7 @@ fn default_workflow() -> WorkflowConfig {
     let merge_stages = IndexMap::from([(
         STAGE_MERGING,
         StageDefinition {
-            role: Some(ROLE_MERGER),
+            role: TomlOption::Value(ROLE_MERGER),
             prompts: Some(task_prompt),
             ..Default::default()
         },
@@ -493,8 +494,8 @@ fn default_workflow() -> WorkflowConfig {
                     AddChecklistItem,
                     GetCtxRec,
                 ]),
-                prompt: Some(PathBuf::from("planner.md")),
-                tool: Some(TOOL_PLANNER),
+                prompt: TomlOption::Value(PathBuf::from("planner.md")),
+                tool: TomlOption::Value(TOOL_PLANNER),
             },
         ),
         (
@@ -510,8 +511,8 @@ fn default_workflow() -> WorkflowConfig {
                     CheckChecklistItem,
                     GetCtxRec,
                 ]),
-                prompt: Some(PathBuf::from("worker.md")),
-                tool: Some(TOOL_DEVELOPER),
+                prompt: TomlOption::Value(PathBuf::from("worker.md")),
+                tool: TomlOption::Value(TOOL_DEVELOPER),
             },
         ),
         (
@@ -525,8 +526,8 @@ fn default_workflow() -> WorkflowConfig {
                     AddChecklistItem,
                     GetCtxRec,
                 ]),
-                prompt: Some(PathBuf::from("test_planner.md")),
-                tool: Some(TOOL_PLANNER),
+                prompt: TomlOption::Value(PathBuf::from("test_planner.md")),
+                tool: TomlOption::Value(TOOL_PLANNER),
             },
         ),
         (
@@ -542,8 +543,8 @@ fn default_workflow() -> WorkflowConfig {
                     CheckChecklistItem,
                     GetCtxRec,
                 ]),
-                prompt: Some(PathBuf::from("test_worker.md")),
-                tool: Some(TOOL_HELPER),
+                prompt: TomlOption::Value(PathBuf::from("test_worker.md")),
+                tool: TomlOption::Value(TOOL_HELPER),
             },
         ),
         (
@@ -558,8 +559,8 @@ fn default_workflow() -> WorkflowConfig {
                     CheckChecklistItem,
                     GetCtxRec,
                 ]),
-                prompt: Some(PathBuf::from("reviewer.md")),
-                tool: Some(TOOL_REVIEWER),
+                prompt: TomlOption::Value(PathBuf::from("reviewer.md")),
+                tool: TomlOption::Value(TOOL_REVIEWER),
             },
         ),
         (
@@ -572,8 +573,8 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithQuestion,
                     GetCtxRec,
                 ]),
-                prompt: Some(PathBuf::from("tester.md")),
-                tool: Some(TOOL_HELPER),
+                prompt: TomlOption::Value(PathBuf::from("tester.md")),
+                tool: TomlOption::Value(TOOL_HELPER),
             },
         ),
         (
@@ -586,8 +587,8 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithQuestion,
                     GetCtxRec,
                 ]),
-                prompt: Some(PathBuf::from("linter.md")),
-                tool: Some(TOOL_DRUDGE),
+                prompt: TomlOption::Value(PathBuf::from("linter.md")),
+                tool: TomlOption::Value(TOOL_DRUDGE),
             },
         ),
         (
@@ -600,16 +601,16 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithQuestion,
                     GetCtxRec,
                 ]),
-                prompt: Some(PathBuf::from("linter_worker.md")),
-                tool: Some(TOOL_DEVELOPER),
+                prompt: TomlOption::Value(PathBuf::from("linter_worker.md")),
+                tool: TomlOption::Value(TOOL_DEVELOPER),
             },
         ),
         (
             ROLE_MERGER,
             RoleDefinition {
                 mcp: Some(vec![StopWithError, ReportSuccess, StopWithQuestion]),
-                prompt: Some(PathBuf::from("merger.md")),
-                tool: Some(TOOL_HELPER),
+                prompt: TomlOption::Value(PathBuf::from("merger.md")),
+                tool: TomlOption::Value(TOOL_HELPER),
             },
         ),
     ]);
@@ -1217,7 +1218,7 @@ name = "test"
         let registered: std::collections::HashSet<&str> =
             PROMPT_FILES.iter().map(|(name, _)| *name).collect();
         for (role_name, role_def) in &wf.roles {
-            if let Some(prompt_path) = &role_def.prompt {
+            if let Some(prompt_path) = role_def.prompt.as_option() {
                 let key = prompt_path
                     .file_stem()
                     .and_then(|s| s.to_str())
