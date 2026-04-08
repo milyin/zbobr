@@ -50,6 +50,8 @@ const ALL_STATE_LABEL_NAMES: &[&str] = &[
     STATE_LABEL_RUNNING,
 ];
 
+const MAX_GITHUB_RETRY_ATTEMPTS: u64 = 3;
+
 use crate::{
     config::ZbobrTaskBackendGithubConfig,
     separator::{
@@ -98,7 +100,15 @@ fn is_transient_octocrab_error(error: &octocrab::Error) -> bool {
     }
 }
 
-/// Retry a GitHub API operation up to 3 times on transient errors.
+fn is_conflict_octocrab_error(error: &octocrab::Error) -> bool {
+    matches!(
+        error,
+        octocrab::Error::GitHub { source, .. }
+        if source.status_code.as_u16() == 409
+    )
+}
+
+/// Retry a GitHub API operation up to MAX_GITHUB_RETRY_ATTEMPTS times on transient errors.
 async fn retry_github<T, F, Fut>(op_name: &str, mut f: F) -> anyhow::Result<T>
 where
     F: FnMut() -> Fut,
@@ -110,10 +120,11 @@ where
         match f().await {
             Ok(value) => return Ok(value),
             Err(e) => {
-                if attempt < 3 && is_transient_octocrab_error(&e) {
+                if attempt < MAX_GITHUB_RETRY_ATTEMPTS && is_transient_octocrab_error(&e) {
                     tracing::warn!(
-                        "Transient GitHub error during {op_name} (attempt {attempt}/3): {}",
-                        format_octocrab_error(&e)
+                        "Transient GitHub error during {op_name} (attempt {attempt}/{max}): {}",
+                        format_octocrab_error(&e),
+                        max = MAX_GITHUB_RETRY_ATTEMPTS
                     );
                     tokio::time::sleep(Duration::from_millis(250 * attempt)).await;
                     continue;
@@ -1131,8 +1142,14 @@ impl ZbobrTaskBackendGithubImpl {
         // When checking existence on a non-default branch, pass ?ref=
         let ref_query: Option<Vec<(&str, &str)>> = reports_branch.map(|b| vec![("ref", b)]);
 
-        let mut n = 0u32;
+        let mut n = 0u64;
         let filename = loop {
+            if n >= MAX_GITHUB_RETRY_ATTEMPTS {
+                return Err(anyhow::anyhow!(
+                    "Exceeded maximum report filename attempts ({MAX_GITHUB_RETRY_ATTEMPTS})"
+                ));
+            }
+
             let candidate = if n == 0 {
                 format!("{base_name}.md")
             } else {
@@ -1150,33 +1167,61 @@ impl ZbobrTaskBackendGithubImpl {
                 .await
                 .is_ok();
 
-            if !exists {
-                break candidate;
+            if exists {
+                n += 1;
+                continue;
             }
-            n += 1;
+
+            let message = format!("zbobr: store report {candidate} for task # {task_id}");
+            let encoded = BASE64.encode(content.as_bytes());
+
+            let mut body = serde_json::json!({
+                "message": message,
+                "content": encoded,
+            });
+            if let Some(branch) = reports_branch {
+                body["branch"] = serde_json::Value::String(branch.to_string());
+            }
+
+            let result = {
+                let mut attempt = 0u64;
+                loop {
+                    attempt += 1;
+                    match self
+                        .octocrab
+                        .put::<serde_json::Value, _, _>(
+                            format!("/repos/{owner}/{repo}/contents/{path}"),
+                            Some(&body),
+                        )
+                        .await
+                    {
+                        Ok(value) => break Ok(value),
+                        Err(e) if attempt < MAX_GITHUB_RETRY_ATTEMPTS && is_transient_octocrab_error(&e) => {
+                            tracing::warn!(
+                                "Transient GitHub error while creating report file {candidate} (attempt {attempt}/{max}): {}",
+                                format_octocrab_error(&e),
+                                max = MAX_GITHUB_RETRY_ATTEMPTS
+                            );
+                            tokio::time::sleep(Duration::from_millis(250 * attempt)).await;
+                            continue;
+                        }
+                        Err(e) => break Err(e),
+                    }
+                }
+            };
+
+            match result {
+                Ok(_) => break candidate,
+                Err(e) if is_conflict_octocrab_error(&e) => {
+                    tracing::info!(
+                        "Report filename conflict for {candidate}, retrying with a new name"
+                    );
+                    n += 1;
+                    continue;
+                }
+                Err(e) => return Err(octocrab_to_anyhow(e)),
+            }
         };
-
-        let path = format!("{dir}/{filename}");
-        let message = format!("zbobr: store report {filename} for task # {task_id}");
-        let encoded = BASE64.encode(content.as_bytes());
-
-        let mut body = serde_json::json!({
-            "message": message,
-            "content": encoded,
-        });
-        if let Some(branch) = reports_branch {
-            body["branch"] = serde_json::Value::String(branch.to_string());
-        }
-
-        retry_github("create report file", || async {
-            self.octocrab
-                .put::<serde_json::Value, _, _>(
-                    format!("/repos/{owner}/{repo}/contents/{path}"),
-                    Some(&body),
-                )
-                .await
-        })
-        .await?;
 
         tracing::debug!("Stored report for task {task_id}: {filename}");
         Ok(filename)
