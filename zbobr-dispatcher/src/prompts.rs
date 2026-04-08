@@ -205,7 +205,7 @@ pub fn prompt_files_for_stage(
     let mut merged: indexmap::IndexMap<String, TomlOption<std::path::PathBuf>> =
         workflow.prompts.clone().unwrap_or_default();
 
-    // Merge role-level prompts per key.
+    // Merge role-level prompts per key (preserve insertion order).
     if let Some(role_def) = stage_def
         .role()
         .map(|r| r.as_str())
@@ -213,24 +213,22 @@ pub fn prompt_files_for_stage(
         && let Some(ref role_prompts) = role_def.prompts
     {
         for (k, v) in role_prompts {
-            let merged_val = if let Some(base_v) = merged.shift_remove(k) {
-                base_v.merge(v.clone())
+            if let Some(base_v) = merged.get_mut(k) {
+                *base_v = base_v.clone().merge(v.clone());
             } else {
-                v.clone()
-            };
-            merged.insert(k.clone(), merged_val);
+                merged.insert(k.clone(), v.clone());
+            }
         }
     }
 
-    // Merge stage-level prompts per key.
+    // Merge stage-level prompts per key (preserve insertion order).
     if let Some(ref stage_prompts) = stage_def.prompts {
         for (k, v) in stage_prompts {
-            let merged_val = if let Some(base_v) = merged.shift_remove(k) {
-                base_v.merge(v.clone())
+            if let Some(base_v) = merged.get_mut(k) {
+                *base_v = base_v.clone().merge(v.clone());
             } else {
-                v.clone()
-            };
-            merged.insert(k.clone(), merged_val);
+                merged.insert(k.clone(), v.clone());
+            }
         }
     }
 
@@ -1027,5 +1025,53 @@ mod tests {
         };
         let files = prompt_files_for_stage(&stage, &workflow);
         assert_eq!(files, vec![PathBuf::from("/prompts/worker.md")]);
+    }
+
+    #[test]
+    fn prompt_files_for_stage_preserves_slot_order() {
+        // Workflow establishes slot order: main (nan), task.
+        // Role overrides main in-place → final order must be [worker.md, task.md], not reversed.
+        use indexmap::IndexMap;
+        use zbobr_api::config::RoleDefinition;
+
+        let mut roles = IndexMap::new();
+        roles.insert(
+            "worker".to_string().into(),
+            RoleDefinition {
+                mcp: None,
+                prompts: Some(IndexMap::from([(
+                    "main".to_string(),
+                    TomlOption::Value(PathBuf::from("/prompts/worker.md")),
+                )])),
+                tool: Default::default(),
+            },
+        );
+        let workflow = WorkflowConfig {
+            prompts_dir: None,
+            // "main" is seeded first (nan placeholder), then "task" — establishes canonical order.
+            prompts: Some(IndexMap::from([
+                ("main".to_string(), TomlOption::ExplicitNone),
+                (
+                    "task".to_string(),
+                    TomlOption::Value(PathBuf::from("/prompts/task.md")),
+                ),
+            ])),
+            roles,
+            pipelines: HashMap::new(),
+        };
+        let stage = StageDefinition {
+            role: Some("worker".to_string().into()).into(),
+            ..Default::default()
+        };
+        let files = prompt_files_for_stage(&stage, &workflow);
+        // worker.md must come before task.md — role's main slot is at the "main" position.
+        assert_eq!(
+            files,
+            vec![
+                PathBuf::from("/prompts/worker.md"),
+                PathBuf::from("/prompts/task.md"),
+            ],
+            "slot order must be preserved: main before task"
+        );
     }
 }

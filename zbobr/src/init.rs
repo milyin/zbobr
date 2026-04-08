@@ -612,10 +612,13 @@ fn default_workflow() -> WorkflowConfig {
         ),
     ]);
 
-    let workflow_prompts = Some(indexmap::IndexMap::from([(
-        "task".to_string(),
-        TomlOption::Value(PathBuf::from(TASK_PROMPT)),
-    )]));
+    let workflow_prompts = Some(indexmap::IndexMap::from([
+        ("main".to_string(), TomlOption::ExplicitNone),
+        (
+            "task".to_string(),
+            TomlOption::Value(PathBuf::from(TASK_PROMPT)),
+        ),
+    ]));
 
     WorkflowConfig {
         prompts_dir: Some(PathBuf::from(WORKFLOW_PROMPTS_DIR)),

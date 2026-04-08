@@ -26,12 +26,11 @@ fn merge_prompt_maps(
     match (base, overlay) {
         (Some(mut base_map), Some(over_map)) => {
             for (k, v) in over_map {
-                let merged = if let Some(base_v) = base_map.shift_remove(&k) {
-                    base_v.merge(v)
+                if let Some(base_v) = base_map.get_mut(&k) {
+                    *base_v = base_v.clone().merge(v);
                 } else {
-                    v
-                };
-                base_map.insert(k, merged);
+                    base_map.insert(k, v);
+                }
             }
             Some(base_map)
         }
