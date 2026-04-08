@@ -461,6 +461,10 @@ fn default_workflow() -> WorkflowConfig {
         STAGE_MERGING,
         StageDefinition {
             role: TomlOption::Value(ROLE_MERGER),
+            prompts: Some(indexmap::IndexMap::from([(
+                "task".to_string(),
+                TomlOption::ExplicitNone,
+            )])),
             ..Default::default()
         },
     )]);
@@ -1107,6 +1111,18 @@ mod tests {
         let linting = main.stages.get(&Stage::from("linting")).unwrap();
         let target = linting.on_success().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("testing"));
+    }
+
+    #[test]
+    fn merge_stage_task_prompt_is_cleared() {
+        let wf = default_workflow();
+        let merge = wf.pipelines.get(&Pipeline::Merge).unwrap();
+        let merging = merge.stages.get(&Stage::from("merging")).unwrap();
+        let task_prompt = merging
+            .prompts
+            .as_ref()
+            .and_then(|map| map.get("task"));
+        assert_eq!(task_prompt, Some(&TomlOption::ExplicitNone));
     }
 
     #[test]
