@@ -689,18 +689,12 @@ impl ZbobrRepoBackendGithub {
             })
             .await;
 
-        match result {
-            Ok(response) => {
-                tracing::info!(
-                    "Fork sync for branch '{}': merge_type={}",
-                    branch,
-                    response.merge_type
-                );
-            }
-            Err(e) => {
-                tracing::warn!("Fork sync failed for branch '{}': {}", branch, e);
-            }
-        }
+        let response = result?;
+        tracing::info!(
+            "Fork sync for branch '{}': merge_type={}",
+            branch,
+            response.merge_type
+        );
 
         Ok(())
     }
