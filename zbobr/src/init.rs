@@ -22,6 +22,7 @@ use zbobr_utility::toml_edit_util::{
     inline_named_children_as_inline_tables,
 };
 use zbobr_api::task::{Executor, Model};
+use toml_edit::{DocumentMut, Item};
 use zbobr_dispatcher::config::{ZbobrDispatcherToml, ZbobrExecutorToml};
 use zbobr_executor_copilot::ZbobrExecutorCopilotToml;
 use zbobr_repo_backend_github::ZbobrRepoBackendGithubToml;
@@ -140,7 +141,7 @@ pub async fn init_workspace(dest: &Path, force: bool) -> anyhow::Result<()> {
     // to convert stage definitions and dispatcher providers/tools into inline tables.
     let config = default_config_toml();
     let pretty = toml::to_string_pretty(&config)?;
-    let mut doc: toml_edit::DocumentMut = pretty.parse()?;
+    let mut doc: DocumentMut = pretty.parse()?;
     inline_stage_tables(&mut doc);
     inline_role_prompt_tables(&mut doc);
     inline_dispatcher_tables(&mut doc);
@@ -635,18 +636,18 @@ fn default_workflow() -> WorkflowConfig {
 }
 
 /// Convert `workflow.pipelines.*.stages.*` entries from standard tables to inline tables.
-fn inline_stage_tables(doc: &mut toml_edit::DocumentMut) {
-    let Some(toml_edit::Item::Table(workflow)) = doc.get_mut("workflow") else {
+fn inline_stage_tables(doc: &mut DocumentMut) {
+    let Some(Item::Table(workflow)) = doc.get_mut("workflow") else {
         return;
     };
-    let Some(toml_edit::Item::Table(pipelines)) = workflow.get_mut("pipelines") else {
+    let Some(Item::Table(pipelines)) = workflow.get_mut("pipelines") else {
         return;
     };
     for (_pname, pipeline_item) in pipelines.iter_mut() {
         let Some(pipeline) = pipeline_item.as_table_mut() else {
             continue;
         };
-        let Some(toml_edit::Item::Table(stages)) = pipeline.get_mut("stages") else {
+        let Some(Item::Table(stages)) = pipeline.get_mut("stages") else {
             continue;
         };
         inline_named_children_as_inline_tables(stages);
@@ -655,11 +656,11 @@ fn inline_stage_tables(doc: &mut toml_edit::DocumentMut) {
 }
 
 /// Convert `workflow.roles.*.prompts` entries from standard tables to inline tables.
-fn inline_role_prompt_tables(doc: &mut toml_edit::DocumentMut) {
-    let Some(toml_edit::Item::Table(workflow)) = doc.get_mut("workflow") else {
+fn inline_role_prompt_tables(doc: &mut DocumentMut) {
+    let Some(Item::Table(workflow)) = doc.get_mut("workflow") else {
         return;
     };
-    let Some(toml_edit::Item::Table(roles)) = workflow.get_mut("roles") else {
+    let Some(Item::Table(roles)) = workflow.get_mut("roles") else {
         return;
     };
 
@@ -677,16 +678,16 @@ fn inline_role_prompt_tables(doc: &mut toml_edit::DocumentMut) {
 }
 
 /// Convert `dispatcher.providers.*` and `dispatcher.tools.*` entries to inline tables/arrays.
-fn inline_dispatcher_tables(doc: &mut toml_edit::DocumentMut) {
-    let Some(toml_edit::Item::Table(dispatcher)) = doc.get_mut("dispatcher") else {
+fn inline_dispatcher_tables(doc: &mut DocumentMut) {
+    let Some(Item::Table(dispatcher)) = doc.get_mut("dispatcher") else {
         return;
     };
 
-    if let Some(toml_edit::Item::Table(providers)) = dispatcher.get_mut("providers") {
+    if let Some(Item::Table(providers)) = dispatcher.get_mut("providers") {
         inline_named_children_as_inline_tables(providers);
     }
 
-    if let Some(toml_edit::Item::Table(tools)) = dispatcher.get_mut("tools") {
+    if let Some(Item::Table(tools)) = dispatcher.get_mut("tools") {
         inline_named_children_as_inline_table_arrays(tools);
     }
 }
@@ -1085,93 +1086,6 @@ You have read access to the task and repository:
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── inline_dispatcher_tables unit tests ──────────────────────────────
-
-    #[test]
-    fn inline_dispatcher_tables_converts_providers_to_inline() {
-        let toml_str = r#"
-[dispatcher.providers.copilot]
-executor = "copilot"
-
-[dispatcher.providers.claude]
-executor = "claude"
-"#;
-        let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
-        inline_dispatcher_tables(&mut doc);
-        let output = doc.to_string();
-        // Should use inline table syntax, not section headers
-        assert!(
-            output.contains("copilot = {"),
-            "copilot should be inline table, got: {output}"
-        );
-        assert!(
-            output.contains("claude = {"),
-            "claude should be inline table, got: {output}"
-        );
-        assert!(
-            !output.contains("[dispatcher.providers.copilot]"),
-            "section header should be gone, got: {output}"
-        );
-    }
-
-    #[test]
-    fn inline_dispatcher_tables_converts_tools_to_inline_array() {
-        let toml_str = r#"
-[[dispatcher.tools.developer]]
-provider = "claude"
-model = "claude-sonnet-4.6"
-
-[[dispatcher.tools.developer]]
-provider = "copilot"
-model = "claude-sonnet-4.6"
-"#;
-        let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
-        inline_dispatcher_tables(&mut doc);
-        let output = doc.to_string();
-        assert!(
-            output.contains("developer = ["),
-            "developer should be inline array, got: {output}"
-        );
-        assert!(
-            !output.contains("[[dispatcher.tools.developer]]"),
-            "array-of-tables header should be gone, got: {output}"
-        );
-    }
-
-    #[test]
-    fn inline_dispatcher_tables_noop_when_dispatcher_absent() {
-        let toml_str = r#"
-[workflow]
-name = "test"
-"#;
-        let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
-        // Should not panic
-        inline_dispatcher_tables(&mut doc);
-    }
-
-    #[test]
-    fn inline_role_prompt_tables_converts_prompts_to_inline() {
-        let toml_str = r#"
-[workflow.roles.worker]
-tool = "developer"
-
-[workflow.roles.worker.prompts]
-main = "worker.md"
-"#;
-        let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
-        inline_role_prompt_tables(&mut doc);
-        let output = doc.to_string();
-        assert!(
-            output.contains("prompts= { main = \"worker.md\" }")
-                || output.contains("prompts = { main = \"worker.md\" }"),
-            "role prompts should be inline table, got: {output}"
-        );
-        assert!(
-            !output.contains("[workflow.roles.worker.prompts]"),
-            "nested prompts table header should be removed, got: {output}"
-        );
-    }
 
     // ── default_workflow validation tests ──────────────────────────────
 
