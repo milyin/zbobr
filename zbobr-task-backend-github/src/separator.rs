@@ -201,10 +201,11 @@ pub(crate) fn merge_concurrent_description_updates(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use zbobr_api::task::{
         ContextRecord, ContextRecordType, Pipeline, Stage, StageContext, StageInfo,
     };
+
+    use super::*;
 
     fn sample_context() -> TaskContext {
         TaskContext {

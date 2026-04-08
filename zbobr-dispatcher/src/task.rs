@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
 pub use zbobr_api::task::*;
-
-use zbobr_api::config::ZbobrDispatcherConfig;
-use zbobr_api::config_tools::McpTool;
+use zbobr_api::{config::ZbobrDispatcherConfig, config_tools::McpTool};
 
 use crate::{TaskDir, ZbobrDispatcher};
 
@@ -565,8 +563,10 @@ mod comment_model_tests {
 
     use async_trait::async_trait;
     use tokio::sync::Mutex;
-    use zbobr_api::backend::{TaskBackend, TaskMut, TaskWeak};
-    use zbobr_api::config::Role;
+    use zbobr_api::{
+        backend::{TaskBackend, TaskMut, TaskWeak},
+        config::Role,
+    };
 
     use super::*;
     use crate::{config::ZbobrDispatcherConfig, mcp::traits::CommonMcpImpl};

@@ -473,7 +473,8 @@ impl IntegrationTestEnv {
         let task = self.get_task(task_id).await;
         let zbobr = self.make_dispatcher(workflow.clone());
 
-        zbobr.process_task(&task, Some(&mcp_tester_config))
+        zbobr
+            .process_task(&task, Some(&mcp_tester_config))
             .await
             .unwrap_or_else(|e| {
                 panic!(
@@ -530,7 +531,8 @@ impl IntegrationTestEnv {
 
             let task = self.get_task(task_id).await;
 
-            zbobr.process_task(&task, Some(&mcp_tester_config))
+            zbobr
+                .process_task(&task, Some(&mcp_tester_config))
                 .await
                 .unwrap_or_else(|e| {
                     panic!(
@@ -575,7 +577,8 @@ impl IntegrationTestEnv {
         let task = self.get_task(task_id).await;
         let zbobr = self.make_dispatcher(workflow.clone());
 
-        zbobr.process_task(&task, Some(&mcp_tester_config))
+        zbobr
+            .process_task(&task, Some(&mcp_tester_config))
             .await
             .unwrap_or_else(|e| {
                 panic!(

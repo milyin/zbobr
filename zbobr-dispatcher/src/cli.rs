@@ -13,6 +13,7 @@ use zbobr_api::{
     config::{Role, StageDefinition},
     config_tools::McpTool,
     task::{Stage, StageContext, StageInfo},
+    tool_executor::ExecutorOutput,
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 // bring in the generic git helpers from utility crate
@@ -20,10 +21,9 @@ use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
     Comment, Task, TaskDir, ToolExecutor, Workflow, ZbobrDispatcher,
-    task::{Model, Executor},
+    task::{Executor, Model},
     workflow::SequentialSignal,
 };
-use zbobr_api::tool_executor::ExecutorOutput;
 
 // ---------------------------------------------------------------------------
 // CLI types
@@ -416,10 +416,7 @@ impl<'a> CliStageRunner<'a> {
     }
 
     async fn run(&self) -> anyhow::Result<()> {
-        let role = self
-            .stage_def
-            .role()
-            .expect("role stage must have role");
+        let role = self.stage_def.role().expect("role stage must have role");
         let tool = self
             .zbobr
             .config()
@@ -440,12 +437,7 @@ impl<'a> CliStageRunner<'a> {
         // Unified worktree detection and problem handling
         let work_dir = match self
             .zbobr
-            .detect_and_handle_worktree(
-                self.task_id,
-                self.pipeline,
-                self.stage,
-                task_dir.path(),
-            )
+            .detect_and_handle_worktree(self.task_id, self.pipeline, self.stage, task_dir.path())
             .await?
         {
             WorktreeResult::Ready(path) => path,
@@ -681,11 +673,12 @@ impl<'a> CliStageRunner<'a> {
 
             if outcome.execution_failed {
                 cycle_excluded_providers.insert(resolved_provider.provider.as_str().to_string());
-                let attempts_remaining = self.zbobr.available_provider_model_count_excluding(
-                    &tool,
-                    &cycle_excluded_providers,
-                )?;
-                let excluded = self.zbobr.record_provider_failure(resolved_provider.provider.as_str());
+                let attempts_remaining = self
+                    .zbobr
+                    .available_provider_model_count_excluding(&tool, &cycle_excluded_providers)?;
+                let excluded = self
+                    .zbobr
+                    .record_provider_failure(resolved_provider.provider.as_str());
                 server_handle.abort();
                 if attempts_remaining > 0 {
                     let exclusion_hint = if excluded {
@@ -706,7 +699,8 @@ impl<'a> CliStageRunner<'a> {
                     tool
                 );
             } else {
-                self.zbobr.record_provider_success(resolved_provider.provider.as_str());
+                self.zbobr
+                    .record_provider_success(resolved_provider.provider.as_str());
             }
 
             if let Some(e) = self
@@ -1010,7 +1004,10 @@ impl ZbobrDispatcher {
                         let task_session = self.task_session(task.id);
                         let status = format_error_status(self.config().fixed_offset(), &msg);
                         if let Err(pause_err) = task_session
-                            .set_pause_with_status_and_signal(status, Signal::go(stage_name.as_str()))
+                            .set_pause_with_status_and_signal(
+                                status,
+                                Signal::go(stage_name.as_str()),
+                            )
                             .await
                         {
                             tracing::error!(
@@ -1102,7 +1099,9 @@ impl ZbobrDispatcher {
             task_backend.debug_state(),
             repo_backend.debug_state()
         );
-        tracing::info!("Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s");
+        tracing::info!(
+            "Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s"
+        );
         tracing::info!(
             "Configured providers: {:?}",
             self.config().providers.keys().collect::<Vec<_>>()
@@ -1162,8 +1161,11 @@ impl ZbobrDispatcher {
                         continue;
                     }
                 };
-                if let crate::workflow::StateAction::RunStage(pipeline_name, stage_name, stage_def) =
-                    action
+                if let crate::workflow::StateAction::RunStage(
+                    pipeline_name,
+                    stage_name,
+                    stage_def,
+                ) = action
                 {
                     tracing::info!(
                         "Processing task #{} (state={:?}, signal={:?}) — running stage {}/{}",
@@ -1190,7 +1192,10 @@ impl ZbobrDispatcher {
                         let task_session = self.task_session(task.id);
                         let status = format_error_status(self.config().fixed_offset(), &msg);
                         if let Err(pause_err) = task_session
-                            .set_pause_with_status_and_signal(status, Signal::go(stage_name.as_str()))
+                            .set_pause_with_status_and_signal(
+                                status,
+                                Signal::go(stage_name.as_str()),
+                            )
                             .await
                         {
                             tracing::error!(
@@ -1344,7 +1349,8 @@ impl ZbobrDispatcher {
                                     task.id,
                                     entry.pipeline
                                 );
-                                if let Err(e) = task_session.set_signal(Some(Signal::ReturnFailure)).await
+                                if let Err(e) =
+                                    task_session.set_signal(Some(Signal::ReturnFailure)).await
                                 {
                                     tracing::error!(
                                         "Failed to set return_failure signal for task #{}: {e}",
@@ -1362,7 +1368,10 @@ impl ZbobrDispatcher {
                                 }
                             }
                             Ok(None) => {
-                                tracing::info!("Task #{}: pipeline failed at root — paused", task.id);
+                                tracing::info!(
+                                    "Task #{}: pipeline failed at root — paused",
+                                    task.id
+                                );
                                 let pipeline = task
                                     .state
                                     .pipeline()
@@ -1378,7 +1387,10 @@ impl ZbobrDispatcher {
                                     "Pipeline failed at root — manual intervention required",
                                 );
                                 if let Err(e) = task_session
-                                    .set_pause_with_status_and_signal(status, Signal::go(first_stage))
+                                    .set_pause_with_status_and_signal(
+                                        status,
+                                        Signal::go(first_stage),
+                                    )
                                     .await
                                 {
                                     tracing::error!("Failed to pause task #{}: {e}", task.id);
@@ -1398,7 +1410,9 @@ impl ZbobrDispatcher {
                                     entry.pipeline,
                                     entry.signal
                                 );
-                                if let Err(e) = task_session.set_signal(Some(entry.signal.clone())).await {
+                                if let Err(e) =
+                                    task_session.set_signal(Some(entry.signal.clone())).await
+                                {
                                     tracing::error!(
                                         "Failed to set return signal for task #{}: {e}",
                                         task.id
@@ -1520,7 +1534,8 @@ impl ZbobrDispatcher {
         // Merge failed in a normal mode — abort and dispatch to conflict handler
         let _ = git(&work_dir, &["merge", "--abort"]).await;
 
-        self.handle_merge_conflict(task_id, pipeline_name, stage).await
+        self.handle_merge_conflict(task_id, pipeline_name, stage)
+            .await
     }
 
     /// Dispatch to the merge conflict handler pipeline.
@@ -1790,8 +1805,9 @@ impl ZbobrDispatcher {
         let pending_state = State::pending(pipeline.clone());
 
         if outcome.execution_interrupted {
-            if let Err(e) =
-                self.perform_stash_and_push(task_id, work_dir, stage.as_str(), pipeline).await
+            if let Err(e) = self
+                .perform_stash_and_push(task_id, work_dir, stage.as_str(), pipeline)
+                .await
             {
                 tracing::warn!("Stash/push failed during interruption for task #{task_id}: {e}");
             }
@@ -1801,8 +1817,9 @@ impl ZbobrDispatcher {
         }
 
         if let Some(e) = outcome.execution_error.as_ref() {
-            if let Err(e) =
-                self.perform_stash_and_push(task_id, work_dir, stage.as_str(), pipeline).await
+            if let Err(e) = self
+                .perform_stash_and_push(task_id, work_dir, stage.as_str(), pipeline)
+                .await
             {
                 tracing::warn!("Stash/push failed during error handling for task #{task_id}: {e}");
             }
@@ -1816,14 +1833,17 @@ impl ZbobrDispatcher {
                 tracing::error!("Failed to set pause for task #{task_id}: {pause_err}");
             }
             task_session.set_state(pending_state.clone()).await?;
-            tracing::info!("Session failed for task #{task_id}, moved to {pending_state:?} with pause");
+            tracing::info!(
+                "Session failed for task #{task_id}, moved to {pending_state:?} with pause"
+            );
             return Ok(outcome.execution_error);
         }
 
         tracing::info!("Session complete for task #{task_id}");
 
-        if let Err(e) =
-            self.perform_stash_and_push(task_id, work_dir, stage.as_str(), pipeline).await
+        if let Err(e) = self
+            .perform_stash_and_push(task_id, work_dir, stage.as_str(), pipeline)
+            .await
         {
             tracing::error!("Stash/push failed for task #{task_id}: {e}");
             let msg = format!("Stash/push failed: {e}");
@@ -1870,7 +1890,10 @@ impl ZbobrDispatcher {
                     task_session.set_signal(Some(Signal::Return)).await?;
                 }
                 SequentialSignal::PauseThenSignal(signal) => {
-                    let status = format_error_status(self.config().fixed_offset(), "Auto-pause: stage completed");
+                    let status = format_error_status(
+                        self.config().fixed_offset(),
+                        "Auto-pause: stage completed",
+                    );
                     task_session
                         .set_pause_with_status_and_signal(status, signal)
                         .await?;
@@ -1896,87 +1919,91 @@ impl ZbobrDispatcher {
         role: &str,
         pipeline_name: &Pipeline,
     ) -> anyhow::Result<()> {
-    let task_backend = self.task_backend();
+        let task_backend = self.task_backend();
 
-    // Stash uncommitted changes if work_dir is a git repository.
-    // The work_dir may not yet be a git repo on the first run,
-    // so we skip stash but still proceed to update_worktree below.
-    let is_git_repo = git_output(work_dir, &["rev-parse", "--is-inside-work-tree"])
-        .await
-        .is_ok();
+        // Stash uncommitted changes if work_dir is a git repository.
+        // The work_dir may not yet be a git repo on the first run,
+        // so we skip stash but still proceed to update_worktree below.
+        let is_git_repo = git_output(work_dir, &["rev-parse", "--is-inside-work-tree"])
+            .await
+            .is_ok();
 
-    if is_git_repo {
-        tracing::info!("Checking for uncommitted changes in {}", work_dir.display());
+        if is_git_repo {
+            tracing::info!("Checking for uncommitted changes in {}", work_dir.display());
 
-        match git_output(work_dir, &["status", "--porcelain"]).await {
-            Ok(status) => {
-                if !status.is_empty() {
-                    let stash_msg = format!("Stashed by {} agent for task #{}", role, task_id);
-                    tracing::info!("Found uncommitted changes, stashing...");
-                    match git(
-                        work_dir,
-                        &["stash", "push", "--include-untracked", "-m", &stash_msg],
-                    )
-                    .await
-                    {
-                        Ok(_) => tracing::info!("Git stash successful"),
-                        Err(e) => tracing::warn!("Git stash failed: {e}"),
+            match git_output(work_dir, &["status", "--porcelain"]).await {
+                Ok(status) => {
+                    if !status.is_empty() {
+                        let stash_msg = format!("Stashed by {} agent for task #{}", role, task_id);
+                        tracing::info!("Found uncommitted changes, stashing...");
+                        match git(
+                            work_dir,
+                            &["stash", "push", "--include-untracked", "-m", &stash_msg],
+                        )
+                        .await
+                        {
+                            Ok(_) => tracing::info!("Git stash successful"),
+                            Err(e) => tracing::warn!("Git stash failed: {e}"),
+                        }
+                    } else {
+                        tracing::info!("No uncommitted changes found");
                     }
-                } else {
-                    tracing::info!("No uncommitted changes found");
+                }
+                Err(e) => tracing::warn!("Failed to check git status for stash: {e}"),
+            }
+        } else {
+            tracing::info!(
+                "Skipping stash for task #{task_id}: {} is not a git repository",
+                work_dir.display()
+            );
+        }
+
+        let task = task_backend
+            .get_task(task_id)
+            .await?
+            .snapshot(false)
+            .await?;
+        if let Some(identity) = task.identity() {
+            let is_conflict_handler = pipeline_name.as_str() == Pipeline::MERGE;
+            let is_uptodate = self.update_worktree(&identity).await?;
+            if !is_uptodate && !is_conflict_handler {
+                anyhow::bail!("Merge conflict while syncing work branch for task #{task_id}");
+            }
+            let config = self.config();
+            if config.overwrite_author && is_uptodate && is_git_repo {
+                let base_branch = self.repo_backend().branch().to_string();
+                zbobr_utility::rewrite_authors_on_worktree(
+                    work_dir,
+                    &base_branch,
+                    &config.git_user_name,
+                    &config.git_user_email,
+                )
+                .await?;
+                // Push rewritten commits
+                let is_uptodate = self.update_worktree(&identity).await?;
+                if !is_uptodate {
+                    anyhow::bail!(
+                        "Merge conflict while pushing rewritten commits for task #{task_id}"
+                    );
                 }
             }
-            Err(e) => tracing::warn!("Failed to check git status for stash: {e}"),
+        } else {
+            tracing::warn!("Task #{task_id} missing routing parameters — skipping push");
         }
-    } else {
-        tracing::info!(
-            "Skipping stash for task #{task_id}: {} is not a git repository",
-            work_dir.display()
-        );
-    }
 
-    let task = task_backend
-        .get_task(task_id)
-        .await?
-        .snapshot(false)
-        .await?;
-    if let Some(identity) = task.identity() {
-        let is_conflict_handler = pipeline_name.as_str() == Pipeline::MERGE;
-        let is_uptodate = self.update_worktree(&identity).await?;
-        if !is_uptodate && !is_conflict_handler {
-            anyhow::bail!("Merge conflict while syncing work branch for task #{task_id}");
-        }
-        let config = self.config();
-        if config.overwrite_author && is_uptodate && is_git_repo {
-            let base_branch = self.repo_backend().branch().to_string();
-            zbobr_utility::rewrite_authors_on_worktree(
-                work_dir,
-                &base_branch,
-                &config.git_user_name,
-                &config.git_user_email,
-            )
-            .await?;
-            // Push rewritten commits
-            let is_uptodate = self.update_worktree(&identity).await?;
-            if !is_uptodate {
-                anyhow::bail!("Merge conflict while pushing rewritten commits for task #{task_id}");
-            }
-        }
-    } else {
-        tracing::warn!("Task #{task_id} missing routing parameters — skipping push");
+        Ok(())
     }
-
-    Ok(())
-}
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use indexmap::IndexMap;
-    use zbobr_api::config::StageDefinition;
-    use zbobr_api::config::{PipelineConfig, WorkflowConfig};
-    use zbobr_api::{Pipeline, StackEntry};
+    use zbobr_api::{
+        Pipeline, StackEntry,
+        config::{PipelineConfig, StageDefinition, WorkflowConfig},
+    };
+
+    use super::*;
 
     // -- Test Helpers --
 

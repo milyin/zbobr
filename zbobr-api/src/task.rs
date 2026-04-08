@@ -782,7 +782,9 @@ impl serde::Serialize for Model {
 
 impl<'de> serde::Deserialize<'de> for Model {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Model(std::borrow::Cow::Owned(String::deserialize(deserializer)?)))
+        Ok(Model(std::borrow::Cow::Owned(String::deserialize(
+            deserializer,
+        )?)))
     }
 }
 

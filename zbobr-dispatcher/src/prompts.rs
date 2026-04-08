@@ -7,7 +7,7 @@ use zbobr_api::{
     config::{Role, StageDefinition, WorkflowConfig},
     config_tools::McpTool,
     context::serialize_context,
-    task::{DEFAULT_MAX_STAGE_COUNT, Pipeline, Stage, Executor},
+    task::{DEFAULT_MAX_STAGE_COUNT, Executor, Pipeline, Stage},
 };
 use zbobr_utility::TomlOption;
 
@@ -706,7 +706,10 @@ mod tests {
     }
 
     fn stage_prompts_map(path: PathBuf) -> Option<indexmap::IndexMap<String, TomlOption<PathBuf>>> {
-        Some(indexmap::IndexMap::from([("main".to_string(), TomlOption::Value(path))]))
+        Some(indexmap::IndexMap::from([(
+            "main".to_string(),
+            TomlOption::Value(path),
+        )]))
     }
 
     #[test]
@@ -923,9 +926,7 @@ mod tests {
         use indexmap::IndexMap;
         use zbobr_api::config::RoleDefinition;
 
-        let prompts = prompt.map(|p| {
-            IndexMap::from([("main".to_string(), TomlOption::Value(p))])
-        });
+        let prompts = prompt.map(|p| IndexMap::from([("main".to_string(), TomlOption::Value(p))]));
         let mut roles = IndexMap::new();
         roles.insert(
             role_name.to_string().into(),
@@ -963,9 +964,10 @@ mod tests {
             make_workflow_with_role_main_prompt("worker", Some(PathBuf::from("/role/worker.md")));
         let stage = StageDefinition {
             role: Some("worker".to_string().into()).into(),
-            prompts: Some(indexmap::IndexMap::from([
-                ("main".to_string(), TomlOption::ExplicitNone),
-            ])),
+            prompts: Some(indexmap::IndexMap::from([(
+                "main".to_string(),
+                TomlOption::ExplicitNone,
+            )])),
             ..Default::default()
         };
         let files = prompt_files_for_stage(&stage, &workflow);
@@ -982,9 +984,10 @@ mod tests {
             make_workflow_with_role_main_prompt("worker", Some(PathBuf::from("/role/worker.md")));
         let stage = StageDefinition {
             role: Some("worker".to_string().into()).into(),
-            prompts: Some(indexmap::IndexMap::from([
-                ("main".to_string(), TomlOption::Value(PathBuf::from("/stage/override.md"))),
-            ])),
+            prompts: Some(indexmap::IndexMap::from([(
+                "main".to_string(),
+                TomlOption::Value(PathBuf::from("/stage/override.md")),
+            )])),
             ..Default::default()
         };
         let files = prompt_files_for_stage(&stage, &workflow);
@@ -999,28 +1002,32 @@ mod tests {
         use zbobr_api::config::RoleDefinition;
 
         let mut roles = IndexMap::new();
-        roles.insert("worker".to_string().into(),
+        roles.insert(
+            "worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
-                prompts: Some(IndexMap::from([
-                    ("main".to_string(), TomlOption::Value(PathBuf::from("/prompts/worker.md"))),
-                ])),
+                prompts: Some(IndexMap::from([(
+                    "main".to_string(),
+                    TomlOption::Value(PathBuf::from("/prompts/worker.md")),
+                )])),
                 tool: Default::default(),
             },
         );
         let workflow = WorkflowConfig {
             prompts_dir: None,
-            prompts: Some(IndexMap::from([
-                ("task".to_string(), TomlOption::Value(PathBuf::from("/prompts/task.md"))),
-            ])),
+            prompts: Some(IndexMap::from([(
+                "task".to_string(),
+                TomlOption::Value(PathBuf::from("/prompts/task.md")),
+            )])),
             roles,
             pipelines: HashMap::new(),
         };
         let stage = StageDefinition {
             role: Some("worker".to_string().into()).into(),
-            prompts: Some(IndexMap::from([
-                ("task".to_string(), TomlOption::ExplicitNone),
-            ])),
+            prompts: Some(IndexMap::from([(
+                "task".to_string(),
+                TomlOption::ExplicitNone,
+            )])),
             ..Default::default()
         };
         let files = prompt_files_for_stage(&stage, &workflow);

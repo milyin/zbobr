@@ -57,7 +57,9 @@ impl serde::Serialize for Role {
 
 impl<'de> serde::Deserialize<'de> for Role {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Role(std::borrow::Cow::Owned(String::deserialize(deserializer)?)))
+        Ok(Role(std::borrow::Cow::Owned(String::deserialize(
+            deserializer,
+        )?)))
     }
 }
 

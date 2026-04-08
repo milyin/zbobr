@@ -3,12 +3,15 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Subcommand;
-use zbobr_api::{Pipeline, Stage, WorktreeBackend, config::{Role, StageDefinition, WorkflowConfig}};
+use zbobr_api::{
+    Pipeline, Stage, WorktreeBackend,
+    config::{Role, StageDefinition, WorkflowConfig},
+};
 use zbobr_dispatcher::{
     ConfiguredPromptBuilder, TaskDir, TaskListEntry, VAR_DESTINATION_BRANCH,
-    VAR_DESTINATION_REPOSITORY, Workflow, ZbobrDispatcher, eligible_runnable_tasks,
+    VAR_DESTINATION_REPOSITORY, Workflow, ZbobrDispatcher,
     config::{ZbobrDispatcherConfig, ZbobrExecutorConfig},
-    print_task, sample_task_and_comments, select_runnable_task,
+    eligible_runnable_tasks, print_task, sample_task_and_comments, select_runnable_task,
 };
 use zbobr_executor_claude::ClaudeExecutor;
 use zbobr_executor_copilot::CopilotExecutor;
@@ -554,11 +557,9 @@ fn resolve_stage_def<'a>(
         }
         (Some(stage), None) => {
             if let Some(p) = pipeline {
-                workflow
-                    .stage(p, stage)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("Stage '{}' not found in pipeline '{}'", stage, p)
-                    })
+                workflow.stage(p, stage).ok_or_else(|| {
+                    anyhow::anyhow!("Stage '{}' not found in pipeline '{}'", stage, p)
+                })
             } else {
                 let matches: Vec<_> = workflow
                     .all_stages()
@@ -590,11 +591,7 @@ fn resolve_stage_def<'a>(
                     .values()
                     .find(|s| s.role().map(|r| r.as_str()) == Some(role.as_str()))
                     .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "No stage with role '{}' found in pipeline '{}'",
-                            role,
-                            p
-                        )
+                        anyhow::anyhow!("No stage with role '{}' found in pipeline '{}'", role, p)
                     })
             } else {
                 workflow
