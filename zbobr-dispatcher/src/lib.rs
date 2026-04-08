@@ -20,9 +20,8 @@ use std::{
 };
 
 pub use cli::{
-    ConfigFileArg, ConfigLocation, GlobalArgs, TaskListEntry,
-    eligible_runnable_tasks, parse_cli, print_task, resolve_config_location,
-    select_runnable_task,
+    ConfigFileArg, ConfigLocation, GlobalArgs, TaskListEntry, eligible_runnable_tasks, parse_cli,
+    print_task, resolve_config_location, select_runnable_task,
 };
 pub use config::{
     ZbobrDispatcherConfig, ZbobrDispatcherToml, ZbobrExecutorArgs, ZbobrExecutorToml,
@@ -32,16 +31,16 @@ pub use prompts::{
     ConfiguredPromptBuilder, VAR_DESTINATION_BRANCH, VAR_DESTINATION_REPOSITORY,
     add_mcp_tool_variables, build_full_prompt, load_prompts, sample_task_and_comments,
 };
-pub use task::{Comment, Model, RoleSession, StackEntry, Task, TaskSession, Executor};
+pub use task::{Comment, Executor, Model, RoleSession, StackEntry, Task, TaskSession};
 pub use task_dir::TaskDir;
 pub use tool_executor::ToolExecutor;
 use typesafe_builder::{_TypesafeBuilderEmpty, _TypesafeBuilderFilled, Builder};
 pub use workflow::{StateAction, Workflow};
-use zbobr_api::{
-    Pipeline, State, config::{ResolvedProvider, Tool, ToolEntry}
-};
-
 pub use zbobr_api::config::Config;
+use zbobr_api::{
+    Pipeline, State,
+    config::{ResolvedProvider, Tool, ToolEntry},
+};
 use zbobr_executor_claude::{ClaudeExecutor, ZbobrExecutorClaudeConfig};
 use zbobr_executor_copilot::{CopilotExecutor, ZbobrExecutorCopilotConfig};
 use zbobr_executor_mcp_tester::{McpTesterExecutor, ZbobrExecutorMcpTesterConfig};
@@ -133,9 +132,11 @@ impl ZbobrDispatcher {
         tool: &Tool,
         additional_excluded: &HashSet<String>,
     ) -> anyhow::Result<(ResolvedProvider, Model)> {
-        let entries: &Vec<ToolEntry> = self.config.tools.get(tool).ok_or_else(|| {
-            anyhow::anyhow!("Tool '{}' not found in dispatcher config", tool)
-        })?;
+        let entries: &Vec<ToolEntry> = self
+            .config
+            .tools
+            .get(tool)
+            .ok_or_else(|| anyhow::anyhow!("Tool '{}' not found in dispatcher config", tool))?;
 
         let resolved_providers = self.config.resolve_providers()?;
 
@@ -157,10 +158,7 @@ impl ZbobrDispatcher {
             .collect();
 
         if available.is_empty() {
-            anyhow::bail!(
-                "All providers for tool '{}' are currently excluded",
-                tool
-            );
+            anyhow::bail!("All providers for tool '{}' are currently excluded", tool);
         }
 
         // Group by provider priority
@@ -187,7 +185,10 @@ impl ZbobrDispatcher {
         drop(rr);
 
         let (_, entry) = &top_group[pick];
-        let rp = resolved_providers.get(entry.provider.as_str()).unwrap().clone();
+        let rp = resolved_providers
+            .get(entry.provider.as_str())
+            .unwrap()
+            .clone();
         Ok((rp, entry.model.clone()))
     }
 
@@ -425,9 +426,10 @@ impl ZbobrDispatcher {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use indexmap::IndexMap;
     use zbobr_api::config::{ProviderDefinition, RoleDefinition, ToolEntry, WorkflowConfig};
+
+    use super::*;
 
     // ── Mock backends ────────────────────────────────────────────────────
 
@@ -517,7 +519,10 @@ mod tests {
         workflow: Workflow,
     ) -> ZbobrDispatcher {
         let config = ZbobrDispatcherConfig {
-            providers: providers.into_iter().map(|(name, def)| (name.into(), def)).collect(),
+            providers: providers
+                .into_iter()
+                .map(|(name, def)| (name.into(), def))
+                .collect(),
             tools,
             ..Default::default()
         };
@@ -555,7 +560,10 @@ mod tests {
         providers.insert("claude".to_string(), provider_def("claude", 10));
 
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string().into(), vec![tool_entry("claude", "opus")]);
+        tools.insert(
+            "smart".to_string().into(),
+            vec![tool_entry("claude", "opus")],
+        );
 
         let dispatcher = make_dispatcher(providers, tools);
         let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
@@ -600,7 +608,10 @@ mod tests {
 
         let (rp1, _) = dispatcher.select_provider(&"smart".into()).unwrap();
         let (rp2, _) = dispatcher.select_provider(&"smart".into()).unwrap();
-        assert_ne!(rp1.provider, rp2.provider, "Round-robin should alternate providers");
+        assert_ne!(
+            rp1.provider, rp2.provider,
+            "Round-robin should alternate providers"
+        );
     }
 
     #[test]
@@ -756,7 +767,9 @@ mod tests {
     #[test]
     fn select_provider_unknown_tool_error() {
         let dispatcher = make_dispatcher(IndexMap::new(), IndexMap::new());
-        let err = dispatcher.select_provider(&"nonexistent".into()).unwrap_err();
+        let err = dispatcher
+            .select_provider(&"nonexistent".into())
+            .unwrap_err();
         let msg = err.to_string().to_lowercase();
         assert!(
             msg.contains("not found"),
@@ -890,7 +903,10 @@ mod tests {
     #[test]
     fn validated_catches_invalid_workflow_refs() {
         let providers = IndexMap::from([("cp".to_string(), provider_def("copilot", 10))]);
-        let tools = IndexMap::from([("smart".to_string().into(), vec![tool_entry("cp", "some-model")])]);
+        let tools = IndexMap::from([(
+            "smart".to_string().into(),
+            vec![tool_entry("cp", "some-model")],
+        )]);
         let mut roles = IndexMap::new();
         roles.insert(
             "worker".to_string().into(),
@@ -940,7 +956,11 @@ mod tests {
 
         // Provider "b" has base priority 5 but entry priority 20 → should win.
         let (rp, model) = dispatcher.select_provider(&"smart".into()).unwrap();
-        assert_eq!(rp.provider.as_str(), "b", "elevated entry should be selected first");
+        assert_eq!(
+            rp.provider.as_str(),
+            "b",
+            "elevated entry should be selected first"
+        );
         assert_eq!(model.as_str(), "sonnet");
 
         // When "b" is excluded, fall back to "a" (effective priority 5).

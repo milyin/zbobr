@@ -1,10 +1,13 @@
-use std::{collections::HashSet, sync::{Arc, Mutex}};
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex},
+};
 
 use zbobr_api::{Pipeline, Stage, config::Role, config_tools::McpTool};
 
 use crate::{
     ZbobrDispatcher,
-    task::{Model, RoleSession, Executor},
+    task::{Executor, Model, RoleSession},
 };
 
 /// Get the current hostname, or "unknown" if it cannot be determined.
@@ -153,16 +156,10 @@ pub async fn run_role_mcp_server(
 
     let path = format!("/{}/{}", role, task_id);
 
-    let session: RoleSession = zbobr.role_session_with_tracker(
-        task_id,
-        tool_tracker,
-        pipeline.clone(),
-        pipeline_run_id,
-    );
+    let session: RoleSession =
+        zbobr.role_session_with_tracker(task_id, tool_tracker, pipeline.clone(), pipeline_run_id);
 
-    tracing::info!(
-        "Creating UnifiedMcp service for task {task_id} role '{role}' at path {path}"
-    );
+    tracing::info!("Creating UnifiedMcp service for task {task_id} role '{role}' at path {path}");
     let svc = StreamableHttpService::new(
         move || {
             tracing::debug!(

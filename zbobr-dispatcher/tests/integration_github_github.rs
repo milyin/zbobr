@@ -31,22 +31,35 @@ async fn load_credentials() -> (String, String, String, String, String) {
                 .repo
                 .expect("[repo] section missing in zbobr_github_test.toml");
             let task_token = {
-                let mut s = tasks.github_token.into_option().expect("github_token missing in [tasks]");
+                let mut s = tasks
+                    .github_token
+                    .into_option()
+                    .expect("github_token missing in [tasks]");
                 s.resolve()
                     .expect("failed to resolve tasks.github_token")
                     .to_owned()
             };
             let repo_token = {
-                let mut s = repo.github_token.into_option().expect("github_token missing in [repo]");
+                let mut s = repo
+                    .github_token
+                    .into_option()
+                    .expect("github_token missing in [repo]");
                 s.resolve()
                     .expect("failed to resolve repo.github_token")
                     .to_owned()
             };
             (
-                tasks.github_repo.into_option().expect("github_repo missing in [tasks]"),
+                tasks
+                    .github_repo
+                    .into_option()
+                    .expect("github_repo missing in [tasks]"),
                 task_token,
-                repo.repository.into_option().expect("repository missing in [repo]"),
-                repo.branch.into_option().unwrap_or_else(|| "main".to_string()),
+                repo.repository
+                    .into_option()
+                    .expect("repository missing in [repo]"),
+                repo.branch
+                    .into_option()
+                    .unwrap_or_else(|| "main".to_string()),
                 repo_token,
             )
         })

@@ -8,16 +8,14 @@
 
 mod stage_title;
 
-use chrono::{DateTime, FixedOffset};
-pub use stage_title::format_timestamp;
-
-use std::str::FromStr;
-use std::{borrow::Cow, fmt};
+use std::{borrow::Cow, fmt, str::FromStr};
 
 use anyhow::{Result, bail};
+use chrono::{DateTime, FixedOffset};
+use stage_title::MdStageTitle;
+pub use stage_title::format_timestamp;
 
 use crate::task::{Comment, ContextRecord, ContextRecordType, StageContext, TaskContext};
-use stage_title::MdStageTitle;
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Markdown record type

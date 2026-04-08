@@ -1,11 +1,8 @@
-use zbobr_api::{Pipeline, Stage};
-use zbobr_api::config::Role;
-use zbobr_api::{config_tools::McpTool};
-use zbobr_api::task::ContextRecordType;
+use zbobr_api::{Pipeline, Stage, config::Role, config_tools::McpTool, task::ContextRecordType};
 
 use crate::{
     mcp::common::parse_ctx_rec_id,
-    task::{Model, RoleSession, Executor},
+    task::{Executor, Model, RoleSession},
 };
 
 /// Log a string response from MCP methods.
@@ -117,24 +114,14 @@ pub trait CommonMcpImpl: Send + Sync {
             .await
         {
             let response = format!("Error adding context record: {e}");
-            log_mcp_string_response(
-                self.role(),
-                self.session().task_id(),
-                tool_name,
-                &response,
-            );
+            log_mcp_string_response(self.role(), self.session().task_id(), tool_name, &response);
             return response;
         }
 
         self.record_tool(tool);
 
         let response = "Report stored".to_string();
-        log_mcp_string_response(
-            self.role(),
-            self.session().task_id(),
-            tool_name,
-            &response,
-        );
+        log_mcp_string_response(self.role(), self.session().task_id(), tool_name, &response);
         response
     }
 
@@ -330,12 +317,7 @@ pub trait CommonMcpImpl: Send + Sync {
 
         match self.session().get_context_record_content(record_id).await {
             Ok(Some(content)) => {
-                log_mcp_string_response(
-                    self.role(),
-                    self.session().task_id(),
-                    tool_name,
-                    &content,
-                );
+                log_mcp_string_response(self.role(), self.session().task_id(), tool_name, &content);
                 content
             }
             Ok(None) => {

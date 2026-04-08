@@ -1,17 +1,15 @@
-use std::path::{Path, PathBuf};
-use std::{collections::HashMap};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use indexmap::IndexMap;
-use zbobr_utility::MergeToml;
-use zbobr_utility::TomlOption;
-use zbobr_utility::config_struct;
+use zbobr_utility::{MergeToml, Secret, TomlOption, config_struct};
 
-use crate::task::FixedOffsetTz;
 use crate::{
     config_tools::McpTool,
-    task::{Model, Pipeline, Executor},
+    task::{Executor, FixedOffsetTz, Model, Pipeline},
 };
-use zbobr_utility::Secret;
 
 mod stage;
 pub use stage::Stage;
@@ -549,7 +547,10 @@ impl WorkflowToml {
         let resolved_prompts_dir = self
             .prompts_dir
             .map(|p| zbobr_utility::resolve_path(p, config_dir));
-        let prompt_base: &Path = resolved_prompts_dir.as_option().map(|p| p.as_path()).unwrap_or(config_dir);
+        let prompt_base: &Path = resolved_prompts_dir
+            .as_option()
+            .map(|p| p.as_path())
+            .unwrap_or(config_dir);
         let prompts = self.prompts.map(|map| {
             map.into_iter()
                 .map(|(k, v)| (k, v.map(|p| zbobr_utility::resolve_path(p, prompt_base))))
@@ -956,7 +957,10 @@ impl ZbobrDispatcherConfig {
         visited: &mut Vec<Provider>,
     ) -> anyhow::Result<ResolvedProvider> {
         if visited.contains(&provider) {
-            anyhow::bail!("Circular parent reference detected in provider '{}'", provider.as_str());
+            anyhow::bail!(
+                "Circular parent reference detected in provider '{}'",
+                provider.as_str()
+            );
         }
         visited.push(provider.clone());
 
@@ -1014,8 +1018,9 @@ impl ZbobrDispatcherConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use indexmap::IndexMap;
+
+    use super::*;
 
     /// Helper: build a minimal ZbobrDispatcherConfig with given providers and tools.
     fn make_config(
@@ -1034,7 +1039,8 @@ mod tests {
     #[test]
     fn resolve_providers_basic() {
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("claude"),
+        providers.insert(
+            Provider::new("claude"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -1058,7 +1064,8 @@ mod tests {
     #[test]
     fn resolve_providers_single_level_inheritance() {
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("claude_base"),
+        providers.insert(
+            Provider::new("claude_base"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -1067,7 +1074,8 @@ mod tests {
                 access_key: Default::default(),
             },
         );
-        providers.insert(Provider::new("claude_child"),
+        providers.insert(
+            Provider::new("claude_child"),
             ProviderDefinition {
                 executor: Default::default(),
                 parent: Some(Provider::new("claude_base")).into(),
@@ -1086,7 +1094,8 @@ mod tests {
     #[test]
     fn resolve_providers_multi_level_chain() {
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("grandparent"),
+        providers.insert(
+            Provider::new("grandparent"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -1095,7 +1104,8 @@ mod tests {
                 access_key: Default::default(),
             },
         );
-        providers.insert(Provider::new("parent"),
+        providers.insert(
+            Provider::new("parent"),
             ProviderDefinition {
                 executor: Default::default(),
                 parent: Some(Provider::new("grandparent")).into(),
@@ -1104,7 +1114,8 @@ mod tests {
                 access_key: Default::default(),
             },
         );
-        providers.insert(Provider::new("child"),
+        providers.insert(
+            Provider::new("child"),
             ProviderDefinition {
                 executor: Default::default(),
                 parent: Some(Provider::new("parent")).into(),
@@ -1124,7 +1135,8 @@ mod tests {
     #[test]
     fn resolve_providers_circular_reference() {
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("a"),
+        providers.insert(
+            Provider::new("a"),
             ProviderDefinition {
                 executor: Default::default(),
                 parent: Some(Provider::new("b")).into(),
@@ -1133,7 +1145,8 @@ mod tests {
                 access_key: Default::default(),
             },
         );
-        providers.insert(Provider::new("b"),
+        providers.insert(
+            Provider::new("b"),
             ProviderDefinition {
                 executor: Default::default(),
                 parent: Some(Provider::new("a")).into(),
@@ -1154,7 +1167,8 @@ mod tests {
     #[test]
     fn resolve_providers_child_overrides_parent() {
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("base"),
+        providers.insert(
+            Provider::new("base"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -1163,7 +1177,8 @@ mod tests {
                 access_key: Default::default(),
             },
         );
-        providers.insert(Provider::new("child"),
+        providers.insert(
+            Provider::new("child"),
             ProviderDefinition {
                 executor: Default::default(),
                 parent: Some(Provider::new("base")).into(),
@@ -1186,7 +1201,8 @@ mod tests {
     #[test]
     fn validate_valid_config() {
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("claude"),
+        providers.insert(
+            Provider::new("claude"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -1196,7 +1212,8 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string().into(),
+        tools.insert(
+            "smart".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1210,7 +1227,8 @@ mod tests {
     #[test]
     fn validate_unknown_parent() {
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("child"),
+        providers.insert(
+            Provider::new("child"),
             ProviderDefinition {
                 executor: Default::default(),
                 parent: Some(Provider::new("nonexistent")).into(),
@@ -1231,7 +1249,8 @@ mod tests {
     #[test]
     fn validate_no_executor_no_parent() {
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("broken"),
+        providers.insert(
+            Provider::new("broken"),
             ProviderDefinition {
                 executor: Default::default(),
                 parent: Default::default(),
@@ -1252,7 +1271,8 @@ mod tests {
     #[test]
     fn validate_tool_references_unknown_provider() {
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("claude"),
+        providers.insert(
+            Provider::new("claude"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -1262,7 +1282,8 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string().into(),
+        tools.insert(
+            "smart".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("ghost"),
                 model: "opus".parse().unwrap(),
@@ -1357,7 +1378,8 @@ mod tests {
     #[test]
     fn resolve_providers_inherits_priority_from_parent() {
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("base"),
+        providers.insert(
+            Provider::new("base"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -1366,7 +1388,8 @@ mod tests {
                 access_key: Default::default(),
             },
         );
-        providers.insert(Provider::new("child"),
+        providers.insert(
+            Provider::new("child"),
             ProviderDefinition {
                 executor: Default::default(),
                 parent: Some(Provider::new("base")).into(),
@@ -1394,7 +1417,8 @@ mod tests {
     #[test]
     fn validate_workflow_refs_rejects_unknown_role_tool() {
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("claude"),
+        providers.insert(
+            Provider::new("claude"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -1404,7 +1428,8 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string().into(),
+        tools.insert(
+            "smart".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1424,7 +1449,8 @@ mod tests {
     #[test]
     fn validate_workflow_refs_rejects_unknown_stage_tool() {
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("claude"),
+        providers.insert(
+            Provider::new("claude"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -1434,7 +1460,8 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string().into(),
+        tools.insert(
+            "smart".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1471,7 +1498,8 @@ mod tests {
     #[test]
     fn validate_workflow_refs_passes_valid_refs() {
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("claude"),
+        providers.insert(
+            Provider::new("claude"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -1481,7 +1509,8 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string().into(),
+        tools.insert(
+            "smart".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1502,7 +1531,8 @@ mod tests {
         let mut pipelines = HashMap::new();
         pipelines.insert(Pipeline::Main, PipelineConfig { stages });
         let mut roles = IndexMap::new();
-        roles.insert("worker".to_string().into(),
+        roles.insert(
+            "worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompts: Default::default(),
@@ -1521,7 +1551,8 @@ mod tests {
     #[test]
     fn validate_workflow_refs_rejects_role_without_tool() {
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("claude"),
+        providers.insert(
+            Provider::new("claude"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -1531,7 +1562,8 @@ mod tests {
             },
         );
         let mut tools = IndexMap::new();
-        tools.insert("smart".to_string().into(),
+        tools.insert(
+            "smart".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
@@ -1552,7 +1584,8 @@ mod tests {
         let mut pipelines = HashMap::new();
         pipelines.insert(Pipeline::Main, PipelineConfig { stages });
         let mut roles = IndexMap::new();
-        roles.insert("worker".to_string().into(),
+        roles.insert(
+            "worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompts: Default::default(),
@@ -1578,7 +1611,8 @@ mod tests {
     #[test]
     fn validate_unknown_executor() {
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("bad"),
+        providers.insert(
+            Provider::new("bad"),
             ProviderDefinition {
                 executor: Some(Executor("invalid_executor".to_string())).into(),
                 parent: Default::default(),
@@ -1709,8 +1743,14 @@ developer = [
         let stage = StageDefinition {
             role: Some("worker".to_string().into()).into(),
             prompts: Some(IndexMap::from([
-                ("main".to_string(), TomlOption::Value(PathBuf::from("worker.md"))),
-                ("extra".to_string(), TomlOption::Value(PathBuf::from("/abs/special.md"))),
+                (
+                    "main".to_string(),
+                    TomlOption::Value(PathBuf::from("worker.md")),
+                ),
+                (
+                    "extra".to_string(),
+                    TomlOption::Value(PathBuf::from("/abs/special.md")),
+                ),
             ])),
             ..Default::default()
         };
@@ -1734,8 +1774,14 @@ developer = [
             StageDefinition {
                 role: Some("reviewer".to_string().into()).into(),
                 prompts: Some(IndexMap::from([
-                    ("main".to_string(), TomlOption::Value(PathBuf::from("review.md"))),
-                    ("common".to_string(), TomlOption::Value(PathBuf::from("common.md"))),
+                    (
+                        "main".to_string(),
+                        TomlOption::Value(PathBuf::from("review.md")),
+                    ),
+                    (
+                        "common".to_string(),
+                        TomlOption::Value(PathBuf::from("common.md")),
+                    ),
                 ])),
                 ..Default::default()
             },
@@ -1744,14 +1790,21 @@ developer = [
         let resolved = pipeline.resolve_paths(std::path::Path::new("/base"));
         let stage = resolved.stage(&Stage::from("review")).unwrap();
         let prompts = stage.prompts.as_ref().unwrap();
-        assert_eq!(prompts["main"].as_option().unwrap(), &PathBuf::from("/base/review.md"));
-        assert_eq!(prompts["common"].as_option().unwrap(), &PathBuf::from("/base/common.md"));
+        assert_eq!(
+            prompts["main"].as_option().unwrap(),
+            &PathBuf::from("/base/review.md")
+        );
+        assert_eq!(
+            prompts["common"].as_option().unwrap(),
+            &PathBuf::from("/base/common.md")
+        );
     }
 
     #[test]
     fn workflow_toml_resolve_paths_resolves_nested_prompt_fields() {
         let mut roles = IndexMap::new();
-        roles.insert("reviewer".to_string().into(),
+        roles.insert(
+            "reviewer".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompts: Some(IndexMap::from([(
@@ -1766,9 +1819,10 @@ developer = [
             Stage::from("review"),
             StageDefinition {
                 role: Some("reviewer".to_string().into()).into(),
-                prompts: Some(IndexMap::from([
-                    ("extra".to_string(), TomlOption::Value(PathBuf::from("common.md"))),
-                ])),
+                prompts: Some(IndexMap::from([(
+                    "extra".to_string(),
+                    TomlOption::Value(PathBuf::from("common.md")),
+                )])),
                 ..Default::default()
             },
         );
@@ -1798,7 +1852,9 @@ developer = [
         let pipeline = &resolved.pipelines.as_ref().unwrap()[&Pipeline::Main];
         let stage = pipeline.stage(&Stage::from("review")).unwrap();
         assert_eq!(
-            stage.prompts.as_ref().unwrap()["extra"].as_option().unwrap(),
+            stage.prompts.as_ref().unwrap()["extra"]
+                .as_option()
+                .unwrap(),
             &PathBuf::from("/shared/prompts/common.md")
         );
     }
@@ -1810,7 +1866,8 @@ developer = [
         // Overlay config (from /project/) has no workflow section.
         // After per-file resolution + merge, the base paths should stay anchored to /shared/.
         let mut roles = IndexMap::new();
-        roles.insert("reviewer".to_string().into(),
+        roles.insert(
+            "reviewer".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompts: Some(IndexMap::from([(
@@ -1853,7 +1910,8 @@ developer = [
         // Base config defines two roles; overlay overrides only one.
         // The unmodified role from base must survive the merge.
         let mut base_roles = IndexMap::new();
-        base_roles.insert("reviewer".to_string().into(),
+        base_roles.insert(
+            "reviewer".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompts: Some(IndexMap::from([(
@@ -1863,7 +1921,8 @@ developer = [
                 tool: Default::default(),
             },
         );
-        base_roles.insert("worker".to_string().into(),
+        base_roles.insert(
+            "worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompts: Some(IndexMap::from([(
@@ -1882,7 +1941,8 @@ developer = [
 
         // Overlay only overrides "reviewer", with a different prompt.
         let mut overlay_roles = IndexMap::new();
-        overlay_roles.insert("reviewer".to_string().into(),
+        overlay_roles.insert(
+            "reviewer".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompts: Some(IndexMap::from([(
@@ -1904,12 +1964,16 @@ developer = [
 
         // "reviewer" is overridden by the overlay.
         assert_eq!(
-            roles["reviewer"].prompts.as_ref().unwrap()["main"].as_option().unwrap(),
+            roles["reviewer"].prompts.as_ref().unwrap()["main"]
+                .as_option()
+                .unwrap(),
             &PathBuf::from("/project/reviewer_override.md")
         );
         // "worker" survives from the base config unchanged.
         assert_eq!(
-            roles["worker"].prompts.as_ref().unwrap()["main"].as_option().unwrap(),
+            roles["worker"].prompts.as_ref().unwrap()["main"]
+                .as_option()
+                .unwrap(),
             &PathBuf::from("/shared/worker.md")
         );
     }
@@ -1981,13 +2045,23 @@ developer = [
         // Main pipeline is overridden by the overlay.
         let main = &pipelines[&Pipeline::Main];
         assert_eq!(
-            main.stage(&Stage::from("planning")).unwrap().role.as_option().map(|s| s.as_str()).unwrap(),
+            main.stage(&Stage::from("planning"))
+                .unwrap()
+                .role
+                .as_option()
+                .map(|s| s.as_str())
+                .unwrap(),
             "senior_planner"
         );
         // Fix pipeline survives from the base config unchanged.
         let fix = &pipelines[&Pipeline::Custom("fix".to_string())];
         assert_eq!(
-            fix.stage(&Stage::from("fixing")).unwrap().role.as_option().map(|s| s.as_str()).unwrap(),
+            fix.stage(&Stage::from("fixing"))
+                .unwrap()
+                .role
+                .as_option()
+                .map(|s| s.as_str())
+                .unwrap(),
             "worker"
         );
     }
@@ -1996,7 +2070,8 @@ developer = [
     fn dispatcher_toml_merge_providers_key_wise() {
         // Base config defines two providers; overlay adds one and overrides one.
         let mut base_providers = IndexMap::new();
-        base_providers.insert(Provider::new("claude"),
+        base_providers.insert(
+            Provider::new("claude"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -2005,7 +2080,8 @@ developer = [
                 access_key: Default::default(),
             },
         );
-        base_providers.insert(Provider::new("copilot"),
+        base_providers.insert(
+            Provider::new("copilot"),
             ProviderDefinition {
                 executor: Some(Executor("copilot".to_string())).into(),
                 parent: Default::default(),
@@ -2022,7 +2098,8 @@ developer = [
 
         // Overlay overrides "claude" with higher priority and adds "gpt".
         let mut overlay_providers = IndexMap::new();
-        overlay_providers.insert(Provider::new("claude"),
+        overlay_providers.insert(
+            Provider::new("claude"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -2031,7 +2108,8 @@ developer = [
                 access_key: Default::default(),
             },
         );
-        overlay_providers.insert(Provider::new("gpt"),
+        overlay_providers.insert(
+            Provider::new("gpt"),
             ProviderDefinition {
                 executor: Some(Executor("openai".to_string())).into(),
                 parent: Default::default(),
@@ -2054,7 +2132,10 @@ developer = [
         // "copilot" survives from the base config.
         assert_eq!(providers["copilot"].priority, TomlOption::Value(5));
         // "gpt" is added by the overlay.
-        assert_eq!(providers["gpt"].executor.as_option().map(|e| e.as_str()), Some("openai"));
+        assert_eq!(
+            providers["gpt"].executor.as_option().map(|e| e.as_str()),
+            Some("openai")
+        );
         assert_eq!(providers.len(), 3);
     }
 
@@ -2063,7 +2144,8 @@ developer = [
         // Base defines a full provider; overlay only patches priority.
         // The overlay must NOT lose executor or other fields from base.
         let mut base_providers = IndexMap::new();
-        base_providers.insert(Provider::new("shared"),
+        base_providers.insert(
+            Provider::new("shared"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -2080,7 +2162,8 @@ developer = [
 
         // Overlay only overrides priority — executor and plan_mode are not restated.
         let mut overlay_providers = IndexMap::new();
-        overlay_providers.insert(Provider::new("shared"),
+        overlay_providers.insert(
+            Provider::new("shared"),
             ProviderDefinition {
                 executor: Default::default(),
                 parent: Default::default(),
@@ -2099,7 +2182,8 @@ developer = [
         let providers = merged.providers.unwrap();
 
         assert_eq!(
-            providers["shared"].priority, TomlOption::Value(20),
+            providers["shared"].priority,
+            TomlOption::Value(20),
             "priority should be overridden"
         );
         assert_eq!(
@@ -2108,7 +2192,8 @@ developer = [
             "executor should be preserved from base"
         );
         assert_eq!(
-            providers["shared"].plan_mode, TomlOption::Value(false),
+            providers["shared"].plan_mode,
+            TomlOption::Value(false),
             "plan_mode should be preserved from base"
         );
     }
@@ -2119,7 +2204,8 @@ developer = [
         // mcp and prompts must survive because overlay uses mcp: None (field absent) and prompts: None.
         use crate::config_tools::McpTool;
         let mut base_roles = IndexMap::new();
-        base_roles.insert("worker".to_string().into(),
+        base_roles.insert(
+            "worker".to_string().into(),
             RoleDefinition {
                 mcp: Some(vec![McpTool::ReportSuccess]),
                 prompts: Some(IndexMap::from([(
@@ -2139,7 +2225,8 @@ developer = [
 
         // Overlay sets only tool; mcp is None (not specified) so base mcp survives.
         let mut overlay_roles = IndexMap::new();
-        overlay_roles.insert("worker".to_string().into(),
+        overlay_roles.insert(
+            "worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
                 prompts: Default::default(),
@@ -2163,7 +2250,9 @@ developer = [
             "tool should be set by overlay"
         );
         assert_eq!(
-            roles["worker"].prompts.as_ref().unwrap()["main"].as_option().unwrap(),
+            roles["worker"].prompts.as_ref().unwrap()["main"]
+                .as_option()
+                .unwrap(),
             &PathBuf::from("/shared/worker.md"),
             "prompts should be preserved from base"
         );
@@ -2178,7 +2267,8 @@ developer = [
         // An overlay that explicitly sets mcp = [] must clear the base mcp list.
         use crate::config_tools::McpTool;
         let mut base_roles = IndexMap::new();
-        base_roles.insert("worker".to_string().into(),
+        base_roles.insert(
+            "worker".to_string().into(),
             RoleDefinition {
                 mcp: Some(vec![McpTool::ReportSuccess]),
                 prompts: Default::default(),
@@ -2194,7 +2284,8 @@ developer = [
 
         // Overlay explicitly sets mcp = [] (Some(vec![])) to clear the list.
         let mut overlay_roles = IndexMap::new();
-        overlay_roles.insert("worker".to_string().into(),
+        overlay_roles.insert(
+            "worker".to_string().into(),
             RoleDefinition {
                 mcp: Some(vec![]),
                 prompts: Default::default(),
@@ -2283,17 +2374,31 @@ developer = [
         let main = &pipelines[&Pipeline::Main];
 
         assert_eq!(
-            main.stage(&Stage::from("planning")).unwrap().role.as_option().map(|s| s.as_str()).unwrap(),
+            main.stage(&Stage::from("planning"))
+                .unwrap()
+                .role
+                .as_option()
+                .map(|s| s.as_str())
+                .unwrap(),
             "senior_planner",
             "planning role should be overridden"
         );
         assert_eq!(
-            main.stage(&Stage::from("planning")).unwrap().tool.as_option().map(|s| s.as_str()),
+            main.stage(&Stage::from("planning"))
+                .unwrap()
+                .tool
+                .as_option()
+                .map(|s| s.as_str()),
             Some("fast"),
             "planning tool should be preserved from base"
         );
         assert_eq!(
-            main.stage(&Stage::from("working")).unwrap().role.as_option().map(|s| s.as_str()).unwrap(),
+            main.stage(&Stage::from("working"))
+                .unwrap()
+                .role
+                .as_option()
+                .map(|s| s.as_str())
+                .unwrap(),
             "worker",
             "working stage should survive unchanged from base"
         );
@@ -2308,14 +2413,25 @@ developer = [
             StageDefinition {
                 role: Some("planner".to_string().into()).into(),
                 prompts: Some(IndexMap::from([
-                    ("main".to_string(), TomlOption::Value(PathBuf::from("/shared/main.md"))),
-                    ("extra".to_string(), TomlOption::Value(PathBuf::from("/shared/extra.md"))),
+                    (
+                        "main".to_string(),
+                        TomlOption::Value(PathBuf::from("/shared/main.md")),
+                    ),
+                    (
+                        "extra".to_string(),
+                        TomlOption::Value(PathBuf::from("/shared/extra.md")),
+                    ),
                 ])),
                 ..Default::default()
             },
         );
         let mut base_pipelines = HashMap::new();
-        base_pipelines.insert(Pipeline::Main, PipelineConfig { stages: base_stages });
+        base_pipelines.insert(
+            Pipeline::Main,
+            PipelineConfig {
+                stages: base_stages,
+            },
+        );
 
         let base = WorkflowToml {
             prompts_dir: Default::default(),
@@ -2330,14 +2446,20 @@ developer = [
             Stage::from("planning"),
             StageDefinition {
                 role: Default::default(),
-                prompts: Some(IndexMap::from([
-                    ("extra".to_string(), TomlOption::ExplicitNone),
-                ])),
+                prompts: Some(IndexMap::from([(
+                    "extra".to_string(),
+                    TomlOption::ExplicitNone,
+                )])),
                 ..Default::default()
             },
         );
         let mut overlay_pipelines = HashMap::new();
-        overlay_pipelines.insert(Pipeline::Main, PipelineConfig { stages: overlay_stages });
+        overlay_pipelines.insert(
+            Pipeline::Main,
+            PipelineConfig {
+                stages: overlay_stages,
+            },
+        );
 
         let overlay = WorkflowToml {
             prompts_dir: Default::default(),
@@ -2348,7 +2470,9 @@ developer = [
 
         let merged = base.merge_toml(overlay);
         let pipelines = merged.pipelines.unwrap();
-        let stage = pipelines[&Pipeline::Main].stage(&Stage::from("planning")).unwrap();
+        let stage = pipelines[&Pipeline::Main]
+            .stage(&Stage::from("planning"))
+            .unwrap();
         let prompts = stage.prompts.as_ref().unwrap();
 
         assert!(
@@ -2473,8 +2597,14 @@ prompts = { task = "common.md", extra = "planning.md" }
         let stage = &pipelines[&Pipeline::Main].stages["planning"];
         let prompts = stage.prompts.as_ref().unwrap();
         assert_eq!(prompts.len(), 2);
-        assert_eq!(prompts["task"], TomlOption::Value(PathBuf::from("common.md")));
-        assert_eq!(prompts["extra"], TomlOption::Value(PathBuf::from("planning.md")));
+        assert_eq!(
+            prompts["task"],
+            TomlOption::Value(PathBuf::from("common.md"))
+        );
+        assert_eq!(
+            prompts["extra"],
+            TomlOption::Value(PathBuf::from("planning.md"))
+        );
     }
 
     // ── Tools map merge test (IndexMap<Tool, Vec<ToolEntry>>) ─────────
@@ -2482,7 +2612,8 @@ prompts = { task = "common.md", extra = "planning.md" }
     #[test]
     fn dispatcher_toml_merge_tools_key_wise_with_wholesale_list_replacement() {
         let mut base_tools = IndexMap::new();
-        base_tools.insert("developer".to_string().into(),
+        base_tools.insert(
+            "developer".to_string().into(),
             vec![
                 ToolEntry {
                     provider: Provider::new("claude"),
@@ -2496,7 +2627,8 @@ prompts = { task = "common.md", extra = "planning.md" }
                 },
             ],
         );
-        base_tools.insert("reviewer".to_string().into(),
+        base_tools.insert(
+            "reviewer".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "claude-opus-4.6".parse().unwrap(),
@@ -2511,14 +2643,16 @@ prompts = { task = "common.md", extra = "planning.md" }
 
         // Overlay replaces "developer" list entirely and adds "tester".
         let mut overlay_tools = IndexMap::new();
-        overlay_tools.insert("developer".to_string().into(),
+        overlay_tools.insert(
+            "developer".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("gpt"),
                 model: "claude-opus-4.6".parse().unwrap(),
                 priority: Some(1).into(),
             }],
         );
-        overlay_tools.insert("tester".to_string().into(),
+        overlay_tools.insert(
+            "tester".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "claude-sonnet-4.6".parse().unwrap(),
@@ -2598,7 +2732,9 @@ prompts = { extra = nan }
 
         // Worker role: prompts.main inherits from base (overlay didn't specify it).
         assert_eq!(
-            roles["worker"].prompts.as_ref().unwrap()["main"].as_option().map(|p| p.as_path()),
+            roles["worker"].prompts.as_ref().unwrap()["main"]
+                .as_option()
+                .map(|p| p.as_path()),
             Some(std::path::Path::new("worker.md"))
         );
 
@@ -2607,14 +2743,21 @@ prompts = { extra = nan }
         assert_eq!(reviewer_mcp.len(), 1);
         assert_eq!(reviewer_mcp[0], McpTool::ReportSuccess);
         assert_eq!(
-            roles["reviewer"].prompts.as_ref().unwrap()["main"].as_option().map(|p| p.as_path()),
+            roles["reviewer"].prompts.as_ref().unwrap()["main"]
+                .as_option()
+                .map(|p| p.as_path()),
             Some(std::path::Path::new("reviewer.md"))
         );
 
         // Planning stage: "extra" slot cleared by nan overlay; "task" slot survives.
         let pipelines = merged.pipelines.as_ref().unwrap();
         let main = &pipelines[&Pipeline::Main];
-        let planning_prompts = main.stage(&Stage::from("planning")).unwrap().prompts.as_ref().unwrap();
+        let planning_prompts = main
+            .stage(&Stage::from("planning"))
+            .unwrap()
+            .prompts
+            .as_ref()
+            .unwrap();
         assert!(
             matches!(planning_prompts["extra"], TomlOption::ExplicitNone),
             "planning extra slot should be cleared by nan overlay"
@@ -2627,12 +2770,21 @@ prompts = { extra = nan }
 
         // Planning stage: role inherited from base (overlay didn't specify it).
         assert_eq!(
-            main.stage(&Stage::from("planning")).unwrap().role.as_option().map(|s| s.as_str()),
+            main.stage(&Stage::from("planning"))
+                .unwrap()
+                .role
+                .as_option()
+                .map(|s| s.as_str()),
             Some("worker")
         );
 
         // Working stage: completely inherited from base (not in overlay).
-        let working_prompts = main.stage(&Stage::from("working")).unwrap().prompts.as_ref().unwrap();
+        let working_prompts = main
+            .stage(&Stage::from("working"))
+            .unwrap()
+            .prompts
+            .as_ref()
+            .unwrap();
         assert_eq!(working_prompts.len(), 2);
         assert_eq!(
             working_prompts["task"].as_option().unwrap(),
@@ -2714,14 +2866,17 @@ on_success = nan
         let overlay: WorkflowToml = toml::from_str(overlay_toml).unwrap();
 
         let merged = base.merge_toml(overlay);
-        let stage = merged
-            .pipelines.as_ref().unwrap()[&Pipeline::Main]
-            .stage(&Stage::from("working")).unwrap();
+        let stage = merged.pipelines.as_ref().unwrap()[&Pipeline::Main]
+            .stage(&Stage::from("working"))
+            .unwrap();
 
         // ExplicitNone should clear the inherited on_success transition
         assert_eq!(stage.on_success, TomlOption::ExplicitNone);
-        assert!(stage.on_success().is_none(),
-            "nan on_success must produce None at runtime, got: {:?}", stage.on_success());
+        assert!(
+            stage.on_success().is_none(),
+            "nan on_success must produce None at runtime, got: {:?}",
+            stage.on_success()
+        );
     }
 
     #[test]
@@ -2771,7 +2926,8 @@ on_success = nan
         // Parent has an access_key; child sets access_key = nan to clear it.
         use zbobr_utility::Secret;
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("base"),
+        providers.insert(
+            Provider::new("base"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -2780,7 +2936,8 @@ on_success = nan
                 access_key: Some(Secret::value("parent-key".to_string())).into(),
             },
         );
-        providers.insert(Provider::new("child"),
+        providers.insert(
+            Provider::new("child"),
             ProviderDefinition {
                 executor: Default::default(),
                 parent: Some(Provider::new("base")).into(),
@@ -2803,7 +2960,8 @@ on_success = nan
     fn resolve_providers_child_clears_priority_with_explicit_none() {
         // Parent has priority 50; child sets priority = nan to reset to default (10).
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("base"),
+        providers.insert(
+            Provider::new("base"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -2812,7 +2970,8 @@ on_success = nan
                 access_key: Default::default(),
             },
         );
-        providers.insert(Provider::new("child"),
+        providers.insert(
+            Provider::new("child"),
             ProviderDefinition {
                 executor: Default::default(),
                 parent: Some(Provider::new("base")).into(),
@@ -2835,7 +2994,8 @@ on_success = nan
     fn resolve_providers_child_clears_plan_mode_with_explicit_none() {
         // Parent has plan_mode = true; child sets plan_mode = nan to reset to default (false).
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("base"),
+        providers.insert(
+            Provider::new("base"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -2844,7 +3004,8 @@ on_success = nan
                 access_key: Default::default(),
             },
         );
-        providers.insert(Provider::new("child"),
+        providers.insert(
+            Provider::new("child"),
             ProviderDefinition {
                 executor: Default::default(),
                 parent: Some(Provider::new("base")).into(),
@@ -2867,7 +3028,8 @@ on_success = nan
     fn resolve_providers_child_executor_nan_is_error() {
         // A child provider setting executor = nan must produce an error since executor is required.
         let mut providers = IndexMap::new();
-        providers.insert(Provider::new("base"),
+        providers.insert(
+            Provider::new("base"),
             ProviderDefinition {
                 executor: Some(Executor("claude".to_string())).into(),
                 parent: Default::default(),
@@ -2876,7 +3038,8 @@ on_success = nan
                 access_key: Default::default(),
             },
         );
-        providers.insert(Provider::new("child"),
+        providers.insert(
+            Provider::new("child"),
             ProviderDefinition {
                 executor: TomlOption::ExplicitNone,
                 parent: Some(Provider::new("base")).into(),

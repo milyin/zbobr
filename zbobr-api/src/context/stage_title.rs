@@ -15,8 +15,7 @@
 //!
 //! `Serialize`/`Deserialize` delegate to `Display`/`FromStr` for serde compatibility.
 
-use std::fmt;
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
 use anyhow::{Context as _, Result};
 

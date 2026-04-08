@@ -57,7 +57,9 @@ impl serde::Serialize for Provider {
 
 impl<'de> serde::Deserialize<'de> for Provider {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Provider(std::borrow::Cow::Owned(String::deserialize(deserializer)?)))
+        Ok(Provider(std::borrow::Cow::Owned(String::deserialize(
+            deserializer,
+        )?)))
     }
 }
 

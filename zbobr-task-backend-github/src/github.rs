@@ -1196,7 +1196,10 @@ impl ZbobrTaskBackendGithubImpl {
                         .await
                     {
                         Ok(value) => break Ok(value),
-                        Err(e) if attempt < MAX_GITHUB_RETRY_ATTEMPTS && is_transient_octocrab_error(&e) => {
+                        Err(e)
+                            if attempt < MAX_GITHUB_RETRY_ATTEMPTS
+                                && is_transient_octocrab_error(&e) =>
+                        {
                             tracing::warn!(
                                 "Transient GitHub error while creating report file {candidate} (attempt {attempt}/{max}): {}",
                                 format_octocrab_error(&e),
@@ -1534,12 +1537,13 @@ impl TaskBackend for TaskBackendGithub {
 mod flag_tests {
     use std::sync::Once;
 
-    use super::*;
-    use crate::separator::{PARAMETERS_SEPARATOR, serialize_description_full};
     use zbobr_api::{
         Secret,
         task::{ContextRecord, ContextRecordType, Pipeline, Stage, StageContext, StageInfo},
     };
+
+    use super::*;
+    use crate::separator::{PARAMETERS_SEPARATOR, serialize_description_full};
 
     fn init_rustls() {
         static RUSTLS_INIT: Once = Once::new();
@@ -1604,8 +1608,7 @@ mod flag_tests {
 
     #[test]
     fn task_to_string_params_includes_flags_when_set() {
-        use zbobr_api::task::State;
-        use zbobr_api::task::TaskContext;
+        use zbobr_api::task::{State, TaskContext};
         let task = Task {
             id: 1,
             title: "t".to_string(),

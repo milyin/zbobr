@@ -128,8 +128,9 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use clap::Parser;
+
+    use super::*;
 
     // Test-only Cli struct for testing the Command parser without config parts
     #[derive(Parser)]

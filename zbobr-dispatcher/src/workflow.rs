@@ -3,7 +3,9 @@ use std::{collections::HashMap, path::PathBuf};
 use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Signal, Stage, State, Task,
-    config::{PipelineConfig, Role, RoleDefinition, StageDefinition, StageTransition, WorkflowConfig},
+    config::{
+        PipelineConfig, Role, RoleDefinition, StageDefinition, StageTransition, WorkflowConfig,
+    },
     config_tools::McpTool,
 };
 
@@ -528,7 +530,10 @@ role = "merger"
         let working = wf
             .stage(&Pipeline::from("main"), &Stage::from("working"))
             .unwrap();
-        assert_eq!(working.role().as_ref().map(|role| role.as_str()), Some("worker"));
+        assert_eq!(
+            working.role().as_ref().map(|role| role.as_str()),
+            Some("worker")
+        );
         assert_eq!(working.call_pipeline(), None);
         assert!(!working.is_call());
     }

@@ -928,8 +928,9 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use zbobr_api::Secret;
+
+    use super::*;
 
     // ── parse_github_repo tests ──────────────────────────────────────
 

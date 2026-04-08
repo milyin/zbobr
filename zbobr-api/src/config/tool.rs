@@ -58,7 +58,9 @@ impl serde::Serialize for Tool {
 
 impl<'de> serde::Deserialize<'de> for Tool {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Tool(std::borrow::Cow::Owned(String::deserialize(deserializer)?)))
+        Ok(Tool(std::borrow::Cow::Owned(String::deserialize(
+            deserializer,
+        )?)))
     }
 }
 

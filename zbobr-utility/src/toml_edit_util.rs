@@ -54,8 +54,9 @@ pub fn inline_item_as_inline_table_array(item: &mut Item) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use toml_edit::DocumentMut;
+
+    use super::*;
 
     #[test]
     fn inline_named_children_as_inline_tables_converts_child_tables() {

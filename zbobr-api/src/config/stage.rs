@@ -51,7 +51,9 @@ impl serde::Serialize for Stage {
 
 impl<'de> serde::Deserialize<'de> for Stage {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Stage(std::borrow::Cow::Owned(String::deserialize(deserializer)?)))
+        Ok(Stage(std::borrow::Cow::Owned(String::deserialize(
+            deserializer,
+        )?)))
     }
 }
 
