@@ -912,6 +912,26 @@ mod tests {
         }
     }
 
+    fn make_workflow_with_role_prompt_explicit_none(role_name: &str) -> WorkflowConfig {
+        use indexmap::IndexMap;
+        use zbobr_api::config::RoleDefinition;
+
+        let mut roles = IndexMap::new();
+        roles.insert(
+            role_name.to_string().into(),
+            RoleDefinition {
+                mcp: None,
+                prompt: zbobr_utility::TomlOption::ExplicitNone,
+                tool: Default::default(),
+            },
+        );
+        WorkflowConfig {
+            prompts_dir: None,
+            roles,
+            pipelines: HashMap::new(),
+        }
+    }
+
     #[test]
     fn prompt_files_for_stage_absent_role_prompt_inherits_role_level() {
         let workflow =
@@ -953,5 +973,22 @@ mod tests {
         };
         let files = prompt_files_for_stage(&stage, &workflow);
         assert_eq!(files, vec![PathBuf::from("/stage/override.md")]);
+    }
+
+    #[test]
+    fn prompt_files_for_stage_absent_stage_prompt_role_prompt_explicit_none() {
+        // When stage doesn't override and role's prompt is ExplicitNone,
+        // should return no files.
+        let workflow = make_workflow_with_role_prompt_explicit_none("worker");
+        let stage = StageDefinition {
+            role: Some("worker".to_string().into()).into(),
+            role_prompt: zbobr_utility::TomlOption::Absent,
+            ..Default::default()
+        };
+        let files = prompt_files_for_stage(&stage, &workflow);
+        assert!(
+            files.is_empty(),
+            "ExplicitNone at role level should produce no prompt files; got: {files:?}"
+        );
     }
 }
