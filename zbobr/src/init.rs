@@ -644,20 +644,33 @@ fn inline_stage_tables(doc: &mut toml_edit::DocumentMut) {
         let Some(toml_edit::Item::Table(stages)) = pipeline.get_mut("stages") else {
             continue;
         };
-        let keys: Vec<String> = stages.iter().map(|(k, _)| k.to_string()).collect();
-        for key in &keys {
-            let Some(stage_item) = stages.get_mut(key) else {
-                continue;
-            };
-            if let Some(table) = stage_item.as_table_mut() {
-                let inline = table.clone().into_inline_table();
-                *stage_item = toml_edit::Item::Value(toml_edit::Value::InlineTable(inline));
-            }
-            if let Some(mut k) = stages.key_mut(key) {
-                k.fmt();
-            }
-        }
+        inline_named_children_as_inline_tables(stages);
         stages.set_dotted(true);
+    }
+}
+
+fn inline_named_children_as_inline_tables(table: &mut toml_edit::Table) {
+    let keys: Vec<String> = table.iter().map(|(k, _)| k.to_string()).collect();
+    for key in &keys {
+        if let Some(item) = table.get_mut(key) {
+            inline_item_as_inline_table(item);
+        }
+        if let Some(mut k) = table.key_mut(key) {
+            k.fmt();
+        }
+    }
+}
+
+fn inline_item_as_inline_table(item: &mut toml_edit::Item) {
+    if let Some(table) = item.as_table_mut() {
+        let inline = table.clone().into_inline_table();
+        *item = toml_edit::Item::Value(toml_edit::Value::InlineTable(inline));
+    }
+}
+
+fn inline_child_table(parent: &mut toml_edit::Table, child_key: &str) {
+    if let Some(item) = parent.get_mut(child_key) {
+        inline_item_as_inline_table(item);
     }
 }
 
@@ -672,15 +685,9 @@ fn inline_role_prompt_tables(doc: &mut toml_edit::DocumentMut) {
 
     let keys: Vec<String> = roles.iter().map(|(k, _)| k.to_string()).collect();
     for key in &keys {
-        let Some(role_item) = roles.get_mut(key) else {
-            continue;
-        };
-        if let Some(table) = role_item.as_table_mut() {
-            if let Some(prompts_item) = table.get_mut("prompts") {
-                if let Some(prompts_table) = prompts_item.as_table_mut() {
-                    let inline = prompts_table.clone().into_inline_table();
-                    *prompts_item = toml_edit::Item::Value(toml_edit::Value::InlineTable(inline));
-                }
+        if let Some(role_item) = roles.get_mut(key) {
+            if let Some(role_table) = role_item.as_table_mut() {
+                inline_child_table(role_table, "prompts");
             }
         }
         if let Some(mut k) = roles.key_mut(key) {
@@ -696,44 +703,33 @@ fn inline_dispatcher_tables(doc: &mut toml_edit::DocumentMut) {
     };
 
     if let Some(toml_edit::Item::Table(providers)) = dispatcher.get_mut("providers") {
-        let keys: Vec<String> = providers.iter().map(|(k, _)| k.to_string()).collect();
-        for key in &keys {
-            let Some(provider_item) = providers.get_mut(key) else {
-                continue;
-            };
-            if let Some(table) = provider_item.as_table_mut() {
-                let inline = table.clone().into_inline_table();
-                *provider_item = toml_edit::Item::Value(toml_edit::Value::InlineTable(inline));
-            }
-            if let Some(mut k) = providers.key_mut(key) {
-                k.fmt();
-            }
-        }
+        inline_named_children_as_inline_tables(providers);
     }
 
     if let Some(toml_edit::Item::Table(tools)) = dispatcher.get_mut("tools") {
-        let keys: Vec<String> = tools.iter().map(|(k, _)| k.to_string()).collect();
-        for key in &keys {
-            let Some(tool_item) = tools.get_mut(key) else {
-                continue;
-            };
-            let inline_tables: Option<Vec<toml_edit::InlineTable>> =
-                if let toml_edit::Item::ArrayOfTables(aot) = tool_item {
-                    Some(aot.iter().map(|t| t.clone().into_inline_table()).collect())
-                } else {
-                    None
-                };
-            if let Some(inline_tables) = inline_tables {
-                let mut array = toml_edit::Array::new();
-                for inline in inline_tables {
-                    array.push(toml_edit::Value::InlineTable(inline));
-                }
-                *tool_item = toml_edit::Item::Value(toml_edit::Value::Array(array));
-            }
-            if let Some(mut k) = tools.key_mut(key) {
-                k.fmt();
-            }
+        inline_named_children_as_inline_table_arrays(tools);
+    }
+}
+
+fn inline_named_children_as_inline_table_arrays(table: &mut toml_edit::Table) {
+    let keys: Vec<String> = table.iter().map(|(k, _)| k.to_string()).collect();
+    for key in &keys {
+        if let Some(item) = table.get_mut(key) {
+            inline_item_as_inline_table_array(item);
         }
+        if let Some(mut k) = table.key_mut(key) {
+            k.fmt();
+        }
+    }
+}
+
+fn inline_item_as_inline_table_array(item: &mut toml_edit::Item) {
+    if let toml_edit::Item::ArrayOfTables(aot) = item {
+        let mut array = toml_edit::Array::new();
+        for table in aot.iter() {
+            array.push(toml_edit::Value::InlineTable(table.clone().into_inline_table()));
+        }
+        *item = toml_edit::Item::Value(toml_edit::Value::Array(array));
     }
 }
 
