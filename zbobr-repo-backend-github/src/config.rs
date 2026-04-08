@@ -21,6 +21,9 @@ pub struct ZbobrRepoBackendGithubConfig {
     #[arg(long)]
     #[config(path)]
     pub repos_dir: PathBuf,
+    /// Automatically sync a forked repository with its upstream before each fetch.
+    #[arg(long)]
+    pub auto_sync_fork: bool,
 }
 
 impl Default for ZbobrRepoBackendGithubConfig {
@@ -30,6 +33,7 @@ impl Default for ZbobrRepoBackendGithubConfig {
             branch: "main".to_string(),
             github_token: Secret::default(),
             repos_dir: PathBuf::from("./repos"),
+            auto_sync_fork: true,
         }
     }
 }

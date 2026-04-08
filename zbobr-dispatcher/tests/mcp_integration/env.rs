@@ -260,6 +260,7 @@ pub async fn init_github_github(
         branch: branch.clone(),
         github_token: Secret::value(repo_token),
         repos_dir: base_path.join("repos").join(&dispatcher_config.instance),
+        auto_sync_fork: true,
     };
 
     let task_backend = TaskBackendGithub::from_config(task_backend_config.clone()).ok()?;
