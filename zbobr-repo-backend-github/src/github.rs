@@ -1189,4 +1189,183 @@ mod tests {
         let backend = ZbobrRepoBackendGithub::from_config(config).unwrap();
         assert_eq!(backend.backend_config.repository, "myorg/myrepo");
     }
+
+    // ── maybe_sync_fork tests ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn maybe_sync_fork_skips_all_http_calls_when_auto_sync_fork_false() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let config = ZbobrRepoBackendGithubConfig {
+            repository: "org/repo".to_string(),
+            branch: "main".to_string(),
+            github_token: Secret::value("ghp_test123"),
+            repos_dir: std::path::PathBuf::from("/tmp/test-repos"),
+            auto_sync_fork: false,
+        };
+        let backend = ZbobrRepoBackendGithub::from_config(config).unwrap();
+        let repo = GitHubRepo {
+            full_name: "org/repo".to_string(),
+        };
+        let result = backend.maybe_sync_fork(&repo, "main").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn maybe_sync_fork_skips_merge_upstream_for_non_fork_repos() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/org/repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({
+                    "full_name": "org/repo",
+                    "fork": false
+                }),
+            ))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/repos/org/repo/merge-upstream"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({
+                    "merge_type": "fast-forward"
+                }),
+            ))
+            .expect(0)
+            .mount(&mock_server)
+            .await;
+
+        let config = ZbobrRepoBackendGithubConfig {
+            repository: "org/repo".to_string(),
+            branch: "main".to_string(),
+            github_token: Secret::value("ghp_test123"),
+            repos_dir: std::path::PathBuf::from("/tmp/test-repos"),
+            auto_sync_fork: true,
+        };
+        let mut backend = ZbobrRepoBackendGithub::from_config(config).unwrap();
+        backend.octocrab = octocrab::Octocrab::builder()
+            .base_uri(&mock_server.uri())
+            .expect("Failed to set base_uri")
+            .personal_token("ghp_test123")
+            .build()
+            .expect("Failed to build octocrab");
+
+        let repo = GitHubRepo {
+            full_name: "org/repo".to_string(),
+        };
+        let result = backend.maybe_sync_fork(&repo, "main").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn maybe_sync_fork_calls_merge_upstream_for_fork_repos() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/org/repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({
+                    "full_name": "org/repo",
+                    "fork": true
+                }),
+            ))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/repos/org/repo/merge-upstream"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({
+                    "merge_type": "fast-forward"
+                }),
+            ))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let config = ZbobrRepoBackendGithubConfig {
+            repository: "org/repo".to_string(),
+            branch: "main".to_string(),
+            github_token: Secret::value("ghp_test123"),
+            repos_dir: std::path::PathBuf::from("/tmp/test-repos"),
+            auto_sync_fork: true,
+        };
+        let mut backend = ZbobrRepoBackendGithub::from_config(config).unwrap();
+        backend.octocrab = octocrab::Octocrab::builder()
+            .base_uri(&mock_server.uri())
+            .expect("Failed to set base_uri")
+            .personal_token("ghp_test123")
+            .build()
+            .expect("Failed to build octocrab");
+
+        let repo = GitHubRepo {
+            full_name: "org/repo".to_string(),
+        };
+        let result = backend.maybe_sync_fork(&repo, "main").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn maybe_sync_fork_propagates_merge_upstream_errors() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/org/repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({
+                    "full_name": "org/repo",
+                    "fork": true
+                }),
+            ))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/repos/org/repo/merge-upstream"))
+            .respond_with(ResponseTemplate::new(422).set_body_json(
+                serde_json::json!({
+                    "message": "Merge conflict"
+                }),
+            ))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let config = ZbobrRepoBackendGithubConfig {
+            repository: "org/repo".to_string(),
+            branch: "main".to_string(),
+            github_token: Secret::value("ghp_test123"),
+            repos_dir: std::path::PathBuf::from("/tmp/test-repos"),
+            auto_sync_fork: true,
+        };
+        let mut backend = ZbobrRepoBackendGithub::from_config(config).unwrap();
+        backend.octocrab = octocrab::Octocrab::builder()
+            .base_uri(&mock_server.uri())
+            .expect("Failed to set base_uri")
+            .personal_token("ghp_test123")
+            .build()
+            .expect("Failed to build octocrab");
+
+        let repo = GitHubRepo {
+            full_name: "org/repo".to_string(),
+        };
+        let result = backend.maybe_sync_fork(&repo, "main").await;
+        assert!(result.is_err());
+    }
 }
