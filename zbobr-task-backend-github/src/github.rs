@@ -50,7 +50,7 @@ const ALL_STATE_LABEL_NAMES: &[&str] = &[
     STATE_LABEL_RUNNING,
 ];
 
-const MAX_GITHUB_RETRY_ATTEMPTS: u64 = 3;
+const MAX_GITHUB_RETRY_ATTEMPTS: u64 = 5;
 
 use crate::{
     config::ZbobrTaskBackendGithubConfig,
@@ -91,6 +91,10 @@ fn format_octocrab_error(e: &octocrab::Error) -> String {
 /// Convert an octocrab error into an anyhow::Error with detailed information.
 fn octocrab_to_anyhow(e: octocrab::Error) -> anyhow::Error {
     anyhow::anyhow!("GitHub API error: {}", format_octocrab_error(&e))
+}
+
+fn format_report_filename_timestamp() -> String {
+    chrono::Local::now().format("%Y-%m-%d_%H-%M-%S_%z").to_string()
 }
 
 fn is_transient_octocrab_error(error: &octocrab::Error) -> bool {
@@ -1142,6 +1146,7 @@ impl ZbobrTaskBackendGithubImpl {
         // When checking existence on a non-default branch, pass ?ref=
         let ref_query: Option<Vec<(&str, &str)>> = reports_branch.map(|b| vec![("ref", b)]);
 
+        let timestamp = format_report_filename_timestamp();
         let mut n = 0u64;
         let filename = loop {
             if n >= MAX_GITHUB_RETRY_ATTEMPTS {
@@ -1151,9 +1156,9 @@ impl ZbobrTaskBackendGithubImpl {
             }
 
             let candidate = if n == 0 {
-                format!("{base_name}.md")
+                format!("{base_name}_{timestamp}.md")
             } else {
-                format!("{base_name}_{n}.md")
+                format!("{base_name}_{timestamp}_{n}.md")
             };
             let path = format!("{dir}/{candidate}");
 
@@ -1801,5 +1806,15 @@ mod flag_tests {
         assert!(err.contains("stage[0].prompt_link"));
         assert!(err.contains("expected full GitHub blob URL"));
         assert!(err.contains("blob/main"));
+    }
+
+    #[test]
+    fn format_report_filename_timestamp_matches_expected_pattern() {
+        let timestamp = format_report_filename_timestamp();
+
+        assert_eq!(timestamp.len(), 25, "timestamp should be exactly 25 characters");
+        assert_eq!(timestamp.chars().nth(10), Some('_'));
+        assert_eq!(timestamp.chars().nth(19), Some('_'));
+        assert!(matches!(timestamp.chars().nth(20), Some('+') | Some('-')));
     }
 }
