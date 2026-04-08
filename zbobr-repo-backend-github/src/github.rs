@@ -83,6 +83,13 @@ async fn worktree_bare_dir(workspace_path: &Path) -> Option<PathBuf> {
 #[allow(dead_code)]
 struct RepoResponse {
     full_name: String,
+    fork: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+struct MergeUpstreamResponse {
+    merge_type: String,
 }
 
 #[derive(Debug)]
@@ -336,6 +343,9 @@ impl ZbobrRepoBackendGithub {
             ],
         )
         .await?;
+
+        self.maybe_sync_fork(repo, &self.backend_config.branch.clone())
+            .await?;
 
         tracing::info!("Fetching origin in {}", bare_dir.display());
         git_env(&bare_dir, &["fetch", "origin"], &env).await?;
@@ -640,6 +650,58 @@ impl ZbobrRepoBackendGithub {
             .patch::<serde_json::Value, _, _>(&endpoint, Some(&patch_payload))
             .await
             .map_err(octocrab_to_anyhow)?;
+        Ok(())
+    }
+
+    /// If `auto_sync_fork` is enabled and the repository is a fork, sync the given branch
+    /// with its upstream via GitHub's merge-upstream API.
+    async fn maybe_sync_fork(&self, repo: &GitHubRepo, branch: &str) -> anyhow::Result<()> {
+        if !self.backend_config.auto_sync_fork {
+            return Ok(());
+        }
+
+        let owner = repo.owner();
+        let name = repo.name();
+
+        let repo_info = retry_github("get repository info", || {
+            self.octocrab
+                .get::<RepoResponse, _, _>(format!("/repos/{owner}/{name}"), None::<&()>)
+        })
+        .await?;
+
+        if !repo_info.fork {
+            return Ok(());
+        }
+
+        tracing::info!(
+            "Repository {}/{} is a fork; syncing branch '{}' with upstream",
+            owner,
+            name,
+            branch
+        );
+
+        let endpoint = format!("/repos/{owner}/{name}/merge-upstream");
+        let payload = serde_json::json!({ "branch": branch });
+
+        let result: anyhow::Result<MergeUpstreamResponse> =
+            retry_github("sync fork with upstream", || {
+                self.octocrab.post(&endpoint, Some(&payload))
+            })
+            .await;
+
+        match result {
+            Ok(response) => {
+                tracing::info!(
+                    "Fork sync for branch '{}': merge_type={}",
+                    branch,
+                    response.merge_type
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Fork sync failed for branch '{}': {}", branch, e);
+            }
+        }
+
         Ok(())
     }
 }
@@ -1114,6 +1176,7 @@ mod tests {
             branch: "main".to_string(),
             github_token: Secret::value("ghp_test123"),
             repos_dir: std::path::PathBuf::from("/tmp/test-repos"),
+            auto_sync_fork: true,
         };
         let backend = ZbobrRepoBackendGithub::from_config(config).unwrap();
         assert_eq!(backend.backend_config.repository, "myorg/myrepo");
@@ -1127,6 +1190,7 @@ mod tests {
             branch: "main".to_string(),
             github_token: Secret::value("ghp_test123"),
             repos_dir: std::path::PathBuf::from("/tmp/test-repos"),
+            auto_sync_fork: true,
         };
         let backend = ZbobrRepoBackendGithub::from_config(config).unwrap();
         assert_eq!(backend.backend_config.repository, "myorg/myrepo");
