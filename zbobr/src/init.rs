@@ -250,7 +250,7 @@ fn default_config_toml() -> RootConfigToml {
             vec![
                 ToolEntry {
                     provider: PROVIDER_CLAUDE,
-                    model: CLAUDE_MODEL_SONNET,
+                    model: CLAUDE_MODEL_OPUS,
                     priority: None,
                 },
                 ToolEntry {
@@ -265,7 +265,7 @@ fn default_config_toml() -> RootConfigToml {
             vec![
                 ToolEntry {
                     provider: PROVIDER_CLAUDE_PLANNER,
-                    model: CLAUDE_MODEL_SONNET,
+                    model: CLAUDE_MODEL_OPUS,
                     priority: None,
                 },
                 ToolEntry {
