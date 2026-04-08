@@ -4,8 +4,10 @@ use anyhow::{Context, Result};
 
 pub mod macros;
 pub mod secret;
+pub mod toml_option;
 pub use macros::config_struct;
 pub use secret::Secret;
+pub use toml_option::TomlOption;
 
 /// Trait for merging two TOML configuration snapshots.
 ///
