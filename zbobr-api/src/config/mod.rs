@@ -881,8 +881,13 @@ impl ZbobrDispatcherConfig {
         stage_def: &StageDefinition,
         workflow: &WorkflowConfig,
     ) -> anyhow::Result<Tool> {
-        if let Some(ref tool) = stage_def.tool.as_option() {
-            return Ok((*tool).clone());
+        match &stage_def.tool {
+            TomlOption::Value(tool) => return Ok(tool.clone()),
+            TomlOption::ExplicitNone => anyhow::bail!(
+                "Tool explicitly cleared (nan) for stage with role {:?}",
+                stage_def.role()
+            ),
+            TomlOption::Absent => {}
         }
         if let Some(role_name) = stage_def.role().map(|r| r.as_str())
             && let Some(role_def) = workflow.role_definition(role_name)
@@ -926,12 +931,35 @@ impl ZbobrDispatcherConfig {
 
         if let Some(ref parent_name) = def.parent.as_option() {
             let parent = self.resolve_single_provider((*parent_name).clone(), visited)?;
+            let executor = match def.executor.clone() {
+                TomlOption::Value(e) => e,
+                TomlOption::Absent => parent.executor,
+                TomlOption::ExplicitNone => anyhow::bail!(
+                    "Provider '{}' explicitly clears executor (nan), but executor is required",
+                    provider
+                ),
+            };
+            let priority = match def.priority.clone() {
+                TomlOption::Value(p) => p,
+                TomlOption::Absent => parent.priority,
+                TomlOption::ExplicitNone => 10,
+            };
+            let plan_mode = match def.plan_mode.clone() {
+                TomlOption::Value(p) => p,
+                TomlOption::Absent => parent.plan_mode,
+                TomlOption::ExplicitNone => false,
+            };
+            let access_key = match def.access_key.clone() {
+                TomlOption::Value(k) => Some(k),
+                TomlOption::Absent => parent.access_key,
+                TomlOption::ExplicitNone => None,
+            };
             Ok(ResolvedProvider {
                 provider: provider.clone(),
-                executor: def.executor.clone().into_option().unwrap_or(parent.executor),
-                priority: def.priority.clone().into_option().unwrap_or(parent.priority),
-                plan_mode: def.plan_mode.clone().into_option().unwrap_or(parent.plan_mode),
-                access_key: def.access_key.clone().into_option().or(parent.access_key),
+                executor,
+                priority,
+                plan_mode,
+                access_key,
             })
         } else {
             let executor = def.executor.clone().into_option().ok_or_else(|| {
@@ -2594,5 +2622,151 @@ role = nan
         assert_eq!(stage.role, TomlOption::ExplicitNone);
         // into_option() converts ExplicitNone → None
         assert!(stage.role.clone().into_option().is_none());
+    }
+
+    // ── ExplicitNone semantics in consumer layer ─────────────────────────
+
+    #[test]
+    fn resolve_tool_stage_explicit_none_blocks_role_fallback() {
+        // A stage with tool = ExplicitNone must NOT fall back to the role's tool.
+        let stage = StageDefinition {
+            tool: TomlOption::ExplicitNone,
+            role: Some("worker".to_string().into()).into(),
+            ..Default::default()
+        };
+        let workflow = make_workflow_with_role("worker", Some("role-tool".into()));
+        let config = ZbobrDispatcherConfig::default();
+        let err = config.resolve_tool(&stage, &workflow).unwrap_err();
+        assert!(
+            err.to_string().contains("explicitly cleared"),
+            "Expected 'explicitly cleared' in error: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_providers_child_clears_access_key_with_explicit_none() {
+        // Parent has an access_key; child sets access_key = nan to clear it.
+        use zbobr_utility::Secret;
+        let mut providers = IndexMap::new();
+        providers.insert(Provider::new("base"),
+            ProviderDefinition {
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Some(Secret::value("parent-key".to_string())).into(),
+            },
+        );
+        providers.insert(Provider::new("child"),
+            ProviderDefinition {
+                executor: Default::default(),
+                parent: Some(Provider::new("base")).into(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: TomlOption::ExplicitNone,
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        let child = &resolved[&Provider::new("child")];
+        assert!(
+            child.access_key.is_none(),
+            "Child with access_key = nan should clear the parent's access_key"
+        );
+    }
+
+    #[test]
+    fn resolve_providers_child_clears_priority_with_explicit_none() {
+        // Parent has priority 50; child sets priority = nan to reset to default (10).
+        let mut providers = IndexMap::new();
+        providers.insert(Provider::new("base"),
+            ProviderDefinition {
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Some(50).into(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
+            },
+        );
+        providers.insert(Provider::new("child"),
+            ProviderDefinition {
+                executor: Default::default(),
+                parent: Some(Provider::new("base")).into(),
+                priority: TomlOption::ExplicitNone,
+                plan_mode: Default::default(),
+                access_key: Default::default(),
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        let child = &resolved[&Provider::new("child")];
+        assert_eq!(
+            child.priority, 10,
+            "Child with priority = nan should reset to default (10), not inherit parent's 50"
+        );
+    }
+
+    #[test]
+    fn resolve_providers_child_clears_plan_mode_with_explicit_none() {
+        // Parent has plan_mode = true; child sets plan_mode = nan to reset to default (false).
+        let mut providers = IndexMap::new();
+        providers.insert(Provider::new("base"),
+            ProviderDefinition {
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Some(true).into(),
+                access_key: Default::default(),
+            },
+        );
+        providers.insert(Provider::new("child"),
+            ProviderDefinition {
+                executor: Default::default(),
+                parent: Some(Provider::new("base")).into(),
+                priority: Default::default(),
+                plan_mode: TomlOption::ExplicitNone,
+                access_key: Default::default(),
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        let child = &resolved[&Provider::new("child")];
+        assert!(
+            !child.plan_mode,
+            "Child with plan_mode = nan should reset to default (false), not inherit parent's true"
+        );
+    }
+
+    #[test]
+    fn resolve_providers_child_executor_nan_is_error() {
+        // A child provider setting executor = nan must produce an error since executor is required.
+        let mut providers = IndexMap::new();
+        providers.insert(Provider::new("base"),
+            ProviderDefinition {
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
+            },
+        );
+        providers.insert(Provider::new("child"),
+            ProviderDefinition {
+                executor: TomlOption::ExplicitNone,
+                parent: Some(Provider::new("base")).into(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let err = config.resolve_providers().unwrap_err();
+        assert!(
+            err.to_string().to_lowercase().contains("executor"),
+            "Expected executor-related error, got: {err}"
+        );
     }
 }
