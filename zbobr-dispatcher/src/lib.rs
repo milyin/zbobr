@@ -896,12 +896,13 @@ mod tests {
             "worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
-                prompt: Default::default(),
+                prompts: Default::default(),
                 tool: Some("nonexistent".to_string().into()).into(),
             },
         );
         let wf_config = WorkflowConfig {
             prompts_dir: None,
+            prompts: None,
             roles,
             pipelines: std::collections::HashMap::new(),
         };

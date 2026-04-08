@@ -1126,7 +1126,7 @@ impl ZbobrDispatcher {
                     stage_name,
                     stage_def.role().map_or("<none>", |r| r.as_str()),
                     tool_name,
-                    stage_def.role_prompt
+                    stage_def.prompts
                 );
             }
         }
