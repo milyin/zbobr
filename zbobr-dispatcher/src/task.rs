@@ -566,6 +566,7 @@ mod comment_model_tests {
     use async_trait::async_trait;
     use tokio::sync::Mutex;
     use zbobr_api::backend::{TaskBackend, TaskMut, TaskWeak};
+    use zbobr_api::config::Role;
 
     use super::*;
     use crate::{config::ZbobrDispatcherConfig, mcp::traits::CommonMcpImpl};
@@ -875,8 +876,8 @@ mod comment_model_tests {
             Role::new("planner"),
             Executor::copilot(),
             Model::from("gpt-5-mini".to_string()),
-            "planning".to_string(),
-            "main".to_string(),
+            "planning".to_string().into(),
+            Pipeline::Main,
             1,
         );
 
@@ -914,7 +915,7 @@ mod comment_model_tests {
         task_id: u64,
     ) -> crate::mcp::unified::UnifiedMcp {
         let tracker = Arc::new(std::sync::Mutex::new(None::<McpTool>));
-        let session = zbobr.role_session_with_tracker(task_id, tracker, "main".to_string(), 1);
+        let session = zbobr.role_session_with_tracker(task_id, tracker, Pipeline::Main, 1);
         let allowed_tools: std::collections::HashSet<zbobr_api::config_tools::McpTool> =
             zbobr_api::config_tools::ALL_TOOLS.iter().copied().collect();
         crate::mcp::unified::UnifiedMcp::new(
@@ -923,8 +924,8 @@ mod comment_model_tests {
             Role::new("worker"),
             Executor::copilot(),
             Model::from("gpt-5-mini".to_string()),
-            "working".to_string(),
-            "main".to_string(),
+            "working".to_string().into(),
+            Pipeline::Main,
             1,
         )
     }
@@ -945,7 +946,7 @@ mod comment_model_tests {
                             pipeline: Pipeline::Main,
                             run_id: 1,
                             stage: Stage::new("working"),
-                            tool: Some("copilot".to_string()),
+                            tool: Some("copilot".to_string()).into(),
                             model: Some("gpt-5-mini".parse().unwrap()),
                             prompt_link: None,
                             output_link: None,
@@ -1017,7 +1018,7 @@ mod comment_model_tests {
                             pipeline: Pipeline::Main,
                             run_id: 1,
                             stage: Stage::new("working"),
-                            tool: Some("copilot".to_string()),
+                            tool: Some("copilot".to_string()).into(),
                             model: Some("gpt-5-mini".parse().unwrap()),
                             prompt_link: None,
                             output_link: None,
@@ -1082,7 +1083,7 @@ mod comment_model_tests {
                             pipeline: Pipeline::Main,
                             run_id: 1,
                             stage: Stage::new("working"),
-                            tool: Some("copilot".to_string()),
+                            tool: Some("copilot".to_string()).into(),
                             model: Some("gpt-5-mini".parse().unwrap()),
                             prompt_link: None,
                             output_link: None,

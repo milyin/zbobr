@@ -133,7 +133,7 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
         pipeline: Pipeline::from("main"),
         run_id: 1,
         stage: Stage::new("planning"),
-        tool: Some(Executor::CLAUDE.to_string()),
+        tool: Some(Executor::CLAUDE.to_string()).into(),
         model: None,
         prompt_link: None,
         output_link: None,
@@ -198,15 +198,15 @@ pub fn prompt_files_for_stage(
     workflow: &WorkflowConfig,
 ) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    if let Some(ref main) = stage_def.role_prompt {
-        files.push(main.clone());
+    if let Some(ref main) = stage_def.role_prompt.as_option() {
+        files.push((*main).clone());
     } else if let Some(role_def) = stage_def
         .role()
         .map(|r| r.as_str())
         .and_then(|r| workflow.role_definition(r))
-        && let Some(ref prompt_path) = role_def.prompt
+        && let Some(ref prompt_path) = role_def.prompt.as_option()
     {
-        files.push(prompt_path.clone());
+        files.push((*prompt_path).clone());
     }
     files.extend(stage_def.prompts.iter().flatten().cloned());
     if let Some(ref prompts_dir) = workflow.prompts_dir {
@@ -682,7 +682,7 @@ mod tests {
         stages.insert(
             Stage::from("work"),
             StageDefinition {
-                role: Some("default".to_string().into()),
+                role: Some("default".to_string().into()).into(),
                 prompts: Some(vec![prompt_path]),
                 ..Default::default()
             },
@@ -699,7 +699,7 @@ mod tests {
         stages.insert(
             Stage::from("work"),
             StageDefinition {
-                role: Some("default".to_string().into()),
+                role: Some("default".to_string().into()).into(),
                 prompts: Some(vec![prompt_path]),
                 ..Default::default()
             },
@@ -720,7 +720,7 @@ mod tests {
         stages.insert(
             Stage::from("work"),
             StageDefinition {
-                role: Some("default".to_string().into()),
+                role: Some("default".to_string().into()).into(),
                 prompts: Some(vec![PathBuf::from("/nonexistent/prompt.md")]),
                 ..Default::default()
             },
@@ -745,7 +745,7 @@ mod tests {
         stages.insert(
             Stage::from("stage_a"),
             StageDefinition {
-                role: Some("default".to_string().into()),
+                role: Some("default".to_string().into()).into(),
                 prompts: Some(vec![PathBuf::from("/nonexistent/prompt.md")]),
                 ..Default::default()
             },
@@ -753,7 +753,7 @@ mod tests {
         stages.insert(
             Stage::from("stage_b"),
             StageDefinition {
-                role: Some("default".to_string().into()),
+                role: Some("default".to_string().into()).into(),
                 prompts: Some(vec![bad_var_path]),
                 ..Default::default()
             },
@@ -795,7 +795,7 @@ mod tests {
         main_stages.insert(
             Stage::from("work"),
             StageDefinition {
-                role: Some("default".to_string().into()),
+                role: Some("default".to_string().into()).into(),
                 prompts: Some(vec![valid_path]),
                 ..Default::default()
             },
@@ -805,7 +805,7 @@ mod tests {
         secondary_stages.insert(
             Stage::from("broken"),
             StageDefinition {
-                role: Some("default".to_string().into()),
+                role: Some("default".to_string().into()).into(),
                 prompts: Some(vec![PathBuf::from("/nonexistent/secondary_prompt.md")]),
                 ..Default::default()
             },
@@ -846,7 +846,7 @@ mod tests {
         stages.insert(
             Stage::from("delegate"),
             StageDefinition {
-                call: Some(Pipeline::from("sub")),
+                call: Some(Pipeline::from("sub")).into(),
                 ..Default::default()
             },
         );

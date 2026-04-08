@@ -35,16 +35,16 @@ fn test_providers_and_tools() -> (
     IndexMap<Tool, Vec<ToolEntry>>,
 ) {
     let provider = ProviderDefinition {
-        executor: Some(Executor(Executor::MCP_TESTER.to_string())),
-        parent: None,
-        priority: None,
-        plan_mode: None,
-        access_key: None,
+        executor: Some(Executor(Executor::MCP_TESTER.to_string())).into(),
+        parent: Default::default(),
+        priority: Default::default(),
+        plan_mode: Default::default(),
+        access_key: Default::default(),
     };
     let entry = ToolEntry {
         provider: "mcp-tester".to_string().into(),
         model: Model::try_new("test-model").expect("valid model name"),
-        priority: None,
+        priority: Default::default(),
     };
     let providers = IndexMap::from([("mcp-tester".to_string().into(), provider)]);
     let tools = IndexMap::from([("mcp-tester".to_string().into(), vec![entry])]);

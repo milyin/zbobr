@@ -68,7 +68,7 @@ impl Default for Workflow {
     fn default() -> Self {
         let mut pipelines = HashMap::new();
         let dummy_stage = StageDefinition {
-            role: Some("default".to_string().into()),
+            role: Some("default".to_string().into()).into(),
             ..Default::default()
         };
         for name in [Pipeline::MAIN, Pipeline::MERGE] {
@@ -407,7 +407,7 @@ mod tests {
     /// Helper: build a minimal valid WorkflowConfig with main/init/merge pipelines.
     fn base_workflow() -> WorkflowConfig {
         let role_stage = |role: &str| StageDefinition {
-            role: Some(role.to_string().into()),
+            role: Some(role.to_string().into()).into(),
             ..Default::default()
         };
         let single_pipeline = |stage_name: &str, role: &str| PipelineConfig {
@@ -433,7 +433,7 @@ mod tests {
                 stages: IndexMap::from([(
                     "checking".into(),
                     StageDefinition {
-                        role: Some("reviewer".into()),
+                        role: Some("reviewer".into()).into(),
                         ..Default::default()
                     },
                 )]),
@@ -443,7 +443,7 @@ mod tests {
         main.stages.insert(
             "call_review".into(),
             StageDefinition {
-                call: Some("review".into()),
+                call: Some("review".into()).into(),
                 ..Default::default()
             },
         );
@@ -457,7 +457,7 @@ mod tests {
         main.stages.insert(
             "do_call".into(),
             StageDefinition {
-                call: Some("nonexistent".into()),
+                call: Some("nonexistent".into()).into(),
                 ..Default::default()
             },
         );
@@ -475,8 +475,8 @@ mod tests {
         main.stages.insert(
             "bad".into(),
             StageDefinition {
-                role: Some("worker".into()),
-                call: Some("merge".into()),
+                role: Some("worker".into()).into(),
+                call: Some("merge".into()).into(),
                 ..Default::default()
             },
         );
@@ -541,7 +541,7 @@ role = "merger"
                 stages: IndexMap::from([(
                     "s1".into(),
                     StageDefinition {
-                        role: Some("worker".into()),
+                        role: Some("worker".into()).into(),
                         ..Default::default()
                     },
                 )]),
@@ -551,7 +551,7 @@ role = "merger"
         main.stages = IndexMap::from([(
             "call_sub".into(),
             StageDefinition {
-                call: Some("sub".into()),
+                call: Some("sub".into()).into(),
                 ..Default::default()
             },
         )]);
@@ -606,7 +606,7 @@ role = "merger"
                 stages: IndexMap::from([(
                     "s1".into(),
                     StageDefinition {
-                        role: Some("helper".into()),
+                        role: Some("helper".into()).into(),
                         ..Default::default()
                     },
                 )]),
@@ -617,7 +617,7 @@ role = "merger"
         main.stages.insert(
             "call_sub".into(),
             StageDefinition {
-                call: Some("sub".into()),
+                call: Some("sub".into()).into(),
                 ..Default::default()
             },
         );
@@ -633,7 +633,7 @@ role = "merger"
         let mut wf = base_workflow();
         let main = wf.pipelines.get_mut("main").unwrap();
         main.stages.get_mut("working").unwrap().on_success =
-            Some(zbobr_api::StageTransition::stage("nonexistent"));
+            Some(zbobr_api::StageTransition::stage("nonexistent")).into();
         let err = wf.validate().unwrap_err();
         assert!(
             err.to_string()
@@ -647,7 +647,7 @@ role = "merger"
         let mut wf = base_workflow();
         let main = wf.pipelines.get_mut("main").unwrap();
         main.stages.get_mut("working").unwrap().on_failure =
-            Some(zbobr_api::StageTransition::stage("nonexistent"));
+            Some(zbobr_api::StageTransition::stage("nonexistent")).into();
         let err = wf.validate().unwrap_err();
         assert!(
             err.to_string()
@@ -661,7 +661,7 @@ role = "merger"
         let mut wf = base_workflow();
         let main = wf.pipelines.get_mut("main").unwrap();
         main.stages.get_mut("working").unwrap().on_success =
-            Some(zbobr_api::StageTransition::stage("working"));
+            Some(zbobr_api::StageTransition::stage("working")).into();
         assert!(wf.validate().is_ok());
     }
 
@@ -744,7 +744,7 @@ role = "merger"
         let mut wf = base_workflow();
         let main = wf.pipelines.get_mut("main").unwrap();
         main.stages.get_mut("working").unwrap().on_success =
-            Some(zbobr_api::StageTransition::pause());
+            Some(zbobr_api::StageTransition::pause()).into();
         assert!(wf.validate().is_ok());
     }
 }

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Signal, Stage, StageTransition, State,
-    config::{PipelineConfig, Role, RoleDefinition, StageDefinition, Tool, WorkflowConfig},
+    config::{PipelineConfig, Role, RoleDefinition, StageDefinition, WorkflowConfig},
     config_tools::ALL_TOOLS,
 };
 use zbobr_dispatcher::backend::TaskBackendExt;
@@ -35,9 +35,9 @@ impl StageDef {
             name,
             role,
             pipeline,
-            on_success: None,
-            on_failure: None,
-            on_intermediate: None,
+            on_success: Default::default(),
+            on_failure: Default::default(),
+            on_intermediate: Default::default(),
         }
     }
 }
@@ -59,11 +59,11 @@ fn build_workflow_with_roles(
             .insert(
                 Stage::from(s.name),
                 StageDefinition {
-                    role: Some(s.role.to_string().into()),
-                    tool: Some("mcp-tester".to_string().into()),
-                    on_success: s.on_success,
-                    on_failure: s.on_failure,
-                    on_intermediate: s.on_intermediate,
+                    role: Some(s.role.to_string().into()).into(),
+                    tool: Some("mcp-tester".to_string().into()).into(),
+                    on_success: s.on_success.into(),
+                    on_failure: s.on_failure.into(),
+                    on_intermediate: s.on_intermediate.into(),
                     ..Default::default()
                 },
             );
@@ -84,8 +84,8 @@ fn build_workflow_with_roles(
 fn role_with_all_tools() -> RoleDefinition {
     RoleDefinition {
         mcp: Some(ALL_TOOLS.to_vec()),
-        prompt: None,
-        tool: Some("mcp-tester".to_string().into()),
+        prompt: Default::default(),
+        tool: Some("mcp-tester".to_string().into()).into(),
     }
 }
 
@@ -385,16 +385,16 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
                 (
                     Stage::from("check"),
                     StageDefinition {
-                        role: Some("role_check".to_string().into()),
-                        tool: Some("mcp-tester".to_string().into()),
+                        role: Some("role_check".to_string().into()).into(),
+                        tool: Some("mcp-tester".to_string().into()).into(),
                         ..Default::default()
                     },
                 ),
                 (
                     Stage::from("finish"),
                     StageDefinition {
-                        role: Some("role_finish".to_string().into()),
-                        tool: Some("mcp-tester".to_string().into()),
+                        role: Some("role_finish".to_string().into()).into(),
+                        tool: Some("mcp-tester".to_string().into()).into(),
                         ..Default::default()
                     },
                 ),
@@ -526,15 +526,15 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
                 (
                     "call_sub".into(),
                     StageDefinition {
-                        call: Some("sub".into()),
+                        call: Some("sub".into()).into(),
                         ..Default::default()
                     },
                 ),
                 (
                     "finish".into(),
                     StageDefinition {
-                        role: Some("role_finish".into()),
-                        tool: Some("mcp-tester".to_string().into()),
+                        role: Some("role_finish".into()).into(),
+                        tool: Some("mcp-tester".to_string().into()).into(),
                         ..Default::default()
                     },
                 ),
@@ -547,8 +547,8 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
             stages: IndexMap::from([(
                 "work".into(),
                 StageDefinition {
-                    role: Some("role_work".into()),
-                    tool: Some("mcp-tester".to_string().into()),
+                    role: Some("role_work".into()).into(),
+                    tool: Some("mcp-tester".to_string().into()).into(),
                     ..Default::default()
                 },
             )]),
@@ -560,8 +560,8 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
             stages: IndexMap::from([(
                 "merging".into(),
                 StageDefinition {
-                    role: Some("role_merge".into()),
-                    tool: Some("mcp-tester".to_string().into()),
+                    role: Some("role_merge".into()).into(),
+                    tool: Some("mcp-tester".to_string().into()).into(),
                     ..Default::default()
                 },
             )]),
@@ -788,7 +788,7 @@ pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
     // Two stages: stage_a has on_success = { pause = true }, stage_b is normal
     let workflow = build_workflow(vec![
         StageDef {
-            on_success: Some(StageTransition::pause()),
+            on_success: Some(StageTransition::pause()).into(),
             ..StageDef::new("stage_a", "role_a", "main")
         },
         StageDef::new("stage_b", "role_b", "main"),
