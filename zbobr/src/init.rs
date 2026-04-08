@@ -243,7 +243,7 @@ fn default_config_toml() -> RootConfigToml {
             vec![
                 ToolEntry {
                     provider: PROVIDER_CLAUDE,
-                    model: CLAUDE_MODEL_OPUS,
+                    model: CLAUDE_MODEL_SONNET,
                     priority: None,
                 },
                 ToolEntry {
@@ -258,7 +258,7 @@ fn default_config_toml() -> RootConfigToml {
             vec![
                 ToolEntry {
                     provider: PROVIDER_CLAUDE_PLANNER,
-                    model: CLAUDE_MODEL_OPUS,
+                    model: CLAUDE_MODEL_SONNET,
                     priority: None,
                 },
                 ToolEntry {
@@ -599,7 +599,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompts: role_prompts("linter_worker.md"),
-                tool: TomlOption::Value(TOOL_DEVELOPER),
+                tool: TomlOption::Value(TOOL_HELPER),
             },
         ),
         (
@@ -1137,11 +1137,11 @@ executor = "claude"
         let toml_str = r#"
 [[dispatcher.tools.developer]]
 provider = "claude"
-model = "claude-opus-4.6"
+model = "claude-sonnet-4.6"
 
 [[dispatcher.tools.developer]]
 provider = "copilot"
-model = "claude-opus-4.6"
+model = "claude-sonnet-4.6"
 "#;
         let mut doc: toml_edit::DocumentMut = toml_str.parse().unwrap();
         inline_dispatcher_tables(&mut doc);
