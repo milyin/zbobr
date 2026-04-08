@@ -357,6 +357,7 @@ fn default_config_toml() -> RootConfigToml {
         }),
         workflow: Some(WorkflowToml {
             prompts_dir: workflow.prompts_dir.into(),
+            prompts: workflow.prompts,
             roles: Some(workflow.roles),
             pipelines: Some(workflow.pipelines),
         }),
@@ -370,14 +371,11 @@ fn default_workflow() -> WorkflowConfig {
         ReportSuccess, StopWithError, StopWithQuestion,
     };
 
-    let task_prompt = vec![PathBuf::from(TASK_PROMPT)];
-
     let main_stages = IndexMap::from([
         (
             STAGE_PLANNING,
             StageDefinition {
                 role: TomlOption::Value(ROLE_PLANNER),
-                prompts: Some(task_prompt.clone()),
                 on_intermediate: TomlOption::Value(StageTransition::pause()),
                 ..Default::default()
             },
@@ -386,7 +384,6 @@ fn default_workflow() -> WorkflowConfig {
             STAGE_WORKING,
             StageDefinition {
                 role: TomlOption::Value(ROLE_WORKER),
-                prompts: Some(task_prompt.clone()),
                 on_failure: TomlOption::Value(StageTransition {
                     next: Some(STAGE_WORKING),
                     pause: true,
@@ -399,7 +396,6 @@ fn default_workflow() -> WorkflowConfig {
             STAGE_REVIEWING,
             StageDefinition {
                 role: TomlOption::Value(ROLE_REVIEWER),
-                prompts: Some(task_prompt.clone()),
                 on_failure: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
                 on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_TEST_PLANNER)),
                 ..Default::default()
@@ -409,7 +405,6 @@ fn default_workflow() -> WorkflowConfig {
             STAGE_TEST_PLANNER,
             StageDefinition {
                 role: TomlOption::Value(ROLE_TEST_PLANNER),
-                prompts: Some(task_prompt.clone()),
                 on_failure: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
                 on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_TEST_WORKER)),
                 ..Default::default()
@@ -419,7 +414,6 @@ fn default_workflow() -> WorkflowConfig {
             STAGE_TEST_WORKER,
             StageDefinition {
                 role: TomlOption::Value(ROLE_TEST_WORKER),
-                prompts: Some(task_prompt.clone()),
                 on_failure: TomlOption::Value(StageTransition {
                     next: Some(STAGE_TEST_WORKER),
                     pause: true,
@@ -432,7 +426,6 @@ fn default_workflow() -> WorkflowConfig {
             STAGE_LINTING,
             StageDefinition {
                 role: TomlOption::Value(ROLE_LINTER),
-                prompts: Some(task_prompt.clone()),
                 on_success: TomlOption::Value(StageTransition::stage(STAGE_TESTING)),
                 on_failure: TomlOption::Value(StageTransition::stage(STAGE_LINTER_WORKER)),
                 ..Default::default()
@@ -442,7 +435,6 @@ fn default_workflow() -> WorkflowConfig {
             STAGE_LINTER_WORKER,
             StageDefinition {
                 role: TomlOption::Value(ROLE_LINTER_WORKER),
-                prompts: Some(task_prompt.clone()),
                 on_success: TomlOption::Value(StageTransition::stage(STAGE_LINTING)),
                 on_failure: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
                 ..Default::default()
@@ -452,7 +444,6 @@ fn default_workflow() -> WorkflowConfig {
             STAGE_TESTING,
             StageDefinition {
                 role: TomlOption::Value(ROLE_TESTER),
-                prompts: Some(task_prompt.clone()),
                 on_failure: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
                 ..Default::default()
             },
@@ -463,7 +454,6 @@ fn default_workflow() -> WorkflowConfig {
         STAGE_MERGING,
         StageDefinition {
             role: TomlOption::Value(ROLE_MERGER),
-            prompts: Some(task_prompt),
             ..Default::default()
         },
     )]);
@@ -482,6 +472,13 @@ fn default_workflow() -> WorkflowConfig {
         },
     );
 
+    fn role_prompts(main: &str) -> Option<indexmap::IndexMap<String, TomlOption<PathBuf>>> {
+        Some(indexmap::IndexMap::from([(
+            "main".to_string(),
+            TomlOption::Value(PathBuf::from(main)),
+        )]))
+    }
+
     let roles = IndexMap::from([
         (
             ROLE_PLANNER,
@@ -494,7 +491,7 @@ fn default_workflow() -> WorkflowConfig {
                     AddChecklistItem,
                     GetCtxRec,
                 ]),
-                prompt: TomlOption::Value(PathBuf::from("planner.md")),
+                prompts: role_prompts("planner.md"),
                 tool: TomlOption::Value(TOOL_PLANNER),
             },
         ),
@@ -511,7 +508,7 @@ fn default_workflow() -> WorkflowConfig {
                     CheckChecklistItem,
                     GetCtxRec,
                 ]),
-                prompt: TomlOption::Value(PathBuf::from("worker.md")),
+                prompts: role_prompts("worker.md"),
                 tool: TomlOption::Value(TOOL_DEVELOPER),
             },
         ),
@@ -526,7 +523,7 @@ fn default_workflow() -> WorkflowConfig {
                     AddChecklistItem,
                     GetCtxRec,
                 ]),
-                prompt: TomlOption::Value(PathBuf::from("test_planner.md")),
+                prompts: role_prompts("test_planner.md"),
                 tool: TomlOption::Value(TOOL_PLANNER),
             },
         ),
@@ -543,7 +540,7 @@ fn default_workflow() -> WorkflowConfig {
                     CheckChecklistItem,
                     GetCtxRec,
                 ]),
-                prompt: TomlOption::Value(PathBuf::from("test_worker.md")),
+                prompts: role_prompts("test_worker.md"),
                 tool: TomlOption::Value(TOOL_HELPER),
             },
         ),
@@ -559,7 +556,7 @@ fn default_workflow() -> WorkflowConfig {
                     CheckChecklistItem,
                     GetCtxRec,
                 ]),
-                prompt: TomlOption::Value(PathBuf::from("reviewer.md")),
+                prompts: role_prompts("reviewer.md"),
                 tool: TomlOption::Value(TOOL_REVIEWER),
             },
         ),
@@ -573,7 +570,7 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithQuestion,
                     GetCtxRec,
                 ]),
-                prompt: TomlOption::Value(PathBuf::from("tester.md")),
+                prompts: role_prompts("tester.md"),
                 tool: TomlOption::Value(TOOL_HELPER),
             },
         ),
@@ -587,7 +584,7 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithQuestion,
                     GetCtxRec,
                 ]),
-                prompt: TomlOption::Value(PathBuf::from("linter.md")),
+                prompts: role_prompts("linter.md"),
                 tool: TomlOption::Value(TOOL_DRUDGE),
             },
         ),
@@ -601,7 +598,7 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithQuestion,
                     GetCtxRec,
                 ]),
-                prompt: TomlOption::Value(PathBuf::from("linter_worker.md")),
+                prompts: role_prompts("linter_worker.md"),
                 tool: TomlOption::Value(TOOL_DEVELOPER),
             },
         ),
@@ -609,14 +606,23 @@ fn default_workflow() -> WorkflowConfig {
             ROLE_MERGER,
             RoleDefinition {
                 mcp: Some(vec![StopWithError, ReportSuccess, StopWithQuestion]),
-                prompt: TomlOption::Value(PathBuf::from("merger.md")),
+                prompts: role_prompts("merger.md"),
                 tool: TomlOption::Value(TOOL_HELPER),
             },
         ),
     ]);
 
+    let workflow_prompts = Some(indexmap::IndexMap::from([
+        ("main".to_string(), TomlOption::ExplicitNone),
+        (
+            "task".to_string(),
+            TomlOption::Value(PathBuf::from(TASK_PROMPT)),
+        ),
+    ]));
+
     WorkflowConfig {
         prompts_dir: Some(PathBuf::from(WORKFLOW_PROMPTS_DIR)),
+        prompts: workflow_prompts,
         pipelines,
         roles,
     }
@@ -1218,17 +1224,20 @@ name = "test"
         let registered: std::collections::HashSet<&str> =
             PROMPT_FILES.iter().map(|(name, _)| *name).collect();
         for (role_name, role_def) in &wf.roles {
-            if let Some(prompt_path) = role_def.prompt.as_option() {
-                let key = prompt_path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .expect("prompt path has no file stem");
-                assert!(
-                    registered.contains(key),
-                    "Role '{}' references prompt file '{}' but it is not in PROMPT_FILES",
-                    role_name,
-                    key
-                );
+            for (slot, prompt_opt) in role_def.prompts.iter().flatten() {
+                if let Some(prompt_path) = prompt_opt.as_option() {
+                    let key = prompt_path
+                        .file_stem()
+                        .and_then(|s: &std::ffi::OsStr| s.to_str())
+                        .expect("prompt path has no file stem");
+                    assert!(
+                        registered.contains(key),
+                        "Role '{}' slot '{}' references prompt file '{}' but it is not in PROMPT_FILES",
+                        role_name,
+                        slot,
+                        key
+                    );
+                }
             }
         }
     }

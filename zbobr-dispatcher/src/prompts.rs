@@ -191,37 +191,58 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
     (task, comments)
 }
 
-/// Collect prompt file paths from a StageDefinition.
-/// If no main_prompt is specified, tries the role's prompt from the workflow config.
-/// Relative paths are prefixed with `workflow.prompts_dir` when set.
+/// Collect prompt file paths from a StageDefinition using three-level map merge.
+///
+/// Merges workflow-level, role-level, and stage-level `prompts` maps in order.
+/// Slots set to `nan` (ExplicitNone) are cleared. Remaining `Value` paths are
+/// collected in insertion order. Relative paths are prefixed with
+/// `workflow.prompts_dir` when set.
 pub fn prompt_files_for_stage(
     stage_def: &StageDefinition,
     workflow: &WorkflowConfig,
 ) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    match &stage_def.role_prompt {
-        TomlOption::Value(main) => {
-            files.push(main.clone());
-        }
-        TomlOption::ExplicitNone => {
-            // role_prompt explicitly cleared: do not inherit the role-level prompt
-        }
-        TomlOption::Absent => {
-            if let Some(role_def) = stage_def
-                .role()
-                .map(|r| r.as_str())
-                .and_then(|r| workflow.role_definition(r))
-                && let Some(ref prompt_path) = role_def.prompt.as_option()
-            {
-                files.push((*prompt_path).clone());
+    // Start with workflow-level prompts.
+    let mut merged: indexmap::IndexMap<String, TomlOption<std::path::PathBuf>> =
+        workflow.prompts.clone().unwrap_or_default();
+
+    // Merge role-level prompts per key (preserve insertion order).
+    if let Some(role_def) = stage_def
+        .role()
+        .map(|r| r.as_str())
+        .and_then(|r| workflow.role_definition(r))
+        && let Some(ref role_prompts) = role_def.prompts
+    {
+        for (k, v) in role_prompts {
+            if let Some(base_v) = merged.get_mut(k) {
+                *base_v = base_v.clone().merge(v.clone());
+            } else {
+                merged.insert(k.clone(), v.clone());
             }
         }
     }
-    files.extend(stage_def.prompts.iter().flatten().cloned());
+
+    // Merge stage-level prompts per key (preserve insertion order).
+    if let Some(ref stage_prompts) = stage_def.prompts {
+        for (k, v) in stage_prompts {
+            if let Some(base_v) = merged.get_mut(k) {
+                *base_v = base_v.clone().merge(v.clone());
+            } else {
+                merged.insert(k.clone(), v.clone());
+            }
+        }
+    }
+
+    // Collect only Value paths (filter out ExplicitNone and Absent).
+    let mut files: Vec<std::path::PathBuf> = merged
+        .into_values()
+        .filter_map(|v| v.into_option())
+        .collect();
+
+    // Prefix relative paths with prompts_dir.
     if let Some(ref prompts_dir) = workflow.prompts_dir {
         files = files
             .into_iter()
-            .map(|p: PathBuf| {
+            .map(|p| {
                 if p.is_relative() {
                     prompts_dir.join(&p)
                 } else {
@@ -676,11 +697,16 @@ mod tests {
         pipelines.insert(Pipeline::from("main"), PipelineConfig { stages });
         let config = WorkflowConfig {
             prompts_dir: None,
+            prompts: None,
             pipelines,
             roles: IndexMap::new(),
         };
         let workflow = Arc::new(Workflow::from_config(config));
         ConfiguredPromptBuilder::new(base_path, workflow)
+    }
+
+    fn stage_prompts_map(path: PathBuf) -> Option<indexmap::IndexMap<String, TomlOption<PathBuf>>> {
+        Some(indexmap::IndexMap::from([("main".to_string(), TomlOption::Value(path))]))
     }
 
     #[test]
@@ -692,7 +718,7 @@ mod tests {
             Stage::from("work"),
             StageDefinition {
                 role: Some("default".to_string().into()).into(),
-                prompts: Some(vec![prompt_path]),
+                prompts: stage_prompts_map(prompt_path),
                 ..Default::default()
             },
         );
@@ -709,7 +735,7 @@ mod tests {
             Stage::from("work"),
             StageDefinition {
                 role: Some("default".to_string().into()).into(),
-                prompts: Some(vec![prompt_path]),
+                prompts: stage_prompts_map(prompt_path),
                 ..Default::default()
             },
         );
@@ -730,7 +756,7 @@ mod tests {
             Stage::from("work"),
             StageDefinition {
                 role: Some("default".to_string().into()).into(),
-                prompts: Some(vec![PathBuf::from("/nonexistent/prompt.md")]),
+                prompts: stage_prompts_map(PathBuf::from("/nonexistent/prompt.md")),
                 ..Default::default()
             },
         );
@@ -755,7 +781,7 @@ mod tests {
             Stage::from("stage_a"),
             StageDefinition {
                 role: Some("default".to_string().into()).into(),
-                prompts: Some(vec![PathBuf::from("/nonexistent/prompt.md")]),
+                prompts: stage_prompts_map(PathBuf::from("/nonexistent/prompt.md")),
                 ..Default::default()
             },
         );
@@ -763,7 +789,7 @@ mod tests {
             Stage::from("stage_b"),
             StageDefinition {
                 role: Some("default".to_string().into()).into(),
-                prompts: Some(vec![bad_var_path]),
+                prompts: stage_prompts_map(bad_var_path),
                 ..Default::default()
             },
         );
@@ -788,6 +814,7 @@ mod tests {
     ) -> ConfiguredPromptBuilder {
         let config = WorkflowConfig {
             prompts_dir: None,
+            prompts: None,
             pipelines,
             roles: IndexMap::new(),
         };
@@ -805,7 +832,7 @@ mod tests {
             Stage::from("work"),
             StageDefinition {
                 role: Some("default".to_string().into()).into(),
-                prompts: Some(vec![valid_path]),
+                prompts: stage_prompts_map(valid_path),
                 ..Default::default()
             },
         );
@@ -815,7 +842,7 @@ mod tests {
             Stage::from("broken"),
             StageDefinition {
                 role: Some("default".to_string().into()).into(),
-                prompts: Some(vec![PathBuf::from("/nonexistent/secondary_prompt.md")]),
+                prompts: stage_prompts_map(PathBuf::from("/nonexistent/secondary_prompt.md")),
                 ..Default::default()
             },
         );
@@ -887,58 +914,42 @@ mod tests {
         }
     }
 
-    // --- prompt_files_for_stage ExplicitNone semantics ---
+    // --- prompt_files_for_stage three-level merge semantics ---
 
-    fn make_workflow_with_role_prompt(
+    fn make_workflow_with_role_main_prompt(
         role_name: &str,
         prompt: Option<PathBuf>,
     ) -> WorkflowConfig {
         use indexmap::IndexMap;
         use zbobr_api::config::RoleDefinition;
 
+        let prompts = prompt.map(|p| {
+            IndexMap::from([("main".to_string(), TomlOption::Value(p))])
+        });
         let mut roles = IndexMap::new();
         roles.insert(
             role_name.to_string().into(),
             RoleDefinition {
                 mcp: None,
-                prompt: prompt.into(),
+                prompts,
                 tool: Default::default(),
             },
         );
         WorkflowConfig {
             prompts_dir: None,
-            roles,
-            pipelines: HashMap::new(),
-        }
-    }
-
-    fn make_workflow_with_role_prompt_explicit_none(role_name: &str) -> WorkflowConfig {
-        use indexmap::IndexMap;
-        use zbobr_api::config::RoleDefinition;
-
-        let mut roles = IndexMap::new();
-        roles.insert(
-            role_name.to_string().into(),
-            RoleDefinition {
-                mcp: None,
-                prompt: zbobr_utility::TomlOption::ExplicitNone,
-                tool: Default::default(),
-            },
-        );
-        WorkflowConfig {
-            prompts_dir: None,
+            prompts: None,
             roles,
             pipelines: HashMap::new(),
         }
     }
 
     #[test]
-    fn prompt_files_for_stage_absent_role_prompt_inherits_role_level() {
+    fn prompt_files_for_stage_inherits_role_main_prompt() {
+        // Stage has no prompts → inherits role's "main" slot.
         let workflow =
-            make_workflow_with_role_prompt("worker", Some(PathBuf::from("/role/worker.md")));
+            make_workflow_with_role_main_prompt("worker", Some(PathBuf::from("/role/worker.md")));
         let stage = StageDefinition {
             role: Some("worker".to_string().into()).into(),
-            role_prompt: zbobr_utility::TomlOption::Absent,
             ..Default::default()
         };
         let files = prompt_files_for_stage(&stage, &workflow);
@@ -946,29 +957,34 @@ mod tests {
     }
 
     #[test]
-    fn prompt_files_for_stage_explicit_none_blocks_role_fallback() {
-        // role_prompt = ExplicitNone: must NOT inherit the role-level prompt.
+    fn prompt_files_for_stage_stage_nan_clears_role_slot() {
+        // Stage sets "main" slot to nan → clears role-level prompt.
         let workflow =
-            make_workflow_with_role_prompt("worker", Some(PathBuf::from("/role/worker.md")));
+            make_workflow_with_role_main_prompt("worker", Some(PathBuf::from("/role/worker.md")));
         let stage = StageDefinition {
             role: Some("worker".to_string().into()).into(),
-            role_prompt: zbobr_utility::TomlOption::ExplicitNone,
+            prompts: Some(indexmap::IndexMap::from([
+                ("main".to_string(), TomlOption::ExplicitNone),
+            ])),
             ..Default::default()
         };
         let files = prompt_files_for_stage(&stage, &workflow);
         assert!(
             files.is_empty(),
-            "ExplicitNone role_prompt must not fall back to role-level prompt; got: {files:?}"
+            "nan at stage level must clear the role-level main slot; got: {files:?}"
         );
     }
 
     #[test]
-    fn prompt_files_for_stage_value_overrides_role_level() {
+    fn prompt_files_for_stage_stage_overrides_role_slot() {
+        // Stage overrides the "main" slot with a different path.
         let workflow =
-            make_workflow_with_role_prompt("worker", Some(PathBuf::from("/role/worker.md")));
+            make_workflow_with_role_main_prompt("worker", Some(PathBuf::from("/role/worker.md")));
         let stage = StageDefinition {
             role: Some("worker".to_string().into()).into(),
-            role_prompt: zbobr_utility::TomlOption::Value(PathBuf::from("/stage/override.md")),
+            prompts: Some(indexmap::IndexMap::from([
+                ("main".to_string(), TomlOption::Value(PathBuf::from("/stage/override.md"))),
+            ])),
             ..Default::default()
         };
         let files = prompt_files_for_stage(&stage, &workflow);
@@ -976,19 +992,86 @@ mod tests {
     }
 
     #[test]
-    fn prompt_files_for_stage_absent_stage_prompt_role_prompt_explicit_none() {
-        // When stage doesn't override and role's prompt is ExplicitNone,
-        // should return no files.
-        let workflow = make_workflow_with_role_prompt_explicit_none("worker");
+    fn prompt_files_for_stage_three_level_merge() {
+        // workflow: { task: "task.md" }, role: { main: "worker.md" }, stage: { task: nan }
+        // Result: only ["worker.md"] (task cleared by stage).
+        use indexmap::IndexMap;
+        use zbobr_api::config::RoleDefinition;
+
+        let mut roles = IndexMap::new();
+        roles.insert("worker".to_string().into(),
+            RoleDefinition {
+                mcp: None,
+                prompts: Some(IndexMap::from([
+                    ("main".to_string(), TomlOption::Value(PathBuf::from("/prompts/worker.md"))),
+                ])),
+                tool: Default::default(),
+            },
+        );
+        let workflow = WorkflowConfig {
+            prompts_dir: None,
+            prompts: Some(IndexMap::from([
+                ("task".to_string(), TomlOption::Value(PathBuf::from("/prompts/task.md"))),
+            ])),
+            roles,
+            pipelines: HashMap::new(),
+        };
         let stage = StageDefinition {
             role: Some("worker".to_string().into()).into(),
-            role_prompt: zbobr_utility::TomlOption::Absent,
+            prompts: Some(IndexMap::from([
+                ("task".to_string(), TomlOption::ExplicitNone),
+            ])),
             ..Default::default()
         };
         let files = prompt_files_for_stage(&stage, &workflow);
-        assert!(
-            files.is_empty(),
-            "ExplicitNone at role level should produce no prompt files; got: {files:?}"
+        assert_eq!(files, vec![PathBuf::from("/prompts/worker.md")]);
+    }
+
+    #[test]
+    fn prompt_files_for_stage_preserves_slot_order() {
+        // Workflow establishes slot order: main (nan), task.
+        // Role overrides main in-place → final order must be [worker.md, task.md], not reversed.
+        use indexmap::IndexMap;
+        use zbobr_api::config::RoleDefinition;
+
+        let mut roles = IndexMap::new();
+        roles.insert(
+            "worker".to_string().into(),
+            RoleDefinition {
+                mcp: None,
+                prompts: Some(IndexMap::from([(
+                    "main".to_string(),
+                    TomlOption::Value(PathBuf::from("/prompts/worker.md")),
+                )])),
+                tool: Default::default(),
+            },
+        );
+        let workflow = WorkflowConfig {
+            prompts_dir: None,
+            // "main" is seeded first (nan placeholder), then "task" — establishes canonical order.
+            prompts: Some(IndexMap::from([
+                ("main".to_string(), TomlOption::ExplicitNone),
+                (
+                    "task".to_string(),
+                    TomlOption::Value(PathBuf::from("/prompts/task.md")),
+                ),
+            ])),
+            roles,
+            pipelines: HashMap::new(),
+        };
+        let stage = StageDefinition {
+            role: Some("worker".to_string().into()).into(),
+            ..Default::default()
+        };
+        let files = prompt_files_for_stage(&stage, &workflow);
+        // worker.md must come before task.md — role's main slot is at the "main" position.
+        assert_eq!(
+            files,
+            vec![
+                PathBuf::from("/prompts/worker.md"),
+                PathBuf::from("/prompts/task.md"),
+            ],
+            "slot order must be preserved: main before task"
         );
     }
 }

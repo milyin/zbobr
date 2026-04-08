@@ -82,6 +82,7 @@ impl Default for Workflow {
         Self {
             config: WorkflowConfig {
                 prompts_dir: None,
+                prompts: None,
                 pipelines,
                 roles: IndexMap::new(),
             },

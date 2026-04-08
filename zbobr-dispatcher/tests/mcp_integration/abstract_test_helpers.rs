@@ -76,6 +76,7 @@ fn build_workflow_with_roles(
 
     WorkflowConfig {
         prompts_dir: None,
+        prompts: None,
         pipelines,
         roles,
     }
@@ -84,7 +85,7 @@ fn build_workflow_with_roles(
 fn role_with_all_tools() -> RoleDefinition {
     RoleDefinition {
         mcp: Some(ALL_TOOLS.to_vec()),
-        prompt: Default::default(),
+        prompts: Default::default(),
         tool: Some("mcp-tester".to_string().into()).into(),
     }
 }
@@ -403,6 +404,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     );
     let workflow = WorkflowConfig {
         prompts_dir: None,
+        prompts: None,
         pipelines,
         roles: IndexMap::from([
             ("role_check".to_string().into(), role_with_all_tools()),
@@ -569,6 +571,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
     );
     let workflow = WorkflowConfig {
         prompts_dir: None,
+        prompts: None,
         pipelines,
         roles: IndexMap::from([
             ("role_work".to_string().into(), role_with_all_tools()),
