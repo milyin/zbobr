@@ -26,6 +26,9 @@ pub fn inline_child_table(parent: &mut Table, child_key: &str) {
     if let Some(item) = parent.get_mut(child_key) {
         inline_item_as_inline_table(item);
     }
+    if let Some(mut key) = parent.key_mut(child_key) {
+        key.fmt();
+    }
 }
 
 /// Convert every named child array-of-tables in `table` to an inline array.
@@ -95,5 +98,21 @@ model = "gpt-5.4"
         assert!(output.contains("developer = ["));
         assert!(output.contains("{ provider = \"claude\""));
         assert!((output.contains("{ provider = \"copilot\"")));
+    }
+
+    #[test]
+    fn inline_child_table_formats_key_and_value_correctly() {
+        let mut doc: DocumentMut = r#"
+[role]
+[role.prompts]
+main = "planner.md"
+"#
+        .parse()
+        .unwrap();
+        let role = doc["role"].as_table_mut().unwrap();
+        inline_child_table(role, "prompts");
+        let output = doc.to_string();
+        assert!(output.contains("prompts = { main = \"planner.md\" }"));
+        assert!(!output.contains("prompts= {"));
     }
 }
