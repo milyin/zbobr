@@ -9,6 +9,7 @@ license = "MIT OR Apache-2.0"
 anyhow = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
+toml_edit = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 zbobr-macros = { workspace = true }

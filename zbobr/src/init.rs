@@ -16,6 +16,11 @@ use zbobr_api::{
     config_tools::McpTool,
 };
 use zbobr_utility::TomlOption;
+use zbobr_utility::toml_edit_util::{
+    inline_child_table,
+    inline_named_children_as_inline_table_arrays,
+    inline_named_children_as_inline_tables,
+};
 use zbobr_api::task::{Executor, Model};
 use zbobr_dispatcher::config::{ZbobrDispatcherToml, ZbobrExecutorToml};
 use zbobr_executor_copilot::ZbobrExecutorCopilotToml;
@@ -649,31 +654,6 @@ fn inline_stage_tables(doc: &mut toml_edit::DocumentMut) {
     }
 }
 
-fn inline_named_children_as_inline_tables(table: &mut toml_edit::Table) {
-    let keys: Vec<String> = table.iter().map(|(k, _)| k.to_string()).collect();
-    for key in &keys {
-        if let Some(item) = table.get_mut(key) {
-            inline_item_as_inline_table(item);
-        }
-        if let Some(mut k) = table.key_mut(key) {
-            k.fmt();
-        }
-    }
-}
-
-fn inline_item_as_inline_table(item: &mut toml_edit::Item) {
-    if let Some(table) = item.as_table_mut() {
-        let inline = table.clone().into_inline_table();
-        *item = toml_edit::Item::Value(toml_edit::Value::InlineTable(inline));
-    }
-}
-
-fn inline_child_table(parent: &mut toml_edit::Table, child_key: &str) {
-    if let Some(item) = parent.get_mut(child_key) {
-        inline_item_as_inline_table(item);
-    }
-}
-
 /// Convert `workflow.roles.*.prompts` entries from standard tables to inline tables.
 fn inline_role_prompt_tables(doc: &mut toml_edit::DocumentMut) {
     let Some(toml_edit::Item::Table(workflow)) = doc.get_mut("workflow") else {
@@ -708,28 +688,6 @@ fn inline_dispatcher_tables(doc: &mut toml_edit::DocumentMut) {
 
     if let Some(toml_edit::Item::Table(tools)) = dispatcher.get_mut("tools") {
         inline_named_children_as_inline_table_arrays(tools);
-    }
-}
-
-fn inline_named_children_as_inline_table_arrays(table: &mut toml_edit::Table) {
-    let keys: Vec<String> = table.iter().map(|(k, _)| k.to_string()).collect();
-    for key in &keys {
-        if let Some(item) = table.get_mut(key) {
-            inline_item_as_inline_table_array(item);
-        }
-        if let Some(mut k) = table.key_mut(key) {
-            k.fmt();
-        }
-    }
-}
-
-fn inline_item_as_inline_table_array(item: &mut toml_edit::Item) {
-    if let toml_edit::Item::ArrayOfTables(aot) = item {
-        let mut array = toml_edit::Array::new();
-        for table in aot.iter() {
-            array.push(toml_edit::Value::InlineTable(table.clone().into_inline_table()));
-        }
-        *item = toml_edit::Item::Value(toml_edit::Value::Array(array));
     }
 }
 

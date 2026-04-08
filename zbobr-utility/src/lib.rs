@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 
 pub mod macros;
 pub mod secret;
+pub mod toml_edit_util;
 pub mod toml_option;
 
 /// Re-export of the `config_struct` proc macro from `zbobr_macros`.
