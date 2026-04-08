@@ -9,6 +9,7 @@ use zbobr_api::{
     context::serialize_context,
     task::{DEFAULT_MAX_STAGE_COUNT, Pipeline, Stage, Executor},
 };
+use zbobr_utility::TomlOption;
 
 use crate::{backend::TaskBackend, workflow::Workflow};
 
@@ -133,7 +134,7 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
         pipeline: Pipeline::from("main"),
         run_id: 1,
         stage: Stage::new("planning"),
-        tool: Some(Executor::CLAUDE.to_string()),
+        tool: Some(Executor::CLAUDE.to_string()).into(),
         model: None,
         prompt_link: None,
         output_link: None,
@@ -198,21 +199,29 @@ pub fn prompt_files_for_stage(
     workflow: &WorkflowConfig,
 ) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    if let Some(ref main) = stage_def.role_prompt {
-        files.push(main.clone());
-    } else if let Some(role_def) = stage_def
-        .role()
-        .map(|r| r.as_str())
-        .and_then(|r| workflow.role_definition(r))
-        && let Some(ref prompt_path) = role_def.prompt
-    {
-        files.push(prompt_path.clone());
+    match &stage_def.role_prompt {
+        TomlOption::Value(main) => {
+            files.push(main.clone());
+        }
+        TomlOption::ExplicitNone => {
+            // role_prompt explicitly cleared: do not inherit the role-level prompt
+        }
+        TomlOption::Absent => {
+            if let Some(role_def) = stage_def
+                .role()
+                .map(|r| r.as_str())
+                .and_then(|r| workflow.role_definition(r))
+                && let Some(ref prompt_path) = role_def.prompt.as_option()
+            {
+                files.push((*prompt_path).clone());
+            }
+        }
     }
     files.extend(stage_def.prompts.iter().flatten().cloned());
     if let Some(ref prompts_dir) = workflow.prompts_dir {
         files = files
             .into_iter()
-            .map(|p| {
+            .map(|p: PathBuf| {
                 if p.is_relative() {
                     prompts_dir.join(&p)
                 } else {
@@ -682,7 +691,7 @@ mod tests {
         stages.insert(
             Stage::from("work"),
             StageDefinition {
-                role: Some("default".to_string().into()),
+                role: Some("default".to_string().into()).into(),
                 prompts: Some(vec![prompt_path]),
                 ..Default::default()
             },
@@ -699,7 +708,7 @@ mod tests {
         stages.insert(
             Stage::from("work"),
             StageDefinition {
-                role: Some("default".to_string().into()),
+                role: Some("default".to_string().into()).into(),
                 prompts: Some(vec![prompt_path]),
                 ..Default::default()
             },
@@ -720,7 +729,7 @@ mod tests {
         stages.insert(
             Stage::from("work"),
             StageDefinition {
-                role: Some("default".to_string().into()),
+                role: Some("default".to_string().into()).into(),
                 prompts: Some(vec![PathBuf::from("/nonexistent/prompt.md")]),
                 ..Default::default()
             },
@@ -745,7 +754,7 @@ mod tests {
         stages.insert(
             Stage::from("stage_a"),
             StageDefinition {
-                role: Some("default".to_string().into()),
+                role: Some("default".to_string().into()).into(),
                 prompts: Some(vec![PathBuf::from("/nonexistent/prompt.md")]),
                 ..Default::default()
             },
@@ -753,7 +762,7 @@ mod tests {
         stages.insert(
             Stage::from("stage_b"),
             StageDefinition {
-                role: Some("default".to_string().into()),
+                role: Some("default".to_string().into()).into(),
                 prompts: Some(vec![bad_var_path]),
                 ..Default::default()
             },
@@ -795,7 +804,7 @@ mod tests {
         main_stages.insert(
             Stage::from("work"),
             StageDefinition {
-                role: Some("default".to_string().into()),
+                role: Some("default".to_string().into()).into(),
                 prompts: Some(vec![valid_path]),
                 ..Default::default()
             },
@@ -805,7 +814,7 @@ mod tests {
         secondary_stages.insert(
             Stage::from("broken"),
             StageDefinition {
-                role: Some("default".to_string().into()),
+                role: Some("default".to_string().into()).into(),
                 prompts: Some(vec![PathBuf::from("/nonexistent/secondary_prompt.md")]),
                 ..Default::default()
             },
@@ -846,7 +855,7 @@ mod tests {
         stages.insert(
             Stage::from("delegate"),
             StageDefinition {
-                call: Some(Pipeline::from("sub")),
+                call: Some(Pipeline::from("sub")).into(),
                 ..Default::default()
             },
         );
@@ -876,5 +885,110 @@ mod tests {
                 comment.username
             );
         }
+    }
+
+    // --- prompt_files_for_stage ExplicitNone semantics ---
+
+    fn make_workflow_with_role_prompt(
+        role_name: &str,
+        prompt: Option<PathBuf>,
+    ) -> WorkflowConfig {
+        use indexmap::IndexMap;
+        use zbobr_api::config::RoleDefinition;
+
+        let mut roles = IndexMap::new();
+        roles.insert(
+            role_name.to_string().into(),
+            RoleDefinition {
+                mcp: None,
+                prompt: prompt.into(),
+                tool: Default::default(),
+            },
+        );
+        WorkflowConfig {
+            prompts_dir: None,
+            roles,
+            pipelines: HashMap::new(),
+        }
+    }
+
+    fn make_workflow_with_role_prompt_explicit_none(role_name: &str) -> WorkflowConfig {
+        use indexmap::IndexMap;
+        use zbobr_api::config::RoleDefinition;
+
+        let mut roles = IndexMap::new();
+        roles.insert(
+            role_name.to_string().into(),
+            RoleDefinition {
+                mcp: None,
+                prompt: zbobr_utility::TomlOption::ExplicitNone,
+                tool: Default::default(),
+            },
+        );
+        WorkflowConfig {
+            prompts_dir: None,
+            roles,
+            pipelines: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn prompt_files_for_stage_absent_role_prompt_inherits_role_level() {
+        let workflow =
+            make_workflow_with_role_prompt("worker", Some(PathBuf::from("/role/worker.md")));
+        let stage = StageDefinition {
+            role: Some("worker".to_string().into()).into(),
+            role_prompt: zbobr_utility::TomlOption::Absent,
+            ..Default::default()
+        };
+        let files = prompt_files_for_stage(&stage, &workflow);
+        assert_eq!(files, vec![PathBuf::from("/role/worker.md")]);
+    }
+
+    #[test]
+    fn prompt_files_for_stage_explicit_none_blocks_role_fallback() {
+        // role_prompt = ExplicitNone: must NOT inherit the role-level prompt.
+        let workflow =
+            make_workflow_with_role_prompt("worker", Some(PathBuf::from("/role/worker.md")));
+        let stage = StageDefinition {
+            role: Some("worker".to_string().into()).into(),
+            role_prompt: zbobr_utility::TomlOption::ExplicitNone,
+            ..Default::default()
+        };
+        let files = prompt_files_for_stage(&stage, &workflow);
+        assert!(
+            files.is_empty(),
+            "ExplicitNone role_prompt must not fall back to role-level prompt; got: {files:?}"
+        );
+    }
+
+    #[test]
+    fn prompt_files_for_stage_value_overrides_role_level() {
+        let workflow =
+            make_workflow_with_role_prompt("worker", Some(PathBuf::from("/role/worker.md")));
+        let stage = StageDefinition {
+            role: Some("worker".to_string().into()).into(),
+            role_prompt: zbobr_utility::TomlOption::Value(PathBuf::from("/stage/override.md")),
+            ..Default::default()
+        };
+        let files = prompt_files_for_stage(&stage, &workflow);
+        assert_eq!(files, vec![PathBuf::from("/stage/override.md")]);
+    }
+
+    #[test]
+    fn prompt_files_for_stage_absent_stage_prompt_role_prompt_explicit_none() {
+        // When stage doesn't override and role's prompt is ExplicitNone,
+        // should return no files.
+        let workflow = make_workflow_with_role_prompt_explicit_none("worker");
+        let stage = StageDefinition {
+            role: Some("worker".to_string().into()).into(),
+            role_prompt: zbobr_utility::TomlOption::Absent,
+            ..Default::default()
+        };
+        let files = prompt_files_for_stage(&stage, &workflow);
+        assert!(
+            files.is_empty(),
+            "ExplicitNone at role level should produce no prompt files; got: {files:?}"
+        );
     }
 }

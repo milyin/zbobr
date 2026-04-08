@@ -3,6 +3,7 @@ use std::{collections::HashMap};
 
 use indexmap::IndexMap;
 use zbobr_utility::MergeToml;
+use zbobr_utility::TomlOption;
 use zbobr_utility::config_struct;
 
 use crate::task::FixedOffsetTz;
@@ -31,12 +32,12 @@ pub trait Config: Sized {
 pub struct RoleDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp: Option<Vec<McpTool>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub prompt: TomlOption<PathBuf>,
     /// Tool name override for this role. Overrides the global dispatcher `tool`.
     /// Stage-level `tool` takes precedence over this.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<Tool>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub tool: TomlOption<Tool>,
 }
 
 impl RoleDefinition {
@@ -55,8 +56,8 @@ impl zbobr_utility::MergeToml for RoleDefinition {
     fn merge_toml(self, other: Self) -> Self {
         Self {
             mcp: other.mcp.or(self.mcp),
-            prompt: other.prompt.or(self.prompt),
-            tool: other.tool.or(self.tool),
+            prompt: self.prompt.merge(other.prompt),
+            tool: self.tool.merge(other.tool),
         }
     }
 }
@@ -67,31 +68,31 @@ impl zbobr_utility::MergeToml for RoleDefinition {
 pub struct ProviderDefinition {
     /// Executor type (e.g. "claude", "copilot", "mcp-tester").
     /// Required unless `parent` is set.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub executor: Option<Executor>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub executor: TomlOption<Executor>,
     /// Parent provider to inherit settings from. Child fields override parent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent: Option<Provider>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub parent: TomlOption<Provider>,
     /// Selection priority. Higher values are preferred. Omit to inherit from
     /// parent (root providers default to 10).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub priority: Option<i32>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub priority: TomlOption<i32>,
     /// Enable plan mode for this provider. Overrides any executor default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plan_mode: Option<bool>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub plan_mode: TomlOption<bool>,
     /// API key for the executor (e.g. Anthropic API key for the claude executor).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub access_key: Option<Secret>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub access_key: TomlOption<Secret>,
 }
 
 impl zbobr_utility::MergeToml for ProviderDefinition {
     fn merge_toml(self, other: Self) -> Self {
         Self {
-            executor: other.executor.or(self.executor),
-            parent: other.parent.or(self.parent),
-            priority: other.priority.or(self.priority),
-            plan_mode: other.plan_mode.or(self.plan_mode),
-            access_key: other.access_key.or(self.access_key),
+            executor: self.executor.merge(other.executor),
+            parent: self.parent.merge(other.parent),
+            priority: self.priority.merge(other.priority),
+            plan_mode: self.plan_mode.merge(other.plan_mode),
+            access_key: self.access_key.merge(other.access_key),
         }
     }
 }
@@ -198,27 +199,27 @@ impl<'de> serde::Deserialize<'de> for StageTransition {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct StageDefinition {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role: Option<Role>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub call: Option<Pipeline>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub role: TomlOption<Role>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub call: TomlOption<Pipeline>,
     /// Tool name override for this stage. Overrides role-level and global `tool`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<Tool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role_prompt: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub tool: TomlOption<Tool>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub role_prompt: TomlOption<PathBuf>,
     /// `None` means absent in config (inherit from base during merging, or no extra prompts at runtime).
     /// `Some(vec![])` explicitly sets an empty list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompts: Option<Vec<PathBuf>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub on_success: Option<StageTransition>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub on_failure: Option<StageTransition>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub on_intermediate: Option<StageTransition>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub on_no_report: Option<StageTransition>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub on_success: TomlOption<StageTransition>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub on_failure: TomlOption<StageTransition>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub on_intermediate: TomlOption<StageTransition>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub on_no_report: TomlOption<StageTransition>,
 }
 
 impl StageDefinition {
@@ -238,11 +239,11 @@ impl StageDefinition {
     }
 
     pub fn role(&self) -> Option<&Role> {
-        self.role.as_ref()
+        self.role.as_option()
     }
 
     pub fn call_pipeline(&self) -> Option<&Pipeline> {
-        self.call.as_ref()
+        self.call.as_option()
     }
 
     pub fn is_call(&self) -> bool {
@@ -250,34 +251,34 @@ impl StageDefinition {
     }
 
     pub fn on_success(&self) -> Option<&StageTransition> {
-        self.on_success.as_ref()
+        self.on_success.as_option()
     }
 
     pub fn on_failure(&self) -> Option<&StageTransition> {
-        self.on_failure.as_ref()
+        self.on_failure.as_option()
     }
 
     pub fn on_intermediate(&self) -> Option<&StageTransition> {
-        self.on_intermediate.as_ref()
+        self.on_intermediate.as_option()
     }
 
     pub fn on_no_report(&self) -> Option<&StageTransition> {
-        self.on_no_report.as_ref()
+        self.on_no_report.as_option()
     }
 }
 
 impl zbobr_utility::MergeToml for StageDefinition {
     fn merge_toml(self, other: Self) -> Self {
         Self {
-            role: other.role.or(self.role),
-            call: other.call.or(self.call),
-            tool: other.tool.or(self.tool),
-            role_prompt: other.role_prompt.or(self.role_prompt),
+            role: self.role.merge(other.role),
+            call: self.call.merge(other.call),
+            tool: self.tool.merge(other.tool),
+            role_prompt: self.role_prompt.merge(other.role_prompt),
             prompts: other.prompts.or(self.prompts),
-            on_success: other.on_success.or(self.on_success),
-            on_failure: other.on_failure.or(self.on_failure),
-            on_intermediate: other.on_intermediate.or(self.on_intermediate),
-            on_no_report: other.on_no_report.or(self.on_no_report),
+            on_success: self.on_success.merge(other.on_success),
+            on_failure: self.on_failure.merge(other.on_failure),
+            on_intermediate: self.on_intermediate.merge(other.on_intermediate),
+            on_no_report: self.on_no_report.merge(other.on_no_report),
         }
     }
 }
@@ -338,7 +339,7 @@ impl PipelineConfig {
             anyhow::bail!("Pipeline '{}' has no stages", pipeline);
         }
         for (sname, stage) in &self.stages {
-            match (&stage.role, &stage.call) {
+            match (stage.role(), stage.call_pipeline()) {
                 (Some(_), Some(_)) => anyhow::bail!(
                     "Pipeline '{}' stage '{}' has both 'role' and 'call' — only one is allowed",
                     pipeline,
@@ -351,7 +352,7 @@ impl PipelineConfig {
                 ),
                 _ => {}
             }
-            if let Some(ref target) = stage.on_success.as_ref().and_then(|t| t.next.as_ref())
+            if let Some(ref target) = stage.on_success().and_then(|t| t.next.as_ref())
                 && !self.stages.contains_key(target.as_str())
             {
                 anyhow::bail!(
@@ -361,7 +362,7 @@ impl PipelineConfig {
                     target
                 );
             }
-            if let Some(ref target) = stage.on_failure.as_ref().and_then(|t| t.next.as_ref())
+            if let Some(ref target) = stage.on_failure().and_then(|t| t.next.as_ref())
                 && !self.stages.contains_key(target.as_str())
             {
                 anyhow::bail!(
@@ -371,7 +372,7 @@ impl PipelineConfig {
                     target
                 );
             }
-            if let Some(ref target) = stage.on_intermediate.as_ref().and_then(|t| t.next.as_ref())
+            if let Some(ref target) = stage.on_intermediate().and_then(|t| t.next.as_ref())
                 && !self.stages.contains_key(target.as_str())
             {
                 anyhow::bail!(
@@ -420,8 +421,8 @@ pub struct WorkflowConfig {
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowToml {
-    #[serde(default)]
-    pub prompts_dir: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
+    pub prompts_dir: TomlOption<PathBuf>,
     #[serde(default)]
     pub roles: Option<IndexMap<Role, RoleDefinition>>,
     #[serde(default)]
@@ -475,7 +476,7 @@ impl WorkflowToml {
 
     pub fn merge_toml(self, other: Self) -> Self {
         Self {
-            prompts_dir: other.prompts_dir.or(self.prompts_dir),
+            prompts_dir: self.prompts_dir.merge(other.prompts_dir),
             roles: match (self.roles, other.roles) {
                 (Some(mut base), Some(over)) => {
                     for (k, v) in over {
@@ -520,7 +521,7 @@ impl WorkflowToml {
         let resolved_prompts_dir = self
             .prompts_dir
             .map(|p| zbobr_utility::resolve_path(p, config_dir));
-        let prompt_base: &Path = resolved_prompts_dir.as_deref().unwrap_or(config_dir);
+        let prompt_base: &Path = resolved_prompts_dir.as_option().map(|p| p.as_path()).unwrap_or(config_dir);
         let roles = self.roles.map(|roles| {
             roles
                 .into_iter()
@@ -542,7 +543,7 @@ impl WorkflowToml {
 
     pub fn try_into_config(self) -> anyhow::Result<WorkflowConfig> {
         Ok(WorkflowConfig {
-            prompts_dir: self.prompts_dir,
+            prompts_dir: self.prompts_dir.into_option(),
             roles: self.roles.unwrap_or_default(),
             pipelines: self.pipelines.unwrap_or_default(),
         })
@@ -556,7 +557,7 @@ impl Config for WorkflowConfig {
     fn build(toml: Option<Self::Toml>, _args: Self::Args, _config_dir: &Path) -> Self {
         match toml {
             Some(t) => WorkflowConfig {
-                prompts_dir: t.prompts_dir,
+                prompts_dir: t.prompts_dir.into_option(),
                 roles: t.roles.unwrap_or_default(),
                 pipelines: t.pipelines.unwrap_or_default(),
             },
@@ -662,7 +663,7 @@ impl WorkflowConfig {
         if !self.roles.is_empty() {
             for (pname, pipeline) in &self.pipelines {
                 for (sname, stage) in &pipeline.stages {
-                    if let Some(role) = &stage.role
+                    if let Some(role) = stage.role()
                         && !self.roles.contains_key(role.as_str())
                     {
                         anyhow::bail!(
@@ -679,7 +680,7 @@ impl WorkflowConfig {
         // Every call-stage's target pipeline must exist
         for (pname, pipeline) in &self.pipelines {
             for (sname, stage) in &pipeline.stages {
-                if let Some(target) = &stage.call
+                if let Some(target) = stage.call_pipeline()
                     && !self.pipelines.contains_key(target.as_str())
                 {
                     anyhow::bail!(
@@ -793,7 +794,7 @@ impl ZbobrDispatcherConfig {
     pub fn validate(&mut self) -> anyhow::Result<()> {
         // Verify parent references are valid
         for (provider_name, provider) in &self.providers {
-            if let Some(ref parent) = provider.parent
+            if let Some(parent) = provider.parent.as_option()
                 && !self.providers.contains_key(parent.as_str())
             {
                 anyhow::bail!(
@@ -808,7 +809,7 @@ impl ZbobrDispatcherConfig {
                     provider_name
                 );
             }
-            if let Some(ref executor) = provider.executor {
+            if let Some(executor) = provider.executor.as_option() {
                 let valid = [Executor::CLAUDE, Executor::COPILOT, Executor::MCP_TESTER];
                 if !valid.contains(&executor.as_str()) {
                     anyhow::bail!(
@@ -834,7 +835,7 @@ impl ZbobrDispatcherConfig {
         self.agent_github_token.resolve()?;
         // Resolve secrets in providers
         for provider in self.providers.values_mut() {
-            if let Some(ref mut key) = provider.access_key {
+            if let TomlOption::Value(ref mut key) = provider.access_key {
                 key.resolve()?;
             }
         }
@@ -844,7 +845,7 @@ impl ZbobrDispatcherConfig {
     /// Validate that all tool-name references in role and stage definitions exist in `self.tools`.
     pub fn validate_workflow_refs(&self, workflow: &WorkflowConfig) -> anyhow::Result<()> {
         for (role_name, role_def) in &workflow.roles {
-            let Some(ref tool) = role_def.tool else {
+            let Some(tool) = role_def.tool.as_option() else {
                 anyhow::bail!("Role '{}' has no tool defined", role_name);
             };
             if !self.tools.contains_key(tool.as_str()) {
@@ -857,7 +858,7 @@ impl ZbobrDispatcherConfig {
         }
         for (pname, pipeline) in &workflow.pipelines {
             for (sname, stage) in &pipeline.stages {
-                if let Some(ref tool) = stage.tool
+                if let Some(tool) = stage.tool.as_option()
                     && !self.tools.contains_key(tool.as_str())
                 {
                     anyhow::bail!(
@@ -880,14 +881,19 @@ impl ZbobrDispatcherConfig {
         stage_def: &StageDefinition,
         workflow: &WorkflowConfig,
     ) -> anyhow::Result<Tool> {
-        if let Some(ref tool) = stage_def.tool {
-            return Ok(tool.clone());
+        match &stage_def.tool {
+            TomlOption::Value(tool) => return Ok(tool.clone()),
+            TomlOption::ExplicitNone => anyhow::bail!(
+                "Tool explicitly cleared (nan) for stage with role {:?}",
+                stage_def.role()
+            ),
+            TomlOption::Absent => {}
         }
         if let Some(role_name) = stage_def.role().map(|r| r.as_str())
             && let Some(role_def) = workflow.role_definition(role_name)
-            && let Some(ref tool) = role_def.tool
+            && let Some(ref tool) = role_def.tool.as_option()
         {
-            return Ok(tool.clone());
+            return Ok((*tool).clone());
         }
         anyhow::bail!(
             "No tool found for stage {:?} with role {:?}",
@@ -923,25 +929,48 @@ impl ZbobrDispatcherConfig {
             .get(&provider)
             .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", provider.as_str()))?;
 
-        if let Some(ref parent_name) = def.parent {
-            let parent = self.resolve_single_provider(parent_name.clone(), visited)?;
+        if let Some(ref parent_name) = def.parent.as_option() {
+            let parent = self.resolve_single_provider((*parent_name).clone(), visited)?;
+            let executor = match def.executor.clone() {
+                TomlOption::Value(e) => e,
+                TomlOption::Absent => parent.executor,
+                TomlOption::ExplicitNone => anyhow::bail!(
+                    "Provider '{}' explicitly clears executor (nan), but executor is required",
+                    provider
+                ),
+            };
+            let priority = match def.priority.clone() {
+                TomlOption::Value(p) => p,
+                TomlOption::Absent => parent.priority,
+                TomlOption::ExplicitNone => 10,
+            };
+            let plan_mode = match def.plan_mode.clone() {
+                TomlOption::Value(p) => p,
+                TomlOption::Absent => parent.plan_mode,
+                TomlOption::ExplicitNone => false,
+            };
+            let access_key = match def.access_key.clone() {
+                TomlOption::Value(k) => Some(k),
+                TomlOption::Absent => parent.access_key,
+                TomlOption::ExplicitNone => None,
+            };
             Ok(ResolvedProvider {
                 provider: provider.clone(),
-                executor: def.executor.clone().unwrap_or(parent.executor),
-                priority: def.priority.unwrap_or(parent.priority),
-                plan_mode: def.plan_mode.unwrap_or(parent.plan_mode),
-                access_key: def.access_key.clone().or(parent.access_key),
+                executor,
+                priority,
+                plan_mode,
+                access_key,
             })
         } else {
-            let executor = def.executor.clone().ok_or_else(|| {
+            let executor = def.executor.clone().into_option().ok_or_else(|| {
                 anyhow::anyhow!("Provider '{}' has no executor and no parent", provider)
             })?;
             Ok(ResolvedProvider {
                 provider: provider.clone(),
                 executor,
-                priority: def.priority.unwrap_or(10),
-                plan_mode: def.plan_mode.unwrap_or(false),
-                access_key: def.access_key.clone(),
+                priority: def.priority.clone().into_option().unwrap_or(10),
+                plan_mode: def.plan_mode.clone().into_option().unwrap_or(false),
+                access_key: def.access_key.clone().into_option(),
             })
         }
     }
@@ -971,11 +1000,11 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some(Executor("claude".to_string())),
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         let config = make_config(providers, IndexMap::new());
@@ -995,20 +1024,20 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude_base"),
             ProviderDefinition {
-                executor: Some(Executor("claude".to_string())),
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         providers.insert(Provider::new("claude_child"),
             ProviderDefinition {
-                executor: None,
-                parent: Some(Provider::new("claude_base")),
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Default::default(),
+                parent: Some(Provider::new("claude_base")).into(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         let config = make_config(providers, IndexMap::new());
@@ -1023,29 +1052,29 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("grandparent"),
             ProviderDefinition {
-                executor: Some(Executor("claude".to_string())),
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         providers.insert(Provider::new("parent"),
             ProviderDefinition {
-                executor: None,
-                parent: Some(Provider::new("grandparent")),
-                priority: None,
-                plan_mode: Some(true),
-                access_key: None,
+                executor: Default::default(),
+                parent: Some(Provider::new("grandparent")).into(),
+                priority: Default::default(),
+                plan_mode: Some(true).into(),
+                access_key: Default::default(),
             },
         );
         providers.insert(Provider::new("child"),
             ProviderDefinition {
-                executor: None,
-                parent: Some(Provider::new("parent")),
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Default::default(),
+                parent: Some(Provider::new("parent")).into(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         let config = make_config(providers, IndexMap::new());
@@ -1061,20 +1090,20 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("a"),
             ProviderDefinition {
-                executor: None,
-                parent: Some(Provider::new("b")),
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Default::default(),
+                parent: Some(Provider::new("b")).into(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         providers.insert(Provider::new("b"),
             ProviderDefinition {
-                executor: None,
-                parent: Some(Provider::new("a")),
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Default::default(),
+                parent: Some(Provider::new("a")).into(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         let config = make_config(providers, IndexMap::new());
@@ -1091,20 +1120,20 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("base"),
             ProviderDefinition {
-                executor: Some(Executor("claude".to_string())),
-                parent: None,
-                priority: None,
-                plan_mode: Some(false),
-                access_key: None,
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Some(false).into(),
+                access_key: Default::default(),
             },
         );
         providers.insert(Provider::new("child"),
             ProviderDefinition {
-                executor: None,
-                parent: Some(Provider::new("base")),
-                priority: Some(5),
-                plan_mode: Some(true),
-                access_key: None,
+                executor: Default::default(),
+                parent: Some(Provider::new("base")).into(),
+                priority: Some(5).into(),
+                plan_mode: Some(true).into(),
+                access_key: Default::default(),
             },
         );
         let config = make_config(providers, IndexMap::new());
@@ -1123,11 +1152,11 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some(Executor("claude".to_string())),
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         let mut tools = IndexMap::new();
@@ -1135,7 +1164,7 @@ mod tests {
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
-                priority: None,
+                priority: Default::default(),
             }],
         );
         let mut config = make_config(providers, tools);
@@ -1147,11 +1176,11 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("child"),
             ProviderDefinition {
-                executor: None,
-                parent: Some(Provider::new("nonexistent")),
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Default::default(),
+                parent: Some(Provider::new("nonexistent")).into(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         let mut config = make_config(providers, IndexMap::new());
@@ -1168,11 +1197,11 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("broken"),
             ProviderDefinition {
-                executor: None,
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Default::default(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         let mut config = make_config(providers, IndexMap::new());
@@ -1189,11 +1218,11 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some(Executor("claude".to_string())),
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         let mut tools = IndexMap::new();
@@ -1201,7 +1230,7 @@ mod tests {
             vec![ToolEntry {
                 provider: Provider::new("ghost"),
                 model: "opus".parse().unwrap(),
-                priority: None,
+                priority: Default::default(),
             }],
         );
         let mut config = make_config(providers, tools);
@@ -1221,12 +1250,12 @@ mod tests {
             role_name.to_string().into(),
             RoleDefinition {
                 mcp: None,
-                prompt: None,
-                tool,
+                prompt: Default::default(),
+                tool: tool.into(),
             },
         );
         WorkflowConfig {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles,
             pipelines: HashMap::new(),
         }
@@ -1235,8 +1264,8 @@ mod tests {
     #[test]
     fn resolve_tool_name_stage_overrides() {
         let stage = StageDefinition {
-            tool: Some("stage-tool".into()),
-            role: Some("worker".to_string().into()),
+            tool: Some("stage-tool".into()).into(),
+            role: Some("worker".to_string().into()).into(),
             ..Default::default()
         };
         let workflow = make_workflow_with_role("worker", Some("role-tool".into()));
@@ -1250,8 +1279,8 @@ mod tests {
     #[test]
     fn resolve_tool_name_falls_back_to_role() {
         let stage = StageDefinition {
-            tool: None,
-            role: Some("worker".to_string().into()),
+            tool: Default::default(),
+            role: Some("worker".to_string().into()).into(),
             ..Default::default()
         };
         let workflow = make_workflow_with_role("worker", Some("role-tool".into()));
@@ -1265,8 +1294,8 @@ mod tests {
     #[test]
     fn resolve_tool_name_errors_when_no_tool() {
         let stage = StageDefinition {
-            tool: None,
-            role: Some("worker".to_string().into()),
+            tool: Default::default(),
+            role: Some("worker".to_string().into()).into(),
             ..Default::default()
         };
         let workflow = make_workflow_with_role("worker", None);
@@ -1277,8 +1306,8 @@ mod tests {
     #[test]
     fn resolve_tool_name_errors_when_no_role() {
         let stage = StageDefinition {
-            tool: None,
-            role: Some("nonexistent".to_string().into()),
+            tool: Default::default(),
+            role: Some("nonexistent".to_string().into()).into(),
             ..Default::default()
         };
         let workflow = WorkflowConfig::default();
@@ -1293,20 +1322,20 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("base"),
             ProviderDefinition {
-                executor: Some(Executor("claude".to_string())),
-                parent: None,
-                priority: Some(3),
-                plan_mode: None,
-                access_key: None,
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Some(3).into(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         providers.insert(Provider::new("child"),
             ProviderDefinition {
-                executor: None,
-                parent: Some(Provider::new("base")),
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Default::default(),
+                parent: Some(Provider::new("base")).into(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         let config = make_config(providers, IndexMap::new());
@@ -1330,11 +1359,11 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some(Executor("claude".to_string())),
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         let mut tools = IndexMap::new();
@@ -1342,7 +1371,7 @@ mod tests {
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
-                priority: None,
+                priority: Default::default(),
             }],
         );
         let config = make_config(providers, tools);
@@ -1360,11 +1389,11 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some(Executor("claude".to_string())),
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         let mut tools = IndexMap::new();
@@ -1372,7 +1401,7 @@ mod tests {
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
-                priority: None,
+                priority: Default::default(),
             }],
         );
         let config = make_config(providers, tools);
@@ -1381,15 +1410,15 @@ mod tests {
         stages.insert(
             Stage::from("working"),
             StageDefinition {
-                role: Some("worker".to_string().into()),
-                tool: Some("bad".into()),
+                role: Some("worker".to_string().into()).into(),
+                tool: Some("bad".into()).into(),
                 ..Default::default()
             },
         );
         let mut pipelines = HashMap::new();
         pipelines.insert(Pipeline::Main, PipelineConfig { stages });
         let workflow = WorkflowConfig {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles: IndexMap::new(),
             pipelines,
         };
@@ -1406,11 +1435,11 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some(Executor("claude".to_string())),
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         let mut tools = IndexMap::new();
@@ -1418,7 +1447,7 @@ mod tests {
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
-                priority: None,
+                priority: Default::default(),
             }],
         );
         let config = make_config(providers, tools);
@@ -1427,8 +1456,8 @@ mod tests {
         stages.insert(
             Stage::from("working"),
             StageDefinition {
-                role: Some("worker".to_string().into()),
-                tool: Some("smart".into()),
+                role: Some("worker".to_string().into()).into(),
+                tool: Some("smart".into()).into(),
                 ..Default::default()
             },
         );
@@ -1438,12 +1467,12 @@ mod tests {
         roles.insert("worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
-                prompt: None,
-                tool: Some("smart".into()),
+                prompt: Default::default(),
+                tool: Some("smart".into()).into(),
             },
         );
         let workflow = WorkflowConfig {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles,
             pipelines,
         };
@@ -1455,11 +1484,11 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some(Executor("claude".to_string())),
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         let mut tools = IndexMap::new();
@@ -1467,7 +1496,7 @@ mod tests {
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "opus".parse().unwrap(),
-                priority: None,
+                priority: Default::default(),
             }],
         );
         let config = make_config(providers, tools);
@@ -1476,8 +1505,8 @@ mod tests {
         stages.insert(
             Stage::from("working"),
             StageDefinition {
-                role: Some("worker".to_string().into()),
-                tool: None,
+                role: Some("worker".to_string().into()).into(),
+                tool: Default::default(),
                 ..Default::default()
             },
         );
@@ -1487,12 +1516,12 @@ mod tests {
         roles.insert("worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
-                prompt: None,
-                tool: None,
+                prompt: Default::default(),
+                tool: Default::default(),
             },
         );
         let workflow = WorkflowConfig {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles,
             pipelines,
         };
@@ -1511,11 +1540,11 @@ mod tests {
         let mut providers = IndexMap::new();
         providers.insert(Provider::new("bad"),
             ProviderDefinition {
-                executor: Some(Executor("invalid_executor".to_string())),
-                parent: None,
-                priority: None,
-                plan_mode: None,
-                access_key: None,
+                executor: Some(Executor("invalid_executor".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         let mut config = make_config(providers, IndexMap::new());
@@ -1576,7 +1605,7 @@ developer = [
         let entry = ToolEntry {
             provider: Provider::new("claude"),
             model: "claude-opus-4.6".parse().unwrap(),
-            priority: None,
+            priority: Default::default(),
         };
         let serialized = toml::to_string(&entry).unwrap();
         assert!(
@@ -1590,7 +1619,7 @@ developer = [
         let entry = ToolEntry {
             provider: Provider::new("copilot"),
             model: "claude-sonnet-4.6".parse().unwrap(),
-            priority: Some(5),
+            priority: Some(5).into(),
         };
         let serialized = toml::to_string(&entry).unwrap();
         assert!(
@@ -1605,12 +1634,12 @@ developer = [
     fn role_definition_resolve_paths_makes_prompt_absolute() {
         let role = RoleDefinition {
             mcp: None,
-            prompt: Some(PathBuf::from("prompts/reviewer.md")),
-            tool: None,
+            prompt: Some(PathBuf::from("prompts/reviewer.md")).into(),
+            tool: Default::default(),
         };
         let resolved = role.resolve_paths(std::path::Path::new("/shared/configs"));
         assert_eq!(
-            resolved.prompt.unwrap(),
+            resolved.prompt.into_option().unwrap(),
             PathBuf::from("/shared/configs/prompts/reviewer.md")
         );
     }
@@ -1619,18 +1648,18 @@ developer = [
     fn role_definition_resolve_paths_preserves_absolute() {
         let role = RoleDefinition {
             mcp: None,
-            prompt: Some(PathBuf::from("/abs/prompt.md")),
-            tool: None,
+            prompt: Some(PathBuf::from("/abs/prompt.md")).into(),
+            tool: Default::default(),
         };
         let resolved = role.resolve_paths(std::path::Path::new("/other"));
-        assert_eq!(resolved.prompt.unwrap(), PathBuf::from("/abs/prompt.md"));
+        assert_eq!(resolved.prompt.into_option().unwrap(), PathBuf::from("/abs/prompt.md"));
     }
 
     #[test]
     fn stage_definition_resolve_paths_resolves_all_prompt_fields() {
         let stage = StageDefinition {
-            role: Some("worker".to_string().into()),
-            role_prompt: Some(PathBuf::from("worker.md")),
+            role: Some("worker".to_string().into()).into(),
+            role_prompt: Some(PathBuf::from("worker.md")).into(),
             prompts: Some(vec![
                 PathBuf::from("common.md"),
                 PathBuf::from("/abs/special.md"),
@@ -1639,7 +1668,7 @@ developer = [
         };
         let resolved = stage.resolve_paths(std::path::Path::new("/shared"));
         assert_eq!(
-            resolved.role_prompt.unwrap(),
+            resolved.role_prompt.into_option().unwrap(),
             PathBuf::from("/shared/worker.md")
         );
         let prompts = resolved.prompts.as_deref().unwrap();
@@ -1653,8 +1682,8 @@ developer = [
         stages.insert(
             Stage::from("review"),
             StageDefinition {
-                role: Some("reviewer".to_string().into()),
-                role_prompt: Some(PathBuf::from("review.md")),
+                role: Some("reviewer".to_string().into()).into(),
+                role_prompt: Some(PathBuf::from("review.md")).into(),
                 prompts: Some(vec![PathBuf::from("common.md")]),
                 ..Default::default()
             },
@@ -1663,7 +1692,7 @@ developer = [
         let resolved = pipeline.resolve_paths(std::path::Path::new("/base"));
         let stage = resolved.stage(&Stage::from("review")).unwrap();
         assert_eq!(
-            stage.role_prompt.as_ref().unwrap(),
+            stage.role_prompt.as_option().unwrap(),
             &PathBuf::from("/base/review.md")
         );
         assert_eq!(
@@ -1678,16 +1707,16 @@ developer = [
         roles.insert("reviewer".to_string().into(),
             RoleDefinition {
                 mcp: None,
-                prompt: Some(PathBuf::from("reviewer.md")),
-                tool: None,
+                prompt: Some(PathBuf::from("reviewer.md")).into(),
+                tool: Default::default(),
             },
         );
         let mut stages = IndexMap::new();
         stages.insert(
             Stage::from("review"),
             StageDefinition {
-                role: Some("reviewer".to_string().into()),
-                role_prompt: Some(PathBuf::from("review_stage.md")),
+                role: Some("reviewer".to_string().into()).into(),
+                role_prompt: Some(PathBuf::from("review_stage.md")).into(),
                 prompts: Some(vec![PathBuf::from("common.md")]),
                 ..Default::default()
             },
@@ -1696,7 +1725,7 @@ developer = [
         pipelines.insert(Pipeline::Main, PipelineConfig { stages });
 
         let toml = WorkflowToml {
-            prompts_dir: Some(PathBuf::from("prompts")),
+            prompts_dir: Some(PathBuf::from("prompts")).into(),
             roles: Some(roles),
             pipelines: Some(pipelines),
         };
@@ -1704,20 +1733,20 @@ developer = [
 
         // prompts_dir resolved
         assert_eq!(
-            resolved.prompts_dir.unwrap(),
+            resolved.prompts_dir.into_option().unwrap(),
             PathBuf::from("/shared/prompts")
         );
         // role prompt resolved against prompts_dir
         let role = &resolved.roles.as_ref().unwrap()["reviewer"];
         assert_eq!(
-            role.prompt.as_ref().unwrap(),
+            role.prompt.as_option().unwrap(),
             &PathBuf::from("/shared/prompts/reviewer.md")
         );
         // stage prompts resolved against prompts_dir
         let pipeline = &resolved.pipelines.as_ref().unwrap()[&Pipeline::Main];
         let stage = pipeline.stage(&Stage::from("review")).unwrap();
         assert_eq!(
-            stage.role_prompt.as_ref().unwrap(),
+            stage.role_prompt.as_option().unwrap(),
             &PathBuf::from("/shared/prompts/review_stage.md")
         );
         assert_eq!(
@@ -1736,12 +1765,12 @@ developer = [
         roles.insert("reviewer".to_string().into(),
             RoleDefinition {
                 mcp: None,
-                prompt: Some(PathBuf::from("reviewer.md")),
-                tool: None,
+                prompt: Some(PathBuf::from("reviewer.md")).into(),
+                tool: Default::default(),
             },
         );
         let base = WorkflowToml {
-            prompts_dir: Some(PathBuf::from("prompts")),
+            prompts_dir: Some(PathBuf::from("prompts")).into(),
             roles: Some(roles),
             pipelines: None,
         };
@@ -1755,12 +1784,12 @@ developer = [
 
         // Base paths should remain anchored to /shared/
         assert_eq!(
-            merged.prompts_dir.unwrap(),
+            merged.prompts_dir.into_option().unwrap(),
             PathBuf::from("/shared/prompts")
         );
         let role = &merged.roles.as_ref().unwrap()["reviewer"];
         assert_eq!(
-            role.prompt.as_ref().unwrap(),
+            role.prompt.as_option().unwrap(),
             &PathBuf::from("/shared/prompts/reviewer.md")
         );
     }
@@ -1775,19 +1804,19 @@ developer = [
         base_roles.insert("reviewer".to_string().into(),
             RoleDefinition {
                 mcp: None,
-                prompt: Some(PathBuf::from("/shared/reviewer.md")),
-                tool: None,
+                prompt: Some(PathBuf::from("/shared/reviewer.md")).into(),
+                tool: Default::default(),
             },
         );
         base_roles.insert("worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
-                prompt: Some(PathBuf::from("/shared/worker.md")),
-                tool: None,
+                prompt: Some(PathBuf::from("/shared/worker.md")).into(),
+                tool: Default::default(),
             },
         );
         let base = WorkflowToml {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles: Some(base_roles),
             pipelines: None,
         };
@@ -1797,12 +1826,12 @@ developer = [
         overlay_roles.insert("reviewer".to_string().into(),
             RoleDefinition {
                 mcp: None,
-                prompt: Some(PathBuf::from("/project/reviewer_override.md")),
-                tool: None,
+                prompt: Some(PathBuf::from("/project/reviewer_override.md")).into(),
+                tool: Default::default(),
             },
         );
         let overlay = WorkflowToml {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles: Some(overlay_roles),
             pipelines: None,
         };
@@ -1812,12 +1841,12 @@ developer = [
 
         // "reviewer" is overridden by the overlay.
         assert_eq!(
-            roles["reviewer"].prompt.as_ref().unwrap(),
+            roles["reviewer"].prompt.as_option().unwrap(),
             &PathBuf::from("/project/reviewer_override.md")
         );
         // "worker" survives from the base config unchanged.
         assert_eq!(
-            roles["worker"].prompt.as_ref().unwrap(),
+            roles["worker"].prompt.as_option().unwrap(),
             &PathBuf::from("/shared/worker.md")
         );
     }
@@ -1830,7 +1859,7 @@ developer = [
         main_stages.insert(
             Stage::from("planning"),
             StageDefinition {
-                role: Some("planner".to_string().into()),
+                role: Some("planner".to_string().into()).into(),
                 ..Default::default()
             },
         );
@@ -1844,7 +1873,7 @@ developer = [
         fix_stages.insert(
             Stage::from("fixing"),
             StageDefinition {
-                role: Some("worker".to_string().into()),
+                role: Some("worker".to_string().into()).into(),
                 ..Default::default()
             },
         );
@@ -1854,7 +1883,7 @@ developer = [
         );
 
         let base = WorkflowToml {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles: None,
             pipelines: Some(base_pipelines),
         };
@@ -1864,7 +1893,7 @@ developer = [
         overlay_stages.insert(
             Stage::from("planning"),
             StageDefinition {
-                role: Some("senior_planner".to_string().into()),
+                role: Some("senior_planner".to_string().into()).into(),
                 ..Default::default()
             },
         );
@@ -1876,7 +1905,7 @@ developer = [
             },
         );
         let overlay = WorkflowToml {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles: None,
             pipelines: Some(overlay_pipelines),
         };
@@ -1887,13 +1916,13 @@ developer = [
         // Main pipeline is overridden by the overlay.
         let main = &pipelines[&Pipeline::Main];
         assert_eq!(
-            main.stage(&Stage::from("planning")).unwrap().role.as_deref().unwrap(),
+            main.stage(&Stage::from("planning")).unwrap().role.as_option().map(|s| s.as_str()).unwrap(),
             "senior_planner"
         );
         // Fix pipeline survives from the base config unchanged.
         let fix = &pipelines[&Pipeline::Custom("fix".to_string())];
         assert_eq!(
-            fix.stage(&Stage::from("fixing")).unwrap().role.as_deref().unwrap(),
+            fix.stage(&Stage::from("fixing")).unwrap().role.as_option().map(|s| s.as_str()).unwrap(),
             "worker"
         );
     }
@@ -1904,20 +1933,20 @@ developer = [
         let mut base_providers = IndexMap::new();
         base_providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some(Executor("claude".to_string())),
-                parent: None,
-                priority: Some(10),
-                plan_mode: None,
-                access_key: None,
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Some(10).into(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         base_providers.insert(Provider::new("copilot"),
             ProviderDefinition {
-                executor: Some(Executor("copilot".to_string())),
-                parent: None,
-                priority: Some(5),
-                plan_mode: None,
-                access_key: None,
+                executor: Some(Executor("copilot".to_string())).into(),
+                parent: Default::default(),
+                priority: Some(5).into(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
 
@@ -1930,20 +1959,20 @@ developer = [
         let mut overlay_providers = IndexMap::new();
         overlay_providers.insert(Provider::new("claude"),
             ProviderDefinition {
-                executor: Some(Executor("claude".to_string())),
-                parent: None,
-                priority: Some(20),
-                plan_mode: None,
-                access_key: None,
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Some(20).into(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
         overlay_providers.insert(Provider::new("gpt"),
             ProviderDefinition {
-                executor: Some(Executor("openai".to_string())),
-                parent: None,
-                priority: Some(15),
-                plan_mode: None,
-                access_key: None,
+                executor: Some(Executor("openai".to_string())).into(),
+                parent: Default::default(),
+                priority: Some(15).into(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
 
@@ -1956,11 +1985,11 @@ developer = [
         let providers = merged.providers.unwrap();
 
         // "claude" is overridden with priority 20.
-        assert_eq!(providers["claude"].priority, Some(20));
+        assert_eq!(providers["claude"].priority, TomlOption::Value(20));
         // "copilot" survives from the base config.
-        assert_eq!(providers["copilot"].priority, Some(5));
+        assert_eq!(providers["copilot"].priority, TomlOption::Value(5));
         // "gpt" is added by the overlay.
-        assert_eq!(providers["gpt"].executor.as_ref().map(|e| e.as_str()), Some("openai"));
+        assert_eq!(providers["gpt"].executor.as_option().map(|e| e.as_str()), Some("openai"));
         assert_eq!(providers.len(), 3);
     }
 
@@ -1971,11 +2000,11 @@ developer = [
         let mut base_providers = IndexMap::new();
         base_providers.insert(Provider::new("shared"),
             ProviderDefinition {
-                executor: Some(Executor("claude".to_string())),
-                parent: None,
-                priority: Some(10),
-                plan_mode: Some(false),
-                access_key: None,
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Some(10).into(),
+                plan_mode: Some(false).into(),
+                access_key: Default::default(),
             },
         );
 
@@ -1988,11 +2017,11 @@ developer = [
         let mut overlay_providers = IndexMap::new();
         overlay_providers.insert(Provider::new("shared"),
             ProviderDefinition {
-                executor: None,
-                parent: None,
-                priority: Some(20),
-                plan_mode: None,
-                access_key: None,
+                executor: Default::default(),
+                parent: Default::default(),
+                priority: Some(20).into(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
             },
         );
 
@@ -2005,18 +2034,16 @@ developer = [
         let providers = merged.providers.unwrap();
 
         assert_eq!(
-            providers["shared"].priority,
-            Some(20),
+            providers["shared"].priority, TomlOption::Value(20),
             "priority should be overridden"
         );
         assert_eq!(
-            providers["shared"].executor.as_ref().map(|e| e.as_str()),
+            providers["shared"].executor.as_option().map(|e| e.as_str()),
             Some("claude"),
             "executor should be preserved from base"
         );
         assert_eq!(
-            providers["shared"].plan_mode,
-            Some(false),
+            providers["shared"].plan_mode, TomlOption::Value(false),
             "plan_mode should be preserved from base"
         );
     }
@@ -2030,13 +2057,13 @@ developer = [
         base_roles.insert("worker".to_string().into(),
             RoleDefinition {
                 mcp: Some(vec![McpTool::ReportSuccess]),
-                prompt: Some(PathBuf::from("/shared/worker.md")),
-                tool: None,
+                prompt: Some(PathBuf::from("/shared/worker.md")).into(),
+                tool: Default::default(),
             },
         );
 
         let base = WorkflowToml {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles: Some(base_roles),
             pipelines: None,
         };
@@ -2046,13 +2073,13 @@ developer = [
         overlay_roles.insert("worker".to_string().into(),
             RoleDefinition {
                 mcp: None,
-                prompt: None,
-                tool: Some("fast-tool".into()),
+                prompt: Default::default(),
+                tool: Some("fast-tool".into()).into(),
             },
         );
 
         let overlay = WorkflowToml {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles: Some(overlay_roles),
             pipelines: None,
         };
@@ -2061,12 +2088,12 @@ developer = [
         let roles = merged.roles.unwrap();
 
         assert_eq!(
-            roles["worker"].tool.as_deref(),
+            roles["worker"].tool.as_option().map(|s| s.as_str()),
             Some("fast-tool"),
             "tool should be set by overlay"
         );
         assert_eq!(
-            roles["worker"].prompt.as_ref().unwrap(),
+            roles["worker"].prompt.as_option().unwrap(),
             &PathBuf::from("/shared/worker.md"),
             "prompt should be preserved from base"
         );
@@ -2084,12 +2111,12 @@ developer = [
         base_roles.insert("worker".to_string().into(),
             RoleDefinition {
                 mcp: Some(vec![McpTool::ReportSuccess]),
-                prompt: None,
-                tool: None,
+                prompt: Default::default(),
+                tool: Default::default(),
             },
         );
         let base = WorkflowToml {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles: Some(base_roles),
             pipelines: None,
         };
@@ -2099,12 +2126,12 @@ developer = [
         overlay_roles.insert("worker".to_string().into(),
             RoleDefinition {
                 mcp: Some(vec![]),
-                prompt: None,
-                tool: None,
+                prompt: Default::default(),
+                tool: Default::default(),
             },
         );
         let overlay = WorkflowToml {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles: Some(overlay_roles),
             pipelines: None,
         };
@@ -2126,15 +2153,15 @@ developer = [
         base_stages.insert(
             Stage::from("planning"),
             StageDefinition {
-                role: Some("planner".to_string().into()),
-                tool: Some("fast".into()),
+                role: Some("planner".to_string().into()).into(),
+                tool: Some("fast".into()).into(),
                 ..Default::default()
             },
         );
         base_stages.insert(
             Stage::from("working"),
             StageDefinition {
-                role: Some("worker".to_string().into()),
+                role: Some("worker".to_string().into()).into(),
                 ..Default::default()
             },
         );
@@ -2148,7 +2175,7 @@ developer = [
         );
 
         let base = WorkflowToml {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles: None,
             pipelines: Some(base_pipelines),
         };
@@ -2158,8 +2185,8 @@ developer = [
         overlay_stages.insert(
             Stage::from("planning"),
             StageDefinition {
-                role: Some("senior_planner".to_string().into()),
-                tool: None,
+                role: Some("senior_planner".to_string().into()).into(),
+                tool: Default::default(),
                 ..Default::default()
             },
         );
@@ -2172,7 +2199,7 @@ developer = [
         );
 
         let overlay = WorkflowToml {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles: None,
             pipelines: Some(overlay_pipelines),
         };
@@ -2182,17 +2209,17 @@ developer = [
         let main = &pipelines[&Pipeline::Main];
 
         assert_eq!(
-            main.stage(&Stage::from("planning")).unwrap().role.as_deref().unwrap(),
+            main.stage(&Stage::from("planning")).unwrap().role.as_option().map(|s| s.as_str()).unwrap(),
             "senior_planner",
             "planning role should be overridden"
         );
         assert_eq!(
-            main.stage(&Stage::from("planning")).unwrap().tool.as_deref(),
+            main.stage(&Stage::from("planning")).unwrap().tool.as_option().map(|s| s.as_str()),
             Some("fast"),
             "planning tool should be preserved from base"
         );
         assert_eq!(
-            main.stage(&Stage::from("working")).unwrap().role.as_deref().unwrap(),
+            main.stage(&Stage::from("working")).unwrap().role.as_option().map(|s| s.as_str()).unwrap(),
             "worker",
             "working stage should survive unchanged from base"
         );
@@ -2205,7 +2232,7 @@ developer = [
         base_stages.insert(
             Stage::from("planning"),
             StageDefinition {
-                role: Some("planner".to_string().into()),
+                role: Some("planner".to_string().into()).into(),
                 prompts: Some(vec![PathBuf::from("/shared/common.md")]),
                 ..Default::default()
             },
@@ -2219,7 +2246,7 @@ developer = [
         );
 
         let base = WorkflowToml {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles: None,
             pipelines: Some(base_pipelines),
         };
@@ -2229,7 +2256,7 @@ developer = [
         overlay_stages.insert(
             Stage::from("planning"),
             StageDefinition {
-                role: None,
+                role: Default::default(),
                 prompts: Some(vec![]),
                 ..Default::default()
             },
@@ -2243,7 +2270,7 @@ developer = [
         );
 
         let overlay = WorkflowToml {
-            prompts_dir: None,
+            prompts_dir: Default::default(),
             roles: None,
             pipelines: Some(overlay_pipelines),
         };
@@ -2387,12 +2414,12 @@ prompts = ["common.md", "planning.md"]
                 ToolEntry {
                     provider: Provider::new("claude"),
                     model: "claude-opus-4.6".parse().unwrap(),
-                    priority: None,
+                    priority: Default::default(),
                 },
                 ToolEntry {
                     provider: Provider::new("copilot"),
                     model: "claude-sonnet-4.6".parse().unwrap(),
-                    priority: Some(5),
+                    priority: Some(5).into(),
                 },
             ],
         );
@@ -2400,7 +2427,7 @@ prompts = ["common.md", "planning.md"]
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "claude-opus-4.6".parse().unwrap(),
-                priority: None,
+                priority: Default::default(),
             }],
         );
 
@@ -2415,14 +2442,14 @@ prompts = ["common.md", "planning.md"]
             vec![ToolEntry {
                 provider: Provider::new("gpt"),
                 model: "claude-opus-4.6".parse().unwrap(),
-                priority: Some(1),
+                priority: Some(1).into(),
             }],
         );
         overlay_tools.insert("tester".to_string().into(),
             vec![ToolEntry {
                 provider: Provider::new("claude"),
                 model: "claude-sonnet-4.6".parse().unwrap(),
-                priority: None,
+                priority: Default::default(),
             }],
         );
 
@@ -2498,7 +2525,7 @@ prompts = []
 
         // Worker role: prompt inherits from base (overlay didn't specify it).
         assert_eq!(
-            roles["worker"].prompt.as_deref(),
+            roles["worker"].prompt.as_option().map(|p| p.as_path()),
             Some(std::path::Path::new("worker.md"))
         );
 
@@ -2507,7 +2534,7 @@ prompts = []
         assert_eq!(reviewer_mcp.len(), 1);
         assert_eq!(reviewer_mcp[0], McpTool::ReportSuccess);
         assert_eq!(
-            roles["reviewer"].prompt.as_deref(),
+            roles["reviewer"].prompt.as_option().map(|p| p.as_path()),
             Some(std::path::Path::new("reviewer.md"))
         );
 
@@ -2525,7 +2552,7 @@ prompts = []
 
         // Planning stage: role inherited from base (overlay didn't specify it).
         assert_eq!(
-            main.stage(&Stage::from("planning")).unwrap().role.as_deref(),
+            main.stage(&Stage::from("planning")).unwrap().role.as_option().map(|s| s.as_str()),
             Some("worker")
         );
 
@@ -2539,5 +2566,287 @@ prompts = []
         assert_eq!(working_prompts.len(), 2);
         assert_eq!(working_prompts[0], PathBuf::from("common.md"));
         assert_eq!(working_prompts[1], PathBuf::from("working.md"));
+    }
+
+    // -- NaN config clearing integration test --------------------------------
+
+    #[test]
+    fn nan_in_toml_clears_base_config_value() {
+        // Base config sets a provider executor and priority.
+        let base_toml: &str = r#"
+[providers.main]
+executor = "claude"
+priority = 10
+"#;
+        // Overlay uses `nan` to explicitly clear the executor field.
+        let overlay_toml: &str = r#"
+[providers.main]
+executor = nan
+"#;
+        let base: ZbobrDispatcherConfigToml = toml::from_str(base_toml).unwrap();
+        let overlay: ZbobrDispatcherConfigToml = toml::from_str(overlay_toml).unwrap();
+
+        let merged = base.merge_toml(overlay);
+        let providers = merged.providers.as_ref().unwrap();
+        let main = &providers["main"];
+
+        // executor was cleared by nan
+        assert_eq!(main.executor, TomlOption::ExplicitNone);
+        // priority was not touched by overlay, so it survives from base
+        assert_eq!(main.priority, TomlOption::Value(10));
+        // into_option() converts ExplicitNone → None
+        assert!(main.executor.clone().into_option().is_none());
+    }
+
+    #[test]
+    fn nan_in_toml_stage_field_clears_inherited_role() {
+        // Base workflow has a stage with a role.
+        let base_toml: &str = r#"
+[pipelines.main.stages.working]
+role = "worker"
+"#;
+        // Overlay uses `nan` to clear the role from the working stage.
+        let overlay_toml: &str = r#"
+[pipelines.main.stages.working]
+role = nan
+"#;
+        let base: WorkflowToml = toml::from_str(base_toml).unwrap();
+        let overlay: WorkflowToml = toml::from_str(overlay_toml).unwrap();
+
+        let merged = base.merge_toml(overlay);
+        let pipelines = merged.pipelines.as_ref().unwrap();
+        let stage = pipelines[&Pipeline::Main]
+            .stage(&Stage::from("working"))
+            .unwrap();
+
+        assert_eq!(stage.role, TomlOption::ExplicitNone);
+        // into_option() converts ExplicitNone → None
+        assert!(stage.role.clone().into_option().is_none());
+    }
+
+    #[test]
+    fn stage_on_success_nan_in_overlay_clears_base_transition() {
+        let base_toml = r#"
+[pipelines.main.stages.working]
+on_success = "reviewing"
+"#;
+        let overlay_toml = r#"
+[pipelines.main.stages.working]
+on_success = nan
+"#;
+        let base: WorkflowToml = toml::from_str(base_toml).unwrap();
+        let overlay: WorkflowToml = toml::from_str(overlay_toml).unwrap();
+
+        let merged = base.merge_toml(overlay);
+        let stage = merged
+            .pipelines.as_ref().unwrap()[&Pipeline::Main]
+            .stage(&Stage::from("working")).unwrap();
+
+        // ExplicitNone should clear the inherited on_success transition
+        assert_eq!(stage.on_success, TomlOption::ExplicitNone);
+        assert!(stage.on_success().is_none(),
+            "nan on_success must produce None at runtime, got: {:?}", stage.on_success());
+    }
+
+    #[test]
+    fn workflow_prompts_dir_nan_in_overlay_clears_base() {
+        let base_toml = r#"prompts_dir = "/some/dir""#;
+        let overlay_toml = r#"prompts_dir = nan"#;
+
+        let base: WorkflowToml = toml::from_str(base_toml).unwrap();
+        let overlay: WorkflowToml = toml::from_str(overlay_toml).unwrap();
+        let merged = base.merge_toml(overlay);
+
+        assert_eq!(merged.prompts_dir, TomlOption::ExplicitNone);
+        // into_option() must return None
+        assert!(merged.prompts_dir.into_option().is_none());
+    }
+
+    #[test]
+    fn workflow_prompts_dir_nan_resolves_to_none_in_config() {
+        let toml_str = r#"prompts_dir = nan"#;
+        let workflow_toml: WorkflowToml = toml::from_str(toml_str).unwrap();
+        // try_into_config converts ExplicitNone → None
+        let config = workflow_toml.try_into_config().unwrap();
+        assert!(config.prompts_dir.is_none());
+    }
+
+    // ── ExplicitNone semantics in consumer layer ─────────────────────────
+
+    #[test]
+    fn resolve_tool_stage_explicit_none_blocks_role_fallback() {
+        // A stage with tool = ExplicitNone must NOT fall back to the role's tool.
+        let stage = StageDefinition {
+            tool: TomlOption::ExplicitNone,
+            role: Some("worker".to_string().into()).into(),
+            ..Default::default()
+        };
+        let workflow = make_workflow_with_role("worker", Some("role-tool".into()));
+        let config = ZbobrDispatcherConfig::default();
+        let err = config.resolve_tool(&stage, &workflow).unwrap_err();
+        assert!(
+            err.to_string().contains("explicitly cleared"),
+            "Expected 'explicitly cleared' in error: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_providers_child_clears_access_key_with_explicit_none() {
+        // Parent has an access_key; child sets access_key = nan to clear it.
+        use zbobr_utility::Secret;
+        let mut providers = IndexMap::new();
+        providers.insert(Provider::new("base"),
+            ProviderDefinition {
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Some(Secret::value("parent-key".to_string())).into(),
+            },
+        );
+        providers.insert(Provider::new("child"),
+            ProviderDefinition {
+                executor: Default::default(),
+                parent: Some(Provider::new("base")).into(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: TomlOption::ExplicitNone,
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        let child = &resolved[&Provider::new("child")];
+        assert!(
+            child.access_key.is_none(),
+            "Child with access_key = nan should clear the parent's access_key"
+        );
+    }
+
+    #[test]
+    fn resolve_providers_child_clears_priority_with_explicit_none() {
+        // Parent has priority 50; child sets priority = nan to reset to default (10).
+        let mut providers = IndexMap::new();
+        providers.insert(Provider::new("base"),
+            ProviderDefinition {
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Some(50).into(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
+            },
+        );
+        providers.insert(Provider::new("child"),
+            ProviderDefinition {
+                executor: Default::default(),
+                parent: Some(Provider::new("base")).into(),
+                priority: TomlOption::ExplicitNone,
+                plan_mode: Default::default(),
+                access_key: Default::default(),
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        let child = &resolved[&Provider::new("child")];
+        assert_eq!(
+            child.priority, 10,
+            "Child with priority = nan should reset to default (10), not inherit parent's 50"
+        );
+    }
+
+    #[test]
+    fn resolve_providers_child_clears_plan_mode_with_explicit_none() {
+        // Parent has plan_mode = true; child sets plan_mode = nan to reset to default (false).
+        let mut providers = IndexMap::new();
+        providers.insert(Provider::new("base"),
+            ProviderDefinition {
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Some(true).into(),
+                access_key: Default::default(),
+            },
+        );
+        providers.insert(Provider::new("child"),
+            ProviderDefinition {
+                executor: Default::default(),
+                parent: Some(Provider::new("base")).into(),
+                priority: Default::default(),
+                plan_mode: TomlOption::ExplicitNone,
+                access_key: Default::default(),
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let resolved = config.resolve_providers().unwrap();
+
+        let child = &resolved[&Provider::new("child")];
+        assert!(
+            !child.plan_mode,
+            "Child with plan_mode = nan should reset to default (false), not inherit parent's true"
+        );
+    }
+
+    #[test]
+    fn resolve_providers_child_executor_nan_is_error() {
+        // A child provider setting executor = nan must produce an error since executor is required.
+        let mut providers = IndexMap::new();
+        providers.insert(Provider::new("base"),
+            ProviderDefinition {
+                executor: Some(Executor("claude".to_string())).into(),
+                parent: Default::default(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
+            },
+        );
+        providers.insert(Provider::new("child"),
+            ProviderDefinition {
+                executor: TomlOption::ExplicitNone,
+                parent: Some(Provider::new("base")).into(),
+                priority: Default::default(),
+                plan_mode: Default::default(),
+                access_key: Default::default(),
+            },
+        );
+        let config = make_config(providers, IndexMap::new());
+        let err = config.resolve_providers().unwrap_err();
+        assert!(
+            err.to_string().to_lowercase().contains("executor"),
+            "Expected executor-related error, got: {err}"
+        );
+    }
+
+    // ── config_struct macro-generated TomlOption handling ───────────────
+
+    #[test]
+    fn config_struct_generated_toml_nan_produces_explicit_none() {
+        let toml_str = r#"
+[providers.main]
+executor = nan
+"#;
+        let root: ZbobrDispatcherConfigToml = toml::from_str(toml_str).unwrap();
+        let providers = root.providers.as_ref().unwrap();
+        let main = &providers["main"];
+        assert_eq!(main.executor, TomlOption::ExplicitNone);
+    }
+
+    #[test]
+    fn config_struct_generated_toml_merge_nan_clears_base() {
+        let base_str = r#"
+[providers.main]
+executor = "claude"
+"#;
+        let overlay_str = r#"
+[providers.main]
+executor = nan
+"#;
+        let base: ZbobrDispatcherConfigToml = toml::from_str(base_str).unwrap();
+        let overlay: ZbobrDispatcherConfigToml = toml::from_str(overlay_str).unwrap();
+        let merged = base.merge_toml(overlay);
+        let providers = merged.providers.as_ref().unwrap();
+        let main = &providers["main"];
+        assert_eq!(main.executor, TomlOption::ExplicitNone);
+        assert!(main.executor.clone().into_option().is_none());
     }
 }
