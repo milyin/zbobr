@@ -24,7 +24,7 @@ use zbobr_utility::{
     TomlOption,
     toml_edit_util::{
         inline_child_table, inline_named_children_as_inline_table_arrays,
-        inline_named_children_as_inline_tables, set_child_tables_dotted,
+        inline_named_children_as_inline_tables, set_child_table_dotted,
     },
 };
 
@@ -145,7 +145,8 @@ pub async fn init_workspace(dest: &Path, force: bool) -> anyhow::Result<()> {
     inline_stage_tables(&mut doc);
     inline_role_prompt_tables(&mut doc);
     inline_dispatcher_tables(&mut doc);
-    set_child_tables_dotted(&mut doc, &["repo", "tasks"], "github_token");
+    set_child_table_dotted(&mut doc, "repo", "github_token");
+    set_child_table_dotted(&mut doc, "tasks", "github_token");
     let config_content = format!(
         "# zbobr configuration\n# See documentation for all available options.\n\n{}",
         doc

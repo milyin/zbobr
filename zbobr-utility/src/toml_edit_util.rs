@@ -44,13 +44,11 @@ pub fn inline_named_children_as_inline_table_arrays(table: &mut Table) {
     }
 }
 
-/// Set a named child table to dotted mode for one or more parent tables.
-pub fn set_child_tables_dotted(doc: &mut DocumentMut, parent_table_names: &[&str], child_key: &str) {
-    for &parent_table_name in parent_table_names {
-        if let Some(Item::Table(parent_table)) = doc.get_mut(parent_table_name) {
-            if let Some(Item::Table(child_table)) = parent_table.get_mut(child_key) {
-                child_table.set_dotted(true);
-            }
+/// Set a named child table to dotted mode for a parent table.
+pub fn set_child_table_dotted(doc: &mut DocumentMut, parent_table_name: &str, child_key: &str) {
+    if let Some(Item::Table(parent_table)) = doc.get_mut(parent_table_name) {
+        if let Some(Item::Table(child_table)) = parent_table.get_mut(child_key) {
+            child_table.set_dotted(true);
         }
     }
 }
@@ -128,7 +126,7 @@ main = "planner.md"
     }
 
     #[test]
-    fn set_child_tables_dotted_converts_nested_tables_to_dotted_keys() {
+    fn set_child_table_dotted_converts_nested_tables_to_dotted_keys() {
         let mut doc: DocumentMut = r#"
 [repo]
 [repo.github_token]
@@ -139,7 +137,8 @@ value = ""
 "#
         .parse()
         .unwrap();
-        set_child_tables_dotted(&mut doc, &["repo", "tasks"], "github_token");
+        set_child_table_dotted(&mut doc, "repo", "github_token");
+        set_child_table_dotted(&mut doc, "tasks", "github_token");
         let output = doc.to_string();
         assert!(output.contains("[repo]"));
         assert!(output.contains("github_token.value = \"\""));
