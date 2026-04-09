@@ -470,6 +470,32 @@ impl zbobr_utility::MergeToml for PipelineConfig {
     }
 }
 
+
+impl PipelineConfig {
+    pub fn stages(&self) -> Option<&IndexMap<Stage, TomlOption<StageDefinition>>> {
+        self.stages.as_ref()
+    }
+
+    pub fn stages_mut(&mut self) -> &mut IndexMap<Stage, TomlOption<StageDefinition>> {
+        if self.stages.is_none() {
+            self.stages = Some(IndexMap::new());
+        }
+        self.stages.as_mut().unwrap()
+    }
+
+    pub fn stage_mut(&mut self, name: &Stage) -> Option<&mut StageDefinition> {
+        self.stages_mut().get_mut(name).and_then(|s| s.as_mut())
+    }
+
+    pub fn insert_stage(&mut self, name: Stage, def: StageDefinition) {
+        self.stages_mut().insert(name, TomlOption::Value(def));
+    }
+
+    pub fn remove_stage(&mut self, name: &Stage) -> Option<TomlOption<StageDefinition>> {
+        self.stages_mut().shift_remove(name)
+    }
+}
+
 /// Top-level workflow configuration: a container of named pipelines and shared roles.
 ///
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -487,6 +513,36 @@ pub struct WorkflowConfig {
 
 
 impl WorkflowConfig {
+
+    pub fn pipelines_mut(&mut self) -> &mut IndexMap<Pipeline, TomlOption<PipelineConfig>> {
+        if self.pipelines.is_none() {
+            self.pipelines = Some(IndexMap::new());
+        }
+        self.pipelines.as_mut().unwrap()
+    }
+
+    pub fn pipeline_mut(&mut self, name: &Pipeline) -> Option<&mut PipelineConfig> {
+        self.pipelines_mut().get_mut(name).and_then(|p| p.as_mut())
+    }
+
+    pub fn insert_pipeline(&mut self, name: Pipeline, def: PipelineConfig) {
+        self.pipelines_mut().insert(name, TomlOption::Value(def));
+    }
+
+    pub fn get_roles(&self) -> Option<&IndexMap<Role, TomlOption<RoleDefinition>>> {
+        self.roles.as_ref()
+    }
+
+    pub fn roles_mut(&mut self) -> &mut IndexMap<Role, TomlOption<RoleDefinition>> {
+        if self.roles.is_none() {
+            self.roles = Some(IndexMap::new());
+        }
+        self.roles.as_mut().unwrap()
+    }
+
+    pub fn insert_role(&mut self, name: Role, def: RoleDefinition) {
+        self.roles_mut().insert(name, TomlOption::Value(def));
+    }
     /// Look up a pipeline by name.
     pub fn pipeline(&self, name: &Pipeline) -> Option<&PipelineConfig> {
         self.pipelines

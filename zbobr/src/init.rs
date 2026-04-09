@@ -1130,8 +1130,8 @@ mod tests {
     #[test]
     fn linting_on_success_routes_to_testing() {
         let wf = default_workflow();
-        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
-        let linting = main.stages.get(&Stage::from("linting")).unwrap();
+        let main = wf.pipeline(&Pipeline::Main).unwrap();
+        let linting = main.stage(&Stage::from("linting")).unwrap();
         let target = linting.on_success().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("testing"));
     }
@@ -1139,8 +1139,8 @@ mod tests {
     #[test]
     fn merge_stage_task_prompt_is_cleared() {
         let wf = default_workflow();
-        let merge = wf.pipelines.get(&Pipeline::Merge).unwrap();
-        let merging = merge.stages.get(&Stage::from("merging")).unwrap();
+        let merge = wf.pipeline(&Pipeline::Merge).unwrap();
+        let merging = merge.stage(&Stage::from("merging")).unwrap();
         let task_prompt = merging
             .prompts
             .as_ref()
@@ -1151,8 +1151,8 @@ mod tests {
     #[test]
     fn linting_on_failure_routes_to_linter_worker() {
         let wf = default_workflow();
-        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
-        let linting = main.stages.get(&Stage::from("linting")).unwrap();
+        let main = wf.pipeline(&Pipeline::Main).unwrap();
+        let linting = main.stage(&Stage::from("linting")).unwrap();
         let target = linting.on_failure().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("linter_worker"));
     }
@@ -1160,8 +1160,8 @@ mod tests {
     #[test]
     fn linter_worker_on_success_routes_to_linting() {
         let wf = default_workflow();
-        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
-        let lw = main.stages.get(&Stage::from("linter_worker")).unwrap();
+        let main = wf.pipeline(&Pipeline::Main).unwrap();
+        let lw = main.stage(&Stage::from("linter_worker")).unwrap();
         let target = lw.on_success().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("linting"));
     }
@@ -1169,8 +1169,8 @@ mod tests {
     #[test]
     fn linter_worker_on_failure_routes_to_working() {
         let wf = default_workflow();
-        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
-        let lw = main.stages.get(&Stage::from("linter_worker")).unwrap();
+        let main = wf.pipeline(&Pipeline::Main).unwrap();
+        let lw = main.stage(&Stage::from("linter_worker")).unwrap();
         let target = lw.on_failure().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("working"));
     }
@@ -1182,8 +1182,9 @@ mod tests {
         let wf = default_workflow();
         let registered: std::collections::HashSet<&str> =
             PROMPT_FILES.iter().map(|(name, _)| *name).collect();
-        for (role_name, role_def) in &wf.roles {
-            for (slot, prompt_opt) in role_def.prompts.iter().flatten() {
+        for (role_name, role_def) in wf.get_roles().unwrap_or(&indexmap::IndexMap::new()) {
+            if let Some(role_def) = role_def.as_option() {
+                for (slot, prompt_opt) in role_def.prompts.iter().flatten() {
                 if let Some(prompt_path) = prompt_opt.as_option() {
                     let key = prompt_path
                         .file_stem()
@@ -1198,6 +1199,7 @@ mod tests {
                     );
                 }
             }
+        }
         }
     }
 
