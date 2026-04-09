@@ -290,6 +290,12 @@ impl StageDefinition {
     }
 }
 
+impl zbobr_utility::ResolvePathValue for StageDefinition {
+    fn resolve_path_value(self, base: &Path) -> Self {
+        self.resolve_paths(base)
+    }
+}
+
 impl zbobr_utility::MergeToml for StageDefinition {
     fn merge_toml(self, other: Self) -> Self {
         Self {
@@ -308,11 +314,12 @@ impl zbobr_utility::MergeToml for StageDefinition {
 /// Per-pipeline configuration: an ordered sequence of stages.
 ///
 /// Stage order is determined by insertion order in the `IndexMap`.
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Default)]
+#[config_struct]
 pub struct PipelineConfig {
-    #[serde(default)]
-    pub stages: IndexMap<Stage, StageDefinition>,
+    #[config(path, skip_args)]
+    pub stages: Option<IndexMap<Stage, TomlOption<StageDefinition>>>,
 }
 
 impl PipelineConfig {
@@ -321,33 +328,44 @@ impl PipelineConfig {
         Self {
             stages: self
                 .stages
-                .into_iter()
-                .map(|(name, stage)| (name, stage.resolve_paths(config_dir)))
-                .collect(),
+                .map(|stages| {
+                    stages
+                        .into_iter()
+                        .map(|(name, stage)| {
+                            (name, stage.map(|stage| stage.resolve_paths(config_dir)))
+                        })
+                        .collect()
+                }),
         }
     }
 
     /// Look up a stage
     pub fn stage(&self, stage: &Stage) -> Option<&StageDefinition> {
-        self.stages.get(stage)
+        self.stages
+            .as_ref()?
+            .get(stage.as_str())?
+            .as_option()
     }
 
     /// Get the index of a stage in the order.
     pub fn stage_index(&self, stage: &Stage) -> Option<usize> {
-        self.stages.get_index_of(stage)
+        self.stages.as_ref()?.get_index_of(stage.as_str())
     }
 
     /// Get the next stage after `stage`.
     pub fn next_stage(&self, stage: &Stage) -> Option<(&Stage, &StageDefinition)> {
-        let idx = self.stages.get_index_of(stage)?;
-        let (next_name, def) = self.stages.get_index(idx + 1)?;
-        Some((next_name, def))
+        let stages = self.stages.as_ref()?;
+        let idx = stages.get_index_of(stage.as_str())?;
+        let (next_name, def) = stages.get_index(idx + 1)?;
+        Some((next_name, def.as_option()?))
     }
 
     /// Get the first stage of this pipeline.
     pub fn first_stage(&self) -> Option<(&Stage, &StageDefinition)> {
-        let (name, def) = self.stages.first()?;
-        Some((name, def))
+        self.stages
+            .as_ref()?
+            .iter()
+            .find_map(|(name, def)| def.as_option().map(|def| (name, def)))
     }
 
     /// Get the start stage for this pipeline (delegates to first_stage).
@@ -357,10 +375,18 @@ impl PipelineConfig {
 
     /// Validate pipeline configuration.
     pub fn validate(&self, pipeline: &Pipeline) -> anyhow::Result<()> {
-        if self.stages.is_empty() {
+        let stages = self.stages.as_ref();
+        if stages
+            .map(|stages| !stages.values().any(TomlOption::is_some))
+            .unwrap_or(true)
+        {
             anyhow::bail!("Pipeline '{}' has no stages", pipeline);
         }
-        for (sname, stage) in &self.stages {
+        for (sname, stage) in stages
+            .into_iter()
+            .flat_map(|stages| stages.iter())
+            .filter_map(|(sname, stage)| stage.as_option().map(|stage| (sname, stage)))
+        {
             match (stage.role(), stage.call_pipeline()) {
                 (Some(_), Some(_)) => anyhow::bail!(
                     "Pipeline '{}' stage '{}' has both 'role' and 'call' — only one is allowed",
@@ -375,7 +401,10 @@ impl PipelineConfig {
                 _ => {}
             }
             if let Some(ref target) = stage.on_success().and_then(|t| t.next.as_ref())
-                && !self.stages.contains_key(target.as_str())
+                && stages
+                    .and_then(|stages| stages.get(target.as_str()))
+                    .and_then(TomlOption::as_option)
+                    .is_none()
             {
                 anyhow::bail!(
                     "Pipeline '{}' stage '{}' on_success references unknown stage '{}'",
@@ -385,7 +414,10 @@ impl PipelineConfig {
                 );
             }
             if let Some(ref target) = stage.on_failure().and_then(|t| t.next.as_ref())
-                && !self.stages.contains_key(target.as_str())
+                && stages
+                    .and_then(|stages| stages.get(target.as_str()))
+                    .and_then(TomlOption::as_option)
+                    .is_none()
             {
                 anyhow::bail!(
                     "Pipeline '{}' stage '{}' on_failure references unknown stage '{}'",
@@ -395,7 +427,10 @@ impl PipelineConfig {
                 );
             }
             if let Some(ref target) = stage.on_intermediate().and_then(|t| t.next.as_ref())
-                && !self.stages.contains_key(target.as_str())
+                && stages
+                    .and_then(|stages| stages.get(target.as_str()))
+                    .and_then(TomlOption::as_option)
+                    .is_none()
             {
                 anyhow::bail!(
                     "Pipeline '{}' stage '{}' on_intermediate references unknown stage '{}'",
@@ -417,14 +452,20 @@ impl zbobr_utility::ResolvePathValue for PipelineConfig {
 
 impl zbobr_utility::MergeToml for PipelineConfig {
     fn merge_toml(self, other: Self) -> Self {
-        let mut stages = self.stages;
-        for (k, v) in other.stages {
-            if let Some(base_v) = stages.get(&k).cloned() {
-                stages.insert(k, base_v.merge_toml(v));
-            } else {
-                stages.insert(k, v);
+        let stages = match (self.stages, other.stages) {
+            (Some(mut base), Some(overlay)) => {
+                for (k, v) in overlay {
+                    if let Some(base_v) = base.get_mut(&k) {
+                        *base_v = base_v.clone().merge(v);
+                    } else {
+                        base.insert(k, v);
+                    }
+                }
+                Some(base)
             }
-        }
+            (None, over) => over,
+            (base, None) => base,
+        };
         Self { stages }
     }
 }
@@ -496,10 +537,13 @@ impl WorkflowConfig {
             .as_ref()
             .and_then(|pipelines| pipelines.get_key_value(default.as_str()))
             && let Some(pipeline) = pdef.as_option()
-            && let Some((name, stage)) = pipeline
-                .stages
-                .iter()
-                .find(|(_, s)| s.role().map(|r| r.as_str()) == Some(role))
+            && let Some((name, stage)) = pipeline.stages.as_ref().and_then(|stages| {
+                stages.iter().find_map(|(name, s)| {
+                    s.as_option()
+                        .filter(|s| s.role().map(|r| r.as_str()) == Some(role))
+                        .map(|s| (name, s))
+                })
+            })
         {
             return Some((pname, name.as_str(), stage));
         }
@@ -508,10 +552,13 @@ impl WorkflowConfig {
                 .iter()
                 .filter_map(|(pname, pdef)| pdef.as_option().map(|pipeline| (pname, pipeline)))
         }) {
-            if let Some((sname, stage)) = pipeline
-                .stages
-                .iter()
-                .find(|(_, s)| s.role().map(|r| r.as_str()) == Some(role))
+            if let Some((sname, stage)) = pipeline.stages.as_ref().and_then(|stages| {
+                stages.iter().find_map(|(name, s)| {
+                    s.as_option()
+                        .filter(|s| s.role().map(|r| r.as_str()) == Some(role))
+                        .map(|s| (name, s))
+                })
+            })
             {
                 return Some((pname, sname.as_str(), stage));
             }
@@ -532,7 +579,13 @@ impl WorkflowConfig {
                 .iter()
                 .filter_map(|(pname, pdef)| pdef.as_option().map(|pipeline| (pname, pipeline)))
         }) {
-            for (sname, stage) in &pipeline.stages {
+            for (sname, stage) in pipeline
+                .stages
+                .as_ref()
+                .into_iter()
+                .flat_map(|stages| stages.iter())
+                .filter_map(|(sname, stage)| stage.as_option().map(|stage| (sname, stage)))
+            {
                 result.push((pname, sname.as_str(), stage));
             }
         }
@@ -571,7 +624,13 @@ impl WorkflowConfig {
                     .iter()
                     .filter_map(|(pname, pdef)| pdef.as_option().map(|pipeline| (pname, pipeline)))
             }) {
-                for (sname, stage) in &pipeline.stages {
+                for (sname, stage) in pipeline
+                    .stages
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|stages| stages.iter())
+                    .filter_map(|(sname, stage)| stage.as_option().map(|stage| (sname, stage)))
+                {
                     if let Some(role) = stage.role()
                         && self.role_definition(role.as_str()).is_none()
                     {
@@ -592,7 +651,13 @@ impl WorkflowConfig {
                 .iter()
                 .filter_map(|(pname, pdef)| pdef.as_option().map(|pipeline| (pname, pipeline)))
         }) {
-            for (sname, stage) in &pipeline.stages {
+            for (sname, stage) in pipeline
+                .stages
+                .as_ref()
+                .into_iter()
+                .flat_map(|stages| stages.iter())
+                .filter_map(|(sname, stage)| stage.as_option().map(|stage| (sname, stage)))
+            {
                 if let Some(target) = stage.call_pipeline()
                     && self.pipeline(target).is_none()
                 {
@@ -778,7 +843,13 @@ impl ZbobrDispatcherConfig {
                 .iter()
                 .filter_map(|(name, def)| def.as_option().map(|def| (name, def)))
         }) {
-            for (sname, stage) in &pipeline.stages {
+            for (sname, stage) in pipeline
+                .stages
+                .as_ref()
+                .into_iter()
+                .flat_map(|stages| stages.iter())
+                .filter_map(|(sname, stage)| stage.as_option().map(|stage| (sname, stage)))
+            {
                 if let Some(tool) = stage.tool.as_option()
                     && !self.tools.contains_key(tool.as_str())
                 {
@@ -1462,7 +1533,12 @@ mod tests {
             },
         );
         let mut pipelines = IndexMap::new();
-        pipelines.insert(Pipeline::Main, PipelineConfig { stages });
+        pipelines.insert(
+            Pipeline::Main,
+            PipelineConfig {
+                stages: Some(wrap_map_values(stages)),
+            },
+        );
         let workflow = WorkflowConfig {
             prompts: Default::default(),
             roles: None,
@@ -1510,7 +1586,12 @@ mod tests {
             },
         );
         let mut pipelines = IndexMap::new();
-        pipelines.insert(Pipeline::Main, PipelineConfig { stages });
+        pipelines.insert(
+            Pipeline::Main,
+            PipelineConfig {
+                stages: Some(wrap_map_values(stages)),
+            },
+        );
         let mut roles = IndexMap::new();
         roles.insert(
             "worker".to_string().into(),
@@ -1562,7 +1643,12 @@ mod tests {
             },
         );
         let mut pipelines = IndexMap::new();
-        pipelines.insert(Pipeline::Main, PipelineConfig { stages });
+        pipelines.insert(
+            Pipeline::Main,
+            PipelineConfig {
+                stages: Some(wrap_map_values(stages)),
+            },
+        );
         let mut roles = IndexMap::new();
         roles.insert(
             "worker".to_string().into(),
@@ -1765,7 +1851,9 @@ developer = [
                 ..Default::default()
             },
         );
-        let pipeline = PipelineConfig { stages };
+        let pipeline = PipelineConfig {
+            stages: Some(wrap_map_values(stages)),
+        };
         let resolved = pipeline.resolve_paths(std::path::Path::new("/base"));
         let stage = resolved.stage(&Stage::from("review")).unwrap();
         let prompts = stage.prompts.as_ref().unwrap();
@@ -1806,7 +1894,12 @@ developer = [
             },
         );
         let mut pipelines = IndexMap::new();
-        pipelines.insert(Pipeline::Main, PipelineConfig { stages });
+        pipelines.insert(
+            Pipeline::Main,
+            PipelineConfig {
+                stages: Some(wrap_map_values(stages)),
+            },
+        );
 
         let toml = WorkflowToml {
             prompts: None.into(),
@@ -1965,7 +2058,7 @@ developer = [
         base_pipelines.insert(
             Pipeline::Main,
             PipelineConfig {
-                stages: main_stages,
+                stages: Some(wrap_map_values(main_stages)),
             },
         );
         let mut fix_stages = IndexMap::new();
@@ -1978,7 +2071,9 @@ developer = [
         );
         base_pipelines.insert(
             Pipeline::Custom("fix".to_string()),
-            PipelineConfig { stages: fix_stages },
+            PipelineConfig {
+                stages: Some(wrap_map_values(fix_stages)),
+            },
         );
 
         let base = WorkflowToml {
@@ -2000,7 +2095,7 @@ developer = [
         overlay_pipelines.insert(
             Pipeline::Main,
             PipelineConfig {
-                stages: overlay_stages,
+                stages: Some(wrap_map_values(overlay_stages)),
             },
         );
         let overlay = WorkflowToml {
@@ -2321,7 +2416,7 @@ developer = [
         base_pipelines.insert(
             Pipeline::Main,
             PipelineConfig {
-                stages: base_stages,
+                stages: Some(wrap_map_values(base_stages)),
             },
         );
 
@@ -2345,7 +2440,7 @@ developer = [
         overlay_pipelines.insert(
             Pipeline::Main,
             PipelineConfig {
-                stages: overlay_stages,
+                stages: Some(wrap_map_values(overlay_stages)),
             },
         );
 
@@ -2415,7 +2510,7 @@ developer = [
         base_pipelines.insert(
             Pipeline::Main,
             PipelineConfig {
-                stages: base_stages,
+                stages: Some(wrap_map_values(base_stages)),
             },
         );
 
@@ -2442,7 +2537,7 @@ developer = [
         overlay_pipelines.insert(
             Pipeline::Main,
             PipelineConfig {
-                stages: overlay_stages,
+                stages: Some(wrap_map_values(overlay_stages)),
             },
         );
 
@@ -2549,7 +2644,11 @@ role = "planner"
         }
         let root: Root = toml::from_str(toml_str).unwrap();
         let pipelines = root.workflow.pipelines.into_option().unwrap();
-        let stage = &pipelines[&Pipeline::Main].as_option().unwrap().stages["planning"];
+        let stage = pipelines[&Pipeline::Main]
+            .as_option()
+            .unwrap()
+            .stage(&Stage::from("planning"))
+            .unwrap();
         assert!(
             stage.prompts.is_none(),
             "missing prompts should deserialize as None"
@@ -2569,7 +2668,11 @@ prompts = {}
         }
         let root: Root = toml::from_str(toml_str).unwrap();
         let pipelines = root.workflow.pipelines.into_option().unwrap();
-        let stage = &pipelines[&Pipeline::Main].as_option().unwrap().stages["planning"];
+        let stage = pipelines[&Pipeline::Main]
+            .as_option()
+            .unwrap()
+            .stage(&Stage::from("planning"))
+            .unwrap();
         assert!(
             stage.prompts.as_ref().is_some_and(|v| v.is_empty()),
             "prompts = {{}} should deserialize as Some(empty map)"
@@ -2589,7 +2692,11 @@ prompts = { task = "common.md", extra = "planning.md" }
         }
         let root: Root = toml::from_str(toml_str).unwrap();
         let pipelines = root.workflow.pipelines.into_option().unwrap();
-        let stage = &pipelines[&Pipeline::Main].as_option().unwrap().stages["planning"];
+        let stage = pipelines[&Pipeline::Main]
+            .as_option()
+            .unwrap()
+            .stage(&Stage::from("planning"))
+            .unwrap();
         let prompts = stage.prompts.as_ref().unwrap();
         assert_eq!(prompts.len(), 2);
         assert_eq!(

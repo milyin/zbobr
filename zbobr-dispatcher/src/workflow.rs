@@ -76,7 +76,10 @@ impl Default for Workflow {
             pipelines.insert(
                 Pipeline::from(name),
                 PipelineConfig {
-                    stages: IndexMap::from([(Stage::from("default"), dummy_stage.clone())]),
+                    stages: Some(IndexMap::from([(
+                        Stage::from("default"),
+                        TomlOption::Value(dummy_stage.clone()),
+                    )])),
                 },
             );
         }
@@ -356,7 +359,12 @@ impl Workflow {
                     })?;
                 let (stage_key, stage_def) = pipeline_config
                     .stages
-                    .get_key_value(target_stage.as_str())
+                    .as_ref()
+                    .and_then(|stages| {
+                        stages
+                            .get_key_value(target_stage.as_str())
+                            .and_then(|(k, v)| v.as_option().map(|v| (k, v)))
+                    })
                     .ok_or_else(|| {
                         anyhow::anyhow!(
                             "Signal '{signal}' references unknown stage '{target_stage}' in pipeline '{pipeline}'"

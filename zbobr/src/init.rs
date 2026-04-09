@@ -477,13 +477,23 @@ fn default_workflow() -> WorkflowConfig {
     pipelines.insert(
         Pipeline::Main,
         PipelineConfig {
-            stages: main_stages,
+            stages: Some(
+                main_stages
+                    .into_iter()
+                    .map(|(k, v)| (k, TomlOption::Value(v)))
+                    .collect(),
+            ),
         },
     );
     pipelines.insert(
         Pipeline::Merge,
         PipelineConfig {
-            stages: merge_stages,
+            stages: Some(
+                merge_stages
+                    .into_iter()
+                    .map(|(k, v)| (k, TomlOption::Value(v)))
+                    .collect(),
+            ),
         },
     );
 

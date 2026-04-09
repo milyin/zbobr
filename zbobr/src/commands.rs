@@ -588,7 +588,10 @@ fn resolve_stage_def<'a>(
                     .ok_or_else(|| anyhow::anyhow!("Pipeline '{}' not found", p))?;
                 pipeline_config
                     .stages
-                    .values()
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|stages| stages.values())
+                    .filter_map(|s| s.as_option())
                     .find(|s| s.role().map(|r| r.as_str()) == Some(role.as_str()))
                     .ok_or_else(|| {
                         anyhow::anyhow!("No stage with role '{}' found in pipeline '{}'", role, p)
