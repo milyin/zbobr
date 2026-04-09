@@ -1,5 +1,3 @@
-use std::{collections::HashMap, path::PathBuf};
-
 use indexmap::IndexMap;
 use zbobr_api::{
     Pipeline, Signal, Stage, State, Task,
@@ -68,7 +66,7 @@ pub enum StateAction<'a> {
 
 impl Default for Workflow {
     fn default() -> Self {
-        let mut pipelines = HashMap::new();
+        let mut pipelines = IndexMap::new();
         let dummy_stage = StageDefinition {
             role: Some("default".to_string().into()).into(),
             ..Default::default()
@@ -83,7 +81,6 @@ impl Default for Workflow {
         }
         Self {
             config: WorkflowConfig {
-                prompts_dir: None,
                 prompts: None,
                 pipelines,
                 roles: IndexMap::new(),
@@ -151,15 +148,11 @@ impl Workflow {
         self.config.validate()
     }
 
-    pub fn prompts_dir(&self) -> Option<&PathBuf> {
-        self.config.prompts_dir.as_ref()
-    }
-
     pub fn roles(&self) -> &IndexMap<Role, RoleDefinition> {
         &self.config.roles
     }
 
-    pub fn pipelines(&self) -> &HashMap<Pipeline, PipelineConfig> {
+    pub fn pipelines(&self) -> &IndexMap<Pipeline, PipelineConfig> {
         &self.config.pipelines
     }
 

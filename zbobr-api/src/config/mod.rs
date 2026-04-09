@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use indexmap::IndexMap;
 use zbobr_utility::{MergeToml, Secret, TomlOption, config_struct};
@@ -217,7 +214,7 @@ impl<'de> serde::Deserialize<'de> for StageTransition {
 /// A single stage in the configurable pipeline.
 ///
 /// The stage's name and pipeline are derived from its structural position
-/// (key in the stages HashMap and key in the pipelines HashMap).
+/// (key in the stages map and key in the pipelines map).
 ///
 /// A stage must have exactly one of `role` (run an agent session) or
 /// `call` (call another pipeline). They are mutually exclusive.
@@ -427,31 +424,26 @@ impl zbobr_utility::MergeToml for PipelineConfig {
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowConfig {
-    /// Base directory for prompt files; prepended to relative prompt paths.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompts_dir: Option<PathBuf>,
     /// Workflow-level named prompt slots inherited by all roles and stages.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompts: Option<IndexMap<String, TomlOption<PathBuf>>>,
     #[serde(default)]
     pub roles: IndexMap<Role, RoleDefinition>,
     #[serde(default)]
-    pub pipelines: HashMap<Pipeline, PipelineConfig>,
+    pub pipelines: IndexMap<Pipeline, PipelineConfig>,
 }
 
 /// TOML representation of WorkflowConfig (all fields optional).
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowToml {
-    #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
-    pub prompts_dir: TomlOption<PathBuf>,
     /// Workflow-level named prompt slots inherited by all roles and stages.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompts: Option<IndexMap<String, TomlOption<PathBuf>>>,
     #[serde(default)]
     pub roles: Option<IndexMap<Role, RoleDefinition>>,
     #[serde(default)]
-    pub pipelines: Option<HashMap<Pipeline, PipelineConfig>>,
+    pub pipelines: Option<IndexMap<Pipeline, PipelineConfig>>,
 }
 
 /// CLI arguments for WorkflowConfig (empty — no CLI-overridable fields).
@@ -501,7 +493,6 @@ impl WorkflowToml {
 
     pub fn merge_toml(self, other: Self) -> Self {
         Self {
-            prompts_dir: self.prompts_dir.merge(other.prompts_dir),
             prompts: merge_prompt_maps(self.prompts, other.prompts),
             roles: match (self.roles, other.roles) {
                 (Some(mut base), Some(over)) => {
@@ -536,40 +527,26 @@ impl WorkflowToml {
 
     /// Resolve relative path fields against the given base directory.
     ///
-    /// `prompts_dir` is resolved against `config_dir`.  Role and stage prompt
-    /// paths are resolved against the *effective* prompt base: the resolved
-    /// `prompts_dir` when present, otherwise `config_dir`.  This preserves the
-    /// runtime contract in `prompt_files_for_stage`, which only prefixes
-    /// *relative* paths with `prompts_dir`; by eagerly making paths absolute
-    /// under the right base here, the dispatcher sees absolute paths and skips
-    /// the prefix step correctly.
+    /// All prompt paths are resolved against `config_dir`.
     pub fn resolve_paths(self, config_dir: &Path) -> Self {
-        let resolved_prompts_dir = self
-            .prompts_dir
-            .map(|p| zbobr_utility::resolve_path(p, config_dir));
-        let prompt_base: &Path = resolved_prompts_dir
-            .as_option()
-            .map(|p| p.as_path())
-            .unwrap_or(config_dir);
         let prompts = self.prompts.map(|map| {
             map.into_iter()
-                .map(|(k, v)| (k, v.map(|p| zbobr_utility::resolve_path(p, prompt_base))))
+                .map(|(k, v)| (k, v.map(|p| zbobr_utility::resolve_path(p, config_dir))))
                 .collect()
         });
         let roles = self.roles.map(|roles| {
             roles
                 .into_iter()
-                .map(|(name, role)| (name, role.resolve_paths(prompt_base)))
+                .map(|(name, role)| (name, role.resolve_paths(config_dir)))
                 .collect()
         });
         let pipelines = self.pipelines.map(|pipelines| {
             pipelines
                 .into_iter()
-                .map(|(name, pipeline)| (name, pipeline.resolve_paths(prompt_base)))
+                .map(|(name, pipeline)| (name, pipeline.resolve_paths(config_dir)))
                 .collect()
         });
         Self {
-            prompts_dir: resolved_prompts_dir,
             prompts,
             roles,
             pipelines,
@@ -578,7 +555,6 @@ impl WorkflowToml {
 
     pub fn try_into_config(self) -> anyhow::Result<WorkflowConfig> {
         Ok(WorkflowConfig {
-            prompts_dir: self.prompts_dir.into_option(),
             prompts: self.prompts,
             roles: self.roles.unwrap_or_default(),
             pipelines: self.pipelines.unwrap_or_default(),
@@ -593,7 +569,6 @@ impl Config for WorkflowConfig {
     fn build(toml: Option<Self::Toml>, _args: Self::Args, _config_dir: &Path) -> Self {
         match toml {
             Some(t) => WorkflowConfig {
-                prompts_dir: t.prompts_dir.into_option(),
                 prompts: t.prompts,
                 roles: t.roles.unwrap_or_default(),
                 pipelines: t.pipelines.unwrap_or_default(),
@@ -1312,10 +1287,9 @@ mod tests {
             },
         );
         WorkflowConfig {
-            prompts_dir: Default::default(),
             prompts: Default::default(),
             roles,
-            pipelines: HashMap::new(),
+            pipelines: IndexMap::new(),
         }
     }
 
@@ -1479,10 +1453,9 @@ mod tests {
                 ..Default::default()
             },
         );
-        let mut pipelines = HashMap::new();
+        let mut pipelines = IndexMap::new();
         pipelines.insert(Pipeline::Main, PipelineConfig { stages });
         let workflow = WorkflowConfig {
-            prompts_dir: Default::default(),
             prompts: Default::default(),
             roles: IndexMap::new(),
             pipelines,
@@ -1528,7 +1501,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let mut pipelines = HashMap::new();
+        let mut pipelines = IndexMap::new();
         pipelines.insert(Pipeline::Main, PipelineConfig { stages });
         let mut roles = IndexMap::new();
         roles.insert(
@@ -1540,7 +1513,6 @@ mod tests {
             },
         );
         let workflow = WorkflowConfig {
-            prompts_dir: Default::default(),
             prompts: Default::default(),
             roles,
             pipelines,
@@ -1581,7 +1553,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let mut pipelines = HashMap::new();
+        let mut pipelines = IndexMap::new();
         pipelines.insert(Pipeline::Main, PipelineConfig { stages });
         let mut roles = IndexMap::new();
         roles.insert(
@@ -1593,7 +1565,6 @@ mod tests {
             },
         );
         let workflow = WorkflowConfig {
-            prompts_dir: Default::default(),
             prompts: Default::default(),
             roles,
             pipelines,
@@ -1826,36 +1797,30 @@ developer = [
                 ..Default::default()
             },
         );
-        let mut pipelines = HashMap::new();
+        let mut pipelines = IndexMap::new();
         pipelines.insert(Pipeline::Main, PipelineConfig { stages });
 
         let toml = WorkflowToml {
-            prompts_dir: Some(PathBuf::from("prompts")).into(),
             prompts: None,
             roles: Some(roles),
             pipelines: Some(pipelines),
         };
         let resolved = toml.resolve_paths(std::path::Path::new("/shared"));
 
-        // prompts_dir resolved
-        assert_eq!(
-            resolved.prompts_dir.into_option().unwrap(),
-            PathBuf::from("/shared/prompts")
-        );
-        // role prompt resolved against prompts_dir
+        // role prompt resolved against config dir
         let role = &resolved.roles.as_ref().unwrap()["reviewer"];
         assert_eq!(
             role.prompts.as_ref().unwrap()["main"].as_option().unwrap(),
-            &PathBuf::from("/shared/prompts/reviewer.md")
+            &PathBuf::from("/shared/reviewer.md")
         );
-        // stage prompts resolved against prompts_dir
+        // stage prompts resolved against config dir
         let pipeline = &resolved.pipelines.as_ref().unwrap()[&Pipeline::Main];
         let stage = pipeline.stage(&Stage::from("review")).unwrap();
         assert_eq!(
             stage.prompts.as_ref().unwrap()["extra"]
                 .as_option()
                 .unwrap(),
-            &PathBuf::from("/shared/prompts/common.md")
+            &PathBuf::from("/shared/common.md")
         );
     }
 
@@ -1878,7 +1843,6 @@ developer = [
             },
         );
         let base = WorkflowToml {
-            prompts_dir: Some(PathBuf::from("prompts")).into(),
             prompts: None,
             roles: Some(roles),
             pipelines: None,
@@ -1892,14 +1856,10 @@ developer = [
         let merged = base_resolved.merge_toml(overlay_resolved);
 
         // Base paths should remain anchored to /shared/
-        assert_eq!(
-            merged.prompts_dir.into_option().unwrap(),
-            PathBuf::from("/shared/prompts")
-        );
         let role = &merged.roles.as_ref().unwrap()["reviewer"];
         assert_eq!(
             role.prompts.as_ref().unwrap()["main"].as_option().unwrap(),
-            &PathBuf::from("/shared/prompts/reviewer.md")
+            &PathBuf::from("/shared/reviewer.md")
         );
     }
 
@@ -1933,7 +1893,6 @@ developer = [
             },
         );
         let base = WorkflowToml {
-            prompts_dir: Default::default(),
             prompts: None,
             roles: Some(base_roles),
             pipelines: None,
@@ -1953,7 +1912,6 @@ developer = [
             },
         );
         let overlay = WorkflowToml {
-            prompts_dir: Default::default(),
             prompts: None,
             roles: Some(overlay_roles),
             pipelines: None,
@@ -1981,7 +1939,7 @@ developer = [
     #[test]
     fn workflow_toml_merge_pipelines_key_wise() {
         // Base config defines two pipelines; overlay overrides only one.
-        let mut base_pipelines = HashMap::new();
+        let mut base_pipelines = IndexMap::new();
         let mut main_stages = IndexMap::new();
         main_stages.insert(
             Stage::from("planning"),
@@ -2010,7 +1968,6 @@ developer = [
         );
 
         let base = WorkflowToml {
-            prompts_dir: Default::default(),
             prompts: None,
             roles: None,
             pipelines: Some(base_pipelines),
@@ -2025,7 +1982,7 @@ developer = [
                 ..Default::default()
             },
         );
-        let mut overlay_pipelines = HashMap::new();
+        let mut overlay_pipelines = IndexMap::new();
         overlay_pipelines.insert(
             Pipeline::Main,
             PipelineConfig {
@@ -2033,7 +1990,6 @@ developer = [
             },
         );
         let overlay = WorkflowToml {
-            prompts_dir: Default::default(),
             prompts: None,
             roles: None,
             pipelines: Some(overlay_pipelines),
@@ -2217,7 +2173,6 @@ developer = [
         );
 
         let base = WorkflowToml {
-            prompts_dir: Default::default(),
             prompts: None,
             roles: Some(base_roles),
             pipelines: None,
@@ -2235,7 +2190,6 @@ developer = [
         );
 
         let overlay = WorkflowToml {
-            prompts_dir: Default::default(),
             prompts: None,
             roles: Some(overlay_roles),
             pipelines: None,
@@ -2276,7 +2230,6 @@ developer = [
             },
         );
         let base = WorkflowToml {
-            prompts_dir: Default::default(),
             prompts: None,
             roles: Some(base_roles),
             pipelines: None,
@@ -2293,7 +2246,6 @@ developer = [
             },
         );
         let overlay = WorkflowToml {
-            prompts_dir: Default::default(),
             prompts: None,
             roles: Some(overlay_roles),
             pipelines: None,
@@ -2329,7 +2281,7 @@ developer = [
             },
         );
 
-        let mut base_pipelines = HashMap::new();
+        let mut base_pipelines = IndexMap::new();
         base_pipelines.insert(
             Pipeline::Main,
             PipelineConfig {
@@ -2338,7 +2290,6 @@ developer = [
         );
 
         let base = WorkflowToml {
-            prompts_dir: Default::default(),
             prompts: None,
             roles: None,
             pipelines: Some(base_pipelines),
@@ -2354,7 +2305,7 @@ developer = [
                 ..Default::default()
             },
         );
-        let mut overlay_pipelines = HashMap::new();
+        let mut overlay_pipelines = IndexMap::new();
         overlay_pipelines.insert(
             Pipeline::Main,
             PipelineConfig {
@@ -2363,7 +2314,6 @@ developer = [
         );
 
         let overlay = WorkflowToml {
-            prompts_dir: Default::default(),
             prompts: None,
             roles: None,
             pipelines: Some(overlay_pipelines),
@@ -2425,7 +2375,7 @@ developer = [
                 ..Default::default()
             },
         );
-        let mut base_pipelines = HashMap::new();
+        let mut base_pipelines = IndexMap::new();
         base_pipelines.insert(
             Pipeline::Main,
             PipelineConfig {
@@ -2434,7 +2384,6 @@ developer = [
         );
 
         let base = WorkflowToml {
-            prompts_dir: Default::default(),
             prompts: None,
             roles: None,
             pipelines: Some(base_pipelines),
@@ -2453,7 +2402,7 @@ developer = [
                 ..Default::default()
             },
         );
-        let mut overlay_pipelines = HashMap::new();
+        let mut overlay_pipelines = IndexMap::new();
         overlay_pipelines.insert(
             Pipeline::Main,
             PipelineConfig {
@@ -2462,7 +2411,6 @@ developer = [
         );
 
         let overlay = WorkflowToml {
-            prompts_dir: Default::default(),
             prompts: None,
             roles: None,
             pipelines: Some(overlay_pipelines),
@@ -2880,26 +2828,13 @@ on_success = nan
     }
 
     #[test]
-    fn workflow_prompts_dir_nan_in_overlay_clears_base() {
-        let base_toml = r#"prompts_dir = "/some/dir""#;
-        let overlay_toml = r#"prompts_dir = nan"#;
-
-        let base: WorkflowToml = toml::from_str(base_toml).unwrap();
-        let overlay: WorkflowToml = toml::from_str(overlay_toml).unwrap();
-        let merged = base.merge_toml(overlay);
-
-        assert_eq!(merged.prompts_dir, TomlOption::ExplicitNone);
-        // into_option() must return None
-        assert!(merged.prompts_dir.into_option().is_none());
-    }
-
-    #[test]
-    fn workflow_prompts_dir_nan_resolves_to_none_in_config() {
-        let toml_str = r#"prompts_dir = nan"#;
-        let workflow_toml: WorkflowToml = toml::from_str(toml_str).unwrap();
-        // try_into_config converts ExplicitNone → None
-        let config = workflow_toml.try_into_config().unwrap();
-        assert!(config.prompts_dir.is_none());
+    fn workflow_toml_rejects_legacy_prompts_dir_field() {
+        let toml_str = r#"prompts_dir = "prompts""#;
+        let parsed = toml::from_str::<WorkflowToml>(toml_str);
+        assert!(
+            parsed.is_err(),
+            "legacy prompts_dir field should be rejected"
+        );
     }
 
     // ── ExplicitNone semantics in consumer layer ─────────────────────────

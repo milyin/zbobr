@@ -69,13 +69,12 @@ fn build_workflow_with_roles(
             );
     }
 
-    let mut pipelines: HashMap<Pipeline, PipelineConfig> = HashMap::new();
+    let mut pipelines: IndexMap<Pipeline, PipelineConfig> = IndexMap::new();
     for (pipeline_name, stages) in pipeline_stages {
         pipelines.insert(pipeline_name, PipelineConfig { stages });
     }
 
     WorkflowConfig {
-        prompts_dir: None,
         prompts: None,
         pipelines,
         roles,
@@ -378,7 +377,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     let work_branch = format!("zbobr_fix-{task_id}-signals");
     env.update_task_branches(task_id, &work_branch).await;
 
-    let mut pipelines: HashMap<Pipeline, PipelineConfig> = HashMap::new();
+    let mut pipelines: IndexMap<Pipeline, PipelineConfig> = IndexMap::new();
     pipelines.insert(
         Pipeline::Main,
         PipelineConfig {
@@ -403,7 +402,6 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
         },
     );
     let workflow = WorkflowConfig {
-        prompts_dir: None,
         prompts: None,
         pipelines,
         roles: IndexMap::from([
@@ -520,7 +518,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
     //   sub:   work (reports success)
     //   init:  preparing (required)
     //   merge: merging   (required)
-    let mut pipelines: HashMap<Pipeline, PipelineConfig> = HashMap::new();
+    let mut pipelines: IndexMap<Pipeline, PipelineConfig> = IndexMap::new();
     pipelines.insert(
         Pipeline::Main,
         PipelineConfig {
@@ -570,7 +568,6 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
         },
     );
     let workflow = WorkflowConfig {
-        prompts_dir: None,
         prompts: None,
         pipelines,
         roles: IndexMap::from([

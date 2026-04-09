@@ -917,10 +917,9 @@ mod tests {
             },
         );
         let wf_config = WorkflowConfig {
-            prompts_dir: None,
             prompts: None,
             roles,
-            pipelines: std::collections::HashMap::new(),
+            pipelines: IndexMap::new(),
         };
         let workflow = Workflow::from_config(wf_config);
         let dispatcher = make_dispatcher_with_workflow(providers, tools, workflow);

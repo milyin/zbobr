@@ -195,8 +195,7 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
 ///
 /// Merges workflow-level, role-level, and stage-level `prompts` maps in order.
 /// Slots set to `nan` (ExplicitNone) are cleared. Remaining `Value` paths are
-/// collected in insertion order. Relative paths are prefixed with
-/// `workflow.prompts_dir` when set.
+/// collected in insertion order.
 pub fn prompt_files_for_stage(
     stage_def: &StageDefinition,
     workflow: &WorkflowConfig,
@@ -233,25 +232,10 @@ pub fn prompt_files_for_stage(
     }
 
     // Collect only Value paths (filter out ExplicitNone and Absent).
-    let mut files: Vec<std::path::PathBuf> = merged
+    merged
         .into_values()
         .filter_map(|v| v.into_option())
-        .collect();
-
-    // Prefix relative paths with prompts_dir.
-    if let Some(ref prompts_dir) = workflow.prompts_dir {
-        files = files
-            .into_iter()
-            .map(|p| {
-                if p.is_relative() {
-                    prompts_dir.join(&p)
-                } else {
-                    p
-                }
-            })
-            .collect();
-    }
-    files
+        .collect()
 }
 
 /// Load and concatenate multiple prompt files.
@@ -693,10 +677,9 @@ mod tests {
         base_path: Option<PathBuf>,
         stages: IndexMap<Stage, StageDefinition>,
     ) -> ConfiguredPromptBuilder {
-        let mut pipelines = HashMap::new();
+        let mut pipelines = IndexMap::new();
         pipelines.insert(Pipeline::from("main"), PipelineConfig { stages });
         let config = WorkflowConfig {
-            prompts_dir: None,
             prompts: None,
             pipelines,
             roles: IndexMap::new(),
@@ -813,10 +796,9 @@ mod tests {
     /// Helper: build a `ConfiguredPromptBuilder` from a multi-pipeline workflow config.
     fn make_prompt_builder_multi(
         base_path: Option<PathBuf>,
-        pipelines: HashMap<Pipeline, PipelineConfig>,
+        pipelines: IndexMap<Pipeline, PipelineConfig>,
     ) -> ConfiguredPromptBuilder {
         let config = WorkflowConfig {
-            prompts_dir: None,
             prompts: None,
             pipelines,
             roles: IndexMap::new(),
@@ -850,7 +832,7 @@ mod tests {
             },
         );
 
-        let mut pipelines = HashMap::new();
+        let mut pipelines = IndexMap::new();
         pipelines.insert(
             Pipeline::from("main"),
             PipelineConfig {
@@ -937,10 +919,9 @@ mod tests {
             },
         );
         WorkflowConfig {
-            prompts_dir: None,
             prompts: None,
             roles,
-            pipelines: HashMap::new(),
+            pipelines: IndexMap::new(),
         }
     }
 
@@ -1014,13 +995,12 @@ mod tests {
             },
         );
         let workflow = WorkflowConfig {
-            prompts_dir: None,
             prompts: Some(IndexMap::from([(
                 "task".to_string(),
                 TomlOption::Value(PathBuf::from("/prompts/task.md")),
             )])),
             roles,
-            pipelines: HashMap::new(),
+            pipelines: IndexMap::new(),
         };
         let stage = StageDefinition {
             role: Some("worker".to_string().into()).into(),
@@ -1054,7 +1034,6 @@ mod tests {
             },
         );
         let workflow = WorkflowConfig {
-            prompts_dir: None,
             // "main" is seeded first (nan placeholder), then "task" — establishes canonical order.
             prompts: Some(IndexMap::from([
                 ("main".to_string(), TomlOption::ExplicitNone),
@@ -1064,7 +1043,7 @@ mod tests {
                 ),
             ])),
             roles,
-            pipelines: HashMap::new(),
+            pipelines: IndexMap::new(),
         };
         let stage = StageDefinition {
             role: Some("worker".to_string().into()).into(),
