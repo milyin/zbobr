@@ -44,6 +44,7 @@ use syn::{
 /// - `toml_type = Type`
 /// - `toml_rename = "..."`
 /// - `toml_alias = "..."`
+/// - `toml_option_for_maps`
 ///
 /// The input struct must use named fields and its name must end with `Config`.
 pub fn config_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -345,8 +346,10 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             let base_is_option = option_inner_type(&field_ty);
             let value_ty = base_is_option.clone().unwrap_or(field_ty.clone());
 
-            // Map fields keep Option<T> (key-by-key merge); other leaf fields use TomlOption<T>.
-            let use_toml_option = !is_map_type(&value_ty);
+            let is_map_field = is_map_type(&value_ty);
+            // Map fields keep Option<T> by default (key-by-key merge).
+            // Set #[config(toml_option_for_maps)] to generate TomlOption<T> for maps.
+            let use_toml_option = config_meta.toml_option_for_maps || !is_map_field;
 
             if !config_meta.skip_toml {
                 if use_toml_option {
@@ -361,9 +364,28 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                         #field_ident: self.#field_ident.merge(::zbobr_utility::TomlOption::from(args.#field_ident)),
                     });
 
-                    merge_toml_fields.push(quote! {
-                        #field_ident: self.#field_ident.merge(other.#field_ident),
-                    });
+                    if is_map_field {
+                        merge_toml_fields.push(quote! {
+                            #field_ident: match (self.#field_ident, other.#field_ident) {
+                                (::zbobr_utility::TomlOption::Value(mut base), ::zbobr_utility::TomlOption::Value(over)) => {
+                                    for (k, over_v) in over {
+                                        if let Some(base_v) = base.get(&k).cloned() {
+                                            base.insert(k, ::zbobr_utility::MergeToml::merge_toml(base_v, over_v));
+                                        } else {
+                                            base.insert(k, over_v);
+                                        }
+                                    }
+                                    ::zbobr_utility::TomlOption::Value(base)
+                                }
+                                (base, ::zbobr_utility::TomlOption::Absent) => base,
+                                (_, over) => over,
+                            },
+                        });
+                    } else {
+                        merge_toml_fields.push(quote! {
+                            #field_ident: self.#field_ident.merge(other.#field_ident),
+                        });
+                    }
                 } else {
                     toml_fields.push(quote! {
                         #[serde(skip_serializing_if = "Option::is_none")]
@@ -762,6 +784,7 @@ struct FieldConfig {
     help_heading: Option<String>,
     skip_toml: bool,
     skip_args: bool,
+    toml_option_for_maps: bool,
     nested_args_ty: Option<TypePath>,
     nested_toml_ty: Option<TypePath>,
     heading_prefix: Option<String>,
@@ -799,6 +822,9 @@ fn parse_config_meta(attr: &Attribute, config: &mut FieldConfig) -> syn::Result<
             Meta::Path(path) if path.is_ident("skip_toml") => config.skip_toml = true,
             Meta::Path(path) if path.is_ident("skip_args") => config.skip_args = true,
             Meta::Path(path) if path.is_ident("path") => config.path = true,
+            Meta::Path(path) if path.is_ident("toml_option_for_maps") => {
+                config.toml_option_for_maps = true
+            }
             Meta::NameValue(name_value) if name_value.path.is_ident("help_heading") => {
                 if let syn::Expr::Lit(syn::ExprLit {
                     lit: Lit::Str(lit), ..
