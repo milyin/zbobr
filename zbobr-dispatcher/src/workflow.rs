@@ -6,6 +6,7 @@ use zbobr_api::{
     },
     config_tools::McpTool,
 };
+use zbobr_utility::TomlOption;
 
 /// Signal produced by the sequential pipeline model after a stage completes.
 pub(crate) enum SequentialSignal {
@@ -82,8 +83,13 @@ impl Default for Workflow {
         Self {
             config: WorkflowConfig {
                 prompts: None,
-                pipelines,
-                roles: IndexMap::new(),
+                pipelines: Some(
+                    pipelines
+                        .into_iter()
+                        .map(|(k, v)| (k, TomlOption::Value(v)))
+                        .collect(),
+                ),
+                roles: None,
             },
         }
     }
@@ -148,12 +154,20 @@ impl Workflow {
         self.config.validate()
     }
 
-    pub fn roles(&self) -> &IndexMap<Role, RoleDefinition> {
+    pub fn roles(&self) -> &Option<IndexMap<Role, TomlOption<RoleDefinition>>> {
         &self.config.roles
     }
 
-    pub fn pipelines(&self) -> &IndexMap<Pipeline, PipelineConfig> {
+    pub fn pipelines(&self) -> &Option<IndexMap<Pipeline, TomlOption<PipelineConfig>>> {
         &self.config.pipelines
+    }
+
+    fn pipeline_entry(&self, name: &Pipeline) -> Option<(&Pipeline, &PipelineConfig)> {
+        self.config
+            .pipelines
+            .as_ref()?
+            .get_key_value(name.as_str())
+            .and_then(|(k, v)| v.as_option().map(|cfg| (k, cfg)))
     }
 
     // -- Sequential pipeline model --
@@ -257,9 +271,7 @@ impl Workflow {
                         default_pipeline
                     );
                     let (pipeline_key, pipeline_config) = self
-                        .config
-                        .pipelines
-                        .get_key_value(default_pipeline.as_str())
+                        .pipeline_entry(&default_pipeline)
                         .ok_or_else(|| {
                             anyhow::anyhow!(
                                 "No start stage for default pipeline '{}'",
@@ -336,9 +348,7 @@ impl Workflow {
                     pipeline
                 );
                 let (pipeline_key, pipeline_config) = self
-                    .config
-                    .pipelines
-                    .get_key_value(pipeline.as_str())
+                    .pipeline_entry(pipeline)
                     .ok_or_else(|| {
                         anyhow::anyhow!(
                             "Signal '{signal}' references unknown pipeline '{pipeline}'"
@@ -361,9 +371,7 @@ impl Workflow {
                     pipeline
                 );
                 let (pipeline_key, pipeline_config) = self
-                    .config
-                    .pipelines
-                    .get_key_value(target_pipeline.as_str())
+                    .pipeline_entry(target_pipeline)
                     .ok_or_else(|| {
                         anyhow::anyhow!(
                             "Signal '{signal}' references unknown pipeline '{target_pipeline}' (no start stage)"
