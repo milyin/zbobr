@@ -91,9 +91,9 @@ pub fn resolve_config_location(
 /// This includes only dispatcher and executor config, not backend-specific settings.
 #[derive(Args, Clone)]
 pub struct GlobalArgs {
-    /// Enable log output to stderr
-    #[arg(long)]
-    pub logs: bool,
+    /// Enable log output to stderr (accepts optional value: --logs, --logs=true, --logs=false)
+    #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true, action = clap::ArgAction::Append)]
+    pub logs: Vec<bool>,
 
     #[command(
         flatten,
@@ -131,18 +131,32 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
         .map(|s| s.get_name().to_owned())
         .collect();
 
+    // Classify each global arg: Flag (no value), RequiredValue, or OptionalValue.
+    // OptionalValue means `num_args = 0..=1` — the next token may or may not be a value.
+    #[derive(Clone, Copy)]
+    enum ArgValence {
+        Flag,
+        RequiredValue,
+        OptionalValue,
+    }
     let global_tmp = GlobalArgs::augment_args(clap::Command::new(""));
-    let global_flags: std::collections::HashMap<String, bool> = global_tmp
+    let global_flags: std::collections::HashMap<String, ArgValence> = global_tmp
         .get_arguments()
         .flat_map(|a| {
-            let takes_value = !matches!(
+            let valence = if matches!(
                 a.get_action(),
                 clap::ArgAction::SetTrue | clap::ArgAction::SetFalse | clap::ArgAction::Count
-            );
-            let long_entry = a.get_long().map(|long| (format!("--{long}"), takes_value));
+            ) {
+                ArgValence::Flag
+            } else if a.get_num_args().is_some_and(|r| r.min_values() == 0) {
+                ArgValence::OptionalValue
+            } else {
+                ArgValence::RequiredValue
+            };
+            let long_entry = a.get_long().map(|long| (format!("--{long}"), valence));
             let short_entry = a
                 .get_short()
-                .map(|short| (format!("-{short}"), takes_value));
+                .map(|short| (format!("-{short}"), valence));
             long_entry.into_iter().chain(short_entry)
         })
         .collect();
@@ -151,6 +165,11 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
     if raw_args.is_empty() {
         let m = cmd.get_matches_from(raw_args);
         return C::from_arg_matches(&m).unwrap_or_else(|e| e.exit());
+    }
+
+    // Helper: returns true if the token is a valid boolean literal for optional-value args.
+    fn is_bool_literal(s: &str) -> bool {
+        s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("false")
     }
 
     let mut before_sub = vec![raw_args[0].clone()];
@@ -165,10 +184,28 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
             if subcommands.contains(arg.as_str()) {
                 found_sub = true;
                 sub_and_after.push(arg.clone());
+                i += 1;
+                continue;
+            }
+            // Normalize optional-value globals before the subcommand.
+            // For `--logs false`, join into `--logs=false` so clap (with
+            // require_equals) sees an attached value.
+            let base = arg.split('=').next().unwrap_or(arg);
+            if let Some(ArgValence::OptionalValue) = global_flags.get(base).copied() {
+                if !arg.contains('=')
+                    && i + 1 < raw_args.len()
+                    && is_bool_literal(&raw_args[i + 1])
+                {
+                    before_sub.push(format!("{}={}", arg, raw_args[i + 1]));
+                    i += 2;
+                } else {
+                    before_sub.push(arg.clone());
+                    i += 1;
+                }
             } else {
                 before_sub.push(arg.clone());
+                i += 1;
             }
-            i += 1;
             continue;
         }
 
@@ -184,21 +221,30 @@ pub fn parse_cli<C: Parser + clap::CommandFactory>(
                 global_flags
                     .get(short_key)
                     .copied()
-                    .filter(|&takes_value| takes_value)
+                    .filter(|v| matches!(v, ArgValence::RequiredValue | ArgValence::OptionalValue))
             } else {
                 None
             }
         });
-        if let Some(takes_value) = matched {
+        if let Some(valence) = matched {
             if arg.contains('=')
                 || (arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 2)
             {
                 // Attached value: --config=val or -cval
                 before_sub.push(arg.clone());
                 i += 1;
-            } else if takes_value && i + 1 < raw_args.len() {
+            } else if matches!(valence, ArgValence::RequiredValue) && i + 1 < raw_args.len() {
                 before_sub.push(arg.clone());
                 before_sub.push(raw_args[i + 1].clone());
+                i += 2;
+            } else if matches!(valence, ArgValence::OptionalValue)
+                && i + 1 < raw_args.len()
+                && is_bool_literal(&raw_args[i + 1])
+            {
+                // Optional value: consume the next token only if it is a
+                // valid boolean literal. Join with '=' so clap sees it as
+                // an attached value (required by require_equals = true).
+                before_sub.push(format!("{}={}", arg, raw_args[i + 1]));
                 i += 2;
             } else {
                 before_sub.push(arg.clone());
@@ -1152,7 +1198,7 @@ impl ZbobrDispatcher {
 
             // Phase 2: use select_runnable_task to pick the highest-priority RunStage candidate
             // and run its stage.  This shares the exact same ready-task selection logic as the
-            // `task list --select` CLI flag.
+            // `task select` CLI subcommand.
             if let Some(task) = select_runnable_task(workflow, &all_tasks) {
                 let action = match workflow.resolve_next_action(task) {
                     Ok(a) => a,
@@ -2324,8 +2370,8 @@ mod tests {
         );
         let action = logs_arg.unwrap().get_action();
         assert!(
-            matches!(action, clap::ArgAction::SetTrue),
-            "--logs should be a boolean flag (SetTrue action)"
+            matches!(action, clap::ArgAction::Append),
+            "--logs should use Append action for last-value-wins semantics"
         );
     }
 }

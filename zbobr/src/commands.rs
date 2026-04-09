@@ -90,10 +90,9 @@ pub enum TaskSubcommand {
         /// Output as JSON array
         #[arg(long)]
         json: bool,
-        /// Print the ID of the highest-priority ready task and exit; exits with code 1 if none
-        #[arg(long)]
-        select: bool,
     },
+    /// Print the ID of the highest-priority ready task and exit; exits with code 1 if none
+    Select,
     /// Show a task by ID (or list all tasks if no ID given)
     Show {
         /// Task ID
@@ -329,11 +328,7 @@ async fn run_task_subcommand(
             }
             println!("Created task #{}", id);
         }
-        TaskSubcommand::List {
-            state,
-            json,
-            select,
-        } => {
+        TaskSubcommand::List { state, json } => {
             let state_filter = state
                 .as_deref()
                 .map(str::parse::<zbobr_api::State>)
@@ -351,29 +346,6 @@ async fn run_task_subcommand(
             }
             tasks.sort_by_key(|t| t.id);
 
-            if select {
-                let eligible = eligible_runnable_tasks(zbobr.workflow(), &tasks);
-                tracing::info!(
-                    "Select requested: {} eligible runnable task(s)",
-                    eligible.len()
-                );
-                if eligible.is_empty() {
-                    tracing::info!("No runnable tasks available for selection");
-                    std::process::exit(1);
-                }
-                match select_runnable_task(zbobr.workflow(), &tasks) {
-                    Some(task) => {
-                        tracing::info!("Selected task #{} for task list select", task.id);
-                        println!("{}", task.id)
-                    }
-                    None => {
-                        tracing::info!("No runnable tasks available for selection");
-                        std::process::exit(1)
-                    }
-                }
-                return Ok(());
-            }
-
             if json {
                 let entries: Vec<TaskListEntry> = tasks.iter().map(TaskListEntry::from).collect();
                 println!("{}", serde_json::to_string_pretty(&entries)?);
@@ -385,6 +357,34 @@ async fn run_task_subcommand(
                         "{}\t{}\t{:?}\t{}",
                         task.id, task.stage_count, task.state, task.title
                     );
+                }
+            }
+        }
+        TaskSubcommand::Select => {
+            let weak_tasks = task_backend.list_tasks().await?;
+            let mut tasks = Vec::new();
+            for w in &weak_tasks {
+                tasks.push(w.snapshot(false).await?);
+            }
+            tasks.sort_by_key(|t| t.id);
+
+            let eligible = eligible_runnable_tasks(zbobr.workflow(), &tasks);
+            tracing::info!(
+                "Select requested: {} eligible runnable task(s)",
+                eligible.len()
+            );
+            if eligible.is_empty() {
+                tracing::info!("No runnable tasks available for selection");
+                std::process::exit(1);
+            }
+            match select_runnable_task(zbobr.workflow(), &tasks) {
+                Some(task) => {
+                    tracing::info!("Selected task #{} for task select", task.id);
+                    println!("{}", task.id)
+                }
+                None => {
+                    tracing::info!("No runnable tasks available for selection");
+                    std::process::exit(1)
                 }
             }
         }
