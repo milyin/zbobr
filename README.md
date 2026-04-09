@@ -302,8 +302,8 @@ Zbobr manages **three distinct GitHub tokens** with different access levels and 
    1. `COPILOT_GITHUB_TOKEN` environment variable
    2. `GH_TOKEN` environment variable
    3. `GITHUB_TOKEN` environment variable
-   4. `copilot_github_token` in the `[executor.copilot]` section of `zbobr.toml`
-- **Config File**: `executor.copilot.copilot_github_token` in `zbobr.toml`
+   4. `copilot_github_token` in the optional `[executor.copilot]` section of `zbobr.toml` (executor sections are optional and can be omitted)
+- **Config File**: If using TOML, set `executor.copilot.copilot_github_token` in `zbobr.toml` (optional; environment variables or CLI flags are preferred)
 
 
 **Token Validation**: Zbobr validates at startup:
@@ -334,7 +334,7 @@ Detailed configuration parameters:
 
 - Copilot token:
    - Env vars: `ZBOBR_COPILOT_GITHUB_TOKEN` (preferred), `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, or `$(gh auth token)`.
-   - TOML field: `copilot_github_token` under `[executor.copilot]` in `zbobr.toml`.
+   - TOML field: `copilot_github_token` under optional `[executor.copilot]` section in `zbobr.toml` (the entire `[executor]` section is optional and can be omitted; environment variables are preferred).
    - Usage: passed as `COPILOT_GITHUB_TOKEN` to Copilot CLI subprocesses so Copilot can perform operations requiring its own permissions when the agent token is restricted.
 
 See `zbobr.toml.sample` for examples of these fields and the code references above for enforcement and usage.
