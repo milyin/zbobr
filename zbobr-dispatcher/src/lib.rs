@@ -428,6 +428,7 @@ impl ZbobrDispatcher {
 mod tests {
     use indexmap::IndexMap;
     use zbobr_api::config::{ProviderDefinition, RoleDefinition, ToolEntry, WorkflowConfig};
+    use zbobr_utility::TomlOption;
 
     use super::*;
 
