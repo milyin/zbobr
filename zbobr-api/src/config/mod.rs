@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use indexmap::IndexMap;
-use zbobr_utility::{MergeToml, Secret, TomlOption, config_struct};
+use zbobr_utility::{Secret, TomlOption, config_struct};
 
 use crate::{
     config_tools::McpTool,
@@ -71,6 +71,12 @@ impl RoleDefinition {
             }),
             ..self
         }
+    }
+}
+
+impl zbobr_utility::ResolvePathValue for RoleDefinition {
+    fn resolve_path_value(self, base: &Path) -> Self {
+        self.resolve_paths(base)
     }
 }
 
@@ -403,6 +409,12 @@ impl PipelineConfig {
     }
 }
 
+impl zbobr_utility::ResolvePathValue for PipelineConfig {
+    fn resolve_path_value(self, base: &Path) -> Self {
+        self.resolve_paths(base)
+    }
+}
+
 impl zbobr_utility::MergeToml for PipelineConfig {
     fn merge_toml(self, other: Self) -> Self {
         let mut stages = self.stages;
@@ -419,161 +431,24 @@ impl zbobr_utility::MergeToml for PipelineConfig {
 
 /// Top-level workflow configuration: a container of named pipelines and shared roles.
 ///
-/// Defined manually (not via `#[config_struct]`) because it needs
-/// custom `Config` impl with `WorkflowArgs` / `WorkflowToml`.
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[config_struct]
 pub struct WorkflowConfig {
     /// Workflow-level named prompt slots inherited by all roles and stages.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(path, skip_args)]
     pub prompts: Option<IndexMap<String, TomlOption<PathBuf>>>,
-    #[serde(default)]
+    #[config(path, skip_args)]
     pub roles: IndexMap<Role, RoleDefinition>,
-    #[serde(default)]
+    #[config(path, skip_args)]
     pub pipelines: IndexMap<Pipeline, PipelineConfig>,
 }
 
-/// TOML representation of WorkflowConfig (all fields optional).
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorkflowToml {
-    /// Workflow-level named prompt slots inherited by all roles and stages.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompts: Option<IndexMap<String, TomlOption<PathBuf>>>,
-    #[serde(default)]
-    pub roles: Option<IndexMap<Role, RoleDefinition>>,
-    #[serde(default)]
-    pub pipelines: Option<IndexMap<Pipeline, PipelineConfig>>,
-}
-
-/// CLI arguments for WorkflowConfig (empty — no CLI-overridable fields).
-#[derive(Clone, Debug, Default)]
-pub struct WorkflowArgs;
-
-impl clap::Args for WorkflowArgs {
-    fn augment_args(cmd: clap::Command) -> clap::Command {
-        cmd
-    }
-    fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
-        cmd
-    }
-}
-
-impl clap::FromArgMatches for WorkflowArgs {
-    fn from_arg_matches(_matches: &clap::ArgMatches) -> Result<Self, clap::Error> {
-        Ok(WorkflowArgs)
-    }
-    fn update_from_arg_matches(&mut self, _matches: &clap::ArgMatches) -> Result<(), clap::Error> {
-        Ok(())
-    }
-}
-
-impl zbobr_utility::PrefixedArgs for WorkflowArgs {
-    fn augment_args_prefixed(cmd: clap::Command, _prefix: &str) -> clap::Command {
-        cmd
-    }
-    fn from_matches_prefixed(
-        _matches: &clap::ArgMatches,
-        _prefix: &str,
-    ) -> Result<Self, clap::Error> {
-        Ok(WorkflowArgs)
-    }
-}
-
-impl WorkflowArgs {
-    pub fn has_overrides(&self) -> bool {
-        false
-    }
-}
-
-impl WorkflowToml {
-    pub fn merge_with_args(self, _args: WorkflowArgs) -> Self {
-        self
-    }
-
-    pub fn merge_toml(self, other: Self) -> Self {
+impl Default for WorkflowConfig {
+    fn default() -> Self {
         Self {
-            prompts: merge_prompt_maps(self.prompts, other.prompts),
-            roles: match (self.roles, other.roles) {
-                (Some(mut base), Some(over)) => {
-                    for (k, v) in over {
-                        if let Some(base_v) = base.get(&k).cloned() {
-                            base.insert(k, base_v.merge_toml(v));
-                        } else {
-                            base.insert(k, v);
-                        }
-                    }
-                    Some(base)
-                }
-                (None, over) => over,
-                (base, None) => base,
-            },
-            pipelines: match (self.pipelines, other.pipelines) {
-                (Some(mut base), Some(over)) => {
-                    for (k, v) in over {
-                        if let Some(base_v) = base.get(&k).cloned() {
-                            base.insert(k, base_v.merge_toml(v));
-                        } else {
-                            base.insert(k, v);
-                        }
-                    }
-                    Some(base)
-                }
-                (None, over) => over,
-                (base, None) => base,
-            },
-        }
-    }
-
-    /// Resolve relative path fields against the given base directory.
-    ///
-    /// All prompt paths are resolved against `config_dir`.
-    pub fn resolve_paths(self, config_dir: &Path) -> Self {
-        let prompts = self.prompts.map(|map| {
-            map.into_iter()
-                .map(|(k, v)| (k, v.map(|p| zbobr_utility::resolve_path(p, config_dir))))
-                .collect()
-        });
-        let roles = self.roles.map(|roles| {
-            roles
-                .into_iter()
-                .map(|(name, role)| (name, role.resolve_paths(config_dir)))
-                .collect()
-        });
-        let pipelines = self.pipelines.map(|pipelines| {
-            pipelines
-                .into_iter()
-                .map(|(name, pipeline)| (name, pipeline.resolve_paths(config_dir)))
-                .collect()
-        });
-        Self {
-            prompts,
-            roles,
-            pipelines,
-        }
-    }
-
-    pub fn try_into_config(self) -> anyhow::Result<WorkflowConfig> {
-        Ok(WorkflowConfig {
-            prompts: self.prompts,
-            roles: self.roles.unwrap_or_default(),
-            pipelines: self.pipelines.unwrap_or_default(),
-        })
-    }
-}
-
-impl Config for WorkflowConfig {
-    type Toml = WorkflowToml;
-    type Args = WorkflowArgs;
-
-    fn build(toml: Option<Self::Toml>, _args: Self::Args, _config_dir: &Path) -> Self {
-        match toml {
-            Some(t) => WorkflowConfig {
-                prompts: t.prompts,
-                roles: t.roles.unwrap_or_default(),
-                pipelines: t.pipelines.unwrap_or_default(),
-            },
-            None => WorkflowConfig::default(),
+            prompts: None,
+            roles: IndexMap::new(),
+            pipelines: IndexMap::new(),
         }
     }
 }
