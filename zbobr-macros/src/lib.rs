@@ -395,19 +395,11 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 }
 
                 if is_path {
-                    if vec_inner_type(&value_ty).is_some() {
-                        // TomlOption<Vec<PathBuf>> or Option<Vec<PathBuf>>: resolve each element
-                        resolve_paths_fields.push(quote! {
-                            #field_ident: self.#field_ident.map(|v| v.into_iter()
-                                .map(|p| ::zbobr_utility::resolve_path(p, config_dir))
-                                .collect()),
-                        });
-                    } else {
-                        // TomlOption<PathBuf> or Option<PathBuf>: resolve the single path
-                        resolve_paths_fields.push(quote! {
-                            #field_ident: self.#field_ident.map(|p| ::zbobr_utility::resolve_path(p, config_dir)),
-                        });
-                    }
+                    // Resolve nested path values recursively (PathBuf, Vec, maps, etc.).
+                    resolve_paths_fields.push(quote! {
+                        #field_ident: self.#field_ident
+                            .map(|value| ::zbobr_utility::resolve_path_value(value, config_dir)),
+                    });
                 } else {
                     resolve_paths_fields.push(quote! {
                         #field_ident: self.#field_ident,
@@ -502,49 +494,31 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             let build_expr = if is_path {
                 if base_is_option.is_some() {
                     if use_toml_option {
-                        // TomlOption<PathBuf> → Option<PathBuf>: resolve if present
-                        quote! {
-                            #field_ident: __merged.#field_ident.into_option().map(|p| ::zbobr_utility::resolve_path(p, config_dir))
-                        }
-                    } else {
-                        // Option<PathBuf>: merged.field.map(|p| resolve_path(p, config_dir))
-                        quote! {
-                            #field_ident: __merged.#field_ident.map(|p| ::zbobr_utility::resolve_path(p, config_dir))
-                        }
-                    }
-                } else if vec_inner_type(&value_ty).is_some() {
-                    if use_toml_option {
-                        // TomlOption<Vec<PathBuf>>: resolve every element
+                        // TomlOption<T> → Option<T>: resolve recursively if present.
                         quote! {
                             #field_ident: __merged.#field_ident.into_option()
-                                .unwrap_or(defaults.#field_ident)
-                                .into_iter()
-                                .map(|p| ::zbobr_utility::resolve_path(p, config_dir))
-                                .collect()
+                                .map(|value| ::zbobr_utility::resolve_path_value(value, config_dir))
                         }
                     } else {
-                        // Vec<PathBuf>: always resolve every element, whether from config or default
+                        // Option<T>: resolve recursively if present.
                         quote! {
                             #field_ident: __merged.#field_ident
-                                .unwrap_or(defaults.#field_ident)
-                                .into_iter()
-                                .map(|p| ::zbobr_utility::resolve_path(p, config_dir))
-                                .collect()
+                                .map(|value| ::zbobr_utility::resolve_path_value(value, config_dir))
                         }
                     }
                 } else {
                     if use_toml_option {
-                        // TomlOption<PathBuf>: resolve, whether from config or default
+                        // Resolve recursively whether value comes from config or default.
                         quote! {
-                            #field_ident: ::zbobr_utility::resolve_path(
+                            #field_ident: ::zbobr_utility::resolve_path_value(
                                 __merged.#field_ident.into_option().unwrap_or(defaults.#field_ident),
                                 config_dir,
                             )
                         }
                     } else {
-                        // PathBuf: always resolve, whether from config or default
+                        // Resolve recursively whether value comes from config or default.
                         quote! {
-                            #field_ident: ::zbobr_utility::resolve_path(
+                            #field_ident: ::zbobr_utility::resolve_path_value(
                                 __merged.#field_ident.unwrap_or(defaults.#field_ident),
                                 config_dir,
                             )

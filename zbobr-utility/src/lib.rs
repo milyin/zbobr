@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::{collections::HashMap, hash::BuildHasher, path::{Path, PathBuf}};
+
+use indexmap::IndexMap;
 
 use anyhow::{Context, Result};
 
@@ -65,6 +67,80 @@ pub fn resolve_path(path: PathBuf, base: &Path) -> PathBuf {
     } else {
         path
     }
+}
+
+/// Recursively resolve path-like config values against a base directory.
+pub trait ResolvePathValue: Sized {
+    fn resolve_path_value(self, base: &Path) -> Self;
+}
+
+impl ResolvePathValue for PathBuf {
+    fn resolve_path_value(self, base: &Path) -> Self {
+        resolve_path(self, base)
+    }
+}
+
+impl<T> ResolvePathValue for Option<T>
+where
+    T: ResolvePathValue,
+{
+    fn resolve_path_value(self, base: &Path) -> Self {
+        self.map(|value| value.resolve_path_value(base))
+    }
+}
+
+impl<T> ResolvePathValue for Vec<T>
+where
+    T: ResolvePathValue,
+{
+    fn resolve_path_value(self, base: &Path) -> Self {
+        self.into_iter()
+            .map(|value| value.resolve_path_value(base))
+            .collect()
+    }
+}
+
+impl<K, V, S> ResolvePathValue for HashMap<K, V, S>
+where
+    K: Eq + std::hash::Hash,
+    V: ResolvePathValue,
+    S: BuildHasher + Default,
+{
+    fn resolve_path_value(self, base: &Path) -> Self {
+        self.into_iter()
+            .map(|(k, value)| (k, value.resolve_path_value(base)))
+            .collect()
+    }
+}
+
+impl<K, V, S> ResolvePathValue for IndexMap<K, V, S>
+where
+    K: Eq + std::hash::Hash,
+    V: ResolvePathValue,
+    S: BuildHasher + Default,
+{
+    fn resolve_path_value(self, base: &Path) -> Self {
+        self.into_iter()
+            .map(|(k, value)| (k, value.resolve_path_value(base)))
+            .collect()
+    }
+}
+
+impl<T> ResolvePathValue for TomlOption<T>
+where
+    T: ResolvePathValue,
+{
+    fn resolve_path_value(self, base: &Path) -> Self {
+        self.map(|value| value.resolve_path_value(base))
+    }
+}
+
+/// Resolve path-like values recursively.
+pub fn resolve_path_value<T>(value: T, base: &Path) -> T
+where
+    T: ResolvePathValue,
+{
+    value.resolve_path_value(base)
 }
 
 /// Run a git command in `dir` with extra environment variables, returning an error on failure.

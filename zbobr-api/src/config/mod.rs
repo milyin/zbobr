@@ -993,9 +993,25 @@ impl ZbobrDispatcherConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use indexmap::IndexMap;
 
     use super::*;
+
+    #[derive(Clone, Default)]
+    #[zbobr_utility::config_struct]
+    struct NestedPathContainersConfig {
+        #[config(skip_args)]
+        #[config(path)]
+        list_of_maps: Vec<IndexMap<String, PathBuf>>,
+        #[config(skip_args)]
+        #[config(path)]
+        by_name: HashMap<String, PathBuf>,
+        #[config(skip_args)]
+        #[config(path)]
+        by_stage: IndexMap<String, Vec<PathBuf>>,
+    }
 
     /// Helper: build a minimal ZbobrDispatcherConfig with given providers and tools.
     fn make_config(
@@ -1010,6 +1026,76 @@ mod tests {
     }
 
     // ── resolve_providers tests ──────────────────────────────────────────
+
+    #[test]
+    fn config_struct_resolve_paths_supports_nested_toml_containers() {
+        let toml = NestedPathContainersConfigToml {
+            list_of_maps: TomlOption::Value(vec![IndexMap::from([
+                ("main".to_string(), PathBuf::from("role/main.md")),
+                ("abs".to_string(), PathBuf::from("/global/main.md")),
+            ])]),
+            by_name: Some(HashMap::from([(
+                "review".to_string(),
+                PathBuf::from("prompts/review.md"),
+            )])),
+            by_stage: Some(IndexMap::from([(
+                "pipeline".to_string(),
+                vec![
+                    PathBuf::from("stages/extra.md"),
+                    PathBuf::from("/global/extra.md"),
+                ],
+            )])),
+        };
+
+        let resolved = toml.resolve_paths(Path::new("/config"));
+
+        let list_item = &resolved.list_of_maps.as_option().unwrap()[0];
+        assert_eq!(list_item["main"], PathBuf::from("/config/role/main.md"));
+        assert_eq!(list_item["abs"], PathBuf::from("/global/main.md"));
+
+        let by_name = resolved.by_name.unwrap();
+        assert_eq!(by_name["review"], PathBuf::from("/config/prompts/review.md"));
+
+        let by_stage = resolved.by_stage.unwrap();
+        let pipeline = &by_stage["pipeline"];
+        assert_eq!(pipeline[0], PathBuf::from("/config/stages/extra.md"));
+        assert_eq!(pipeline[1], PathBuf::from("/global/extra.md"));
+    }
+
+    #[test]
+    fn config_struct_build_supports_nested_toml_containers() {
+        let built = <NestedPathContainersConfig as Config>::build(
+            Some(NestedPathContainersConfigToml {
+                list_of_maps: TomlOption::Value(vec![IndexMap::from([(
+                    "main".to_string(),
+                    PathBuf::from("role/main.md"),
+                )])]),
+                by_name: Some(HashMap::from([(
+                    "review".to_string(),
+                    PathBuf::from("prompts/review.md"),
+                )])),
+                by_stage: Some(IndexMap::from([(
+                    "pipeline".to_string(),
+                    vec![PathBuf::from("stages/extra.md")],
+                )])),
+            }),
+            Default::default(),
+            Path::new("/config"),
+        );
+
+        assert_eq!(
+            built.list_of_maps[0]["main"],
+            PathBuf::from("/config/role/main.md")
+        );
+        assert_eq!(
+            built.by_name["review"],
+            PathBuf::from("/config/prompts/review.md")
+        );
+        assert_eq!(
+            built.by_stage["pipeline"][0],
+            PathBuf::from("/config/stages/extra.md")
+        );
+    }
 
     #[test]
     fn resolve_providers_basic() {
