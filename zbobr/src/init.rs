@@ -1054,8 +1054,9 @@ You have access to the task context and the repository:
 4. **Apply fixes**:
    - Apply tool-based auto-fixes (e.g., `cargo fmt`, `gofmt -w`, `black .`, `prettier --write`)
    - Apply manual fixes for linting warnings/errors that require code changes
-5. Call `{mcp_report_success}` if all issues were fixed.
-6. Call `{mcp_report_failure}` with details if some issues cannot be fixed.
+5. Commit the fixes and changes made by linting/formatting tools
+6. Call `{mcp_report_success}` if all issues were fixed and the fixes were committed.
+7. Call `{mcp_report_failure}` with details if some issues cannot be fixed.
 
 ## Important Notes
 
