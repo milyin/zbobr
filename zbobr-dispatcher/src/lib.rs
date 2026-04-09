@@ -428,6 +428,7 @@ impl ZbobrDispatcher {
 mod tests {
     use indexmap::IndexMap;
     use zbobr_api::config::{ProviderDefinition, RoleDefinition, ToolEntry, WorkflowConfig};
+    use zbobr_utility::TomlOption;
 
     use super::*;
 
@@ -917,10 +918,9 @@ mod tests {
             },
         );
         let wf_config = WorkflowConfig {
-            prompts_dir: None,
             prompts: None,
-            roles,
-            pipelines: std::collections::HashMap::new(),
+            roles: Some(roles.into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
+            pipelines: Some(IndexMap::new()),
         };
         let workflow = Workflow::from_config(wf_config);
         let dispatcher = make_dispatcher_with_workflow(providers, tools, workflow);

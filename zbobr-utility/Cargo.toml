@@ -12,6 +12,7 @@ serde = { workspace = true }
 toml_edit = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+indexmap = { workspace = true }
 zbobr-macros = { workspace = true }
 
 [dev-dependencies]

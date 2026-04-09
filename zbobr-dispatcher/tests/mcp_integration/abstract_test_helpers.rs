@@ -13,6 +13,7 @@ use zbobr_api::{
     config_tools::ALL_TOOLS,
 };
 use zbobr_dispatcher::backend::TaskBackendExt;
+use zbobr_utility::TomlOption;
 
 use super::{abstract_scenarios, env::IntegrationTestEnv};
 
@@ -69,16 +70,15 @@ fn build_workflow_with_roles(
             );
     }
 
-    let mut pipelines: HashMap<Pipeline, PipelineConfig> = HashMap::new();
+    let mut pipelines: IndexMap<Pipeline, PipelineConfig> = IndexMap::new();
     for (pipeline_name, stages) in pipeline_stages {
-        pipelines.insert(pipeline_name, PipelineConfig { stages });
+        pipelines.insert(pipeline_name, PipelineConfig { stages: Some(stages.into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()) });
     }
 
     WorkflowConfig {
-        prompts_dir: None,
         prompts: None,
-        pipelines,
-        roles,
+        pipelines: Some(pipelines.into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
+        roles: Some(roles.into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
     }
 }
 
@@ -378,11 +378,11 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     let work_branch = format!("zbobr_fix-{task_id}-signals");
     env.update_task_branches(task_id, &work_branch).await;
 
-    let mut pipelines: HashMap<Pipeline, PipelineConfig> = HashMap::new();
+    let mut pipelines: IndexMap<Pipeline, PipelineConfig> = IndexMap::new();
     pipelines.insert(
         Pipeline::Main,
         PipelineConfig {
-            stages: IndexMap::from([
+            stages: Some(IndexMap::from([
                 (
                     Stage::from("check"),
                     StageDefinition {
@@ -399,17 +399,16 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
                         ..Default::default()
                     },
                 ),
-            ]),
+            ]).into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
         },
     );
     let workflow = WorkflowConfig {
-        prompts_dir: None,
         prompts: None,
-        pipelines,
-        roles: IndexMap::from([
-            ("role_check".to_string().into(), role_with_all_tools()),
-            ("role_finish".to_string().into(), role_with_all_tools()),
-        ]),
+        pipelines: Some(pipelines.into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
+        roles: Some(IndexMap::from([
+            ("role_check".to_string().into(), TomlOption::Value(role_with_all_tools())),
+            ("role_finish".to_string().into(), TomlOption::Value(role_with_all_tools())),
+        ])),
     };
 
     // First run: failure → return_failure → root pipeline pauses
@@ -520,11 +519,11 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
     //   sub:   work (reports success)
     //   init:  preparing (required)
     //   merge: merging   (required)
-    let mut pipelines: HashMap<Pipeline, PipelineConfig> = HashMap::new();
+    let mut pipelines: IndexMap<Pipeline, PipelineConfig> = IndexMap::new();
     pipelines.insert(
         Pipeline::Main,
         PipelineConfig {
-            stages: IndexMap::from([
+            stages: Some(IndexMap::from([
                 (
                     "call_sub".into(),
                     StageDefinition {
@@ -540,44 +539,43 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
                         ..Default::default()
                     },
                 ),
-            ]),
+            ]).into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
         },
     );
     pipelines.insert(
         Pipeline::from("sub"),
         PipelineConfig {
-            stages: IndexMap::from([(
+            stages: Some(IndexMap::from([(
                 "work".into(),
                 StageDefinition {
                     role: Some("role_work".into()).into(),
                     tool: Some("mcp-tester".to_string().into()).into(),
                     ..Default::default()
                 },
-            )]),
+            )]).into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
         },
     );
     pipelines.insert(
         Pipeline::Merge,
         PipelineConfig {
-            stages: IndexMap::from([(
+            stages: Some(IndexMap::from([(
                 "merging".into(),
                 StageDefinition {
                     role: Some("role_merge".into()).into(),
                     tool: Some("mcp-tester".to_string().into()).into(),
                     ..Default::default()
                 },
-            )]),
+            )]).into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
         },
     );
     let workflow = WorkflowConfig {
-        prompts_dir: None,
         prompts: None,
-        pipelines,
-        roles: IndexMap::from([
-            ("role_work".to_string().into(), role_with_all_tools()),
-            ("role_finish".to_string().into(), role_with_all_tools()),
-            ("role_merge".to_string().into(), role_with_all_tools()),
-        ]),
+        pipelines: Some(pipelines.into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
+        roles: Some(IndexMap::from([
+            ("role_work".to_string().into(), TomlOption::Value(role_with_all_tools())),
+            ("role_finish".to_string().into(), TomlOption::Value(role_with_all_tools())),
+            ("role_merge".to_string().into(), TomlOption::Value(role_with_all_tools())),
+        ])),
     };
 
     let scenarios = scenarios_map(vec![

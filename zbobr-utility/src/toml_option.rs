@@ -55,6 +55,14 @@ impl<T> TomlOption<T> {
         }
     }
 
+    /// Convert to `Option<&mut T>`: `Value(t)` → `Some(&mut t)`, otherwise `None`.
+    pub fn as_mut(&mut self) -> Option<&mut T> {
+        match self {
+            Self::Value(v) => Some(v),
+            _ => None,
+        }
+    }
+
     /// Convert to `Option<T>`: `Value(t)` → `Some(t)`, otherwise `None`.
     pub fn into_option(self) -> Option<T> {
         match self {
@@ -197,9 +205,15 @@ impl<'de, T: serde::Deserialize<'de>> serde::de::Visitor<'de> for TomlOptionVisi
 // MergeToml
 // ---------------------------------------------------------------------------
 
-impl<T> super::MergeToml for TomlOption<T> {
+impl<T: super::MergeToml> super::MergeToml for TomlOption<T> {
     fn merge_toml(self, other: Self) -> Self {
-        self.merge(other)
+        match (self, other) {
+            (TomlOption::Value(base), TomlOption::Value(over)) => {
+                TomlOption::Value(base.merge_toml(over))
+            }
+            (base, TomlOption::Absent) => base,
+            (_, over) => over,
+        }
     }
 }
 
@@ -415,7 +429,7 @@ mod tests {
     #[test]
     fn merge_toml_trait() {
         use crate::MergeToml;
-        let base = TomlOption::Value(1);
+        let base = TomlOption::Value(1i32);
         let overlay = TomlOption::ExplicitNone;
         assert_eq!(base.merge_toml(overlay), TomlOption::ExplicitNone);
     }

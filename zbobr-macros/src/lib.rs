@@ -345,8 +345,10 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             let base_is_option = option_inner_type(&field_ty);
             let value_ty = base_is_option.clone().unwrap_or(field_ty.clone());
 
-            // Map fields keep Option<T> (key-by-key merge); other leaf fields use TomlOption<T>.
-            let use_toml_option = !is_map_type(&value_ty);
+            let is_map_field = is_map_type(&value_ty);
+            // Always use TomlOption<T> for leaf fields, including maps.
+            // Map fields still keep dedicated key-by-key merge when both sides are Value(...).
+            let use_toml_option = true;
 
             if !config_meta.skip_toml {
                 if use_toml_option {
@@ -361,9 +363,28 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                         #field_ident: self.#field_ident.merge(::zbobr_utility::TomlOption::from(args.#field_ident)),
                     });
 
-                    merge_toml_fields.push(quote! {
-                        #field_ident: self.#field_ident.merge(other.#field_ident),
-                    });
+                    if is_map_field {
+                        merge_toml_fields.push(quote! {
+                            #field_ident: match (self.#field_ident, other.#field_ident) {
+                                (::zbobr_utility::TomlOption::Value(mut base), ::zbobr_utility::TomlOption::Value(over)) => {
+                                    for (k, over_v) in over {
+                                        if let Some(base_v) = base.get(&k).cloned() {
+                                            base.insert(k, ::zbobr_utility::MergeToml::merge_toml(base_v, over_v));
+                                        } else {
+                                            base.insert(k, over_v);
+                                        }
+                                    }
+                                    ::zbobr_utility::TomlOption::Value(base)
+                                }
+                                (base, ::zbobr_utility::TomlOption::Absent) => base,
+                                (_, over) => over,
+                            },
+                        });
+                    } else {
+                        merge_toml_fields.push(quote! {
+                            #field_ident: self.#field_ident.merge(other.#field_ident),
+                        });
+                    }
                 } else {
                     toml_fields.push(quote! {
                         #[serde(skip_serializing_if = "Option::is_none")]
@@ -395,19 +416,11 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
                 }
 
                 if is_path {
-                    if vec_inner_type(&value_ty).is_some() {
-                        // TomlOption<Vec<PathBuf>> or Option<Vec<PathBuf>>: resolve each element
-                        resolve_paths_fields.push(quote! {
-                            #field_ident: self.#field_ident.map(|v| v.into_iter()
-                                .map(|p| ::zbobr_utility::resolve_path(p, config_dir))
-                                .collect()),
-                        });
-                    } else {
-                        // TomlOption<PathBuf> or Option<PathBuf>: resolve the single path
-                        resolve_paths_fields.push(quote! {
-                            #field_ident: self.#field_ident.map(|p| ::zbobr_utility::resolve_path(p, config_dir)),
-                        });
-                    }
+                    // Resolve nested path values recursively (PathBuf, Vec, maps, etc.).
+                    resolve_paths_fields.push(quote! {
+                        #field_ident: self.#field_ident
+                            .map(|value| ::zbobr_utility::resolve_path_value(value, config_dir)),
+                    });
                 } else {
                     resolve_paths_fields.push(quote! {
                         #field_ident: self.#field_ident,
@@ -502,49 +515,31 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             let build_expr = if is_path {
                 if base_is_option.is_some() {
                     if use_toml_option {
-                        // TomlOption<PathBuf> → Option<PathBuf>: resolve if present
-                        quote! {
-                            #field_ident: __merged.#field_ident.into_option().map(|p| ::zbobr_utility::resolve_path(p, config_dir))
-                        }
-                    } else {
-                        // Option<PathBuf>: merged.field.map(|p| resolve_path(p, config_dir))
-                        quote! {
-                            #field_ident: __merged.#field_ident.map(|p| ::zbobr_utility::resolve_path(p, config_dir))
-                        }
-                    }
-                } else if vec_inner_type(&value_ty).is_some() {
-                    if use_toml_option {
-                        // TomlOption<Vec<PathBuf>>: resolve every element
+                        // TomlOption<T> → Option<T>: resolve recursively if present.
                         quote! {
                             #field_ident: __merged.#field_ident.into_option()
-                                .unwrap_or(defaults.#field_ident)
-                                .into_iter()
-                                .map(|p| ::zbobr_utility::resolve_path(p, config_dir))
-                                .collect()
+                                .map(|value| ::zbobr_utility::resolve_path_value(value, config_dir))
                         }
                     } else {
-                        // Vec<PathBuf>: always resolve every element, whether from config or default
+                        // Option<T>: resolve recursively if present.
                         quote! {
                             #field_ident: __merged.#field_ident
-                                .unwrap_or(defaults.#field_ident)
-                                .into_iter()
-                                .map(|p| ::zbobr_utility::resolve_path(p, config_dir))
-                                .collect()
+                                .map(|value| ::zbobr_utility::resolve_path_value(value, config_dir))
                         }
                     }
                 } else {
                     if use_toml_option {
-                        // TomlOption<PathBuf>: resolve, whether from config or default
+                        // Resolve recursively whether value comes from config or default.
                         quote! {
-                            #field_ident: ::zbobr_utility::resolve_path(
+                            #field_ident: ::zbobr_utility::resolve_path_value(
                                 __merged.#field_ident.into_option().unwrap_or(defaults.#field_ident),
                                 config_dir,
                             )
                         }
                     } else {
-                        // PathBuf: always resolve, whether from config or default
+                        // Resolve recursively whether value comes from config or default.
                         quote! {
-                            #field_ident: ::zbobr_utility::resolve_path(
+                            #field_ident: ::zbobr_utility::resolve_path_value(
                                 __merged.#field_ident.unwrap_or(defaults.#field_ident),
                                 config_dir,
                             )

@@ -1,7 +1,6 @@
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
 };
 
@@ -40,7 +39,7 @@ const CLAUDE_MODEL_SONNET: Model = Model::new("claude-sonnet-4-6");
 const COPILOT_MODEL_GPT_5_4: Model = Model::new("gpt-5.4");
 const COPILOT_MODEL_GPT_5_MINI: Model = Model::new("gpt-5-mini");
 
-const WORKFLOW_PROMPTS_DIR: &str = "prompts";
+const PROMPTS_SUBDIR: &str = "prompts";
 const TASK_PROMPT: &str = "task.md";
 const LOOP_SCRIPT: &str = "loop.sh";
 
@@ -199,6 +198,10 @@ async fn write_or_new(path: &Path, content: &str, force: bool) -> anyhow::Result
     Ok(())
 }
 
+fn prompt_path(name: &str) -> PathBuf {
+    PathBuf::from(PROMPTS_SUBDIR).join(name)
+}
+
 /// Build a default `RootConfigToml` with sensible example values.
 fn default_config_toml() -> RootConfigToml {
     let workflow = default_workflow();
@@ -330,8 +333,8 @@ fn default_config_toml() -> RootConfigToml {
             workspaces: TomlOption::Value(PathBuf::from("./workspaces")),
             base_port: TomlOption::Value(3000),
             agent_github_token: TomlOption::Value(Secret::value("not-configured")),
-            providers: Some(providers),
-            tools: Some(tools),
+            providers: Some(providers).into(),
+            tools: Some(tools).into(),
             provider_exclusion_secs: TomlOption::Value(3600),
             provider_exclusion_fail_count: TomlOption::Value(3),
             work_branch_prefix: TomlOption::Value("zbobr_fix".into()),
@@ -365,10 +368,9 @@ fn default_config_toml() -> RootConfigToml {
             mcp_tester: None,
         }),
         workflow: Some(WorkflowToml {
-            prompts_dir: workflow.prompts_dir.into(),
-            prompts: workflow.prompts,
-            roles: Some(workflow.roles),
-            pipelines: Some(workflow.pipelines),
+            prompts: workflow.prompts.into(),
+            roles: workflow.roles.into(),
+            pipelines: workflow.pipelines.into(),
         }),
     }
 }
@@ -471,24 +473,34 @@ fn default_workflow() -> WorkflowConfig {
         },
     )]);
 
-    let mut pipelines = HashMap::new();
+    let mut pipelines = IndexMap::new();
     pipelines.insert(
         Pipeline::Main,
         PipelineConfig {
-            stages: main_stages,
+            stages: Some(
+                main_stages
+                    .into_iter()
+                    .map(|(k, v)| (k, TomlOption::Value(v)))
+                    .collect(),
+            ),
         },
     );
     pipelines.insert(
         Pipeline::Merge,
         PipelineConfig {
-            stages: merge_stages,
+            stages: Some(
+                merge_stages
+                    .into_iter()
+                    .map(|(k, v)| (k, TomlOption::Value(v)))
+                    .collect(),
+            ),
         },
     );
 
     fn role_prompts(main: &str) -> Option<indexmap::IndexMap<String, TomlOption<PathBuf>>> {
         Some(indexmap::IndexMap::from([(
             "main".to_string(),
-            TomlOption::Value(PathBuf::from(main)),
+            TomlOption::Value(prompt_path(main)),
         )]))
     }
 
@@ -629,15 +641,24 @@ fn default_workflow() -> WorkflowConfig {
         ("main".to_string(), TomlOption::ExplicitNone),
         (
             "task".to_string(),
-            TomlOption::Value(PathBuf::from(TASK_PROMPT)),
+            TomlOption::Value(prompt_path(TASK_PROMPT)),
         ),
     ]));
 
     WorkflowConfig {
-        prompts_dir: Some(PathBuf::from(WORKFLOW_PROMPTS_DIR)),
         prompts: workflow_prompts,
-        pipelines,
-        roles,
+        pipelines: Some(
+            pipelines
+                .into_iter()
+                .map(|(k, v)| (k, TomlOption::Value(v)))
+                .collect(),
+        ),
+        roles: Some(
+            roles
+                .into_iter()
+                .map(|(k, v)| (k, TomlOption::Value(v)))
+                .collect(),
+        ),
     }
 }
 
@@ -1109,8 +1130,8 @@ mod tests {
     #[test]
     fn linting_on_success_routes_to_testing() {
         let wf = default_workflow();
-        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
-        let linting = main.stages.get(&Stage::from("linting")).unwrap();
+        let main = wf.pipeline(&Pipeline::Main).unwrap();
+        let linting = main.stage(&Stage::from("linting")).unwrap();
         let target = linting.on_success().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("testing"));
     }
@@ -1118,8 +1139,8 @@ mod tests {
     #[test]
     fn merge_stage_task_prompt_is_cleared() {
         let wf = default_workflow();
-        let merge = wf.pipelines.get(&Pipeline::Merge).unwrap();
-        let merging = merge.stages.get(&Stage::from("merging")).unwrap();
+        let merge = wf.pipeline(&Pipeline::Merge).unwrap();
+        let merging = merge.stage(&Stage::from("merging")).unwrap();
         let task_prompt = merging
             .prompts
             .as_ref()
@@ -1130,8 +1151,8 @@ mod tests {
     #[test]
     fn linting_on_failure_routes_to_linter_worker() {
         let wf = default_workflow();
-        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
-        let linting = main.stages.get(&Stage::from("linting")).unwrap();
+        let main = wf.pipeline(&Pipeline::Main).unwrap();
+        let linting = main.stage(&Stage::from("linting")).unwrap();
         let target = linting.on_failure().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("linter_worker"));
     }
@@ -1139,8 +1160,8 @@ mod tests {
     #[test]
     fn linter_worker_on_success_routes_to_linting() {
         let wf = default_workflow();
-        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
-        let lw = main.stages.get(&Stage::from("linter_worker")).unwrap();
+        let main = wf.pipeline(&Pipeline::Main).unwrap();
+        let lw = main.stage(&Stage::from("linter_worker")).unwrap();
         let target = lw.on_success().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("linting"));
     }
@@ -1148,8 +1169,8 @@ mod tests {
     #[test]
     fn linter_worker_on_failure_routes_to_working() {
         let wf = default_workflow();
-        let main = wf.pipelines.get(&Pipeline::Main).unwrap();
-        let lw = main.stages.get(&Stage::from("linter_worker")).unwrap();
+        let main = wf.pipeline(&Pipeline::Main).unwrap();
+        let lw = main.stage(&Stage::from("linter_worker")).unwrap();
         let target = lw.on_failure().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("working"));
     }
@@ -1161,8 +1182,9 @@ mod tests {
         let wf = default_workflow();
         let registered: std::collections::HashSet<&str> =
             PROMPT_FILES.iter().map(|(name, _)| *name).collect();
-        for (role_name, role_def) in &wf.roles {
-            for (slot, prompt_opt) in role_def.prompts.iter().flatten() {
+        for (role_name, role_def) in wf.get_roles().unwrap_or(&indexmap::IndexMap::new()) {
+            if let Some(role_def) = role_def.as_option() {
+                for (slot, prompt_opt) in role_def.prompts.iter().flatten() {
                 if let Some(prompt_path) = prompt_opt.as_option() {
                     let key = prompt_path
                         .file_stem()
@@ -1177,6 +1199,7 @@ mod tests {
                     );
                 }
             }
+        }
         }
     }
 

@@ -27,6 +27,7 @@ impl ZbobrExecutorMcpTesterConfig {
         let merged = toml.unwrap_or_default().merge_with_args(args);
         let scenarios = merged
             .scenarios
+            .into_option()
             .unwrap_or_default()
             .into_iter()
             .map(|(k, v)| (k, resolve_path(v, config_dir)))
