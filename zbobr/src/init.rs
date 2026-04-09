@@ -40,7 +40,7 @@ const CLAUDE_MODEL_SONNET: Model = Model::new("claude-sonnet-4-6");
 const COPILOT_MODEL_GPT_5_4: Model = Model::new("gpt-5.4");
 const COPILOT_MODEL_GPT_5_MINI: Model = Model::new("gpt-5-mini");
 
-const WORKFLOW_PROMPTS_DIR: &str = "prompts";
+const PROMPTS_SUBDIR: &str = "prompts";
 const TASK_PROMPT: &str = "task.md";
 const LOOP_SCRIPT: &str = "loop.sh";
 
@@ -197,6 +197,10 @@ async fn write_or_new(path: &Path, content: &str, force: bool) -> anyhow::Result
         println!("  wrote {}", path.display());
     }
     Ok(())
+}
+
+fn prompt_path(name: &str) -> PathBuf {
+    PathBuf::from(PROMPTS_SUBDIR).join(name)
 }
 
 /// Build a default `RootConfigToml` with sensible example values.
@@ -365,7 +369,6 @@ fn default_config_toml() -> RootConfigToml {
             mcp_tester: None,
         }),
         workflow: Some(WorkflowToml {
-            prompts_dir: workflow.prompts_dir.into(),
             prompts: workflow.prompts,
             roles: Some(workflow.roles),
             pipelines: Some(workflow.pipelines),
@@ -488,7 +491,7 @@ fn default_workflow() -> WorkflowConfig {
     fn role_prompts(main: &str) -> Option<indexmap::IndexMap<String, TomlOption<PathBuf>>> {
         Some(indexmap::IndexMap::from([(
             "main".to_string(),
-            TomlOption::Value(PathBuf::from(main)),
+            TomlOption::Value(prompt_path(main)),
         )]))
     }
 
@@ -629,12 +632,11 @@ fn default_workflow() -> WorkflowConfig {
         ("main".to_string(), TomlOption::ExplicitNone),
         (
             "task".to_string(),
-            TomlOption::Value(PathBuf::from(TASK_PROMPT)),
+            TomlOption::Value(prompt_path(TASK_PROMPT)),
         ),
     ]));
 
     WorkflowConfig {
-        prompts_dir: Some(PathBuf::from(WORKFLOW_PROMPTS_DIR)),
         prompts: workflow_prompts,
         pipelines,
         roles,
