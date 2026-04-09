@@ -334,8 +334,8 @@ fn default_config_toml() -> RootConfigToml {
             workspaces: TomlOption::Value(PathBuf::from("./workspaces")),
             base_port: TomlOption::Value(3000),
             agent_github_token: TomlOption::Value(Secret::value("not-configured")),
-            providers: Some(providers),
-            tools: Some(tools),
+            providers: TomlOption::Value(providers),
+            tools: TomlOption::Value(tools),
             provider_exclusion_secs: TomlOption::Value(3600),
             provider_exclusion_fail_count: TomlOption::Value(3),
             work_branch_prefix: TomlOption::Value("zbobr_fix".into()),
@@ -369,9 +369,9 @@ fn default_config_toml() -> RootConfigToml {
             mcp_tester: None,
         }),
         workflow: Some(WorkflowToml {
-            prompts: workflow.prompts,
-            roles: Some(workflow.roles),
-            pipelines: Some(workflow.pipelines),
+            prompts: workflow.prompts.into(),
+            roles: workflow.roles.into(),
+            pipelines: workflow.pipelines.into(),
         }),
     }
 }
@@ -478,13 +478,23 @@ fn default_workflow() -> WorkflowConfig {
     pipelines.insert(
         Pipeline::Main,
         PipelineConfig {
-            stages: main_stages,
+            stages: Some(
+                main_stages
+                    .into_iter()
+                    .map(|(k, v)| (k, TomlOption::Value(v)))
+                    .collect(),
+            ),
         },
     );
     pipelines.insert(
         Pipeline::Merge,
         PipelineConfig {
-            stages: merge_stages,
+            stages: Some(
+                merge_stages
+                    .into_iter()
+                    .map(|(k, v)| (k, TomlOption::Value(v)))
+                    .collect(),
+            ),
         },
     );
 
@@ -638,8 +648,18 @@ fn default_workflow() -> WorkflowConfig {
 
     WorkflowConfig {
         prompts: workflow_prompts,
-        pipelines,
-        roles,
+        pipelines: Some(
+            pipelines
+                .into_iter()
+                .map(|(k, v)| (k, TomlOption::Value(v)))
+                .collect(),
+        ),
+        roles: Some(
+            roles
+                .into_iter()
+                .map(|(k, v)| (k, TomlOption::Value(v)))
+                .collect(),
+        ),
     }
 }
 
