@@ -1,7 +1,6 @@
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
 };
 
@@ -334,8 +333,8 @@ fn default_config_toml() -> RootConfigToml {
             workspaces: TomlOption::Value(PathBuf::from("./workspaces")),
             base_port: TomlOption::Value(3000),
             agent_github_token: TomlOption::Value(Secret::value("not-configured")),
-            providers: Some(providers),
-            tools: Some(tools),
+            providers: Some(providers).into(),
+            tools: Some(tools).into(),
             provider_exclusion_secs: TomlOption::Value(3600),
             provider_exclusion_fail_count: TomlOption::Value(3),
             work_branch_prefix: TomlOption::Value("zbobr_fix".into()),
@@ -369,9 +368,9 @@ fn default_config_toml() -> RootConfigToml {
             mcp_tester: None,
         }),
         workflow: Some(WorkflowToml {
-            prompts: workflow.prompts,
-            roles: Some(workflow.roles),
-            pipelines: Some(workflow.pipelines),
+            prompts: workflow.prompts.into(),
+            roles: workflow.roles.into(),
+            pipelines: workflow.pipelines.into(),
         }),
     }
 }
@@ -474,7 +473,7 @@ fn default_workflow() -> WorkflowConfig {
         },
     )]);
 
-    let mut pipelines = HashMap::new();
+    let mut pipelines = IndexMap::new();
     pipelines.insert(
         Pipeline::Main,
         PipelineConfig {
@@ -638,8 +637,18 @@ fn default_workflow() -> WorkflowConfig {
 
     WorkflowConfig {
         prompts: workflow_prompts,
-        pipelines,
-        roles,
+        pipelines: Some(
+            pipelines
+                .into_iter()
+                .map(|(k, v)| (k, TomlOption::Value(v)))
+                .collect(),
+        ),
+        roles: Some(
+            roles
+                .into_iter()
+                .map(|(k, v)| (k, TomlOption::Value(v)))
+                .collect(),
+        ),
     }
 }
 
