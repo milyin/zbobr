@@ -44,7 +44,6 @@ use syn::{
 /// - `toml_type = Type`
 /// - `toml_rename = "..."`
 /// - `toml_alias = "..."`
-/// - `toml_option_for_maps`
 ///
 /// The input struct must use named fields and its name must end with `Config`.
 pub fn config_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -347,9 +346,9 @@ fn expand_config_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             let value_ty = base_is_option.clone().unwrap_or(field_ty.clone());
 
             let is_map_field = is_map_type(&value_ty);
-            // Map fields keep Option<T> by default (key-by-key merge).
-            // Set #[config(toml_option_for_maps)] to generate TomlOption<T> for maps.
-            let use_toml_option = config_meta.toml_option_for_maps || !is_map_field;
+            // Always use TomlOption<T> for leaf fields, including maps.
+            // Map fields still keep dedicated key-by-key merge when both sides are Value(...).
+            let use_toml_option = true;
 
             if !config_meta.skip_toml {
                 if use_toml_option {
@@ -784,7 +783,6 @@ struct FieldConfig {
     help_heading: Option<String>,
     skip_toml: bool,
     skip_args: bool,
-    toml_option_for_maps: bool,
     nested_args_ty: Option<TypePath>,
     nested_toml_ty: Option<TypePath>,
     heading_prefix: Option<String>,
@@ -822,9 +820,6 @@ fn parse_config_meta(attr: &Attribute, config: &mut FieldConfig) -> syn::Result<
             Meta::Path(path) if path.is_ident("skip_toml") => config.skip_toml = true,
             Meta::Path(path) if path.is_ident("skip_args") => config.skip_args = true,
             Meta::Path(path) if path.is_ident("path") => config.path = true,
-            Meta::Path(path) if path.is_ident("toml_option_for_maps") => {
-                config.toml_option_for_maps = true
-            }
             Meta::NameValue(name_value) if name_value.path.is_ident("help_heading") => {
                 if let syn::Expr::Lit(syn::ExprLit {
                     lit: Lit::Str(lit), ..

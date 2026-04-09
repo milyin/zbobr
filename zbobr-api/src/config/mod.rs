@@ -912,14 +912,16 @@ mod tests {
             by_name: Some(HashMap::from([(
                 "review".to_string(),
                 PathBuf::from("prompts/review.md"),
-            )])),
+            )]))
+            .into(),
             by_stage: Some(IndexMap::from([(
                 "pipeline".to_string(),
                 vec![
                     PathBuf::from("stages/extra.md"),
                     PathBuf::from("/global/extra.md"),
                 ],
-            )])),
+            )]))
+            .into(),
         };
 
         let resolved = toml.resolve_paths(Path::new("/config"));
@@ -928,10 +930,10 @@ mod tests {
         assert_eq!(list_item["main"], PathBuf::from("/config/role/main.md"));
         assert_eq!(list_item["abs"], PathBuf::from("/global/main.md"));
 
-        let by_name = resolved.by_name.unwrap();
+        let by_name = resolved.by_name.into_option().unwrap();
         assert_eq!(by_name["review"], PathBuf::from("/config/prompts/review.md"));
 
-        let by_stage = resolved.by_stage.unwrap();
+        let by_stage = resolved.by_stage.into_option().unwrap();
         let pipeline = &by_stage["pipeline"];
         assert_eq!(pipeline[0], PathBuf::from("/config/stages/extra.md"));
         assert_eq!(pipeline[1], PathBuf::from("/global/extra.md"));
@@ -948,11 +950,13 @@ mod tests {
                 by_name: Some(HashMap::from([(
                     "review".to_string(),
                     PathBuf::from("prompts/review.md"),
-                )])),
+                )]))
+                .into(),
                 by_stage: Some(IndexMap::from([(
                     "pipeline".to_string(),
                     vec![PathBuf::from("stages/extra.md")],
-                )])),
+                )]))
+                .into(),
             }),
             Default::default(),
             Path::new("/config"),
@@ -1762,20 +1766,20 @@ developer = [
         pipelines.insert(Pipeline::Main, PipelineConfig { stages });
 
         let toml = WorkflowToml {
-            prompts: None,
-            roles: Some(roles),
-            pipelines: Some(pipelines),
+            prompts: None.into(),
+            roles: Some(roles).into(),
+            pipelines: Some(pipelines).into(),
         };
         let resolved = toml.resolve_paths(std::path::Path::new("/shared"));
 
         // role prompt resolved against config dir
-        let role = &resolved.roles.as_ref().unwrap()["reviewer"];
+        let role = &resolved.roles.as_option().unwrap()["reviewer"];
         assert_eq!(
             role.prompts.as_ref().unwrap()["main"].as_option().unwrap(),
             &PathBuf::from("/shared/reviewer.md")
         );
         // stage prompts resolved against config dir
-        let pipeline = &resolved.pipelines.as_ref().unwrap()[&Pipeline::Main];
+        let pipeline = &resolved.pipelines.as_option().unwrap()[&Pipeline::Main];
         let stage = pipeline.stage(&Stage::from("review")).unwrap();
         assert_eq!(
             stage.prompts.as_ref().unwrap()["extra"]
@@ -1804,9 +1808,9 @@ developer = [
             },
         );
         let base = WorkflowToml {
-            prompts: None,
-            roles: Some(roles),
-            pipelines: None,
+            prompts: None.into(),
+            roles: Some(roles).into(),
+            pipelines: None.into(),
         };
         let base_resolved = base.resolve_paths(std::path::Path::new("/shared"));
 
@@ -1817,7 +1821,7 @@ developer = [
         let merged = base_resolved.merge_toml(overlay_resolved);
 
         // Base paths should remain anchored to /shared/
-        let role = &merged.roles.as_ref().unwrap()["reviewer"];
+        let role = &merged.roles.as_option().unwrap()["reviewer"];
         assert_eq!(
             role.prompts.as_ref().unwrap()["main"].as_option().unwrap(),
             &PathBuf::from("/shared/reviewer.md")
@@ -1854,9 +1858,9 @@ developer = [
             },
         );
         let base = WorkflowToml {
-            prompts: None,
-            roles: Some(base_roles),
-            pipelines: None,
+            prompts: None.into(),
+            roles: Some(base_roles).into(),
+            pipelines: None.into(),
         };
 
         // Overlay only overrides "reviewer", with a different prompt.
@@ -1873,13 +1877,13 @@ developer = [
             },
         );
         let overlay = WorkflowToml {
-            prompts: None,
-            roles: Some(overlay_roles),
-            pipelines: None,
+            prompts: None.into(),
+            roles: Some(overlay_roles).into(),
+            pipelines: None.into(),
         };
 
         let merged = base.merge_toml(overlay);
-        let roles = merged.roles.unwrap();
+        let roles = merged.roles.into_option().unwrap();
 
         // "reviewer" is overridden by the overlay.
         assert_eq!(
@@ -1929,9 +1933,9 @@ developer = [
         );
 
         let base = WorkflowToml {
-            prompts: None,
-            roles: None,
-            pipelines: Some(base_pipelines),
+            prompts: None.into(),
+            roles: None.into(),
+            pipelines: Some(base_pipelines).into(),
         };
 
         // Overlay only overrides the Main pipeline.
@@ -1951,13 +1955,13 @@ developer = [
             },
         );
         let overlay = WorkflowToml {
-            prompts: None,
-            roles: None,
-            pipelines: Some(overlay_pipelines),
+            prompts: None.into(),
+            roles: None.into(),
+            pipelines: Some(overlay_pipelines).into(),
         };
 
         let merged = base.merge_toml(overlay);
-        let pipelines = merged.pipelines.unwrap();
+        let pipelines = merged.pipelines.into_option().unwrap();
 
         // Main pipeline is overridden by the overlay.
         let main = &pipelines[&Pipeline::Main];
@@ -2009,7 +2013,7 @@ developer = [
         );
 
         let base_toml = ZbobrDispatcherConfigToml {
-            providers: Some(base_providers),
+            providers: Some(base_providers).into(),
             ..Default::default()
         };
 
@@ -2037,12 +2041,12 @@ developer = [
         );
 
         let overlay_toml = ZbobrDispatcherConfigToml {
-            providers: Some(overlay_providers),
+            providers: Some(overlay_providers).into(),
             ..Default::default()
         };
 
         let merged = base_toml.merge_toml(overlay_toml);
-        let providers = merged.providers.unwrap();
+        let providers = merged.providers.into_option().unwrap();
 
         // "claude" is overridden with priority 20.
         assert_eq!(providers["claude"].priority, TomlOption::Value(20));
@@ -2073,7 +2077,7 @@ developer = [
         );
 
         let base_toml = ZbobrDispatcherConfigToml {
-            providers: Some(base_providers),
+            providers: Some(base_providers).into(),
             ..Default::default()
         };
 
@@ -2091,12 +2095,12 @@ developer = [
         );
 
         let overlay_toml = ZbobrDispatcherConfigToml {
-            providers: Some(overlay_providers),
+            providers: Some(overlay_providers).into(),
             ..Default::default()
         };
 
         let merged = base_toml.merge_toml(overlay_toml);
-        let providers = merged.providers.unwrap();
+        let providers = merged.providers.into_option().unwrap();
 
         assert_eq!(
             providers["shared"].priority,
@@ -2134,9 +2138,9 @@ developer = [
         );
 
         let base = WorkflowToml {
-            prompts: None,
-            roles: Some(base_roles),
-            pipelines: None,
+            prompts: None.into(),
+            roles: Some(base_roles).into(),
+            pipelines: None.into(),
         };
 
         // Overlay sets only tool; mcp is None (not specified) so base mcp survives.
@@ -2151,13 +2155,13 @@ developer = [
         );
 
         let overlay = WorkflowToml {
-            prompts: None,
-            roles: Some(overlay_roles),
-            pipelines: None,
+            prompts: None.into(),
+            roles: Some(overlay_roles).into(),
+            pipelines: None.into(),
         };
 
         let merged = base.merge_toml(overlay);
-        let roles = merged.roles.unwrap();
+        let roles = merged.roles.into_option().unwrap();
 
         assert_eq!(
             roles["worker"].tool.as_option().map(|s| s.as_str()),
@@ -2191,9 +2195,9 @@ developer = [
             },
         );
         let base = WorkflowToml {
-            prompts: None,
-            roles: Some(base_roles),
-            pipelines: None,
+            prompts: None.into(),
+            roles: Some(base_roles).into(),
+            pipelines: None.into(),
         };
 
         // Overlay explicitly sets mcp = [] (Some(vec![])) to clear the list.
@@ -2207,13 +2211,13 @@ developer = [
             },
         );
         let overlay = WorkflowToml {
-            prompts: None,
-            roles: Some(overlay_roles),
-            pipelines: None,
+            prompts: None.into(),
+            roles: Some(overlay_roles).into(),
+            pipelines: None.into(),
         };
 
         let merged = base.merge_toml(overlay);
-        let roles = merged.roles.unwrap();
+        let roles = merged.roles.into_option().unwrap();
 
         assert!(
             roles["worker"].mcp.as_ref().is_some_and(|v| v.is_empty()),
@@ -2251,9 +2255,9 @@ developer = [
         );
 
         let base = WorkflowToml {
-            prompts: None,
-            roles: None,
-            pipelines: Some(base_pipelines),
+            prompts: None.into(),
+            roles: None.into(),
+            pipelines: Some(base_pipelines).into(),
         };
 
         // Overlay patches "planning" stage: changes role but leaves tool as None (not restated).
@@ -2275,13 +2279,13 @@ developer = [
         );
 
         let overlay = WorkflowToml {
-            prompts: None,
-            roles: None,
-            pipelines: Some(overlay_pipelines),
+            prompts: None.into(),
+            roles: None.into(),
+            pipelines: Some(overlay_pipelines).into(),
         };
 
         let merged = base.merge_toml(overlay);
-        let pipelines = merged.pipelines.unwrap();
+        let pipelines = merged.pipelines.into_option().unwrap();
         let main = &pipelines[&Pipeline::Main];
 
         assert_eq!(
@@ -2345,9 +2349,9 @@ developer = [
         );
 
         let base = WorkflowToml {
-            prompts: None,
-            roles: None,
-            pipelines: Some(base_pipelines),
+            prompts: None.into(),
+            roles: None.into(),
+            pipelines: Some(base_pipelines).into(),
         };
 
         // Overlay clears "extra" slot with nan, leaves "main" alone.
@@ -2372,13 +2376,13 @@ developer = [
         );
 
         let overlay = WorkflowToml {
-            prompts: None,
-            roles: None,
-            pipelines: Some(overlay_pipelines),
+            prompts: None.into(),
+            roles: None.into(),
+            pipelines: Some(overlay_pipelines).into(),
         };
 
         let merged = base.merge_toml(overlay);
-        let pipelines = merged.pipelines.unwrap();
+        let pipelines = merged.pipelines.into_option().unwrap();
         let stage = pipelines[&Pipeline::Main]
             .stage(&Stage::from("planning"))
             .unwrap();
@@ -2408,7 +2412,7 @@ tool = "developer"
             workflow: WorkflowToml,
         }
         let root: Root = toml::from_str(toml_str).unwrap();
-        let role = &root.workflow.roles.unwrap()["worker"];
+        let role = &root.workflow.roles.into_option().unwrap()["worker"];
         assert!(
             role.mcp.is_none(),
             "missing mcp field should deserialize as None"
@@ -2426,7 +2430,7 @@ mcp = []
             workflow: WorkflowToml,
         }
         let root: Root = toml::from_str(toml_str).unwrap();
-        let role = &root.workflow.roles.unwrap()["worker"];
+        let role = &root.workflow.roles.into_option().unwrap()["worker"];
         assert!(
             role.mcp.as_ref().is_some_and(|v| v.is_empty()),
             "mcp = [] should deserialize as Some(vec![])"
@@ -2444,7 +2448,7 @@ mcp = ["report_success", "report_failure"]
             workflow: WorkflowToml,
         }
         let root: Root = toml::from_str(toml_str).unwrap();
-        let role = &root.workflow.roles.unwrap()["worker"];
+        let role = &root.workflow.roles.into_option().unwrap()["worker"];
         let mcp = role.mcp.as_ref().unwrap();
         assert_eq!(mcp.len(), 2);
         assert_eq!(mcp[0], McpTool::ReportSuccess);
@@ -2462,7 +2466,7 @@ role = "planner"
             workflow: WorkflowToml,
         }
         let root: Root = toml::from_str(toml_str).unwrap();
-        let pipelines = root.workflow.pipelines.unwrap();
+        let pipelines = root.workflow.pipelines.into_option().unwrap();
         let stage = &pipelines[&Pipeline::Main].stages["planning"];
         assert!(
             stage.prompts.is_none(),
@@ -2482,7 +2486,7 @@ prompts = {}
             workflow: WorkflowToml,
         }
         let root: Root = toml::from_str(toml_str).unwrap();
-        let pipelines = root.workflow.pipelines.unwrap();
+        let pipelines = root.workflow.pipelines.into_option().unwrap();
         let stage = &pipelines[&Pipeline::Main].stages["planning"];
         assert!(
             stage.prompts.as_ref().is_some_and(|v| v.is_empty()),
@@ -2502,7 +2506,7 @@ prompts = { task = "common.md", extra = "planning.md" }
             workflow: WorkflowToml,
         }
         let root: Root = toml::from_str(toml_str).unwrap();
-        let pipelines = root.workflow.pipelines.unwrap();
+        let pipelines = root.workflow.pipelines.into_option().unwrap();
         let stage = &pipelines[&Pipeline::Main].stages["planning"];
         let prompts = stage.prompts.as_ref().unwrap();
         assert_eq!(prompts.len(), 2);
@@ -2546,7 +2550,7 @@ prompts = { task = "common.md", extra = "planning.md" }
         );
 
         let base_toml = ZbobrDispatcherConfigToml {
-            tools: Some(base_tools),
+            tools: Some(base_tools).into(),
             ..Default::default()
         };
 
@@ -2570,12 +2574,12 @@ prompts = { task = "common.md", extra = "planning.md" }
         );
 
         let overlay_toml = ZbobrDispatcherConfigToml {
-            tools: Some(overlay_tools),
+            tools: Some(overlay_tools).into(),
             ..Default::default()
         };
 
         let merged = base_toml.merge_toml(overlay_toml);
-        let tools = merged.tools.unwrap();
+        let tools = merged.tools.into_option().unwrap();
 
         // "developer" list is fully replaced by overlay (1 entry, not 2).
         assert_eq!(tools["developer"].len(), 1);
@@ -2632,7 +2636,7 @@ prompts = { extra = nan }
         let merged = base.workflow.merge_toml(overlay.workflow);
 
         // Worker role: mcp overridden by overlay (3 entries instead of 2).
-        let roles = merged.roles.as_ref().unwrap();
+        let roles = merged.roles.as_option().unwrap();
         let worker_mcp = roles["worker"].mcp.as_ref().unwrap();
         assert_eq!(worker_mcp.len(), 3);
         assert_eq!(worker_mcp[0], McpTool::ReportSuccess);
@@ -2659,7 +2663,7 @@ prompts = { extra = nan }
         );
 
         // Planning stage: "extra" slot cleared by nan overlay; "task" slot survives.
-        let pipelines = merged.pipelines.as_ref().unwrap();
+        let pipelines = merged.pipelines.as_option().unwrap();
         let main = &pipelines[&Pipeline::Main];
         let planning_prompts = main
             .stage(&Stage::from("planning"))
@@ -2724,7 +2728,7 @@ executor = nan
         let overlay: ZbobrDispatcherConfigToml = toml::from_str(overlay_toml).unwrap();
 
         let merged = base.merge_toml(overlay);
-        let providers = merged.providers.as_ref().unwrap();
+        let providers = merged.providers.as_option().unwrap();
         let main = &providers["main"];
 
         // executor was cleared by nan
@@ -2751,7 +2755,7 @@ role = nan
         let overlay: WorkflowToml = toml::from_str(overlay_toml).unwrap();
 
         let merged = base.merge_toml(overlay);
-        let pipelines = merged.pipelines.as_ref().unwrap();
+        let pipelines = merged.pipelines.as_option().unwrap();
         let stage = pipelines[&Pipeline::Main]
             .stage(&Stage::from("working"))
             .unwrap();
@@ -2775,7 +2779,7 @@ on_success = nan
         let overlay: WorkflowToml = toml::from_str(overlay_toml).unwrap();
 
         let merged = base.merge_toml(overlay);
-        let stage = merged.pipelines.as_ref().unwrap()[&Pipeline::Main]
+        let stage = merged.pipelines.as_option().unwrap()[&Pipeline::Main]
             .stage(&Stage::from("working"))
             .unwrap();
 
@@ -2961,7 +2965,7 @@ on_success = nan
 executor = nan
 "#;
         let root: ZbobrDispatcherConfigToml = toml::from_str(toml_str).unwrap();
-        let providers = root.providers.as_ref().unwrap();
+        let providers = root.providers.as_option().unwrap();
         let main = &providers["main"];
         assert_eq!(main.executor, TomlOption::ExplicitNone);
     }
@@ -2979,7 +2983,7 @@ executor = nan
         let base: ZbobrDispatcherConfigToml = toml::from_str(base_str).unwrap();
         let overlay: ZbobrDispatcherConfigToml = toml::from_str(overlay_str).unwrap();
         let merged = base.merge_toml(overlay);
-        let providers = merged.providers.as_ref().unwrap();
+        let providers = merged.providers.as_option().unwrap();
         let main = &providers["main"];
         assert_eq!(main.executor, TomlOption::ExplicitNone);
         assert!(main.executor.clone().into_option().is_none());
