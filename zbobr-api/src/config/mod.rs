@@ -432,6 +432,7 @@ impl zbobr_utility::MergeToml for PipelineConfig {
 /// Top-level workflow configuration: a container of named pipelines and shared roles.
 ///
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Default)]
 #[config_struct]
 pub struct WorkflowConfig {
     /// Workflow-level named prompt slots inherited by all roles and stages.
@@ -443,15 +444,6 @@ pub struct WorkflowConfig {
     pub pipelines: Option<IndexMap<Pipeline, TomlOption<PipelineConfig>>>,
 }
 
-impl Default for WorkflowConfig {
-    fn default() -> Self {
-        Self {
-            prompts: None,
-            roles: None,
-            pipelines: None,
-        }
-    }
-}
 
 impl WorkflowConfig {
     /// Look up a pipeline by name.
