@@ -93,6 +93,7 @@ impl Default for Workflow {
                         .collect(),
                 ),
                 roles: None,
+                ..Default::default()
             },
         }
     }
@@ -132,6 +133,10 @@ impl Workflow {
 
     pub fn default_pipeline(&self) -> Pipeline {
         self.config.default_pipeline()
+    }
+
+    pub fn merge_pipeline(&self) -> Pipeline {
+        self.config.merge_pipeline()
     }
 
     pub fn pipeline_names(&self) -> Vec<&Pipeline> {

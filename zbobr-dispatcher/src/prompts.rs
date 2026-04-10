@@ -688,6 +688,7 @@ mod tests {
             prompts: None,
             pipelines: Some(pipelines),
             roles: Some(indexmap::IndexMap::new()),
+            ..Default::default()
         };
         let workflow = Arc::new(Workflow::from_config(config));
         ConfiguredPromptBuilder::new(base_path, workflow)
@@ -807,6 +808,7 @@ mod tests {
             prompts: None,
             pipelines: Some(pipelines.into_iter().map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v))).collect()),
             roles: Some(indexmap::IndexMap::new()),
+            ..Default::default()
         };
         let workflow = Arc::new(Workflow::from_config(config));
         ConfiguredPromptBuilder::new(base_path, workflow)
@@ -927,6 +929,7 @@ mod tests {
             prompts: None,
             roles: Some(roles.into_iter().map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v))).collect()),
             pipelines: Some(indexmap::IndexMap::new()),
+            ..Default::default()
         }
     }
 
@@ -1006,6 +1009,7 @@ mod tests {
             )])),
             roles: Some(roles.into_iter().map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v))).collect()),
             pipelines: Some(indexmap::IndexMap::new()),
+            ..Default::default()
         };
         let stage = StageDefinition {
             role: Some("worker".to_string().into()).into(),
@@ -1049,6 +1053,7 @@ mod tests {
             ])),
             roles: Some(roles.into_iter().map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v))).collect()),
             pipelines: Some(indexmap::IndexMap::new()),
+            ..Default::default()
         };
         let stage = StageDefinition {
             role: Some("worker".to_string().into()).into(),

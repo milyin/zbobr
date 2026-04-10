@@ -1507,9 +1507,11 @@ impl ZbobrDispatcher {
         // 5. Attempt merge with base branch from backend config
         let base_branch = self.repo_backend().branch();
 
+        let merge_pipeline = self.workflow().merge_pipeline();
+
         // If we ARE the conflict handler, start the merge but don't abort on failure —
         // the agent needs to see conflict markers in the working tree.
-        let is_conflict_handler = pipeline_name.as_str() == Pipeline::MERGE;
+        let is_conflict_handler = pipeline_name == &merge_pipeline;
 
         let merged_ok = git_check(
             &work_dir,
@@ -1551,8 +1553,10 @@ impl ZbobrDispatcher {
         let task_session = self.task_session(task_id);
         let pending_state = State::pending(pipeline.clone());
 
+        let merge_pipeline = self.workflow().merge_pipeline();
+
         // Recursion guard: if already inside the merge pipeline, pause
-        if pipeline.as_str() == Pipeline::MERGE {
+        if pipeline == &merge_pipeline {
             tracing::error!("Task #{task_id}: merge conflict inside merge pipeline — pausing");
             let msg = "Merge conflict inside merge pipeline. Manual intervention required.";
             let status = format_error_status(self.config().fixed_offset(), msg);
@@ -1569,7 +1573,7 @@ impl ZbobrDispatcher {
             .await?;
         task_session.allocate_pipeline_run_id().await?;
         task_session
-            .set_signal(Some(Signal::call(Pipeline::MERGE)))
+            .set_signal(Some(Signal::call(self.workflow().merge_pipeline())))
             .await?;
         task_session.set_state(pending_state).await?;
 
@@ -1964,7 +1968,7 @@ impl ZbobrDispatcher {
             .snapshot(false)
             .await?;
         if let Some(identity) = task.identity() {
-            let is_conflict_handler = pipeline_name.as_str() == Pipeline::MERGE;
+            let is_conflict_handler = pipeline_name == &self.workflow().merge_pipeline();
             let is_uptodate = self.update_worktree(&identity).await?;
             if !is_uptodate && !is_conflict_handler {
                 anyhow::bail!("Merge conflict while syncing work branch for task #{task_id}");

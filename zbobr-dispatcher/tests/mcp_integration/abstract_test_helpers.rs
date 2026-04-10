@@ -79,6 +79,7 @@ fn build_workflow_with_roles(
         prompts: None,
         pipelines: Some(pipelines.into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
         roles: Some(roles.into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
+        ..Default::default()
     }
 }
 
@@ -409,6 +410,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
             ("role_check".to_string().into(), TomlOption::Value(role_with_all_tools())),
             ("role_finish".to_string().into(), TomlOption::Value(role_with_all_tools())),
         ])),
+        ..Default::default()
     };
 
     // First run: failure → return_failure → root pipeline pauses
@@ -576,6 +578,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
             ("role_finish".to_string().into(), TomlOption::Value(role_with_all_tools())),
             ("role_merge".to_string().into(), TomlOption::Value(role_with_all_tools())),
         ])),
+        ..Default::default()
     };
 
     let scenarios = scenarios_map(vec![

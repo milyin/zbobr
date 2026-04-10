@@ -921,6 +921,7 @@ mod tests {
             prompts: None,
             roles: Some(roles.into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
             pipelines: Some(IndexMap::new()),
+            ..Default::default()
         };
         let workflow = Workflow::from_config(wf_config);
         let dispatcher = make_dispatcher_with_workflow(providers, tools, workflow);
