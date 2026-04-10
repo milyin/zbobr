@@ -761,7 +761,7 @@ Implement the task according to the final plan in the context. There can be mult
 - If there are no checklist items yet, read the plan and create them with `{mcp_add_checklist_item}` before writing any code. Break the plan into concrete implementation steps, including any tests you determine are needed.
 - If checklist items exist, skip already-checked ones and process the remaining ones in order.
 - Use `{mcp_check_checklist_item}` to mark an item done when its subtask is complete.
-- Use `{mcp_add_checklist_item}` to add a new item when you discover additional work or the user requests changes in comments.
+- Use `{mcp_add_checklist_item}` to add a new item whenever new work is identified: you discover something during implementation, the user requests changes in comments, or a reviewer's report requires follow-up that isn't covered by existing items.
 
 **You own testing.** After implementing the feature, decide whether new tests are needed and add them as checklist items. Prefer tests that validate observable behavior, transitions, and integration boundaries over tests that snapshot static content.
 "#,
