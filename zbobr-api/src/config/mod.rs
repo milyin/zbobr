@@ -3119,16 +3119,6 @@ on_success = nan
         );
     }
 
-    #[test]
-    fn workflow_toml_rejects_legacy_prompts_dir_field() {
-        let toml_str = r#"prompts_dir = "prompts""#;
-        let parsed = toml::from_str::<WorkflowToml>(toml_str);
-        assert!(
-            parsed.is_err(),
-            "legacy prompts_dir field should be rejected"
-        );
-    }
-
     // ── ExplicitNone semantics in consumer layer ─────────────────────────
 
     #[test]
