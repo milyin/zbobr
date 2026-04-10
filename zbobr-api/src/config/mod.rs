@@ -456,7 +456,13 @@ impl zbobr_utility::MergeToml for PipelineConfig {
             (Some(mut base), Some(overlay)) => {
                 for (k, v) in overlay {
                     if let Some(base_v) = base.get_mut(&k) {
-                        *base_v = base_v.clone().merge(v);
+                        *base_v = match (base_v.clone(), v) {
+                            (
+                                TomlOption::Value(base_stage),
+                                TomlOption::Value(overlay_stage),
+                            ) => TomlOption::Value(base_stage.merge_toml(overlay_stage)),
+                            (base_stage, overlay_stage) => base_stage.merge(overlay_stage),
+                        };
                     } else {
                         base.insert(k, v);
                     }
@@ -2189,7 +2195,7 @@ developer = [
             },
         );
         base_pipelines.insert(
-            Pipeline::Custom("fix".to_string()),
+            Pipeline::from("fix"),
             PipelineConfig {
                 stages: Some(wrap_map_values(fix_stages)),
             },
@@ -2240,7 +2246,7 @@ developer = [
             "senior_planner"
         );
         // Fix pipeline survives from the base config unchanged.
-        let fix = pipelines[&Pipeline::Custom("fix".to_string())]
+        let fix = pipelines[&Pipeline::from("fix")]
             .as_option()
             .unwrap();
         assert_eq!(

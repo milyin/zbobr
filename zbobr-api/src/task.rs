@@ -451,27 +451,25 @@ impl schemars::JsonSchema for State {
     }
 }
 
-/// A pipeline identifier: one of the three built-in pipelines or a custom one.
-#[derive(Debug, Clone)]
-pub enum Pipeline {
-    /// The primary workflow pipeline (name: `"main"`).
-    Main,
-    /// The merge/conflict-resolution pipeline (name: `"merge"`).
-    Merge,
-    /// Any other user-defined pipeline.
-    Custom(String),
-}
+/// A pipeline identifier: one of the built-in pipelines or a custom one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Pipeline(pub std::borrow::Cow<'static, str>);
 
 impl Pipeline {
     pub const MAIN: &'static str = "main";
     pub const MERGE: &'static str = "merge";
 
+    pub const fn new(s: &'static str) -> Self {
+        Pipeline(std::borrow::Cow::Borrowed(s))
+    }
+
+    #[allow(non_upper_case_globals)]
+    pub const Main: Pipeline = Pipeline::new(Self::MAIN);
+    #[allow(non_upper_case_globals)]
+    pub const Merge: Pipeline = Pipeline::new(Self::MERGE);
+
     pub fn as_str(&self) -> &str {
-        match self {
-            Pipeline::Main => Self::MAIN,
-            Pipeline::Merge => Self::MERGE,
-            Pipeline::Custom(s) => s.as_str(),
-        }
+        &self.0
     }
 }
 
@@ -484,11 +482,7 @@ impl std::fmt::Display for Pipeline {
 impl std::str::FromStr for Pipeline {
     type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            Self::MAIN => Pipeline::Main,
-            Self::MERGE => Pipeline::Merge,
-            other => Pipeline::Custom(other.to_string()),
-        })
+        Ok(Pipeline(std::borrow::Cow::Owned(s.to_string())))
     }
 }
 
@@ -498,41 +492,22 @@ impl std::borrow::Borrow<str> for Pipeline {
     }
 }
 
-impl PartialEq for Pipeline {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_str() == other.as_str()
-    }
-}
-
-impl Eq for Pipeline {}
-
-impl std::hash::Hash for Pipeline {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::hash::Hash::hash(self.as_str(), state);
-    }
-}
-
-impl PartialOrd for Pipeline {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Pipeline {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.as_str().cmp(other.as_str())
+impl std::ops::Deref for Pipeline {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
     }
 }
 
 impl From<&str> for Pipeline {
     fn from(s: &str) -> Self {
-        s.parse().unwrap()
+        Pipeline(std::borrow::Cow::Owned(s.to_string()))
     }
 }
 
 impl From<String> for Pipeline {
     fn from(s: String) -> Self {
-        s.parse().unwrap()
+        Pipeline(std::borrow::Cow::Owned(s))
     }
 }
 
@@ -870,7 +845,7 @@ mod tests {
             "pending:main"
         );
         assert_eq!(
-            State::Pending(Pipeline::Custom("foo".into())).to_serde_string(),
+            State::Pending(Pipeline::from("foo")).to_serde_string(),
             "pending:foo"
         );
         assert_eq!(
@@ -889,7 +864,7 @@ mod tests {
         assert_eq!(State::from("pending:main"), State::Pending(Pipeline::Main));
         assert_eq!(
             State::from("pending:foo"),
-            State::Pending(Pipeline::Custom("foo".into()))
+            State::Pending(Pipeline::from("foo"))
         );
         assert_eq!(
             State::from("running:main:working"),
@@ -920,7 +895,7 @@ mod tests {
             State::Ready,
             State::Pending(Pipeline::Main),
             State::Pending(Pipeline::Merge),
-            State::Pending(Pipeline::Custom("custom".into())),
+            State::Pending(Pipeline::from("custom")),
             State::Running(Pipeline::Main, Stage::from("working")),
             State::Running(Pipeline::Merge, Stage::from("reviewing")),
         ];
@@ -934,7 +909,7 @@ mod tests {
     #[test]
     fn state_is_pending() {
         assert!(State::Pending(Pipeline::Main).is_pending());
-        assert!(State::Pending(Pipeline::Custom("x".into())).is_pending());
+        assert!(State::Pending(Pipeline::from("x")).is_pending());
         assert!(!State::Done.is_pending());
         assert!(!State::Running(Pipeline::Main, Stage::from("s")).is_pending());
     }
