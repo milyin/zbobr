@@ -367,6 +367,8 @@ fn default_config_toml() -> RootConfigToml {
             prompts: workflow.prompts.into(),
             roles: workflow.roles.into(),
             pipelines: workflow.pipelines.into(),
+            on_start: workflow.on_start.into(),
+            on_merge: workflow.on_merge.into(),
         }),
     }
 }
@@ -601,6 +603,8 @@ fn default_workflow() -> WorkflowConfig {
                 .map(|(k, v)| (k, TomlOption::Value(v)))
                 .collect(),
         ),
+        on_start: Some("main".into()),
+        on_merge: Some("merge".into()),
     }
 }
 
