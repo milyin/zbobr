@@ -31,6 +31,8 @@ const DEFAULT_REPORTS_PATH: &str = "reports";
 
 const STATE_PREFIX: &str = "state:";
 const INSTANCE_LABEL_PREFIX: &str = "zbobr:";
+const PIPELINE_LABEL_PREFIX: &str = "pipeline:";
+const PAUSE_LABEL: &str = "pause";
 
 // -- State label name constants --
 
@@ -445,6 +447,108 @@ impl ZbobrTaskBackendGithubImpl {
         })
         .await
         .map(|_| ())?;
+        Ok(())
+    }
+
+    /// Get labels currently applied to a specific issue.
+    async fn get_issue_labels(&self, id: u64) -> anyhow::Result<Vec<String>> {
+        let (owner, repo) = self.parse_repo()?;
+        let labels: Vec<octocrab::models::Label> = retry_github("get issue labels", || {
+            self.octocrab.get(
+                format!("/repos/{owner}/{repo}/issues/{id}/labels"),
+                None::<&()>,
+            )
+        })
+        .await?;
+        Ok(labels.into_iter().map(|l| l.name).collect())
+    }
+
+    /// Add labels to a specific issue.
+    async fn add_issue_labels(&self, id: u64, labels: &[String]) -> anyhow::Result<()> {
+        if labels.is_empty() {
+            return Ok(());
+        }
+        let (owner, repo) = self.parse_repo()?;
+        let body = serde_json::json!({ "labels": labels });
+        let url = format!("/repos/{owner}/{repo}/issues/{id}/labels");
+        retry_github("add issue labels", || {
+            self.octocrab.post(url.clone(), Some(&body))
+        })
+        .await
+        .map(|_: serde_json::Value| ())?;
+        Ok(())
+    }
+
+    /// Remove a specific label from an issue. 404 is silently ignored (label already absent).
+    async fn remove_issue_label(&self, id: u64, label: &str) -> anyhow::Result<()> {
+        let (owner, repo) = self.parse_repo()?;
+        let url = format!("/repos/{owner}/{repo}/issues/{id}/labels/{label}");
+        match self.octocrab._delete(url, None::<&()>).await {
+            Ok(_) => Ok(()),
+            Err(octocrab::Error::GitHub { source, .. }) if source.status_code.as_u16() == 404 => {
+                Ok(())
+            }
+            Err(e) => Err(octocrab_to_anyhow(e)),
+        }
+    }
+
+    /// Update GitHub issue labels to reflect the current task pipeline state.
+    ///
+    /// - Sets `pipeline:<name>` labels for all active pipelines (from state + stack).
+    /// - Clears `pipeline:<name>` labels for pipelines no longer active.
+    /// - Sets or clears the `pause` label based on whether state is `State::Pause`.
+    async fn apply_pipeline_and_pause_labels(
+        &self,
+        id: u64,
+        state: &State,
+        stack: &[StackEntry],
+    ) -> anyhow::Result<()> {
+        // Collect desired pipeline labels
+        let mut desired_pipeline_labels: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        if let Some(pipeline) = state.pipeline() {
+            desired_pipeline_labels
+                .insert(format!("{PIPELINE_LABEL_PREFIX}{}", pipeline.as_str()));
+        }
+        for entry in stack {
+            desired_pipeline_labels
+                .insert(format!("{PIPELINE_LABEL_PREFIX}{}", entry.pipeline.as_str()));
+        }
+
+        // Read current issue labels
+        let current_labels = self.get_issue_labels(id).await?;
+        let current_pipeline_labels: std::collections::HashSet<String> = current_labels
+            .iter()
+            .filter(|l| l.starts_with(PIPELINE_LABEL_PREFIX))
+            .cloned()
+            .collect();
+        let has_pause_label = current_labels.iter().any(|l| l == PAUSE_LABEL);
+
+        // Add missing pipeline labels (ensure label exists in repo first)
+        for label in desired_pipeline_labels.difference(&current_pipeline_labels) {
+            let pipeline_name = label
+                .strip_prefix(PIPELINE_LABEL_PREFIX)
+                .unwrap_or(label.as_str());
+            self.ensure_label_exists(label, "0052cc", &format!("Pipeline: {pipeline_name}"))
+                .await?;
+            self.add_issue_labels(id, &[label.clone()]).await?;
+        }
+
+        // Remove stale pipeline labels
+        for label in current_pipeline_labels.difference(&desired_pipeline_labels) {
+            self.remove_issue_label(id, label).await?;
+        }
+
+        // Sync pause label
+        let is_paused = state.is_pause();
+        if is_paused && !has_pause_label {
+            self.ensure_label_exists(PAUSE_LABEL, "e4e669", "Task is paused")
+                .await?;
+            self.add_issue_labels(id, &[PAUSE_LABEL.to_string()]).await?;
+        } else if !is_paused && has_pause_label {
+            self.remove_issue_label(id, PAUSE_LABEL).await?;
+        }
+
         Ok(())
     }
 
@@ -929,6 +1033,15 @@ impl ZbobrTaskBackendGithubImpl {
         self.record_cooling(id);
         let mut saved_task = task;
         saved_task.etag = Some(new_desc);
+
+        // Sync pipeline/pause labels to reflect the new state
+        if let Err(e) = self
+            .apply_pipeline_and_pause_labels(id, &saved_task.state, &saved_task.stack)
+            .await
+        {
+            tracing::warn!("Task #{id}: failed to sync labels: {e}");
+        }
+
         Ok(saved_task)
     }
 
@@ -1363,6 +1476,18 @@ impl TaskBackend for TaskBackendGithub {
         })
         .await?;
 
+        // Sync pipeline/pause labels for the initial state
+        if let Err(e) = self
+            .inner
+            .apply_pipeline_and_pause_labels(issue.number, &state, &[])
+            .await
+        {
+            tracing::warn!(
+                "Task #{}: failed to sync labels after create: {e}",
+                issue.number
+            );
+        }
+
         Ok(issue.number)
     }
 
@@ -1428,7 +1553,6 @@ mod flag_tests {
             title: "test".to_string(),
             body: Some(body),
             state: "open".to_string(),
-            labels: vec![],
         }
     }
 
@@ -1546,7 +1670,6 @@ mod flag_tests {
             title: "test".to_string(),
             body: Some(body),
             state: "open".to_string(),
-            labels: vec![],
         };
 
         let mut task = issue_to_task(issue);
