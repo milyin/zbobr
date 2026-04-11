@@ -644,6 +644,12 @@ mod comment_model_tests {
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("report not found: {name}"))
         }
+
+        async fn pending_override(
+            &self,
+        ) -> anyhow::Result<Option<zbobr_api::StateOverrideRequest>> {
+            Ok(None)
+        }
     }
 
     impl TrackingMut {

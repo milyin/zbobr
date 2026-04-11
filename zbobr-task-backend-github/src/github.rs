@@ -7,9 +7,9 @@ use std::{
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use zbobr_api::{
-    Comment, Signal, Task,
+    Comment, Signal, StateOverrideRequest, Task,
     backend::TaskBackend,
-    task::{StackEntry, State, TaskContext},
+    task::{Pipeline, StackEntry, State, TaskContext},
 };
 
 // -- Parameter name constants (GitHub issue body parameter keys) --
@@ -1187,6 +1187,21 @@ impl ZbobrTaskBackendGithubImpl {
 use tokio::sync::OwnedMutexGuard;
 use zbobr_api::backend::{TaskMut, TaskWeak};
 
+/// Compute the set of zbobr-managed labels that should be on an issue given its state + stack.
+fn expected_labels(state: &State, stack: &[StackEntry]) -> std::collections::HashSet<String> {
+    let mut labels = std::collections::HashSet::new();
+    if let Some(pipeline) = state.pipeline() {
+        labels.insert(format!("{PIPELINE_LABEL_PREFIX}{}", pipeline.as_str()));
+    }
+    for entry in stack {
+        labels.insert(format!("{PIPELINE_LABEL_PREFIX}{}", entry.pipeline.as_str()));
+    }
+    if state.is_pause() {
+        labels.insert(PAUSE_LABEL.to_string());
+    }
+    labels
+}
+
 struct GithubTaskWeak {
     id: u64,
     backend: Arc<ZbobrTaskBackendGithubImpl>,
@@ -1226,6 +1241,57 @@ impl TaskWeak for GithubTaskWeak {
 
     async fn read_report(&self, name: &str) -> anyhow::Result<String> {
         self.backend.read_report_internal(self.id, name).await
+    }
+
+    async fn pending_override(&self) -> anyhow::Result<Option<StateOverrideRequest>> {
+        let task = self.snapshot(false).await?;
+
+        // Only check tasks in an active state
+        if matches!(task.state, State::Empty | State::Done | State::Unknown(_)) {
+            return Ok(None);
+        }
+
+        let actual: std::collections::HashSet<String> =
+            self.backend.get_issue_labels(self.id).await?.into_iter().collect();
+        let expected = expected_labels(&task.state, &task.stack);
+
+        // Pause label removed → Resume
+        if expected.contains(PAUSE_LABEL) && !actual.contains(PAUSE_LABEL) {
+            return Ok(Some(StateOverrideRequest::Resume));
+        }
+
+        // Pause label added → Pause
+        if !expected.contains(PAUSE_LABEL) && actual.contains(PAUSE_LABEL) {
+            return Ok(Some(StateOverrideRequest::Pause));
+        }
+
+        // New pipeline label added by user → RunPipeline
+        let expected_pipelines: std::collections::HashSet<&str> = expected
+            .iter()
+            .filter_map(|l| l.strip_prefix(PIPELINE_LABEL_PREFIX))
+            .collect();
+        let actual_new_pipelines: Vec<&str> = actual
+            .iter()
+            .filter_map(|l| l.strip_prefix(PIPELINE_LABEL_PREFIX))
+            .filter(|p| !expected_pipelines.contains(*p))
+            .collect();
+
+        match actual_new_pipelines.as_slice() {
+            [pipeline] => {
+                return Ok(Some(StateOverrideRequest::RunPipeline(Pipeline::from(
+                    *pipeline,
+                ))));
+            }
+            [_, _, ..] => {
+                tracing::warn!(
+                    "Task #{}: multiple new pipeline labels set simultaneously — ignoring",
+                    self.id
+                );
+            }
+            [] => {}
+        }
+
+        Ok(None)
     }
 }
 

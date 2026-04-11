@@ -1221,6 +1221,96 @@ impl ZbobrDispatcher {
         // Sort by task_priority descending so tasks closest to completion are processed first.
         all_tasks.sort_by_key(|b| std::cmp::Reverse(task_priority(b)));
 
+        // Pre-pass: apply user-initiated state overrides detected by the backend UI
+        // (e.g., GitHub label changes). Run before any writes so labels from the
+        // previous cycle have settled and comparisons are unambiguous.
+        for (task, weak) in all_tasks.iter().zip(all_weak.iter()) {
+            if task.state.is_done() || matches!(task.state, State::Empty) {
+                continue;
+            }
+            let override_req = match weak.pending_override().await {
+                Ok(Some(r)) => r,
+                Ok(None) => continue,
+                Err(e) => {
+                    tracing::warn!("Task #{}: failed to check pending override: {e}", task.id);
+                    continue;
+                }
+            };
+            let task_session = self.task_session(task.id);
+            match override_req {
+                zbobr_api::StateOverrideRequest::Resume => {
+                    match task_session.pop_stack().await {
+                        Ok(Some(entry)) => {
+                            if let Err(e) =
+                                task_session.set_signal(Some(entry.signal.clone())).await
+                            {
+                                tracing::error!(
+                                    "Task #{}: resume — failed to set signal: {e}",
+                                    task.id
+                                );
+                                continue;
+                            }
+                            if let Err(e) = task_session
+                                .set_state(State::pending(entry.pipeline.clone()))
+                                .await
+                            {
+                                tracing::error!(
+                                    "Task #{}: resume — failed to set state: {e}",
+                                    task.id
+                                );
+                                continue;
+                            }
+                            tracing::info!(
+                                "Task #{}: user-initiated resume → pipeline '{}'",
+                                task.id,
+                                entry.pipeline
+                            );
+                        }
+                        Ok(None) => {
+                            tracing::warn!(
+                                "Task #{}: resume requested but stack is empty — ignoring",
+                                task.id
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!("Task #{}: resume — pop_stack failed: {e}", task.id);
+                        }
+                    }
+                }
+                zbobr_api::StateOverrideRequest::Pause => {
+                    if let Err(e) = task_session.set_state(State::Pause).await {
+                        tracing::error!("Task #{}: user-initiated pause failed: {e}", task.id);
+                    } else {
+                        tracing::info!("Task #{}: user-initiated pause", task.id);
+                    }
+                }
+                zbobr_api::StateOverrideRequest::RunPipeline(pipeline) => {
+                    let p = pipeline.clone();
+                    if let Err(e) = task_session
+                        .modify_task(move |mut task| {
+                            task.stack.clear();
+                            task.signal = None;
+                            task.state = State::pending(p);
+                            task
+                        })
+                        .await
+                    {
+                        tracing::error!(
+                            "Task #{}: pipeline switch to '{}' failed: {e}",
+                            task.id,
+                            pipeline
+                        );
+                    } else {
+                        tracing::info!(
+                            "Task #{}: user-initiated pipeline switch → '{}'",
+                            task.id,
+                            pipeline
+                        );
+                    }
+                }
+            }
+        }
+
         // Phase 1: apply transitions and handle Done / instant call-stage actions for all tasks.
         for task in &all_tasks {
             if task.state.is_done() {

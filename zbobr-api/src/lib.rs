@@ -21,7 +21,7 @@ pub use context::format_timestamp;
 pub use secret::Secret;
 pub use task::{
     Comment, ContextRecord, ContextRecordType, Executor, HistoryRecordType, Model, Pipeline,
-    Signal, StackEntry, Stage, StageContext, StageInfo, State, Task, TaskContext, TaskIdentity,
-    classify_comment, extract_repo_name,
+    Signal, StackEntry, Stage, StageContext, StageInfo, State, StateOverrideRequest, Task,
+    TaskContext, TaskIdentity, classify_comment, extract_repo_name,
 };
 pub use tool_executor::{ExecutorOutput, ToolExecutor, format_command_for_log};

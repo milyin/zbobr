@@ -449,6 +449,18 @@ impl schemars::JsonSchema for State {
     }
 }
 
+/// A user-initiated state change request detected by the task backend
+/// from its UI mechanism (e.g., GitHub label changes).
+#[derive(Debug, Clone, PartialEq)]
+pub enum StateOverrideRequest {
+    /// Clear Pause state: pop stack, restore Pending+signal, resume execution.
+    Resume,
+    /// Enter Pause state immediately.
+    Pause,
+    /// Clear call stack and start the given pipeline from its first stage.
+    RunPipeline(Pipeline),
+}
+
 /// A pipeline identifier: one of the built-in pipelines or a custom one.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Pipeline(pub std::borrow::Cow<'static, str>);
