@@ -29,26 +29,9 @@ const DEFAULT_REPORTS_PATH: &str = "reports";
 
 // -- Label prefix constants (GitHub-backend-specific) --
 
-const STATE_PREFIX: &str = "state:";
 const INSTANCE_LABEL_PREFIX: &str = "zbobr:";
 const PIPELINE_LABEL_PREFIX: &str = "pipeline:";
 const PAUSE_LABEL: &str = "pause";
-
-// -- State label name constants --
-
-const STATE_LABEL_DONE: &str = "done";
-const STATE_LABEL_PAUSE: &str = "pause";
-const STATE_LABEL_READY: &str = "ready";
-const STATE_LABEL_PENDING: &str = "pending";
-const STATE_LABEL_RUNNING: &str = "running";
-
-const ALL_STATE_LABEL_NAMES: &[&str] = &[
-    STATE_LABEL_DONE,
-    STATE_LABEL_PAUSE,
-    STATE_LABEL_READY,
-    STATE_LABEL_PENDING,
-    STATE_LABEL_RUNNING,
-];
 
 const MAX_GITHUB_RETRY_ATTEMPTS: u64 = 5;
 
@@ -221,22 +204,6 @@ impl ZbobrTaskBackendGithubImpl {
 
     fn default_max_stage_count(&self) -> u64 {
         self.backend_config.default_max_stage_count
-    }
-
-    /// Return the GitHub label color for a state label.
-    fn state_label_color(label: &str) -> &'static str {
-        if let Some(state_name) = label.strip_prefix(STATE_PREFIX) {
-            match state_name {
-                v if v == STATE_LABEL_DONE => "0e8a16",    // green
-                v if v == STATE_LABEL_READY => "0075ca",   // blue
-                v if v == STATE_LABEL_PAUSE => "e4e669",   // yellow
-                v if v == STATE_LABEL_PENDING => "d3d3d3", // gray
-                v if v == STATE_LABEL_RUNNING => "c2e0c6", // light green
-                _ => "ededed",
-            }
-        } else {
-            "ededed" // fallback light gray
-        }
     }
 
     fn parse_repo(&self) -> anyhow::Result<(&str, &str)> {
@@ -615,36 +582,6 @@ impl ZbobrTaskBackendGithubImpl {
         self.ensure_reports_branch_exists().await?;
 
         let existing_labels = self.list_labels().await?;
-
-        // Create state labels programmatically from type constants
-        let state_labels: Vec<String> = ALL_STATE_LABEL_NAMES
-            .iter()
-            .map(|name| format!("{}{name}", STATE_PREFIX))
-            .collect();
-
-        for label_name in &state_labels {
-            let color = Self::state_label_color(label_name);
-            let desc = format!("State: {}", label_name);
-            if !existing_labels.contains(label_name) {
-                tracing::info!("Creating label '{label_name}'");
-                self.create_label(label_name, color, &desc).await?;
-            } else if force {
-                tracing::info!("Updating label '{label_name}' (force)");
-                self.update_label(label_name, color, &desc).await?;
-            } else {
-                tracing::info!("Label '{label_name}' already exists");
-            }
-        }
-
-        // Delete obsolete managed labels (state:* not in the expected set)
-        let expected_labels: std::collections::HashSet<&str> =
-            state_labels.iter().map(|s| s.as_str()).collect();
-        for label in &existing_labels {
-            if label.starts_with(STATE_PREFIX) && !expected_labels.contains(label.as_str()) {
-                tracing::info!("Deleting obsolete label '{label}'");
-                self.delete_label(label).await?;
-            }
-        }
 
         // Create zbobr:<instance> label for this instance
         let instance_label = format!("{}{}", INSTANCE_LABEL_PREFIX, self.backend_config.instance);
