@@ -1575,7 +1575,7 @@ mod flag_tests {
             id: 1,
             title: "t".to_string(),
             description: "d".to_string(),
-            state: State::Ready,
+            state: State::Pending(zbobr_api::task::Pipeline::Main),
             work_branch: None,
             pr_url: None,
             context: TaskContext {
@@ -1628,7 +1628,7 @@ mod flag_tests {
             id: 1,
             title: "t".to_string(),
             description: "d".to_string(),
-            state: State::Ready,
+            state: State::Pending(zbobr_api::task::Pipeline::Main),
             work_branch: None,
             pr_url: None,
             context: TaskContext {

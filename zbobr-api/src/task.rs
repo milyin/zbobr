@@ -306,7 +306,6 @@ pub use crate::config::Stage;
 /// - `""` (empty)
 /// - `"done"`
 /// - `"pause"`
-/// - `"ready"`
 /// - `"pending:{pipeline}"`
 /// - `"running:{pipeline}:{stage}"`
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -315,7 +314,6 @@ pub enum State {
     Empty,
     Done,
     Pause,
-    Ready,
     Pending(Pipeline),
     Running(Pipeline, Stage),
     /// Unrecognized state preserved verbatim to keep compatibility with
@@ -342,10 +340,6 @@ impl State {
 
     pub fn is_pause(&self) -> bool {
         matches!(self, State::Pause)
-    }
-
-    pub fn is_ready(&self) -> bool {
-        matches!(self, State::Ready)
     }
 
     pub fn is_pending(&self) -> bool {
@@ -378,7 +372,6 @@ impl State {
             State::Empty => String::new(),
             State::Done => "done".to_string(),
             State::Pause => "pause".to_string(),
-            State::Ready => "ready".to_string(),
             State::Pending(pipeline) => format!("pending:{}", pipeline.as_str()),
             State::Running(pipeline, stage) => {
                 format!("running:{}:{}", pipeline.as_str(), stage.as_str())
@@ -399,7 +392,6 @@ impl From<&str> for State {
         match parts.next().unwrap() {
             "done" => State::Done,
             "pause" => State::Pause,
-            "ready" => State::Ready,
             "pending" => match parts.next() {
                 Some(p) if !p.is_empty() => State::Pending(Pipeline::from(p)),
                 _ => State::Unknown(s.to_string()),
@@ -845,7 +837,6 @@ mod tests {
         assert_eq!(State::Empty.to_serde_string(), "");
         assert_eq!(State::Done.to_serde_string(), "done");
         assert_eq!(State::Pause.to_serde_string(), "pause");
-        assert_eq!(State::Ready.to_serde_string(), "ready");
         assert_eq!(
             State::Pending(Pipeline::Main).to_serde_string(),
             "pending:main"
@@ -866,7 +857,6 @@ mod tests {
         assert_eq!(State::from(""), State::Empty);
         assert_eq!(State::from("done"), State::Done);
         assert_eq!(State::from("pause"), State::Pause);
-        assert_eq!(State::from("ready"), State::Ready);
         assert_eq!(State::from("pending:main"), State::Pending(Pipeline::Main));
         assert_eq!(
             State::from("pending:foo"),
@@ -898,7 +888,6 @@ mod tests {
             State::Empty,
             State::Done,
             State::Pause,
-            State::Ready,
             State::Pending(Pipeline::Main),
             State::Pending(Pipeline::Merge),
             State::Pending(Pipeline::from("custom")),

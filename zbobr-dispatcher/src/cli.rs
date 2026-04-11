@@ -298,20 +298,12 @@ fn task_priority(task: &Task) -> u64 {
 /// Uses full workflow resolution via [`Workflow::resolve_next_action`] so that the predicate
 /// matches exactly the tasks that [`run_manager_loop`] would schedule in Phase 2.
 ///
-/// Tasks in `READY` state with a non-empty stack are excluded because the loop normalises them
-/// via `apply_ready_from_state` in Phase 1 and defers them to the next cycle — they are never
-/// present in Phase 2 `runstage_candidates`.  Calling `resolve_next_action` on such tasks
-/// would use the wrong pipeline (default instead of the saved stack pipeline).
-///
 /// Returns all tasks eligible for non-call `RunStage` processing.
 pub fn eligible_runnable_tasks<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Vec<&'a Task> {
     tasks
         .iter()
         .filter(|t| {
-            // READY-with-stack tasks are normalised in loop Phase 1 and deferred; skip them.
-            let ready_with_stack = t.state.is_ready() && !t.stack.is_empty();
             !t.go_pause
-                && !ready_with_stack
                 && matches!(
                     workflow.resolve_next_action(t),
                     Ok(crate::workflow::StateAction::RunStage(_, _, def))
@@ -894,44 +886,6 @@ impl ZbobrDispatcher {
         Ok(true)
     }
 
-    /// Handle READY state by popping resume context from the stack.
-    ///
-    /// If the task is READY with a non-empty stack, pops the top entry and
-    /// sets state to `Pending(pipeline)` with the saved signal.
-    ///
-    /// If the stack is empty, returns `false` — the existing
-    /// `resolve_next_action` handles READY with empty stack by starting
-    /// from the default pipeline's first stage.
-    ///
-    /// Returns `Ok(true)` when the task state was updated.
-    async fn apply_ready_from_state(self: &Arc<Self>, task: &Task) -> anyhow::Result<bool> {
-        if !task.state.is_ready() {
-            return Ok(false);
-        }
-        if task.stack.is_empty() {
-            return Ok(false);
-        }
-
-        let task_session = self.task_session(task.id);
-        let entry = task_session.pop_stack().await?;
-
-        if let Some(entry) = entry {
-            task_session.set_signal(Some(entry.signal.clone())).await?;
-            task_session
-                .set_state(State::pending(entry.pipeline.clone()))
-                .await?;
-            tracing::info!(
-                "Task #{}: READY with stack — restored pipeline '{}' signal '{}'",
-                task.id,
-                entry.pipeline,
-                entry.signal
-            );
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
     /// Process a task according to its current state and signal (single-step).
     pub async fn process_task(
         self: &Arc<Self>,
@@ -949,24 +903,8 @@ impl ZbobrDispatcher {
             return Ok(());
         }
 
-        if task.state.is_pause() {
-            tracing::info!("Task #{} is paused — skipped", task.id);
-            return Ok(());
-        }
-
-        // Handle READY with stack (resume from pause)
-        let task = if self.apply_ready_from_state(task).await? {
-            self.task_backend()
-                .get_task(task.id)
-                .await?
-                .snapshot(false)
-                .await?
-        } else {
-            task.clone()
-        };
-
         // Use state machine to determine what to do
-        let action = self.workflow().resolve_next_action(&task)?;
+        let action = self.workflow().resolve_next_action(task)?;
         match action {
             crate::workflow::StateAction::RunStage(pipeline_name, stage_name, stage_def) => {
                 if let Some(call_target) = stage_def.call_pipeline() {
@@ -1080,6 +1018,21 @@ impl ZbobrDispatcher {
                     task.state,
                     task.signal
                 );
+            }
+            crate::workflow::StateAction::Resume => {
+                let task_session = self.task_session(task.id);
+                if let Some(entry) = task_session.pop_stack().await? {
+                    task_session.set_signal(Some(entry.signal.clone())).await?;
+                    task_session
+                        .set_state(State::pending(entry.pipeline.clone()))
+                        .await?;
+                    tracing::info!(
+                        "Task #{}: resumed from pause → pipeline '{}' signal '{}'",
+                        task.id,
+                        entry.pipeline,
+                        entry.signal
+                    );
+                }
             }
         }
         Ok(())
@@ -1287,23 +1240,6 @@ impl ZbobrDispatcher {
                 _ => {}
             }
 
-            if task.state.is_pause() {
-                continue;
-            }
-
-            // Handle READY with stack (resume from pause)
-            match self.apply_ready_from_state(task).await {
-                Ok(true) => continue, // will be processed on the next pass
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to apply ready-from-state for task #{}: {e}",
-                        task.id
-                    );
-                    continue;
-                }
-                _ => {}
-            }
-
             let action = match workflow.resolve_next_action(task) {
                 Ok(a) => a,
                 Err(e) => {
@@ -1441,6 +1377,49 @@ impl ZbobrDispatcher {
                     }
                 }
                 crate::workflow::StateAction::Paused | crate::workflow::StateAction::Idle => {}
+                crate::workflow::StateAction::Resume => {
+                    let task_session = self.task_session(task.id);
+                    match task_session.pop_stack().await {
+                        Ok(Some(entry)) => {
+                            tracing::info!(
+                                "Task #{}: resumed from pause → pipeline '{}' signal '{}'",
+                                task.id,
+                                entry.pipeline,
+                                entry.signal
+                            );
+                            if let Err(e) =
+                                task_session.set_signal(Some(entry.signal.clone())).await
+                            {
+                                tracing::error!(
+                                    "Failed to set resume signal for task #{}: {e}",
+                                    task.id
+                                );
+                            }
+                            if let Err(e) = task_session
+                                .set_state(State::pending(entry.pipeline.clone()))
+                                .await
+                            {
+                                tracing::error!(
+                                    "Failed to set resume state for task #{}: {e}",
+                                    task.id
+                                );
+                            }
+                        }
+                        Ok(None) => {
+                            tracing::warn!(
+                                "Task #{}: Resume action but stack was empty",
+                                task.id
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "Failed to pop stack during resume for task #{}: {e}",
+                                task.id
+                            );
+                        }
+                    }
+                    continue; // re-process on next pass (now Pending+signal)
+                }
             }
         }
 
@@ -2062,9 +2041,9 @@ mod tests {
     fn select_runnable_task_selects_highest_stage_count() {
         let wf = make_workflow();
         let tasks = [
-            make_task(1, State::Ready, 2, false, vec![]),
-            make_task(2, State::Ready, 5, false, vec![]),
-            make_task(3, State::Ready, 3, false, vec![]),
+            make_task(1, State::Pending(Pipeline::Main), 2, false, vec![]),
+            make_task(2, State::Pending(Pipeline::Main), 5, false, vec![]),
+            make_task(3, State::Pending(Pipeline::Main), 3, false, vec![]),
         ];
 
         let selected = select_runnable_task(&wf, &tasks);
@@ -2077,12 +2056,12 @@ mod tests {
         let wf = make_workflow();
         // Two tasks with same stage_count but different IDs
         let tasks1 = [
-            make_task(5, State::Ready, 10, false, vec![]),
-            make_task(3, State::Ready, 10, false, vec![]),
+            make_task(5, State::Pending(Pipeline::Main), 10, false, vec![]),
+            make_task(3, State::Pending(Pipeline::Main), 10, false, vec![]),
         ];
         let tasks2 = [
-            make_task(3, State::Ready, 10, false, vec![]),
-            make_task(5, State::Ready, 10, false, vec![]),
+            make_task(3, State::Pending(Pipeline::Main), 10, false, vec![]),
+            make_task(5, State::Pending(Pipeline::Main), 10, false, vec![]),
         ];
 
         let selected1 = select_runnable_task(&wf, &tasks1);
@@ -2097,24 +2076,24 @@ mod tests {
     #[test]
     fn select_runnable_task_excludes_paused_tasks() {
         let wf = make_workflow();
-        let tasks = [make_task(1, State::Ready, 10, true, vec![])];
+        let tasks = [make_task(1, State::Pending(Pipeline::Main), 10, true, vec![])];
 
         let selected = select_runnable_task(&wf, &tasks);
         assert!(selected.is_none());
     }
 
     #[test]
-    fn select_runnable_task_excludes_ready_with_stack() {
+    fn select_runnable_task_excludes_pause_with_stack() {
         let wf = make_workflow();
         let stack = vec![StackEntry {
             pipeline: Pipeline::Main,
             signal: Signal::go("working"),
             pipeline_run_id: 1,
         }];
-        let tasks = [make_task(1, State::Ready, 10, false, stack)];
+        let tasks = [make_task(1, State::Pause, 10, false, stack)];
 
         let selected = select_runnable_task(&wf, &tasks);
-        // READY-with-stack tasks are excluded (Phase 1 normalization)
+        // Pause-with-stack tasks resolve to Resume (not RunStage) → excluded from Phase 2
         assert!(selected.is_none());
     }
 
@@ -2145,9 +2124,9 @@ mod tests {
             pipeline_run_id: 1,
         }];
         let tasks = [
-            make_task(1, State::Ready, 10, true, vec![]), // paused
-            make_task(2, State::Done, 5, false, vec![]),  // done
-            make_task(3, State::Ready, 15, false, stack), // ready with stack
+            make_task(1, State::Pending(Pipeline::Main), 10, true, vec![]), // go_pause flag
+            make_task(2, State::Done, 5, false, vec![]),                    // done
+            make_task(3, State::Pause, 15, false, stack),                   // pause with stack → Resume
         ];
 
         let selected = select_runnable_task(&wf, &tasks);
@@ -2158,12 +2137,12 @@ mod tests {
 
     #[test]
     fn task_list_entry_from_task_projects_correct_fields() {
-        let task = make_task(42, State::Ready, 7, false, vec![]);
+        let task = make_task(42, State::Pending(Pipeline::Main), 7, false, vec![]);
         let entry = TaskListEntry::from(&task);
 
         assert_eq!(entry.id, 42);
         assert_eq!(entry.stage_count, 7);
-        assert_eq!(entry.state, State::Ready);
+        assert_eq!(entry.state, State::Pending(Pipeline::Main));
         assert_eq!(entry.title, "task 42");
     }
 

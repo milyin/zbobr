@@ -442,7 +442,7 @@ impl IntegrationTestEnv {
     ) {
         self.zbobr
             .task_backend()
-            .set_task_state(task_id, zbobr_api::State::Ready)
+            .set_task_state(task_id, zbobr_api::State::pending(workflow.default_pipeline()))
             .await
             .unwrap_or_else(|e| panic!("[{}] failed to set task state: {e}", self.name));
         self.zbobr
