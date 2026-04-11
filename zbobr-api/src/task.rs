@@ -641,9 +641,16 @@ pub struct StackEntry {
     /// Caller's pipeline_run_id to restore on return.
     #[serde(default)]
     pub pipeline_run_id: u64,
-    /// Signal to emit when returning to this pipeline.
+    /// Signal to emit when returning to this pipeline (pause/resume context, or fallback for old
+    /// call entries that pre-date `calling_stage`).
     #[serde(alias = "stage")]
     pub signal: Signal,
+    /// Stage in the calling pipeline that initiated a sub-pipeline call.
+    /// Present only for call-stack entries (not pause entries).
+    /// When present, `on_success`/`on_failure` of this stage are consulted at return time
+    /// to determine the actual continuation signal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calling_stage: Option<Stage>,
 }
 
 /// A worktree problem detected before stage execution.

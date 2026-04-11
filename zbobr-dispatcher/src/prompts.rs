@@ -164,6 +164,7 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
             pipeline: Pipeline::from("parent"),
             pipeline_run_id: 1,
             signal: Signal::Go(Stage::new("done")),
+            calling_stage: None,
         }],
         status: None,
         go_pause: false,

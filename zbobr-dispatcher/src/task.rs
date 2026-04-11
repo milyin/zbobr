@@ -486,11 +486,31 @@ impl TaskSession {
         pipeline: impl Into<crate::task::Pipeline>,
         signal: Signal,
     ) -> anyhow::Result<()> {
+        self.push_stack_inner(pipeline.into(), signal, None).await
+    }
+
+    pub async fn push_call_stack(
+        &self,
+        pipeline: impl Into<crate::task::Pipeline>,
+        signal: Signal,
+        calling_stage: crate::task::Stage,
+    ) -> anyhow::Result<()> {
+        self.push_stack_inner(pipeline.into(), signal, Some(calling_stage))
+            .await
+    }
+
+    async fn push_stack_inner(
+        &self,
+        pipeline: crate::task::Pipeline,
+        signal: Signal,
+        calling_stage: Option<crate::task::Stage>,
+    ) -> anyhow::Result<()> {
         let task = self.get_task().await?;
         let entry = crate::task::StackEntry {
-            pipeline: pipeline.into(),
+            pipeline,
             signal,
             pipeline_run_id: task.pipeline_run_id,
+            calling_stage,
         };
         self.modify_task(move |mut task| {
             task.stack.push(entry);

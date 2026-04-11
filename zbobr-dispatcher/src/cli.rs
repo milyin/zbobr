@@ -757,24 +757,6 @@ impl ZbobrDispatcher {
     ) -> anyhow::Result<()> {
         let task_session = self.task_session(task_id);
 
-        // Determine what signal to emit when the called pipeline returns.
-        let stage_def = self.workflow().stage(pipeline_name, stage);
-        let return_signal = if let Some(target) = stage_def
-            .and_then(|s| s.on_success())
-            .and_then(|t| t.next.as_ref())
-        {
-            Signal::go(target.as_str())
-        } else {
-            match self
-                .workflow()
-                .pipeline(pipeline_name)
-                .and_then(|p| p.next_stage(stage))
-            {
-                Some((next, _)) => Signal::go(next.as_str()),
-                None => Signal::Return,
-            }
-        };
-
         task_session.allocate_pipeline_run_id().await?;
         task_session.increment_stage_count().await?;
 
@@ -799,9 +781,19 @@ impl ZbobrDispatcher {
             }
         }
 
-        // Push stack so we return to the right place.
+        // Push stack recording the calling stage so on_success/on_failure can be resolved
+        // at return time. The signal field carries a fallback (natural next stage) for
+        // backward-compat with old stack entries, but new return handling uses calling_stage.
+        let fallback_signal = match self
+            .workflow()
+            .pipeline(pipeline_name)
+            .and_then(|p| p.next_stage(stage))
+        {
+            Some((next, _)) => Signal::go(next.as_str()),
+            None => Signal::Return,
+        };
         task_session
-            .push_stack(pipeline_name.clone(), return_signal.clone())
+            .push_call_stack(pipeline_name.clone(), fallback_signal, stage.clone())
             .await?;
 
         let call_signal = Signal::call(call_pipeline.clone());
@@ -811,7 +803,7 @@ impl ZbobrDispatcher {
             .await?;
 
         tracing::info!(
-            "Task #{task_id}: stage {pipeline_name}/{} calling pipeline '{call_pipeline}' (return → {return_signal})",
+            "Task #{task_id}: stage {pipeline_name}/{} calling pipeline '{call_pipeline}'",
             stage.as_str()
         );
 
@@ -874,6 +866,7 @@ impl ZbobrDispatcher {
                     pipeline,
                     signal,
                     pipeline_run_id: t.pipeline_run_id,
+                    calling_stage: None,
                 });
                 t.state = State::Pause;
                 t.signal = None;
@@ -884,6 +877,81 @@ impl ZbobrDispatcher {
 
         tracing::info!("Task #{}: pause applied — state set to PAUSE", task.id);
         Ok(true)
+    }
+
+    /// Apply the return transition for a completed sub-pipeline call.
+    ///
+    /// Looks up `on_success` or `on_failure` on the calling stage (stored in `entry.calling_stage`).
+    /// Falls back to the pre-computed `entry.signal` for old stack entries that lack `calling_stage`.
+    ///
+    /// - Success: applies `on_success` transition (next stage + optional pause)
+    /// - Failure with `on_failure` configured: applies `on_failure` transition (absorbs the failure)
+    /// - Failure with no `on_failure`: propagates `ReturnFailure` up the stack
+    async fn apply_call_return(
+        self: &Arc<Self>,
+        task_id: u64,
+        entry: &StackEntry,
+        is_failure: bool,
+    ) -> anyhow::Result<()> {
+        let task_session = self.task_session(task_id);
+
+        let (signal, pause) = if let Some(ref calling_stage) = entry.calling_stage {
+            let stage_def = self.workflow().stage(&entry.pipeline, calling_stage);
+            let transition = if is_failure {
+                stage_def.and_then(|s| s.on_failure())
+            } else {
+                stage_def.and_then(|s| s.on_success())
+            };
+
+            match transition {
+                Some(t) => {
+                    let next_signal = match t.next.as_ref() {
+                        Some(next) => Signal::go(next.as_str()),
+                        None => {
+                            // No explicit next: use the natural successor in the pipeline
+                            match self
+                                .workflow()
+                                .pipeline(&entry.pipeline)
+                                .and_then(|p| p.next_stage(calling_stage))
+                            {
+                                Some((next, _)) => Signal::go(next.as_str()),
+                                None => Signal::Return,
+                            }
+                        }
+                    };
+                    (next_signal, t.pause)
+                }
+                None if is_failure => {
+                    // No on_failure configured: propagate failure up
+                    (Signal::ReturnFailure, false)
+                }
+                None => {
+                    // No on_success configured: use fallback signal stored at call time
+                    (entry.signal.clone(), false)
+                }
+            }
+        } else {
+            // Old stack entry without calling_stage: preserve existing behaviour
+            if is_failure {
+                (Signal::ReturnFailure, false)
+            } else {
+                (entry.signal.clone(), false)
+            }
+        };
+
+        task_session.set_signal(Some(signal)).await?;
+        if pause {
+            let status = zbobr_api::format_status(
+                zbobr_api::PAUSE_PREFIX,
+                &chrono::Utc::now().with_timezone(&self.config().fixed_offset()),
+                "Pipeline returned — pausing as configured",
+            );
+            task_session.set_pause_with_status(status).await?;
+        }
+        task_session
+            .set_state(State::pending(entry.pipeline.clone()))
+            .await?;
+        Ok(())
     }
 
     /// Process a task according to its current state and signal (single-step).
@@ -959,50 +1027,34 @@ impl ZbobrDispatcher {
             crate::workflow::StateAction::Done => {
                 let task_session = self.task_session(task.id);
                 let is_failure = task.signal.as_ref() == Some(&Signal::ReturnFailure);
-                if is_failure {
-                    // Pipeline failed — return to caller or pause at root
-                    if let Some(entry) = task_session.pop_stack().await? {
-                        task_session.set_signal(Some(Signal::ReturnFailure)).await?;
-                        task_session
-                            .set_state(State::pending(entry.pipeline.clone()))
-                            .await?;
-                        tracing::info!(
-                            "Task #{}: pipeline failed — returning failure to pipeline '{}'",
-                            task.id,
-                            entry.pipeline
-                        );
-                    } else {
-                        let pipeline = task
-                            .state
-                            .pipeline()
-                            .cloned()
-                            .unwrap_or_else(|| self.workflow().default_pipeline());
-                        let first_stage = self
-                            .workflow()
-                            .start_stage_for_pipeline(&pipeline)
-                            .map(|(name, _)| name.to_string())
-                            .unwrap_or_default();
-                        let status = format_error_status(
-                            self.config().fixed_offset(),
-                            "Pipeline failed at root — manual intervention required",
-                        );
-                        task_session
-                            .set_pause_with_status_and_signal(status, Signal::go(first_stage))
-                            .await?;
-                        tracing::info!("Task #{}: pipeline failed at root — paused", task.id);
-                    }
-                } else if let Some(entry) = task_session.pop_stack().await? {
-                    // Success return from sub-pipeline — re-run calling stage
-                    task_session.set_signal(Some(entry.signal.clone())).await?;
-                    task_session
-                        .set_state(State::pending(entry.pipeline.clone()))
-                        .await?;
+                if let Some(entry) = task_session.pop_stack().await? {
                     tracing::info!(
-                        "Task #{}: returning to pipeline '{}' with signal '{}'",
+                        "Task #{}: pipeline {} — returning to '{}'",
                         task.id,
-                        entry.pipeline,
-                        entry.signal
+                        if is_failure { "failed" } else { "succeeded" },
+                        entry.pipeline
                     );
+                    self.apply_call_return(task.id, &entry, is_failure).await?;
+                } else if is_failure {
+                    // Failure reached root — pause for manual intervention
+                    let pipeline = task
+                        .state
+                        .pipeline()
+                        .cloned()
+                        .unwrap_or_else(|| self.workflow().default_pipeline());
+                    let first_stage = self
+                        .workflow()
+                        .start_stage_for_pipeline(&pipeline)
+                        .map(|(name, _)| name.to_string())
+                        .unwrap_or_default();
+                    let status = format_error_status(
+                        self.config().fixed_offset(),
+                        "Pipeline failed at root — manual intervention required",
+                    );
+                    task_session
+                        .set_pause_with_status_and_signal(status, Signal::go(first_stage))
+                        .await?;
+                    tracing::info!("Task #{}: pipeline failed at root — paused", task.id);
                 } else {
                     task_session.finish().await?;
                     tracing::info!("Task #{}: completed", task.id);
@@ -1366,34 +1418,25 @@ impl ZbobrDispatcher {
                 crate::workflow::StateAction::Done => {
                     let task_session = self.task_session(task.id);
                     let is_failure = task.signal.as_ref() == Some(&Signal::ReturnFailure);
-                    if is_failure {
-                        // Pipeline failed — return to caller or pause at root
-                        match task_session.pop_stack().await {
-                            Ok(Some(entry)) => {
-                                tracing::info!(
-                                    "Task #{}: pipeline failed — returning failure to pipeline '{}'",
-                                    task.id,
-                                    entry.pipeline
+                    match task_session.pop_stack().await {
+                        Ok(Some(entry)) => {
+                            tracing::info!(
+                                "Task #{}: pipeline {} — returning to '{}'",
+                                task.id,
+                                if is_failure { "failed" } else { "succeeded" },
+                                entry.pipeline
+                            );
+                            if let Err(e) =
+                                self.apply_call_return(task.id, &entry, is_failure).await
+                            {
+                                tracing::error!(
+                                    "Task #{}: apply_call_return failed: {e}",
+                                    task.id
                                 );
-                                if let Err(e) =
-                                    task_session.set_signal(Some(Signal::ReturnFailure)).await
-                                {
-                                    tracing::error!(
-                                        "Failed to set return_failure signal for task #{}: {e}",
-                                        task.id
-                                    );
-                                }
-                                if let Err(e) = task_session
-                                    .set_state(State::pending(entry.pipeline.clone()))
-                                    .await
-                                {
-                                    tracing::error!(
-                                        "Failed to set return state for task #{}: {e}",
-                                        task.id
-                                    );
-                                }
                             }
-                            Ok(None) => {
+                        }
+                        Ok(None) => {
+                            if is_failure {
                                 tracing::info!(
                                     "Task #{}: pipeline failed at root — paused",
                                     task.id
@@ -1421,48 +1464,15 @@ impl ZbobrDispatcher {
                                 {
                                     tracing::error!("Failed to pause task #{}: {e}", task.id);
                                 }
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to pop stack for task #{}: {e}", task.id)
-                            }
-                        }
-                    } else {
-                        match task_session.pop_stack().await {
-                            Ok(Some(entry)) => {
-                                // Success return from sub-pipeline — re-run calling stage
-                                tracing::info!(
-                                    "Task #{}: returning to pipeline '{}' with signal '{}'",
-                                    task.id,
-                                    entry.pipeline,
-                                    entry.signal
-                                );
-                                if let Err(e) =
-                                    task_session.set_signal(Some(entry.signal.clone())).await
-                                {
-                                    tracing::error!(
-                                        "Failed to set return signal for task #{}: {e}",
-                                        task.id
-                                    );
-                                }
-                                if let Err(e) = task_session
-                                    .set_state(State::pending(entry.pipeline.clone()))
-                                    .await
-                                {
-                                    tracing::error!(
-                                        "Failed to set return state for task #{}: {e}",
-                                        task.id
-                                    );
-                                }
-                            }
-                            Ok(None) => {
+                            } else {
                                 tracing::info!("Task #{}: completed", task.id);
                                 if let Err(e) = task_session.finish().await {
                                     tracing::error!("Failed to finish task #{}: {e}", task.id);
                                 }
                             }
-                            Err(e) => {
-                                tracing::error!("Failed to pop stack for task #{}: {e}", task.id);
-                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to pop stack for task #{}: {e}", task.id)
                         }
                     }
                 }
@@ -2179,6 +2189,7 @@ mod tests {
             pipeline: Pipeline::Main,
             signal: Signal::go("working"),
             pipeline_run_id: 1,
+            calling_stage: None,
         }];
         let tasks = [make_task(1, State::Pause, 10, false, stack)];
 
@@ -2212,6 +2223,7 @@ mod tests {
             pipeline: Pipeline::Main,
             signal: Signal::go("working"),
             pipeline_run_id: 1,
+            calling_stage: None,
         }];
         let tasks = [
             make_task(1, State::Pending(Pipeline::Main), 10, true, vec![]), // go_pause flag
