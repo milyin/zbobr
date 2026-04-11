@@ -9,7 +9,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use zbobr_api::{
     Comment, Signal, Task,
     backend::TaskBackend,
-    task::{Pipeline, StackEntry, Stage, State, TaskContext},
+    task::{StackEntry, State, TaskContext},
 };
 
 // -- Parameter name constants (GitHub issue body parameter keys) --
@@ -17,8 +17,7 @@ use zbobr_api::{
 const PARAM_WORK_BRANCH: &str = "work_branch";
 const PARAM_PR_URL: &str = "pr_url";
 const PARAM_STACK: &str = "stack";
-const PARAM_PIPELINE: &str = "pipeline";
-const PARAM_STAGE: &str = "stage";
+const PARAM_STATE: &str = "state";
 const PARAM_SIGNAL: &str = "signal";
 const PARAM_PIPELINE_RUN_ID: &str = "pipeline_run_id";
 const PARAM_STAGE_COUNT: &str = "stage_count";
@@ -31,7 +30,6 @@ const DEFAULT_REPORTS_PATH: &str = "reports";
 // -- Label prefix constants (GitHub-backend-specific) --
 
 const STATE_PREFIX: &str = "state:";
-const FLAG_LABEL_PREFIX: &str = "flag:";
 const INSTANCE_LABEL_PREFIX: &str = "zbobr:";
 
 // -- State label name constants --
@@ -149,12 +147,6 @@ struct IssueResponse {
     title: String,
     body: Option<String>,
     state: String,
-    labels: Vec<IssueLabel>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct IssueLabel {
-    name: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -227,61 +219,6 @@ impl ZbobrTaskBackendGithubImpl {
 
     fn default_max_stage_count(&self) -> u64 {
         self.backend_config.default_max_stage_count
-    }
-
-    /// Convert a state to its GitHub label representations (state:* label only).
-    fn state_to_labels(state: &State) -> Vec<String> {
-        let state_label = |name: &str| format!("{}{name}", STATE_PREFIX);
-
-        match state {
-            State::Empty => vec![],
-            State::Done => vec![state_label(STATE_LABEL_DONE)],
-            State::Pause => vec![state_label(STATE_LABEL_PAUSE)],
-            State::Ready => vec![state_label(STATE_LABEL_READY)],
-            State::Pending(_) => vec![state_label(STATE_LABEL_PENDING)],
-            State::Running(_, _) => vec![state_label(STATE_LABEL_RUNNING)],
-            State::Unknown(raw) => vec![state_label(raw)],
-        }
-    }
-
-    /// Parse a State from GitHub issue labels and params.
-    /// Pipeline and stage are passed as params (no longer stored in labels).
-    fn labels_to_state(
-        labels: &[IssueLabel],
-        pipeline_param: Option<&str>,
-        stage_param: Option<&str>,
-    ) -> State {
-        let mut state_value: Option<&str> = None;
-
-        for label in labels {
-            if let Some(v) = label.name.strip_prefix(STATE_PREFIX) {
-                state_value = Some(v);
-            }
-        }
-
-        match state_value {
-            None => State::Empty,
-            Some(v) if v == STATE_LABEL_DONE => State::Done,
-            Some(v) if v == STATE_LABEL_PAUSE => State::Pause,
-            Some(v) if v == STATE_LABEL_READY => State::Ready,
-            Some(v) if v == STATE_LABEL_PENDING => match pipeline_param {
-                Some(p) => State::Pending(Pipeline::from(p)),
-                None => State::Unknown(format!("{}{}", STATE_PREFIX, STATE_LABEL_PENDING)),
-            },
-            Some(v) if v == STATE_LABEL_RUNNING => match (pipeline_param, stage_param) {
-                (Some(p), Some(s)) => State::Running(Pipeline::from(p), Stage::from(s)),
-                (None, Some(s)) => State::Unknown(format!(
-                    "{}{}; stage:{s}",
-                    STATE_PREFIX, STATE_LABEL_RUNNING
-                )),
-                (Some(p), None) => State::Unknown(format!(
-                    "{}{}; pipeline:{p}",
-                    STATE_PREFIX, STATE_LABEL_RUNNING
-                )),
-                (None, None) => State::Unknown(format!("{}{}", STATE_PREFIX, STATE_LABEL_RUNNING)),
-            },
-            Some(other) => State::Unknown(format!("{}{other}", STATE_PREFIX)),
-        }
     }
 
     /// Return the GitHub label color for a state label.
@@ -424,68 +361,6 @@ impl ZbobrTaskBackendGithubImpl {
         })
         .await
         .map(|_: serde_json::Value| ())?;
-        Ok(())
-    }
-
-    /// Apply a state change on a GitHub issue via labels.
-    async fn apply_state_change(&self, id: u64, state: &State) -> anyhow::Result<()> {
-        let (owner, repo) = self.parse_repo()?;
-
-        // Fetch current labels
-        let issue: IssueResponse = retry_github("get issue labels", || {
-            self.octocrab
-                .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
-        })
-        .await?;
-
-        // Get the new labels we want to set
-        let new_labels = Self::state_to_labels(state);
-        let new_labels_set: std::collections::HashSet<&str> =
-            new_labels.iter().map(|s| s.as_str()).collect();
-
-        // Remove state: and legacy flag: labels that are NOT in the new set
-        for label in &issue.labels {
-            if (label.name.starts_with(STATE_PREFIX) || label.name.starts_with(FLAG_LABEL_PREFIX))
-                && !new_labels_set.contains(label.name.as_str())
-            {
-                let _ = retry_github("remove state label", || async {
-                    self.octocrab
-                        .issues(owner, repo)
-                        .remove_label(id, &label.name)
-                        .await
-                })
-                .await;
-            }
-        }
-
-        // Add new state labels if not empty
-        if !new_labels.is_empty() {
-            // Ensure all labels exist before assigning them
-            for label in &new_labels {
-                let color = Self::state_label_color(label);
-                let desc = format!("State: {label}");
-                self.ensure_label_exists(label, color, &desc).await?;
-            }
-
-            // Only add labels that aren't already present
-            let existing_label_names: std::collections::HashSet<&str> =
-                issue.labels.iter().map(|l| l.name.as_str()).collect();
-            let labels_to_add: Vec<String> = new_labels
-                .into_iter()
-                .filter(|label| !existing_label_names.contains(label.as_str()))
-                .collect();
-
-            if !labels_to_add.is_empty() {
-                retry_github("add state labels", || async {
-                    self.octocrab
-                        .issues(owner, repo)
-                        .add_labels(id, &labels_to_add)
-                        .await
-                })
-                .await?;
-            }
-        }
-
         Ok(())
     }
 
@@ -715,13 +590,13 @@ impl ZbobrTaskBackendGithubImpl {
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
 
-        // pipeline, stage, and signal are stored as params
-        let pipeline_param = params_map.get(PARAM_PIPELINE).map(|s| s.as_str());
-        let stage_param = params_map.get(PARAM_STAGE).map(|s| s.as_str());
         let signal: Option<Signal> = params_map.get(PARAM_SIGNAL).and_then(|s| s.parse().ok());
 
-        // state is stored as label; pipeline/stage come from params
-        let state = Self::labels_to_state(&issue.labels, pipeline_param, stage_param);
+        // state is stored as a single param in canonical format (e.g. "running:main:working")
+        let state: State = params_map
+            .get(PARAM_STATE)
+            .map(|s| s.parse().unwrap_or(State::Empty))
+            .unwrap_or(State::Empty);
 
         let pause = params_map
             .get(PARAM_FLAG_PAUSE)
@@ -858,16 +733,10 @@ impl ZbobrTaskBackendGithubImpl {
         {
             params.insert(PARAM_STACK.to_string(), json);
         }
-        // Store pipeline and stage as params (not labels)
-        match &task.state {
-            State::Pending(pipeline) => {
-                params.insert(PARAM_PIPELINE.to_string(), pipeline.as_str().to_string());
-            }
-            State::Running(pipeline, stage) => {
-                params.insert(PARAM_PIPELINE.to_string(), pipeline.as_str().to_string());
-                params.insert(PARAM_STAGE.to_string(), stage.as_str().to_string());
-            }
-            _ => {}
+        // Store state as a single param in canonical format
+        let state_str = task.state.to_string();
+        if !state_str.is_empty() {
+            params.insert(PARAM_STATE.to_string(), state_str);
         }
         // Store signal as param (not label)
         if let Some(ref signal) = task.signal {
@@ -1056,9 +925,6 @@ impl ZbobrTaskBackendGithubImpl {
                 expected_desc = current_body;
             }
         }
-
-        // Always apply state change to ensure legacy flag: labels are removed even when state is unchanged.
-        self.apply_state_change(id, &task.state).await?;
 
         self.record_cooling(id);
         let mut saved_task = task;
@@ -1476,9 +1342,14 @@ impl TaskBackend for TaskBackendGithub {
         state: State,
     ) -> anyhow::Result<u64> {
         let (owner, repo) = self.inner.parse_repo()?;
+        let mut init_params = HashMap::new();
+        let state_str = state.to_string();
+        if !state_str.is_empty() {
+            init_params.insert(PARAM_STATE.to_string(), state_str);
+        }
         let body = serialize_description_full(
             description,
-            &HashMap::new(),
+            &init_params,
             &None,
             &TaskContext::default(),
             &[],
@@ -1492,14 +1363,7 @@ impl TaskBackend for TaskBackendGithub {
         })
         .await?;
 
-        let issue_id = issue.number;
-
-        // Apply the initial state as a label
-        if !state.is_empty() {
-            self.inner.apply_state_change(issue_id, &state).await?;
-        }
-
-        Ok(issue_id)
+        Ok(issue.number)
     }
 
     async fn setup(&self, force: bool) -> anyhow::Result<()> {
