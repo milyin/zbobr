@@ -583,6 +583,43 @@ impl ZbobrTaskBackendGithubImpl {
 
         let existing_labels = self.list_labels().await?;
 
+        // Create the pause label
+        if !existing_labels.contains(&PAUSE_LABEL.to_string()) {
+            tracing::info!("Creating label '{PAUSE_LABEL}'");
+            self.create_label(PAUSE_LABEL, "e4e669", "Task is paused").await?;
+        } else if force {
+            tracing::info!("Updating label '{PAUSE_LABEL}' (force)");
+            self.update_label(PAUSE_LABEL, "e4e669", "Task is paused").await?;
+        } else {
+            tracing::info!("Label '{PAUSE_LABEL}' already exists");
+        }
+
+        // Create standard pipeline labels
+        let standard_pipelines = [zbobr_api::Pipeline::MAIN, zbobr_api::Pipeline::MERGE];
+        for pipeline in &standard_pipelines {
+            let label = format!("{PIPELINE_LABEL_PREFIX}{pipeline}");
+            let desc = format!("Pipeline: {pipeline}");
+            if !existing_labels.contains(&label) {
+                tracing::info!("Creating label '{label}'");
+                self.create_label(&label, "0052cc", &desc).await?;
+            } else if force {
+                tracing::info!("Updating label '{label}' (force)");
+                self.update_label(&label, "0052cc", &desc).await?;
+            } else {
+                tracing::info!("Label '{label}' already exists");
+            }
+        }
+
+        // With force: remove obsolete state:* labels left over from the old schema
+        if force {
+            for label in &existing_labels {
+                if label.starts_with("state:") {
+                    tracing::info!("Deleting obsolete state label '{label}' (force)");
+                    self.delete_label(label).await?;
+                }
+            }
+        }
+
         // Create zbobr:<instance> label for this instance
         let instance_label = format!("{}{}", INSTANCE_LABEL_PREFIX, self.backend_config.instance);
         let instance_color = "1d76db"; // blue
