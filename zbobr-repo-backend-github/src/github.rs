@@ -75,17 +75,6 @@ where
 
 /// Returns `true` for HTTP status codes that make fork upstream sync non-fatal:
 /// conflict (409), unprocessable entity (422), or forbidden (403).
-fn is_nonfatal_fork_sync_status(code: u16) -> bool {
-    matches!(code, 403 | 409 | 422)
-}
-
-fn is_nonfatal_fork_sync_error(e: &octocrab::Error) -> bool {
-    matches!(
-        e,
-        octocrab::Error::GitHub { source, .. }
-            if is_nonfatal_fork_sync_status(source.status_code.as_u16())
-    )
-}
 
 /// Extract the backing bare repository path from a worktree's `.git` file.
 ///
@@ -719,14 +708,6 @@ impl ZbobrRepoBackendGithub {
                     repo.full_name
                 );
             }
-            Err(e) if is_nonfatal_fork_sync_error(&e) => {
-                tracing::warn!(
-                    "Could not sync fork branch '{}' of {} with upstream (non-fatal): {}",
-                    branch,
-                    repo.full_name,
-                    octocrab_to_anyhow(e)
-                );
-            }
             Err(e) => {
                 return Err(octocrab_to_anyhow(e));
             }
@@ -1224,35 +1205,5 @@ mod tests {
         assert_eq!(backend.backend_config.repository, "myorg/myrepo");
     }
 
-    // ── fork sync non-fatal status classification tests ──────────────
 
-    #[test]
-    fn fork_sync_nonfatal_status_forbidden() {
-        assert!(is_nonfatal_fork_sync_status(403));
-    }
-
-    #[test]
-    fn fork_sync_nonfatal_status_conflict() {
-        assert!(is_nonfatal_fork_sync_status(409));
-    }
-
-    #[test]
-    fn fork_sync_nonfatal_status_unprocessable() {
-        assert!(is_nonfatal_fork_sync_status(422));
-    }
-
-    #[test]
-    fn fork_sync_fatal_status_not_found() {
-        assert!(!is_nonfatal_fork_sync_status(404));
-    }
-
-    #[test]
-    fn fork_sync_fatal_status_server_error() {
-        assert!(!is_nonfatal_fork_sync_status(500));
-    }
-
-    #[test]
-    fn fork_sync_fatal_status_ok() {
-        assert!(!is_nonfatal_fork_sync_status(200));
-    }
 }
