@@ -12,7 +12,6 @@ use zbobr_api::{
     config::{PipelineConfig, Role, RoleDefinition, StageDefinition, WorkflowConfig},
     config_tools::ALL_TOOLS,
 };
-use zbobr_dispatcher::backend::TaskBackendExt;
 use zbobr_utility::TomlOption;
 
 use super::{abstract_scenarios, env::IntegrationTestEnv};
@@ -300,16 +299,24 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
     assert_eq!(task.signal, Some(Signal::Return));
     assert_eq!(task.state, State::Pending(Pipeline::Merge));
 
-    // Step 3: process return → stack pop → go_work in main pipeline
+    // Step 3: process return → stack pop → Return in main pipeline.
+    // The test workflow's main pipeline has a single stage ("work"), so
+    // natural-next after returning is Return rather than go(work).
     env.continue_pipeline(task_id, &workflow, &scenarios).await;
     let task = env.get_task(task_id).await;
     assert_eq!(
         task.signal,
-        Some(Signal::go("work")),
-        "After return from conflict, signal should be go_work (popped from stack)"
+        Some(Signal::Return),
+        "After return from conflict in a single-stage main pipeline, signal should stay Return"
     );
     assert_eq!(task.state, State::Pending(Pipeline::Main));
     assert!(task.stack.is_empty(), "Stack should be empty after pop");
+
+    // Step 4: resolve root-level Return to DONE.
+    env.continue_pipeline(task_id, &workflow, &scenarios).await;
+    let task = env.get_task(task_id).await;
+    assert_eq!(task.state, State::Done);
+    assert_eq!(task.signal, None);
 }
 
 // ===========================================================================

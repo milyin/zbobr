@@ -1185,7 +1185,7 @@ mod tests {
         let config = ZbobrRepoBackendGithubConfig {
             repository: "https://github.com/myorg/myrepo.git".to_string(),
             branch: "main".to_string(),
-            github_token: Secret::value("ghp_test123"),
+            github_token: Secret::value("ghp_012345678901234567890123456789012345"),
             repos_dir: std::path::PathBuf::from("/tmp/test-repos"),
         };
         let backend = ZbobrRepoBackendGithub::from_config(config).unwrap();
@@ -1198,7 +1198,7 @@ mod tests {
         let config = ZbobrRepoBackendGithubConfig {
             repository: "git@github.com:myorg/myrepo.git".to_string(),
             branch: "main".to_string(),
-            github_token: Secret::value("ghp_test123"),
+            github_token: Secret::value("ghp_012345678901234567890123456789012345"),
             repos_dir: std::path::PathBuf::from("/tmp/test-repos"),
         };
         let backend = ZbobrRepoBackendGithub::from_config(config).unwrap();

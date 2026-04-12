@@ -684,7 +684,10 @@ impl ZbobrTaskBackendGithubImpl {
     }
 
     /// Parse an IssueResponse into a Task.
-    fn issue_to_task(&self, issue: IssueResponse) -> anyhow::Result<Task> {
+    fn issue_to_task_with_default_max_stage_count(
+        issue: IssueResponse,
+        default_max_stage_count: u64,
+    ) -> anyhow::Result<Task> {
         let body = issue.body.unwrap_or_default();
         let (description, params_map, status, context) = parse_description_full(&body)?;
 
@@ -739,10 +742,14 @@ impl ZbobrTaskBackendGithubImpl {
             max_stage_count: params_map
                 .get(PARAM_MAX_STAGE_COUNT)
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(self.default_max_stage_count()),
+                .unwrap_or(default_max_stage_count),
             closed: issue.state == "closed",
             etag: Some(body),
         })
+    }
+
+    fn issue_to_task(&self, issue: IssueResponse) -> anyhow::Result<Task> {
+        Self::issue_to_task_with_default_max_stage_count(issue, self.default_max_stage_count())
     }
 
     fn report_url_prefix_from_config(
@@ -819,6 +826,19 @@ impl ZbobrTaskBackendGithubImpl {
         }
 
         Ok(())
+    }
+
+    #[cfg(test)]
+    fn hydrate_issue_to_task_for_config(
+        config: &ZbobrTaskBackendGithubConfig,
+        issue: IssueResponse,
+    ) -> anyhow::Result<Task> {
+        let mut task = Self::issue_to_task_with_default_max_stage_count(
+            issue,
+            config.default_max_stage_count,
+        )?;
+        Self::normalize_task_report_links_for_config(config, &mut task)?;
+        Ok(task)
     }
 
     fn hydrate_issue_to_task(&self, issue: IssueResponse) -> anyhow::Result<Task> {
@@ -1606,8 +1626,6 @@ impl TaskBackend for TaskBackendGithub {
 
 #[cfg(test)]
 mod flag_tests {
-    use std::sync::Once;
-
     use zbobr_api::{
         Secret,
         task::{ContextRecord, ContextRecordType, Pipeline, Stage, StageContext, StageInfo},
@@ -1615,13 +1633,6 @@ mod flag_tests {
 
     use super::*;
     use crate::separator::{PARAMETERS_SEPARATOR, serialize_description_full};
-
-    fn init_rustls() {
-        static RUSTLS_INIT: Once = Once::new();
-        RUSTLS_INIT.call_once(|| {
-            let _ = rustls::crypto::ring::default_provider().install_default();
-        });
-    }
 
     fn make_issue_with_params(key: &str, value: &str) -> IssueResponse {
         let body = format!("desc{PARAMETERS_SEPARATOR}{key}: {value}\n");
@@ -1634,7 +1645,6 @@ mod flag_tests {
     }
 
     fn make_config() -> ZbobrTaskBackendGithubConfig {
-        init_rustls();
         ZbobrTaskBackendGithubConfig {
             instance: "default".to_string(),
             timezone: None,
@@ -1647,17 +1657,12 @@ mod flag_tests {
         }
     }
 
-    fn make_backend() -> ZbobrTaskBackendGithubImpl {
-        init_rustls();
-        let config = make_config();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let _guard = rt.enter();
-        ZbobrTaskBackendGithubImpl::from_config(config).unwrap()
-    }
-
     fn issue_to_task(issue: IssueResponse) -> Task {
-        let backend = make_backend();
-        backend.issue_to_task(issue).unwrap()
+        ZbobrTaskBackendGithubImpl::issue_to_task_with_default_max_stage_count(
+            issue,
+            zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
+        )
+        .unwrap()
     }
 
     #[test]
@@ -1749,8 +1754,7 @@ mod flag_tests {
             state: "open".to_string(),
         };
 
-        let mut task = issue_to_task(issue);
-        ZbobrTaskBackendGithubImpl::normalize_task_report_links_for_config(&config, &mut task)
+        let task = ZbobrTaskBackendGithubImpl::hydrate_issue_to_task_for_config(&config, issue)
             .unwrap();
         let stage = &task.context.stages[0];
 
