@@ -1311,8 +1311,8 @@ impl TaskWeak for GithubTaskWeak {
     async fn pending_override(&self) -> anyhow::Result<Option<StateOverrideRequest>> {
         let task = self.snapshot(false).await?;
 
-        // Only check tasks in an active state
-        if matches!(task.state, State::Empty | State::Done | State::Unknown(_)) {
+        // Done/Unknown tasks are never overridable
+        if matches!(task.state, State::Done | State::Unknown(_)) {
             return Ok(None);
         }
 
