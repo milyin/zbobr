@@ -923,10 +923,7 @@ impl ZbobrDispatcher {
                 let transition = stage_def.and_then(|s| s.on_no_report());
                 match transition {
                     Some(t) => (self.transition_signal(&entry.pipeline, calling_stage, t), t.pause),
-                    None => {
-                        // No on_no_report: advance to natural next stage
-                        (self.natural_next_signal(&entry.pipeline, calling_stage), false)
-                    }
+                    None => (self.natural_next_signal(&entry.pipeline, calling_stage), false),
                 }
             }
             other => {
@@ -1944,6 +1941,12 @@ impl ZbobrDispatcher {
             .await?
             .snapshot(false)
             .await?;
+        // Track whether a pause was triggered this tick so we can skip the state reset below.
+        // Keeping state as Running lets apply_pause_to_state derive calling_stage from
+        // state.stage() (the stage that was actually running) rather than from the
+        // pre-computed signal target.
+        let mut pause_pending = current_task.go_pause;
+
         if !current_task.go_pause && current_task.signal.is_none() {
             let current_stage = stage.clone();
             let stage_def = self.workflow().stage(pipeline, &current_stage);
@@ -1971,6 +1974,7 @@ impl ZbobrDispatcher {
                     task_session
                         .set_pause_with_status_and_signal(status, signal)
                         .await?;
+                    pause_pending = true;
                 }
             }
         }
@@ -1981,7 +1985,11 @@ impl ZbobrDispatcher {
                 .set_signal(Some(Signal::go(stage.as_str())))
                 .await?;
         }
-        task_session.set_state(pending_state).await?;
+        // Only reset state to Pending when no pause was triggered. When paused, keep
+        // state as Running so apply_pause_to_state can read calling_stage from state.stage().
+        if !pause_pending {
+            task_session.set_state(pending_state).await?;
+        }
 
         Ok(None)
     }

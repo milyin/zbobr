@@ -496,13 +496,21 @@ impl IntegrationTestEnv {
         let zbobr = self.make_dispatcher(workflow.clone());
         for i in 0..max_iterations {
             let task = self.get_task(task_id).await;
-            if task.state.is_done() || task.state.is_pause() {
+            if task.state.is_done() {
                 return i;
             }
+            if task.state.is_pause() {
+                // Resume via advance_tasks, which runs the pending_override pre-pass.
+                zbobr.advance_tasks().await.ok();
+                let resumed_task = self.get_task(task_id).await;
+                if resumed_task.state.is_pause() {
+                    return i;
+                }
+                continue;
+            }
             if task.go_pause {
-                // One more process_task call to convert pause flag to PAUSE state
-                let mcp_cfg = ZbobrExecutorMcpTesterConfig::default();
-                zbobr.process_task(&task, Some(&mcp_cfg)).await.ok();
+                // advance_tasks converts the pause flag to PAUSE state via apply_pause_to_state.
+                zbobr.advance_tasks().await.ok();
                 return i;
             }
             // If state is PENDING but no signal, nothing to do

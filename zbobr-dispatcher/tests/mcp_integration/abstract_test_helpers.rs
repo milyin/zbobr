@@ -289,9 +289,9 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
     );
     assert_eq!(task.stack[0].pipeline, zbobr_api::Pipeline::Main);
     assert_eq!(
-        task.stack[0].signal,
-        Signal::go("work"),
-        "Stack entry should have signal go_work (re-run interrupted stage)"
+        task.stack[0].calling_stage,
+        Stage::from("work"),
+        "Stack entry should remember the interrupted work stage"
     );
 
     // Step 2: run the conflict handler (merging/resolve) → return
@@ -337,8 +337,8 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
     assert!(task.go_pause, "stop_with_error should set pause flag");
     assert_eq!(
         task.state,
-        State::Pending(Pipeline::Main),
-        "Should be pending, not DONE"
+        State::running(Pipeline::Main, Stage::from("work")),
+        "State should remain Running so apply_pause_to_state can read the calling stage"
     );
     assert_eq!(
         task.signal,
@@ -669,9 +669,9 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
     assert_eq!(task.stack.len(), 1, "Stack should have one entry");
     assert_eq!(task.stack[0].pipeline, zbobr_api::Pipeline::Main);
     assert_eq!(
-        task.stack[0].signal,
-        Signal::go("finish"),
-        "Return signal should advance to next stage"
+        task.stack[0].calling_stage,
+        Stage::from("call_sub"),
+        "Stack entry should remember the call stage for return"
     );
 
     // Step 2..N: run to completion through sub-pipeline → return → finish → DONE
@@ -717,7 +717,7 @@ pub async fn run_pause_state_conversion(env: &IntegrationTestEnv) {
 
     let task = env.get_task(task_id).await;
     assert!(task.go_pause, "stop_with_error should set pause flag");
-    assert_eq!(task.state, State::Pending(Pipeline::Main));
+    assert_eq!(task.state, State::running(Pipeline::Main, Stage::from("work")));
     assert_eq!(task.signal, Some(Signal::go("work")));
 
     // Step 2: continue_pipeline → centralized handler converts pause flag to PAUSE state
@@ -730,9 +730,9 @@ pub async fn run_pause_state_conversion(env: &IntegrationTestEnv) {
     assert_eq!(task.stack.len(), 1, "Stack should have one entry");
     assert_eq!(task.stack[0].pipeline, zbobr_api::Pipeline::Main);
     assert_eq!(
-        task.stack[0].signal,
-        Signal::go("work"),
-        "Stack entry should save signal to re-run the stage"
+        task.stack[0].calling_stage,
+        Stage::from("work"),
+        "Stack entry should remember the paused work stage"
     );
 }
 
@@ -772,17 +772,12 @@ pub async fn run_pause_resume_cycle(env: &IntegrationTestEnv) {
     assert_eq!(task.state, State::Pause);
     assert_eq!(task.stack.len(), 1);
 
-    // Step 3: process Pause → Resume (pops stack, restores pipeline/signal), then RunStage
+    // Step 3: run_to_completion handles Pause → Resume via advance_tasks (pending_override
+    // pre-pass), then advances past the paused stage to completion.
     let success_scenarios = scenarios_map(vec![(
         "role_work",
         abstract_scenarios::report_and_finish_scenario(),
     )]);
-    // First continue_pipeline: Pause+stack → Resume → sets Pending+signal
-    env.continue_pipeline(task_id, &workflow, &success_scenarios)
-        .await;
-
-    // After Resume handler: state=Pending(main), signal=Go(work)
-    // Let it run to completion.
     env.run_to_completion(task_id, &workflow, &success_scenarios, 5)
         .await;
 
@@ -869,7 +864,11 @@ pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
         Some(Signal::go("stage_b")),
         "Pause signal should point to NEXT stage, not current"
     );
-    assert_eq!(task.state, State::Pending(Pipeline::Main));
+    assert_eq!(
+        task.state,
+        State::running(Pipeline::Main, Stage::from("stage_a")),
+        "State should remain Running so apply_pause_to_state can read the calling stage"
+    );
 
     // Step 2: Convert pause to PAUSE state
     env.continue_pipeline(task_id, &workflow, &scenarios).await;
@@ -880,9 +879,9 @@ pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
     assert!(task.signal.is_none(), "Signal should be cleared");
     assert_eq!(task.stack.len(), 1, "Stack should have one entry");
     assert_eq!(
-        task.stack[0].signal,
-        Signal::go("stage_b"),
-        "Stack should save signal to advance to next stage"
+        task.stack[0].calling_stage,
+        Stage::from("stage_a"),
+        "Stack entry should remember the stage that completed, not the pre-computed next stage"
     );
 
     // Step 3: Process Pause+stack → Resume → Pending+signal, then run to completion
@@ -958,8 +957,8 @@ pub async fn run_pause_on_runner_error(env: &IntegrationTestEnv) {
     assert_eq!(task.stack.len(), 1, "Stack should have one entry");
     assert_eq!(task.stack[0].pipeline, zbobr_api::Pipeline::Main);
     assert_eq!(
-        task.stack[0].signal,
-        Signal::go("work"),
-        "Stack entry should save signal to re-run the stage"
+        task.stack[0].calling_stage,
+        Stage::from("work"),
+        "Stack entry should remember the paused work stage"
     );
 }
