@@ -46,10 +46,10 @@ pub fn inline_named_children_as_inline_table_arrays(table: &mut Table) {
 
 /// Set a named child table to dotted mode for a parent table.
 pub fn set_child_table_dotted(doc: &mut DocumentMut, parent_table_name: &str, child_key: &str) {
-    if let Some(Item::Table(parent_table)) = doc.get_mut(parent_table_name) {
-        if let Some(Item::Table(child_table)) = parent_table.get_mut(child_key) {
-            child_table.set_dotted(true);
-        }
+    if let Some(Item::Table(parent_table)) = doc.get_mut(parent_table_name)
+        && let Some(Item::Table(child_table)) = parent_table.get_mut(child_key)
+    {
+        child_table.set_dotted(true);
     }
 }
 

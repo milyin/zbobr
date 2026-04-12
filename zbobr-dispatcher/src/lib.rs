@@ -297,7 +297,7 @@ impl ZbobrDispatcher {
                     access_key: Default::default(),
                 };
                 if let Some(ref key) = provider.access_key {
-                    executor.access_key = Some(key.clone()).into();
+                    executor.access_key = Some(key.clone());
                 }
                 Ok(Box::new(executor))
             }
@@ -596,7 +596,7 @@ mod tests {
     #[test]
     fn select_provider_round_robin_same_priority() {
         let mut providers = IndexMap::new();
-        providers.insert("a".to_string().into(), provider_def("claude", 10));
+        providers.insert("a".to_string(), provider_def("claude", 10));
         providers.insert("b".to_string(), provider_def("copilot", 10));
 
         let mut tools = IndexMap::new();
@@ -618,7 +618,7 @@ mod tests {
     #[test]
     fn select_provider_skips_excluded() {
         let mut providers = IndexMap::new();
-        providers.insert("a".to_string().into(), provider_def("claude", 10));
+        providers.insert("a".to_string(), provider_def("claude", 10));
         providers.insert("b".to_string(), provider_def("copilot", 10));
 
         let mut tools = IndexMap::new();
@@ -726,7 +726,7 @@ mod tests {
                 ToolEntry {
                     provider: "fallback".to_string().into(),
                     model: "haiku".parse().unwrap(),
-                    priority: Some(0).into(),
+                    priority: Some(0),
                 },
             ],
         );
@@ -781,7 +781,7 @@ mod tests {
     #[test]
     fn record_provider_failure_excludes_on_threshold() {
         let mut providers = IndexMap::new();
-        providers.insert("a".to_string().into(), provider_def("claude", 10));
+        providers.insert("a".to_string(), provider_def("claude", 10));
 
         let mut tools = IndexMap::new();
         tools.insert("smart".to_string().into(), vec![tool_entry("a", "model-a")]);
@@ -857,7 +857,7 @@ mod tests {
         };
         let result = dispatcher.build_executor(&bad_provider, None);
         assert!(result.is_err(), "Expected Err for unknown executor");
-        let msg = result.err().unwrap().to_string();
+        let msg: String = result.err().unwrap().to_string();
         assert!(
             msg.contains("Unknown executor"),
             "Expected 'Unknown executor' in error: {msg}"
@@ -919,14 +919,19 @@ mod tests {
         );
         let wf_config = WorkflowConfig {
             prompts: None,
-            roles: Some(roles.into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
+            roles: Some(
+                roles
+                    .into_iter()
+                    .map(|(k, v)| (k, TomlOption::Value(v)))
+                    .collect(),
+            ),
             pipelines: Some(IndexMap::new()),
         };
         let workflow = Workflow::from_config(wf_config);
         let dispatcher = make_dispatcher_with_workflow(providers, tools, workflow);
         let result = dispatcher.validated();
         assert!(result.is_err(), "Expected Err for invalid workflow refs");
-        let msg = result.err().unwrap().to_string();
+        let msg: String = result.err().unwrap().to_string();
         assert!(
             msg.contains("nonexistent"),
             "Expected 'nonexistent' in error: {msg}"
@@ -936,8 +941,8 @@ mod tests {
     #[test]
     fn select_provider_entry_priority_elevates_above_provider() {
         let mut providers = IndexMap::new();
-        providers.insert("a".to_string().into(), provider_def("claude", 5));
-        providers.insert("b".to_string().into(), provider_def("copilot", 5));
+        providers.insert("a".to_string(), provider_def("claude", 5));
+        providers.insert("b".to_string(), provider_def("copilot", 5));
 
         let mut tools = IndexMap::new();
         tools.insert(
@@ -947,7 +952,7 @@ mod tests {
                 ToolEntry {
                     provider: "b".to_string().into(),
                     model: "sonnet".parse().unwrap(),
-                    priority: Some(20).into(),
+                    priority: Some(20),
                 },
             ],
         );

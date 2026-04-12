@@ -9,3 +9,6 @@ workspace/
 
 # Local GitHub integration test credentials (contains real tokens)
 zbobr_github_test.toml
+# Compiled binary artifacts in root (from clippy/rustc testing)
+/test_conv
+/test_trait
