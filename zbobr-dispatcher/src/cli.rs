@@ -607,7 +607,13 @@ impl<'a> CliStageRunner<'a> {
                 .zbobr
                 .build_executor(&resolved_provider, self.mcp_tester_override)?;
             let copilot_token_owned = if resolved_provider.executor == Executor::copilot() {
-                self.zbobr.copilot_github_token().to_owned()
+                match self.zbobr.copilot_github_token() {
+                    Some(token) => {
+                        tracing::info!("Using configured copilot_github_token for copilot");
+                        token.to_owned()
+                    }
+                    None => resolve_gh_auth_token().await,
+                }
             } else {
                 String::new()
             };
@@ -1776,6 +1782,34 @@ struct SessionOutcome {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Obtain a GitHub token from the `gh` CLI for use as the Copilot token.
+/// Falls back to an empty string and logs a warning when `gh` is unavailable or unauthenticated.
+async fn resolve_gh_auth_token() -> String {
+    tracing::info!("copilot_github_token not configured; falling back to `gh auth token`");
+    match tokio::process::Command::new("gh")
+        .args(["auth", "token"])
+        .output()
+        .await
+    {
+        Ok(output) if output.status.success() => {
+            let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            tracing::info!("Using token from `gh auth token` for copilot");
+            token
+        }
+        Ok(output) => {
+            tracing::warn!(
+                "`gh auth token` failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+            String::new()
+        }
+        Err(e) => {
+            tracing::warn!("Failed to run `gh auth token`: {e}");
+            String::new()
+        }
+    }
+}
+
 async fn execute_tool(
     executor: Box<dyn ToolExecutor>,
     copilot_token: &str,
