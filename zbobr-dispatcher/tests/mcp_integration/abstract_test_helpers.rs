@@ -72,13 +72,33 @@ fn build_workflow_with_roles(
 
     let mut pipelines: IndexMap<Pipeline, PipelineConfig> = IndexMap::new();
     for (pipeline_name, stages) in pipeline_stages {
-        pipelines.insert(pipeline_name, PipelineConfig { stages: Some(stages.into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()) });
+        pipelines.insert(
+            pipeline_name,
+            PipelineConfig {
+                stages: Some(
+                    stages
+                        .into_iter()
+                        .map(|(k, v)| (k, TomlOption::Value(v)))
+                        .collect(),
+                ),
+            },
+        );
     }
 
     WorkflowConfig {
         prompts: None,
-        pipelines: Some(pipelines.into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
-        roles: Some(roles.into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
+        pipelines: Some(
+            pipelines
+                .into_iter()
+                .map(|(k, v)| (k, TomlOption::Value(v)))
+                .collect(),
+        ),
+        roles: Some(
+            roles
+                .into_iter()
+                .map(|(k, v)| (k, TomlOption::Value(v)))
+                .collect(),
+        ),
         ..Default::default()
     }
 }
@@ -383,32 +403,48 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     pipelines.insert(
         Pipeline::Main,
         PipelineConfig {
-            stages: Some(IndexMap::from([
-                (
-                    Stage::from("check"),
-                    StageDefinition {
-                        role: Some("role_check".to_string().into()).into(),
-                        tool: Some("mcp-tester".to_string().into()).into(),
-                        ..Default::default()
-                    },
-                ),
-                (
-                    Stage::from("finish"),
-                    StageDefinition {
-                        role: Some("role_finish".to_string().into()).into(),
-                        tool: Some("mcp-tester".to_string().into()).into(),
-                        ..Default::default()
-                    },
-                ),
-            ]).into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
+            stages: Some(
+                IndexMap::from([
+                    (
+                        Stage::from("check"),
+                        StageDefinition {
+                            role: Some("role_check".to_string().into()).into(),
+                            tool: Some("mcp-tester".to_string().into()).into(),
+                            ..Default::default()
+                        },
+                    ),
+                    (
+                        Stage::from("finish"),
+                        StageDefinition {
+                            role: Some("role_finish".to_string().into()).into(),
+                            tool: Some("mcp-tester".to_string().into()).into(),
+                            ..Default::default()
+                        },
+                    ),
+                ])
+                .into_iter()
+                .map(|(k, v)| (k, TomlOption::Value(v)))
+                .collect(),
+            ),
         },
     );
     let workflow = WorkflowConfig {
         prompts: None,
-        pipelines: Some(pipelines.into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
+        pipelines: Some(
+            pipelines
+                .into_iter()
+                .map(|(k, v)| (k, TomlOption::Value(v)))
+                .collect(),
+        ),
         roles: Some(IndexMap::from([
-            ("role_check".to_string().into(), TomlOption::Value(role_with_all_tools())),
-            ("role_finish".to_string().into(), TomlOption::Value(role_with_all_tools())),
+            (
+                "role_check".to_string().into(),
+                TomlOption::Value(role_with_all_tools()),
+            ),
+            (
+                "role_finish".to_string().into(),
+                TomlOption::Value(role_with_all_tools()),
+            ),
         ])),
         ..Default::default()
     };
@@ -525,58 +561,87 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
     pipelines.insert(
         Pipeline::Main,
         PipelineConfig {
-            stages: Some(IndexMap::from([
-                (
-                    "call_sub".into(),
-                    StageDefinition {
-                        call: Some("sub".into()).into(),
-                        ..Default::default()
-                    },
-                ),
-                (
-                    "finish".into(),
-                    StageDefinition {
-                        role: Some("role_finish".into()).into(),
-                        tool: Some("mcp-tester".to_string().into()).into(),
-                        ..Default::default()
-                    },
-                ),
-            ]).into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
+            stages: Some(
+                IndexMap::from([
+                    (
+                        "call_sub".into(),
+                        StageDefinition {
+                            call: Some("sub".into()).into(),
+                            ..Default::default()
+                        },
+                    ),
+                    (
+                        "finish".into(),
+                        StageDefinition {
+                            role: Some("role_finish".into()).into(),
+                            tool: Some("mcp-tester".to_string().into()).into(),
+                            ..Default::default()
+                        },
+                    ),
+                ])
+                .into_iter()
+                .map(|(k, v)| (k, TomlOption::Value(v)))
+                .collect(),
+            ),
         },
     );
     pipelines.insert(
         Pipeline::from("sub"),
         PipelineConfig {
-            stages: Some(IndexMap::from([(
-                "work".into(),
-                StageDefinition {
-                    role: Some("role_work".into()).into(),
-                    tool: Some("mcp-tester".to_string().into()).into(),
-                    ..Default::default()
-                },
-            )]).into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
+            stages: Some(
+                IndexMap::from([(
+                    "work".into(),
+                    StageDefinition {
+                        role: Some("role_work".into()).into(),
+                        tool: Some("mcp-tester".to_string().into()).into(),
+                        ..Default::default()
+                    },
+                )])
+                .into_iter()
+                .map(|(k, v)| (k, TomlOption::Value(v)))
+                .collect(),
+            ),
         },
     );
     pipelines.insert(
         Pipeline::Merge,
         PipelineConfig {
-            stages: Some(IndexMap::from([(
-                "merging".into(),
-                StageDefinition {
-                    role: Some("role_merge".into()).into(),
-                    tool: Some("mcp-tester".to_string().into()).into(),
-                    ..Default::default()
-                },
-            )]).into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
+            stages: Some(
+                IndexMap::from([(
+                    "merging".into(),
+                    StageDefinition {
+                        role: Some("role_merge".into()).into(),
+                        tool: Some("mcp-tester".to_string().into()).into(),
+                        ..Default::default()
+                    },
+                )])
+                .into_iter()
+                .map(|(k, v)| (k, TomlOption::Value(v)))
+                .collect(),
+            ),
         },
     );
     let workflow = WorkflowConfig {
         prompts: None,
-        pipelines: Some(pipelines.into_iter().map(|(k,v)| (k, TomlOption::Value(v))).collect()),
+        pipelines: Some(
+            pipelines
+                .into_iter()
+                .map(|(k, v)| (k, TomlOption::Value(v)))
+                .collect(),
+        ),
         roles: Some(IndexMap::from([
-            ("role_work".to_string().into(), TomlOption::Value(role_with_all_tools())),
-            ("role_finish".to_string().into(), TomlOption::Value(role_with_all_tools())),
-            ("role_merge".to_string().into(), TomlOption::Value(role_with_all_tools())),
+            (
+                "role_work".to_string().into(),
+                TomlOption::Value(role_with_all_tools()),
+            ),
+            (
+                "role_finish".to_string().into(),
+                TomlOption::Value(role_with_all_tools()),
+            ),
+            (
+                "role_merge".to_string().into(),
+                TomlOption::Value(role_with_all_tools()),
+            ),
         ])),
         ..Default::default()
     };
@@ -780,7 +845,7 @@ pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
     // Two stages: stage_a has on_success = { pause = true }, stage_b is normal
     let workflow = build_workflow(vec![
         StageDef {
-            on_success: Some(StageTransition::pause()).into(),
+            on_success: Some(StageTransition::pause()),
             ..StageDef::new("stage_a", "role_a", "main")
         },
         StageDef::new("stage_b", "role_b", "main"),

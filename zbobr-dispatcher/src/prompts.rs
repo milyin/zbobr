@@ -134,7 +134,7 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
         pipeline: Pipeline::from("main"),
         run_id: 1,
         stage: Stage::new("planning"),
-        tool: Some(Executor::CLAUDE.to_string()).into(),
+        tool: Some(Executor::CLAUDE.to_string()),
         model: None,
         prompt_link: None,
         output_link: None,
@@ -681,7 +681,12 @@ mod tests {
         pipelines.insert(
             Pipeline::from("main"),
             zbobr_utility::TomlOption::Value(PipelineConfig {
-                stages: Some(stages.into_iter().map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v))).collect()),
+                stages: Some(
+                    stages
+                        .into_iter()
+                        .map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v)))
+                        .collect(),
+                ),
             }),
         );
         let config = WorkflowConfig {
@@ -806,7 +811,12 @@ mod tests {
     ) -> ConfiguredPromptBuilder {
         let config = WorkflowConfig {
             prompts: None,
-            pipelines: Some(pipelines.into_iter().map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v))).collect()),
+            pipelines: Some(
+                pipelines
+                    .into_iter()
+                    .map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v)))
+                    .collect(),
+            ),
             roles: Some(indexmap::IndexMap::new()),
             ..Default::default()
         };
@@ -843,13 +853,23 @@ mod tests {
         pipelines.insert(
             Pipeline::from("main"),
             PipelineConfig {
-                stages: Some(main_stages.into_iter().map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v))).collect()),
+                stages: Some(
+                    main_stages
+                        .into_iter()
+                        .map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v)))
+                        .collect(),
+                ),
             },
         );
         pipelines.insert(
             Pipeline::from("secondary"),
             PipelineConfig {
-                stages: Some(secondary_stages.into_iter().map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v))).collect()),
+                stages: Some(
+                    secondary_stages
+                        .into_iter()
+                        .map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v)))
+                        .collect(),
+                ),
             },
         );
 
@@ -927,7 +947,12 @@ mod tests {
         );
         WorkflowConfig {
             prompts: None,
-            roles: Some(roles.into_iter().map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v))).collect()),
+            roles: Some(
+                roles
+                    .into_iter()
+                    .map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v)))
+                    .collect(),
+            ),
             pipelines: Some(indexmap::IndexMap::new()),
             ..Default::default()
         }
@@ -1007,7 +1032,12 @@ mod tests {
                 "task".to_string(),
                 TomlOption::Value(PathBuf::from("/prompts/task.md")),
             )])),
-            roles: Some(roles.into_iter().map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v))).collect()),
+            roles: Some(
+                roles
+                    .into_iter()
+                    .map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v)))
+                    .collect(),
+            ),
             pipelines: Some(indexmap::IndexMap::new()),
             ..Default::default()
         };
@@ -1051,7 +1081,12 @@ mod tests {
                     TomlOption::Value(PathBuf::from("/prompts/task.md")),
                 ),
             ])),
-            roles: Some(roles.into_iter().map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v))).collect()),
+            roles: Some(
+                roles
+                    .into_iter()
+                    .map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v)))
+                    .collect(),
+            ),
             pipelines: Some(indexmap::IndexMap::new()),
             ..Default::default()
         };

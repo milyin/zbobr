@@ -38,8 +38,9 @@ fn is_transient_octocrab_error(error: &octocrab::Error) -> bool {
     }
 }
 
-/// Retry a GitHub API operation up to 3 times on transient errors.
-async fn retry_github<T, F, Fut>(op_name: &str, mut f: F) -> anyhow::Result<T>
+/// Retry a GitHub API operation up to 3 times on transient errors, returning the raw
+/// `octocrab::Error` on non-transient failure so callers can apply their own classification.
+async fn retry_github_raw<T, F, Fut>(op_name: &str, mut f: F) -> Result<T, octocrab::Error>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, octocrab::Error>>,
@@ -57,10 +58,33 @@ where
                     tokio::time::sleep(Duration::from_millis(250 * attempt)).await;
                     continue;
                 }
-                return Err(octocrab_to_anyhow(e));
+                return Err(e);
             }
         }
     }
+}
+
+/// Retry a GitHub API operation up to 3 times on transient errors.
+async fn retry_github<T, F, Fut>(op_name: &str, f: F) -> anyhow::Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, octocrab::Error>>,
+{
+    retry_github_raw(op_name, f).await.map_err(octocrab_to_anyhow)
+}
+
+/// Returns `true` for HTTP status codes that make fork upstream sync non-fatal:
+/// conflict (409), unprocessable entity (422), or forbidden (403).
+fn is_nonfatal_fork_sync_status(code: u16) -> bool {
+    matches!(code, 403 | 409 | 422)
+}
+
+fn is_nonfatal_fork_sync_error(e: &octocrab::Error) -> bool {
+    matches!(
+        e,
+        octocrab::Error::GitHub { source, .. }
+            if is_nonfatal_fork_sync_status(source.status_code.as_u16())
+    )
 }
 
 /// Extract the backing bare repository path from a worktree's `.git` file.
@@ -81,8 +105,16 @@ async fn worktree_bare_dir(workspace_path: &Path) -> Option<PathBuf> {
 
 #[derive(Debug, serde::Deserialize)]
 #[allow(dead_code)]
+struct ParentRepo {
+    full_name: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct RepoResponse {
     full_name: String,
+    fork: bool,
+    parent: Option<ParentRepo>,
 }
 
 #[derive(Debug)]
@@ -336,6 +368,11 @@ impl ZbobrRepoBackendGithub {
             ],
         )
         .await?;
+
+        // If the destination repo is a fork, sync its base branch with the upstream
+        // via GitHub's merge-upstream API before fetching, so the subsequent fetch
+        // picks up the freshly synced content.
+        self.sync_fork_if_needed(repo).await?;
 
         tracing::info!("Fetching origin in {}", bare_dir.display());
         git_env(&bare_dir, &["fetch", "origin"], &env).await?;
@@ -640,6 +677,61 @@ impl ZbobrRepoBackendGithub {
             .patch::<serde_json::Value, _, _>(&endpoint, Some(&patch_payload))
             .await
             .map_err(octocrab_to_anyhow)?;
+        Ok(())
+    }
+
+    /// If the destination repository is a GitHub fork, sync its base branch with the upstream
+    /// parent via the GitHub merge-upstream API. Errors that indicate the sync is not possible
+    /// (conflict, unprocessable, forbidden) are non-fatal: a warning is logged and the pipeline
+    /// continues with whatever state the fork is already in.
+    async fn sync_fork_if_needed(&self, repo: &GitHubRepo) -> anyhow::Result<()> {
+        let repo_path = &repo.full_name;
+        let repo_info = retry_github("get repo metadata for fork check", || {
+            self.octocrab
+                .get::<RepoResponse, _, _>(format!("/repos/{repo_path}"), None::<&()>)
+        })
+        .await?;
+
+        if !repo_info.fork {
+            return Ok(());
+        }
+
+        let branch = &self.backend_config.branch;
+        tracing::info!(
+            "Repository {} is a fork; syncing branch '{}' with upstream via GitHub API",
+            repo.full_name,
+            branch
+        );
+
+        let endpoint = format!("/repos/{}/{}/merge-upstream", repo.owner(), repo.name());
+        let payload = serde_json::json!({ "branch": branch });
+
+        match retry_github_raw("sync fork branch with upstream", || {
+            self.octocrab
+                .post::<_, serde_json::Value>(&endpoint, Some(&payload))
+        })
+        .await
+        {
+            Ok(_) => {
+                tracing::info!(
+                    "Successfully synced fork branch '{}' of {} with upstream",
+                    branch,
+                    repo.full_name
+                );
+            }
+            Err(e) if is_nonfatal_fork_sync_error(&e) => {
+                tracing::warn!(
+                    "Could not sync fork branch '{}' of {} with upstream (non-fatal): {}",
+                    branch,
+                    repo.full_name,
+                    octocrab_to_anyhow(e)
+                );
+            }
+            Err(e) => {
+                return Err(octocrab_to_anyhow(e));
+            }
+        }
+
         Ok(())
     }
 }
@@ -1130,5 +1222,37 @@ mod tests {
         };
         let backend = ZbobrRepoBackendGithub::from_config(config).unwrap();
         assert_eq!(backend.backend_config.repository, "myorg/myrepo");
+    }
+
+    // ── fork sync non-fatal status classification tests ──────────────
+
+    #[test]
+    fn fork_sync_nonfatal_status_forbidden() {
+        assert!(is_nonfatal_fork_sync_status(403));
+    }
+
+    #[test]
+    fn fork_sync_nonfatal_status_conflict() {
+        assert!(is_nonfatal_fork_sync_status(409));
+    }
+
+    #[test]
+    fn fork_sync_nonfatal_status_unprocessable() {
+        assert!(is_nonfatal_fork_sync_status(422));
+    }
+
+    #[test]
+    fn fork_sync_fatal_status_not_found() {
+        assert!(!is_nonfatal_fork_sync_status(404));
+    }
+
+    #[test]
+    fn fork_sync_fatal_status_server_error() {
+        assert!(!is_nonfatal_fork_sync_status(500));
+    }
+
+    #[test]
+    fn fork_sync_fatal_status_ok() {
+        assert!(!is_nonfatal_fork_sync_status(200));
     }
 }

@@ -312,9 +312,8 @@ impl Workflow {
                     target_stage,
                     pipeline
                 );
-                let (pipeline_key, pipeline_config) = self
-                    .pipeline_entry(pipeline)
-                    .ok_or_else(|| {
+                let (pipeline_key, pipeline_config) =
+                    self.pipeline_entry(pipeline).ok_or_else(|| {
                         anyhow::anyhow!(
                             "Signal '{signal}' references unknown pipeline '{pipeline}'"
                         )
@@ -385,13 +384,23 @@ mod tests {
             ..Default::default()
         };
         let single_pipeline = |stage_name: &str, role: &str| PipelineConfig {
-            stages: Some(IndexMap::from([(Stage::from(stage_name), role_stage(role))]).into_iter().map(|(k,v)| (k, zbobr_utility::TomlOption::Value(v))).collect()),
+            stages: Some(
+                IndexMap::from([(Stage::from(stage_name), role_stage(role))])
+                    .into_iter()
+                    .map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v)))
+                    .collect(),
+            ),
         };
         WorkflowConfig {
-            pipelines: Some(indexmap::IndexMap::from([
-                ("main".into(), single_pipeline("working", "worker")),
-                ("merge".into(), single_pipeline("merging", "merger")),
-            ]).into_iter().map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v))).collect()),
+            pipelines: Some(
+                indexmap::IndexMap::from([
+                    ("main".into(), single_pipeline("working", "worker")),
+                    ("merge".into(), single_pipeline("merging", "merger")),
+                ])
+                .into_iter()
+                .map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v)))
+                .collect(),
+            ),
             ..Default::default()
         }
     }
@@ -403,13 +412,18 @@ mod tests {
         wf.insert_pipeline(
             zbobr_api::Pipeline::from("review"),
             PipelineConfig {
-                stages: Some(IndexMap::from([(
-                    "checking".into(),
-                    StageDefinition {
-                        role: Some("reviewer".into()).into(),
-                        ..Default::default()
-                    },
-                )]).into_iter().map(|(k,v)| (k, zbobr_utility::TomlOption::Value(v))).collect()),
+                stages: Some(
+                    IndexMap::from([(
+                        "checking".into(),
+                        StageDefinition {
+                            role: Some("reviewer".into()).into(),
+                            ..Default::default()
+                        },
+                    )])
+                    .into_iter()
+                    .map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v)))
+                    .collect(),
+                ),
             },
         );
         let main = wf.pipeline_mut(&zbobr_api::Pipeline::Main).unwrap();
@@ -523,13 +537,18 @@ role = "merger"
             },
         );
         let main = wf.pipeline_mut(&zbobr_api::Pipeline::Main).unwrap();
-        main.stages = Some(IndexMap::from([(
-            "call_sub".into(),
-            StageDefinition {
-                call: Some("sub".into()).into(),
-                ..Default::default()
-            },
-        )]).into_iter().map(|(k,v)| (k, zbobr_utility::TomlOption::Value(v))).collect());
+        main.stages = Some(
+            IndexMap::from([(
+                "call_sub".into(),
+                StageDefinition {
+                    call: Some("sub".into()).into(),
+                    ..Default::default()
+                },
+            )])
+            .into_iter()
+            .map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v)))
+            .collect(),
+        );
         let workflow = Workflow::from_config(wf);
 
         // Pending task (no signal) → state machine should resolve to RunStage for the call stage
@@ -588,7 +607,9 @@ role = "merger"
             },
         );
         let main = wf.pipeline_mut(&zbobr_api::Pipeline::Main).unwrap();
-        let working = main.remove_stage(&zbobr_api::Stage::from("working")).unwrap();
+        let working = main
+            .remove_stage(&zbobr_api::Stage::from("working"))
+            .unwrap();
         main.insert_stage(
             zbobr_api::Stage::from("call_sub"),
             StageDefinition {
@@ -596,7 +617,8 @@ role = "merger"
                 ..Default::default()
             },
         );
-        main.stages_mut().insert(zbobr_api::Stage::from("working"), working);
+        main.stages_mut()
+            .insert(zbobr_api::Stage::from("working"), working);
         // "worker" role should still be found on the "working" stage
         assert!(wf.find_stage_by_role("worker").is_some());
         // No stage has role matching call target name
@@ -607,8 +629,9 @@ role = "merger"
     fn on_success_unknown_stage_fails_validation() {
         let mut wf = base_workflow();
         let main = wf.pipeline_mut(&zbobr_api::Pipeline::Main).unwrap();
-        main.stage_mut(&zbobr_api::Stage::from("working")).unwrap().on_success =
-            Some(zbobr_api::StageTransition::stage("nonexistent")).into();
+        main.stage_mut(&zbobr_api::Stage::from("working"))
+            .unwrap()
+            .on_success = Some(zbobr_api::StageTransition::stage("nonexistent")).into();
         let err = wf.validate().unwrap_err();
         assert!(
             err.to_string()
@@ -621,8 +644,9 @@ role = "merger"
     fn on_failure_unknown_stage_fails_validation() {
         let mut wf = base_workflow();
         let main = wf.pipeline_mut(&zbobr_api::Pipeline::Main).unwrap();
-        main.stage_mut(&zbobr_api::Stage::from("working")).unwrap().on_failure =
-            Some(zbobr_api::StageTransition::stage("nonexistent")).into();
+        main.stage_mut(&zbobr_api::Stage::from("working"))
+            .unwrap()
+            .on_failure = Some(zbobr_api::StageTransition::stage("nonexistent")).into();
         let err = wf.validate().unwrap_err();
         assert!(
             err.to_string()
@@ -635,8 +659,9 @@ role = "merger"
     fn on_success_self_reference_allowed() {
         let mut wf = base_workflow();
         let main = wf.pipeline_mut(&zbobr_api::Pipeline::Main).unwrap();
-        main.stage_mut(&zbobr_api::Stage::from("working")).unwrap().on_success =
-            Some(zbobr_api::StageTransition::stage("working")).into();
+        main.stage_mut(&zbobr_api::Stage::from("working"))
+            .unwrap()
+            .on_success = Some(zbobr_api::StageTransition::stage("working")).into();
         assert!(wf.validate().is_ok());
     }
 
@@ -718,8 +743,9 @@ role = "merger"
     fn on_success_pause_only_passes_validation() {
         let mut wf = base_workflow();
         let main = wf.pipeline_mut(&zbobr_api::Pipeline::Main).unwrap();
-        main.stage_mut(&zbobr_api::Stage::from("working")).unwrap().on_success =
-            Some(zbobr_api::StageTransition::pause()).into();
+        main.stage_mut(&zbobr_api::Stage::from("working"))
+            .unwrap()
+            .on_success = Some(zbobr_api::StageTransition::pause()).into();
         assert!(wf.validate().is_ok());
     }
 }

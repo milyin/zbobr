@@ -79,7 +79,9 @@ fn octocrab_to_anyhow(e: octocrab::Error) -> anyhow::Error {
 }
 
 fn format_report_filename_timestamp() -> String {
-    chrono::Local::now().format("%Y-%m-%d_%H-%M-%S_%z").to_string()
+    chrono::Local::now()
+        .format("%Y-%m-%d_%H-%M-%S_%z")
+        .to_string()
 }
 
 fn is_transient_octocrab_error(error: &octocrab::Error) -> bool {
@@ -1874,7 +1876,11 @@ mod flag_tests {
     fn format_report_filename_timestamp_matches_expected_pattern() {
         let timestamp = format_report_filename_timestamp();
 
-        assert_eq!(timestamp.len(), 25, "timestamp should be exactly 25 characters");
+        assert_eq!(
+            timestamp.len(),
+            25,
+            "timestamp should be exactly 25 characters"
+        );
         assert_eq!(timestamp.chars().nth(10), Some('_'));
         assert_eq!(timestamp.chars().nth(19), Some('_'));
         assert!(matches!(timestamp.chars().nth(20), Some('+') | Some('-')));

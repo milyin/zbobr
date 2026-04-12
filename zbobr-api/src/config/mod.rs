@@ -314,8 +314,7 @@ impl zbobr_utility::MergeToml for StageDefinition {
 /// Per-pipeline configuration: an ordered sequence of stages.
 ///
 /// Stage order is determined by insertion order in the `IndexMap`.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-#[derive(Default)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Default)]
 #[config_struct]
 pub struct PipelineConfig {
     #[config(path, skip_args)]
@@ -326,25 +325,18 @@ impl PipelineConfig {
     /// Resolve relative path fields in all stages against the given base directory.
     pub fn resolve_paths(self, config_dir: &Path) -> Self {
         Self {
-            stages: self
-                .stages
-                .map(|stages| {
-                    stages
-                        .into_iter()
-                        .map(|(name, stage)| {
-                            (name, stage.map(|stage| stage.resolve_paths(config_dir)))
-                        })
-                        .collect()
-                }),
+            stages: self.stages.map(|stages| {
+                stages
+                    .into_iter()
+                    .map(|(name, stage)| (name, stage.map(|stage| stage.resolve_paths(config_dir))))
+                    .collect()
+            }),
         }
     }
 
     /// Look up a stage
     pub fn stage(&self, stage: &Stage) -> Option<&StageDefinition> {
-        self.stages
-            .as_ref()?
-            .get(stage.as_str())?
-            .as_option()
+        self.stages.as_ref()?.get(stage.as_str())?.as_option()
     }
 
     /// Get the index of a stage in the order.
@@ -476,7 +468,6 @@ impl zbobr_utility::MergeToml for PipelineConfig {
     }
 }
 
-
 impl PipelineConfig {
     pub fn stages(&self) -> Option<&IndexMap<Stage, TomlOption<StageDefinition>>> {
         self.stages.as_ref()
@@ -504,8 +495,7 @@ impl PipelineConfig {
 
 /// Top-level workflow configuration: a container of named pipelines and shared roles.
 ///
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-#[derive(Default)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Default)]
 #[config_struct]
 pub struct WorkflowConfig {
     /// Workflow-level named prompt slots inherited by all roles and stages.
@@ -525,9 +515,7 @@ pub struct WorkflowConfig {
     pub pipelines: Option<IndexMap<Pipeline, TomlOption<PipelineConfig>>>,
 }
 
-
 impl WorkflowConfig {
-
     pub fn pipelines_mut(&mut self) -> &mut IndexMap<Pipeline, TomlOption<PipelineConfig>> {
         if self.pipelines.is_none() {
             self.pipelines = Some(IndexMap::new());
@@ -559,10 +547,7 @@ impl WorkflowConfig {
     }
     /// Look up a pipeline by name.
     pub fn pipeline(&self, name: &Pipeline) -> Option<&PipelineConfig> {
-        self.pipelines
-            .as_ref()?
-            .get(name.as_str())?
-            .as_option()
+        self.pipelines.as_ref()?.get(name.as_str())?.as_option()
     }
 
     /// Look up a stage in a specific pipeline.
@@ -633,8 +618,7 @@ impl WorkflowConfig {
                         .filter(|s| s.role().map(|r| r.as_str()) == Some(role))
                         .map(|s| (name, s))
                 })
-            })
-            {
+            }) {
                 return Some((pname, sname.as_str(), stage));
             }
         }
@@ -913,11 +897,16 @@ impl ZbobrDispatcherConfig {
                 );
             }
         }
-        for (pname, pipeline) in workflow.pipelines.as_ref().into_iter().flat_map(|pipelines| {
-            pipelines
-                .iter()
-                .filter_map(|(name, def)| def.as_option().map(|def| (name, def)))
-        }) {
+        for (pname, pipeline) in workflow
+            .pipelines
+            .as_ref()
+            .into_iter()
+            .flat_map(|pipelines| {
+                pipelines
+                    .iter()
+                    .filter_map(|(name, def)| def.as_option().map(|def| (name, def)))
+            })
+        {
             for (sname, stage) in pipeline
                 .stages
                 .as_ref()
@@ -958,9 +947,9 @@ impl ZbobrDispatcherConfig {
         }
         if let Some(role_name) = stage_def.role().map(|r| r.as_str())
             && let Some(role_def) = workflow.role_definition(role_name)
-            && let Some(ref tool) = role_def.tool.as_option()
+            && let Some(tool) = role_def.tool.as_option()
         {
-            return Ok((*tool).clone());
+            return Ok(tool.clone());
         }
         anyhow::bail!(
             "No tool found for stage {:?} with role {:?}",
@@ -999,8 +988,8 @@ impl ZbobrDispatcherConfig {
             .get(&provider)
             .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", provider.as_str()))?;
 
-        if let Some(ref parent_name) = def.parent.as_option() {
-            let parent = self.resolve_single_provider((*parent_name).clone(), visited)?;
+        if let Some(parent_name) = def.parent.as_option() {
+            let parent = self.resolve_single_provider(parent_name.clone(), visited)?;
             let executor = match def.executor.clone() {
                 TomlOption::Value(e) => e,
                 TomlOption::Absent => parent.executor,
@@ -1120,7 +1109,10 @@ mod tests {
         assert_eq!(list_item["abs"], PathBuf::from("/global/main.md"));
 
         let by_name = resolved.by_name.into_option().unwrap();
-        assert_eq!(by_name["review"], PathBuf::from("/config/prompts/review.md"));
+        assert_eq!(
+            by_name["review"],
+            PathBuf::from("/config/prompts/review.md")
+        );
 
         let by_stage = resolved.by_stage.into_option().unwrap();
         let pipeline = &by_stage["pipeline"];
@@ -1837,7 +1829,7 @@ developer = [
         let entry = ToolEntry {
             provider: Provider::new("copilot"),
             model: "claude-sonnet-4.6".parse().unwrap(),
-            priority: Some(5).into(),
+            priority: Some(5),
         };
         let serialized = toml::to_string(&entry).unwrap();
         assert!(
@@ -2154,14 +2146,24 @@ developer = [
 
         // "reviewer" is overridden by the overlay.
         assert_eq!(
-            roles["reviewer"].as_option().unwrap().prompts.as_ref().unwrap()["main"]
+            roles["reviewer"]
+                .as_option()
+                .unwrap()
+                .prompts
+                .as_ref()
+                .unwrap()["main"]
                 .as_option()
                 .unwrap(),
             &PathBuf::from("/project/reviewer_override.md")
         );
         // "worker" survives from the base config unchanged.
         assert_eq!(
-            roles["worker"].as_option().unwrap().prompts.as_ref().unwrap()["main"]
+            roles["worker"]
+                .as_option()
+                .unwrap()
+                .prompts
+                .as_ref()
+                .unwrap()["main"]
                 .as_option()
                 .unwrap(),
             &PathBuf::from("/shared/worker.md")
@@ -2716,9 +2718,7 @@ tool = "developer"
         }
         let root: Root = toml::from_str(toml_str).unwrap();
         let roles = root.workflow.roles.into_option().unwrap();
-        let role = roles["worker"]
-            .as_option()
-            .unwrap();
+        let role = roles["worker"].as_option().unwrap();
         assert!(
             role.mcp.is_none(),
             "missing mcp field should deserialize as None"
@@ -2737,9 +2737,7 @@ mcp = []
         }
         let root: Root = toml::from_str(toml_str).unwrap();
         let roles = root.workflow.roles.into_option().unwrap();
-        let role = roles["worker"]
-            .as_option()
-            .unwrap();
+        let role = roles["worker"].as_option().unwrap();
         assert!(
             role.mcp.as_ref().is_some_and(|v| v.is_empty()),
             "mcp = [] should deserialize as Some(vec![])"
@@ -2758,9 +2756,7 @@ mcp = ["report_success", "report_failure"]
         }
         let root: Root = toml::from_str(toml_str).unwrap();
         let roles = root.workflow.roles.into_option().unwrap();
-        let role = roles["worker"]
-            .as_option()
-            .unwrap();
+        let role = roles["worker"].as_option().unwrap();
         let mcp = role.mcp.as_ref().unwrap();
         assert_eq!(mcp.len(), 2);
         assert_eq!(mcp[0], McpTool::ReportSuccess);
@@ -2860,7 +2856,7 @@ prompts = { task = "common.md", extra = "planning.md" }
                 ToolEntry {
                     provider: Provider::new("copilot"),
                     model: "claude-sonnet-4.6".parse().unwrap(),
-                    priority: Some(5).into(),
+                    priority: Some(5),
                 },
             ],
         );
@@ -2885,7 +2881,7 @@ prompts = { task = "common.md", extra = "planning.md" }
             vec![ToolEntry {
                 provider: Provider::new("gpt"),
                 model: "claude-opus-4.6".parse().unwrap(),
-                priority: Some(1).into(),
+                priority: Some(1),
             }],
         );
         overlay_tools.insert(
@@ -2969,7 +2965,12 @@ prompts = { extra = nan }
 
         // Worker role: prompts.main inherits from base (overlay didn't specify it).
         assert_eq!(
-            roles["worker"].as_option().unwrap().prompts.as_ref().unwrap()["main"]
+            roles["worker"]
+                .as_option()
+                .unwrap()
+                .prompts
+                .as_ref()
+                .unwrap()["main"]
                 .as_option()
                 .map(|p| p.as_path()),
             Some(std::path::Path::new("worker.md"))
