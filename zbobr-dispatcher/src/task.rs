@@ -480,35 +480,18 @@ impl TaskSession {
         .await
     }
 
-    /// Push an entry onto the task's call stack, saving the current pipeline_run_id.
+    /// Push an entry onto the task's call/pause stack, saving the current pipeline_run_id.
+    /// `calling_stage` is the stage in `pipeline` whose on_success/on_failure/on_no_report
+    /// transitions will be consulted when the sub-pipeline or pause returns.
     pub async fn push_stack(
         &self,
         pipeline: impl Into<crate::task::Pipeline>,
-        signal: Signal,
-    ) -> anyhow::Result<()> {
-        self.push_stack_inner(pipeline.into(), signal, None).await
-    }
-
-    pub async fn push_call_stack(
-        &self,
-        pipeline: impl Into<crate::task::Pipeline>,
-        signal: Signal,
         calling_stage: crate::task::Stage,
     ) -> anyhow::Result<()> {
-        self.push_stack_inner(pipeline.into(), signal, Some(calling_stage))
-            .await
-    }
-
-    async fn push_stack_inner(
-        &self,
-        pipeline: crate::task::Pipeline,
-        signal: Signal,
-        calling_stage: Option<crate::task::Stage>,
-    ) -> anyhow::Result<()> {
+        let pipeline = pipeline.into();
         let task = self.get_task().await?;
         let entry = crate::task::StackEntry {
             pipeline,
-            signal,
             pipeline_run_id: task.pipeline_run_id,
             calling_stage,
         };

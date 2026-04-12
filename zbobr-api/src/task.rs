@@ -453,8 +453,9 @@ impl schemars::JsonSchema for State {
 /// from its UI mechanism (e.g., GitHub label changes).
 #[derive(Debug, Clone, PartialEq)]
 pub enum StateOverrideRequest {
-    /// Clear Pause state: pop stack, restore Pending+signal, resume execution.
-    Resume,
+    /// Clear Pause state and return from it with the given signal
+    /// (Return = no-report, ReturnSuccess, or ReturnFailure).
+    Resume(Signal),
     /// Enter Pause state immediately.
     Pause,
     /// Clear call stack and start the given pipeline from its first stage.
@@ -550,8 +551,10 @@ pub enum Signal {
     Go(Stage),
     /// Call a sub-pipeline.
     Call(Pipeline),
-    /// Return successfully from a sub-pipeline.
+    /// Return from a sub-pipeline with no explicit outcome (no-report).
     Return,
+    /// Return from a sub-pipeline with explicit success.
+    ReturnSuccess,
     /// Return with failure from a sub-pipeline.
     ReturnFailure,
 }
@@ -586,6 +589,7 @@ impl std::fmt::Display for Signal {
             Signal::Go(stage) => write!(f, "go_{stage}"),
             Signal::Call(pipeline) => write!(f, "call_{pipeline}"),
             Signal::Return => f.write_str("return"),
+            Signal::ReturnSuccess => f.write_str("return_success"),
             Signal::ReturnFailure => f.write_str("return_failure"),
         }
     }
@@ -600,6 +604,8 @@ impl std::str::FromStr for Signal {
             Ok(Signal::Call(Pipeline::from(pipeline_name)))
         } else if s == "return" {
             Ok(Signal::Return)
+        } else if s == "return_success" {
+            Ok(Signal::ReturnSuccess)
         } else if s == "return_failure" {
             Ok(Signal::ReturnFailure)
         } else {
@@ -630,27 +636,21 @@ impl schemars::JsonSchema for Signal {
     }
 }
 
-/// An entry on the task's call stack, recording which pipeline to return to
-/// and which signal to emit upon return (e.g. `Signal::Go("working")`).
+/// An entry on the task's call/pause stack, recording the pipeline to return to
+/// and the stage in that pipeline whose `on_success`/`on_failure`/`on_no_report`
+/// transitions are consulted when the sub-pipeline (or pause) returns.
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct StackEntry {
-    /// Caller's pipeline to return to after sub-pipeline completion.
+    /// Caller's pipeline to return to after sub-pipeline / pause completion.
     pub pipeline: Pipeline,
     /// Caller's pipeline_run_id to restore on return.
     #[serde(default)]
     pub pipeline_run_id: u64,
-    /// Signal to emit when returning to this pipeline (pause/resume context, or fallback for old
-    /// call entries that pre-date `calling_stage`).
-    #[serde(alias = "stage")]
-    pub signal: Signal,
-    /// Stage in the calling pipeline that initiated a sub-pipeline call.
-    /// Present only for call-stack entries (not pause entries).
-    /// When present, `on_success`/`on_failure` of this stage are consulted at return time
-    /// to determine the actual continuation signal.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub calling_stage: Option<Stage>,
+    /// Stage in the calling pipeline whose transitions determine the continuation
+    /// signal on return (both for call entries and for pause entries).
+    pub calling_stage: Stage,
 }
 
 /// A worktree problem detected before stage execution.

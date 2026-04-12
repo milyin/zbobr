@@ -163,8 +163,7 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
         stack: vec![StackEntry {
             pipeline: Pipeline::from("parent"),
             pipeline_run_id: 1,
-            signal: Signal::Go(Stage::new("done")),
-            calling_stage: None,
+            calling_stage: Stage::new("done"),
         }],
         status: None,
         go_pause: false,

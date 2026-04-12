@@ -59,12 +59,10 @@ pub enum StateAction<'a> {
     RunStage(&'a Pipeline, &'a Stage, &'a StageDefinition),
     /// Task is completed.
     Done,
-    /// Task is paused with an empty stack — waiting for external action.
+    /// Task is paused — waiting for external action (resume handled by pre-pass).
     Paused,
     /// Nothing to do (no signal, no pending action).
     Idle,
-    /// Task is paused with a non-empty stack — pop stack and restore Pending+signal.
-    Resume,
 }
 
 impl Default for Workflow {
@@ -256,7 +254,6 @@ impl Workflow {
             StateAction::Done => tracing::debug!("Task #{}: resolved → Done", task.id),
             StateAction::Paused => tracing::debug!("Task #{}: resolved → Paused", task.id),
             StateAction::Idle => tracing::debug!("Task #{}: resolved → Idle", task.id),
-            StateAction::Resume => tracing::debug!("Task #{}: resolved → Resume (pop stack)", task.id),
         }
         Ok(action)
     }
@@ -273,13 +270,7 @@ impl Workflow {
         match &task.state {
             State::Empty => Ok(StateAction::Idle),
             State::Done => Ok(StateAction::Done),
-            State::Pause => {
-                if task.stack.is_empty() {
-                    Ok(StateAction::Paused)
-                } else {
-                    Ok(StateAction::Resume)
-                }
-            }
+            State::Pause => Ok(StateAction::Paused),
             State::Pending(pipeline) => {
                 if let Some(ref signal) = task.signal {
                     tracing::info!(
@@ -307,18 +298,6 @@ impl Workflow {
             }
             State::Running(_, _) | State::Unknown(_) => Ok(StateAction::Idle),
         }
-    }
-
-    fn resolve_signal(&self, task: &Task, signal: &Signal) -> anyhow::Result<StateAction<'_>> {
-        let pipeline =
-            pipeline_from_state(&task.state).unwrap_or_else(|| self.config.default_pipeline());
-        tracing::info!(
-            "Task #{}: resolve_signal '{}' in pipeline '{}'",
-            task.id,
-            signal,
-            pipeline
-        );
-        self.resolve_signal_in_pipeline(signal, &pipeline)
     }
 
     fn resolve_signal_in_pipeline(
@@ -373,7 +352,7 @@ impl Workflow {
                 })?;
                 Ok(StateAction::RunStage(pipeline_key, stage_key, start))
             }
-            Signal::Return | Signal::ReturnFailure => {
+            Signal::Return | Signal::ReturnSuccess | Signal::ReturnFailure => {
                 tracing::info!(
                     "Signal '{}' → Done (returning from pipeline '{}')",
                     signal,

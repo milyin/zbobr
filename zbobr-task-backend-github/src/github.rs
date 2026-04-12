@@ -32,6 +32,8 @@ const DEFAULT_REPORTS_PATH: &str = "reports";
 const INSTANCE_LABEL_PREFIX: &str = "zbobr:";
 const PIPELINE_LABEL_PREFIX: &str = "pipeline:";
 const PAUSE_LABEL: &str = "pause";
+const YES_LABEL: &str = "yes";
+const NO_LABEL: &str = "no";
 
 const MAX_GITHUB_RETRY_ATTEMPTS: u64 = 5;
 
@@ -464,6 +466,7 @@ impl ZbobrTaskBackendGithubImpl {
     /// - Sets `pipeline:<name>` labels for all active pipelines (from state + stack).
     /// - Clears `pipeline:<name>` labels for pipelines no longer active.
     /// - Sets or clears the `pause` label based on whether state is `State::Pause`.
+    /// - Removes `yes`/`no` labels when not paused (they are consumed after resume).
     async fn apply_pipeline_and_pause_labels(
         &self,
         id: u64,
@@ -514,6 +517,17 @@ impl ZbobrTaskBackendGithubImpl {
             self.add_issue_labels(id, &[PAUSE_LABEL.to_string()]).await?;
         } else if !is_paused && has_pause_label {
             self.remove_issue_label(id, PAUSE_LABEL).await?;
+        }
+
+        // Remove yes/no labels when not paused (they've been consumed after resume)
+        if !is_paused {
+            for label in [YES_LABEL, NO_LABEL] {
+                if current_labels.iter().any(|l| l == label) {
+                    if let Err(e) = self.remove_issue_label(id, label).await {
+                        tracing::warn!("Task #{id}: failed to remove '{label}' label: {e}");
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -592,6 +606,20 @@ impl ZbobrTaskBackendGithubImpl {
             self.update_label(PAUSE_LABEL, "e4e669", "Task is paused").await?;
         } else {
             tracing::info!("Label '{PAUSE_LABEL}' already exists");
+        }
+
+        // Create yes/no labels for pause resume signaling
+        let yes_no_labels = [(YES_LABEL, "0e8a16", "Resume pause with success"), (NO_LABEL, "d73a4a", "Resume pause with failure")];
+        for (label, color, desc) in &yes_no_labels {
+            if !existing_labels.contains(&label.to_string()) {
+                tracing::info!("Creating label '{label}'");
+                self.create_label(label, color, desc).await?;
+            } else if force {
+                tracing::info!("Updating label '{label}' (force)");
+                self.update_label(label, color, desc).await?;
+            } else {
+                tracing::info!("Label '{label}' already exists");
+            }
         }
 
         // Create standard pipeline labels
@@ -1292,9 +1320,16 @@ impl TaskWeak for GithubTaskWeak {
             self.backend.get_issue_labels(self.id).await?.into_iter().collect();
         let expected = expected_labels(&task.state, &task.stack);
 
-        // Pause label removed → Resume
+        // Pause label removed → Resume with signal derived from yes/no labels
         if expected.contains(PAUSE_LABEL) && !actual.contains(PAUSE_LABEL) {
-            return Ok(Some(StateOverrideRequest::Resume));
+            let has_yes = actual.contains(YES_LABEL);
+            let has_no = actual.contains(NO_LABEL);
+            let return_signal = match (has_yes, has_no) {
+                (true, false) => Signal::ReturnSuccess,
+                (false, true) => Signal::ReturnFailure,
+                _ => Signal::Return, // neither or both → no-report
+            };
+            return Ok(Some(StateOverrideRequest::Resume(return_signal)));
         }
 
         // Pause label added → Pause
