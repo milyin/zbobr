@@ -75,8 +75,8 @@ pub enum TaskSubcommand {
         /// Task description
         #[arg(long, default_value = "")]
         description: String,
-        /// Initial state (READY, DONE, etc.; default: READY)
-        #[arg(long, default_value = "READY")]
+        /// Initial state (e.g. pending:main, done; default: pending:main)
+        #[arg(long, default_value = "pending:main")]
         state: String,
         /// When set the task will be paused automatically on every state change
         #[arg(long, action = clap::ArgAction::SetTrue)]

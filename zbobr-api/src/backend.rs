@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::task::{Comment, Signal, StackEntry, State, Task, TaskIdentity};
+use crate::task::{Comment, Signal, StackEntry, State, StateOverrideRequest, Task, TaskIdentity};
 
 /// Unicode symbol prepended to every formatted error status message.
 pub const ERROR_PREFIX: char = '\u{274C}';
@@ -47,6 +47,12 @@ pub trait TaskWeak: Send + Sync {
 
     /// Read a stored report file by name.
     async fn read_report(&self, name: &str) -> anyhow::Result<String>;
+
+    /// Poll whether the user has requested a state change via the backend's UI mechanism.
+    /// Returns `None` if no change is pending.
+    /// Detection logic is backend-specific (e.g., GitHub label changes); the dispatcher
+    /// applies the result via `modify_task`, which re-syncs the backend UI state automatically.
+    async fn pending_override(&self) -> anyhow::Result<Option<StateOverrideRequest>>;
 }
 
 /// Exclusive mutable handle. Obtained via `TaskWeak::upgrade()`. Dropping releases the lock.

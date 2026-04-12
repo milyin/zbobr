@@ -8,7 +8,7 @@ use tokio::{
     sync::{Mutex, OwnedMutexGuard},
 };
 use zbobr_api::{
-    Comment, Signal, StackEntry, State, Task,
+    Comment, Signal, StackEntry, State, StateOverrideRequest, Task,
     backend::{TaskBackend, TaskMut, TaskWeak},
     task::TaskContext,
 };
@@ -370,6 +370,10 @@ impl TaskWeak for FsTaskWeak {
 
     async fn read_report(&self, name: &str) -> anyhow::Result<String> {
         self.backend.read_report(self.id, name).await
+    }
+
+    async fn pending_override(&self) -> anyhow::Result<Option<StateOverrideRequest>> {
+        Ok(None)
     }
 }
 

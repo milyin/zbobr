@@ -306,7 +306,6 @@ pub use crate::config::Stage;
 /// - `""` (empty)
 /// - `"done"`
 /// - `"pause"`
-/// - `"ready"`
 /// - `"pending:{pipeline}"`
 /// - `"running:{pipeline}:{stage}"`
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -315,7 +314,6 @@ pub enum State {
     Empty,
     Done,
     Pause,
-    Ready,
     Pending(Pipeline),
     Running(Pipeline, Stage),
     /// Unrecognized state preserved verbatim to keep compatibility with
@@ -342,10 +340,6 @@ impl State {
 
     pub fn is_pause(&self) -> bool {
         matches!(self, State::Pause)
-    }
-
-    pub fn is_ready(&self) -> bool {
-        matches!(self, State::Ready)
     }
 
     pub fn is_pending(&self) -> bool {
@@ -378,7 +372,6 @@ impl State {
             State::Empty => String::new(),
             State::Done => "done".to_string(),
             State::Pause => "pause".to_string(),
-            State::Ready => "ready".to_string(),
             State::Pending(pipeline) => format!("pending:{}", pipeline.as_str()),
             State::Running(pipeline, stage) => {
                 format!("running:{}:{}", pipeline.as_str(), stage.as_str())
@@ -399,7 +392,6 @@ impl From<&str> for State {
         match parts.next().unwrap() {
             "done" => State::Done,
             "pause" => State::Pause,
-            "ready" => State::Ready,
             "pending" => match parts.next() {
                 Some(p) if !p.is_empty() => State::Pending(Pipeline::from(p)),
                 _ => State::Unknown(s.to_string()),
@@ -429,6 +421,12 @@ impl std::str::FromStr for State {
     }
 }
 
+impl std::fmt::Display for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_serde_string())
+    }
+}
+
 impl serde::Serialize for State {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.to_serde_string())
@@ -451,27 +449,38 @@ impl schemars::JsonSchema for State {
     }
 }
 
-/// A pipeline identifier: one of the three built-in pipelines or a custom one.
-#[derive(Debug, Clone)]
-pub enum Pipeline {
-    /// The primary workflow pipeline (name: `"main"`).
-    Main,
-    /// The merge/conflict-resolution pipeline (name: `"merge"`).
-    Merge,
-    /// Any other user-defined pipeline.
-    Custom(String),
+/// A user-initiated state change request detected by the task backend
+/// from its UI mechanism (e.g., GitHub label changes).
+#[derive(Debug, Clone, PartialEq)]
+pub enum StateOverrideRequest {
+    /// Clear Pause state and return from it with the given signal
+    /// (Return = no-report, ReturnSuccess, or ReturnFailure).
+    Resume(Signal),
+    /// Enter Pause state immediately.
+    Pause,
+    /// Clear call stack and start the given pipeline from its first stage.
+    RunPipeline(Pipeline),
 }
+
+/// A pipeline identifier: one of the built-in pipelines or a custom one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Pipeline(pub std::borrow::Cow<'static, str>);
 
 impl Pipeline {
     pub const MAIN: &'static str = "main";
     pub const MERGE: &'static str = "merge";
 
+    pub const fn new(s: &'static str) -> Self {
+        Pipeline(std::borrow::Cow::Borrowed(s))
+    }
+
+    #[allow(non_upper_case_globals)]
+    pub const Main: Pipeline = Pipeline::new(Self::MAIN);
+    #[allow(non_upper_case_globals)]
+    pub const Merge: Pipeline = Pipeline::new(Self::MERGE);
+
     pub fn as_str(&self) -> &str {
-        match self {
-            Pipeline::Main => Self::MAIN,
-            Pipeline::Merge => Self::MERGE,
-            Pipeline::Custom(s) => s.as_str(),
-        }
+        &self.0
     }
 }
 
@@ -484,11 +493,7 @@ impl std::fmt::Display for Pipeline {
 impl std::str::FromStr for Pipeline {
     type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            Self::MAIN => Pipeline::Main,
-            Self::MERGE => Pipeline::Merge,
-            other => Pipeline::Custom(other.to_string()),
-        })
+        Ok(Pipeline(std::borrow::Cow::Owned(s.to_string())))
     }
 }
 
@@ -498,41 +503,22 @@ impl std::borrow::Borrow<str> for Pipeline {
     }
 }
 
-impl PartialEq for Pipeline {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_str() == other.as_str()
-    }
-}
-
-impl Eq for Pipeline {}
-
-impl std::hash::Hash for Pipeline {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::hash::Hash::hash(self.as_str(), state);
-    }
-}
-
-impl PartialOrd for Pipeline {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Pipeline {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.as_str().cmp(other.as_str())
+impl std::ops::Deref for Pipeline {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
     }
 }
 
 impl From<&str> for Pipeline {
     fn from(s: &str) -> Self {
-        s.parse().unwrap()
+        Pipeline(std::borrow::Cow::Owned(s.to_string()))
     }
 }
 
 impl From<String> for Pipeline {
     fn from(s: String) -> Self {
-        s.parse().unwrap()
+        Pipeline(std::borrow::Cow::Owned(s))
     }
 }
 
@@ -565,8 +551,10 @@ pub enum Signal {
     Go(Stage),
     /// Call a sub-pipeline.
     Call(Pipeline),
-    /// Return successfully from a sub-pipeline.
+    /// Return from a sub-pipeline with no explicit outcome (no-report).
     Return,
+    /// Return from a sub-pipeline with explicit success.
+    ReturnSuccess,
     /// Return with failure from a sub-pipeline.
     ReturnFailure,
 }
@@ -601,6 +589,7 @@ impl std::fmt::Display for Signal {
             Signal::Go(stage) => write!(f, "go_{stage}"),
             Signal::Call(pipeline) => write!(f, "call_{pipeline}"),
             Signal::Return => f.write_str("return"),
+            Signal::ReturnSuccess => f.write_str("return_success"),
             Signal::ReturnFailure => f.write_str("return_failure"),
         }
     }
@@ -615,6 +604,8 @@ impl std::str::FromStr for Signal {
             Ok(Signal::Call(Pipeline::from(pipeline_name)))
         } else if s == "return" {
             Ok(Signal::Return)
+        } else if s == "return_success" {
+            Ok(Signal::ReturnSuccess)
         } else if s == "return_failure" {
             Ok(Signal::ReturnFailure)
         } else {
@@ -645,20 +636,21 @@ impl schemars::JsonSchema for Signal {
     }
 }
 
-/// An entry on the task's call stack, recording which pipeline to return to
-/// and which signal to emit upon return (e.g. `Signal::Go("working")`).
+/// An entry on the task's call/pause stack, recording the pipeline to return to
+/// and the stage in that pipeline whose `on_success`/`on_failure`/`on_no_report`
+/// transitions are consulted when the sub-pipeline (or pause) returns.
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct StackEntry {
-    /// Caller's pipeline to return to after sub-pipeline completion.
+    /// Caller's pipeline to return to after sub-pipeline / pause completion.
     pub pipeline: Pipeline,
     /// Caller's pipeline_run_id to restore on return.
     #[serde(default)]
     pub pipeline_run_id: u64,
-    /// Signal to emit when returning to this pipeline.
-    #[serde(alias = "stage")]
-    pub signal: Signal,
+    /// Stage in the calling pipeline whose transitions determine the continuation
+    /// signal on return (both for call entries and for pause entries).
+    pub calling_stage: Stage,
 }
 
 /// A worktree problem detected before stage execution.
@@ -864,13 +856,12 @@ mod tests {
         assert_eq!(State::Empty.to_serde_string(), "");
         assert_eq!(State::Done.to_serde_string(), "done");
         assert_eq!(State::Pause.to_serde_string(), "pause");
-        assert_eq!(State::Ready.to_serde_string(), "ready");
         assert_eq!(
             State::Pending(Pipeline::Main).to_serde_string(),
             "pending:main"
         );
         assert_eq!(
-            State::Pending(Pipeline::Custom("foo".into())).to_serde_string(),
+            State::Pending(Pipeline::from("foo")).to_serde_string(),
             "pending:foo"
         );
         assert_eq!(
@@ -885,11 +876,10 @@ mod tests {
         assert_eq!(State::from(""), State::Empty);
         assert_eq!(State::from("done"), State::Done);
         assert_eq!(State::from("pause"), State::Pause);
-        assert_eq!(State::from("ready"), State::Ready);
         assert_eq!(State::from("pending:main"), State::Pending(Pipeline::Main));
         assert_eq!(
             State::from("pending:foo"),
-            State::Pending(Pipeline::Custom("foo".into()))
+            State::Pending(Pipeline::from("foo"))
         );
         assert_eq!(
             State::from("running:main:working"),
@@ -917,10 +907,9 @@ mod tests {
             State::Empty,
             State::Done,
             State::Pause,
-            State::Ready,
             State::Pending(Pipeline::Main),
             State::Pending(Pipeline::Merge),
-            State::Pending(Pipeline::Custom("custom".into())),
+            State::Pending(Pipeline::from("custom")),
             State::Running(Pipeline::Main, Stage::from("working")),
             State::Running(Pipeline::Merge, Stage::from("reviewing")),
         ];
@@ -934,7 +923,7 @@ mod tests {
     #[test]
     fn state_is_pending() {
         assert!(State::Pending(Pipeline::Main).is_pending());
-        assert!(State::Pending(Pipeline::Custom("x".into())).is_pending());
+        assert!(State::Pending(Pipeline::from("x")).is_pending());
         assert!(!State::Done.is_pending());
         assert!(!State::Running(Pipeline::Main, Stage::from("s")).is_pending());
     }

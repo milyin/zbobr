@@ -84,8 +84,6 @@ const TOOL_DRUDGE: Tool = Tool::new("drudge");
 
 const ROLE_PLANNER: Role = Role::new("planner");
 const ROLE_WORKER: Role = Role::new("worker");
-const ROLE_TEST_PLANNER: Role = Role::new("test_planner");
-const ROLE_TEST_WORKER: Role = Role::new("test_worker");
 const ROLE_REVIEWER: Role = Role::new("reviewer");
 const ROLE_TESTER: Role = Role::new("tester");
 const ROLE_LINTER: Role = Role::new("linter");
@@ -95,8 +93,6 @@ const ROLE_MERGER: Role = Role::new("merger");
 const STAGE_PLANNING: Stage = Stage::new("planning");
 const STAGE_WORKING: Stage = Stage::new("working");
 const STAGE_REVIEWING: Stage = Stage::new("reviewing");
-const STAGE_TEST_PLANNER: Stage = Stage::new("test_planner");
-const STAGE_TEST_WORKER: Stage = Stage::new("test_worker");
 const STAGE_LINTING: Stage = Stage::new("linting");
 const STAGE_LINTER_WORKER: Stage = Stage::new("linter_worker");
 const STAGE_TESTING: Stage = Stage::new("testing");
@@ -369,6 +365,8 @@ fn default_config_toml() -> RootConfigToml {
             prompts: workflow.prompts.into(),
             roles: workflow.roles.into(),
             pipelines: workflow.pipelines.into(),
+            on_start: workflow.on_start.into(),
+            on_merge: workflow.on_merge.into(),
         }),
     }
 }
@@ -406,27 +404,6 @@ fn default_workflow() -> WorkflowConfig {
             StageDefinition {
                 role: TomlOption::Value(ROLE_REVIEWER),
                 on_failure: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
-                on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_TEST_PLANNER)),
-                ..Default::default()
-            },
-        ),
-        (
-            STAGE_TEST_PLANNER,
-            StageDefinition {
-                role: TomlOption::Value(ROLE_TEST_PLANNER),
-                on_failure: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
-                on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_TEST_WORKER)),
-                ..Default::default()
-            },
-        ),
-        (
-            STAGE_TEST_WORKER,
-            StageDefinition {
-                role: TomlOption::Value(ROLE_TEST_WORKER),
-                on_failure: TomlOption::Value(StageTransition {
-                    next: Some(STAGE_TEST_WORKER),
-                    pause: true,
-                }),
                 on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
                 ..Default::default()
             },
@@ -511,7 +488,6 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithQuestion,
                     ReportSuccess,
                     ReportIntermediate,
-                    AddChecklistItem,
                     GetCtxRec,
                 ]),
                 prompts: role_prompts("planner.md"),
@@ -533,38 +509,6 @@ fn default_workflow() -> WorkflowConfig {
                 ]),
                 prompts: role_prompts("worker.md"),
                 tool: TomlOption::Value(TOOL_DEVELOPER),
-            },
-        ),
-        (
-            ROLE_TEST_PLANNER,
-            RoleDefinition {
-                mcp: Some(vec![
-                    StopWithError,
-                    StopWithQuestion,
-                    ReportSuccess,
-                    ReportIntermediate,
-                    AddChecklistItem,
-                    GetCtxRec,
-                ]),
-                prompts: role_prompts("test_planner.md"),
-                tool: TomlOption::Value(TOOL_PLANNER),
-            },
-        ),
-        (
-            ROLE_TEST_WORKER,
-            RoleDefinition {
-                mcp: Some(vec![
-                    StopWithError,
-                    ReportSuccess,
-                    ReportFailure,
-                    ReportIntermediate,
-                    StopWithQuestion,
-                    AddChecklistItem,
-                    CheckChecklistItem,
-                    GetCtxRec,
-                ]),
-                prompts: role_prompts("test_worker.md"),
-                tool: TomlOption::Value(TOOL_HELPER),
             },
         ),
         (
@@ -657,6 +601,8 @@ fn default_workflow() -> WorkflowConfig {
                 .map(|(k, v)| (k, TomlOption::Value(v)))
                 .collect(),
         ),
+        on_start: Some("main".into()),
+        on_merge: Some("merge".into()),
     }
 }
 
@@ -724,8 +670,6 @@ fn inline_dispatcher_tables(doc: &mut DocumentMut) {
 const PROMPT_FILES: &[(&str, &str)] = &[
     ("planner", PLANNER_PROMPT),
     ("worker", WORKER_PROMPT),
-    ("test_planner", TEST_PLANNER_PROMPT),
-    ("test_worker", TEST_WORKER_PROMPT),
     ("reviewer", REVIEWER_PROMPT),
     ("linter", LINTER_PROMPT),
     ("linter_worker", LINTER_WORKER_PROMPT),
@@ -767,8 +711,8 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 ## Access Model
 
 - You can access the internet and run local commands.
-- Use MCP `{mcp_report_intermediate}` to present the plan for user review when plan is not yet approved
-- Use MCP `{mcp_add_checklist_item}` and `{mcp_report_success}` to send the the plan to implementation when the plan is approved
+- Use MCP `{mcp_report_intermediate}` to present the plan for user review when the plan is not yet approved
+- Use MCP `{mcp_report_success}` to send the approved plan to implementation
 - Use MCP `{mcp_stop_with_question}` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
 - Use MCP `{mcp_stop_with_error}` only to report technical errors
 "#,
@@ -789,7 +733,7 @@ Your working directory is already the repository with the work branch checked ou
 4. **Design an architecture-level plan**. Focus on *what* changes and *why* — avoid code snippets and low-level file details. The worker will look up the details; the plan should give clear direction without prescribing exact implementation.
 5. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
 6. **Determine if the plan is clear and ready**:
-   - If something is unclear or you have doubts, use `{mcp_stop_with_question}` to ask only focused question(s) with sufficient context to understand the question. Do NOT add checklist items yet. Finish the session after asking.
+   - If something is unclear or you have doubts, use `{mcp_stop_with_question}` to ask only focused question(s) with sufficient context to understand the question. Finish the session after asking.
    - Only if the plan is clear and no questions were posted, proceed to step 7.
 7. **Check for user approval**:
    - Review the most recent (last) comment below to determine if the user unambiguously approves this plan
@@ -804,28 +748,24 @@ Your working directory is already the repository with the work branch checked ou
      - Silence or absence of a comment
      - Any ambiguous message that could be interpreted as something other than plan approval
    - If approval is confirmed (in the last comment or task description):
-     - Proceed to step 8: create checklist items
-     - Then call `{mcp_report_success}` to finalize and proceed to implementation
+     - Call `{mcp_report_success}` with a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog).
    - If approval is NOT confirmed (including any doubt):
-     - Proceed to step 8.5: present the plan for review
-     - Call `{mcp_report_intermediate}` and wait for user feedback
-     - Do NOT create checklist items yet (to avoid noise if plan is rejected)
-     - **When in doubt, always present the plan for review rather than proceeding**
-8. **Prepare checklist items for the worker** (only when plan is approved):
-   - Review the unchecked checklist items in the context below (if any).
-   - Use `{mcp_add_checklist_item}` to add implementation steps for the worker. Each item has two parts: a **brief** summary (shown inline in the context) and a **full_report** with detailed instructions (stored as a linked file). Put concise step title in brief; put the *what* and *why* in full_report — which components or modules to change, which interfaces or data flows are affected, which patterns from the analog to follow. Do NOT include code snippets, exact file paths, or prescriptive implementation details — the worker will look those up.
-   - The checklist items ARE the plan — they should fully describe what the worker needs to do
-   - After creating checklist items, call `{mcp_report_success}` with a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog).
-8.5. **If approval is NOT confirmed**: Present the plan by calling `{mcp_report_intermediate}` with a brief description of the proposed approach. Do NOT include checklist items yet — present only the plan structure and rationale."#,
+     - Present the plan by calling `{mcp_report_intermediate}` with a description of the proposed approach and rationale.
+     - **When in doubt, always present the plan for review rather than proceeding**"#,
 );
 
 const WORKER_PROMPT: &str = concat!(
     r#"# Worker Agent
 
-Implement the task accordingly to the final plan in the context. Notice that there can be multiple plan versions in the history, work on the last one. If the plan is accompanied by checklist items, process them one by one, skip the checked ones. If there are no checklst items, analyze the pan and create checklist items for the implementation steps yourself.
+Implement the task according to the final plan in the context. There can be multiple plan versions in the history — work on the last one.
 
-- Use `{mcp_check_checklist_item}` to mark item as done when you complete the subtask in it.
-- Use `{mcp_add_checklist_item}` to add new item when you discover new job to do or user made additional request in comments.
+**Your first job in every session is to maintain the checklist:**
+- If there are no checklist items yet, read the plan and create them with `{mcp_add_checklist_item}` before writing any code. Break the plan into concrete implementation steps, including any tests you determine are needed.
+- If checklist items exist, skip already-checked ones and process the remaining ones in order.
+- Use `{mcp_check_checklist_item}` to mark an item done when its subtask is complete.
+- Use `{mcp_add_checklist_item}` to add a new item whenever new work is identified: you discover something during implementation, the user requests changes in comments, or a reviewer's report requires follow-up that isn't covered by existing items.
+
+**You own testing.** After implementing the feature, decide whether new tests are needed and add them as checklist items. Prefer tests that validate observable behavior, transitions, and integration boundaries over tests that snapshot static content.
 "#,
     get_ctx_rec_guidance!(),
     r#"
@@ -841,67 +781,27 @@ You can access the internet and run local commands. Your restrictions:
 
 ## Workspace isolation
 
-Workspace branch isolation. Your working directory is already the repository with the work branch checked out. Do not make changes in the destination branch: this is for reference only. Do NOT fetch or use any other branches. If you need temporary or experimental branches, prefix their names with the work branch name to avoid interfering with other agents.
+Your working directory is already the repository with the work branch checked out. Do not make changes in the destination branch: this is for reference only. Do NOT fetch or use any other branches. If you need temporary or experimental branches, prefix their names with the work branch name to avoid interfering with other agents.
 
 Work autonomously. Do not ask the user for anything unless the task genuinely requires human input.
 
 ## Workflow
 
 1. Read the task description, context, and comments provided below in this prompt. The full history and checklist are available in the context section.
-2. **Identify the analog referenced in the plan.** Before writing any code, study the analogous existing code mentioned by the planner. Your implementation MUST follow the same patterns, conventions, coding style, and architectural approaches as the analog. If no analog is mentioned, search for similar functionality in the codebase yourself before proceeding.
-3. Implement the task by going through unchecked checklist items one by one. Commit work after implementing each item.  **Follow the same patterns and style as the identified analog if one is available.**
-4. When implementation for an item is complete, mark the item done with `{mcp_check_checklist_item}` (pass the ctx_rec_N id).
-5. If you sense your context window is getting close to its limit, finish your current item to a buildable state, commit your work, mark completed items as done, call `{mcp_report_intermediate}` with a summary of what you accomplished and what remains and finish the session.
-6. If you need human clarification or intervention, call `{mcp_stop_with_question}`. If the plan is unclear or requires adjustment, call `{mcp_report_failure}`. In case of technical errors use `{mcp_stop_with_error}`.
-7. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
-8. When your current session's work is done, decide how to finish:
+2. **Maintain the checklist** (see above): create items from the plan if none exist, otherwise continue from unchecked items.
+3. **Identify the analog referenced in the plan.** Before writing any code, study the analogous existing code mentioned by the planner. Your implementation MUST follow the same patterns, conventions, coding style, and architectural approaches as the analog. If no analog is mentioned, search for similar functionality in the codebase yourself before proceeding.
+4. Implement the task by going through unchecked checklist items one by one. Commit work after implementing each item. **Follow the same patterns and style as the identified analog if one is available.**
+5. When implementation for an item is complete, mark it done with `{mcp_check_checklist_item}` (pass the ctx_rec_N id).
+6. If you sense your context window is getting close to its limit, finish your current item to a buildable state, commit your work, mark completed items as done, call `{mcp_report_intermediate}` with a summary of what you accomplished and what remains, and finish the session.
+7. If you need human clarification or intervention, call `{mcp_stop_with_question}`. If the plan is unclear or requires adjustment, call `{mcp_report_failure}`. In case of technical errors use `{mcp_stop_with_error}`.
+8. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
+9. When your current session's work is done, decide how to finish:
     - If **all checklist items are completed** (the full plan is done), call `{mcp_report_success}` to report final success.
     - If **some items remain unchecked** (more work is needed in future sessions), call `{mcp_report_intermediate}` to report what you accomplished so far.
 
 ## Coding Guidelines
 
 - **Prefer deriving values from types and constants** rather than using hardcoded string literals. If a value can be computed from an existing type, enum variant, or constant, do it. Avoid duplicating the value as literals or constants."#,
-);
-
-const TEST_PLANNER_PROMPT: &str = concat!(
-    r#"#Analyze the implementation changes and determine if additional tests are required. Your job is to produce a test plan with list of tests to be added.
-
-"#,
-    get_ctx_rec_guidance!(),
-    r#"
-
-## Workflow
-
-1. Read recent plan and recent implemetation report.
-2. Inspect changes in the working branch (e.g., `git diff origin/{destination_branch}...HEAD`) to understand implemented behavior.
-3. Decide whether the new feature/bugfix needs additional tests beyond existing coverage. If no new tests are needed, call `{mcp_report_success}` with only a brief rationale and finish.
-4. Do NOT propose tests that only assert static prompt text or default config literal values.
-5. Treat prompt files and default config examples as source-of-truth authoring artifacts, not behavior contracts to snapshot.
-6. Prefer tests that validate behavior and contracts: transitions/routing, parser/serializer invariants, error handling, and externally observable outcomes.
-7. Add content-based assertions only when exact text/value stability is itself an explicit product/API contract.
-8. Prepare a plan for implementing the required tests as an overview document and set of checklist items
-9. Call `{mcp_add_checklist_item}` for each test or group of related tests.
-10. Call `{mcp_report_success}` with the overview report test-planning work is complete.
-"#,
-);
-
-const TEST_WORKER_PROMPT: &str = concat!(
-    r#"Implement the requested tests and run them.
-
-"#,
-    get_ctx_rec_guidance!(),
-    r#"
-
-## Workflow
-
-1. For each unchecked checklist item related to tests, implement the corresponding test. Commit your work after implementing each item.
-2. Run the implemented tests.
-3. If tests fail, call `{mcp_report_failure}` and include failure details.
-4. If tests pass, call `{mcp_report_success}`.
-
-## Important
-Do not implement any functionality, your job is only to implement and run tests according to the unchecked checklist items.
-"#,
 );
 
 const REVIEWER_PROMPT: &str = concat!(

@@ -74,11 +74,17 @@ impl ToolExecutor for CopilotExecutor {
             format_command_for_log("copilot", &args, work_dir)
         );
 
-        // Set GitHub tokens for copilot agent process
-        tracing::info!("Setting GH_TOKEN for agent and COPILOT_GITHUB_TOKEN for copilot");
+        // Set GitHub tokens for copilot agent process.
+        // Only set COPILOT_GITHUB_TOKEN when non-empty: an empty override would shadow
+        // Copilot's own authentication fallback (e.g. gh auth token).
         cmd.env("GH_TOKEN", agent_github_token)
-            .env("GITHUB_TOKEN", agent_github_token)
-            .env("COPILOT_GITHUB_TOKEN", copilot_github_token);
+            .env("GITHUB_TOKEN", agent_github_token);
+        if !copilot_github_token.is_empty() {
+            tracing::info!("Setting COPILOT_GITHUB_TOKEN from configured token");
+            cmd.env("COPILOT_GITHUB_TOKEN", copilot_github_token);
+        } else {
+            tracing::info!("COPILOT_GITHUB_TOKEN not set; copilot will use its own auth");
+        }
 
         let mut child = cmd.spawn()?;
 
@@ -116,6 +122,11 @@ impl ToolExecutor for CopilotExecutor {
 
         tracing::debug!("Copilot finished execution with status: {status}");
 
+        if !status.success() {
+            tracing::warn!("Copilot exited with non-zero status: {status}");
+            log_copilot_auth_diagnostics(copilot_github_token).await;
+        }
+
         let stdout_lines = stdout_result.unwrap_or_default();
         let stderr_lines = stderr_result.unwrap_or_default();
         let output = combine_output(stdout_lines, stderr_lines);
@@ -124,6 +135,54 @@ impl ToolExecutor for CopilotExecutor {
             output,
             exit_ok: status.success(),
         })
+    }
+}
+
+/// Log GitHub authentication diagnostics after a copilot failure.
+/// Identifies which GitHub user is associated with the given token, or reports
+/// the ambient gh auth status when no token was configured.
+async fn log_copilot_auth_diagnostics(copilot_github_token: &str) {
+    if copilot_github_token.is_empty() {
+        tracing::warn!("COPILOT_GITHUB_TOKEN was not set; checking ambient `gh auth status`");
+        match tokio::process::Command::new("gh")
+            .args(["auth", "status"])
+            .output()
+            .await
+        {
+            Ok(output) => {
+                let text = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                tracing::warn!("gh auth status:\n{}", text.trim());
+            }
+            Err(e) => tracing::warn!("Failed to run `gh auth status`: {e}"),
+        }
+        return;
+    }
+
+    let prefix = &copilot_github_token[..copilot_github_token.len().min(8)];
+    tracing::warn!("COPILOT_GITHUB_TOKEN: {}...", prefix);
+
+    match tokio::process::Command::new("gh")
+        .args(["api", "user", "--jq", ".login"])
+        .env("GH_TOKEN", copilot_github_token)
+        .env("GITHUB_TOKEN", copilot_github_token)
+        .output()
+        .await
+    {
+        Ok(output) if output.status.success() => {
+            let login = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            tracing::warn!("GitHub user for COPILOT_GITHUB_TOKEN: {}", login);
+        }
+        Ok(output) => {
+            tracing::warn!(
+                "Could not identify GitHub user for COPILOT_GITHUB_TOKEN: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Err(e) => tracing::warn!("Failed to run `gh api user` for diagnostics: {e}"),
     }
 }
 

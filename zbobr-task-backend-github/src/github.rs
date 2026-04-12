@@ -7,9 +7,9 @@ use std::{
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use zbobr_api::{
-    Comment, Signal, Task,
+    Comment, Signal, StateOverrideRequest, Task,
     backend::TaskBackend,
-    task::{Pipeline, StackEntry, Stage, State, TaskContext},
+    task::{Pipeline, StackEntry, State, TaskContext},
 };
 
 // -- Parameter name constants (GitHub issue body parameter keys) --
@@ -17,8 +17,7 @@ use zbobr_api::{
 const PARAM_WORK_BRANCH: &str = "work_branch";
 const PARAM_PR_URL: &str = "pr_url";
 const PARAM_STACK: &str = "stack";
-const PARAM_PIPELINE: &str = "pipeline";
-const PARAM_STAGE: &str = "stage";
+const PARAM_STATE: &str = "state";
 const PARAM_SIGNAL: &str = "signal";
 const PARAM_PIPELINE_RUN_ID: &str = "pipeline_run_id";
 const PARAM_STAGE_COUNT: &str = "stage_count";
@@ -30,25 +29,11 @@ const DEFAULT_REPORTS_PATH: &str = "reports";
 
 // -- Label prefix constants (GitHub-backend-specific) --
 
-const STATE_PREFIX: &str = "state:";
-const FLAG_LABEL_PREFIX: &str = "flag:";
 const INSTANCE_LABEL_PREFIX: &str = "zbobr:";
-
-// -- State label name constants --
-
-const STATE_LABEL_DONE: &str = "done";
-const STATE_LABEL_PAUSE: &str = "pause";
-const STATE_LABEL_READY: &str = "ready";
-const STATE_LABEL_PENDING: &str = "pending";
-const STATE_LABEL_RUNNING: &str = "running";
-
-const ALL_STATE_LABEL_NAMES: &[&str] = &[
-    STATE_LABEL_DONE,
-    STATE_LABEL_PAUSE,
-    STATE_LABEL_READY,
-    STATE_LABEL_PENDING,
-    STATE_LABEL_RUNNING,
-];
+const PIPELINE_LABEL_PREFIX: &str = "pipeline:";
+const PAUSE_LABEL: &str = "pause";
+const YES_LABEL: &str = "yes";
+const NO_LABEL: &str = "no";
 
 const MAX_GITHUB_RETRY_ATTEMPTS: u64 = 5;
 
@@ -151,12 +136,6 @@ struct IssueResponse {
     title: String,
     body: Option<String>,
     state: String,
-    labels: Vec<IssueLabel>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct IssueLabel {
-    name: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -229,77 +208,6 @@ impl ZbobrTaskBackendGithubImpl {
 
     fn default_max_stage_count(&self) -> u64 {
         self.backend_config.default_max_stage_count
-    }
-
-    /// Convert a state to its GitHub label representations (state:* label only).
-    fn state_to_labels(state: &State) -> Vec<String> {
-        let state_label = |name: &str| format!("{}{name}", STATE_PREFIX);
-
-        match state {
-            State::Empty => vec![],
-            State::Done => vec![state_label(STATE_LABEL_DONE)],
-            State::Pause => vec![state_label(STATE_LABEL_PAUSE)],
-            State::Ready => vec![state_label(STATE_LABEL_READY)],
-            State::Pending(_) => vec![state_label(STATE_LABEL_PENDING)],
-            State::Running(_, _) => vec![state_label(STATE_LABEL_RUNNING)],
-            State::Unknown(raw) => vec![state_label(raw)],
-        }
-    }
-
-    /// Parse a State from GitHub issue labels and params.
-    /// Pipeline and stage are passed as params (no longer stored in labels).
-    fn labels_to_state(
-        labels: &[IssueLabel],
-        pipeline_param: Option<&str>,
-        stage_param: Option<&str>,
-    ) -> State {
-        let mut state_value: Option<&str> = None;
-
-        for label in labels {
-            if let Some(v) = label.name.strip_prefix(STATE_PREFIX) {
-                state_value = Some(v);
-            }
-        }
-
-        match state_value {
-            None => State::Empty,
-            Some(v) if v == STATE_LABEL_DONE => State::Done,
-            Some(v) if v == STATE_LABEL_PAUSE => State::Pause,
-            Some(v) if v == STATE_LABEL_READY => State::Ready,
-            Some(v) if v == STATE_LABEL_PENDING => match pipeline_param {
-                Some(p) => State::Pending(Pipeline::from(p)),
-                None => State::Unknown(format!("{}{}", STATE_PREFIX, STATE_LABEL_PENDING)),
-            },
-            Some(v) if v == STATE_LABEL_RUNNING => match (pipeline_param, stage_param) {
-                (Some(p), Some(s)) => State::Running(Pipeline::from(p), Stage::from(s)),
-                (None, Some(s)) => State::Unknown(format!(
-                    "{}{}; stage:{s}",
-                    STATE_PREFIX, STATE_LABEL_RUNNING
-                )),
-                (Some(p), None) => State::Unknown(format!(
-                    "{}{}; pipeline:{p}",
-                    STATE_PREFIX, STATE_LABEL_RUNNING
-                )),
-                (None, None) => State::Unknown(format!("{}{}", STATE_PREFIX, STATE_LABEL_RUNNING)),
-            },
-            Some(other) => State::Unknown(format!("{}{other}", STATE_PREFIX)),
-        }
-    }
-
-    /// Return the GitHub label color for a state label.
-    fn state_label_color(label: &str) -> &'static str {
-        if let Some(state_name) = label.strip_prefix(STATE_PREFIX) {
-            match state_name {
-                v if v == STATE_LABEL_DONE => "0e8a16",    // green
-                v if v == STATE_LABEL_READY => "0075ca",   // blue
-                v if v == STATE_LABEL_PAUSE => "e4e669",   // yellow
-                v if v == STATE_LABEL_PENDING => "d3d3d3", // gray
-                v if v == STATE_LABEL_RUNNING => "c2e0c6", // light green
-                _ => "ededed",
-            }
-        } else {
-            "ededed" // fallback light gray
-        }
     }
 
     fn parse_repo(&self) -> anyhow::Result<(&str, &str)> {
@@ -429,68 +337,6 @@ impl ZbobrTaskBackendGithubImpl {
         Ok(())
     }
 
-    /// Apply a state change on a GitHub issue via labels.
-    async fn apply_state_change(&self, id: u64, state: &State) -> anyhow::Result<()> {
-        let (owner, repo) = self.parse_repo()?;
-
-        // Fetch current labels
-        let issue: IssueResponse = retry_github("get issue labels", || {
-            self.octocrab
-                .get(format!("/repos/{owner}/{repo}/issues/{id}"), None::<&()>)
-        })
-        .await?;
-
-        // Get the new labels we want to set
-        let new_labels = Self::state_to_labels(state);
-        let new_labels_set: std::collections::HashSet<&str> =
-            new_labels.iter().map(|s| s.as_str()).collect();
-
-        // Remove state: and legacy flag: labels that are NOT in the new set
-        for label in &issue.labels {
-            if (label.name.starts_with(STATE_PREFIX) || label.name.starts_with(FLAG_LABEL_PREFIX))
-                && !new_labels_set.contains(label.name.as_str())
-            {
-                let _ = retry_github("remove state label", || async {
-                    self.octocrab
-                        .issues(owner, repo)
-                        .remove_label(id, &label.name)
-                        .await
-                })
-                .await;
-            }
-        }
-
-        // Add new state labels if not empty
-        if !new_labels.is_empty() {
-            // Ensure all labels exist before assigning them
-            for label in &new_labels {
-                let color = Self::state_label_color(label);
-                let desc = format!("State: {label}");
-                self.ensure_label_exists(label, color, &desc).await?;
-            }
-
-            // Only add labels that aren't already present
-            let existing_label_names: std::collections::HashSet<&str> =
-                issue.labels.iter().map(|l| l.name.as_str()).collect();
-            let labels_to_add: Vec<String> = new_labels
-                .into_iter()
-                .filter(|label| !existing_label_names.contains(label.as_str()))
-                .collect();
-
-            if !labels_to_add.is_empty() {
-                retry_github("add state labels", || async {
-                    self.octocrab
-                        .issues(owner, repo)
-                        .add_labels(id, &labels_to_add)
-                        .await
-                })
-                .await?;
-            }
-        }
-
-        Ok(())
-    }
-
     /// List all labels in the repository.
     async fn list_labels(&self) -> anyhow::Result<Vec<String>> {
         let (owner, repo) = self.parse_repo()?;
@@ -575,6 +421,120 @@ impl ZbobrTaskBackendGithubImpl {
         Ok(())
     }
 
+    /// Get labels currently applied to a specific issue.
+    async fn get_issue_labels(&self, id: u64) -> anyhow::Result<Vec<String>> {
+        let (owner, repo) = self.parse_repo()?;
+        let labels: Vec<octocrab::models::Label> = retry_github("get issue labels", || {
+            self.octocrab.get(
+                format!("/repos/{owner}/{repo}/issues/{id}/labels"),
+                None::<&()>,
+            )
+        })
+        .await?;
+        Ok(labels.into_iter().map(|l| l.name).collect())
+    }
+
+    /// Add labels to a specific issue.
+    async fn add_issue_labels(&self, id: u64, labels: &[String]) -> anyhow::Result<()> {
+        if labels.is_empty() {
+            return Ok(());
+        }
+        let (owner, repo) = self.parse_repo()?;
+        let body = serde_json::json!({ "labels": labels });
+        let url = format!("/repos/{owner}/{repo}/issues/{id}/labels");
+        retry_github("add issue labels", || {
+            self.octocrab.post(url.clone(), Some(&body))
+        })
+        .await
+        .map(|_: serde_json::Value| ())?;
+        Ok(())
+    }
+
+    /// Remove a specific label from an issue. 404 is silently ignored (label already absent).
+    async fn remove_issue_label(&self, id: u64, label: &str) -> anyhow::Result<()> {
+        let (owner, repo) = self.parse_repo()?;
+        let url = format!("/repos/{owner}/{repo}/issues/{id}/labels/{label}");
+        match self.octocrab._delete(url, None::<&()>).await {
+            Ok(_) => Ok(()),
+            Err(octocrab::Error::GitHub { source, .. }) if source.status_code.as_u16() == 404 => {
+                Ok(())
+            }
+            Err(e) => Err(octocrab_to_anyhow(e)),
+        }
+    }
+
+    /// Update GitHub issue labels to reflect the current task pipeline state.
+    ///
+    /// - Sets `pipeline:<name>` labels for all active pipelines (from state + stack).
+    /// - Clears `pipeline:<name>` labels for pipelines no longer active.
+    /// - Sets or clears the `pause` label based on whether state is `State::Pause`.
+    /// - Removes `yes`/`no` labels when not paused (they are consumed after resume).
+    async fn apply_pipeline_and_pause_labels(
+        &self,
+        id: u64,
+        state: &State,
+        stack: &[StackEntry],
+    ) -> anyhow::Result<()> {
+        // Collect desired pipeline labels
+        let mut desired_pipeline_labels: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        if let Some(pipeline) = state.pipeline() {
+            desired_pipeline_labels
+                .insert(format!("{PIPELINE_LABEL_PREFIX}{}", pipeline.as_str()));
+        }
+        for entry in stack {
+            desired_pipeline_labels
+                .insert(format!("{PIPELINE_LABEL_PREFIX}{}", entry.pipeline.as_str()));
+        }
+
+        // Read current issue labels
+        let current_labels = self.get_issue_labels(id).await?;
+        let current_pipeline_labels: std::collections::HashSet<String> = current_labels
+            .iter()
+            .filter(|l| l.starts_with(PIPELINE_LABEL_PREFIX))
+            .cloned()
+            .collect();
+        let has_pause_label = current_labels.iter().any(|l| l == PAUSE_LABEL);
+
+        // Add missing pipeline labels (ensure label exists in repo first)
+        for label in desired_pipeline_labels.difference(&current_pipeline_labels) {
+            let pipeline_name = label
+                .strip_prefix(PIPELINE_LABEL_PREFIX)
+                .unwrap_or(label.as_str());
+            self.ensure_label_exists(label, "0052cc", &format!("Pipeline: {pipeline_name}"))
+                .await?;
+            self.add_issue_labels(id, &[label.clone()]).await?;
+        }
+
+        // Remove stale pipeline labels
+        for label in current_pipeline_labels.difference(&desired_pipeline_labels) {
+            self.remove_issue_label(id, label).await?;
+        }
+
+        // Sync pause label
+        let is_paused = state.is_pause();
+        if is_paused && !has_pause_label {
+            self.ensure_label_exists(PAUSE_LABEL, "e4e669", "Task is paused")
+                .await?;
+            self.add_issue_labels(id, &[PAUSE_LABEL.to_string()]).await?;
+        } else if !is_paused && has_pause_label {
+            self.remove_issue_label(id, PAUSE_LABEL).await?;
+        }
+
+        // Remove yes/no labels when not paused (they've been consumed after resume)
+        if !is_paused {
+            for label in [YES_LABEL, NO_LABEL] {
+                if current_labels.iter().any(|l| l == label) {
+                    if let Err(e) = self.remove_issue_label(id, label).await {
+                        tracing::warn!("Task #{id}: failed to remove '{label}' label: {e}");
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Ensure the task repo exists (used internally by setup).
     async fn ensure_task_repo_exists(&self) -> anyhow::Result<()> {
         let (owner, repo) = self.parse_repo()?;
@@ -639,33 +599,54 @@ impl ZbobrTaskBackendGithubImpl {
 
         let existing_labels = self.list_labels().await?;
 
-        // Create state labels programmatically from type constants
-        let state_labels: Vec<String> = ALL_STATE_LABEL_NAMES
-            .iter()
-            .map(|name| format!("{}{name}", STATE_PREFIX))
-            .collect();
+        // Create the pause label
+        if !existing_labels.contains(&PAUSE_LABEL.to_string()) {
+            tracing::info!("Creating label '{PAUSE_LABEL}'");
+            self.create_label(PAUSE_LABEL, "e4e669", "Task is paused").await?;
+        } else if force {
+            tracing::info!("Updating label '{PAUSE_LABEL}' (force)");
+            self.update_label(PAUSE_LABEL, "e4e669", "Task is paused").await?;
+        } else {
+            tracing::info!("Label '{PAUSE_LABEL}' already exists");
+        }
 
-        for label_name in &state_labels {
-            let color = Self::state_label_color(label_name);
-            let desc = format!("State: {}", label_name);
-            if !existing_labels.contains(label_name) {
-                tracing::info!("Creating label '{label_name}'");
-                self.create_label(label_name, color, &desc).await?;
+        // Create yes/no labels for pause resume signaling
+        let yes_no_labels = [(YES_LABEL, "0e8a16", "Resume pause with success"), (NO_LABEL, "d73a4a", "Resume pause with failure")];
+        for (label, color, desc) in &yes_no_labels {
+            if !existing_labels.contains(&label.to_string()) {
+                tracing::info!("Creating label '{label}'");
+                self.create_label(label, color, desc).await?;
             } else if force {
-                tracing::info!("Updating label '{label_name}' (force)");
-                self.update_label(label_name, color, &desc).await?;
+                tracing::info!("Updating label '{label}' (force)");
+                self.update_label(label, color, desc).await?;
             } else {
-                tracing::info!("Label '{label_name}' already exists");
+                tracing::info!("Label '{label}' already exists");
             }
         }
 
-        // Delete obsolete managed labels (state:* not in the expected set)
-        let expected_labels: std::collections::HashSet<&str> =
-            state_labels.iter().map(|s| s.as_str()).collect();
-        for label in &existing_labels {
-            if label.starts_with(STATE_PREFIX) && !expected_labels.contains(label.as_str()) {
-                tracing::info!("Deleting obsolete label '{label}'");
-                self.delete_label(label).await?;
+        // Create standard pipeline labels
+        let standard_pipelines = [zbobr_api::Pipeline::MAIN, zbobr_api::Pipeline::MERGE];
+        for pipeline in &standard_pipelines {
+            let label = format!("{PIPELINE_LABEL_PREFIX}{pipeline}");
+            let desc = format!("Pipeline: {pipeline}");
+            if !existing_labels.contains(&label) {
+                tracing::info!("Creating label '{label}'");
+                self.create_label(&label, "0052cc", &desc).await?;
+            } else if force {
+                tracing::info!("Updating label '{label}' (force)");
+                self.update_label(&label, "0052cc", &desc).await?;
+            } else {
+                tracing::info!("Label '{label}' already exists");
+            }
+        }
+
+        // With force: remove obsolete state:* labels left over from the old schema
+        if force {
+            for label in &existing_labels {
+                if label.starts_with("state:") {
+                    tracing::info!("Deleting obsolete state label '{label}' (force)");
+                    self.delete_label(label).await?;
+                }
             }
         }
 
@@ -717,13 +698,13 @@ impl ZbobrTaskBackendGithubImpl {
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
 
-        // pipeline, stage, and signal are stored as params
-        let pipeline_param = params_map.get(PARAM_PIPELINE).map(|s| s.as_str());
-        let stage_param = params_map.get(PARAM_STAGE).map(|s| s.as_str());
         let signal: Option<Signal> = params_map.get(PARAM_SIGNAL).and_then(|s| s.parse().ok());
 
-        // state is stored as label; pipeline/stage come from params
-        let state = Self::labels_to_state(&issue.labels, pipeline_param, stage_param);
+        // state is stored as a single param in canonical format (e.g. "running:main:working")
+        let state: State = params_map
+            .get(PARAM_STATE)
+            .map(|s| s.parse().unwrap_or(State::Empty))
+            .unwrap_or(State::Empty);
 
         let pause = params_map
             .get(PARAM_FLAG_PAUSE)
@@ -860,16 +841,10 @@ impl ZbobrTaskBackendGithubImpl {
         {
             params.insert(PARAM_STACK.to_string(), json);
         }
-        // Store pipeline and stage as params (not labels)
-        match &task.state {
-            State::Pending(pipeline) => {
-                params.insert(PARAM_PIPELINE.to_string(), pipeline.as_str().to_string());
-            }
-            State::Running(pipeline, stage) => {
-                params.insert(PARAM_PIPELINE.to_string(), pipeline.as_str().to_string());
-                params.insert(PARAM_STAGE.to_string(), stage.as_str().to_string());
-            }
-            _ => {}
+        // Store state as a single param in canonical format
+        let state_str = task.state.to_string();
+        if !state_str.is_empty() {
+            params.insert(PARAM_STATE.to_string(), state_str);
         }
         // Store signal as param (not label)
         if let Some(ref signal) = task.signal {
@@ -1059,12 +1034,18 @@ impl ZbobrTaskBackendGithubImpl {
             }
         }
 
-        // Always apply state change to ensure legacy flag: labels are removed even when state is unchanged.
-        self.apply_state_change(id, &task.state).await?;
-
         self.record_cooling(id);
         let mut saved_task = task;
         saved_task.etag = Some(new_desc);
+
+        // Sync pipeline/pause labels to reflect the new state
+        if let Err(e) = self
+            .apply_pipeline_and_pause_labels(id, &saved_task.state, &saved_task.stack)
+            .await
+        {
+            tracing::warn!("Task #{id}: failed to sync labels: {e}");
+        }
+
         Ok(saved_task)
     }
 
@@ -1273,6 +1254,21 @@ impl ZbobrTaskBackendGithubImpl {
 use tokio::sync::OwnedMutexGuard;
 use zbobr_api::backend::{TaskMut, TaskWeak};
 
+/// Compute the set of zbobr-managed labels that should be on an issue given its state + stack.
+fn expected_labels(state: &State, stack: &[StackEntry]) -> std::collections::HashSet<String> {
+    let mut labels = std::collections::HashSet::new();
+    if let Some(pipeline) = state.pipeline() {
+        labels.insert(format!("{PIPELINE_LABEL_PREFIX}{}", pipeline.as_str()));
+    }
+    for entry in stack {
+        labels.insert(format!("{PIPELINE_LABEL_PREFIX}{}", entry.pipeline.as_str()));
+    }
+    if state.is_pause() {
+        labels.insert(PAUSE_LABEL.to_string());
+    }
+    labels
+}
+
 struct GithubTaskWeak {
     id: u64,
     backend: Arc<ZbobrTaskBackendGithubImpl>,
@@ -1312,6 +1308,64 @@ impl TaskWeak for GithubTaskWeak {
 
     async fn read_report(&self, name: &str) -> anyhow::Result<String> {
         self.backend.read_report_internal(self.id, name).await
+    }
+
+    async fn pending_override(&self) -> anyhow::Result<Option<StateOverrideRequest>> {
+        let task = self.snapshot(false).await?;
+
+        // Done/Unknown tasks are never overridable
+        if matches!(task.state, State::Done | State::Unknown(_)) {
+            return Ok(None);
+        }
+
+        let actual: std::collections::HashSet<String> =
+            self.backend.get_issue_labels(self.id).await?.into_iter().collect();
+        let expected = expected_labels(&task.state, &task.stack);
+
+        // Pause label removed → Resume with signal derived from yes/no labels
+        if expected.contains(PAUSE_LABEL) && !actual.contains(PAUSE_LABEL) {
+            let has_yes = actual.contains(YES_LABEL);
+            let has_no = actual.contains(NO_LABEL);
+            let return_signal = match (has_yes, has_no) {
+                (true, false) => Signal::ReturnSuccess,
+                (false, true) => Signal::ReturnFailure,
+                _ => Signal::Return, // neither or both → no-report
+            };
+            return Ok(Some(StateOverrideRequest::Resume(return_signal)));
+        }
+
+        // Pause label added → Pause
+        if !expected.contains(PAUSE_LABEL) && actual.contains(PAUSE_LABEL) {
+            return Ok(Some(StateOverrideRequest::Pause));
+        }
+
+        // New pipeline label added by user → RunPipeline
+        let expected_pipelines: std::collections::HashSet<&str> = expected
+            .iter()
+            .filter_map(|l| l.strip_prefix(PIPELINE_LABEL_PREFIX))
+            .collect();
+        let actual_new_pipelines: Vec<&str> = actual
+            .iter()
+            .filter_map(|l| l.strip_prefix(PIPELINE_LABEL_PREFIX))
+            .filter(|p| !expected_pipelines.contains(*p))
+            .collect();
+
+        match actual_new_pipelines.as_slice() {
+            [pipeline] => {
+                return Ok(Some(StateOverrideRequest::RunPipeline(Pipeline::from(
+                    *pipeline,
+                ))));
+            }
+            [_, _, ..] => {
+                tracing::warn!(
+                    "Task #{}: multiple new pipeline labels set simultaneously — ignoring",
+                    self.id
+                );
+            }
+            [] => {}
+        }
+
+        Ok(None)
     }
 }
 
@@ -1478,9 +1532,14 @@ impl TaskBackend for TaskBackendGithub {
         state: State,
     ) -> anyhow::Result<u64> {
         let (owner, repo) = self.inner.parse_repo()?;
+        let mut init_params = HashMap::new();
+        let state_str = state.to_string();
+        if !state_str.is_empty() {
+            init_params.insert(PARAM_STATE.to_string(), state_str);
+        }
         let body = serialize_description_full(
             description,
-            &HashMap::new(),
+            &init_params,
             &None,
             &TaskContext::default(),
             &[],
@@ -1494,14 +1553,19 @@ impl TaskBackend for TaskBackendGithub {
         })
         .await?;
 
-        let issue_id = issue.number;
-
-        // Apply the initial state as a label
-        if !state.is_empty() {
-            self.inner.apply_state_change(issue_id, &state).await?;
+        // Sync pipeline/pause labels for the initial state
+        if let Err(e) = self
+            .inner
+            .apply_pipeline_and_pause_labels(issue.number, &state, &[])
+            .await
+        {
+            tracing::warn!(
+                "Task #{}: failed to sync labels after create: {e}",
+                issue.number
+            );
         }
 
-        Ok(issue_id)
+        Ok(issue.number)
     }
 
     async fn setup(&self, force: bool) -> anyhow::Result<()> {
@@ -1566,7 +1630,6 @@ mod flag_tests {
             title: "test".to_string(),
             body: Some(body),
             state: "open".to_string(),
-            labels: vec![],
         }
     }
 
@@ -1684,7 +1747,6 @@ mod flag_tests {
             title: "test".to_string(),
             body: Some(body),
             state: "open".to_string(),
-            labels: vec![],
         };
 
         let mut task = issue_to_task(issue);
@@ -1713,7 +1775,7 @@ mod flag_tests {
             id: 1,
             title: "t".to_string(),
             description: "d".to_string(),
-            state: State::Ready,
+            state: State::Pending(zbobr_api::task::Pipeline::Main),
             work_branch: None,
             pr_url: None,
             context: TaskContext {
@@ -1766,7 +1828,7 @@ mod flag_tests {
             id: 1,
             title: "t".to_string(),
             description: "d".to_string(),
-            state: State::Ready,
+            state: State::Pending(zbobr_api::task::Pipeline::Main),
             work_branch: None,
             pr_url: None,
             context: TaskContext {

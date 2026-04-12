@@ -480,17 +480,20 @@ impl TaskSession {
         .await
     }
 
-    /// Push an entry onto the task's call stack, saving the current pipeline_run_id.
+    /// Push an entry onto the task's call/pause stack, saving the current pipeline_run_id.
+    /// `calling_stage` is the stage in `pipeline` whose on_success/on_failure/on_no_report
+    /// transitions will be consulted when the sub-pipeline or pause returns.
     pub async fn push_stack(
         &self,
         pipeline: impl Into<crate::task::Pipeline>,
-        signal: Signal,
+        calling_stage: crate::task::Stage,
     ) -> anyhow::Result<()> {
+        let pipeline = pipeline.into();
         let task = self.get_task().await?;
         let entry = crate::task::StackEntry {
-            pipeline: pipeline.into(),
-            signal,
+            pipeline,
             pipeline_run_id: task.pipeline_run_id,
+            calling_stage,
         };
         self.modify_task(move |mut task| {
             task.stack.push(entry);
@@ -643,6 +646,12 @@ mod comment_model_tests {
                 .get(&(self.id, name.to_string()))
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("report not found: {name}"))
+        }
+
+        async fn pending_override(
+            &self,
+        ) -> anyhow::Result<Option<zbobr_api::StateOverrideRequest>> {
+            Ok(None)
         }
     }
 

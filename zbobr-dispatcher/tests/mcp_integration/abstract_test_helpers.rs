@@ -99,6 +99,7 @@ fn build_workflow_with_roles(
                 .map(|(k, v)| (k, TomlOption::Value(v)))
                 .collect(),
         ),
+        ..Default::default()
     }
 }
 
@@ -153,7 +154,7 @@ async fn write_and_commit(dir: &std::path::Path, file: &str, content: &str, msg:
 pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
     let repo_path = env.create_git_repo("repo_mcp_tools").await;
     let task_id = env
-        .create_task("Test task", "Test task description", "READY")
+        .create_task("Test task", "Test task description", "pending:main")
         .await;
     // Pre-set work branch so the repo backend can set up the workspace
     let work_branch = format!("zbobr_fix-{task_id}-mcp");
@@ -181,7 +182,7 @@ pub async fn run_all_mcp_tools(env: &IntegrationTestEnv) {
 pub async fn run_stage_transfer(env: &IntegrationTestEnv) {
     let _repo_path = env.create_git_repo("repo_transfer").await;
     let task_id = env
-        .create_task("Transfer test", "Transfer test description", "READY")
+        .create_task("Transfer test", "Transfer test description", "pending:main")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-transfer");
     env.update_task_branches(task_id, &work_branch).await;
@@ -253,7 +254,7 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
     .await;
 
     let task_id = env
-        .create_task("Conflict test", "Conflict test description", "READY")
+        .create_task("Conflict test", "Conflict test description", "pending:main")
         .await;
     env.update_task_branches(task_id, work_branch).await;
 
@@ -318,7 +319,7 @@ pub async fn run_auto_conflict(env: &IntegrationTestEnv) {
 pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
     let _repo_path = env.create_git_repo("repo_pause").await;
     let task_id = env
-        .create_task("Pause test", "Pause test description", "READY")
+        .create_task("Pause test", "Pause test description", "pending:main")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-pause");
     env.update_task_branches(task_id, &work_branch).await;
@@ -361,7 +362,7 @@ pub async fn run_pause_on_error(env: &IntegrationTestEnv) {
 pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
     let _repo_path = env.create_git_repo("repo_ready").await;
     let task_id = env
-        .create_task("Ready test", "Ready test description", "READY")
+        .create_task("Ready test", "Ready test description", "pending:main")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-ready");
     env.update_task_branches(task_id, &work_branch).await;
@@ -393,7 +394,7 @@ pub async fn run_ready_dispatch(env: &IntegrationTestEnv) {
 pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
     let _repo_path = env.create_git_repo("repo_signals").await;
     let task_id = env
-        .create_task("Signal test", "Signal test description", "READY")
+        .create_task("Signal test", "Signal test description", "pending:main")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-signals");
     env.update_task_branches(task_id, &work_branch).await;
@@ -445,6 +446,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
                 TomlOption::Value(role_with_all_tools()),
             ),
         ])),
+        ..Default::default()
     };
 
     // First run: failure → return_failure → root pipeline pauses
@@ -484,7 +486,7 @@ pub async fn run_signal_transitions(env: &IntegrationTestEnv) {
 pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
     let _repo_path = env.create_git_repo("repo_ask").await;
     let task_id = env
-        .create_task("Ask test", "Ask test description", "READY")
+        .create_task("Ask test", "Ask test description", "pending:main")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-ask");
     env.update_task_branches(task_id, &work_branch).await;
@@ -514,7 +516,7 @@ pub async fn run_pause_on_ask_user(env: &IntegrationTestEnv) {
 pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
     // Create task WITHOUT identity fields — no routing params
     let task_id = env
-        .create_task("Undefined test", "Undefined test description", "READY")
+        .create_task("Undefined test", "Undefined test description", "pending:main")
         .await;
     // DO NOT set branches — identity is undefined
 
@@ -545,7 +547,7 @@ pub async fn run_auto_undefined(env: &IntegrationTestEnv) {
 pub async fn run_call_stage(env: &IntegrationTestEnv) {
     let _repo_path = env.create_git_repo("repo_call_stage").await;
     let task_id = env
-        .create_task("Call stage test", "Call stage test description", "READY")
+        .create_task("Call stage test", "Call stage test description", "pending:main")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-call");
     env.update_task_branches(task_id, &work_branch).await;
@@ -641,6 +643,7 @@ pub async fn run_call_stage(env: &IntegrationTestEnv) {
                 TomlOption::Value(role_with_all_tools()),
             ),
         ])),
+        ..Default::default()
     };
 
     let scenarios = scenarios_map(vec![
@@ -696,7 +699,7 @@ pub async fn run_pause_state_conversion(env: &IntegrationTestEnv) {
         .create_task(
             "Pause conversion test",
             "Pause conversion test description",
-            "READY",
+            "pending:main",
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-pause-conv");
@@ -743,7 +746,7 @@ pub async fn run_pause_resume_cycle(env: &IntegrationTestEnv) {
         .create_task(
             "Pause resume test",
             "Pause resume test description",
-            "READY",
+            "pending:main",
         )
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-pause-resume");
@@ -769,28 +772,16 @@ pub async fn run_pause_resume_cycle(env: &IntegrationTestEnv) {
     assert_eq!(task.state, State::Pause);
     assert_eq!(task.stack.len(), 1);
 
-    // Step 3: simulate user unpause by setting state to READY
-    env.zbobr
-        .task_backend()
-        .set_task_state(task_id, zbobr_api::State::Ready)
-        .await
-        .unwrap();
-
-    let task = env.get_task(task_id).await;
-    assert_eq!(task.state, State::Ready);
-    assert_eq!(task.stack.len(), 1, "Stack should still have the entry");
-
-    // Step 4: process READY → pops stack, restores pipeline/signal
+    // Step 3: process Pause → Resume (pops stack, restores pipeline/signal), then RunStage
     let success_scenarios = scenarios_map(vec![(
         "role_work",
         abstract_scenarios::report_and_finish_scenario(),
     )]);
+    // First continue_pipeline: Pause+stack → Resume → sets Pending+signal
     env.continue_pipeline(task_id, &workflow, &success_scenarios)
         .await;
 
-    // After READY handler: state=Pending(main), signal=Go(work)
-    // Then process_task resolves and runs the stage with success scenario.
-    // After the stage succeeds (single stage → Return → Done at root → finish)
+    // After Resume handler: state=Pending(main), signal=Go(work)
     // Let it run to completion.
     env.run_to_completion(task_id, &workflow, &success_scenarios, 5)
         .await;
@@ -814,7 +805,7 @@ pub async fn run_pause_resume_cycle(env: &IntegrationTestEnv) {
 pub async fn run_ready_fresh_start(env: &IntegrationTestEnv) {
     let _repo_path = env.create_git_repo("repo_fresh").await;
     let task_id = env
-        .create_task("Fresh start test", "Fresh start test description", "READY")
+        .create_task("Fresh start test", "Fresh start test description", "pending:main")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-fresh");
     env.update_task_branches(task_id, &work_branch).await;
@@ -846,7 +837,7 @@ pub async fn run_ready_fresh_start(env: &IntegrationTestEnv) {
 pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
     let _repo_path = env.create_git_repo("repo_stage_pause").await;
     let task_id = env
-        .create_task("Stage pause test", "Stage pause test description", "READY")
+        .create_task("Stage pause test", "Stage pause test description", "pending:main")
         .await;
     let work_branch = format!("zbobr_fix-{task_id}-stage-pause");
     env.update_task_branches(task_id, &work_branch).await;
@@ -894,18 +885,7 @@ pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
         "Stack should save signal to advance to next stage"
     );
 
-    // Step 3: User unpauses by setting state to READY
-    env.zbobr
-        .task_backend()
-        .set_task_state(task_id, zbobr_api::State::Ready)
-        .await
-        .unwrap();
-
-    let task = env.get_task(task_id).await;
-    assert_eq!(task.state, State::Ready);
-    assert_eq!(task.stack.len(), 1);
-
-    // Step 4: Resume and run to completion (stage_b runs, then DONE)
+    // Step 3: Process Pause+stack → Resume → Pending+signal, then run to completion
     env.run_to_completion(task_id, &workflow, &scenarios, 5)
         .await;
 
@@ -929,7 +909,7 @@ pub async fn run_pause_on_runner_error(env: &IntegrationTestEnv) {
     let _repo_path = env.create_git_repo("repo_runner_err").await;
     // Create task with EMPTY description — this triggers the pre-flight check error
     // inside CliStageRunner::run() before the MCP server is started.
-    let task_id = env.create_task("Runner error test", "", "READY").await;
+    let task_id = env.create_task("Runner error test", "", "pending:main").await;
     let work_branch = format!("zbobr_fix-{task_id}-runner-err");
     env.update_task_branches(task_id, &work_branch).await;
 

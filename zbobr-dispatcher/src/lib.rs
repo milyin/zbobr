@@ -85,7 +85,9 @@ impl ZbobrDispatcher {
         self.config.validate_workflow_refs(self.workflow.config())?;
         // Eagerly resolve providers to catch circular inheritance at startup.
         self.config.resolve_providers()?;
-        self.copilot.config.copilot_github_token.resolve()?;
+        if let Some(ref mut token) = self.copilot.config.copilot_github_token {
+            token.resolve()?;
+        }
         Ok(self)
     }
 
@@ -309,8 +311,12 @@ impl ZbobrDispatcher {
         }
     }
 
-    pub fn copilot_github_token(&self) -> &str {
-        self.copilot.config.copilot_github_token.as_ref()
+    pub fn copilot_github_token(&self) -> Option<&str> {
+        self.copilot
+            .config
+            .copilot_github_token
+            .as_ref()
+            .map(|s| s.as_ref())
     }
 
     pub async fn create_task(
@@ -926,6 +932,7 @@ mod tests {
                     .collect(),
             ),
             pipelines: Some(IndexMap::new()),
+            ..Default::default()
         };
         let workflow = Workflow::from_config(wf_config);
         let dispatcher = make_dispatcher_with_workflow(providers, tools, workflow);

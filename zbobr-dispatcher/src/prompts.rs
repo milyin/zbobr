@@ -155,7 +155,7 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
         id: 1,
         title: "TITLE".to_string(),
         description: "DESCRIPTION".to_string(),
-        state: zbobr_api::State::Ready,
+        state: zbobr_api::State::pending(zbobr_api::Pipeline::Main),
         work_branch: Some("zbobr_fix-1-sample-task".to_string()),
         pr_url: Some(format!("{SAMPLE_REPO_URL}/pull/42")),
         context,
@@ -163,7 +163,7 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
         stack: vec![StackEntry {
             pipeline: Pipeline::from("parent"),
             pipeline_run_id: 1,
-            signal: Signal::Go(Stage::new("done")),
+            calling_stage: Stage::new("done"),
         }],
         status: None,
         go_pause: false,
@@ -693,6 +693,7 @@ mod tests {
             prompts: None,
             pipelines: Some(pipelines),
             roles: Some(indexmap::IndexMap::new()),
+            ..Default::default()
         };
         let workflow = Arc::new(Workflow::from_config(config));
         ConfiguredPromptBuilder::new(base_path, workflow)
@@ -817,6 +818,7 @@ mod tests {
                     .collect(),
             ),
             roles: Some(indexmap::IndexMap::new()),
+            ..Default::default()
         };
         let workflow = Arc::new(Workflow::from_config(config));
         ConfiguredPromptBuilder::new(base_path, workflow)
@@ -952,6 +954,7 @@ mod tests {
                     .collect(),
             ),
             pipelines: Some(indexmap::IndexMap::new()),
+            ..Default::default()
         }
     }
 
@@ -1036,6 +1039,7 @@ mod tests {
                     .collect(),
             ),
             pipelines: Some(indexmap::IndexMap::new()),
+            ..Default::default()
         };
         let stage = StageDefinition {
             role: Some("worker".to_string().into()).into(),
@@ -1084,6 +1088,7 @@ mod tests {
                     .collect(),
             ),
             pipelines: Some(indexmap::IndexMap::new()),
+            ..Default::default()
         };
         let stage = StageDefinition {
             role: Some("worker".to_string().into()).into(),

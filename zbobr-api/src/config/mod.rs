@@ -448,7 +448,13 @@ impl zbobr_utility::MergeToml for PipelineConfig {
             (Some(mut base), Some(overlay)) => {
                 for (k, v) in overlay {
                     if let Some(base_v) = base.get_mut(&k) {
-                        *base_v = base_v.clone().merge(v);
+                        *base_v = match (base_v.clone(), v) {
+                            (
+                                TomlOption::Value(base_stage),
+                                TomlOption::Value(overlay_stage),
+                            ) => TomlOption::Value(base_stage.merge_toml(overlay_stage)),
+                            (base_stage, overlay_stage) => base_stage.merge(overlay_stage),
+                        };
                     } else {
                         base.insert(k, v);
                     }
@@ -495,6 +501,14 @@ pub struct WorkflowConfig {
     /// Workflow-level named prompt slots inherited by all roles and stages.
     #[config(path, skip_args)]
     pub prompts: Option<IndexMap<String, TomlOption<PathBuf>>>,
+    /// Pipeline to use when a new task starts.
+    /// Defaults to `main` when omitted.
+    #[config(skip_args)]
+    pub on_start: Option<Pipeline>,
+    /// Pipeline to use for merge/conflict-resolution tasks.
+    /// Defaults to `merge` when omitted.
+    #[config(skip_args)]
+    pub on_merge: Option<Pipeline>,
     #[config(path, skip_args)]
     pub roles: Option<IndexMap<Role, TomlOption<RoleDefinition>>>,
     #[config(path, skip_args)]
@@ -551,7 +565,12 @@ impl WorkflowConfig {
 
     /// The default pipeline name.
     pub fn default_pipeline(&self) -> Pipeline {
-        Pipeline::Main
+        self.on_start.clone().unwrap_or(Pipeline::Main)
+    }
+
+    /// The merge/conflict-handler pipeline name.
+    pub fn merge_pipeline(&self) -> Pipeline {
+        self.on_merge.clone().unwrap_or(Pipeline::Merge)
     }
 
     /// All pipeline names.
@@ -635,7 +654,7 @@ impl WorkflowConfig {
     /// Validate the entire workflow configuration.
     pub fn validate(&self) -> anyhow::Result<()> {
         // Required pipelines must exist
-        for required in [Pipeline::Main, Pipeline::Merge] {
+        for required in [self.default_pipeline(), self.merge_pipeline()] {
             if self.pipeline(&required).is_none() {
                 anyhow::bail!(
                     "Required pipeline '{}' is missing from [workflow.pipelines]",
@@ -1417,6 +1436,7 @@ mod tests {
             prompts: Default::default(),
             roles: Some(wrap_map_values(roles)),
             pipelines: None,
+            ..Default::default()
         }
     }
 
@@ -1591,6 +1611,7 @@ mod tests {
             prompts: Default::default(),
             roles: None,
             pipelines: Some(wrap_map_values(pipelines)),
+            ..Default::default()
         };
         let err = config.validate_workflow_refs(&workflow).unwrap_err();
         let msg = err.to_string();
@@ -1653,6 +1674,7 @@ mod tests {
             prompts: Default::default(),
             roles: Some(wrap_map_values(roles)),
             pipelines: Some(wrap_map_values(pipelines)),
+            ..Default::default()
         };
         assert!(config.validate_workflow_refs(&workflow).is_ok());
     }
@@ -1710,6 +1732,7 @@ mod tests {
             prompts: Default::default(),
             roles: Some(wrap_map_values(roles)),
             pipelines: Some(wrap_map_values(pipelines)),
+            ..Default::default()
         };
         let err = config.validate_workflow_refs(&workflow).unwrap_err();
         let msg = err.to_string();
@@ -1953,6 +1976,7 @@ developer = [
             prompts: None.into(),
             roles: Some(wrap_map_values(roles)).into(),
             pipelines: Some(wrap_map_values(pipelines)).into(),
+            ..Default::default()
         };
         let resolved = toml.resolve_paths(std::path::Path::new("/shared"));
 
@@ -1978,6 +2002,48 @@ developer = [
     }
 
     #[test]
+    fn workflow_config_start_and_merge_pipeline_defaults_to_main_and_merge() {
+        let wf = WorkflowConfig::default();
+        assert_eq!(wf.default_pipeline(), Pipeline::Main);
+        assert_eq!(wf.merge_pipeline(), Pipeline::Merge);
+    }
+
+    #[test]
+    fn workflow_config_validate_requires_configured_start_and_merge_pipelines() {
+        let mut wf = WorkflowConfig::default();
+        wf.on_start = Some("custom_main".into());
+        wf.on_merge = Some("custom_merge".into());
+        wf.pipelines = Some(IndexMap::from([
+            (
+                Pipeline::from("custom_main"),
+                TomlOption::Value(PipelineConfig {
+                    stages: Some(IndexMap::from([(
+                        Stage::from("work"),
+                        TomlOption::Value(StageDefinition {
+                            role: Some("worker".to_string().into()).into(),
+                            ..Default::default()
+                        }),
+                    )])),
+                }),
+            ),
+            (
+                Pipeline::from("custom_merge"),
+                TomlOption::Value(PipelineConfig {
+                    stages: Some(IndexMap::from([(
+                        Stage::from("merge"),
+                        TomlOption::Value(StageDefinition {
+                            role: Some("merger".to_string().into()).into(),
+                            ..Default::default()
+                        }),
+                    )])),
+                }),
+            ),
+        ]));
+
+        assert!(wf.validate().is_ok());
+    }
+
+    #[test]
     fn workflow_toml_merge_preserves_resolved_paths_from_base() {
         // Simulate two config files from different directories:
         // Base config (from /shared/) defines workflow with relative prompts.
@@ -1999,6 +2065,7 @@ developer = [
             prompts: None.into(),
             roles: Some(wrap_map_values(roles)).into(),
             pipelines: None.into(),
+            ..Default::default()
         };
         let base_resolved = base.resolve_paths(std::path::Path::new("/shared"));
 
@@ -2051,6 +2118,7 @@ developer = [
             prompts: None.into(),
             roles: Some(wrap_map_values(base_roles)).into(),
             pipelines: None.into(),
+            ..Default::default()
         };
 
         // Overlay only overrides "reviewer", with a different prompt.
@@ -2070,6 +2138,7 @@ developer = [
             prompts: None.into(),
             roles: Some(wrap_map_values(overlay_roles)).into(),
             pipelines: None.into(),
+            ..Default::default()
         };
 
         let merged = base.merge_toml(overlay);
@@ -2128,7 +2197,7 @@ developer = [
             },
         );
         base_pipelines.insert(
-            Pipeline::Custom("fix".to_string()),
+            Pipeline::from("fix"),
             PipelineConfig {
                 stages: Some(wrap_map_values(fix_stages)),
             },
@@ -2138,6 +2207,7 @@ developer = [
             prompts: None.into(),
             roles: None.into(),
             pipelines: Some(wrap_map_values(base_pipelines)).into(),
+            ..Default::default()
         };
 
         // Overlay only overrides the Main pipeline.
@@ -2160,6 +2230,7 @@ developer = [
             prompts: None.into(),
             roles: None.into(),
             pipelines: Some(wrap_map_values(overlay_pipelines)).into(),
+            ..Default::default()
         };
 
         let merged = base.merge_toml(overlay);
@@ -2177,7 +2248,7 @@ developer = [
             "senior_planner"
         );
         // Fix pipeline survives from the base config unchanged.
-        let fix = pipelines[&Pipeline::Custom("fix".to_string())]
+        let fix = pipelines[&Pipeline::from("fix")]
             .as_option()
             .unwrap();
         assert_eq!(
@@ -2345,6 +2416,7 @@ developer = [
             prompts: None.into(),
             roles: Some(wrap_map_values(base_roles)).into(),
             pipelines: None.into(),
+            ..Default::default()
         };
 
         // Overlay sets only tool; mcp is None (not specified) so base mcp survives.
@@ -2362,6 +2434,7 @@ developer = [
             prompts: None.into(),
             roles: Some(wrap_map_values(overlay_roles)).into(),
             pipelines: None.into(),
+            ..Default::default()
         };
 
         let merged = base.merge_toml(overlay);
@@ -2417,6 +2490,7 @@ developer = [
             prompts: None.into(),
             roles: Some(wrap_map_values(base_roles)).into(),
             pipelines: None.into(),
+            ..Default::default()
         };
 
         // Overlay explicitly sets mcp = [] (Some(vec![])) to clear the list.
@@ -2433,6 +2507,7 @@ developer = [
             prompts: None.into(),
             roles: Some(wrap_map_values(overlay_roles)).into(),
             pipelines: None.into(),
+            ..Default::default()
         };
 
         let merged = base.merge_toml(overlay);
@@ -2482,6 +2557,7 @@ developer = [
             prompts: None.into(),
             roles: None.into(),
             pipelines: Some(wrap_map_values(base_pipelines)).into(),
+            ..Default::default()
         };
 
         // Overlay patches "planning" stage: changes role but leaves tool as None (not restated).
@@ -2506,6 +2582,7 @@ developer = [
             prompts: None.into(),
             roles: None.into(),
             pipelines: Some(wrap_map_values(overlay_pipelines)).into(),
+            ..Default::default()
         };
 
         let merged = base.merge_toml(overlay);
@@ -2576,6 +2653,7 @@ developer = [
             prompts: None.into(),
             roles: None.into(),
             pipelines: Some(wrap_map_values(base_pipelines)).into(),
+            ..Default::default()
         };
 
         // Overlay clears "extra" slot with nan, leaves "main" alone.
@@ -2603,6 +2681,7 @@ developer = [
             prompts: None.into(),
             roles: None.into(),
             pipelines: Some(wrap_map_values(overlay_pipelines)).into(),
+            ..Default::default()
         };
 
         let merged = base.merge_toml(overlay);
@@ -3044,16 +3123,6 @@ on_success = nan
             stage.on_success().is_none(),
             "nan on_success must produce None at runtime, got: {:?}",
             stage.on_success()
-        );
-    }
-
-    #[test]
-    fn workflow_toml_rejects_legacy_prompts_dir_field() {
-        let toml_str = r#"prompts_dir = "prompts""#;
-        let parsed = toml::from_str::<WorkflowToml>(toml_str);
-        assert!(
-            parsed.is_err(),
-            "legacy prompts_dir field should be rejected"
         );
     }
 

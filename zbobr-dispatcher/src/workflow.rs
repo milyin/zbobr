@@ -59,7 +59,7 @@ pub enum StateAction<'a> {
     RunStage(&'a Pipeline, &'a Stage, &'a StageDefinition),
     /// Task is completed.
     Done,
-    /// Task is paused, waiting for user.
+    /// Task is paused — waiting for external action (resume handled by pre-pass).
     Paused,
     /// Nothing to do (no signal, no pending action).
     Idle,
@@ -93,6 +93,7 @@ impl Default for Workflow {
                         .collect(),
                 ),
                 roles: None,
+                ..Default::default()
             },
         }
     }
@@ -132,6 +133,10 @@ impl Workflow {
 
     pub fn default_pipeline(&self) -> Pipeline {
         self.config.default_pipeline()
+    }
+
+    pub fn merge_pipeline(&self) -> Pipeline {
+        self.config.merge_pipeline()
     }
 
     pub fn pipeline_names(&self) -> Vec<&Pipeline> {
@@ -264,43 +269,6 @@ impl Workflow {
 
         match &task.state {
             State::Empty => Ok(StateAction::Idle),
-            State::Ready => {
-                if task.stack.is_empty() {
-                    // Push default pipeline's start stage
-                    let default_pipeline = self.config.default_pipeline();
-                    tracing::info!(
-                        "Task #{}: READY with empty stack → starting default pipeline '{}'",
-                        task.id,
-                        default_pipeline
-                    );
-                    let (pipeline_key, pipeline_config) =
-                        self.pipeline_entry(&default_pipeline).ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "No start stage for default pipeline '{}'",
-                                default_pipeline
-                            )
-                        })?;
-                    let (stage_name, stage_def) =
-                        pipeline_config.start_stage().ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "No start stage for default pipeline '{}'",
-                                default_pipeline
-                            )
-                        })?;
-                    Ok(StateAction::RunStage(pipeline_key, stage_name, stage_def))
-                } else if let Some(ref signal) = task.signal {
-                    tracing::info!(
-                        "Task #{}: READY with stack (depth={}) and signal '{}' → resolving signal",
-                        task.id,
-                        task.stack.len(),
-                        signal
-                    );
-                    self.resolve_signal(task, signal)
-                } else {
-                    tracing::debug!("Task #{}: READY with stack but no signal → Idle", task.id);
-                    Ok(StateAction::Idle)
-                }
-            }
             State::Done => Ok(StateAction::Done),
             State::Pause => Ok(StateAction::Paused),
             State::Pending(pipeline) => {
@@ -313,28 +281,23 @@ impl Workflow {
                     );
                     self.resolve_signal_in_pipeline(signal, pipeline)
                 } else {
-                    tracing::debug!(
-                        "Task #{}: PENDING in pipeline '{}' but no signal → Idle",
+                    tracing::info!(
+                        "Task #{}: PENDING in pipeline '{}' with no signal → starting from first stage",
                         task.id,
                         pipeline
                     );
-                    Ok(StateAction::Idle)
+                    let (pipeline_key, pipeline_config) = self
+                        .pipeline_entry(pipeline)
+                        .ok_or_else(|| anyhow::anyhow!("Unknown pipeline '{pipeline}'"))?;
+                    let (stage_name, stage_def) =
+                        pipeline_config.start_stage().ok_or_else(|| {
+                            anyhow::anyhow!("Pipeline '{pipeline}' has no start stage")
+                        })?;
+                    Ok(StateAction::RunStage(pipeline_key, stage_name, stage_def))
                 }
             }
             State::Running(_, _) | State::Unknown(_) => Ok(StateAction::Idle),
         }
-    }
-
-    fn resolve_signal(&self, task: &Task, signal: &Signal) -> anyhow::Result<StateAction<'_>> {
-        let pipeline =
-            pipeline_from_state(&task.state).unwrap_or_else(|| self.config.default_pipeline());
-        tracing::info!(
-            "Task #{}: resolve_signal '{}' in pipeline '{}'",
-            task.id,
-            signal,
-            pipeline
-        );
-        self.resolve_signal_in_pipeline(signal, &pipeline)
     }
 
     fn resolve_signal_in_pipeline(
@@ -388,7 +351,7 @@ impl Workflow {
                 })?;
                 Ok(StateAction::RunStage(pipeline_key, stage_key, start))
             }
-            Signal::Return | Signal::ReturnFailure => {
+            Signal::Return | Signal::ReturnSuccess | Signal::ReturnFailure => {
                 tracing::info!(
                     "Signal '{}' → Done (returning from pipeline '{}')",
                     signal,
@@ -588,12 +551,12 @@ role = "merger"
         );
         let workflow = Workflow::from_config(wf);
 
-        // Ready task → state machine should resolve to RunStage for the call stage
+        // Pending task (no signal) → state machine should resolve to RunStage for the call stage
         let task = Task {
             id: 1,
             title: String::new(),
             description: String::new(),
-            state: State::Ready,
+            state: State::Pending(Pipeline::Main),
             work_branch: None,
             pr_url: None,
             context: TaskContext::default(),
