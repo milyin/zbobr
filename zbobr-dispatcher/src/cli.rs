@@ -1284,7 +1284,7 @@ impl ZbobrDispatcher {
         // (e.g., GitHub label changes). Run before any writes so labels from the
         // previous cycle have settled and comparisons are unambiguous.
         for (task, weak) in all_tasks.iter().zip(all_weak.iter()) {
-            if task.state.is_done() || matches!(task.state, State::Empty) {
+            if task.state.is_done() {
                 continue;
             }
             let override_req = match weak.pending_override().await {
