@@ -220,6 +220,9 @@ impl ZbobrRepoBackendGithub {
         // regardless of whether the user supplied an HTTPS URL, SSH URL, or bare "owner/repo".
         let repo = parse_github_repo(&backend_config.repository)?;
         backend_config.repository = repo.full_name;
+        // Octocrab/hyper-rustls requires a process-wide crypto provider.
+        // CLI entrypoints install this early, but library/unit-test callers may not.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let token = backend_config.github_token.as_ref().to_owned();
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(token)
@@ -1185,7 +1188,7 @@ mod tests {
         let config = ZbobrRepoBackendGithubConfig {
             repository: "https://github.com/myorg/myrepo.git".to_string(),
             branch: "main".to_string(),
-            github_token: Secret::value("ghp_test123"),
+            github_token: Secret::value("ghp_012345678901234567890123456789012345"),
             repos_dir: std::path::PathBuf::from("/tmp/test-repos"),
         };
         let backend = ZbobrRepoBackendGithub::from_config(config).unwrap();
@@ -1198,7 +1201,7 @@ mod tests {
         let config = ZbobrRepoBackendGithubConfig {
             repository: "git@github.com:myorg/myrepo.git".to_string(),
             branch: "main".to_string(),
-            github_token: Secret::value("ghp_test123"),
+            github_token: Secret::value("ghp_012345678901234567890123456789012345"),
             repos_dir: std::path::PathBuf::from("/tmp/test-repos"),
         };
         let backend = ZbobrRepoBackendGithub::from_config(config).unwrap();
