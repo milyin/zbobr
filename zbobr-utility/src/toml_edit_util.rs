@@ -142,7 +142,8 @@ value = ""
         let output = doc.to_string();
         assert!(output.contains("[repo]"));
         assert!(output.contains("github_token.value = \"\""));
-        assert!(output.contains("tasks.github_token.value = \"\""));
+        assert!(output.contains("[tasks]"));
+        assert!(output.contains("github_token.value = \"\""));
         assert!(!output.contains("[repo.github_token]"));
         assert!(!output.contains("[tasks.github_token]"));
     }
