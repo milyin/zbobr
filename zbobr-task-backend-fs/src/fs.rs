@@ -373,6 +373,10 @@ impl TaskWeak for FsTaskWeak {
     }
 
     async fn pending_override(&self) -> anyhow::Result<Option<StateOverrideRequest>> {
+        let task = self.snapshot(false).await?;
+        if matches!(task.state, State::Pause) && !task.stack.is_empty() {
+            return Ok(Some(StateOverrideRequest::Resume(Signal::Return)));
+        }
         Ok(None)
     }
 }
