@@ -2014,10 +2014,18 @@ mod tests {
             ..Default::default()
         };
         let main_pipeline = PipelineConfig {
-            stages: Some(IndexMap::from([("working".into(), role_stage)]).into_iter().map(|(k,v)| (k, zbobr_utility::TomlOption::Value(v))).collect()),
+            stages: Some(
+                IndexMap::from([("working".into(), role_stage)])
+                    .into_iter()
+                    .map(|(k, v)| (k, zbobr_utility::TomlOption::Value(v)))
+                    .collect(),
+            ),
         };
         let config = WorkflowConfig {
-            pipelines: Some(indexmap::IndexMap::from([(zbobr_api::Pipeline::from("main"), zbobr_utility::TomlOption::Value(main_pipeline))])),
+            pipelines: Some(indexmap::IndexMap::from([(
+                zbobr_api::Pipeline::from("main"),
+                zbobr_utility::TomlOption::Value(main_pipeline),
+            )])),
             ..Default::default()
         };
         Workflow::from_config(config)

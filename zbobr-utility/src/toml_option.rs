@@ -15,20 +15,15 @@
 ///
 /// Serialization: `Absent` is skipped (use `#[serde(skip_serializing_if = "TomlOption::is_absent")]`),
 /// `ExplicitNone` serializes as `f64::NAN`, `Value(T)` serializes `T` normally.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub enum TomlOption<T> {
     /// Field was not present in the TOML source.
+    #[default]
     Absent,
     /// Field was explicitly set to `nan` — clears inherited value.
     ExplicitNone,
     /// Field carries a normal value.
     Value(T),
-}
-
-impl<T> Default for TomlOption<T> {
-    fn default() -> Self {
-        Self::Absent
-    }
 }
 
 impl<T> TomlOption<T> {

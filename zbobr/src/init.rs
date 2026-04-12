@@ -1,8 +1,6 @@
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::{
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use indexmap::IndexMap;
 use toml_edit::{DocumentMut, Item};
@@ -693,10 +691,10 @@ fn inline_role_prompt_tables(doc: &mut DocumentMut) {
 
     let keys: Vec<String> = roles.iter().map(|(k, _)| k.to_string()).collect();
     for key in &keys {
-        if let Some(role_item) = roles.get_mut(key) {
-            if let Some(role_table) = role_item.as_table_mut() {
-                inline_child_table(role_table, "prompts");
-            }
+        if let Some(role_item) = roles.get_mut(key)
+            && let Some(role_table) = role_item.as_table_mut()
+        {
+            inline_child_table(role_table, "prompts");
         }
         if let Some(mut k) = roles.key_mut(key) {
             k.fmt();
@@ -1142,10 +1140,7 @@ mod tests {
         let wf = default_workflow();
         let merge = wf.pipeline(&Pipeline::Merge).unwrap();
         let merging = merge.stage(&Stage::from("merging")).unwrap();
-        let task_prompt = merging
-            .prompts
-            .as_ref()
-            .and_then(|map| map.get("task"));
+        let task_prompt = merging.prompts.as_ref().and_then(|map| map.get("task"));
         assert_eq!(task_prompt, Some(&TomlOption::ExplicitNone));
     }
 
@@ -1186,21 +1181,21 @@ mod tests {
         for (role_name, role_def) in wf.get_roles().unwrap_or(&indexmap::IndexMap::new()) {
             if let Some(role_def) = role_def.as_option() {
                 for (slot, prompt_opt) in role_def.prompts.iter().flatten() {
-                if let Some(prompt_path) = prompt_opt.as_option() {
-                    let key = prompt_path
-                        .file_stem()
-                        .and_then(|s: &std::ffi::OsStr| s.to_str())
-                        .expect("prompt path has no file stem");
-                    assert!(
-                        registered.contains(key),
-                        "Role '{}' slot '{}' references prompt file '{}' but it is not in PROMPT_FILES",
-                        role_name,
-                        slot,
-                        key
-                    );
+                    if let Some(prompt_path) = prompt_opt.as_option() {
+                        let key = prompt_path
+                            .file_stem()
+                            .and_then(|s: &std::ffi::OsStr| s.to_str())
+                            .expect("prompt path has no file stem");
+                        assert!(
+                            registered.contains(key),
+                            "Role '{}' slot '{}' references prompt file '{}' but it is not in PROMPT_FILES",
+                            role_name,
+                            slot,
+                            key
+                        );
+                    }
                 }
             }
-        }
         }
     }
 
