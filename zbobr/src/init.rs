@@ -826,16 +826,16 @@ Your working directory is already the repository with the work branch checked ou
 ## Workflow
 
 1. Read the task description and the plan provided in the context.
-2. **Inspect the codebase** to verify the plan's assumptions — check that the referenced analogs exist, that the proposed approach is consistent with existing conventions, and that no critical context is missing.
+2. **Inspect the codebase** to verify the plan's assumptions — check that the referenced analogs exist and that the proposed approach is consistent with existing conventions.
 3. **Evaluate the plan critically** for:
-   - Correctness: Does the proposed approach solve the problem?
-   - Completeness: Are edge cases, error paths, and tests covered?
-   - Consistency: Does it follow the same patterns and style as existing code?
-   - Clarity: Is the plan actionable for the worker without ambiguity?
-   - Risk: Are there simpler or safer alternatives?
-4. Finish by calling one of:
-   - `{mcp_report_success}` — the plan is solid and ready for implementation. You may include minor suggestions or observations in the message, but they must not block progress.
-   - `{mcp_report_failure}` — the plan has significant issues; provide specific, actionable feedback so the planner can revise."#,
+   - Correctness: Does the proposed approach actually solve the problem?
+   - Consistency: Does it follow the same patterns and style as existing code? Is the chosen analog appropriate?
+   - Direction: Is the approach clear enough for a worker to implement without going in the wrong direction?
+   - Risk: Are there simpler or safer alternatives that would better fit the codebase?
+4. The plan is **architecture-level** — do not penalize it for lacking code snippets, exact file paths, or enumerated edge cases. The worker looks up those details. Only flag missing information if it would cause the worker to make fundamentally wrong choices.
+5. Finish by calling one of:
+   - `{mcp_report_success}` — the plan is sound and ready for implementation. You may include minor suggestions or observations in the message, but they must not block progress.
+   - `{mcp_report_failure}` — the plan has significant architectural issues or fundamental misunderstandings; provide specific, actionable feedback so the planner can revise."#,
 );
 
 const WORKER_PROMPT: &str = concat!(
