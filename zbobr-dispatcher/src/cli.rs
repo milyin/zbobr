@@ -962,6 +962,37 @@ impl ZbobrDispatcher {
         let calling_stage = &entry.calling_stage;
         let stage_def = self.workflow().stage(&entry.pipeline, calling_stage);
 
+        // Role stages on the stack were interrupted by handle_merge_conflict.
+        // Their on_xxx handlers serve their own completion flow (via sequential_signal),
+        // not merge-pipeline returns. Apply fixed behavior regardless of config:
+        //   success / no-report → re-run the interrupted stage
+        //   failure → pause for manual intervention (keep signal pointing at the stage)
+        if stage_def.map(|s| s.role().is_some()).unwrap_or(false) {
+            if return_signal == Signal::ReturnFailure {
+                let msg = format!(
+                    "Merge pipeline failed while resolving conflict in stage '{}/{}' — manual intervention required",
+                    entry.pipeline, calling_stage
+                );
+                tracing::error!("Task #{task_id}: {msg}");
+                let status = format_error_status(self.config().fixed_offset(), &msg);
+                task_session
+                    .set_pause_with_status_and_signal(
+                        status,
+                        Signal::go(calling_stage.as_str()),
+                    )
+                    .await?;
+            } else {
+                task_session
+                    .set_signal(Some(Signal::go(calling_stage.as_str())))
+                    .await?;
+            }
+            task_session
+                .set_state(State::pending(entry.pipeline.clone()))
+                .await?;
+            return Ok(());
+        }
+
+        // Call/pause stage: consult on_success / on_failure / on_no_report transitions.
         let signal = match &return_signal {
             Signal::ReturnSuccess => {
                 let transition = stage_def.and_then(|s| s.on_success());
