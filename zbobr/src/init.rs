@@ -400,6 +400,7 @@ fn default_workflow() -> WorkflowConfig {
             StageDefinition {
                 role: TomlOption::Value(ROLE_PLAN_REVIEWER),
                 on_failure: TomlOption::Value(StageTransition::stage(STAGE_PLANNING)),
+                on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_PLAN_REVIEW_USER)),
                 ..Default::default()
             },
         ),
@@ -552,7 +553,6 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithQuestion,
                     ReportSuccess,
                     ReportFailure,
-                    ReportIntermediate,
                     GetCtxRec,
                 ]),
                 prompts: role_prompts("plan_reviewer.md"),
@@ -816,7 +816,6 @@ Review the proposed implementation plan and evaluate its soundness, completeness
 - You can access the internet and run local commands.
 - Use `{mcp_report_success}` if the plan is sound and ready for implementation.
 - Use `{mcp_report_failure}` if the plan has significant issues that must be addressed before implementation.
-- Use `{mcp_report_intermediate}` to provide feedback without blocking — when the plan is acceptable but you have suggestions.
 - Use `{mcp_stop_with_question}` when you need clarification on the plan.
 - Use `{mcp_stop_with_error}` only to report technical errors.
 
@@ -835,9 +834,8 @@ Your working directory is already the repository with the work branch checked ou
    - Clarity: Is the plan actionable for the worker without ambiguity?
    - Risk: Are there simpler or safer alternatives?
 4. Finish by calling one of:
-   - `{mcp_report_success}` — the plan is solid and ready for implementation.
-   - `{mcp_report_failure}` — the plan has significant issues; provide specific, actionable feedback so the planner can revise.
-   - `{mcp_report_intermediate}` — the plan is acceptable but has suggestions or minor concerns worth noting."#,
+   - `{mcp_report_success}` — the plan is solid and ready for implementation. You may include minor suggestions or observations in the message, but they must not block progress.
+   - `{mcp_report_failure}` — the plan has significant issues; provide specific, actionable feedback so the planner can revise."#,
 );
 
 const WORKER_PROMPT: &str = concat!(
