@@ -800,7 +800,7 @@ Your working directory is already the repository with the work branch checked ou
 6. **Determine if the plan is clear and ready**:
    - If something is unclear or you have doubts, use `{mcp_stop_with_question}` to ask only focused question(s) with sufficient context to understand the question. Finish the session after asking.
    - Only if the plan is clear and no questions were posted, proceed to step 7.
-7. Call `{mcp_report_success}` with the plan and a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog). The review stage will handle approval."#,
+7. Call `{mcp_report_success}` with the plan and a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog). **Include the full plan text inline in the report — do NOT write it to a file and reference a path. The entire plan must be readable directly from the report in the context.** The review stage will handle approval."#,
 );
 
 const PLAN_REVIEWER_PROMPT: &str = concat!(
@@ -843,7 +843,7 @@ Your working directory is already the repository with the work branch checked ou
 const WORKER_PROMPT: &str = concat!(
     r#"# Worker Agent
 
-Implement the task according to the final plan in the context. There can be multiple plan versions in the history — work on the last one.
+Implement the task according to the plan in the context. There can be multiple plan versions in the history — always use the **latest** (most recent) plan. Do not use earlier plan versions even if they appear first in the context.
 
 **Your first job in every session is to maintain the checklist:**
 - If there are no checklist items yet, read the plan and create them with `{mcp_add_checklist_item}` before writing any code. Break the plan into concrete implementation steps, including any tests you determine are needed.
@@ -873,7 +873,7 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 
 ## Workflow
 
-1. Read the task description, context, and comments provided below in this prompt. The full history and checklist are available in the context section.
+1. Read the task description, context, and comments provided below in this prompt. The full history and checklist are available in the context section. **Identify the latest plan** — if multiple plan iterations exist, use only the most recent one; earlier versions are superseded.
 2. **Maintain the checklist** (see above): create items from the plan if none exist, otherwise continue from unchecked items.
 3. **Identify the analog referenced in the plan.** Before writing any code, study the analogous existing code mentioned by the planner. Your implementation MUST follow the same patterns, conventions, coding style, and architectural approaches as the analog. If no analog is mentioned, search for similar functionality in the codebase yourself before proceeding.
 4. Implement the task by going through unchecked checklist items one by one. Commit work after implementing each item. **Follow the same patterns and style as the identified analog if one is available.**
