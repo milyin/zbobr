@@ -42,7 +42,7 @@ fn apply_transition(
 }
 
 /// Workflow wraps a `WorkflowConfig` and exposes state machine logic as methods.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Workflow {
     config: WorkflowConfig,
 }
@@ -57,40 +57,6 @@ pub enum StateAction<'a> {
     Paused,
     /// Nothing to do (no signal, no pending action).
     Idle,
-}
-
-impl Default for Workflow {
-    fn default() -> Self {
-        let mut pipelines = IndexMap::new();
-        let dummy_stage = StageDefinition {
-            role: Some("default".to_string().into()).into(),
-            ..Default::default()
-        };
-        for name in [Pipeline::MAIN, Pipeline::MERGE] {
-            pipelines.insert(
-                Pipeline::from(name),
-                PipelineConfig {
-                    stages: Some(IndexMap::from([(
-                        Stage::from("default"),
-                        TomlOption::Value(dummy_stage.clone()),
-                    )])),
-                },
-            );
-        }
-        Self {
-            config: WorkflowConfig {
-                prompts: None,
-                pipelines: Some(
-                    pipelines
-                        .into_iter()
-                        .map(|(k, v)| (k, TomlOption::Value(v)))
-                        .collect(),
-                ),
-                roles: None,
-                ..Default::default()
-            },
-        }
-    }
 }
 
 impl Workflow {
@@ -125,12 +91,12 @@ impl Workflow {
         self.config.all_stages()
     }
 
-    pub fn default_pipeline(&self) -> Pipeline {
-        self.config.default_pipeline()
+    pub fn on_start(&self) -> Pipeline {
+        self.config.on_start.clone().unwrap_or("main".into())
     }
 
-    pub fn merge_pipeline(&self) -> Pipeline {
-        self.config.merge_pipeline()
+    pub fn on_merge(&self) -> Pipeline {
+        self.config.on_merge.clone().unwrap_or("merge".into())
     }
 
     pub fn pipeline_names(&self) -> Vec<&Pipeline> {

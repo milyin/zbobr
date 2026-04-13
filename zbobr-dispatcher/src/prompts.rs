@@ -155,7 +155,7 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
         id: 1,
         title: "TITLE".to_string(),
         description: "DESCRIPTION".to_string(),
-        state: zbobr_api::State::pending(zbobr_api::Pipeline::Main),
+        state: zbobr_api::State::pending("main".to_string()),
         work_branch: Some("zbobr_fix-1-sample-task".to_string()),
         pr_url: Some(format!("{SAMPLE_REPO_URL}/pull/42")),
         context,

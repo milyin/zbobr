@@ -437,10 +437,9 @@ impl zbobr_utility::MergeToml for PipelineConfig {
                 for (k, v) in overlay {
                     if let Some(base_v) = base.get_mut(&k) {
                         *base_v = match (base_v.clone(), v) {
-                            (
-                                TomlOption::Value(base_stage),
-                                TomlOption::Value(overlay_stage),
-                            ) => TomlOption::Value(base_stage.merge_toml(overlay_stage)),
+                            (TomlOption::Value(base_stage), TomlOption::Value(overlay_stage)) => {
+                                TomlOption::Value(base_stage.merge_toml(overlay_stage))
+                            }
                             (base_stage, overlay_stage) => base_stage.merge(overlay_stage),
                         };
                     } else {
@@ -551,16 +550,6 @@ impl WorkflowConfig {
         self.pipeline(pipeline)?.start_stage()
     }
 
-    /// The default pipeline name.
-    pub fn default_pipeline(&self) -> Pipeline {
-        self.on_start.clone().unwrap_or(Pipeline::Main)
-    }
-
-    /// The merge/conflict-handler pipeline name.
-    pub fn merge_pipeline(&self) -> Pipeline {
-        self.on_merge.clone().unwrap_or(Pipeline::Merge)
-    }
-
     /// All pipeline names.
     pub fn pipeline_names(&self) -> Vec<&Pipeline> {
         let mut names: Vec<&Pipeline> = self
@@ -577,24 +566,8 @@ impl WorkflowConfig {
         names
     }
 
-    /// Find the first stage with a given role (across all pipelines, preferring default pipeline).
+    /// Find the first stage with a given role
     pub fn find_stage_by_role(&self, role: &str) -> Option<(&Pipeline, &str, &StageDefinition)> {
-        let default = self.default_pipeline();
-        if let Some((pname, pdef)) = self
-            .pipelines
-            .as_ref()
-            .and_then(|pipelines| pipelines.get_key_value(default.as_str()))
-            && let Some(pipeline) = pdef.as_option()
-            && let Some((name, stage)) = pipeline.stages.as_ref().and_then(|stages| {
-                stages.iter().find_map(|(name, s)| {
-                    s.as_option()
-                        .filter(|s| s.role().map(|r| r.as_str()) == Some(role))
-                        .map(|s| (name, s))
-                })
-            })
-        {
-            return Some((pname, name.as_str(), stage));
-        }
         for (pname, pipeline) in self.pipelines.as_ref().into_iter().flat_map(|pipelines| {
             pipelines
                 .iter()
@@ -641,14 +614,16 @@ impl WorkflowConfig {
 
     /// Validate the entire workflow configuration.
     pub fn validate(&self) -> anyhow::Result<()> {
-        // Required pipelines must exist
-        for required in [self.default_pipeline(), self.merge_pipeline()] {
-            if self.pipeline(&required).is_none() {
-                anyhow::bail!(
-                    "Required pipeline '{}' is missing from [workflow.pipelines]",
-                    required
-                );
-            }
+        // The pipelines named in `on_start` and `on_merge` must exist in the pipelines map.
+        if let Some(ref on_start) = self.on_start
+            && self.pipeline(on_start).is_none()
+        {
+            anyhow::bail!("on_start references unknown pipeline '{}'", on_start);
+        }
+        if let Some(ref on_merge) = self.on_merge
+            && self.pipeline(on_merge).is_none()
+        {
+            anyhow::bail!("on_merge references unknown pipeline '{}'", on_merge);
         }
 
         let pipeline_names = self.pipeline_names();
@@ -1990,13 +1965,6 @@ developer = [
     }
 
     #[test]
-    fn workflow_config_start_and_merge_pipeline_defaults_to_main_and_merge() {
-        let wf = WorkflowConfig::default();
-        assert_eq!(wf.default_pipeline(), Pipeline::Main);
-        assert_eq!(wf.merge_pipeline(), Pipeline::Merge);
-    }
-
-    #[test]
     fn workflow_config_validate_requires_configured_start_and_merge_pipelines() {
         let mut wf = WorkflowConfig::default();
         wf.on_start = Some("custom_main".into());
@@ -2236,9 +2204,7 @@ developer = [
             "senior_planner"
         );
         // Fix pipeline survives from the base config unchanged.
-        let fix = pipelines[&Pipeline::from("fix")]
-            .as_option()
-            .unwrap();
+        let fix = pipelines[&Pipeline::from("fix")].as_option().unwrap();
         assert_eq!(
             fix.stage(&Stage::from("fixing"))
                 .unwrap()

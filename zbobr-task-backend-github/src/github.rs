@@ -624,23 +624,7 @@ impl ZbobrTaskBackendGithubImpl {
             }
         }
 
-        // Create standard pipeline labels
-        let standard_pipelines = [zbobr_api::Pipeline::MAIN, zbobr_api::Pipeline::MERGE];
-        for pipeline in &standard_pipelines {
-            let label = format!("{PIPELINE_LABEL_PREFIX}{pipeline}");
-            let desc = format!("Pipeline: {pipeline}");
-            if !existing_labels.contains(&label) {
-                tracing::info!("Creating label '{label}'");
-                self.create_label(&label, "0052cc", &desc).await?;
-            } else if force {
-                tracing::info!("Updating label '{label}' (force)");
-                self.update_label(&label, "0052cc", &desc).await?;
-            } else {
-                tracing::info!("Label '{label}' already exists");
-            }
-        }
-
-        // With force: remove obsolete state:* labels left over from the old schema
+       // With force: remove obsolete state:* labels left over from the old schema
         if force {
             for label in &existing_labels {
                 if label.starts_with("state:") {

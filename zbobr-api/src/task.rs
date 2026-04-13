@@ -467,18 +467,10 @@ pub enum StateOverrideRequest {
 pub struct Pipeline(pub std::borrow::Cow<'static, str>);
 
 impl Pipeline {
-    pub const MAIN: &'static str = "main";
-    pub const MERGE: &'static str = "merge";
-
     pub const fn new(s: &'static str) -> Self {
         Pipeline(std::borrow::Cow::Borrowed(s))
     }
-
-    #[allow(non_upper_case_globals)]
-    pub const Main: Pipeline = Pipeline::new(Self::MAIN);
-    #[allow(non_upper_case_globals)]
-    pub const Merge: Pipeline = Pipeline::new(Self::MERGE);
-
+ 
     pub fn as_str(&self) -> &str {
         &self.0
     }

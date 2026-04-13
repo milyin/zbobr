@@ -105,6 +105,7 @@ const STAGE_MERGING: Stage = Stage::new("merging");
 
 const PIPELINE_PLAN: Pipeline = Pipeline::new("plan");
 const PIPELINE_WORK: Pipeline = Pipeline::new("work");
+const PIPELINE_MERGE: Pipeline = Pipeline::new("merge");
 
 const PROVIDER_CLAUDE: Provider = Provider::new("claude");
 const PROVIDER_COPILOT: Provider = Provider::new("copilot");
@@ -511,7 +512,7 @@ fn default_workflow() -> WorkflowConfig {
         },
     );
     pipelines.insert(
-        Pipeline::Merge,
+        PIPELINE_MERGE,
         PipelineConfig {
             stages: Some(
                 merge_stages
