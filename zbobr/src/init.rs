@@ -427,7 +427,8 @@ fn default_workflow() -> WorkflowConfig {
             StageDefinition {
                 role: TomlOption::Value(ROLE_WORKER),
                 on_failure: TomlOption::Value(StageTransition::stage(STAGE_PAUSE_RETRY_WORKING)),
-                on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_REVIEWING)),
+                on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
+                on_success: TomlOption::Value(StageTransition::stage(STAGE_REVIEWING)),
                 ..Default::default()
             },
         ),
@@ -437,6 +438,7 @@ fn default_workflow() -> WorkflowConfig {
                 pause: true,
                 on_success: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
                 on_no_report: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
+                on_failure: TomlOption::Value(StageTransition::stage(STAGE_REVIEWING)),
                 ..Default::default()
             },
         ),
