@@ -91,7 +91,9 @@ const ROLE_LINTER_WORKER: Role = Role::new("linter_worker");
 const ROLE_MERGER: Role = Role::new("merger");
 
 const STAGE_PLANNING: Stage = Stage::new("planning");
+const STAGE_PAUSE_PLANNING: Stage = Stage::new("pause_planning");
 const STAGE_WORKING: Stage = Stage::new("working");
+const STAGE_PAUSE_RETRY_WORKING: Stage = Stage::new("pause_retry_working");
 const STAGE_REVIEWING: Stage = Stage::new("reviewing");
 const STAGE_LINTING: Stage = Stage::new("linting");
 const STAGE_LINTER_WORKER: Stage = Stage::new("linter_worker");
@@ -383,7 +385,14 @@ fn default_workflow() -> WorkflowConfig {
             STAGE_PLANNING,
             StageDefinition {
                 role: TomlOption::Value(ROLE_PLANNER),
-                on_intermediate: TomlOption::Value(StageTransition::pause()),
+                on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_PAUSE_PLANNING)),
+                ..Default::default()
+            },
+        ),
+        (
+            STAGE_PAUSE_PLANNING,
+            StageDefinition {
+                pause: true,
                 ..Default::default()
             },
         ),
@@ -391,11 +400,17 @@ fn default_workflow() -> WorkflowConfig {
             STAGE_WORKING,
             StageDefinition {
                 role: TomlOption::Value(ROLE_WORKER),
-                on_failure: TomlOption::Value(StageTransition {
-                    next: Some(STAGE_WORKING),
-                    pause: true,
-                }),
+                on_failure: TomlOption::Value(StageTransition::stage(STAGE_PAUSE_RETRY_WORKING)),
                 on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_REVIEWING)),
+                ..Default::default()
+            },
+        ),
+        (
+            STAGE_PAUSE_RETRY_WORKING,
+            StageDefinition {
+                pause: true,
+                on_success: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
+                on_no_report: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
                 ..Default::default()
             },
         ),

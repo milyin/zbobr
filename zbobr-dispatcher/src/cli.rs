@@ -807,6 +807,70 @@ impl ZbobrDispatcher {
         Ok(())
     }
 
+    /// Handle a stage that is a dedicated pause stage (`pause = true`).
+    ///
+    /// Pushes the current pipeline + stage onto the stack, then sets state directly to
+    /// `State::Pause`. On resume, `apply_call_return` pops the stack and routes via the
+    /// pause stage's `on_success`/`on_failure`/`on_no_report` handlers (or natural next).
+    async fn handle_pause_stage(
+        self: &Arc<Self>,
+        task_id: u64,
+        pipeline_name: &Pipeline,
+        stage: &Stage,
+    ) -> anyhow::Result<()> {
+        let task_session = self.task_session(task_id);
+
+        task_session.allocate_pipeline_run_id().await?;
+        task_session.increment_stage_count().await?;
+
+        // Auto-pause if stage count limit reached (before push_stack to prevent stack duplication on resume).
+        {
+            let task = task_session.get_task().await?;
+            if task.max_stage_count > 0 && task.stage_count >= task.max_stage_count {
+                tracing::warn!(
+                    "Task #{task_id}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
+                    task.stage_count,
+                    task.max_stage_count
+                );
+                let status = format_error_status(
+                    self.config().fixed_offset(),
+                    &format!(
+                        "Stage count limit ({}) reached - auto-paused",
+                        task.max_stage_count
+                    ),
+                );
+                task_session.set_pause_with_status(status).await?;
+                return Ok(());
+            }
+        }
+
+        // Push stack so resume knows which stage's handlers to consult.
+        task_session
+            .push_stack(pipeline_name.clone(), stage.clone())
+            .await?;
+
+        let status = zbobr_api::format_status(
+            zbobr_api::PAUSE_PREFIX,
+            &chrono::Utc::now().with_timezone(&self.config().fixed_offset()),
+            &format!("Paused at stage '{stage}'"),
+        );
+        task_session
+            .modify_task(move |mut t| {
+                t.state = State::Pause;
+                t.signal = None;
+                t.go_pause = false;
+                t.status = Some(status);
+                t
+            })
+            .await?;
+
+        tracing::info!(
+            "Task #{task_id}: stage {pipeline_name}/{} paused",
+            stage.as_str()
+        );
+        Ok(())
+    }
+
     /// Centralized pause handler.  Called before dispatching any task.
     ///
     /// When `task.go_pause` is true the handler atomically:
@@ -898,32 +962,32 @@ impl ZbobrDispatcher {
         let calling_stage = &entry.calling_stage;
         let stage_def = self.workflow().stage(&entry.pipeline, calling_stage);
 
-        let (signal, pause) = match &return_signal {
+        let signal = match &return_signal {
             Signal::ReturnSuccess => {
                 let transition = stage_def.and_then(|s| s.on_success());
                 match transition {
-                    Some(t) => (self.transition_signal(&entry.pipeline, calling_stage, t), t.pause),
+                    Some(t) => self.transition_signal(&entry.pipeline, calling_stage, t),
                     None => {
                         // No on_success: advance to natural next stage
-                        (self.natural_next_signal(&entry.pipeline, calling_stage), false)
+                        self.natural_next_signal(&entry.pipeline, calling_stage)
                     }
                 }
             }
             Signal::ReturnFailure => {
                 let transition = stage_def.and_then(|s| s.on_failure());
                 match transition {
-                    Some(t) => (self.transition_signal(&entry.pipeline, calling_stage, t), t.pause),
+                    Some(t) => self.transition_signal(&entry.pipeline, calling_stage, t),
                     None => {
                         // No on_failure: propagate failure up the stack
-                        (Signal::ReturnFailure, false)
+                        Signal::ReturnFailure
                     }
                 }
             }
             Signal::Return => {
                 let transition = stage_def.and_then(|s| s.on_no_report());
                 match transition {
-                    Some(t) => (self.transition_signal(&entry.pipeline, calling_stage, t), t.pause),
-                    None => (self.natural_next_signal(&entry.pipeline, calling_stage), false),
+                    Some(t) => self.transition_signal(&entry.pipeline, calling_stage, t),
+                    None => self.natural_next_signal(&entry.pipeline, calling_stage),
                 }
             }
             other => {
@@ -931,19 +995,11 @@ impl ZbobrDispatcher {
                     "Task #{}: unexpected return signal '{other}' — treating as no-report",
                     task_id
                 );
-                (self.natural_next_signal(&entry.pipeline, calling_stage), false)
+                self.natural_next_signal(&entry.pipeline, calling_stage)
             }
         };
 
         task_session.set_signal(Some(signal)).await?;
-        if pause {
-            let status = zbobr_api::format_status(
-                zbobr_api::PAUSE_PREFIX,
-                &chrono::Utc::now().with_timezone(&self.config().fixed_offset()),
-                "Pipeline returned — pausing as configured",
-            );
-            task_session.set_pause_with_status(status).await?;
-        }
         task_session
             .set_state(State::pending(entry.pipeline.clone()))
             .await?;
@@ -1006,6 +1062,15 @@ impl ZbobrDispatcher {
                         call_target
                     );
                     self.handle_call_stage(task.id, pipeline_name, stage_name, call_target)
+                        .await?;
+                } else if stage_def.is_pause() {
+                    tracing::info!(
+                        "Task #{}: entering pause stage {}/{}",
+                        task.id,
+                        pipeline_name,
+                        stage_name,
+                    );
+                    self.handle_pause_stage(task.id, pipeline_name, stage_name)
                         .await?;
                 } else {
                     tracing::info!(
@@ -1407,6 +1472,27 @@ impl ZbobrDispatcher {
                         {
                             tracing::error!(
                                 "Call stage {}/{} failed for task #{}: {e}",
+                                pipeline_name,
+                                stage_name,
+                                task.id
+                            );
+                        }
+                    } else if stage_def.is_pause() {
+                        // Pause stages are instant — process eagerly without consuming a run slot.
+                        tracing::info!(
+                            "Processing task #{} (state={:?}, signal={:?}) — pause stage {}/{}",
+                            task.id,
+                            task.state,
+                            task.signal,
+                            pipeline_name,
+                            stage_name,
+                        );
+                        if let Err(e) = self
+                            .handle_pause_stage(task.id, pipeline_name, stage_name)
+                            .await
+                        {
+                            tracing::error!(
+                                "Pause stage {}/{} failed for task #{}: {e}",
                                 pipeline_name,
                                 stage_name,
                                 task.id
@@ -1945,7 +2031,7 @@ impl ZbobrDispatcher {
         // Keeping state as Running lets apply_pause_to_state derive calling_stage from
         // state.stage() (the stage that was actually running) rather than from the
         // pre-computed signal target.
-        let mut pause_pending = current_task.go_pause;
+        let pause_pending = current_task.go_pause;
 
         if !current_task.go_pause && current_task.signal.is_none() {
             let current_stage = stage.clone();
@@ -1965,16 +2051,6 @@ impl ZbobrDispatcher {
                 }
                 SequentialSignal::Return => {
                     task_session.set_signal(Some(Signal::Return)).await?;
-                }
-                SequentialSignal::PauseThenSignal(signal) => {
-                    let status = format_error_status(
-                        self.config().fixed_offset(),
-                        "Auto-pause: stage completed",
-                    );
-                    task_session
-                        .set_pause_with_status_and_signal(status, signal)
-                        .await?;
-                    pause_pending = true;
                 }
             }
         }

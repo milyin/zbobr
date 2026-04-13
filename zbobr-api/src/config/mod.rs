@@ -154,33 +154,23 @@ pub use provider::Provider;
 mod tool;
 pub use tool::Tool;
 
-/// A stage transition descriptor with an optional target stage and pause flag.
+/// A stage transition descriptor with an optional target stage.
 ///
 /// Accepts two TOML forms:
-/// - String shorthand: `on_success = "stage_b"` → `{ next: Some("stage_b"), pause: false }`
-/// - Full table: `on_success = { next = "stage_b", pause = true }`
+/// - String shorthand: `on_success = "stage_b"` → `{ next: Some("stage_b") }`
+/// - Full table: `on_success = { next = "stage_b" }`
 ///
-/// Both `next` and `pause` are optional (defaults: `None` and `false`).
+/// `next` is optional (default: `None`, meaning natural next stage or pipeline end).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct StageTransition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next: Option<Stage>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub pause: bool,
 }
 
 impl StageTransition {
     pub fn stage(next: impl Into<Stage>) -> Self {
         Self {
             next: Some(next.into()),
-            pause: false,
-        }
-    }
-
-    pub fn pause() -> Self {
-        Self {
-            next: None,
-            pause: true,
         }
     }
 }
@@ -195,8 +185,6 @@ impl<'de> serde::Deserialize<'de> for StageTransition {
         struct FullTransition {
             #[serde(default)]
             next: Option<Stage>,
-            #[serde(default)]
-            pause: bool,
         }
         #[derive(serde::Deserialize)]
         #[serde(untagged)]
@@ -205,14 +193,8 @@ impl<'de> serde::Deserialize<'de> for StageTransition {
             Full(FullTransition),
         }
         match Helper::deserialize(deserializer)? {
-            Helper::Stage(s) => Ok(StageTransition {
-                next: Some(s),
-                pause: false,
-            }),
-            Helper::Full(f) => Ok(StageTransition {
-                next: f.next,
-                pause: f.pause,
-            }),
+            Helper::Stage(s) => Ok(StageTransition { next: Some(s) }),
+            Helper::Full(f) => Ok(StageTransition { next: f.next }),
         }
     }
 }
@@ -222,8 +204,12 @@ impl<'de> serde::Deserialize<'de> for StageTransition {
 /// The stage's name and pipeline are derived from its structural position
 /// (key in the stages map and key in the pipelines map).
 ///
-/// A stage must have exactly one of `role` (run an agent session) or
-/// `call` (call another pipeline). They are mutually exclusive.
+/// A stage must have exactly one of:
+/// - `role` — run an agent session
+/// - `call` — call another pipeline
+/// - `pause = true` — pause the task immediately; on resume the handlers decide where to go next
+///
+/// These three options are mutually exclusive.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct StageDefinition {
@@ -231,6 +217,8 @@ pub struct StageDefinition {
     pub role: TomlOption<Role>,
     #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
     pub call: TomlOption<Pipeline>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pause: bool,
     /// Tool name override for this stage. Overrides role-level and global `tool`.
     #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
     pub tool: TomlOption<Tool>,
@@ -273,6 +261,10 @@ impl StageDefinition {
         self.call.is_some()
     }
 
+    pub fn is_pause(&self) -> bool {
+        self.pause
+    }
+
     pub fn on_success(&self) -> Option<&StageTransition> {
         self.on_success.as_option()
     }
@@ -301,6 +293,7 @@ impl zbobr_utility::MergeToml for StageDefinition {
         Self {
             role: self.role.merge(other.role),
             call: self.call.merge(other.call),
+            pause: self.pause || other.pause,
             tool: self.tool.merge(other.tool),
             prompts: merge_prompt_maps(self.prompts, other.prompts),
             on_success: self.on_success.merge(other.on_success),
@@ -379,18 +372,13 @@ impl PipelineConfig {
             .flat_map(|stages| stages.iter())
             .filter_map(|(sname, stage)| stage.as_option().map(|stage| (sname, stage)))
         {
-            match (stage.role(), stage.call_pipeline()) {
-                (Some(_), Some(_)) => anyhow::bail!(
-                    "Pipeline '{}' stage '{}' has both 'role' and 'call' — only one is allowed",
+            match (stage.role(), stage.call_pipeline(), stage.is_pause()) {
+                (Some(_), None, false) | (None, Some(_), false) | (None, None, true) => {}
+                _ => anyhow::bail!(
+                    "Pipeline '{}' stage '{}' must have exactly one of 'role', 'call', or 'pause'",
                     pipeline,
                     sname
                 ),
-                (None, None) => anyhow::bail!(
-                    "Pipeline '{}' stage '{}' has neither 'role' nor 'call' — one is required",
-                    pipeline,
-                    sname
-                ),
-                _ => {}
             }
             if let Some(ref target) = stage.on_success().and_then(|t| t.next.as_ref())
                 && stages
