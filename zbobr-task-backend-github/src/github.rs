@@ -1335,6 +1335,14 @@ impl TaskWeak for GithubTaskWeak {
                 (false, true) => Signal::ReturnFailure,
                 _ => Signal::Return, // neither or both → no-report
             };
+            // When the stack is empty there is no caller to return to.
+            // Fall back to restarting whatever pipeline label is still on the issue.
+            if task.stack.is_empty() {
+                let pipeline = actual
+                    .iter()
+                    .find_map(|l| l.strip_prefix(PIPELINE_LABEL_PREFIX).map(Pipeline::from));
+                return Ok(pipeline.map(StateOverrideRequest::RunPipeline));
+            }
             return Ok(Some(StateOverrideRequest::Resume(return_signal)));
         }
 
