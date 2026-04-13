@@ -42,7 +42,7 @@ pub(crate) fn serialize_parameters(params: &HashMap<String, String>) -> String {
 }
 
 /// Parse a task description into (description, parameters, status, context, dead_context).
-/// Section order: description → PARAMETERS → STATUS → CONTEXT → DEAD_CONTEXT.
+/// Section order: description → PARAMETERS → STATUS → DEAD_CONTEXT → CONTEXT.
 #[allow(clippy::type_complexity)]
 pub(crate) fn parse_description_full(
     full_text: &str,
@@ -54,23 +54,22 @@ pub(crate) fn parse_description_full(
         full_text.to_string()
     };
 
-    // Split off DEAD_CONTEXT (must come last)
-    let dead_parts: Vec<&str> = normalized.split(DEAD_CONTEXT_SEPARATOR).collect();
+    // Split off CONTEXT (comes last)
+    let ctx_parts: Vec<&str> = normalized.split(CONTEXT_SEPARATOR).collect();
+    let (before_context, context_text) = match ctx_parts.len() {
+        1 => (ctx_parts[0], ""),
+        _ => (ctx_parts[0], ctx_parts[1]),
+    };
+
+    // Split off DEAD_CONTEXT (comes just before CONTEXT)
+    let dead_parts: Vec<&str> = before_context.split(DEAD_CONTEXT_SEPARATOR).collect();
     let (before_dead, dead_context_text) = match dead_parts.len() {
         1 => (dead_parts[0], ""),
         _ => (dead_parts[0], dead_parts[1]),
     };
 
-    // Split by context separator
-    let parts: Vec<&str> = before_dead.split(CONTEXT_SEPARATOR).collect();
-
-    let (before_context, context_text) = match parts.len() {
-        1 => (parts[0], ""),
-        _ => (parts[0], parts[1]),
-    };
-
     // Split by status separator
-    let status_parts: Vec<&str> = before_context.split(STATUS_SEPARATOR).collect();
+    let status_parts: Vec<&str> = before_dead.split(STATUS_SEPARATOR).collect();
     let (before_status, status_text) = match status_parts.len() {
         1 => (status_parts[0], None),
         _ => {
@@ -103,7 +102,7 @@ pub(crate) fn parse_description_full(
 }
 
 /// Serialize description, parameters, status, context, and dead_context back into the full format.
-/// Section order: description → PARAMETERS → STATUS → CONTEXT → DEAD_CONTEXT.
+/// Section order: description → PARAMETERS → STATUS → DEAD_CONTEXT → CONTEXT.
 /// `comments` are interspersed into the context section as compact titles for user display.
 pub(crate) fn serialize_description_full(
     original_description: &str,
@@ -134,17 +133,17 @@ pub(crate) fn serialize_description_full(
         result.push('\n');
     }
 
-    // Add context if non-empty
+    // Add dead_context if non-empty (just before CONTEXT)
+    if !dead_context.is_empty() {
+        result.push_str(DEAD_CONTEXT_SEPARATOR);
+        result.push_str(dead_context);
+    }
+
+    // Add context if non-empty (always last)
     let context_str = serialize_context(context, comments, false, report_url);
     if !context_str.is_empty() {
         result.push_str(CONTEXT_SEPARATOR);
         result.push_str(&context_str);
-    }
-
-    // Add dead_context if non-empty (always last)
-    if !dead_context.is_empty() {
-        result.push_str(DEAD_CONTEXT_SEPARATOR);
-        result.push_str(dead_context);
     }
 
     result
