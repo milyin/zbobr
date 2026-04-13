@@ -827,6 +827,10 @@ pub struct Task {
     /// Used to detect if the task has been modified between read and write operations.
     #[serde(skip)]
     pub etag: Option<String>,
+    /// Dead context: text moved here by the user to hide it from agents.
+    /// Stored verbatim in the task body; never passed to agent prompts.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub dead_context: String,
 }
 
 impl Task {
@@ -1078,6 +1082,7 @@ mod tests {
             max_stage_count: DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
+            dead_context: String::new(),
         }
     }
 

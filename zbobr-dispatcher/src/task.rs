@@ -779,6 +779,7 @@ mod comment_model_tests {
                 max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
                 closed: false,
                 etag: None,
+                dead_context: String::new(),
             };
             self.inner.tasks.lock().await.insert(
                 id,

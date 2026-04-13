@@ -673,7 +673,8 @@ impl ZbobrTaskBackendGithubImpl {
         default_max_stage_count: u64,
     ) -> anyhow::Result<Task> {
         let body = issue.body.unwrap_or_default();
-        let (description, params_map, status, context) = parse_description_full(&body)?;
+        let (description, params_map, status, context, dead_context) =
+            parse_description_full(&body)?;
 
         // Promoted fields: read from params_map where they were stored
         let work_branch = params_map.get(PARAM_WORK_BRANCH).cloned();
@@ -729,6 +730,7 @@ impl ZbobrTaskBackendGithubImpl {
                 .unwrap_or(default_max_stage_count),
             closed: issue.state == "closed",
             etag: Some(body),
+            dead_context,
         })
     }
 
@@ -991,6 +993,7 @@ impl ZbobrTaskBackendGithubImpl {
                 &task.context,
                 &comments,
                 Some(&make_url),
+                &task.dead_context,
             )
         });
 
@@ -1004,6 +1007,7 @@ impl ZbobrTaskBackendGithubImpl {
             &task.context,
             &comments,
             Some(&make_url),
+            &task.dead_context,
         );
 
         // Write description with retry and conflict detection
@@ -1028,6 +1032,7 @@ impl ZbobrTaskBackendGithubImpl {
                         &current_task.context,
                         &comments,
                         Some(&make_url),
+                        &current_task.dead_context,
                     )
                 }
             };
@@ -1556,6 +1561,7 @@ impl TaskBackend for TaskBackendGithub {
             &TaskContext::default(),
             &[],
             None,
+            "",
         );
 
         let issue = retry_github("create issue", || async {
@@ -1714,6 +1720,7 @@ mod flag_tests {
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
+            dead_context: String::new(),
         };
         let params = ZbobrTaskBackendGithubImpl::task_to_string_params(&task);
         assert_eq!(
@@ -1758,6 +1765,7 @@ mod flag_tests {
             &context,
             &[],
             Some(&|filename| format!("{report_prefix}{filename}")),
+            "",
         );
         let issue = IssueResponse {
             number: 1,
@@ -1825,6 +1833,7 @@ mod flag_tests {
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
+            dead_context: String::new(),
         };
 
         let err =
@@ -1876,6 +1885,7 @@ mod flag_tests {
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
+            dead_context: String::new(),
         };
 
         let err =

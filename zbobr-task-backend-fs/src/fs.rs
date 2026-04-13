@@ -51,6 +51,8 @@ struct TaskFile {
     #[serde(default)]
     max_stage_count: u64,
     closed: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    dead_context: String,
 }
 
 impl TaskFile {
@@ -85,6 +87,7 @@ impl TaskFile {
             max_stage_count: self.max_stage_count,
             closed: self.closed,
             etag: None,
+            dead_context: self.dead_context.clone(),
         })
     }
 
@@ -107,6 +110,7 @@ impl TaskFile {
             stage_count: task.stage_count,
             max_stage_count: task.max_stage_count,
             closed,
+            dead_context: task.dead_context.clone(),
         }
     }
 }
@@ -495,6 +499,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             max_stage_count: self.config.default_max_stage_count,
             closed: false,
             etag: None,
+            dead_context: String::new(),
         };
 
         let task_file = TaskFile::from_task(&task, false);

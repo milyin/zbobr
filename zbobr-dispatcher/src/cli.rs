@@ -2278,6 +2278,7 @@ mod tests {
             max_stage_count: 0,
             closed: false,
             etag: None,
+            dead_context: String::new(),
         }
     }
 
