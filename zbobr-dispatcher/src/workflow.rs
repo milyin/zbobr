@@ -169,10 +169,10 @@ impl Workflow {
                 Some(stage.to_string()),
                 Signal::Return,
             ),
-            // No report tool called — use on_no_report if configured, else advance (same as on_success).
+            // No report tool called — use on_no_report if configured, else repeat the stage.
             _ => apply_transition(
                 stage_def.and_then(|s| s.on_no_report()),
-                next_stage(),
+                Some(stage.to_string()),
                 Signal::Return,
             ),
         }
