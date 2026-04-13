@@ -374,7 +374,15 @@ impl ZbobrDispatcher {
             self.config.workspaces.display()
         );
 
-        self.task_backend.setup(force).await
+        self.task_backend.setup(force).await?;
+
+        // Ensure labels exist for all configured pipelines
+        let pipeline_names = self.workflow.pipeline_names();
+        self.task_backend
+            .ensure_pipeline_labels_exist(&pipeline_names)
+            .await?;
+
+        Ok(())
     }
 
     /// Fetch latest refs from origin with authentication.

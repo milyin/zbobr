@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::task::{Comment, Signal, StackEntry, State, StateOverrideRequest, Task, TaskIdentity};
+use crate::task::{Comment, Pipeline, Signal, StackEntry, State, StateOverrideRequest, Task, TaskIdentity};
 
 /// Unicode symbol prepended to every formatted error status message.
 pub const ERROR_PREFIX: char = '\u{274C}';
@@ -204,6 +204,16 @@ pub trait TaskBackend: Send + Sync {
     /// Return the "owner/repo" name of the task repository, if available.
     fn task_repo_name(&self) -> Option<String> {
         None
+    }
+
+    /// Ensure that labels exist for the given configured pipelines.
+    /// This is called during setup to create pipeline labels in the backend.
+    /// Only GitHub backend implements this; other backends have a no-op default.
+    async fn ensure_pipeline_labels_exist(
+        &self,
+        _pipelines: &[&Pipeline],
+    ) -> anyhow::Result<()> {
+        Ok(())
     }
 }
 

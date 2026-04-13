@@ -1576,6 +1576,26 @@ impl TaskBackend for TaskBackendGithub {
         self.inner.setup(force).await
     }
 
+    async fn ensure_pipeline_labels_exist(
+        &self,
+        pipelines: &[&Pipeline],
+    ) -> anyhow::Result<()> {
+        let existing_labels = self.inner.list_labels().await?;
+        for pipeline in pipelines {
+            let label_name = format!("{}{}", PIPELINE_LABEL_PREFIX, pipeline.as_str());
+            let description = format!("Pipeline: {}", pipeline.as_str());
+            if !existing_labels.contains(&label_name) {
+                tracing::info!("Creating label '{label_name}'");
+                self.inner
+                    .ensure_label_exists(&label_name, "0052cc", &description)
+                    .await?;
+            } else {
+                tracing::debug!("Label '{label_name}' already exists");
+            }
+        }
+        Ok(())
+    }
+
     async fn validate_connectivity(&self) -> anyhow::Result<()> {
         let (owner, repo) = self.inner.parse_repo()?;
         let task_repo_exists = retry_github("check task repo", || {
