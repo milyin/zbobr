@@ -83,6 +83,7 @@ const TOOL_REVIEWER: Tool = Tool::new("reviewer");
 const TOOL_DRUDGE: Tool = Tool::new("drudge");
 
 const ROLE_PLANNER: Role = Role::new("planner");
+const ROLE_PLAN_REVIEWER: Role = Role::new("plan_reviewer");
 const ROLE_WORKER: Role = Role::new("worker");
 const ROLE_REVIEWER: Role = Role::new("reviewer");
 const ROLE_TESTER: Role = Role::new("tester");
@@ -91,7 +92,9 @@ const ROLE_LINTER_WORKER: Role = Role::new("linter_worker");
 const ROLE_MERGER: Role = Role::new("merger");
 
 const STAGE_PLANNING: Stage = Stage::new("planning");
-const STAGE_PAUSE_PLANNING: Stage = Stage::new("pause_planning");
+const STAGE_PLAN_REVIEW_ADVERSARIAL: Stage = Stage::new("plan_review_adversarial");
+const STAGE_PLAN_REVIEW_USER: Stage = Stage::new("plan_review_user");
+const STAGE_CALL_WORK: Stage = Stage::new("call_work");
 const STAGE_WORKING: Stage = Stage::new("working");
 const STAGE_PAUSE_RETRY_WORKING: Stage = Stage::new("pause_retry_working");
 const STAGE_REVIEWING: Stage = Stage::new("reviewing");
@@ -99,6 +102,9 @@ const STAGE_LINTING: Stage = Stage::new("linting");
 const STAGE_LINTER_WORKER: Stage = Stage::new("linter_worker");
 const STAGE_TESTING: Stage = Stage::new("testing");
 const STAGE_MERGING: Stage = Stage::new("merging");
+
+const PIPELINE_PLAN: Pipeline = Pipeline::new("plan");
+const PIPELINE_WORK: Pipeline = Pipeline::new("work");
 
 const PROVIDER_CLAUDE: Provider = Provider::new("claude");
 const PROVIDER_COPILOT: Provider = Provider::new("copilot");
@@ -380,22 +386,40 @@ fn default_workflow() -> WorkflowConfig {
         ReportSuccess, StopWithError, StopWithQuestion,
     };
 
-    let main_stages = IndexMap::from([
+    let plan_stages = IndexMap::from([
         (
             STAGE_PLANNING,
             StageDefinition {
                 role: TomlOption::Value(ROLE_PLANNER),
-                on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_PAUSE_PLANNING)),
                 ..Default::default()
             },
         ),
         (
-            STAGE_PAUSE_PLANNING,
+            STAGE_PLAN_REVIEW_ADVERSARIAL,
             StageDefinition {
-                pause: true,
+                role: TomlOption::Value(ROLE_PLAN_REVIEWER),
+                on_failure: TomlOption::Value(StageTransition::stage(STAGE_PLANNING)),
                 ..Default::default()
             },
         ),
+        (
+            STAGE_PLAN_REVIEW_USER,
+            StageDefinition {
+                pause: true,
+                on_failure: TomlOption::Value(StageTransition::stage(STAGE_PLANNING)),
+                ..Default::default()
+            },
+        ),
+        (
+            STAGE_CALL_WORK,
+            StageDefinition {
+                call: TomlOption::Value(PIPELINE_WORK),
+                ..Default::default()
+            },
+        ),
+    ]);
+
+    let work_stages = IndexMap::from([
         (
             STAGE_WORKING,
             StageDefinition {
@@ -465,10 +489,21 @@ fn default_workflow() -> WorkflowConfig {
 
     let mut pipelines = IndexMap::new();
     pipelines.insert(
-        Pipeline::Main,
+        PIPELINE_PLAN,
         PipelineConfig {
             stages: Some(
-                main_stages
+                plan_stages
+                    .into_iter()
+                    .map(|(k, v)| (k, TomlOption::Value(v)))
+                    .collect(),
+            ),
+        },
+    );
+    pipelines.insert(
+        PIPELINE_WORK,
+        PipelineConfig {
+            stages: Some(
+                work_stages
                     .into_iter()
                     .map(|(k, v)| (k, TomlOption::Value(v)))
                     .collect(),
@@ -507,6 +542,21 @@ fn default_workflow() -> WorkflowConfig {
                 ]),
                 prompts: role_prompts("planner.md"),
                 tool: TomlOption::Value(TOOL_PLANNER),
+            },
+        ),
+        (
+            ROLE_PLAN_REVIEWER,
+            RoleDefinition {
+                mcp: Some(vec![
+                    StopWithError,
+                    StopWithQuestion,
+                    ReportSuccess,
+                    ReportFailure,
+                    ReportIntermediate,
+                    GetCtxRec,
+                ]),
+                prompts: role_prompts("plan_reviewer.md"),
+                tool: TomlOption::Value(TOOL_REVIEWER),
             },
         ),
         (
@@ -616,7 +666,7 @@ fn default_workflow() -> WorkflowConfig {
                 .map(|(k, v)| (k, TomlOption::Value(v)))
                 .collect(),
         ),
-        on_start: Some("main".into()),
+        on_start: Some("plan".into()),
         on_merge: Some("merge".into()),
     }
 }
@@ -684,6 +734,7 @@ fn inline_dispatcher_tables(doc: &mut DocumentMut) {
 
 const PROMPT_FILES: &[(&str, &str)] = &[
     ("planner", PLANNER_PROMPT),
+    ("plan_reviewer", PLAN_REVIEWER_PROMPT),
     ("worker", WORKER_PROMPT),
     ("reviewer", REVIEWER_PROMPT),
     ("linter", LINTER_PROMPT),
@@ -767,6 +818,43 @@ Your working directory is already the repository with the work branch checked ou
    - If approval is NOT confirmed (including any doubt):
      - Present the plan by calling `{mcp_report_intermediate}` with a description of the proposed approach and rationale.
      - **When in doubt, always present the plan for review rather than proceeding**"#,
+);
+
+const PLAN_REVIEWER_PROMPT: &str = concat!(
+    r#"# Plan Reviewer Agent
+
+Review the proposed implementation plan and evaluate its soundness, completeness, and quality. You are an adversarial reviewer — your role is to find weaknesses, missing cases, architectural problems, or better alternatives.
+
+"#,
+    get_ctx_rec_guidance!(),
+    r#"
+## Access Model
+
+- You can access the internet and run local commands.
+- Use `{mcp_report_success}` if the plan is sound and ready for implementation.
+- Use `{mcp_report_failure}` if the plan has significant issues that must be addressed before implementation.
+- Use `{mcp_report_intermediate}` to provide feedback without blocking — when the plan is acceptable but you have suggestions.
+- Use `{mcp_stop_with_question}` when you need clarification on the plan.
+- Use `{mcp_stop_with_error}` only to report technical errors.
+
+## Workspace isolation
+
+Your working directory is already the repository with the work branch checked out. Inspect the codebase to validate the plan. Do NOT make any code changes.
+
+## Workflow
+
+1. Read the task description and the plan provided in the context.
+2. **Inspect the codebase** to verify the plan's assumptions — check that the referenced analogs exist, that the proposed approach is consistent with existing conventions, and that no critical context is missing.
+3. **Evaluate the plan critically** for:
+   - Correctness: Does the proposed approach solve the problem?
+   - Completeness: Are edge cases, error paths, and tests covered?
+   - Consistency: Does it follow the same patterns and style as existing code?
+   - Clarity: Is the plan actionable for the worker without ambiguity?
+   - Risk: Are there simpler or safer alternatives?
+4. Finish by calling one of:
+   - `{mcp_report_success}` — the plan is solid and ready for implementation.
+   - `{mcp_report_failure}` — the plan has significant issues; provide specific, actionable feedback so the planner can revise.
+   - `{mcp_report_intermediate}` — the plan is acceptable but has suggestions or minor concerns worth noting."#,
 );
 
 const WORKER_PROMPT: &str = concat!(
@@ -1044,8 +1132,8 @@ mod tests {
     #[test]
     fn linting_on_success_routes_to_testing() {
         let wf = default_workflow();
-        let main = wf.pipeline(&Pipeline::Main).unwrap();
-        let linting = main.stage(&Stage::from("linting")).unwrap();
+        let work = wf.pipeline(&PIPELINE_WORK).unwrap();
+        let linting = work.stage(&Stage::from("linting")).unwrap();
         let target = linting.on_success().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("testing"));
     }
@@ -1062,8 +1150,8 @@ mod tests {
     #[test]
     fn linting_on_failure_routes_to_linter_worker() {
         let wf = default_workflow();
-        let main = wf.pipeline(&Pipeline::Main).unwrap();
-        let linting = main.stage(&Stage::from("linting")).unwrap();
+        let work = wf.pipeline(&PIPELINE_WORK).unwrap();
+        let linting = work.stage(&Stage::from("linting")).unwrap();
         let target = linting.on_failure().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("linter_worker"));
     }
@@ -1071,8 +1159,8 @@ mod tests {
     #[test]
     fn linter_worker_on_success_routes_to_linting() {
         let wf = default_workflow();
-        let main = wf.pipeline(&Pipeline::Main).unwrap();
-        let lw = main.stage(&Stage::from("linter_worker")).unwrap();
+        let work = wf.pipeline(&PIPELINE_WORK).unwrap();
+        let lw = work.stage(&Stage::from("linter_worker")).unwrap();
         let target = lw.on_success().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("linting"));
     }
@@ -1080,8 +1168,8 @@ mod tests {
     #[test]
     fn linter_worker_on_failure_routes_to_working() {
         let wf = default_workflow();
-        let main = wf.pipeline(&Pipeline::Main).unwrap();
-        let lw = main.stage(&Stage::from("linter_worker")).unwrap();
+        let work = wf.pipeline(&PIPELINE_WORK).unwrap();
+        let lw = work.stage(&Stage::from("linter_worker")).unwrap();
         let target = lw.on_failure().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("working"));
     }
