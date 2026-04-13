@@ -133,11 +133,9 @@ pub(crate) fn serialize_description_full(
         result.push('\n');
     }
 
-    // Add dead_context if non-empty (just before CONTEXT)
-    if !dead_context.is_empty() {
-        result.push_str(DEAD_CONTEXT_SEPARATOR);
-        result.push_str(dead_context);
-    }
+    // Always emit the DEAD_CONTEXT marker so the user can move context there
+    result.push_str(DEAD_CONTEXT_SEPARATOR);
+    result.push_str(dead_context);
 
     // Add context if non-empty (always last)
     let context_str = serialize_context(context, comments, false, report_url);
