@@ -1011,8 +1011,20 @@ impl ZbobrTaskBackendGithubImpl {
         // translate that intent into the go_pause flag so it is persisted in the body
         // params and survives the label sync that follows.
         let actual_labels = self.get_issue_labels(id).await?;
-        if actual_labels.iter().any(|l| l == PAUSE_LABEL) && !task.state.is_pause() {
+        if actual_labels.iter().any(|l| l == PAUSE_LABEL) && !task.state.is_pause() && !task.go_pause {
             task.go_pause = true;
+            let ts = {
+                let now = chrono::Utc::now();
+                match self.backend_config.timezone.as_ref() {
+                    Some(tz) => now.with_timezone(&**tz),
+                    None => now.fixed_offset(),
+                }
+            };
+            task.status = Some(zbobr_api::format_status(
+                zbobr_api::PAUSE_PREFIX,
+                &ts,
+                "Paused by user",
+            ));
         }
 
         let string_params = Self::task_to_string_params(&task);
