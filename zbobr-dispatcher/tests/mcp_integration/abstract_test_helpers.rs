@@ -833,7 +833,7 @@ pub async fn run_ready_fresh_start(env: &IntegrationTestEnv) {
 }
 
 // ===========================================================================
-// Test 16: Stage with on_success.pause pauses after success, then advances
+// Test 16: Dedicated pause stage pauses after stage_a succeeds, then advances
 // ===========================================================================
 
 pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
@@ -844,54 +844,94 @@ pub async fn run_stage_pause_on_success(env: &IntegrationTestEnv) {
     let work_branch = format!("zbobr_fix-{task_id}-stage-pause");
     env.update_task_branches(task_id, &work_branch).await;
 
-    // Two stages: stage_a has on_success = { pause = true }, stage_b is normal
-    let workflow = build_workflow(vec![
-        StageDef {
-            on_success: Some(StageTransition::pause()),
-            ..StageDef::new("stage_a", "role_a", "main")
-        },
-        StageDef::new("stage_b", "role_b", "main"),
-    ]);
+    // Pipeline: stage_a (role_a) → pause_stage (pause=true) → stage_b (role_b)
+    // stage_a's on_success routes to the dedicated pause stage.
+    // After pause_stage: natural next is stage_b (resume with Return via FS backend).
+    let stages: IndexMap<Stage, TomlOption<StageDefinition>> = [
+        (
+            Stage::from("stage_a"),
+            TomlOption::Value(StageDefinition {
+                role: Some("role_a".to_string().into()).into(),
+                tool: Some("mcp-tester".to_string().into()).into(),
+                on_success: Some(StageTransition::stage("pause_stage")).into(),
+                ..Default::default()
+            }),
+        ),
+        (
+            Stage::from("pause_stage"),
+            TomlOption::Value(StageDefinition {
+                pause: true,
+                ..Default::default()
+            }),
+        ),
+        (
+            Stage::from("stage_b"),
+            TomlOption::Value(StageDefinition {
+                role: Some("role_b".to_string().into()).into(),
+                tool: Some("mcp-tester".to_string().into()).into(),
+                ..Default::default()
+            }),
+        ),
+    ]
+    .into_iter()
+    .collect();
+
+    let workflow = WorkflowConfig {
+        pipelines: Some(
+            [(
+                Pipeline::Main,
+                TomlOption::Value(PipelineConfig {
+                    stages: Some(stages),
+                }),
+            )]
+            .into_iter()
+            .collect(),
+        ),
+        roles: Some(
+            [
+                (Role::from("role_a"), TomlOption::Value(role_with_all_tools())),
+                (Role::from("role_b"), TomlOption::Value(role_with_all_tools())),
+            ]
+            .into_iter()
+            .collect(),
+        ),
+        ..Default::default()
+    };
 
     let scenarios = scenarios_map(vec![
         ("role_a", abstract_scenarios::report_and_finish_scenario()),
         ("role_b", abstract_scenarios::report_and_finish_scenario()),
     ]);
 
-    // Step 1: Run pipeline — stage_a succeeds but on_success has pause: true
+    // Step 1: Run pipeline — stage_a succeeds, on_success advances to pause_stage signal
     env.run_pipeline(task_id, &workflow, &scenarios).await;
 
     let task = env.get_task(task_id).await;
-    assert!(
-        task.go_pause,
-        "Stage with on_success.pause should set pause flag after report_success"
-    );
     assert_eq!(
         task.signal,
-        Some(Signal::go("stage_b")),
-        "Pause signal should point to NEXT stage, not current"
+        Some(Signal::go("pause_stage")),
+        "Signal should point to the pause stage after stage_a succeeds"
     );
-    assert_eq!(
-        task.state,
-        State::running(Pipeline::Main, Stage::from("stage_a")),
-        "State should remain Running so apply_pause_to_state can read the calling stage"
+    assert!(
+        !task.go_pause,
+        "go_pause flag should not be set — pause is handled by the dedicated pause stage"
     );
 
-    // Step 2: Convert pause to PAUSE state
+    // Step 2: Continue pipeline — state machine visits pause_stage → handle_pause_stage
     env.continue_pipeline(task_id, &workflow, &scenarios).await;
 
     let task = env.get_task(task_id).await;
-    assert_eq!(task.state, State::Pause);
-    assert!(!task.go_pause, "Pause flag should be cleared");
+    assert_eq!(task.state, State::Pause, "State should be PAUSE after pause stage executes");
+    assert!(!task.go_pause, "Pause flag should be clear");
     assert!(task.signal.is_none(), "Signal should be cleared");
     assert_eq!(task.stack.len(), 1, "Stack should have one entry");
     assert_eq!(
         task.stack[0].calling_stage,
-        Stage::from("stage_a"),
-        "Stack entry should remember the stage that completed, not the pre-computed next stage"
+        Stage::from("pause_stage"),
+        "Stack entry should record the pause stage itself"
     );
 
-    // Step 3: Process Pause+stack → Resume → Pending+signal, then run to completion
+    // Step 3: FS backend auto-resumes (Return signal) → stage_b runs → Done
     env.run_to_completion(task_id, &workflow, &scenarios, 5)
         .await;
 

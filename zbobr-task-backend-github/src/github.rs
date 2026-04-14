@@ -7,7 +7,7 @@ use std::{
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use zbobr_api::{
-    Comment, Signal, StateOverrideRequest, Task,
+    Comment, Signal, StateOverrideRequest, TaskSnapshot,
     backend::TaskBackend,
     task::{Pipeline, StackEntry, State, TaskContext},
 };
@@ -19,7 +19,6 @@ const PARAM_PR_URL: &str = "pr_url";
 const PARAM_STACK: &str = "stack";
 const PARAM_STATE: &str = "state";
 const PARAM_SIGNAL: &str = "signal";
-const PARAM_PIPELINE_RUN_ID: &str = "pipeline_run_id";
 const PARAM_STAGE_COUNT: &str = "stage_count";
 const PARAM_MAX_STAGE_COUNT: &str = "max_stage_count";
 const PARAM_FLAG_PAUSE: &str = "pause";
@@ -467,24 +466,26 @@ impl ZbobrTaskBackendGithubImpl {
     ///
     /// - Sets `pipeline:<name>` labels for all active pipelines (from state + stack).
     /// - Clears `pipeline:<name>` labels for pipelines no longer active.
-    /// - Sets or clears the `pause` label based on whether state is `State::Pause`.
+    /// - Sets or clears the `pause` label based on whether state is `State::Pause` or `go_pause`.
     /// - Removes `yes`/`no` labels when not paused (they are consumed after resume).
     async fn apply_pipeline_and_pause_labels(
         &self,
         id: u64,
         state: &State,
         stack: &[StackEntry],
+        go_pause: bool,
     ) -> anyhow::Result<()> {
         // Collect desired pipeline labels
         let mut desired_pipeline_labels: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         if let Some(pipeline) = state.pipeline() {
-            desired_pipeline_labels
-                .insert(format!("{PIPELINE_LABEL_PREFIX}{}", pipeline.as_str()));
+            desired_pipeline_labels.insert(format!("{PIPELINE_LABEL_PREFIX}{}", pipeline.as_str()));
         }
         for entry in stack {
-            desired_pipeline_labels
-                .insert(format!("{PIPELINE_LABEL_PREFIX}{}", entry.pipeline.as_str()));
+            desired_pipeline_labels.insert(format!(
+                "{PIPELINE_LABEL_PREFIX}{}",
+                entry.pipeline.as_str()
+            ));
         }
 
         // Read current issue labels
@@ -512,11 +513,12 @@ impl ZbobrTaskBackendGithubImpl {
         }
 
         // Sync pause label
-        let is_paused = state.is_pause();
+        let is_paused = state.is_pause() || go_pause;
         if is_paused && !has_pause_label {
             self.ensure_label_exists(PAUSE_LABEL, "e4e669", "Task is paused")
                 .await?;
-            self.add_issue_labels(id, &[PAUSE_LABEL.to_string()]).await?;
+            self.add_issue_labels(id, &[PAUSE_LABEL.to_string()])
+                .await?;
         } else if !is_paused && has_pause_label {
             self.remove_issue_label(id, PAUSE_LABEL).await?;
         }
@@ -524,10 +526,10 @@ impl ZbobrTaskBackendGithubImpl {
         // Remove yes/no labels when not paused (they've been consumed after resume)
         if !is_paused {
             for label in [YES_LABEL, NO_LABEL] {
-                if current_labels.iter().any(|l| l == label) {
-                    if let Err(e) = self.remove_issue_label(id, label).await {
-                        tracing::warn!("Task #{id}: failed to remove '{label}' label: {e}");
-                    }
+                if current_labels.iter().any(|l| l == label)
+                    && let Err(e) = self.remove_issue_label(id, label).await
+                {
+                    tracing::warn!("Task #{id}: failed to remove '{label}' label: {e}");
                 }
             }
         }
@@ -602,16 +604,21 @@ impl ZbobrTaskBackendGithubImpl {
         // Create the pause label
         if !existing_labels.contains(&PAUSE_LABEL.to_string()) {
             tracing::info!("Creating label '{PAUSE_LABEL}'");
-            self.create_label(PAUSE_LABEL, "e4e669", "Task is paused").await?;
+            self.create_label(PAUSE_LABEL, "e4e669", "Task is paused")
+                .await?;
         } else if force {
             tracing::info!("Updating label '{PAUSE_LABEL}' (force)");
-            self.update_label(PAUSE_LABEL, "e4e669", "Task is paused").await?;
+            self.update_label(PAUSE_LABEL, "e4e669", "Task is paused")
+                .await?;
         } else {
             tracing::info!("Label '{PAUSE_LABEL}' already exists");
         }
 
         // Create yes/no labels for pause resume signaling
-        let yes_no_labels = [(YES_LABEL, "0e8a16", "Resume pause with success"), (NO_LABEL, "d73a4a", "Resume pause with failure")];
+        let yes_no_labels = [
+            (YES_LABEL, "0e8a16", "Resume pause with success"),
+            (NO_LABEL, "d73a4a", "Resume pause with failure"),
+        ];
         for (label, color, desc) in &yes_no_labels {
             if !existing_labels.contains(&label.to_string()) {
                 tracing::info!("Creating label '{label}'");
@@ -619,22 +626,6 @@ impl ZbobrTaskBackendGithubImpl {
             } else if force {
                 tracing::info!("Updating label '{label}' (force)");
                 self.update_label(label, color, desc).await?;
-            } else {
-                tracing::info!("Label '{label}' already exists");
-            }
-        }
-
-        // Create standard pipeline labels
-        let standard_pipelines = [zbobr_api::Pipeline::MAIN, zbobr_api::Pipeline::MERGE];
-        for pipeline in &standard_pipelines {
-            let label = format!("{PIPELINE_LABEL_PREFIX}{pipeline}");
-            let desc = format!("Pipeline: {pipeline}");
-            if !existing_labels.contains(&label) {
-                tracing::info!("Creating label '{label}'");
-                self.create_label(&label, "0052cc", &desc).await?;
-            } else if force {
-                tracing::info!("Updating label '{label}' (force)");
-                self.update_label(&label, "0052cc", &desc).await?;
             } else {
                 tracing::info!("Label '{label}' already exists");
             }
@@ -687,9 +678,10 @@ impl ZbobrTaskBackendGithubImpl {
     fn issue_to_task_with_default_max_stage_count(
         issue: IssueResponse,
         default_max_stage_count: u64,
-    ) -> anyhow::Result<Task> {
+    ) -> anyhow::Result<TaskSnapshot> {
         let body = issue.body.unwrap_or_default();
-        let (description, params_map, status, context) = parse_description_full(&body)?;
+        let (description, params_map, status, context, dead_context) =
+            parse_description_full(&body)?;
 
         // Promoted fields: read from params_map where they were stored
         let work_branch = params_map.get(PARAM_WORK_BRANCH).cloned();
@@ -718,7 +710,7 @@ impl ZbobrTaskBackendGithubImpl {
             .map(|s| s == PARAM_FLAG_VALUE_TRUE)
             .unwrap_or(false);
 
-        Ok(Task {
+        Ok(TaskSnapshot {
             id: issue.number,
             title: issue.title,
             description,
@@ -731,10 +723,6 @@ impl ZbobrTaskBackendGithubImpl {
             status,
             go_pause: pause,
             confirm,
-            pipeline_run_id: params_map
-                .get(PARAM_PIPELINE_RUN_ID)
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
             stage_count: params_map
                 .get(PARAM_STAGE_COUNT)
                 .and_then(|s| s.parse().ok())
@@ -745,10 +733,11 @@ impl ZbobrTaskBackendGithubImpl {
                 .unwrap_or(default_max_stage_count),
             closed: issue.state == "closed",
             etag: Some(body),
+            dead_context,
         })
     }
 
-    fn issue_to_task(&self, issue: IssueResponse) -> anyhow::Result<Task> {
+    fn issue_to_task(&self, issue: IssueResponse) -> anyhow::Result<TaskSnapshot> {
         Self::issue_to_task_with_default_max_stage_count(issue, self.default_max_stage_count())
     }
 
@@ -793,7 +782,7 @@ impl ZbobrTaskBackendGithubImpl {
 
     fn normalize_task_report_links_for_config(
         config: &ZbobrTaskBackendGithubConfig,
-        task: &mut Task,
+        task: &mut TaskSnapshot,
     ) -> anyhow::Result<()> {
         for (stage_idx, stage) in task.context.stages.iter_mut().enumerate() {
             if let Some(link) = stage.info.prompt_link.as_mut() {
@@ -832,7 +821,7 @@ impl ZbobrTaskBackendGithubImpl {
     fn hydrate_issue_to_task_for_config(
         config: &ZbobrTaskBackendGithubConfig,
         issue: IssueResponse,
-    ) -> anyhow::Result<Task> {
+    ) -> anyhow::Result<TaskSnapshot> {
         let mut task = Self::issue_to_task_with_default_max_stage_count(
             issue,
             config.default_max_stage_count,
@@ -841,14 +830,14 @@ impl ZbobrTaskBackendGithubImpl {
         Ok(task)
     }
 
-    fn hydrate_issue_to_task(&self, issue: IssueResponse) -> anyhow::Result<Task> {
+    fn hydrate_issue_to_task(&self, issue: IssueResponse) -> anyhow::Result<TaskSnapshot> {
         let mut task = self.issue_to_task(issue)?;
         Self::normalize_task_report_links_for_config(&self.backend_config, &mut task)?;
         Ok(task)
     }
 
     /// Build the string parameters map for serialization, including promoted fields.
-    fn task_to_string_params(task: &Task) -> HashMap<String, String> {
+    fn task_to_string_params(task: &TaskSnapshot) -> HashMap<String, String> {
         let mut params: HashMap<String, String> = HashMap::new();
         if let Some(ref v) = task.pr_url {
             params.insert(PARAM_PR_URL.to_string(), v.clone());
@@ -869,12 +858,6 @@ impl ZbobrTaskBackendGithubImpl {
         // Store signal as param (not label)
         if let Some(ref signal) = task.signal {
             params.insert(PARAM_SIGNAL.to_string(), signal.to_string());
-        }
-        if task.pipeline_run_id > 0 {
-            params.insert(
-                PARAM_PIPELINE_RUN_ID.to_string(),
-                task.pipeline_run_id.to_string(),
-            );
         }
         if task.stage_count > 0 {
             params.insert(PARAM_STAGE_COUNT.to_string(), task.stage_count.to_string());
@@ -945,7 +928,7 @@ impl ZbobrTaskBackendGithubImpl {
     }
 
     /// Internal: fetch task from GitHub without cooling check.
-    async fn fetch_task(&self, id: u64) -> anyhow::Result<Task> {
+    async fn fetch_task(&self, id: u64) -> anyhow::Result<TaskSnapshot> {
         let (owner, repo) = self.parse_repo()?;
         let issue: IssueResponse = retry_github("get issue", || {
             self.octocrab
@@ -956,7 +939,7 @@ impl ZbobrTaskBackendGithubImpl {
     }
 
     /// Internal: read task with cooling check.
-    async fn read_task(&self, id: u64) -> anyhow::Result<Task> {
+    async fn read_task(&self, id: u64) -> anyhow::Result<TaskSnapshot> {
         self.await_cooling_for(id).await;
         self.fetch_task(id).await
     }
@@ -987,8 +970,8 @@ impl ZbobrTaskBackendGithubImpl {
     async fn modify_task_internal(
         &self,
         id: u64,
-        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-    ) -> anyhow::Result<Task> {
+        mutate: Box<dyn FnOnce(TaskSnapshot) -> TaskSnapshot + Send>,
+    ) -> anyhow::Result<TaskSnapshot> {
         let task = self.fetch_task(id).await?;
         let comments = self.get_task_comments_internal(id).await?;
         let url_prefix = self.report_url_prefix(id);
@@ -1007,10 +990,31 @@ impl ZbobrTaskBackendGithubImpl {
                 &task.context,
                 &comments,
                 Some(&make_url),
+                &task.dead_context,
             )
         });
 
-        let task = mutate(task);
+        let mut task = mutate(task);
+
+        // If the user has manually added the pause label while the task is running,
+        // translate that intent into the go_pause flag so it is persisted in the body
+        // params and survives the label sync that follows.
+        let actual_labels = self.get_issue_labels(id).await?;
+        if actual_labels.iter().any(|l| l == PAUSE_LABEL) && !task.state.is_pause() && !task.go_pause {
+            task.go_pause = true;
+            let ts = {
+                let now = chrono::Utc::now();
+                match self.backend_config.timezone.as_ref() {
+                    Some(tz) => now.with_timezone(&**tz),
+                    None => now.fixed_offset(),
+                }
+            };
+            task.status = Some(zbobr_api::format_status(
+                zbobr_api::PAUSE_PREFIX,
+                &ts,
+                "Paused by user",
+            ));
+        }
 
         let string_params = Self::task_to_string_params(&task);
         let new_description = serialize_description_full(
@@ -1020,6 +1024,7 @@ impl ZbobrTaskBackendGithubImpl {
             &task.context,
             &comments,
             Some(&make_url),
+            &task.dead_context,
         );
 
         // Write description with retry and conflict detection
@@ -1044,6 +1049,7 @@ impl ZbobrTaskBackendGithubImpl {
                         &current_task.context,
                         &comments,
                         Some(&make_url),
+                        &current_task.dead_context,
                     )
                 }
             };
@@ -1060,7 +1066,12 @@ impl ZbobrTaskBackendGithubImpl {
 
         // Sync pipeline/pause labels to reflect the new state
         if let Err(e) = self
-            .apply_pipeline_and_pause_labels(id, &saved_task.state, &saved_task.stack)
+            .apply_pipeline_and_pause_labels(
+                id,
+                &saved_task.state,
+                &saved_task.stack,
+                saved_task.go_pause,
+            )
             .await
         {
             tracing::warn!("Task #{id}: failed to sync labels: {e}");
@@ -1281,7 +1292,10 @@ fn expected_labels(state: &State, stack: &[StackEntry]) -> std::collections::Has
         labels.insert(format!("{PIPELINE_LABEL_PREFIX}{}", pipeline.as_str()));
     }
     for entry in stack {
-        labels.insert(format!("{PIPELINE_LABEL_PREFIX}{}", entry.pipeline.as_str()));
+        labels.insert(format!(
+            "{PIPELINE_LABEL_PREFIX}{}",
+            entry.pipeline.as_str()
+        ));
     }
     if state.is_pause() {
         labels.insert(PAUSE_LABEL.to_string());
@@ -1292,7 +1306,7 @@ fn expected_labels(state: &State, stack: &[StackEntry]) -> std::collections::Has
 struct GithubTaskWeak {
     id: u64,
     backend: Arc<ZbobrTaskBackendGithubImpl>,
-    saved_snapshot: Arc<std::sync::Mutex<Option<Task>>>,
+    saved_snapshot: Arc<std::sync::Mutex<Option<TaskSnapshot>>>,
 }
 
 #[async_trait]
@@ -1301,7 +1315,7 @@ impl TaskWeak for GithubTaskWeak {
         self.id
     }
 
-    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task> {
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<TaskSnapshot> {
         if !refresh && let Some(task) = self.saved_snapshot.lock().unwrap().clone() {
             return Ok(task);
         }
@@ -1338,8 +1352,12 @@ impl TaskWeak for GithubTaskWeak {
             return Ok(None);
         }
 
-        let actual: std::collections::HashSet<String> =
-            self.backend.get_issue_labels(self.id).await?.into_iter().collect();
+        let actual: std::collections::HashSet<String> = self
+            .backend
+            .get_issue_labels(self.id)
+            .await?
+            .into_iter()
+            .collect();
         let expected = expected_labels(&task.state, &task.stack);
 
         // Pause label removed → Resume with signal derived from yes/no labels
@@ -1351,6 +1369,14 @@ impl TaskWeak for GithubTaskWeak {
                 (false, true) => Signal::ReturnFailure,
                 _ => Signal::Return, // neither or both → no-report
             };
+            // When the stack is empty there is no caller to return to.
+            // Fall back to restarting whatever pipeline label is still on the issue.
+            if task.stack.is_empty() {
+                let pipeline = actual
+                    .iter()
+                    .find_map(|l| l.strip_prefix(PIPELINE_LABEL_PREFIX).map(Pipeline::from));
+                return Ok(pipeline.map(StateOverrideRequest::RunPipeline));
+            }
             return Ok(Some(StateOverrideRequest::Resume(return_signal)));
         }
 
@@ -1392,7 +1418,7 @@ impl TaskWeak for GithubTaskWeak {
 struct GithubTaskMut {
     id: u64,
     backend: Arc<ZbobrTaskBackendGithubImpl>,
-    saved_snapshot: Arc<std::sync::Mutex<Option<Task>>>,
+    saved_snapshot: Arc<std::sync::Mutex<Option<TaskSnapshot>>>,
     _guard: OwnedMutexGuard<()>,
 }
 
@@ -1402,7 +1428,7 @@ impl TaskMut for GithubTaskMut {
         self.id
     }
 
-    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task> {
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<TaskSnapshot> {
         if !refresh && let Some(task) = self.saved_snapshot.lock().unwrap().clone() {
             return Ok(task);
         }
@@ -1414,11 +1440,11 @@ impl TaskMut for GithubTaskMut {
 
     async fn modify_task(
         &self,
-        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-    ) -> anyhow::Result<()> {
+        mutate: Box<dyn FnOnce(TaskSnapshot) -> TaskSnapshot + Send>,
+    ) -> anyhow::Result<TaskSnapshot> {
         let task = self.backend.modify_task_internal(self.id, mutate).await?;
-        *self.saved_snapshot.lock().unwrap() = Some(task);
-        Ok(())
+        *self.saved_snapshot.lock().unwrap() = Some(task.clone());
+        Ok(task)
     }
 
     async fn close(&self) -> anyhow::Result<()> {
@@ -1564,6 +1590,7 @@ impl TaskBackend for TaskBackendGithub {
             &TaskContext::default(),
             &[],
             None,
+            "",
         );
 
         let issue = retry_github("create issue", || async {
@@ -1576,7 +1603,7 @@ impl TaskBackend for TaskBackendGithub {
         // Sync pipeline/pause labels for the initial state
         if let Err(e) = self
             .inner
-            .apply_pipeline_and_pause_labels(issue.number, &state, &[])
+            .apply_pipeline_and_pause_labels(issue.number, &state, &[], false)
             .await
         {
             tracing::warn!(
@@ -1590,6 +1617,23 @@ impl TaskBackend for TaskBackendGithub {
 
     async fn setup(&self, force: bool) -> anyhow::Result<()> {
         self.inner.setup(force).await
+    }
+
+    async fn ensure_pipeline_labels_exist(&self, pipelines: &[&Pipeline]) -> anyhow::Result<()> {
+        let existing_labels = self.inner.list_labels().await?;
+        for pipeline in pipelines {
+            let label_name = format!("{}{}", PIPELINE_LABEL_PREFIX, pipeline.as_str());
+            let description = format!("Pipeline: {}", pipeline.as_str());
+            if !existing_labels.contains(&label_name) {
+                tracing::info!("Creating label '{label_name}'");
+                self.inner
+                    .ensure_label_exists(&label_name, "0052cc", &description)
+                    .await?;
+            } else {
+                tracing::debug!("Label '{label_name}' already exists");
+            }
+        }
+        Ok(())
     }
 
     async fn validate_connectivity(&self) -> anyhow::Result<()> {
@@ -1657,7 +1701,7 @@ mod flag_tests {
         }
     }
 
-    fn issue_to_task(issue: IssueResponse) -> Task {
+    fn issue_to_task(issue: IssueResponse) -> TaskSnapshot {
         ZbobrTaskBackendGithubImpl::issue_to_task_with_default_max_stage_count(
             issue,
             zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
@@ -1684,7 +1728,7 @@ mod flag_tests {
     #[test]
     fn task_to_string_params_includes_flags_when_set() {
         use zbobr_api::task::{State, TaskContext};
-        let task = Task {
+        let task = TaskSnapshot {
             id: 1,
             title: "t".to_string(),
             description: "d".to_string(),
@@ -1697,11 +1741,11 @@ mod flag_tests {
             status: None,
             go_pause: true,
             confirm: true,
-            pipeline_run_id: 0,
             stage_count: 0,
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
+            dead_context: String::new(),
         };
         let params = ZbobrTaskBackendGithubImpl::task_to_string_params(&task);
         assert_eq!(
@@ -1722,7 +1766,6 @@ mod flag_tests {
                 info: StageInfo {
                     instance: "default".to_string(),
                     pipeline: Pipeline::Main,
-                    run_id: 1,
                     stage: Stage::new("working"),
                     tool: None,
                     model: None,
@@ -1746,6 +1789,7 @@ mod flag_tests {
             &context,
             &[],
             Some(&|filename| format!("{report_prefix}{filename}")),
+            "",
         );
         let issue = IssueResponse {
             number: 1,
@@ -1754,8 +1798,8 @@ mod flag_tests {
             state: "open".to_string(),
         };
 
-        let task = ZbobrTaskBackendGithubImpl::hydrate_issue_to_task_for_config(&config, issue)
-            .unwrap();
+        let task =
+            ZbobrTaskBackendGithubImpl::hydrate_issue_to_task_for_config(&config, issue).unwrap();
         let stage = &task.context.stages[0];
 
         assert_eq!(
@@ -1775,7 +1819,7 @@ mod flag_tests {
     #[test]
     fn normalize_task_report_links_rejects_non_blob_report_link_with_diagnostic() {
         let config = make_config();
-        let mut task = Task {
+        let mut task = TaskSnapshot {
             id: 1,
             title: "t".to_string(),
             description: "d".to_string(),
@@ -1787,7 +1831,6 @@ mod flag_tests {
                     info: StageInfo {
                         instance: "default".to_string(),
                         pipeline: Pipeline::Main,
-                        run_id: 1,
                         stage: Stage::new("working"),
                         tool: None,
                         model: None,
@@ -1808,11 +1851,11 @@ mod flag_tests {
             status: None,
             go_pause: false,
             confirm: false,
-            pipeline_run_id: 0,
             stage_count: 0,
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
+            dead_context: String::new(),
         };
 
         let err =
@@ -1828,7 +1871,7 @@ mod flag_tests {
     #[test]
     fn normalize_task_report_links_rejects_wrong_blob_prefix_with_diagnostic() {
         let config = make_config();
-        let mut task = Task {
+        let mut task = TaskSnapshot {
             id: 1,
             title: "t".to_string(),
             description: "d".to_string(),
@@ -1840,7 +1883,6 @@ mod flag_tests {
                     info: StageInfo {
                         instance: "default".to_string(),
                         pipeline: Pipeline::Main,
-                        run_id: 1,
                         stage: Stage::new("working"),
                         tool: None,
                         model: None,
@@ -1859,11 +1901,11 @@ mod flag_tests {
             status: None,
             go_pause: false,
             confirm: false,
-            pipeline_run_id: 0,
             stage_count: 0,
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
+            dead_context: String::new(),
         };
 
         let err =

@@ -36,8 +36,6 @@ pub struct UnifiedMcp {
     stage: Stage,
     /// Pipeline for this session.
     pipeline: Pipeline,
-    /// Pipeline run ID for this session.
-    pipeline_run_id: u64,
 }
 
 impl CommonMcpImpl for UnifiedMcp {
@@ -64,10 +62,6 @@ impl CommonMcpImpl for UnifiedMcp {
     fn pipeline(&self) -> &Pipeline {
         &self.pipeline
     }
-
-    fn pipeline_run_id(&self) -> u64 {
-        self.pipeline_run_id
-    }
 }
 
 /// All possible static tool names across all roles.
@@ -84,7 +78,6 @@ impl UnifiedMcp {
         model: Model,
         stage: Stage,
         pipeline: Pipeline,
-        pipeline_run_id: u64,
     ) -> Self {
         Self {
             session,
@@ -95,7 +88,6 @@ impl UnifiedMcp {
             model,
             stage,
             pipeline,
-            pipeline_run_id,
         }
     }
 

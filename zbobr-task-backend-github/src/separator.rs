@@ -12,6 +12,7 @@ use zbobr_api::{
 pub(crate) const PARAMETERS_SEPARATOR: &str = "\n\n---PARAMETERS---\n";
 pub(crate) const STATUS_SEPARATOR: &str = "\n\n---STATUS---\n";
 pub(crate) const CONTEXT_SEPARATOR: &str = "\n\n---CONTEXT---\n";
+pub(crate) const DEAD_CONTEXT_SEPARATOR: &str = "\n\n---DEAD_CONTEXT---\n";
 
 /// Parse parameters from the PARAMETERS section.
 /// Returns a map of parameter names to values.
@@ -40,12 +41,12 @@ pub(crate) fn serialize_parameters(params: &HashMap<String, String>) -> String {
     result
 }
 
-/// Parse a task description into (description, parameters, status, context).
-/// Section order: description → PARAMETERS → STATUS → CONTEXT.
+/// Parse a task description into (description, parameters, status, context, dead_context).
+/// Section order: description → PARAMETERS → STATUS → DEAD_CONTEXT → CONTEXT.
 #[allow(clippy::type_complexity)]
 pub(crate) fn parse_description_full(
     full_text: &str,
-) -> Result<(String, HashMap<String, String>, Option<String>, TaskContext)> {
+) -> Result<(String, HashMap<String, String>, Option<String>, TaskContext, String)> {
     // Normalize line endings so separators match regardless of \r\n vs \n.
     let normalized = if full_text.contains("\r\n") {
         full_text.replace("\r\n", "\n")
@@ -53,16 +54,22 @@ pub(crate) fn parse_description_full(
         full_text.to_string()
     };
 
-    // First split by context separator
-    let parts: Vec<&str> = normalized.split(CONTEXT_SEPARATOR).collect();
+    // Split off CONTEXT (comes last)
+    let ctx_parts: Vec<&str> = normalized.split(CONTEXT_SEPARATOR).collect();
+    let (before_context, context_text) = match ctx_parts.len() {
+        1 => (ctx_parts[0], ""),
+        _ => (ctx_parts[0], ctx_parts[1]),
+    };
 
-    let (before_context, context_text) = match parts.len() {
-        1 => (parts[0], ""),
-        _ => (parts[0], parts[1]),
+    // Split off DEAD_CONTEXT (comes just before CONTEXT)
+    let dead_parts: Vec<&str> = before_context.split(DEAD_CONTEXT_SEPARATOR).collect();
+    let (before_dead, dead_context_text) = match dead_parts.len() {
+        1 => (dead_parts[0], ""),
+        _ => (dead_parts[0], dead_parts[1]),
     };
 
     // Split by status separator
-    let status_parts: Vec<&str> = before_context.split(STATUS_SEPARATOR).collect();
+    let status_parts: Vec<&str> = before_dead.split(STATUS_SEPARATOR).collect();
     let (before_status, status_text) = match status_parts.len() {
         1 => (status_parts[0], None),
         _ => {
@@ -89,11 +96,13 @@ pub(crate) fn parse_description_full(
     // Parse context using shared format
     let context = parse_context(context_text)?;
 
-    Ok((description, parameters, status, context))
+    let dead_context = dead_context_text.to_string();
+
+    Ok((description, parameters, status, context, dead_context))
 }
 
-/// Serialize description, parameters, status, and context back into the full format.
-/// Section order: description → PARAMETERS → STATUS → CONTEXT.
+/// Serialize description, parameters, status, context, and dead_context back into the full format.
+/// Section order: description → PARAMETERS → STATUS → DEAD_CONTEXT → CONTEXT.
 /// `comments` are interspersed into the context section as compact titles for user display.
 pub(crate) fn serialize_description_full(
     original_description: &str,
@@ -102,10 +111,11 @@ pub(crate) fn serialize_description_full(
     context: &TaskContext,
     comments: &[Comment],
     report_url: Option<&dyn Fn(&str) -> String>,
+    dead_context: &str,
 ) -> String {
     // Strip everything from the description first
     let clean_description = parse_description_full(original_description)
-        .map(|(desc, _, _, _)| desc)
+        .map(|(desc, _, _, _, _)| desc)
         .unwrap_or_else(|_| original_description.to_string());
 
     let mut result = clean_description;
@@ -123,7 +133,11 @@ pub(crate) fn serialize_description_full(
         result.push('\n');
     }
 
-    // Add context if non-empty
+    // Always emit the DEAD_CONTEXT marker so the user can move context there
+    result.push_str(DEAD_CONTEXT_SEPARATOR);
+    result.push_str(dead_context);
+
+    // Add context if non-empty (always last)
     let context_str = serialize_context(context, comments, false, report_url);
     if !context_str.is_empty() {
         result.push_str(CONTEXT_SEPARATOR);
@@ -158,9 +172,12 @@ pub(crate) fn merge_concurrent_description_updates(
     our_new: &str,
 ) -> Result<String> {
     // Parse all three versions
-    let (orig_desc, orig_params, orig_status, orig_context) = parse_description_full(original)?;
-    let (curr_desc, curr_params, curr_status, curr_context) = parse_description_full(current)?;
-    let (new_desc, new_params, new_status, new_context) = parse_description_full(our_new)?;
+    let (orig_desc, orig_params, orig_status, orig_context, orig_dead) =
+        parse_description_full(original)?;
+    let (curr_desc, curr_params, curr_status, curr_context, curr_dead) =
+        parse_description_full(current)?;
+    let (new_desc, new_params, new_status, new_context, new_dead) =
+        parse_description_full(our_new)?;
 
     // Determine what we changed
     let we_changed_desc = new_desc != orig_desc;
@@ -168,6 +185,7 @@ pub(crate) fn merge_concurrent_description_updates(
     let we_changed_status = new_status != orig_status;
     let we_changed_context = serde_json::to_string(&new_context).unwrap_or_default()
         != serde_json::to_string(&orig_context).unwrap_or_default();
+    let we_changed_dead = new_dead != orig_dead;
 
     // Merge: prefer our changes if we made them, otherwise prefer their changes
     let merged_desc = if we_changed_desc { new_desc } else { curr_desc };
@@ -186,6 +204,7 @@ pub(crate) fn merge_concurrent_description_updates(
     } else {
         curr_context
     };
+    let merged_dead = if we_changed_dead { new_dead } else { curr_dead };
 
     // Serialize back with the merged content (no URL builder — will be re-serialized by caller)
     // No compact comments during merge — they are re-added when the caller re-serializes.
@@ -196,6 +215,7 @@ pub(crate) fn merge_concurrent_description_updates(
         &merged_context,
         &[],
         None,
+        &merged_dead,
     ))
 }
 
@@ -213,7 +233,6 @@ mod tests {
                 info: StageInfo {
                     instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
-                    run_id: 1,
                     stage: Stage::new("working"),
                     tool: Some("claude".to_string()),
                     model: Some("claude-opus-4.6".parse().unwrap()),
@@ -250,8 +269,8 @@ mod tests {
         let ctx = sample_context();
 
         let serialized =
-            serialize_description_full("my task", &HashMap::new(), &None, &ctx, &[], None);
-        let (desc, _, _, parsed_ctx) = parse_description_full(&serialized).unwrap();
+            serialize_description_full("my task", &HashMap::new(), &None, &ctx, &[], None, "");
+        let (desc, _, _, parsed_ctx, _) = parse_description_full(&serialized).unwrap();
 
         assert_eq!(desc, "my task");
         assert_eq!(parsed_ctx.stages.len(), 1);
@@ -276,8 +295,9 @@ mod tests {
             &TaskContext::default(),
             &[],
             None,
+            "",
         );
-        let (desc, _, _, ctx) = parse_description_full(&serialized).unwrap();
+        let (desc, _, _, ctx, _) = parse_description_full(&serialized).unwrap();
 
         assert_eq!(desc, "description");
         assert!(ctx.stages.is_empty());
@@ -291,8 +311,9 @@ mod tests {
         let status = Some("Something went wrong\ndetails here".to_string());
         let ctx = sample_context();
 
-        let serialized = serialize_description_full("my task", &params, &status, &ctx, &[], None);
-        let (desc, parsed_params, parsed_status, parsed_ctx) =
+        let serialized =
+            serialize_description_full("my task", &params, &status, &ctx, &[], None, "");
+        let (desc, parsed_params, parsed_status, parsed_ctx, _) =
             parse_description_full(&serialized).unwrap();
 
         assert_eq!(desc, "my task");
@@ -318,8 +339,9 @@ mod tests {
             &TaskContext::default(),
             &[],
             None,
+            "",
         );
-        let (desc, _, status, ctx) = parse_description_full(&serialized).unwrap();
+        let (desc, _, status, ctx, _) = parse_description_full(&serialized).unwrap();
 
         assert_eq!(desc, "desc");
         assert_eq!(status, None);
@@ -336,6 +358,7 @@ mod tests {
             &TaskContext::default(),
             &[],
             None,
+            "",
         );
 
         // They changed the status
@@ -346,6 +369,7 @@ mod tests {
             &TaskContext::default(),
             &[],
             None,
+            "",
         );
 
         // We changed the context
@@ -356,10 +380,11 @@ mod tests {
             &sample_context(),
             &[],
             None,
+            "",
         );
 
         let merged = merge_concurrent_description_updates(&original, &current, &our_new).unwrap();
-        let (desc, _, status, ctx) = parse_description_full(&merged).unwrap();
+        let (desc, _, status, ctx, _) = parse_description_full(&merged).unwrap();
 
         assert_eq!(desc, "original desc");
         assert_eq!(status, Some("their error".to_string()));
@@ -373,7 +398,6 @@ mod tests {
                 info: StageInfo {
                     instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
-                    run_id: 1,
                     stage: Stage::new("planning"),
                     tool: None,
                     model: None,
@@ -390,7 +414,8 @@ mod tests {
             }],
         };
 
-        let original = serialize_description_full("desc", &HashMap::new(), &None, &ctx1, &[], None);
+        let original =
+            serialize_description_full("desc", &HashMap::new(), &None, &ctx1, &[], None, "");
 
         // They changed the context
         let ctx_theirs = TaskContext {
@@ -398,7 +423,6 @@ mod tests {
                 info: StageInfo {
                     instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
-                    run_id: 1,
                     stage: Stage::new("planning"),
                     tool: None,
                     model: None,
@@ -415,7 +439,7 @@ mod tests {
             }],
         };
         let current =
-            serialize_description_full("desc", &HashMap::new(), &None, &ctx_theirs, &[], None);
+            serialize_description_full("desc", &HashMap::new(), &None, &ctx_theirs, &[], None, "");
 
         // We also changed the context
         let ctx_ours = TaskContext {
@@ -423,7 +447,6 @@ mod tests {
                 info: StageInfo {
                     instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
-                    run_id: 1,
                     stage: Stage::new("planning"),
                     tool: None,
                     model: None,
@@ -440,10 +463,10 @@ mod tests {
             }],
         };
         let our_new =
-            serialize_description_full("desc", &HashMap::new(), &None, &ctx_ours, &[], None);
+            serialize_description_full("desc", &HashMap::new(), &None, &ctx_ours, &[], None, "");
 
         let merged = merge_concurrent_description_updates(&original, &current, &our_new).unwrap();
-        let (_, _, _, ctx) = parse_description_full(&merged).unwrap();
+        let (_, _, _, ctx, _) = parse_description_full(&merged).unwrap();
 
         // Our change should win
         assert_eq!(ctx.stages[0].records[0].brief, "our change");

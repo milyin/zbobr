@@ -31,7 +31,7 @@ pub use prompts::{
     ConfiguredPromptBuilder, VAR_DESTINATION_BRANCH, VAR_DESTINATION_REPOSITORY,
     add_mcp_tool_variables, build_full_prompt, load_prompts, sample_task_and_comments,
 };
-pub use task::{Comment, Executor, Model, RoleSession, StackEntry, Task, TaskSession};
+pub use task::{Comment, Executor, Model, RoleSession, StackEntry, TaskSnapshot, TaskSession};
 pub use task_dir::TaskDir;
 pub use tool_executor::ToolExecutor;
 use typesafe_builder::{_TypesafeBuilderEmpty, _TypesafeBuilderFilled, Builder};
@@ -374,7 +374,15 @@ impl ZbobrDispatcher {
             self.config.workspaces.display()
         );
 
-        self.task_backend.setup(force).await
+        self.task_backend.setup(force).await?;
+
+        // Ensure labels exist for all configured pipelines
+        let pipeline_names = self.workflow.pipeline_names();
+        self.task_backend
+            .ensure_pipeline_labels_exist(&pipeline_names)
+            .await?;
+
+        Ok(())
     }
 
     /// Fetch latest refs from origin with authentication.
@@ -418,15 +426,8 @@ impl ZbobrDispatcher {
         task_id: u64,
         tracker: Arc<std::sync::Mutex<Option<zbobr_api::config_tools::McpTool>>>,
         pipeline: Pipeline,
-        pipeline_run_id: u64,
     ) -> RoleSession {
-        RoleSession::with_shared_tracker(
-            Arc::clone(self),
-            task_id,
-            tracker,
-            pipeline,
-            pipeline_run_id,
-        )
+        RoleSession::with_shared_tracker(Arc::clone(self), task_id, tracker, pipeline)
     }
 }
 

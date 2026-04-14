@@ -20,7 +20,7 @@ use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
-    Comment, Task, TaskDir, ToolExecutor, Workflow, ZbobrDispatcher,
+    Comment, TaskSnapshot, TaskDir, ToolExecutor, Workflow, ZbobrDispatcher,
     task::{Executor, Model},
     workflow::SequentialSignal,
 };
@@ -270,8 +270,8 @@ pub struct TaskListEntry {
     pub title: String,
 }
 
-impl From<&Task> for TaskListEntry {
-    fn from(task: &Task) -> Self {
+impl From<&TaskSnapshot> for TaskListEntry {
+    fn from(task: &TaskSnapshot) -> Self {
         Self {
             id: task.id,
             stage_count: task.stage_count,
@@ -289,7 +289,7 @@ impl From<&Task> for TaskListEntry {
 ///
 /// This is the single source of truth for task priority ordering used by both
 /// [`select_runnable_task`] and [`run_manager_loop`].
-fn task_priority(task: &Task) -> u64 {
+fn task_priority(task: &TaskSnapshot) -> u64 {
     task.stage_count
 }
 
@@ -299,7 +299,7 @@ fn task_priority(task: &Task) -> u64 {
 /// matches exactly the tasks that [`run_manager_loop`] would schedule in Phase 2.
 ///
 /// Returns all tasks eligible for non-call `RunStage` processing.
-pub fn eligible_runnable_tasks<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Vec<&'a Task> {
+pub fn eligible_runnable_tasks<'a>(workflow: &Workflow, tasks: &'a [TaskSnapshot]) -> Vec<&'a TaskSnapshot> {
     tasks
         .iter()
         .filter(|t| {
@@ -316,7 +316,7 @@ pub fn eligible_runnable_tasks<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Ve
 /// Return the highest-priority task from [`eligible_runnable_tasks`].
 ///
 /// Returns `None` if no runnable task exists.
-pub fn select_runnable_task<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Option<&'a Task> {
+pub fn select_runnable_task<'a>(workflow: &Workflow, tasks: &'a [TaskSnapshot]) -> Option<&'a TaskSnapshot> {
     eligible_runnable_tasks(workflow, tasks)
         .into_iter()
         .max_by(|a, b| {
@@ -331,7 +331,7 @@ pub fn select_runnable_task<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Optio
 // ---------------------------------------------------------------------------
 
 /// Print a task to stdout in a human-readable format.
-pub fn print_task(task: &Task, discussion: &[Comment]) {
+pub fn print_task(task: &TaskSnapshot, discussion: &[Comment]) {
     println!("ID:          {}", task.id);
     println!("Title:       {}", task.title);
     println!("State:       {:?}", task.state);
@@ -400,7 +400,7 @@ impl<'a> CliStageRunner<'a> {
         State::running(self.pipeline.clone(), self.stage.clone())
     }
 
-    async fn prompt(&self, _pipeline_run_id: u64) -> anyhow::Result<String> {
+    async fn prompt(&self) -> anyhow::Result<String> {
         self.zbobr
             .prompt_builder()
             .build_for_stage(self.stage_def, self.task_id, self.zbobr.task_backend())
@@ -449,16 +449,6 @@ impl<'a> CliStageRunner<'a> {
                 self.zbobr.ensure_pr_url(self.task_id).await?;
             }
         }
-
-        // Allocate pipeline run ID if this is a fresh task (run_id == 0).
-        {
-            let task_session = self.zbobr.task_session(self.task_id);
-            let task = task_session.get_task().await?;
-            if task.pipeline_run_id == 0 {
-                task_session.allocate_pipeline_run_id().await?;
-            }
-        }
-
         // Auto-pause if stage count limit reached (before incrementing to avoid wasted increment).
         {
             let task_session = self.zbobr.task_session(self.task_id);
@@ -516,25 +506,14 @@ impl<'a> CliStageRunner<'a> {
             .and_then(|d| d.mcp.as_ref())
             .map(|tools| tools.iter().copied().collect())
             .unwrap_or_default();
-
-        // Read current pipeline_run_id for this session.
-        let task_snap = self
-            .zbobr
-            .task_backend()
-            .get_task(self.task_id)
-            .await?
-            .snapshot(false)
-            .await?;
-        let pipeline_run_id = task_snap.pipeline_run_id;
-
-        let prompt_text = self.prompt(pipeline_run_id).await?;
+        let prompt_text = self.prompt().await?;
 
         // Store the prompt once; the link is reused for each provider attempt's StageContext entry.
         let prompt_link = {
             let role_session = self.zbobr.role_session(self.task_id);
             let base_name = format!(
-                "prompt_{}_{}_{}_start",
-                self.pipeline, pipeline_run_id, self.stage
+                "prompt_{}_{}_start",
+                self.pipeline, self.stage
             );
             role_session.store_report(&base_name, &prompt_text).await?
         };
@@ -567,7 +546,6 @@ impl<'a> CliStageRunner<'a> {
                             info: StageInfo {
                                 instance,
                                 pipeline: pipeline_name,
-                                run_id: pipeline_run_id,
                                 stage: stage_name,
                                 tool: tool_val,
                                 model: model_val,
@@ -594,7 +572,6 @@ impl<'a> CliStageRunner<'a> {
                     allowed_tools.clone(),
                     Arc::clone(&tool_tracker),
                     self.pipeline.clone(),
-                    pipeline_run_id,
                 )
                 .await?;
 
@@ -637,8 +614,8 @@ impl<'a> CliStageRunner<'a> {
             if let Some(ref output) = outcome.execution_output {
                 let role_session = self.zbobr.role_session(self.task_id);
                 let base_name = format!(
-                    "output_{}_{}_{}_end",
-                    self.pipeline, pipeline_run_id, self.stage
+                    "output_{}_{}_end",
+                    self.pipeline, self.stage
                 );
                 match role_session.store_report(&base_name, output).await {
                     Ok(output_link) => {
@@ -763,8 +740,7 @@ impl ZbobrDispatcher {
     ) -> anyhow::Result<()> {
         let task_session = self.task_session(task_id);
 
-        task_session.allocate_pipeline_run_id().await?;
-        task_session.increment_stage_count().await?;
+                task_session.increment_stage_count().await?;
 
         // Auto-pause if stage count limit reached (before push_stack to prevent stack duplication on resume).
         {
@@ -807,6 +783,69 @@ impl ZbobrDispatcher {
         Ok(())
     }
 
+    /// Handle a stage that is a dedicated pause stage (`pause = true`).
+    ///
+    /// Pushes the current pipeline + stage onto the stack, then sets state directly to
+    /// `State::Pause`. On resume, `apply_call_return` pops the stack and routes via the
+    /// pause stage's `on_success`/`on_failure`/`on_no_report` handlers (or natural next).
+    async fn handle_pause_stage(
+        self: &Arc<Self>,
+        task_id: u64,
+        pipeline_name: &Pipeline,
+        stage: &Stage,
+    ) -> anyhow::Result<()> {
+        let task_session = self.task_session(task_id);
+
+                task_session.increment_stage_count().await?;
+
+        // Auto-pause if stage count limit reached (before push_stack to prevent stack duplication on resume).
+        {
+            let task = task_session.get_task().await?;
+            if task.max_stage_count > 0 && task.stage_count >= task.max_stage_count {
+                tracing::warn!(
+                    "Task #{task_id}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
+                    task.stage_count,
+                    task.max_stage_count
+                );
+                let status = format_error_status(
+                    self.config().fixed_offset(),
+                    &format!(
+                        "Stage count limit ({}) reached - auto-paused",
+                        task.max_stage_count
+                    ),
+                );
+                task_session.set_pause_with_status(status).await?;
+                return Ok(());
+            }
+        }
+
+        // Push stack so resume knows which stage's handlers to consult.
+        task_session
+            .push_stack(pipeline_name.clone(), stage.clone())
+            .await?;
+
+        let status = zbobr_api::format_status(
+            zbobr_api::PAUSE_PREFIX,
+            &chrono::Utc::now().with_timezone(&self.config().fixed_offset()),
+            &format!("Paused at stage '{stage}'"),
+        );
+        task_session
+            .modify_task(move |mut t| {
+                t.state = State::Pause;
+                t.signal = None;
+                t.go_pause = false;
+                t.status = Some(status);
+                t
+            })
+            .await?;
+
+        tracing::info!(
+            "Task #{task_id}: stage {pipeline_name}/{} paused",
+            stage.as_str()
+        );
+        Ok(())
+    }
+
     /// Centralized pause handler.  Called before dispatching any task.
     ///
     /// When `task.go_pause` is true the handler atomically:
@@ -815,7 +854,7 @@ impl ZbobrDispatcher {
     ///   3. clears signal and pause flag.
     ///
     /// Returns `Ok(true)` when the task was paused (caller should skip it).
-    async fn apply_pause_to_state(self: &Arc<Self>, task: &Task) -> anyhow::Result<bool> {
+    async fn apply_pause_to_state(self: &Arc<Self>, task: &TaskSnapshot) -> anyhow::Result<bool> {
         if !task.go_pause {
             return Ok(false);
         }
@@ -836,7 +875,7 @@ impl ZbobrDispatcher {
                     task.id,
                     task.state
                 );
-                self.workflow().default_pipeline()
+                self.workflow().on_start()
             }
         };
 
@@ -888,42 +927,108 @@ impl ZbobrDispatcher {
     /// - `ReturnSuccess` → `on_success`; if absent, advance to natural next stage
     /// - `ReturnFailure` → `on_failure`; if absent, propagate `ReturnFailure` up the stack
     /// - `Return` (no-report) → `on_no_report`; if absent, advance to natural next stage
+    /// Pop the top stack entry, compute the return transition, and apply everything atomically.
+    ///
+    /// Combines stack pop + signal set + state set into a single `modify_task` call so that
+    /// the parent pipeline label is never transiently removed from the GitHub issue between
+    /// the pop and the state restore.
+    ///
+    /// Returns the popped entry (for caller logging) or `None` if the stack was empty.
     async fn apply_call_return(
         self: &Arc<Self>,
         task_id: u64,
-        entry: &StackEntry,
         return_signal: Signal,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Option<StackEntry>> {
         let task_session = self.task_session(task_id);
-        let calling_stage = &entry.calling_stage;
-        let stage_def = self.workflow().stage(&entry.pipeline, calling_stage);
+        let task = task_session.get_task().await?;
 
-        let (signal, pause) = match &return_signal {
+        let entry = match task.stack.last().cloned() {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+
+        let calling_stage = entry.calling_stage.clone();
+        let stage_def = self.workflow().stage(&entry.pipeline, &calling_stage);
+        let pipeline = entry.pipeline.clone();
+        // Pre-compute confirm_status outside the closure (needs config access).
+        let confirm_status = {
+            let ts = chrono::Utc::now().with_timezone(&self.config().fixed_offset());
+            zbobr_api::format_status(zbobr_api::PAUSE_PREFIX, &ts, "Awaiting confirmation")
+        };
+
+        // Role stages on the stack were interrupted by handle_merge_conflict.
+        // Their on_xxx handlers serve their own completion flow (via sequential_signal),
+        // not merge-pipeline returns. Apply fixed behavior regardless of config:
+        //   success / no-report → re-run the interrupted stage
+        //   failure → pause for manual intervention (keep signal pointing at the stage)
+        if stage_def.map(|s| s.role().is_some()).unwrap_or(false) {
+            if return_signal == Signal::ReturnFailure {
+                let msg = format!(
+                    "Merge pipeline failed while resolving conflict in stage '{}/{}' — manual intervention required",
+                    pipeline, calling_stage
+                );
+                tracing::error!("Task #{task_id}: {msg}");
+                let status = format_error_status(self.config().fixed_offset(), &msg);
+                task_session
+                    .modify_task(move |mut task| {
+                        task.stack.pop();
+                        task.status = Some(status);
+                        task.go_pause = true;
+                        task.signal = Some(Signal::go(calling_stage));
+                        let new_state = State::pending(pipeline);
+                        if task.confirm && task.state != new_state {
+                            task.go_pause = true;
+                            task.status = Some(confirm_status);
+                        }
+                        task.state = new_state;
+                        task
+                    })
+                    .await?;
+            } else {
+                task_session
+                    .modify_task(move |mut task| {
+                        task.stack.pop();
+                        task.signal = Some(Signal::go(calling_stage));
+                        let new_state = State::pending(pipeline);
+                        if task.confirm && task.state != new_state {
+                            task.go_pause = true;
+                            task.status = Some(confirm_status);
+                        }
+                        task.state = new_state;
+                        task
+                    })
+                    .await?;
+            }
+            return Ok(Some(entry));
+        }
+
+        // Call/pause stage: consult on_success / on_failure / on_no_report transitions.
+        let signal = match &return_signal {
             Signal::ReturnSuccess => {
                 let transition = stage_def.and_then(|s| s.on_success());
                 match transition {
-                    Some(t) => (self.transition_signal(&entry.pipeline, calling_stage, t), t.pause),
+                    Some(t) => self.transition_signal(&pipeline, &calling_stage, t),
                     None => {
                         // No on_success: advance to natural next stage
-                        (self.natural_next_signal(&entry.pipeline, calling_stage), false)
+                        self.natural_next_signal(&pipeline, &calling_stage)
                     }
                 }
             }
             Signal::ReturnFailure => {
                 let transition = stage_def.and_then(|s| s.on_failure());
                 match transition {
-                    Some(t) => (self.transition_signal(&entry.pipeline, calling_stage, t), t.pause),
+                    Some(t) => self.transition_signal(&pipeline, &calling_stage, t),
                     None => {
                         // No on_failure: propagate failure up the stack
-                        (Signal::ReturnFailure, false)
+                        Signal::ReturnFailure
                     }
                 }
             }
             Signal::Return => {
                 let transition = stage_def.and_then(|s| s.on_no_report());
                 match transition {
-                    Some(t) => (self.transition_signal(&entry.pipeline, calling_stage, t), t.pause),
-                    None => (self.natural_next_signal(&entry.pipeline, calling_stage), false),
+                    Some(t) => self.transition_signal(&pipeline, &calling_stage, t),
+                    None => self.natural_next_signal(&pipeline, &calling_stage),
                 }
             }
             other => {
@@ -931,23 +1036,25 @@ impl ZbobrDispatcher {
                     "Task #{}: unexpected return signal '{other}' — treating as no-report",
                     task_id
                 );
-                (self.natural_next_signal(&entry.pipeline, calling_stage), false)
+                self.natural_next_signal(&pipeline, &calling_stage)
             }
         };
 
-        task_session.set_signal(Some(signal)).await?;
-        if pause {
-            let status = zbobr_api::format_status(
-                zbobr_api::PAUSE_PREFIX,
-                &chrono::Utc::now().with_timezone(&self.config().fixed_offset()),
-                "Pipeline returned — pausing as configured",
-            );
-            task_session.set_pause_with_status(status).await?;
-        }
         task_session
-            .set_state(State::pending(entry.pipeline.clone()))
+            .modify_task(move |mut task| {
+                task.stack.pop();
+                task.signal = Some(signal);
+                let new_state = State::pending(pipeline);
+                if task.confirm && task.state != new_state {
+                    task.go_pause = true;
+                    task.status = Some(confirm_status);
+                }
+                task.state = new_state;
+                task
+            })
             .await?;
-        Ok(())
+
+        Ok(Some(entry))
     }
 
     /// Compute the signal for a configured `StageTransition`: explicit `next` stage or natural successor.
@@ -979,7 +1086,7 @@ impl ZbobrDispatcher {
     /// Process a task according to its current state and signal (single-step).
     pub async fn process_task(
         self: &Arc<Self>,
-        task: &Task,
+        task: &TaskSnapshot,
         mcp_tester_override: Option<&ZbobrExecutorMcpTesterConfig>,
     ) -> anyhow::Result<()> {
         if task.state.is_done() {
@@ -1006,6 +1113,15 @@ impl ZbobrDispatcher {
                         call_target
                     );
                     self.handle_call_stage(task.id, pipeline_name, stage_name, call_target)
+                        .await?;
+                } else if stage_def.is_pause() {
+                    tracing::info!(
+                        "Task #{}: entering pause stage {}/{}",
+                        task.id,
+                        pipeline_name,
+                        stage_name,
+                    );
+                    self.handle_pause_stage(task.id, pipeline_name, stage_name)
                         .await?;
                 } else {
                     tracing::info!(
@@ -1053,36 +1169,39 @@ impl ZbobrDispatcher {
                     Some(Signal::ReturnSuccess) => Signal::ReturnSuccess,
                     _ => Signal::Return,
                 };
-                if let Some(entry) = task_session.pop_stack().await? {
-                    tracing::info!(
-                        "Task #{}: pipeline done with '{return_signal}' — returning to '{}'",
-                        task.id,
-                        entry.pipeline
-                    );
-                    self.apply_call_return(task.id, &entry, return_signal).await?;
-                } else if return_signal == Signal::ReturnFailure {
-                    // Failure reached root — pause for manual intervention
-                    let pipeline = task
-                        .state
-                        .pipeline()
-                        .cloned()
-                        .unwrap_or_else(|| self.workflow().default_pipeline());
-                    let first_stage = self
-                        .workflow()
-                        .start_stage_for_pipeline(&pipeline)
-                        .map(|(name, _)| name.to_string())
-                        .unwrap_or_default();
-                    let status = format_error_status(
-                        self.config().fixed_offset(),
-                        "Pipeline failed at root — manual intervention required",
-                    );
-                    task_session
-                        .set_pause_with_status_and_signal(status, Signal::go(first_stage))
-                        .await?;
-                    tracing::info!("Task #{}: pipeline failed at root — paused", task.id);
-                } else {
-                    task_session.finish().await?;
-                    tracing::info!("Task #{}: completed", task.id);
+                match self.apply_call_return(task.id, return_signal.clone()).await? {
+                    Some(entry) => {
+                        tracing::info!(
+                            "Task #{}: pipeline done with '{return_signal}' — returning to '{}'",
+                            task.id,
+                            entry.pipeline
+                        );
+                    }
+                    None if return_signal == Signal::ReturnFailure => {
+                        // Failure reached root — pause for manual intervention
+                        let pipeline = task
+                            .state
+                            .pipeline()
+                            .cloned()
+                            .unwrap_or_else(|| self.workflow().on_start());
+                        let first_stage = self
+                            .workflow()
+                            .start_stage_for_pipeline(&pipeline)
+                            .map(|(name, _)| name.to_string())
+                            .unwrap_or_default();
+                        let status = format_error_status(
+                            self.config().fixed_offset(),
+                            "Pipeline failed at root — manual intervention required",
+                        );
+                        task_session
+                            .set_pause_with_status_and_signal(status, Signal::go(first_stage))
+                            .await?;
+                        tracing::info!("Task #{}: pipeline failed at root — paused", task.id);
+                    }
+                    None => {
+                        task_session.finish().await?;
+                        tracing::info!("Task #{}: completed", task.id);
+                    }
                 }
             }
             crate::workflow::StateAction::Paused => {
@@ -1262,7 +1381,7 @@ impl ZbobrDispatcher {
     ///
     /// Applies pause/ready normalization and processes instant transitions (Done and call stages).
     /// Returns the current task snapshot list.
-    pub async fn advance_tasks(self: &Arc<Self>) -> anyhow::Result<Vec<Task>> {
+    pub async fn advance_tasks(self: &Arc<Self>) -> anyhow::Result<Vec<TaskSnapshot>> {
         let task_backend = self.task_backend();
         let workflow = self.workflow();
 
@@ -1273,7 +1392,7 @@ impl ZbobrDispatcher {
                 vec![]
             }
         };
-        let mut all_tasks: Vec<Task> = Vec::new();
+        let mut all_tasks: Vec<TaskSnapshot> = Vec::new();
         for w in &all_weak {
             match w.snapshot(false).await {
                 Ok(t) => all_tasks.push(t),
@@ -1301,21 +1420,13 @@ impl ZbobrDispatcher {
             let task_session = self.task_session(task.id);
             match override_req {
                 zbobr_api::StateOverrideRequest::Resume(signal) => {
-                    match task_session.pop_stack().await {
+                    match self.apply_call_return(task.id, signal.clone()).await {
                         Ok(Some(entry)) => {
                             tracing::info!(
                                 "Task #{}: user-initiated resume with signal '{signal}' → pipeline '{}'",
                                 task.id,
                                 entry.pipeline
                             );
-                            if let Err(e) =
-                                self.apply_call_return(task.id, &entry, signal).await
-                            {
-                                tracing::error!(
-                                    "Task #{}: resume apply_call_return failed: {e}",
-                                    task.id
-                                );
-                            }
                         }
                         Ok(None) => {
                             tracing::warn!(
@@ -1324,7 +1435,10 @@ impl ZbobrDispatcher {
                             );
                         }
                         Err(e) => {
-                            tracing::error!("Task #{}: resume — pop_stack failed: {e}", task.id);
+                            tracing::error!(
+                                "Task #{}: resume apply_call_return failed: {e}",
+                                task.id
+                            );
                         }
                     }
                 }
@@ -1361,6 +1475,17 @@ impl ZbobrDispatcher {
                 }
             }
         }
+
+        // Refresh snapshots after applying overrides so Phase 1 uses current state
+        // instead of stale pre-override task copies.
+        all_tasks.clear();
+        for w in &all_weak {
+            match w.snapshot(false).await {
+                Ok(t) => all_tasks.push(t),
+                Err(e) => tracing::warn!("Failed to snapshot task after overrides: {e}"),
+            }
+        }
+        all_tasks.sort_by_key(|b| std::cmp::Reverse(task_priority(b)));
 
         // Phase 1: apply transitions and handle Done / instant call-stage actions for all tasks.
         for task in &all_tasks {
@@ -1412,6 +1537,27 @@ impl ZbobrDispatcher {
                                 task.id
                             );
                         }
+                    } else if stage_def.is_pause() {
+                        // Pause stages are instant — process eagerly without consuming a run slot.
+                        tracing::info!(
+                            "Processing task #{} (state={:?}, signal={:?}) — pause stage {}/{}",
+                            task.id,
+                            task.state,
+                            task.signal,
+                            pipeline_name,
+                            stage_name,
+                        );
+                        if let Err(e) = self
+                            .handle_pause_stage(task.id, pipeline_name, stage_name)
+                            .await
+                        {
+                            tracing::error!(
+                                "Pause stage {}/{} failed for task #{}: {e}",
+                                pipeline_name,
+                                stage_name,
+                                task.id
+                            );
+                        }
                     }
                 }
                 crate::workflow::StateAction::Done => {
@@ -1421,60 +1567,45 @@ impl ZbobrDispatcher {
                         Some(Signal::ReturnSuccess) => Signal::ReturnSuccess,
                         _ => Signal::Return,
                     };
-                    match task_session.pop_stack().await {
+                    match self.apply_call_return(task.id, return_signal.clone()).await {
                         Ok(Some(entry)) => {
                             tracing::info!(
                                 "Task #{}: pipeline done with '{return_signal}' — returning to '{}'",
                                 task.id,
                                 entry.pipeline
                             );
-                            if let Err(e) =
-                                self.apply_call_return(task.id, &entry, return_signal).await
+                        }
+                        Ok(None) if return_signal == Signal::ReturnFailure => {
+                            tracing::info!("Task #{}: pipeline failed at root — paused", task.id);
+                            let pipeline = task
+                                .state
+                                .pipeline()
+                                .cloned()
+                                .unwrap_or_else(|| self.workflow().on_start());
+                            let first_stage = self
+                                .workflow()
+                                .start_stage_for_pipeline(&pipeline)
+                                .map(|(name, _)| name.to_string())
+                                .unwrap_or_default();
+                            let status = format_error_status(
+                                self.config().fixed_offset(),
+                                "Pipeline failed at root — manual intervention required",
+                            );
+                            if let Err(e) = task_session
+                                .set_pause_with_status_and_signal(status, Signal::go(first_stage))
+                                .await
                             {
-                                tracing::error!(
-                                    "Task #{}: apply_call_return failed: {e}",
-                                    task.id
-                                );
+                                tracing::error!("Failed to pause task #{}: {e}", task.id);
                             }
                         }
                         Ok(None) => {
-                            if return_signal == Signal::ReturnFailure {
-                                tracing::info!(
-                                    "Task #{}: pipeline failed at root — paused",
-                                    task.id
-                                );
-                                let pipeline = task
-                                    .state
-                                    .pipeline()
-                                    .cloned()
-                                    .unwrap_or_else(|| self.workflow().default_pipeline());
-                                let first_stage = self
-                                    .workflow()
-                                    .start_stage_for_pipeline(&pipeline)
-                                    .map(|(name, _)| name.to_string())
-                                    .unwrap_or_default();
-                                let status = format_error_status(
-                                    self.config().fixed_offset(),
-                                    "Pipeline failed at root — manual intervention required",
-                                );
-                                if let Err(e) = task_session
-                                    .set_pause_with_status_and_signal(
-                                        status,
-                                        Signal::go(first_stage),
-                                    )
-                                    .await
-                                {
-                                    tracing::error!("Failed to pause task #{}: {e}", task.id);
-                                }
-                            } else {
-                                tracing::info!("Task #{}: completed", task.id);
-                                if let Err(e) = task_session.finish().await {
-                                    tracing::error!("Failed to finish task #{}: {e}", task.id);
-                                }
+                            tracing::info!("Task #{}: completed", task.id);
+                            if let Err(e) = task_session.finish().await {
+                                tracing::error!("Failed to finish task #{}: {e}", task.id);
                             }
                         }
                         Err(e) => {
-                            tracing::error!("Failed to pop stack for task #{}: {e}", task.id)
+                            tracing::error!("Task #{}: apply_call_return failed: {e}", task.id);
                         }
                     }
                 }
@@ -1545,7 +1676,7 @@ impl ZbobrDispatcher {
         // 5. Attempt merge with base branch from backend config
         let base_branch = self.repo_backend().branch();
 
-        let merge_pipeline = self.workflow().merge_pipeline();
+        let merge_pipeline = self.workflow().on_merge();
 
         // If we ARE the conflict handler, start the merge but don't abort on failure —
         // the agent needs to see conflict markers in the working tree.
@@ -1591,7 +1722,7 @@ impl ZbobrDispatcher {
         let task_session = self.task_session(task_id);
         let pending_state = State::pending(pipeline.clone());
 
-        let merge_pipeline = self.workflow().merge_pipeline();
+        let merge_pipeline = self.workflow().on_merge();
 
         // Recursion guard: if already inside the merge pipeline, pause
         if pipeline == &merge_pipeline {
@@ -1610,9 +1741,8 @@ impl ZbobrDispatcher {
         task_session
             .push_stack(pipeline.clone(), stage.clone())
             .await?;
-        task_session.allocate_pipeline_run_id().await?;
-        task_session
-            .set_signal(Some(Signal::call(self.workflow().merge_pipeline())))
+                task_session
+            .set_signal(Some(Signal::call(self.workflow().on_merge())))
             .await?;
         task_session.set_state(pending_state).await?;
 
@@ -1732,7 +1862,6 @@ impl ZbobrDispatcher {
         allowed_tools: std::collections::HashSet<McpTool>,
         tool_tracker: Arc<std::sync::Mutex<Option<McpTool>>>,
         pipeline: Pipeline,
-        pipeline_run_id: u64,
     ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
         let (port_tx, port_rx) = tokio::sync::oneshot::channel();
         let zbobr = Arc::clone(self);
@@ -1747,7 +1876,6 @@ impl ZbobrDispatcher {
                 allowed_tools,
                 tool_tracker,
                 pipeline,
-                pipeline_run_id,
             )
             .await
             {
@@ -1945,7 +2073,7 @@ impl ZbobrDispatcher {
         // Keeping state as Running lets apply_pause_to_state derive calling_stage from
         // state.stage() (the stage that was actually running) rather than from the
         // pre-computed signal target.
-        let mut pause_pending = current_task.go_pause;
+        let pause_pending = current_task.go_pause;
 
         if !current_task.go_pause && current_task.signal.is_none() {
             let current_stage = stage.clone();
@@ -1965,16 +2093,6 @@ impl ZbobrDispatcher {
                 }
                 SequentialSignal::Return => {
                     task_session.set_signal(Some(Signal::Return)).await?;
-                }
-                SequentialSignal::PauseThenSignal(signal) => {
-                    let status = format_error_status(
-                        self.config().fixed_offset(),
-                        "Auto-pause: stage completed",
-                    );
-                    task_session
-                        .set_pause_with_status_and_signal(status, signal)
-                        .await?;
-                    pause_pending = true;
                 }
             }
         }
@@ -2046,7 +2164,7 @@ impl ZbobrDispatcher {
             .snapshot(false)
             .await?;
         if let Some(identity) = task.identity() {
-            let is_conflict_handler = pipeline_name == &self.workflow().merge_pipeline();
+            let is_conflict_handler = pipeline_name == &self.workflow().on_merge();
             let is_uptodate = self.update_worktree(&identity).await?;
             if !is_uptodate && !is_conflict_handler {
                 anyhow::bail!("Merge conflict while syncing work branch for task #{task_id}");
@@ -2120,8 +2238,8 @@ mod tests {
         stage_count: u64,
         pause: bool,
         stack: Vec<StackEntry>,
-    ) -> Task {
-        Task {
+    ) -> TaskSnapshot {
+        TaskSnapshot {
             id,
             title: format!("task {}", id),
             description: "test description".to_string(),
@@ -2134,11 +2252,11 @@ mod tests {
             status: None,
             go_pause: pause,
             confirm: false,
-            pipeline_run_id: 0,
             stage_count,
             max_stage_count: 0,
             closed: false,
             etag: None,
+            dead_context: String::new(),
         }
     }
 
@@ -2194,7 +2312,6 @@ mod tests {
         let wf = make_workflow();
         let stack = vec![StackEntry {
             pipeline: Pipeline::Main,
-            pipeline_run_id: 1,
             calling_stage: Stage::from("working"),
         }];
         let tasks = [make_task(1, State::Pause, 10, false, stack)];
@@ -2216,7 +2333,7 @@ mod tests {
     #[test]
     fn select_runnable_task_returns_none_on_empty_input() {
         let wf = make_workflow();
-        let tasks: [Task; 0] = [];
+        let tasks: [TaskSnapshot; 0] = [];
 
         let selected = select_runnable_task(&wf, &tasks);
         assert!(selected.is_none());
@@ -2227,7 +2344,6 @@ mod tests {
         let wf = make_workflow();
         let stack = vec![StackEntry {
             pipeline: Pipeline::Main,
-            pipeline_run_id: 1,
             calling_stage: Stage::from("working"),
         }];
         let tasks = [

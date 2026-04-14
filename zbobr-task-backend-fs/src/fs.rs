@@ -8,7 +8,7 @@ use tokio::{
     sync::{Mutex, OwnedMutexGuard},
 };
 use zbobr_api::{
-    Comment, Signal, StackEntry, State, StateOverrideRequest, Task,
+    Comment, Signal, StackEntry, State, StateOverrideRequest, TaskSnapshot,
     backend::{TaskBackend, TaskMut, TaskWeak},
     task::TaskContext,
 };
@@ -45,16 +45,16 @@ struct TaskFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     status: Option<String>,
     #[serde(default)]
-    pipeline_run_id: u64,
-    #[serde(default)]
     stage_count: u64,
     #[serde(default)]
     max_stage_count: u64,
     closed: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    dead_context: String,
 }
 
 impl TaskFile {
-    fn to_task(&self) -> anyhow::Result<Task> {
+    fn to_task(&self) -> anyhow::Result<TaskSnapshot> {
         // Migrate legacy `stage` field to `state` if present
         let state = if self.state.is_empty() {
             if let Some(ref stage) = self.stage {
@@ -66,7 +66,7 @@ impl TaskFile {
             self.state.clone()
         };
 
-        Ok(Task {
+        Ok(TaskSnapshot {
             id: self.id,
             title: self.title.clone(),
             description: self.description.clone(),
@@ -80,15 +80,15 @@ impl TaskFile {
             status: self.status.clone(),
             go_pause: self.pause,
             confirm: self.confirm,
-            pipeline_run_id: self.pipeline_run_id,
             stage_count: self.stage_count,
             max_stage_count: self.max_stage_count,
             closed: self.closed,
             etag: None,
+            dead_context: self.dead_context.clone(),
         })
     }
 
-    fn from_task(task: &Task, closed: bool) -> Self {
+    fn from_task(task: &TaskSnapshot, closed: bool) -> Self {
         Self {
             id: task.id,
             title: task.title.clone(),
@@ -103,10 +103,10 @@ impl TaskFile {
             signal: task.signal.clone(),
             stack: task.stack.clone(),
             status: task.status.clone(),
-            pipeline_run_id: task.pipeline_run_id,
             stage_count: task.stage_count,
             max_stage_count: task.max_stage_count,
             closed,
+            dead_context: task.dead_context.clone(),
         }
     }
 }
@@ -321,7 +321,7 @@ impl ZbobrTaskBackendFs {
     }
 
     /// Read a task from disk (internal, returns Task directly).
-    async fn read_task(&self, id: u64) -> anyhow::Result<Task> {
+    async fn read_task(&self, id: u64) -> anyhow::Result<TaskSnapshot> {
         let task_file = self.read_task_file(id).await?;
         task_file.to_task()
     }
@@ -334,7 +334,7 @@ impl ZbobrTaskBackendFs {
 struct FsTaskWeak {
     id: u64,
     backend: Arc<ZbobrTaskBackendFs>,
-    saved_snapshot: Arc<std::sync::Mutex<Option<Task>>>,
+    saved_snapshot: Arc<std::sync::Mutex<Option<TaskSnapshot>>>,
 }
 
 #[async_trait]
@@ -343,7 +343,7 @@ impl TaskWeak for FsTaskWeak {
         self.id
     }
 
-    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task> {
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<TaskSnapshot> {
         if !refresh && let Some(task) = self.saved_snapshot.lock().unwrap().clone() {
             return Ok(task);
         }
@@ -388,7 +388,7 @@ impl TaskWeak for FsTaskWeak {
 struct FsTaskMut {
     id: u64,
     backend: Arc<ZbobrTaskBackendFs>,
-    saved_snapshot: Arc<std::sync::Mutex<Option<Task>>>,
+    saved_snapshot: Arc<std::sync::Mutex<Option<TaskSnapshot>>>,
     _guard: OwnedMutexGuard<()>,
 }
 
@@ -398,7 +398,7 @@ impl TaskMut for FsTaskMut {
         self.id
     }
 
-    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task> {
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<TaskSnapshot> {
         if !refresh && let Some(task) = self.saved_snapshot.lock().unwrap().clone() {
             return Ok(task);
         }
@@ -410,8 +410,8 @@ impl TaskMut for FsTaskMut {
 
     async fn modify_task(
         &self,
-        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-    ) -> anyhow::Result<()> {
+        mutate: Box<dyn FnOnce(TaskSnapshot) -> TaskSnapshot + Send>,
+    ) -> anyhow::Result<TaskSnapshot> {
         let task_file = self.backend.read_task_file(self.id).await?;
         let was_closed = task_file.closed;
 
@@ -420,10 +420,10 @@ impl TaskMut for FsTaskMut {
 
         let task_file = TaskFile::from_task(&task, was_closed);
         self.backend.write_task_file(&task_file).await?;
-        *self.saved_snapshot.lock().unwrap() = Some(task);
+        *self.saved_snapshot.lock().unwrap() = Some(task.clone());
 
         tracing::debug!("Modified task {}", self.id);
-        Ok(())
+        Ok(task)
     }
 
     async fn close(&self) -> anyhow::Result<()> {
@@ -476,7 +476,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
     ) -> anyhow::Result<u64> {
         let id = self.get_next_id().await?;
 
-        let task = Task {
+        let task = TaskSnapshot {
             id,
             title: title.to_string(),
             description: description.to_string(),
@@ -490,11 +490,11 @@ impl TaskBackend for ZbobrTaskBackendFs {
             status: None,
             go_pause: false,
             confirm: false,
-            pipeline_run_id: 0,
             stage_count: 0,
             max_stage_count: self.config.default_max_stage_count,
             closed: false,
             etag: None,
+            dead_context: String::new(),
         };
 
         let task_file = TaskFile::from_task(&task, false);

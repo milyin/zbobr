@@ -22,8 +22,6 @@ pub struct RoleSession {
     last_mapped_tool: Arc<std::sync::Mutex<Option<McpTool>>>,
     /// Pipeline for this session's comments.
     pipeline: Option<Pipeline>,
-    /// Pipeline run ID for this session's comments.
-    pipeline_run_id: u64,
 }
 
 impl RoleSession {
@@ -33,7 +31,6 @@ impl RoleSession {
             task_id,
             last_mapped_tool: Arc::new(std::sync::Mutex::new(None)),
             pipeline: None,
-            pipeline_run_id: 0,
         }
     }
 
@@ -42,14 +39,12 @@ impl RoleSession {
         task_id: u64,
         tracker: Arc<std::sync::Mutex<Option<McpTool>>>,
         pipeline: Pipeline,
-        pipeline_run_id: u64,
     ) -> Self {
         Self {
             zbobr,
             task_id,
             last_mapped_tool: tracker,
             pipeline: Some(pipeline),
-            pipeline_run_id,
         }
     }
 
@@ -82,7 +77,7 @@ impl RoleSession {
     }
 
     /// Read the full task state.
-    pub async fn get_task(&self) -> anyhow::Result<Task> {
+    pub async fn get_task(&self) -> anyhow::Result<TaskSnapshot> {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         weak.snapshot(false).await
     }
@@ -102,11 +97,6 @@ impl RoleSession {
         &self.pipeline
     }
 
-    /// Get pipeline run ID for this session.
-    pub fn pipeline_run_id(&self) -> u64 {
-        self.pipeline_run_id
-    }
-
     /// Atomically read-modify-write the task body via transient upgrade.
     ///
     /// The closure receives a mutable `Task` reference and may modify `description`,
@@ -116,7 +106,7 @@ impl RoleSession {
     /// and restored afterwards, so MCP tools cannot change them.
     pub async fn modify_task<F>(&self, mutate: F) -> anyhow::Result<()>
     where
-        F: FnOnce(Task) -> Task + Send + 'static,
+        F: FnOnce(TaskSnapshot) -> TaskSnapshot + Send + 'static,
     {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
@@ -134,6 +124,7 @@ impl RoleSession {
                 task
             }))
             .await
+            .map(|_| ())
     }
 
     /// Get all comments as structured `Comment` objects.
@@ -373,7 +364,7 @@ impl TaskSession {
     }
 
     /// Read the full task state.
-    pub async fn get_task(&self) -> anyhow::Result<Task> {
+    pub async fn get_task(&self) -> anyhow::Result<TaskSnapshot> {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         weak.snapshot(false).await
     }
@@ -381,7 +372,7 @@ impl TaskSession {
     /// Atomically read-modify-write the task with unrestricted access via transient upgrade.
     pub async fn modify_task<F>(&self, mutate: F) -> anyhow::Result<()>
     where
-        F: FnOnce(Task) -> Task + Send + 'static,
+        F: FnOnce(TaskSnapshot) -> TaskSnapshot + Send + 'static,
     {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
@@ -391,6 +382,7 @@ impl TaskSession {
                 task
             }))
             .await
+            .map(|_| ())
     }
 
     /// Set the task state (dispatcher only).
@@ -459,18 +451,6 @@ impl TaskSession {
         .await
     }
 
-    /// Allocate a new pipeline run ID (monotonically incrementing).
-    pub async fn allocate_pipeline_run_id(&self) -> anyhow::Result<u64> {
-        let task = self.get_task().await?;
-        let new_id = task.pipeline_run_id + 1;
-        self.modify_task(move |mut t| {
-            t.pipeline_run_id = new_id;
-            t
-        })
-        .await?;
-        Ok(new_id)
-    }
-
     /// Increment the stage counter. Called each time a stage is entered.
     pub async fn increment_stage_count(&self) -> anyhow::Result<()> {
         self.modify_task(move |mut t| {
@@ -480,7 +460,7 @@ impl TaskSession {
         .await
     }
 
-    /// Push an entry onto the task's call/pause stack, saving the current pipeline_run_id.
+    /// Push an entry onto the task's call/pause stack.
     /// `calling_stage` is the stage in `pipeline` whose on_success/on_failure/on_no_report
     /// transitions will be consulted when the sub-pipeline or pause returns.
     pub async fn push_stack(
@@ -489,10 +469,8 @@ impl TaskSession {
         calling_stage: crate::task::Stage,
     ) -> anyhow::Result<()> {
         let pipeline = pipeline.into();
-        let task = self.get_task().await?;
         let entry = crate::task::StackEntry {
             pipeline,
-            pipeline_run_id: task.pipeline_run_id,
             calling_stage,
         };
         self.modify_task(move |mut task| {
@@ -502,15 +480,13 @@ impl TaskSession {
         .await
     }
 
-    /// Pop the top entry from the task's call stack. Restores pipeline_run_id.
+    /// Pop the top entry from the task's call stack.
     pub async fn pop_stack(&self) -> anyhow::Result<Option<crate::task::StackEntry>> {
         let task = self.get_task().await?;
         let popped = task.stack.last().cloned();
-        if let Some(ref entry) = popped {
-            let restored_run_id = entry.pipeline_run_id;
+        if popped.is_some() {
             self.modify_task(move |mut task| {
                 task.stack.pop();
-                task.pipeline_run_id = restored_run_id;
                 task
             })
             .await?;
@@ -577,7 +553,7 @@ mod comment_model_tests {
     // Simple in-memory backend for testing
 
     struct InMemTask {
-        task: Task,
+        task: TaskSnapshot,
         closed: bool,
     }
 
@@ -617,7 +593,7 @@ mod comment_model_tests {
             self.id
         }
 
-        async fn snapshot(&self, _refresh: bool) -> anyhow::Result<Task> {
+        async fn snapshot(&self, _refresh: bool) -> anyhow::Result<TaskSnapshot> {
             let tasks = self.backend.tasks.lock().await;
             tasks
                 .get(&self.id)
@@ -681,7 +657,7 @@ mod comment_model_tests {
             self.id
         }
 
-        async fn snapshot(&self, _refresh: bool) -> anyhow::Result<Task> {
+        async fn snapshot(&self, _refresh: bool) -> anyhow::Result<TaskSnapshot> {
             let tasks = self.backend.tasks.lock().await;
             tasks
                 .get(&self.id)
@@ -691,13 +667,13 @@ mod comment_model_tests {
 
         async fn modify_task(
             &self,
-            mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-        ) -> anyhow::Result<()> {
+            mutate: Box<dyn FnOnce(TaskSnapshot) -> TaskSnapshot + Send>,
+        ) -> anyhow::Result<TaskSnapshot> {
             let mut tasks = self.backend.tasks.lock().await;
             if let Some(t) = tasks.get_mut(&self.id) {
                 let task = t.task.clone();
                 t.task = mutate(task);
-                Ok(())
+                Ok(t.task.clone())
             } else {
                 Err(anyhow::anyhow!("not found"))
             }
@@ -761,7 +737,7 @@ mod comment_model_tests {
                 .next_id
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
                 + 1;
-            let task = Task {
+            let task = TaskSnapshot {
                 id,
                 title: title.to_string(),
                 description: description.to_string(),
@@ -774,11 +750,11 @@ mod comment_model_tests {
                 status: None,
                 go_pause: false,
                 confirm: false,
-                pipeline_run_id: 0,
                 stage_count: 0,
                 max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
                 closed: false,
                 etag: None,
+                dead_context: String::new(),
             };
             self.inner.tasks.lock().await.insert(
                 id,
@@ -887,7 +863,6 @@ mod comment_model_tests {
             Model::from("gpt-5-mini".to_string()),
             "planning".to_string().into(),
             Pipeline::Main,
-            1,
         );
 
         // stop_with_error stores the status in the task's status field
@@ -924,7 +899,7 @@ mod comment_model_tests {
         task_id: u64,
     ) -> crate::mcp::unified::UnifiedMcp {
         let tracker = Arc::new(std::sync::Mutex::new(None::<McpTool>));
-        let session = zbobr.role_session_with_tracker(task_id, tracker, Pipeline::Main, 1);
+        let session = zbobr.role_session_with_tracker(task_id, tracker, Pipeline::Main);
         let allowed_tools: std::collections::HashSet<zbobr_api::config_tools::McpTool> =
             zbobr_api::config_tools::ALL_TOOLS.iter().copied().collect();
         crate::mcp::unified::UnifiedMcp::new(
@@ -935,7 +910,6 @@ mod comment_model_tests {
             Model::from("gpt-5-mini".to_string()),
             "working".to_string().into(),
             Pipeline::Main,
-            1,
         )
     }
 
@@ -953,7 +927,6 @@ mod comment_model_tests {
                         info: StageInfo {
                             instance: "default".to_string(),
                             pipeline: Pipeline::Main,
-                            run_id: 1,
                             stage: Stage::new("working"),
                             tool: Some("copilot".to_string()),
                             model: Some("gpt-5-mini".parse().unwrap()),
@@ -1025,7 +998,6 @@ mod comment_model_tests {
                         info: StageInfo {
                             instance: "default".to_string(),
                             pipeline: Pipeline::Main,
-                            run_id: 1,
                             stage: Stage::new("working"),
                             tool: Some("copilot".to_string()),
                             model: Some("gpt-5-mini".parse().unwrap()),
@@ -1090,7 +1062,6 @@ mod comment_model_tests {
                         info: StageInfo {
                             instance: "default".to_string(),
                             pipeline: Pipeline::Main,
-                            run_id: 1,
                             stage: Stage::new("working"),
                             tool: Some("copilot".to_string()),
                             model: Some("gpt-5-mini".parse().unwrap()),

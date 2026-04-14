@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use zbobr_api::{
-    Pipeline, Signal, Stage, State, Task,
+    Pipeline, Signal, Stage, State, TaskSnapshot,
     config::{
         PipelineConfig, Role, RoleDefinition, StageDefinition, StageTransition, WorkflowConfig,
     },
@@ -16,8 +16,6 @@ pub(crate) enum SequentialSignal {
     Advance(String),
     /// `report_success`/`on_no_report` at the last stage → pipeline done, return.
     Return,
-    /// Stage-configured pause → set pause flag, emit given signal on resume.
-    PauseThenSignal(Signal),
 }
 
 /// Convert a stage transition config + default target into a [`SequentialSignal`].
@@ -33,22 +31,18 @@ fn apply_transition(
         .and_then(|t| t.next.as_ref())
         .map(|n: &Stage| n.to_string())
         .or(default_target);
-    if transition.is_some_and(|t| t.pause) {
-        SequentialSignal::PauseThenSignal(target.as_deref().map_or(no_target, Signal::go))
-    } else {
-        match target {
-            Some(t) => SequentialSignal::Advance(t),
-            None => match no_target {
-                Signal::Return => SequentialSignal::Return,
-                Signal::ReturnFailure => SequentialSignal::ReturnFailure,
-                _ => unreachable!(),
-            },
-        }
+    match target {
+        Some(t) => SequentialSignal::Advance(t),
+        None => match no_target {
+            Signal::Return => SequentialSignal::Return,
+            Signal::ReturnFailure => SequentialSignal::ReturnFailure,
+            _ => unreachable!(),
+        },
     }
 }
 
 /// Workflow wraps a `WorkflowConfig` and exposes state machine logic as methods.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Workflow {
     config: WorkflowConfig,
 }
@@ -63,40 +57,6 @@ pub enum StateAction<'a> {
     Paused,
     /// Nothing to do (no signal, no pending action).
     Idle,
-}
-
-impl Default for Workflow {
-    fn default() -> Self {
-        let mut pipelines = IndexMap::new();
-        let dummy_stage = StageDefinition {
-            role: Some("default".to_string().into()).into(),
-            ..Default::default()
-        };
-        for name in [Pipeline::MAIN, Pipeline::MERGE] {
-            pipelines.insert(
-                Pipeline::from(name),
-                PipelineConfig {
-                    stages: Some(IndexMap::from([(
-                        Stage::from("default"),
-                        TomlOption::Value(dummy_stage.clone()),
-                    )])),
-                },
-            );
-        }
-        Self {
-            config: WorkflowConfig {
-                prompts: None,
-                pipelines: Some(
-                    pipelines
-                        .into_iter()
-                        .map(|(k, v)| (k, TomlOption::Value(v)))
-                        .collect(),
-                ),
-                roles: None,
-                ..Default::default()
-            },
-        }
-    }
 }
 
 impl Workflow {
@@ -131,12 +91,12 @@ impl Workflow {
         self.config.all_stages()
     }
 
-    pub fn default_pipeline(&self) -> Pipeline {
-        self.config.default_pipeline()
+    pub fn on_start(&self) -> Pipeline {
+        self.config.on_start.clone().unwrap_or("main".into())
     }
 
-    pub fn merge_pipeline(&self) -> Pipeline {
-        self.config.merge_pipeline()
+    pub fn on_merge(&self) -> Pipeline {
+        self.config.on_merge.clone().unwrap_or("merge".into())
     }
 
     pub fn pipeline_names(&self) -> Vec<&Pipeline> {
@@ -209,10 +169,10 @@ impl Workflow {
                 Some(stage.to_string()),
                 Signal::Return,
             ),
-            // No report tool called — use on_no_report if configured, else advance (same as on_success).
+            // No report tool called — use on_no_report if configured, else repeat the stage.
             _ => apply_transition(
                 stage_def.and_then(|s| s.on_no_report()),
-                next_stage(),
+                Some(stage.to_string()),
                 Signal::Return,
             ),
         }
@@ -222,7 +182,7 @@ impl Workflow {
 
     /// Given a task's current state/signal/stack and the workflow configuration,
     /// determine the next action to take.
-    pub fn resolve_next_action(&self, task: &Task) -> anyhow::Result<StateAction<'_>> {
+    pub fn resolve_next_action(&self, task: &TaskSnapshot) -> anyhow::Result<StateAction<'_>> {
         tracing::debug!(
             "Task #{}: resolving next action (state={:?}, signal={:?}, stack_depth={})",
             task.id,
@@ -241,6 +201,13 @@ impl Workflow {
                         stage,
                         call_target
                     );
+                } else if def.is_pause() {
+                    tracing::info!(
+                        "Task #{}: resolved → RunStage {}/{} (pause)",
+                        task.id,
+                        pipeline,
+                        stage,
+                    );
                 } else {
                     tracing::info!(
                         "Task #{}: resolved → RunStage {}/{} (role={:?})",
@@ -258,7 +225,7 @@ impl Workflow {
         Ok(action)
     }
 
-    fn resolve_inner(&self, task: &Task, depth: usize) -> anyhow::Result<StateAction<'_>> {
+    fn resolve_inner(&self, task: &TaskSnapshot, depth: usize) -> anyhow::Result<StateAction<'_>> {
         // Guard against infinite recursion
         if depth > 20 {
             anyhow::bail!(
@@ -475,15 +442,91 @@ mod tests {
     }
 
     #[test]
-    fn stage_neither_role_nor_call() {
+    fn stage_neither_role_nor_call_nor_pause() {
         let mut wf = base_workflow();
         let main = wf.pipeline_mut(&zbobr_api::Pipeline::Main).unwrap();
         main.insert_stage(zbobr_api::Stage::from("empty"), StageDefinition::default());
         let err = wf.validate().unwrap_err();
         assert!(
-            err.to_string().contains("neither 'role' nor 'call'"),
+            err.to_string().contains("must have exactly one of"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn pause_stage_valid() {
+        let mut wf = base_workflow();
+        let main = wf.pipeline_mut(&zbobr_api::Pipeline::Main).unwrap();
+        main.insert_stage(
+            zbobr_api::Stage::from("wait"),
+            StageDefinition {
+                pause: true,
+                ..Default::default()
+            },
+        );
+        assert!(wf.validate().is_ok());
+    }
+
+    #[test]
+    fn pause_stage_with_role_fails() {
+        let mut wf = base_workflow();
+        let main = wf.pipeline_mut(&zbobr_api::Pipeline::Main).unwrap();
+        main.insert_stage(
+            zbobr_api::Stage::from("bad"),
+            StageDefinition {
+                role: Some("worker".into()).into(),
+                pause: true,
+                ..Default::default()
+            },
+        );
+        let err = wf.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("must have exactly one of"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn pause_stage_with_call_fails() {
+        let mut wf = base_workflow();
+        let main = wf.pipeline_mut(&zbobr_api::Pipeline::Main).unwrap();
+        main.insert_stage(
+            zbobr_api::Stage::from("bad"),
+            StageDefinition {
+                call: Some("merge".into()).into(),
+                pause: true,
+                ..Default::default()
+            },
+        );
+        let err = wf.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("must have exactly one of"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn pause_stage_toml_round_trip() {
+        let toml_str = r#"
+[pipelines.main.stages.working]
+role = "worker"
+on_success = "wait"
+
+[pipelines.main.stages.wait]
+pause = true
+
+[pipelines.merge.stages.merging]
+role = "merger"
+"#;
+        let wf: WorkflowConfig = toml::from_str(toml_str).unwrap();
+        assert!(wf.validate().is_ok());
+
+        let wait = wf
+            .stage(&Pipeline::from("main"), &Stage::from("wait"))
+            .unwrap();
+        assert!(wait.is_pause());
+        assert!(wait.role().is_none());
+        assert!(wait.call_pipeline().is_none());
     }
 
     #[test]
@@ -552,7 +595,7 @@ role = "merger"
         let workflow = Workflow::from_config(wf);
 
         // Pending task (no signal) → state machine should resolve to RunStage for the call stage
-        let task = Task {
+        let task = TaskSnapshot {
             id: 1,
             title: String::new(),
             description: String::new(),
@@ -565,11 +608,11 @@ role = "merger"
             status: None,
             go_pause: false,
             confirm: false,
-            pipeline_run_id: 0,
             stage_count: 0,
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
+            dead_context: String::new(),
         };
         let action = workflow.resolve_next_action(&task).unwrap();
         match action {
@@ -707,45 +750,4 @@ role = "merger"
         assert!(planning.on_failure().is_none());
     }
 
-    #[test]
-    fn on_success_structured_with_pause_toml_round_trip() {
-        let toml_str = r#"
-[pipelines.main.stages.working]
-role = "worker"
-on_success = { pause = true }
-
-[pipelines.main.stages.reviewing]
-role = "reviewer"
-on_success = { next = "working", pause = true }
-
-[pipelines.merge.stages.merging]
-role = "merger"
-"#;
-        let wf: WorkflowConfig = toml::from_str(toml_str).unwrap();
-        assert!(wf.validate().is_ok());
-
-        let working = wf
-            .stage(&Pipeline::from("main"), &Stage::from("working"))
-            .unwrap();
-        let t = working.on_success().unwrap();
-        assert!(t.next.is_none());
-        assert!(t.pause);
-
-        let reviewing = wf
-            .stage(&Pipeline::from("main"), &Stage::from("reviewing"))
-            .unwrap();
-        let t = reviewing.on_success().unwrap();
-        assert_eq!(t.next.as_ref().map(|s| s.as_str()), Some("working"));
-        assert!(t.pause);
-    }
-
-    #[test]
-    fn on_success_pause_only_passes_validation() {
-        let mut wf = base_workflow();
-        let main = wf.pipeline_mut(&zbobr_api::Pipeline::Main).unwrap();
-        main.stage_mut(&zbobr_api::Stage::from("working"))
-            .unwrap()
-            .on_success = Some(zbobr_api::StageTransition::pause()).into();
-        assert!(wf.validate().is_ok());
-    }
 }

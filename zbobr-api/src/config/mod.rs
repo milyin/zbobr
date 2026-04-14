@@ -154,33 +154,23 @@ pub use provider::Provider;
 mod tool;
 pub use tool::Tool;
 
-/// A stage transition descriptor with an optional target stage and pause flag.
+/// A stage transition descriptor with an optional target stage.
 ///
 /// Accepts two TOML forms:
-/// - String shorthand: `on_success = "stage_b"` → `{ next: Some("stage_b"), pause: false }`
-/// - Full table: `on_success = { next = "stage_b", pause = true }`
+/// - String shorthand: `on_success = "stage_b"` → `{ next: Some("stage_b") }`
+/// - Full table: `on_success = { next = "stage_b" }`
 ///
-/// Both `next` and `pause` are optional (defaults: `None` and `false`).
+/// `next` is optional (default: `None`, meaning natural next stage or pipeline end).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct StageTransition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next: Option<Stage>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub pause: bool,
 }
 
 impl StageTransition {
     pub fn stage(next: impl Into<Stage>) -> Self {
         Self {
             next: Some(next.into()),
-            pause: false,
-        }
-    }
-
-    pub fn pause() -> Self {
-        Self {
-            next: None,
-            pause: true,
         }
     }
 }
@@ -195,8 +185,6 @@ impl<'de> serde::Deserialize<'de> for StageTransition {
         struct FullTransition {
             #[serde(default)]
             next: Option<Stage>,
-            #[serde(default)]
-            pause: bool,
         }
         #[derive(serde::Deserialize)]
         #[serde(untagged)]
@@ -205,14 +193,8 @@ impl<'de> serde::Deserialize<'de> for StageTransition {
             Full(FullTransition),
         }
         match Helper::deserialize(deserializer)? {
-            Helper::Stage(s) => Ok(StageTransition {
-                next: Some(s),
-                pause: false,
-            }),
-            Helper::Full(f) => Ok(StageTransition {
-                next: f.next,
-                pause: f.pause,
-            }),
+            Helper::Stage(s) => Ok(StageTransition { next: Some(s) }),
+            Helper::Full(f) => Ok(StageTransition { next: f.next }),
         }
     }
 }
@@ -222,8 +204,12 @@ impl<'de> serde::Deserialize<'de> for StageTransition {
 /// The stage's name and pipeline are derived from its structural position
 /// (key in the stages map and key in the pipelines map).
 ///
-/// A stage must have exactly one of `role` (run an agent session) or
-/// `call` (call another pipeline). They are mutually exclusive.
+/// A stage must have exactly one of:
+/// - `role` — run an agent session
+/// - `call` — call another pipeline
+/// - `pause = true` — pause the task immediately; on resume the handlers decide where to go next
+///
+/// These three options are mutually exclusive.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct StageDefinition {
@@ -231,6 +217,8 @@ pub struct StageDefinition {
     pub role: TomlOption<Role>,
     #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
     pub call: TomlOption<Pipeline>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pause: bool,
     /// Tool name override for this stage. Overrides role-level and global `tool`.
     #[serde(default, skip_serializing_if = "TomlOption::is_absent")]
     pub tool: TomlOption<Tool>,
@@ -273,6 +261,10 @@ impl StageDefinition {
         self.call.is_some()
     }
 
+    pub fn is_pause(&self) -> bool {
+        self.pause
+    }
+
     pub fn on_success(&self) -> Option<&StageTransition> {
         self.on_success.as_option()
     }
@@ -301,6 +293,7 @@ impl zbobr_utility::MergeToml for StageDefinition {
         Self {
             role: self.role.merge(other.role),
             call: self.call.merge(other.call),
+            pause: self.pause || other.pause,
             tool: self.tool.merge(other.tool),
             prompts: merge_prompt_maps(self.prompts, other.prompts),
             on_success: self.on_success.merge(other.on_success),
@@ -379,18 +372,13 @@ impl PipelineConfig {
             .flat_map(|stages| stages.iter())
             .filter_map(|(sname, stage)| stage.as_option().map(|stage| (sname, stage)))
         {
-            match (stage.role(), stage.call_pipeline()) {
-                (Some(_), Some(_)) => anyhow::bail!(
-                    "Pipeline '{}' stage '{}' has both 'role' and 'call' — only one is allowed",
+            match (stage.role(), stage.call_pipeline(), stage.is_pause()) {
+                (Some(_), None, false) | (None, Some(_), false) | (None, None, true) => {}
+                _ => anyhow::bail!(
+                    "Pipeline '{}' stage '{}' must have exactly one of 'role', 'call', or 'pause'",
                     pipeline,
                     sname
                 ),
-                (None, None) => anyhow::bail!(
-                    "Pipeline '{}' stage '{}' has neither 'role' nor 'call' — one is required",
-                    pipeline,
-                    sname
-                ),
-                _ => {}
             }
             if let Some(ref target) = stage.on_success().and_then(|t| t.next.as_ref())
                 && stages
@@ -449,10 +437,9 @@ impl zbobr_utility::MergeToml for PipelineConfig {
                 for (k, v) in overlay {
                     if let Some(base_v) = base.get_mut(&k) {
                         *base_v = match (base_v.clone(), v) {
-                            (
-                                TomlOption::Value(base_stage),
-                                TomlOption::Value(overlay_stage),
-                            ) => TomlOption::Value(base_stage.merge_toml(overlay_stage)),
+                            (TomlOption::Value(base_stage), TomlOption::Value(overlay_stage)) => {
+                                TomlOption::Value(base_stage.merge_toml(overlay_stage))
+                            }
                             (base_stage, overlay_stage) => base_stage.merge(overlay_stage),
                         };
                     } else {
@@ -563,16 +550,6 @@ impl WorkflowConfig {
         self.pipeline(pipeline)?.start_stage()
     }
 
-    /// The default pipeline name.
-    pub fn default_pipeline(&self) -> Pipeline {
-        self.on_start.clone().unwrap_or(Pipeline::Main)
-    }
-
-    /// The merge/conflict-handler pipeline name.
-    pub fn merge_pipeline(&self) -> Pipeline {
-        self.on_merge.clone().unwrap_or(Pipeline::Merge)
-    }
-
     /// All pipeline names.
     pub fn pipeline_names(&self) -> Vec<&Pipeline> {
         let mut names: Vec<&Pipeline> = self
@@ -589,24 +566,8 @@ impl WorkflowConfig {
         names
     }
 
-    /// Find the first stage with a given role (across all pipelines, preferring default pipeline).
+    /// Find the first stage with a given role
     pub fn find_stage_by_role(&self, role: &str) -> Option<(&Pipeline, &str, &StageDefinition)> {
-        let default = self.default_pipeline();
-        if let Some((pname, pdef)) = self
-            .pipelines
-            .as_ref()
-            .and_then(|pipelines| pipelines.get_key_value(default.as_str()))
-            && let Some(pipeline) = pdef.as_option()
-            && let Some((name, stage)) = pipeline.stages.as_ref().and_then(|stages| {
-                stages.iter().find_map(|(name, s)| {
-                    s.as_option()
-                        .filter(|s| s.role().map(|r| r.as_str()) == Some(role))
-                        .map(|s| (name, s))
-                })
-            })
-        {
-            return Some((pname, name.as_str(), stage));
-        }
         for (pname, pipeline) in self.pipelines.as_ref().into_iter().flat_map(|pipelines| {
             pipelines
                 .iter()
@@ -653,14 +614,16 @@ impl WorkflowConfig {
 
     /// Validate the entire workflow configuration.
     pub fn validate(&self) -> anyhow::Result<()> {
-        // Required pipelines must exist
-        for required in [self.default_pipeline(), self.merge_pipeline()] {
-            if self.pipeline(&required).is_none() {
-                anyhow::bail!(
-                    "Required pipeline '{}' is missing from [workflow.pipelines]",
-                    required
-                );
-            }
+        // The pipelines named in `on_start` and `on_merge` must exist in the pipelines map.
+        if let Some(ref on_start) = self.on_start
+            && self.pipeline(on_start).is_none()
+        {
+            anyhow::bail!("on_start references unknown pipeline '{}'", on_start);
+        }
+        if let Some(ref on_merge) = self.on_merge
+            && self.pipeline(on_merge).is_none()
+        {
+            anyhow::bail!("on_merge references unknown pipeline '{}'", on_merge);
         }
 
         let pipeline_names = self.pipeline_names();
@@ -2002,13 +1965,6 @@ developer = [
     }
 
     #[test]
-    fn workflow_config_start_and_merge_pipeline_defaults_to_main_and_merge() {
-        let wf = WorkflowConfig::default();
-        assert_eq!(wf.default_pipeline(), Pipeline::Main);
-        assert_eq!(wf.merge_pipeline(), Pipeline::Merge);
-    }
-
-    #[test]
     fn workflow_config_validate_requires_configured_start_and_merge_pipelines() {
         let mut wf = WorkflowConfig::default();
         wf.on_start = Some("custom_main".into());
@@ -2248,9 +2204,7 @@ developer = [
             "senior_planner"
         );
         // Fix pipeline survives from the base config unchanged.
-        let fix = pipelines[&Pipeline::from("fix")]
-            .as_option()
-            .unwrap();
+        let fix = pipelines[&Pipeline::from("fix")].as_option().unwrap();
         assert_eq!(
             fix.stage(&Stage::from("fixing"))
                 .unwrap()

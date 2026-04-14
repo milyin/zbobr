@@ -147,7 +147,6 @@ pub async fn run_role_mcp_server(
     allowed_tools: HashSet<McpTool>,
     tool_tracker: Arc<Mutex<Option<McpTool>>>,
     pipeline: Pipeline,
-    pipeline_run_id: u64,
 ) -> anyhow::Result<u16> {
     let base_port = zbobr.config().base_port;
     use rmcp::transport::streamable_http_server::{
@@ -157,7 +156,7 @@ pub async fn run_role_mcp_server(
     let path = format!("/{}/{}", role, task_id);
 
     let session: RoleSession =
-        zbobr.role_session_with_tracker(task_id, tool_tracker, pipeline.clone(), pipeline_run_id);
+        zbobr.role_session_with_tracker(task_id, tool_tracker, pipeline.clone());
 
     tracing::info!("Creating UnifiedMcp service for task {task_id} role '{role}' at path {path}");
     let svc = StreamableHttpService::new(
@@ -174,7 +173,6 @@ pub async fn run_role_mcp_server(
                 model.clone(),
                 stage.clone(),
                 pipeline.clone(),
-                pipeline_run_id,
             ))
         },
         Arc::new(LocalSessionManager::default()),

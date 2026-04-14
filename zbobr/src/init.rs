@@ -83,6 +83,7 @@ const TOOL_REVIEWER: Tool = Tool::new("reviewer");
 const TOOL_DRUDGE: Tool = Tool::new("drudge");
 
 const ROLE_PLANNER: Role = Role::new("planner");
+const ROLE_PLAN_REVIEWER: Role = Role::new("plan_reviewer");
 const ROLE_WORKER: Role = Role::new("worker");
 const ROLE_REVIEWER: Role = Role::new("reviewer");
 const ROLE_TESTER: Role = Role::new("tester");
@@ -91,12 +92,20 @@ const ROLE_LINTER_WORKER: Role = Role::new("linter_worker");
 const ROLE_MERGER: Role = Role::new("merger");
 
 const STAGE_PLANNING: Stage = Stage::new("planning");
+const STAGE_PLAN_REVIEW_ADVERSARIAL: Stage = Stage::new("plan_review_adversarial");
+const STAGE_PLAN_REVIEW_USER: Stage = Stage::new("plan_review_user");
+const STAGE_CALL_WORK: Stage = Stage::new("call_work");
 const STAGE_WORKING: Stage = Stage::new("working");
+const STAGE_PAUSE_RETRY_WORKING: Stage = Stage::new("pause_retry_working");
 const STAGE_REVIEWING: Stage = Stage::new("reviewing");
 const STAGE_LINTING: Stage = Stage::new("linting");
 const STAGE_LINTER_WORKER: Stage = Stage::new("linter_worker");
 const STAGE_TESTING: Stage = Stage::new("testing");
 const STAGE_MERGING: Stage = Stage::new("merging");
+
+const PIPELINE_PLAN: Pipeline = Pipeline::new("plan");
+const PIPELINE_WORK: Pipeline = Pipeline::new("work");
+const PIPELINE_MERGE: Pipeline = Pipeline::new("merge");
 
 const PROVIDER_CLAUDE: Provider = Provider::new("claude");
 const PROVIDER_COPILOT: Provider = Provider::new("copilot");
@@ -378,24 +387,58 @@ fn default_workflow() -> WorkflowConfig {
         ReportSuccess, StopWithError, StopWithQuestion,
     };
 
-    let main_stages = IndexMap::from([
+    let plan_stages = IndexMap::from([
         (
             STAGE_PLANNING,
             StageDefinition {
                 role: TomlOption::Value(ROLE_PLANNER),
-                on_intermediate: TomlOption::Value(StageTransition::pause()),
                 ..Default::default()
             },
         ),
         (
+            STAGE_PLAN_REVIEW_ADVERSARIAL,
+            StageDefinition {
+                role: TomlOption::Value(ROLE_PLAN_REVIEWER),
+                on_failure: TomlOption::Value(StageTransition::stage(STAGE_PLANNING)),
+                on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_PLAN_REVIEW_USER)),
+                ..Default::default()
+            },
+        ),
+        (
+            STAGE_PLAN_REVIEW_USER,
+            StageDefinition {
+                pause: true,
+                on_failure: TomlOption::Value(StageTransition::stage(STAGE_PLANNING)),
+                ..Default::default()
+            },
+        ),
+        (
+            STAGE_CALL_WORK,
+            StageDefinition {
+                call: TomlOption::Value(PIPELINE_WORK),
+                ..Default::default()
+            },
+        ),
+    ]);
+
+    let work_stages = IndexMap::from([
+        (
             STAGE_WORKING,
             StageDefinition {
                 role: TomlOption::Value(ROLE_WORKER),
-                on_failure: TomlOption::Value(StageTransition {
-                    next: Some(STAGE_WORKING),
-                    pause: true,
-                }),
-                on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_REVIEWING)),
+                on_failure: TomlOption::Value(StageTransition::stage(STAGE_PAUSE_RETRY_WORKING)),
+                on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
+                on_success: TomlOption::Value(StageTransition::stage(STAGE_REVIEWING)),
+                ..Default::default()
+            },
+        ),
+        (
+            STAGE_PAUSE_RETRY_WORKING,
+            StageDefinition {
+                pause: true,
+                on_success: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
+                on_no_report: TomlOption::Value(StageTransition::stage(STAGE_WORKING)),
+                on_failure: TomlOption::Value(StageTransition::stage(STAGE_REVIEWING)),
                 ..Default::default()
             },
         ),
@@ -450,10 +493,10 @@ fn default_workflow() -> WorkflowConfig {
 
     let mut pipelines = IndexMap::new();
     pipelines.insert(
-        Pipeline::Main,
+        PIPELINE_PLAN,
         PipelineConfig {
             stages: Some(
-                main_stages
+                plan_stages
                     .into_iter()
                     .map(|(k, v)| (k, TomlOption::Value(v)))
                     .collect(),
@@ -461,7 +504,18 @@ fn default_workflow() -> WorkflowConfig {
         },
     );
     pipelines.insert(
-        Pipeline::Merge,
+        PIPELINE_WORK,
+        PipelineConfig {
+            stages: Some(
+                work_stages
+                    .into_iter()
+                    .map(|(k, v)| (k, TomlOption::Value(v)))
+                    .collect(),
+            ),
+        },
+    );
+    pipelines.insert(
+        PIPELINE_MERGE,
         PipelineConfig {
             stages: Some(
                 merge_stages
@@ -487,11 +541,24 @@ fn default_workflow() -> WorkflowConfig {
                     StopWithError,
                     StopWithQuestion,
                     ReportSuccess,
-                    ReportIntermediate,
                     GetCtxRec,
                 ]),
                 prompts: role_prompts("planner.md"),
                 tool: TomlOption::Value(TOOL_PLANNER),
+            },
+        ),
+        (
+            ROLE_PLAN_REVIEWER,
+            RoleDefinition {
+                mcp: Some(vec![
+                    StopWithError,
+                    StopWithQuestion,
+                    ReportSuccess,
+                    ReportFailure,
+                    GetCtxRec,
+                ]),
+                prompts: role_prompts("plan_reviewer.md"),
+                tool: TomlOption::Value(TOOL_REVIEWER),
             },
         ),
         (
@@ -601,7 +668,7 @@ fn default_workflow() -> WorkflowConfig {
                 .map(|(k, v)| (k, TomlOption::Value(v)))
                 .collect(),
         ),
-        on_start: Some("main".into()),
+        on_start: Some("plan".into()),
         on_merge: Some("merge".into()),
     }
 }
@@ -669,6 +736,7 @@ fn inline_dispatcher_tables(doc: &mut DocumentMut) {
 
 const PROMPT_FILES: &[(&str, &str)] = &[
     ("planner", PLANNER_PROMPT),
+    ("plan_reviewer", PLAN_REVIEWER_PROMPT),
     ("worker", WORKER_PROMPT),
     ("reviewer", REVIEWER_PROMPT),
     ("linter", LINTER_PROMPT),
@@ -708,11 +776,12 @@ Read the task description and comments provided below in this prompt. Design an 
 
 Work autonomously, try to solve problems independently. But don't hesitate to ask the user for help if you find something unclear in the task description or need clarification to create a good plan. Use `{mcp_stop_with_question}` for this purpose.
 
+**You MUST end every session by calling exactly one MCP tool** — `{mcp_report_success}`, `{mcp_stop_with_question}`, or `{mcp_stop_with_error}`. Finishing without calling one of these tools is a protocol error.
+
 ## Access Model
 
 - You can access the internet and run local commands.
-- Use MCP `{mcp_report_intermediate}` to present the plan for user review when the plan is not yet approved
-- Use MCP `{mcp_report_success}` to send the approved plan to implementation
+- Use MCP `{mcp_report_success}` to submit the plan for review and implementation — **mandatory at the end of every successful planning session**
 - Use MCP `{mcp_stop_with_question}` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
 - Use MCP `{mcp_stop_with_error}` only to report technical errors
 "#,
@@ -735,29 +804,51 @@ Your working directory is already the repository with the work branch checked ou
 6. **Determine if the plan is clear and ready**:
    - If something is unclear or you have doubts, use `{mcp_stop_with_question}` to ask only focused question(s) with sufficient context to understand the question. Finish the session after asking.
    - Only if the plan is clear and no questions were posted, proceed to step 7.
-7. **Check for user approval**:
-   - Review the most recent (last) comment below to determine if the user unambiguously approves this plan
-   - Check the task description to see if it explicitly states that confirmation is not needed (e.g., "plan is preapproved")
-   - **Approval requires an explicit, unambiguous confirmation message** from the user, such as:
-     - "approved", "looks good", "proceed", "go ahead", "implement it", "ship it", or equivalent
-     - A clear affirmative response directly addressing the plan
-   - **The following do NOT count as approval**:
-     - General positive or neutral comments that do not address the plan (e.g., "ok", "thanks", "interesting")
-     - Questions or requests for clarification
-     - Comments about the task description rather than the plan
-     - Silence or absence of a comment
-     - Any ambiguous message that could be interpreted as something other than plan approval
-   - If approval is confirmed (in the last comment or task description):
-     - Call `{mcp_report_success}` with a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog).
-   - If approval is NOT confirmed (including any doubt):
-     - Present the plan by calling `{mcp_report_intermediate}` with a description of the proposed approach and rationale.
-     - **When in doubt, always present the plan for review rather than proceeding**"#,
+7. **Call `{mcp_report_success}`** with the plan and a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog). **Include the full plan text inline in the report — do NOT write it to a file and reference a path. The entire plan must be readable directly from the report in the context.**
+
+It's critical to finish work with either `{mcp_report_success}` or `{mcp_stop_with_question}` / `{mcp_stop_with_error}`. Only data returned with the mcp tools is recorded.
+"#,
+);
+
+const PLAN_REVIEWER_PROMPT: &str = concat!(
+    r#"# Plan Reviewer Agent
+
+Review the proposed implementation plan and evaluate its soundness, completeness, and quality. You are an adversarial reviewer — your role is to find weaknesses, missing cases, architectural problems, or better alternatives.
+
+"#,
+    get_ctx_rec_guidance!(),
+    r#"
+## Access Model
+
+- You can access the internet and run local commands.
+- Use `{mcp_report_success}` if the plan is sound and ready for implementation.
+- Use `{mcp_report_failure}` if the plan has significant issues that must be addressed before implementation.
+- Use `{mcp_stop_with_question}` when you need clarification on the plan.
+- Use `{mcp_stop_with_error}` only to report technical errors.
+
+## Workspace isolation
+
+Your working directory is already the repository with the work branch checked out. Inspect the codebase to validate the plan. Do NOT make any code changes.
+
+## Workflow
+
+1. Read the task description and the plan provided in the context.
+2. **Inspect the codebase** to verify the plan's assumptions — check that the referenced analogs exist and that the proposed approach is consistent with existing conventions.
+3. **Evaluate the plan critically** for:
+   - Correctness: Does the proposed approach actually solve the problem?
+   - Consistency: Does it follow the same patterns and style as existing code? Is the chosen analog appropriate?
+   - Direction: Is the approach clear enough for a worker to implement without going in the wrong direction?
+   - Risk: Are there simpler or safer alternatives that would better fit the codebase?
+4. The plan is **architecture-level** — do not penalize it for lacking code snippets, exact file paths, or enumerated edge cases. The worker looks up those details. Only flag missing information if it would cause the worker to make fundamentally wrong choices.
+5. Finish by calling one of:
+   - `{mcp_report_success}` — the plan is sound and ready for implementation. You may include minor suggestions or observations in the message, but they must not block progress.
+   - `{mcp_report_failure}` — the plan has significant architectural issues or fundamental misunderstandings; provide specific, actionable feedback so the planner can revise."#,
 );
 
 const WORKER_PROMPT: &str = concat!(
     r#"# Worker Agent
 
-Implement the task according to the final plan in the context. There can be multiple plan versions in the history — work on the last one.
+Implement the task according to the plan in the context. There can be multiple plan versions in the history — always use the **latest** (most recent) plan. Do not use earlier plan versions even if they appear first in the context.
 
 **Your first job in every session is to maintain the checklist:**
 - If there are no checklist items yet, read the plan and create them with `{mcp_add_checklist_item}` before writing any code. Break the plan into concrete implementation steps, including any tests you determine are needed.
@@ -787,7 +878,7 @@ Work autonomously. Do not ask the user for anything unless the task genuinely re
 
 ## Workflow
 
-1. Read the task description, context, and comments provided below in this prompt. The full history and checklist are available in the context section.
+1. Read the task description, context, and comments provided below in this prompt. The full history and checklist are available in the context section. **Identify the latest plan** — if multiple plan iterations exist, use only the most recent one; earlier versions are superseded.
 2. **Maintain the checklist** (see above): create items from the plan if none exist, otherwise continue from unchecked items.
 3. **Identify the analog referenced in the plan.** Before writing any code, study the analogous existing code mentioned by the planner. Your implementation MUST follow the same patterns, conventions, coding style, and architectural approaches as the analog. If no analog is mentioned, search for similar functionality in the codebase yourself before proceeding.
 4. Implement the task by going through unchecked checklist items one by one. Commit work after implementing each item. **Follow the same patterns and style as the identified analog if one is available.**
@@ -970,6 +1061,8 @@ Resolve merge conflicts when the work branch cannot be automatically synchronize
 
 The framework attempted to merge changes into the work branch and encountered conflicts. The conflicts may come from merging the upstream base branch or from merging concurrent remote changes. The repository is in a mid-merge state with conflict markers in the affected files. Your job is to resolve those conflicts and complete the merge commit.
 
+You are called exactly because both sides contain changes that Git could not combine automatically. Assume the work branch changes and the incoming branch changes are both intentional until you verify otherwise. The default goal is not to pick a side, but to produce a merged result that preserves the intended behavior from both sides.
+
 
 ## Access Model
 
@@ -989,14 +1082,18 @@ You have read access to the task and repository:
 2. Your current working directory is the repository in a mid-merge conflict state. Examine the conflicts:
    - `git status` to see which files have conflicts
    - `git diff` to examine conflict markers and understand what changed in each branch
-   - Review the code in both branches to understand the intent
+    - Review the code in both branches to understand the intent of each side before editing
 3. **Attempt automatic resolution:**
-   - For simple, non-overlapping changes (e.g., formatting, imports, unrelated edits), apply manual fixes that combine both changes
+    - For simple, non-overlapping changes (e.g., formatting, imports, unrelated edits), apply manual fixes that combine both changes
+    - For semantic conflicts, build the merged result deliberately: preserve behavior, flags, config keys, validation, and other logic introduced on both sides unless you can prove one side intentionally replaced the other
+    - Treat conflicts in lists, feature arrays, dependency options, config maps, and struct fields as merge problems, not winner-take-all choices. If one side added or kept a capability and the other changed an adjacent value, usually the correct result keeps both unless they are truly incompatible
    - Edit each conflicted file to remove all conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) and produce a correct merged version
    - Use `git add <file>` for each resolved file, then `git commit -m "chore: merge conflicts resolved"` to complete the merge commit
-   - Do NOT run `git merge` again — just resolve the markers and commit
+    - Do NOT run `git merge` again — just resolve the markers and commit
+    - Do NOT resolve a semantic conflict by blindly taking `ours`, `theirs`, or the shorter side without verifying that no intended behavior is lost
 4. **If automatic resolution is not possible:**
-   - Use `{mcp_stop_with_question}` to describe the conflicts and ask which version should be preferred, or ask for guidance
+    - Use `{mcp_stop_with_question}` when the intended merged behavior is unclear, when the two sides appear mutually exclusive, or when preserving both sides would require product or design judgement
+    - Describe what each side changed, what options you considered, and why the correct merged result is ambiguous
    - Wait for user input before proceeding
 5. **After successful resolution:**
    - Ensure all your changes are explicitly committed using `git commit` to the local work branch
@@ -1004,9 +1101,11 @@ You have read access to the task and repository:
 
 ## Conflict Resolution Principles
 
+- Start from the assumption that both sides contain valuable changes and try to preserve the intent of both sides in the final merged file
 - Combine non-overlapping changes from both branches (destination and work) when possible
-- For conflicting edits to the same code, ask the user which version is preferred
-- Preserve the intent of both branches' changes if both changes are valid
+- Prefer semantic merges over textual merges: keep version bumps together with feature additions, keep refactors together with bug fixes, and keep new options unless there is clear evidence they must be removed
+- Watch for silent regressions where a manually resolved conflict drops a capability from one side, such as removing a feature flag, config key, dependency option, or validation rule while keeping an unrelated change from the other side
+- If the correct merged behavior is unclear after reviewing both sides, ask the user instead of guessing which version is preferred
 - Do NOT delete either branch's work without explicit user guidance"#;
 
 #[cfg(test)]
@@ -1029,8 +1128,8 @@ mod tests {
     #[test]
     fn linting_on_success_routes_to_testing() {
         let wf = default_workflow();
-        let main = wf.pipeline(&Pipeline::Main).unwrap();
-        let linting = main.stage(&Stage::from("linting")).unwrap();
+        let work = wf.pipeline(&PIPELINE_WORK).unwrap();
+        let linting = work.stage(&Stage::from("linting")).unwrap();
         let target = linting.on_success().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("testing"));
     }
@@ -1038,7 +1137,7 @@ mod tests {
     #[test]
     fn merge_stage_task_prompt_is_cleared() {
         let wf = default_workflow();
-        let merge = wf.pipeline(&Pipeline::Merge).unwrap();
+        let merge = wf.pipeline(&PIPELINE_MERGE).unwrap();
         let merging = merge.stage(&Stage::from("merging")).unwrap();
         let task_prompt = merging.prompts.as_ref().and_then(|map| map.get("task"));
         assert_eq!(task_prompt, Some(&TomlOption::ExplicitNone));
@@ -1047,8 +1146,8 @@ mod tests {
     #[test]
     fn linting_on_failure_routes_to_linter_worker() {
         let wf = default_workflow();
-        let main = wf.pipeline(&Pipeline::Main).unwrap();
-        let linting = main.stage(&Stage::from("linting")).unwrap();
+        let work = wf.pipeline(&PIPELINE_WORK).unwrap();
+        let linting = work.stage(&Stage::from("linting")).unwrap();
         let target = linting.on_failure().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("linter_worker"));
     }
@@ -1056,8 +1155,8 @@ mod tests {
     #[test]
     fn linter_worker_on_success_routes_to_linting() {
         let wf = default_workflow();
-        let main = wf.pipeline(&Pipeline::Main).unwrap();
-        let lw = main.stage(&Stage::from("linter_worker")).unwrap();
+        let work = wf.pipeline(&PIPELINE_WORK).unwrap();
+        let lw = work.stage(&Stage::from("linter_worker")).unwrap();
         let target = lw.on_success().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("linting"));
     }
@@ -1065,8 +1164,8 @@ mod tests {
     #[test]
     fn linter_worker_on_failure_routes_to_working() {
         let wf = default_workflow();
-        let main = wf.pipeline(&Pipeline::Main).unwrap();
-        let lw = main.stage(&Stage::from("linter_worker")).unwrap();
+        let work = wf.pipeline(&PIPELINE_WORK).unwrap();
+        let lw = work.stage(&Stage::from("linter_worker")).unwrap();
         let target = lw.on_failure().and_then(|t| t.next.as_deref());
         assert_eq!(target, Some("working"));
     }

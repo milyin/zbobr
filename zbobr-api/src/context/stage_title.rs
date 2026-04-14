@@ -2,12 +2,12 @@
 //!
 //! The stage title is a markdown line with the format:
 //! ```text
-//! pipeline:run_id:**stage** `tool` `model` `YYYY-MM-DD HH:MM:SS +HHMM` <sub>[prompt](prompt_url)</sub> <sub>[output](output_url)</sub>
+//! pipeline:**stage** `tool` `model` `YYYY-MM-DD HH:MM:SS +HHMM` <sub>[prompt](prompt_url)</sub> <sub>[output](output_url)</sub>
 //! ```
 //!
 //! The prompt and output sub-links are optional. When there are no links:
 //! ```text
-//! pipeline:run_id:**stage** `tool` `model` `YYYY-MM-DD HH:MM:SS +HHMM`
+//! pipeline:**stage** `tool` `model` `YYYY-MM-DD HH:MM:SS +HHMM`
 //! ```
 //!
 //! This module provides [`MdStageTitle`] which can be converted to/from a string
@@ -17,7 +17,7 @@
 
 use std::{fmt, str::FromStr};
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 
 /// Label used for the prompt sub-link in the stage title markdown.
 const PROMPT_LABEL: &str = "prompt";
@@ -32,7 +32,6 @@ pub struct MdStageTitle {
     pub instance: String,
     pub timestamp: chrono::DateTime<chrono::FixedOffset>,
     pub pipeline: Pipeline,
-    pub run_id: u64,
     pub stage: Stage,
     pub tool: Option<String>,
     pub model: Option<Model>,
@@ -46,7 +45,6 @@ impl From<&StageInfo> for MdStageTitle {
             instance: info.instance.clone(),
             timestamp: info.timestamp,
             pipeline: info.pipeline.clone(),
-            run_id: info.run_id,
             stage: info.stage.clone(),
             tool: info.tool.clone(),
             model: info.model.clone(),
@@ -62,7 +60,6 @@ impl From<MdStageTitle> for StageInfo {
             instance: t.instance,
             timestamp: t.timestamp,
             pipeline: t.pipeline,
-            run_id: t.run_id,
             stage: t.stage,
             tool: t.tool,
             model: t.model,
@@ -74,21 +71,16 @@ impl From<MdStageTitle> for StageInfo {
 
 // -- Display (serialization) -------------------------------------------------
 
-/// Wrapper: `instance:pipeline:run_id:**stage**`
+/// Wrapper: `instance:pipeline:**stage**`
 struct PipelineStage<'a> {
     instance: &'a str,
     pipeline: &'a Pipeline,
-    run_id: u64,
     stage: &'a Stage,
 }
 
 impl fmt::Display for PipelineStage<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}:{}:{}:**{}**",
-            self.instance, self.pipeline, self.run_id, self.stage
-        )
+        write!(f, "{}:{}:**{}**", self.instance, self.pipeline, self.stage)
     }
 }
 
@@ -114,7 +106,6 @@ impl fmt::Display for MdStageTitle {
             PipelineStage {
                 instance: &self.instance,
                 pipeline: &self.pipeline,
-                run_id: self.run_id,
                 stage: &self.stage,
             },
         )?;
@@ -144,8 +135,8 @@ impl FromStr for MdStageTitle {
         let s = s.strip_prefix("- ").unwrap_or(s).trim();
         let mut rest = s;
 
-        // 1. instance:pipeline:run_id:**stage**
-        let (instance, pipeline, run_id, stage) = parse_next_pipeline_stage(&mut rest)?;
+        // 1. instance:pipeline:**stage**
+        let (instance, pipeline, stage) = parse_next_pipeline_stage(&mut rest)?;
 
         // 2. Optional backtick tokens (tool, model, timestamp)
         let mut tool = None;
@@ -196,7 +187,6 @@ impl FromStr for MdStageTitle {
             instance,
             timestamp,
             pipeline,
-            run_id,
             stage,
             tool,
             model,
@@ -223,24 +213,16 @@ impl<'de> serde::Deserialize<'de> for MdStageTitle {
 
 // -- Parsing helpers ----------------------------------------------------------
 
-fn parse_next_pipeline_stage(rest: &mut &str) -> Result<(String, Pipeline, u64, Stage)> {
+fn parse_next_pipeline_stage(rest: &mut &str) -> Result<(String, Pipeline, Stage)> {
     let stage_marker = ":**";
     let marker_pos = rest
         .find(stage_marker)
         .ok_or_else(|| anyhow::anyhow!("Missing ':**' stage marker"))?;
-    let instance_pipeline_and_run = &rest[..marker_pos];
+    let instance_and_pipeline = &rest[..marker_pos];
     let after_marker = &rest[marker_pos + stage_marker.len()..];
 
-    // Format: instance:pipeline:run_id
-    // Split on the last ':' to get run_id, then split the remainder on the first ':' to get instance and pipeline.
-    let run_sep = instance_pipeline_and_run
-        .rfind(':')
-        .ok_or_else(|| anyhow::anyhow!("Missing ':' before run_id"))?;
-    let run_id: u64 = instance_pipeline_and_run[run_sep + 1..]
-        .trim()
-        .parse()
-        .context("Invalid run_id")?;
-    let instance_and_pipeline = instance_pipeline_and_run[..run_sep].trim();
+    // Format: instance:pipeline
+    let instance_and_pipeline = instance_and_pipeline.trim();
 
     let pipeline_sep = instance_and_pipeline
         .find(':')
@@ -257,7 +239,6 @@ fn parse_next_pipeline_stage(rest: &mut &str) -> Result<(String, Pipeline, u64, 
     Ok((
         instance_str.to_string(),
         pipeline_str.parse().unwrap(),
-        run_id,
         Stage::from(stage_str),
     ))
 }
@@ -303,7 +284,6 @@ impl fmt::Display for MdMdStageTitleForPrompt<'_> {
             PipelineStage {
                 instance: &t.instance,
                 pipeline: &t.pipeline,
-                run_id: t.run_id,
                 stage: &t.stage,
             },
         )?;
@@ -326,7 +306,6 @@ mod tests {
             instance: "myinstance".to_string(),
             timestamp: chrono::DateTime::parse_from_rfc3339("2024-06-15T10:30:00+03:00").unwrap(),
             pipeline: Pipeline::from("main"),
-            run_id: 2,
             stage: Stage::new("working"),
             tool: Some("claude".to_string()),
             model: Some("claude-opus-4.6".parse().unwrap()),
@@ -349,7 +328,7 @@ mod tests {
         let s = title.to_string();
         assert_eq!(
             s,
-            "myinstance:main:2:**working** `claude` `claude-opus-4.6` `2024-06-15 10:30:00 +0300` <sub>[prompt](prompts/work.md)</sub> <sub>[output](output/work.md)</sub>"
+            "myinstance:main:**working** `claude` `claude-opus-4.6` `2024-06-15 10:30:00 +0300` <sub>[prompt](prompts/work.md)</sub> <sub>[output](output/work.md)</sub>"
         );
     }
 
@@ -367,7 +346,6 @@ mod tests {
             instance: "default".to_string(),
             timestamp: chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").unwrap(),
             pipeline: Pipeline::from("merge"),
-            run_id: 1,
             stage: Stage::new("review"),
             tool: None,
             model: None,
@@ -375,7 +353,7 @@ mod tests {
             output_link: None,
         };
         let s = title.to_string();
-        assert_eq!(s, "default:merge:1:**review** `2024-01-01 00:00:00 +0000`");
+        assert_eq!(s, "default:merge:**review** `2024-01-01 00:00:00 +0000`");
         let parsed: MdStageTitle = s.parse().unwrap();
         assert_eq!(parsed, title);
     }
@@ -386,7 +364,6 @@ mod tests {
             instance: "default".to_string(),
             timestamp: chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").unwrap(),
             pipeline: Pipeline::from("merge"),
-            run_id: 1,
             stage: Stage::new("review"),
             tool: None,
             model: None,
@@ -396,7 +373,7 @@ mod tests {
         let s = title.to_string();
         assert_eq!(
             s,
-            "default:merge:1:**review** `2024-01-01 00:00:00 +0000` <sub>[prompt](prompts/review.md)</sub>"
+            "default:merge:**review** `2024-01-01 00:00:00 +0000` <sub>[prompt](prompts/review.md)</sub>"
         );
         let parsed: MdStageTitle = s.parse().unwrap();
         assert_eq!(parsed, title);
@@ -418,7 +395,7 @@ mod tests {
     #[test]
     fn parse_rejects_malformed_model_token() {
         // Valid tool backtick but model backtick contains a space → should fail
-        let s = "myinstance:main:2:**working** `claude` `bad model` `2024-06-15 10:30:00 +0300`";
+        let s = "myinstance:main:**working** `claude` `bad model` `2024-06-15 10:30:00 +0300`";
         let result = s.parse::<MdStageTitle>();
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();

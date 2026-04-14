@@ -154,8 +154,6 @@ pub struct StageInfo {
     pub instance: String,
     /// Pipeline that owns this stage.
     pub pipeline: Pipeline,
-    /// Run identifier within the pipeline (monotonically increasing per pipeline).
-    pub run_id: u64,
     /// Stage name within the pipeline.
     pub stage: Stage,
     /// Executor/provider used for this stage (e.g. "claude", "copilot", or a provider name).
@@ -467,18 +465,15 @@ pub enum StateOverrideRequest {
 pub struct Pipeline(pub std::borrow::Cow<'static, str>);
 
 impl Pipeline {
-    pub const MAIN: &'static str = "main";
-    pub const MERGE: &'static str = "merge";
+    #[allow(non_upper_case_globals)]
+    pub const Main: Pipeline = Pipeline::new("main");
+    #[allow(non_upper_case_globals)]
+    pub const Merge: Pipeline = Pipeline::new("merge");
 
     pub const fn new(s: &'static str) -> Self {
         Pipeline(std::borrow::Cow::Borrowed(s))
     }
-
-    #[allow(non_upper_case_globals)]
-    pub const Main: Pipeline = Pipeline::new(Self::MAIN);
-    #[allow(non_upper_case_globals)]
-    pub const Merge: Pipeline = Pipeline::new(Self::MERGE);
-
+ 
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -645,9 +640,6 @@ impl schemars::JsonSchema for Signal {
 pub struct StackEntry {
     /// Caller's pipeline to return to after sub-pipeline / pause completion.
     pub pipeline: Pipeline,
-    /// Caller's pipeline_run_id to restore on return.
-    #[serde(default)]
-    pub pipeline_run_id: u64,
     /// Stage in the calling pipeline whose transitions determine the continuation
     /// signal on return (both for call entries and for pause entries).
     pub calling_stage: Stage,
@@ -788,7 +780,7 @@ fn default_max_stage_count() -> u64 {
 
 /// A task in the abstract domain (generic, backed by GitHub or Filesystem).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Task {
+pub struct TaskSnapshot {
     pub id: u64,
     pub title: String,
     pub description: String,
@@ -817,9 +809,6 @@ pub struct Task {
     /// the task's state is changed.  This gives human operators an opportunity to
     /// review a transition before the next processing step occurs.
     pub confirm: bool,
-    /// Current/latest pipeline run counter. Incremented on each new pipeline call.
-    #[serde(default)]
-    pub pipeline_run_id: u64,
     /// Counter that is automatically incremented on each stage passed.
     #[serde(default)]
     pub stage_count: u64,
@@ -835,9 +824,13 @@ pub struct Task {
     /// Used to detect if the task has been modified between read and write operations.
     #[serde(skip)]
     pub etag: Option<String>,
+    /// Dead context: text moved here by the user to hide it from agents.
+    /// Stored verbatim in the task body; never passed to agent prompts.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub dead_context: String,
 }
 
-impl Task {
+impl TaskSnapshot {
     /// Returns a TaskIdentity if the work_branch field is set.
     pub fn identity(&self) -> Option<TaskIdentity> {
         Some(TaskIdentity {
@@ -939,7 +932,6 @@ mod tests {
         StageInfo {
             instance: "default".to_string(),
             pipeline: Pipeline::from(pipeline),
-            run_id: 1,
             stage: Stage::from(stage),
             tool: None,
             model: None,
@@ -1067,8 +1059,8 @@ mod tests {
         assert_eq!(ContextRecordType::Question.to_string(), "question");
     }
 
-    fn make_task(id: u64, work_branch: Option<&str>) -> Task {
-        Task {
+    fn make_task(id: u64, work_branch: Option<&str>) -> TaskSnapshot {
+        TaskSnapshot {
             id,
             title: String::new(),
             description: String::new(),
@@ -1081,11 +1073,11 @@ mod tests {
             status: None,
             go_pause: false,
             confirm: false,
-            pipeline_run_id: 0,
             stage_count: 0,
             max_stage_count: DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
+            dead_context: String::new(),
         }
     }
 
