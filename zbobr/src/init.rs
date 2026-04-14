@@ -619,7 +619,7 @@ fn default_workflow() -> WorkflowConfig {
                     GetCtxRec,
                 ]),
                 prompts: role_prompts("linter.md"),
-                tool: TomlOption::Value(TOOL_DRUDGE),
+                tool: TomlOption::Value(TOOL_HELPER),
             },
         ),
         (
