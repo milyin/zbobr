@@ -451,23 +451,33 @@ impl<'a> CliStageRunner<'a> {
         }
         // Auto-pause if stage count limit reached (before incrementing to avoid wasted increment).
         {
-            let task_session = self.zbobr.task_session(self.task_id);
-            let task = task_session.get_task().await?;
-            if task.max_stage_count > 0 && task.stage_count >= task.max_stage_count {
-                tracing::warn!(
-                    "Task #{}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
-                    self.task_id,
-                    task.stage_count,
-                    task.max_stage_count
-                );
-                let status = format_error_status(
-                    self.zbobr.config().fixed_offset(),
-                    &format!(
-                        "Stage count limit ({}) reached - auto-paused",
-                        task.max_stage_count
-                    ),
-                );
-                task_session.set_pause_with_status(status).await?;
+            let task_id = self.task_id;
+            let fixed_offset = self.zbobr.config().fixed_offset();
+            let task_session = self.zbobr.task_session(task_id);
+            let stage_limit_reached = task_session
+                .modify_task(move |mut task| {
+                    if task.max_stage_count > 0 && task.stage_count >= task.max_stage_count {
+                        tracing::warn!(
+                            "Task #{task_id}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
+                            task.stage_count,
+                            task.max_stage_count
+                        );
+                        let status = format_error_status(
+                            fixed_offset,
+                            &format!(
+                                "Stage count limit ({}) reached - auto-paused",
+                                task.max_stage_count
+                            ),
+                        );
+                        task.status = Some(status);
+                        task.go_pause = true;
+                        (task, true)
+                    } else {
+                        (task, false)
+                    }
+                })
+                .await?;
+            if stage_limit_reached {
                 return Ok(());
             }
         }
@@ -744,21 +754,31 @@ impl ZbobrDispatcher {
 
         // Auto-pause if stage count limit reached (before push_stack to prevent stack duplication on resume).
         {
-            let task = task_session.get_task().await?;
-            if task.max_stage_count > 0 && task.stage_count >= task.max_stage_count {
-                tracing::warn!(
-                    "Task #{task_id}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
-                    task.stage_count,
-                    task.max_stage_count
-                );
-                let status = format_error_status(
-                    self.config().fixed_offset(),
-                    &format!(
-                        "Stage count limit ({}) reached - auto-paused",
-                        task.max_stage_count
-                    ),
-                );
-                task_session.set_pause_with_status(status).await?;
+            let fixed_offset = self.config().fixed_offset();
+            let stage_limit_reached = task_session
+                .modify_task(move |mut task| {
+                    if task.max_stage_count > 0 && task.stage_count >= task.max_stage_count {
+                        tracing::warn!(
+                            "Task #{task_id}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
+                            task.stage_count,
+                            task.max_stage_count
+                        );
+                        let status = format_error_status(
+                            fixed_offset,
+                            &format!(
+                                "Stage count limit ({}) reached - auto-paused",
+                                task.max_stage_count
+                            ),
+                        );
+                        task.status = Some(status);
+                        task.go_pause = true;
+                        (task, true)
+                    } else {
+                        (task, false)
+                    }
+                })
+                .await?;
+            if stage_limit_reached {
                 return Ok(());
             }
         }
@@ -800,21 +820,31 @@ impl ZbobrDispatcher {
 
         // Auto-pause if stage count limit reached (before push_stack to prevent stack duplication on resume).
         {
-            let task = task_session.get_task().await?;
-            if task.max_stage_count > 0 && task.stage_count >= task.max_stage_count {
-                tracing::warn!(
-                    "Task #{task_id}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
-                    task.stage_count,
-                    task.max_stage_count
-                );
-                let status = format_error_status(
-                    self.config().fixed_offset(),
-                    &format!(
-                        "Stage count limit ({}) reached - auto-paused",
-                        task.max_stage_count
-                    ),
-                );
-                task_session.set_pause_with_status(status).await?;
+            let fixed_offset = self.config().fixed_offset();
+            let stage_limit_reached = task_session
+                .modify_task(move |mut task| {
+                    if task.max_stage_count > 0 && task.stage_count >= task.max_stage_count {
+                        tracing::warn!(
+                            "Task #{task_id}: stage_count ({}) reached max_stage_count ({}) — auto-pausing",
+                            task.stage_count,
+                            task.max_stage_count
+                        );
+                        let status = format_error_status(
+                            fixed_offset,
+                            &format!(
+                                "Stage count limit ({}) reached - auto-paused",
+                                task.max_stage_count
+                            ),
+                        );
+                        task.status = Some(status);
+                        task.go_pause = true;
+                        (task, true)
+                    } else {
+                        (task, false)
+                    }
+                })
+                .await?;
+            if stage_limit_reached {
                 return Ok(());
             }
         }
@@ -835,7 +865,7 @@ impl ZbobrDispatcher {
                 t.signal = None;
                 t.go_pause = false;
                 t.status = Some(status);
-                t
+                (t, ())
             })
             .await?;
 
@@ -913,7 +943,7 @@ impl ZbobrDispatcher {
                 t.state = State::Pause;
                 t.signal = None;
                 t.go_pause = false;
-                t
+                (t, ())
             })
             .await?;
 
@@ -940,9 +970,18 @@ impl ZbobrDispatcher {
         return_signal: Signal,
     ) -> anyhow::Result<Option<StackEntry>> {
         let task_session = self.task_session(task_id);
-        let task = task_session.get_task().await?;
 
-        let entry = match task.stack.last().cloned() {
+        // Atomically pop the stack top; returns None if the stack is empty.
+        let entry = match task_session
+            .modify_task(|mut task| {
+                let top = task.stack.last().cloned();
+                if top.is_some() {
+                    task.stack.pop();
+                }
+                (task, top)
+            })
+            .await?
+        {
             Some(e) => e,
             None => return Ok(None),
         };
@@ -971,7 +1010,6 @@ impl ZbobrDispatcher {
                 let status = format_error_status(self.config().fixed_offset(), &msg);
                 task_session
                     .modify_task(move |mut task| {
-                        task.stack.pop();
                         task.status = Some(status);
                         task.go_pause = true;
                         task.signal = Some(Signal::go(calling_stage));
@@ -981,13 +1019,12 @@ impl ZbobrDispatcher {
                             task.status = Some(confirm_status);
                         }
                         task.state = new_state;
-                        task
+                        (task, ())
                     })
                     .await?;
             } else {
                 task_session
                     .modify_task(move |mut task| {
-                        task.stack.pop();
                         task.signal = Some(Signal::go(calling_stage));
                         let new_state = State::pending(pipeline);
                         if task.confirm && task.state != new_state {
@@ -995,7 +1032,7 @@ impl ZbobrDispatcher {
                             task.status = Some(confirm_status);
                         }
                         task.state = new_state;
-                        task
+                        (task, ())
                     })
                     .await?;
             }
@@ -1042,7 +1079,6 @@ impl ZbobrDispatcher {
 
         task_session
             .modify_task(move |mut task| {
-                task.stack.pop();
                 task.signal = Some(signal);
                 let new_state = State::pending(pipeline);
                 if task.confirm && task.state != new_state {
@@ -1050,7 +1086,7 @@ impl ZbobrDispatcher {
                     task.status = Some(confirm_status);
                 }
                 task.state = new_state;
-                task
+                (task, ())
             })
             .await?;
 
@@ -1456,7 +1492,7 @@ impl ZbobrDispatcher {
                             task.stack.clear();
                             task.signal = None;
                             task.state = State::pending(p);
-                            task
+                            (task, ())
                         })
                         .await
                     {

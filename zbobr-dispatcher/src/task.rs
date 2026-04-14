@@ -362,14 +362,29 @@ impl TaskSession {
         RoleSession::new(Arc::clone(&self.zbobr), self.task_id)
     }
 
-    /// Read the full task state.
-    pub async fn get_task(&self) -> anyhow::Result<Task> {
+    /// Atomically read-modify-write the task with unrestricted access, returning a value from
+    /// the closure. Callers that don't need a return value use `(task, ())`.
+    pub async fn modify_task<F, R>(&self, mutate: F) -> anyhow::Result<R>
+    where
+        F: FnOnce(Task) -> (Task, R) + Send + 'static,
+        R: Send + 'static,
+    {
+        let result = std::sync::Arc::new(std::sync::Mutex::new(None::<R>));
+        let result_clone = std::sync::Arc::clone(&result);
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
-        weak.snapshot(false).await
+        let mutable = weak.upgrade().await?;
+        mutable
+            .modify_task(Box::new(move |task| {
+                let (new_task, r) = mutate(task);
+                *result_clone.lock().unwrap() = Some(r);
+                new_task
+            }))
+            .await?;
+        Ok(result.lock().unwrap().take().expect("modify_task closure must run"))
     }
 
-    /// Atomically read-modify-write the task with unrestricted access via transient upgrade.
-    pub async fn modify_task<F>(&self, mutate: F) -> anyhow::Result<()>
+    /// Internal void mutation — used by simple setters that don't need a return value.
+    async fn modify_task_void<F>(&self, mutate: F) -> anyhow::Result<()>
     where
         F: FnOnce(Task) -> Task + Send + 'static,
     {
@@ -390,7 +405,7 @@ impl TaskSession {
             let ts = chrono::Utc::now().with_timezone(&self.zbobr.config().fixed_offset());
             zbobr_api::format_status(zbobr_api::PAUSE_PREFIX, &ts, "Awaiting confirmation")
         };
-        self.modify_task(move |mut task| {
+        self.modify_task_void(move |mut task| {
             if task.confirm && task.state != state {
                 task.go_pause = true;
                 task.status = Some(confirm_status);
@@ -406,7 +421,7 @@ impl TaskSession {
 
     /// Set the confirm flag on the task (dispatcher only).
     pub async fn set_confirm(&self, confirm: bool) -> anyhow::Result<()> {
-        self.modify_task(move |mut task| {
+        self.modify_task_void(move |mut task| {
             task.confirm = confirm;
             task
         })
@@ -415,7 +430,7 @@ impl TaskSession {
 
     /// Set signal on the task (dispatcher only).
     pub async fn set_signal(&self, signal: Option<Signal>) -> anyhow::Result<()> {
-        self.modify_task(move |mut task| {
+        self.modify_task_void(move |mut task| {
             task.signal = signal;
             task
         })
@@ -425,7 +440,7 @@ impl TaskSession {
     /// Pause the task and set a status message atomically.
     /// It is not possible to set pause without an explanation.
     pub async fn set_pause_with_status(&self, status: String) -> anyhow::Result<()> {
-        self.modify_task(move |mut task| {
+        self.modify_task_void(move |mut task| {
             task.status = Some(status);
             task.go_pause = true;
             task
@@ -440,7 +455,7 @@ impl TaskSession {
         status: String,
         signal: Signal,
     ) -> anyhow::Result<()> {
-        self.modify_task(move |mut task| {
+        self.modify_task_void(move |mut task| {
             task.status = Some(status);
             task.go_pause = true;
             task.signal = Some(signal);
@@ -451,7 +466,7 @@ impl TaskSession {
 
     /// Increment the stage counter. Called each time a stage is entered.
     pub async fn increment_stage_count(&self) -> anyhow::Result<()> {
-        self.modify_task(move |mut t| {
+        self.modify_task_void(move |mut t| {
             t.stage_count += 1;
             t
         })
@@ -471,7 +486,7 @@ impl TaskSession {
             pipeline,
             calling_stage,
         };
-        self.modify_task(move |mut task| {
+        self.modify_task_void(move |mut task| {
             task.stack.push(entry);
             task
         })
@@ -480,23 +495,22 @@ impl TaskSession {
 
     /// Pop the top entry from the task's call stack.
     pub async fn pop_stack(&self) -> anyhow::Result<Option<crate::task::StackEntry>> {
-        let task = self.get_task().await?;
-        let popped = task.stack.last().cloned();
-        if popped.is_some() {
-            self.modify_task(move |mut task| {
+        self.modify_task(|mut task| {
+            let popped = task.stack.last().cloned();
+            if popped.is_some() {
                 task.stack.pop();
-                task
-            })
-            .await?;
-        }
-        Ok(popped)
+            }
+            (task, popped)
+        })
+        .await
     }
 
     /// Finish the task: delete placeholder commit, push branch,
     /// then set state to DONE and clear signal.
     pub async fn finish(&self) -> anyhow::Result<()> {
         let task_id = self.task_id;
-        let task = self.get_task().await?;
+        // Read work_branch/identity for git I/O — inherently racy with external operations.
+        let task = self.zbobr.task_backend().get_task(task_id).await?.snapshot(false).await?;
 
         // Delete placeholder commit and push before marking done.
         if let Some(work_branch) = &task.work_branch {
@@ -522,7 +536,7 @@ impl TaskSession {
             }
         }
 
-        self.modify_task(move |mut task| {
+        self.modify_task_void(move |mut task| {
             task.state = State::Done;
             task.signal = None;
             task
