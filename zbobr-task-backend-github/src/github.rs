@@ -1441,10 +1441,10 @@ impl TaskMut for GithubTaskMut {
     async fn modify_task(
         &self,
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Task> {
         let task = self.backend.modify_task_internal(self.id, mutate).await?;
-        *self.saved_snapshot.lock().unwrap() = Some(task);
-        Ok(())
+        *self.saved_snapshot.lock().unwrap() = Some(task.clone());
+        Ok(task)
     }
 
     async fn close(&self) -> anyhow::Result<()> {

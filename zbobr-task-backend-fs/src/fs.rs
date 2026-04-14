@@ -411,7 +411,7 @@ impl TaskMut for FsTaskMut {
     async fn modify_task(
         &self,
         mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Task> {
         let task_file = self.backend.read_task_file(self.id).await?;
         let was_closed = task_file.closed;
 
@@ -420,10 +420,10 @@ impl TaskMut for FsTaskMut {
 
         let task_file = TaskFile::from_task(&task, was_closed);
         self.backend.write_task_file(&task_file).await?;
-        *self.saved_snapshot.lock().unwrap() = Some(task);
+        *self.saved_snapshot.lock().unwrap() = Some(task.clone());
 
         tracing::debug!("Modified task {}", self.id);
-        Ok(())
+        Ok(task)
     }
 
     async fn close(&self) -> anyhow::Result<()> {

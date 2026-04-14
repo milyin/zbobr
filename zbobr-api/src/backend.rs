@@ -61,9 +61,9 @@ pub trait TaskMut: Send + Sync {
     fn task_id(&self) -> u64;
     async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task>;
 
-    /// Core mutation primitive — reads task, applies closure, writes back.
+    /// Core mutation primitive — reads task, applies closure, writes back, returns updated task.
     async fn modify_task(&self, mutate: Box<dyn FnOnce(Task) -> Task + Send>)
-    -> anyhow::Result<()>;
+    -> anyhow::Result<Task>;
 
     /// Close the task.
     async fn close(&self) -> anyhow::Result<()>;
@@ -79,6 +79,7 @@ pub trait TaskMut: Send + Sync {
             task
         }))
         .await
+        .map(|_| ())
     }
 
     async fn set_signal(&self, signal: Option<Signal>) -> anyhow::Result<()> {
@@ -87,6 +88,7 @@ pub trait TaskMut: Send + Sync {
             task
         }))
         .await
+        .map(|_| ())
     }
 
     async fn set_stack(&self, stack: Vec<StackEntry>) -> anyhow::Result<()> {
@@ -95,6 +97,7 @@ pub trait TaskMut: Send + Sync {
             task
         }))
         .await
+        .map(|_| ())
     }
 
     /// Set the status field directly (pre-formatted string or None to clear).
@@ -104,6 +107,7 @@ pub trait TaskMut: Send + Sync {
             task
         }))
         .await
+        .map(|_| ())
     }
 
     /// Pause the task and set a status message atomically.
@@ -115,6 +119,7 @@ pub trait TaskMut: Send + Sync {
             task
         }))
         .await
+        .map(|_| ())
     }
 
     /// Pause the task, set a status message, and assign a signal — all atomically.
@@ -131,6 +136,7 @@ pub trait TaskMut: Send + Sync {
             task
         }))
         .await
+        .map(|_| ())
     }
 
     async fn set_confirm(&self, confirm: bool) -> anyhow::Result<()> {
@@ -139,6 +145,7 @@ pub trait TaskMut: Send + Sync {
             task
         }))
         .await
+        .map(|_| ())
     }
 
     async fn set_work_branch(&self, branch: Option<String>) -> anyhow::Result<()> {
@@ -147,6 +154,7 @@ pub trait TaskMut: Send + Sync {
             task
         }))
         .await
+        .map(|_| ())
     }
 
     async fn set_description(&self, desc: String) -> anyhow::Result<()> {
@@ -155,6 +163,7 @@ pub trait TaskMut: Send + Sync {
             task
         }))
         .await
+        .map(|_| ())
     }
 
     /// Store a report file, deduplicating with `_N` suffix if needed.

@@ -124,6 +124,7 @@ impl RoleSession {
                 task
             }))
             .await
+            .map(|_| ())
     }
 
     /// Get all comments as structured `Comment` objects.
@@ -396,6 +397,7 @@ impl TaskSession {
                 task
             }))
             .await
+            .map(|_| ())
     }
 
     /// Set the task state (dispatcher only).
@@ -680,12 +682,12 @@ mod comment_model_tests {
         async fn modify_task(
             &self,
             mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-        ) -> anyhow::Result<()> {
+        ) -> anyhow::Result<Task> {
             let mut tasks = self.backend.tasks.lock().await;
             if let Some(t) = tasks.get_mut(&self.id) {
                 let task = t.task.clone();
                 t.task = mutate(task);
-                Ok(())
+                Ok(t.task.clone())
             } else {
                 Err(anyhow::anyhow!("not found"))
             }
