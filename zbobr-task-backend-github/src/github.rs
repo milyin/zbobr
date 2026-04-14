@@ -467,24 +467,26 @@ impl ZbobrTaskBackendGithubImpl {
     ///
     /// - Sets `pipeline:<name>` labels for all active pipelines (from state + stack).
     /// - Clears `pipeline:<name>` labels for pipelines no longer active.
-    /// - Sets or clears the `pause` label based on whether state is `State::Pause`.
+    /// - Sets or clears the `pause` label based on whether state is `State::Pause` or `go_pause`.
     /// - Removes `yes`/`no` labels when not paused (they are consumed after resume).
     async fn apply_pipeline_and_pause_labels(
         &self,
         id: u64,
         state: &State,
         stack: &[StackEntry],
+        go_pause: bool,
     ) -> anyhow::Result<()> {
         // Collect desired pipeline labels
         let mut desired_pipeline_labels: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         if let Some(pipeline) = state.pipeline() {
-            desired_pipeline_labels
-                .insert(format!("{PIPELINE_LABEL_PREFIX}{}", pipeline.as_str()));
+            desired_pipeline_labels.insert(format!("{PIPELINE_LABEL_PREFIX}{}", pipeline.as_str()));
         }
         for entry in stack {
-            desired_pipeline_labels
-                .insert(format!("{PIPELINE_LABEL_PREFIX}{}", entry.pipeline.as_str()));
+            desired_pipeline_labels.insert(format!(
+                "{PIPELINE_LABEL_PREFIX}{}",
+                entry.pipeline.as_str()
+            ));
         }
 
         // Read current issue labels
@@ -512,11 +514,12 @@ impl ZbobrTaskBackendGithubImpl {
         }
 
         // Sync pause label
-        let is_paused = state.is_pause();
+        let is_paused = state.is_pause() || go_pause;
         if is_paused && !has_pause_label {
             self.ensure_label_exists(PAUSE_LABEL, "e4e669", "Task is paused")
                 .await?;
-            self.add_issue_labels(id, &[PAUSE_LABEL.to_string()]).await?;
+            self.add_issue_labels(id, &[PAUSE_LABEL.to_string()])
+                .await?;
         } else if !is_paused && has_pause_label {
             self.remove_issue_label(id, PAUSE_LABEL).await?;
         }
@@ -524,10 +527,10 @@ impl ZbobrTaskBackendGithubImpl {
         // Remove yes/no labels when not paused (they've been consumed after resume)
         if !is_paused {
             for label in [YES_LABEL, NO_LABEL] {
-                if current_labels.iter().any(|l| l == label) {
-                    if let Err(e) = self.remove_issue_label(id, label).await {
-                        tracing::warn!("Task #{id}: failed to remove '{label}' label: {e}");
-                    }
+                if current_labels.iter().any(|l| l == label)
+                    && let Err(e) = self.remove_issue_label(id, label).await
+                {
+                    tracing::warn!("Task #{id}: failed to remove '{label}' label: {e}");
                 }
             }
         }
@@ -602,16 +605,21 @@ impl ZbobrTaskBackendGithubImpl {
         // Create the pause label
         if !existing_labels.contains(&PAUSE_LABEL.to_string()) {
             tracing::info!("Creating label '{PAUSE_LABEL}'");
-            self.create_label(PAUSE_LABEL, "e4e669", "Task is paused").await?;
+            self.create_label(PAUSE_LABEL, "e4e669", "Task is paused")
+                .await?;
         } else if force {
             tracing::info!("Updating label '{PAUSE_LABEL}' (force)");
-            self.update_label(PAUSE_LABEL, "e4e669", "Task is paused").await?;
+            self.update_label(PAUSE_LABEL, "e4e669", "Task is paused")
+                .await?;
         } else {
             tracing::info!("Label '{PAUSE_LABEL}' already exists");
         }
 
         // Create yes/no labels for pause resume signaling
-        let yes_no_labels = [(YES_LABEL, "0e8a16", "Resume pause with success"), (NO_LABEL, "d73a4a", "Resume pause with failure")];
+        let yes_no_labels = [
+            (YES_LABEL, "0e8a16", "Resume pause with success"),
+            (NO_LABEL, "d73a4a", "Resume pause with failure"),
+        ];
         for (label, color, desc) in &yes_no_labels {
             if !existing_labels.contains(&label.to_string()) {
                 tracing::info!("Creating label '{label}'");
@@ -624,7 +632,7 @@ impl ZbobrTaskBackendGithubImpl {
             }
         }
 
-       // With force: remove obsolete state:* labels left over from the old schema
+        // With force: remove obsolete state:* labels left over from the old schema
         if force {
             for label in &existing_labels {
                 if label.starts_with("state:") {
@@ -997,7 +1005,15 @@ impl ZbobrTaskBackendGithubImpl {
             )
         });
 
-        let task = mutate(task);
+        let mut task = mutate(task);
+
+        // If the user has manually added the pause label while the task is running,
+        // translate that intent into the go_pause flag so it is persisted in the body
+        // params and survives the label sync that follows.
+        let actual_labels = self.get_issue_labels(id).await?;
+        if actual_labels.iter().any(|l| l == PAUSE_LABEL) && !task.state.is_pause() {
+            task.go_pause = true;
+        }
 
         let string_params = Self::task_to_string_params(&task);
         let new_description = serialize_description_full(
@@ -1049,7 +1065,12 @@ impl ZbobrTaskBackendGithubImpl {
 
         // Sync pipeline/pause labels to reflect the new state
         if let Err(e) = self
-            .apply_pipeline_and_pause_labels(id, &saved_task.state, &saved_task.stack)
+            .apply_pipeline_and_pause_labels(
+                id,
+                &saved_task.state,
+                &saved_task.stack,
+                saved_task.go_pause,
+            )
             .await
         {
             tracing::warn!("Task #{id}: failed to sync labels: {e}");
@@ -1270,7 +1291,10 @@ fn expected_labels(state: &State, stack: &[StackEntry]) -> std::collections::Has
         labels.insert(format!("{PIPELINE_LABEL_PREFIX}{}", pipeline.as_str()));
     }
     for entry in stack {
-        labels.insert(format!("{PIPELINE_LABEL_PREFIX}{}", entry.pipeline.as_str()));
+        labels.insert(format!(
+            "{PIPELINE_LABEL_PREFIX}{}",
+            entry.pipeline.as_str()
+        ));
     }
     if state.is_pause() {
         labels.insert(PAUSE_LABEL.to_string());
@@ -1327,8 +1351,12 @@ impl TaskWeak for GithubTaskWeak {
             return Ok(None);
         }
 
-        let actual: std::collections::HashSet<String> =
-            self.backend.get_issue_labels(self.id).await?.into_iter().collect();
+        let actual: std::collections::HashSet<String> = self
+            .backend
+            .get_issue_labels(self.id)
+            .await?
+            .into_iter()
+            .collect();
         let expected = expected_labels(&task.state, &task.stack);
 
         // Pause label removed → Resume with signal derived from yes/no labels
@@ -1574,7 +1602,7 @@ impl TaskBackend for TaskBackendGithub {
         // Sync pipeline/pause labels for the initial state
         if let Err(e) = self
             .inner
-            .apply_pipeline_and_pause_labels(issue.number, &state, &[])
+            .apply_pipeline_and_pause_labels(issue.number, &state, &[], false)
             .await
         {
             tracing::warn!(
@@ -1590,10 +1618,7 @@ impl TaskBackend for TaskBackendGithub {
         self.inner.setup(force).await
     }
 
-    async fn ensure_pipeline_labels_exist(
-        &self,
-        pipelines: &[&Pipeline],
-    ) -> anyhow::Result<()> {
+    async fn ensure_pipeline_labels_exist(&self, pipelines: &[&Pipeline]) -> anyhow::Result<()> {
         let existing_labels = self.inner.list_labels().await?;
         for pipeline in pipelines {
             let label_name = format!("{}{}", PIPELINE_LABEL_PREFIX, pipeline.as_str());
@@ -1774,8 +1799,8 @@ mod flag_tests {
             state: "open".to_string(),
         };
 
-        let task = ZbobrTaskBackendGithubImpl::hydrate_issue_to_task_for_config(&config, issue)
-            .unwrap();
+        let task =
+            ZbobrTaskBackendGithubImpl::hydrate_issue_to_task_for_config(&config, issue).unwrap();
         let stage = &task.context.stages[0];
 
         assert_eq!(
