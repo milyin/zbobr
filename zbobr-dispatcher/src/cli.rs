@@ -20,7 +20,7 @@ use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
 use zbobr_utility::{git, git_check, git_output};
 
 use crate::{
-    Comment, Task, TaskDir, ToolExecutor, Workflow, ZbobrDispatcher,
+    Comment, TaskSnapshot, TaskDir, ToolExecutor, Workflow, ZbobrDispatcher,
     task::{Executor, Model},
     workflow::SequentialSignal,
 };
@@ -270,8 +270,8 @@ pub struct TaskListEntry {
     pub title: String,
 }
 
-impl From<&Task> for TaskListEntry {
-    fn from(task: &Task) -> Self {
+impl From<&TaskSnapshot> for TaskListEntry {
+    fn from(task: &TaskSnapshot) -> Self {
         Self {
             id: task.id,
             stage_count: task.stage_count,
@@ -289,7 +289,7 @@ impl From<&Task> for TaskListEntry {
 ///
 /// This is the single source of truth for task priority ordering used by both
 /// [`select_runnable_task`] and [`run_manager_loop`].
-fn task_priority(task: &Task) -> u64 {
+fn task_priority(task: &TaskSnapshot) -> u64 {
     task.stage_count
 }
 
@@ -299,7 +299,7 @@ fn task_priority(task: &Task) -> u64 {
 /// matches exactly the tasks that [`run_manager_loop`] would schedule in Phase 2.
 ///
 /// Returns all tasks eligible for non-call `RunStage` processing.
-pub fn eligible_runnable_tasks<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Vec<&'a Task> {
+pub fn eligible_runnable_tasks<'a>(workflow: &Workflow, tasks: &'a [TaskSnapshot]) -> Vec<&'a TaskSnapshot> {
     tasks
         .iter()
         .filter(|t| {
@@ -316,7 +316,7 @@ pub fn eligible_runnable_tasks<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Ve
 /// Return the highest-priority task from [`eligible_runnable_tasks`].
 ///
 /// Returns `None` if no runnable task exists.
-pub fn select_runnable_task<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Option<&'a Task> {
+pub fn select_runnable_task<'a>(workflow: &Workflow, tasks: &'a [TaskSnapshot]) -> Option<&'a TaskSnapshot> {
     eligible_runnable_tasks(workflow, tasks)
         .into_iter()
         .max_by(|a, b| {
@@ -331,7 +331,7 @@ pub fn select_runnable_task<'a>(workflow: &Workflow, tasks: &'a [Task]) -> Optio
 // ---------------------------------------------------------------------------
 
 /// Print a task to stdout in a human-readable format.
-pub fn print_task(task: &Task, discussion: &[Comment]) {
+pub fn print_task(task: &TaskSnapshot, discussion: &[Comment]) {
     println!("ID:          {}", task.id);
     println!("Title:       {}", task.title);
     println!("State:       {:?}", task.state);
@@ -854,7 +854,7 @@ impl ZbobrDispatcher {
     ///   3. clears signal and pause flag.
     ///
     /// Returns `Ok(true)` when the task was paused (caller should skip it).
-    async fn apply_pause_to_state(self: &Arc<Self>, task: &Task) -> anyhow::Result<bool> {
+    async fn apply_pause_to_state(self: &Arc<Self>, task: &TaskSnapshot) -> anyhow::Result<bool> {
         if !task.go_pause {
             return Ok(false);
         }
@@ -1086,7 +1086,7 @@ impl ZbobrDispatcher {
     /// Process a task according to its current state and signal (single-step).
     pub async fn process_task(
         self: &Arc<Self>,
-        task: &Task,
+        task: &TaskSnapshot,
         mcp_tester_override: Option<&ZbobrExecutorMcpTesterConfig>,
     ) -> anyhow::Result<()> {
         if task.state.is_done() {
@@ -1381,7 +1381,7 @@ impl ZbobrDispatcher {
     ///
     /// Applies pause/ready normalization and processes instant transitions (Done and call stages).
     /// Returns the current task snapshot list.
-    pub async fn advance_tasks(self: &Arc<Self>) -> anyhow::Result<Vec<Task>> {
+    pub async fn advance_tasks(self: &Arc<Self>) -> anyhow::Result<Vec<TaskSnapshot>> {
         let task_backend = self.task_backend();
         let workflow = self.workflow();
 
@@ -1392,7 +1392,7 @@ impl ZbobrDispatcher {
                 vec![]
             }
         };
-        let mut all_tasks: Vec<Task> = Vec::new();
+        let mut all_tasks: Vec<TaskSnapshot> = Vec::new();
         for w in &all_weak {
             match w.snapshot(false).await {
                 Ok(t) => all_tasks.push(t),
@@ -2238,8 +2238,8 @@ mod tests {
         stage_count: u64,
         pause: bool,
         stack: Vec<StackEntry>,
-    ) -> Task {
-        Task {
+    ) -> TaskSnapshot {
+        TaskSnapshot {
             id,
             title: format!("task {}", id),
             description: "test description".to_string(),
@@ -2333,7 +2333,7 @@ mod tests {
     #[test]
     fn select_runnable_task_returns_none_on_empty_input() {
         let wf = make_workflow();
-        let tasks: [Task; 0] = [];
+        let tasks: [TaskSnapshot; 0] = [];
 
         let selected = select_runnable_task(&wf, &tasks);
         assert!(selected.is_none());

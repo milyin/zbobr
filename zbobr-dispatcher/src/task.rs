@@ -77,7 +77,7 @@ impl RoleSession {
     }
 
     /// Read the full task state.
-    pub async fn get_task(&self) -> anyhow::Result<Task> {
+    pub async fn get_task(&self) -> anyhow::Result<TaskSnapshot> {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         weak.snapshot(false).await
     }
@@ -106,7 +106,7 @@ impl RoleSession {
     /// and restored afterwards, so MCP tools cannot change them.
     pub async fn modify_task<F>(&self, mutate: F) -> anyhow::Result<()>
     where
-        F: FnOnce(Task) -> Task + Send + 'static,
+        F: FnOnce(TaskSnapshot) -> TaskSnapshot + Send + 'static,
     {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
@@ -364,7 +364,7 @@ impl TaskSession {
     }
 
     /// Read the full task state.
-    pub async fn get_task(&self) -> anyhow::Result<Task> {
+    pub async fn get_task(&self) -> anyhow::Result<TaskSnapshot> {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         weak.snapshot(false).await
     }
@@ -372,7 +372,7 @@ impl TaskSession {
     /// Atomically read-modify-write the task with unrestricted access via transient upgrade.
     pub async fn modify_task<F>(&self, mutate: F) -> anyhow::Result<()>
     where
-        F: FnOnce(Task) -> Task + Send + 'static,
+        F: FnOnce(TaskSnapshot) -> TaskSnapshot + Send + 'static,
     {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
         let mutable = weak.upgrade().await?;
@@ -553,7 +553,7 @@ mod comment_model_tests {
     // Simple in-memory backend for testing
 
     struct InMemTask {
-        task: Task,
+        task: TaskSnapshot,
         closed: bool,
     }
 
@@ -593,7 +593,7 @@ mod comment_model_tests {
             self.id
         }
 
-        async fn snapshot(&self, _refresh: bool) -> anyhow::Result<Task> {
+        async fn snapshot(&self, _refresh: bool) -> anyhow::Result<TaskSnapshot> {
             let tasks = self.backend.tasks.lock().await;
             tasks
                 .get(&self.id)
@@ -657,7 +657,7 @@ mod comment_model_tests {
             self.id
         }
 
-        async fn snapshot(&self, _refresh: bool) -> anyhow::Result<Task> {
+        async fn snapshot(&self, _refresh: bool) -> anyhow::Result<TaskSnapshot> {
             let tasks = self.backend.tasks.lock().await;
             tasks
                 .get(&self.id)
@@ -667,8 +667,8 @@ mod comment_model_tests {
 
         async fn modify_task(
             &self,
-            mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-        ) -> anyhow::Result<Task> {
+            mutate: Box<dyn FnOnce(TaskSnapshot) -> TaskSnapshot + Send>,
+        ) -> anyhow::Result<TaskSnapshot> {
             let mut tasks = self.backend.tasks.lock().await;
             if let Some(t) = tasks.get_mut(&self.id) {
                 let task = t.task.clone();
@@ -737,7 +737,7 @@ mod comment_model_tests {
                 .next_id
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
                 + 1;
-            let task = Task {
+            let task = TaskSnapshot {
                 id,
                 title: title.to_string(),
                 description: description.to_string(),

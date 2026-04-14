@@ -7,7 +7,7 @@ use std::{
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use zbobr_api::{
-    Comment, Signal, StateOverrideRequest, Task,
+    Comment, Signal, StateOverrideRequest, TaskSnapshot,
     backend::TaskBackend,
     task::{Pipeline, StackEntry, State, TaskContext},
 };
@@ -678,7 +678,7 @@ impl ZbobrTaskBackendGithubImpl {
     fn issue_to_task_with_default_max_stage_count(
         issue: IssueResponse,
         default_max_stage_count: u64,
-    ) -> anyhow::Result<Task> {
+    ) -> anyhow::Result<TaskSnapshot> {
         let body = issue.body.unwrap_or_default();
         let (description, params_map, status, context, dead_context) =
             parse_description_full(&body)?;
@@ -710,7 +710,7 @@ impl ZbobrTaskBackendGithubImpl {
             .map(|s| s == PARAM_FLAG_VALUE_TRUE)
             .unwrap_or(false);
 
-        Ok(Task {
+        Ok(TaskSnapshot {
             id: issue.number,
             title: issue.title,
             description,
@@ -737,7 +737,7 @@ impl ZbobrTaskBackendGithubImpl {
         })
     }
 
-    fn issue_to_task(&self, issue: IssueResponse) -> anyhow::Result<Task> {
+    fn issue_to_task(&self, issue: IssueResponse) -> anyhow::Result<TaskSnapshot> {
         Self::issue_to_task_with_default_max_stage_count(issue, self.default_max_stage_count())
     }
 
@@ -782,7 +782,7 @@ impl ZbobrTaskBackendGithubImpl {
 
     fn normalize_task_report_links_for_config(
         config: &ZbobrTaskBackendGithubConfig,
-        task: &mut Task,
+        task: &mut TaskSnapshot,
     ) -> anyhow::Result<()> {
         for (stage_idx, stage) in task.context.stages.iter_mut().enumerate() {
             if let Some(link) = stage.info.prompt_link.as_mut() {
@@ -821,7 +821,7 @@ impl ZbobrTaskBackendGithubImpl {
     fn hydrate_issue_to_task_for_config(
         config: &ZbobrTaskBackendGithubConfig,
         issue: IssueResponse,
-    ) -> anyhow::Result<Task> {
+    ) -> anyhow::Result<TaskSnapshot> {
         let mut task = Self::issue_to_task_with_default_max_stage_count(
             issue,
             config.default_max_stage_count,
@@ -830,14 +830,14 @@ impl ZbobrTaskBackendGithubImpl {
         Ok(task)
     }
 
-    fn hydrate_issue_to_task(&self, issue: IssueResponse) -> anyhow::Result<Task> {
+    fn hydrate_issue_to_task(&self, issue: IssueResponse) -> anyhow::Result<TaskSnapshot> {
         let mut task = self.issue_to_task(issue)?;
         Self::normalize_task_report_links_for_config(&self.backend_config, &mut task)?;
         Ok(task)
     }
 
     /// Build the string parameters map for serialization, including promoted fields.
-    fn task_to_string_params(task: &Task) -> HashMap<String, String> {
+    fn task_to_string_params(task: &TaskSnapshot) -> HashMap<String, String> {
         let mut params: HashMap<String, String> = HashMap::new();
         if let Some(ref v) = task.pr_url {
             params.insert(PARAM_PR_URL.to_string(), v.clone());
@@ -928,7 +928,7 @@ impl ZbobrTaskBackendGithubImpl {
     }
 
     /// Internal: fetch task from GitHub without cooling check.
-    async fn fetch_task(&self, id: u64) -> anyhow::Result<Task> {
+    async fn fetch_task(&self, id: u64) -> anyhow::Result<TaskSnapshot> {
         let (owner, repo) = self.parse_repo()?;
         let issue: IssueResponse = retry_github("get issue", || {
             self.octocrab
@@ -939,7 +939,7 @@ impl ZbobrTaskBackendGithubImpl {
     }
 
     /// Internal: read task with cooling check.
-    async fn read_task(&self, id: u64) -> anyhow::Result<Task> {
+    async fn read_task(&self, id: u64) -> anyhow::Result<TaskSnapshot> {
         self.await_cooling_for(id).await;
         self.fetch_task(id).await
     }
@@ -970,8 +970,8 @@ impl ZbobrTaskBackendGithubImpl {
     async fn modify_task_internal(
         &self,
         id: u64,
-        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-    ) -> anyhow::Result<Task> {
+        mutate: Box<dyn FnOnce(TaskSnapshot) -> TaskSnapshot + Send>,
+    ) -> anyhow::Result<TaskSnapshot> {
         let task = self.fetch_task(id).await?;
         let comments = self.get_task_comments_internal(id).await?;
         let url_prefix = self.report_url_prefix(id);
@@ -1306,7 +1306,7 @@ fn expected_labels(state: &State, stack: &[StackEntry]) -> std::collections::Has
 struct GithubTaskWeak {
     id: u64,
     backend: Arc<ZbobrTaskBackendGithubImpl>,
-    saved_snapshot: Arc<std::sync::Mutex<Option<Task>>>,
+    saved_snapshot: Arc<std::sync::Mutex<Option<TaskSnapshot>>>,
 }
 
 #[async_trait]
@@ -1315,7 +1315,7 @@ impl TaskWeak for GithubTaskWeak {
         self.id
     }
 
-    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task> {
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<TaskSnapshot> {
         if !refresh && let Some(task) = self.saved_snapshot.lock().unwrap().clone() {
             return Ok(task);
         }
@@ -1418,7 +1418,7 @@ impl TaskWeak for GithubTaskWeak {
 struct GithubTaskMut {
     id: u64,
     backend: Arc<ZbobrTaskBackendGithubImpl>,
-    saved_snapshot: Arc<std::sync::Mutex<Option<Task>>>,
+    saved_snapshot: Arc<std::sync::Mutex<Option<TaskSnapshot>>>,
     _guard: OwnedMutexGuard<()>,
 }
 
@@ -1428,7 +1428,7 @@ impl TaskMut for GithubTaskMut {
         self.id
     }
 
-    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task> {
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<TaskSnapshot> {
         if !refresh && let Some(task) = self.saved_snapshot.lock().unwrap().clone() {
             return Ok(task);
         }
@@ -1440,8 +1440,8 @@ impl TaskMut for GithubTaskMut {
 
     async fn modify_task(
         &self,
-        mutate: Box<dyn FnOnce(Task) -> Task + Send>,
-    ) -> anyhow::Result<Task> {
+        mutate: Box<dyn FnOnce(TaskSnapshot) -> TaskSnapshot + Send>,
+    ) -> anyhow::Result<TaskSnapshot> {
         let task = self.backend.modify_task_internal(self.id, mutate).await?;
         *self.saved_snapshot.lock().unwrap() = Some(task.clone());
         Ok(task)
@@ -1701,7 +1701,7 @@ mod flag_tests {
         }
     }
 
-    fn issue_to_task(issue: IssueResponse) -> Task {
+    fn issue_to_task(issue: IssueResponse) -> TaskSnapshot {
         ZbobrTaskBackendGithubImpl::issue_to_task_with_default_max_stage_count(
             issue,
             zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
@@ -1728,7 +1728,7 @@ mod flag_tests {
     #[test]
     fn task_to_string_params_includes_flags_when_set() {
         use zbobr_api::task::{State, TaskContext};
-        let task = Task {
+        let task = TaskSnapshot {
             id: 1,
             title: "t".to_string(),
             description: "d".to_string(),
@@ -1819,7 +1819,7 @@ mod flag_tests {
     #[test]
     fn normalize_task_report_links_rejects_non_blob_report_link_with_diagnostic() {
         let config = make_config();
-        let mut task = Task {
+        let mut task = TaskSnapshot {
             id: 1,
             title: "t".to_string(),
             description: "d".to_string(),
@@ -1871,7 +1871,7 @@ mod flag_tests {
     #[test]
     fn normalize_task_report_links_rejects_wrong_blob_prefix_with_diagnostic() {
         let config = make_config();
-        let mut task = Task {
+        let mut task = TaskSnapshot {
             id: 1,
             title: "t".to_string(),
             description: "d".to_string(),

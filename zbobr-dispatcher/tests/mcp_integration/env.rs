@@ -15,7 +15,7 @@ use zbobr_api::{
     config::{Provider, ProviderDefinition, Tool, ToolEntry, WorkflowConfig},
 };
 use zbobr_dispatcher::{
-    Comment, Task, Workflow, ZbobrDispatcher, ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
+    Comment, TaskSnapshot, Workflow, ZbobrDispatcher, ZbobrDispatcherBuilder, ZbobrDispatcherConfig,
     backend::TaskBackendExt, prompts::ConfiguredPromptBuilder, task::Executor,
 };
 use zbobr_executor_mcp_tester::ZbobrExecutorMcpTesterConfig;
@@ -342,7 +342,7 @@ impl IntegrationTestEnv {
             .unwrap_or_else(|e| panic!("[{}] failed to create task: {e}", self.name))
     }
 
-    pub async fn get_task(&self, task_id: u64) -> Task {
+    pub async fn get_task(&self, task_id: u64) -> TaskSnapshot {
         self.zbobr
             .task_backend()
             .get_task(task_id)

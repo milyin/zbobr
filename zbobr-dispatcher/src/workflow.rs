@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use zbobr_api::{
-    Pipeline, Signal, Stage, State, Task,
+    Pipeline, Signal, Stage, State, TaskSnapshot,
     config::{
         PipelineConfig, Role, RoleDefinition, StageDefinition, StageTransition, WorkflowConfig,
     },
@@ -182,7 +182,7 @@ impl Workflow {
 
     /// Given a task's current state/signal/stack and the workflow configuration,
     /// determine the next action to take.
-    pub fn resolve_next_action(&self, task: &Task) -> anyhow::Result<StateAction<'_>> {
+    pub fn resolve_next_action(&self, task: &TaskSnapshot) -> anyhow::Result<StateAction<'_>> {
         tracing::debug!(
             "Task #{}: resolving next action (state={:?}, signal={:?}, stack_depth={})",
             task.id,
@@ -225,7 +225,7 @@ impl Workflow {
         Ok(action)
     }
 
-    fn resolve_inner(&self, task: &Task, depth: usize) -> anyhow::Result<StateAction<'_>> {
+    fn resolve_inner(&self, task: &TaskSnapshot, depth: usize) -> anyhow::Result<StateAction<'_>> {
         // Guard against infinite recursion
         if depth > 20 {
             anyhow::bail!(
@@ -595,7 +595,7 @@ role = "merger"
         let workflow = Workflow::from_config(wf);
 
         // Pending task (no signal) → state machine should resolve to RunStage for the call stage
-        let task = Task {
+        let task = TaskSnapshot {
             id: 1,
             title: String::new(),
             description: String::new(),

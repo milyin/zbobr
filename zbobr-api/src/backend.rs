@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::task::{Comment, Pipeline, Signal, StackEntry, State, StateOverrideRequest, Task, TaskIdentity};
+use crate::task::{Comment, Pipeline, Signal, StackEntry, State, StateOverrideRequest, TaskSnapshot, TaskIdentity};
 
 /// Unicode symbol prepended to every formatted error status message.
 pub const ERROR_PREFIX: char = '\u{274C}';
@@ -36,7 +36,7 @@ pub trait TaskWeak: Send + Sync {
     /// When `refresh` is `false`, implementations may return a cached snapshot.
     /// When `refresh` is `true`, implementations must reload from the backing store
     /// and refresh any saved snapshot cache.
-    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task>;
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<TaskSnapshot>;
 
     /// Try to acquire exclusive write access.
     /// Fails if another TaskMut is held for this task.
@@ -59,11 +59,11 @@ pub trait TaskWeak: Send + Sync {
 #[async_trait]
 pub trait TaskMut: Send + Sync {
     fn task_id(&self) -> u64;
-    async fn snapshot(&self, refresh: bool) -> anyhow::Result<Task>;
+    async fn snapshot(&self, refresh: bool) -> anyhow::Result<TaskSnapshot>;
 
     /// Core mutation primitive — reads task, applies closure, writes back, returns updated task.
-    async fn modify_task(&self, mutate: Box<dyn FnOnce(Task) -> Task + Send>)
-    -> anyhow::Result<Task>;
+    async fn modify_task(&self, mutate: Box<dyn FnOnce(TaskSnapshot) -> TaskSnapshot + Send>)
+    -> anyhow::Result<TaskSnapshot>;
 
     /// Close the task.
     async fn close(&self) -> anyhow::Result<()>;

@@ -780,7 +780,7 @@ fn default_max_stage_count() -> u64 {
 
 /// A task in the abstract domain (generic, backed by GitHub or Filesystem).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Task {
+pub struct TaskSnapshot {
     pub id: u64,
     pub title: String,
     pub description: String,
@@ -830,7 +830,7 @@ pub struct Task {
     pub dead_context: String,
 }
 
-impl Task {
+impl TaskSnapshot {
     /// Returns a TaskIdentity if the work_branch field is set.
     pub fn identity(&self) -> Option<TaskIdentity> {
         Some(TaskIdentity {
@@ -1059,8 +1059,8 @@ mod tests {
         assert_eq!(ContextRecordType::Question.to_string(), "question");
     }
 
-    fn make_task(id: u64, work_branch: Option<&str>) -> Task {
-        Task {
+    fn make_task(id: u64, work_branch: Option<&str>) -> TaskSnapshot {
+        TaskSnapshot {
             id,
             title: String::new(),
             description: String::new(),

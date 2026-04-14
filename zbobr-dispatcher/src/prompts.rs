@@ -2,7 +2,7 @@ use std::{borrow::Cow, collections::HashMap, path::PathBuf, sync::Arc};
 
 use simpleinterpolation::Interpolation;
 use zbobr_api::{
-    Comment, ContextRecord, ContextRecordType, Signal, StackEntry, StageContext, StageInfo, Task,
+    Comment, ContextRecord, ContextRecordType, Signal, StackEntry, StageContext, StageInfo, TaskSnapshot,
     TaskContext,
     config::{Role, StageDefinition, WorkflowConfig},
     config_tools::McpTool,
@@ -104,7 +104,7 @@ impl ConfiguredPromptBuilder {
     pub fn build_for_stage_with_task(
         &self,
         stage_def: &StageDefinition,
-        task: &Task,
+        task: &TaskSnapshot,
         comments: &[Comment],
     ) -> anyhow::Result<String> {
         let prompt_files = prompt_files_for_stage(stage_def, self.workflow.config());
@@ -126,7 +126,7 @@ impl ConfiguredPromptBuilder {
 ///
 /// The values are non-trivial so that template variables such as `context`,
 /// `signal`, `stack`, `pr_url`, and comment `url` fields are exercised.
-pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
+pub fn sample_task_and_comments() -> (TaskSnapshot, Vec<Comment>) {
     const SAMPLE_REPO_URL: &str = "https://github.com/example/repo";
     const SAMPLE_ISSUE_URL: &str = "https://github.com/example/repo/issues/1";
     let stage_info = StageInfo {
@@ -150,7 +150,7 @@ pub fn sample_task_and_comments() -> (Task, Vec<Comment>) {
             }],
         }],
     };
-    let task = Task {
+    let task = TaskSnapshot {
         id: 1,
         title: "TITLE".to_string(),
         description: "DESCRIPTION".to_string(),
@@ -276,7 +276,7 @@ pub fn load_prompts(paths: &[PathBuf], base_path: Option<&PathBuf>) -> anyhow::R
 
 /// Build template variables from task and comments.
 pub fn build_template_variables<'a>(
-    task: &'a Task,
+    task: &'a TaskSnapshot,
     comments: &'a [Comment],
 ) -> HashMap<Cow<'static, str>, Cow<'a, str>> {
     let mut vars: HashMap<Cow<'static, str>, Cow<'a, str>> = HashMap::new();
@@ -352,7 +352,7 @@ pub async fn build_full_prompt(
 pub fn build_prompt_with_task(
     user_context: &str,
     role: &Role,
-    task: &Task,
+    task: &TaskSnapshot,
     comments: &[Comment],
     workflow: &WorkflowConfig,
     extra_vars: &HashMap<String, String>,
@@ -394,8 +394,8 @@ mod tests {
     use super::*;
     use crate::workflow::Workflow;
 
-    fn dummy_task(title: &str) -> Task {
-        Task {
+    fn dummy_task(title: &str) -> TaskSnapshot {
+        TaskSnapshot {
             id: 1,
             title: title.to_owned(),
             description: String::new(),
