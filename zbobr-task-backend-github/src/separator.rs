@@ -233,7 +233,6 @@ mod tests {
                 info: StageInfo {
                     instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
-                    run_id: 1,
                     stage: Stage::new("working"),
                     tool: Some("claude".to_string()),
                     model: Some("claude-opus-4.6".parse().unwrap()),
@@ -399,7 +398,6 @@ mod tests {
                 info: StageInfo {
                     instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
-                    run_id: 1,
                     stage: Stage::new("planning"),
                     tool: None,
                     model: None,
@@ -425,7 +423,6 @@ mod tests {
                 info: StageInfo {
                     instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
-                    run_id: 1,
                     stage: Stage::new("planning"),
                     tool: None,
                     model: None,
@@ -450,7 +447,6 @@ mod tests {
                 info: StageInfo {
                     instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
-                    run_id: 1,
                     stage: Stage::new("planning"),
                     tool: None,
                     model: None,

@@ -608,7 +608,6 @@ role = "merger"
             status: None,
             go_pause: false,
             confirm: false,
-            pipeline_run_id: 0,
             stage_count: 0,
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,

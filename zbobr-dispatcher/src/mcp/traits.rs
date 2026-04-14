@@ -59,9 +59,6 @@ pub trait CommonMcpImpl: Send + Sync {
     /// Returns the pipeline name for this session.
     fn pipeline(&self) -> &Pipeline;
 
-    /// Returns the pipeline run ID for this session.
-    fn pipeline_run_id(&self) -> u64;
-
     /// Record a tool call for transition mapping.
     fn record_tool(&self, tool: McpTool) {
         self.session().record_tool_call(tool);
@@ -87,9 +84,8 @@ pub trait CommonMcpImpl: Send + Sync {
 
         // Store the report file and get the link
         let base_name = format!(
-            "report_{}_{}_{}_{}",
+            "report_{}_{}_{}",
             self.pipeline(),
-            self.pipeline_run_id(),
             self.stage(),
             tool_name,
         );
@@ -152,9 +148,8 @@ pub trait CommonMcpImpl: Send + Sync {
         );
 
         let base_name = format!(
-            "checklist_{}_{}_{}_item",
+            "checklist_{}_{}_item",
             self.pipeline(),
-            self.pipeline_run_id(),
             self.stage(),
         );
         let report_link = match self.session().store_report(&base_name, full_report).await {

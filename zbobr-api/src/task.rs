@@ -154,8 +154,6 @@ pub struct StageInfo {
     pub instance: String,
     /// Pipeline that owns this stage.
     pub pipeline: Pipeline,
-    /// Run identifier within the pipeline (monotonically increasing per pipeline).
-    pub run_id: u64,
     /// Stage name within the pipeline.
     pub stage: Stage,
     /// Executor/provider used for this stage (e.g. "claude", "copilot", or a provider name).
@@ -467,6 +465,11 @@ pub enum StateOverrideRequest {
 pub struct Pipeline(pub std::borrow::Cow<'static, str>);
 
 impl Pipeline {
+    #[allow(non_upper_case_globals)]
+    pub const Main: Pipeline = Pipeline::new("main");
+    #[allow(non_upper_case_globals)]
+    pub const Merge: Pipeline = Pipeline::new("merge");
+
     pub const fn new(s: &'static str) -> Self {
         Pipeline(std::borrow::Cow::Borrowed(s))
     }
@@ -637,9 +640,6 @@ impl schemars::JsonSchema for Signal {
 pub struct StackEntry {
     /// Caller's pipeline to return to after sub-pipeline / pause completion.
     pub pipeline: Pipeline,
-    /// Caller's pipeline_run_id to restore on return.
-    #[serde(default)]
-    pub pipeline_run_id: u64,
     /// Stage in the calling pipeline whose transitions determine the continuation
     /// signal on return (both for call entries and for pause entries).
     pub calling_stage: Stage,
@@ -809,9 +809,6 @@ pub struct Task {
     /// the task's state is changed.  This gives human operators an opportunity to
     /// review a transition before the next processing step occurs.
     pub confirm: bool,
-    /// Current/latest pipeline run counter. Incremented on each new pipeline call.
-    #[serde(default)]
-    pub pipeline_run_id: u64,
     /// Counter that is automatically incremented on each stage passed.
     #[serde(default)]
     pub stage_count: u64,
@@ -935,7 +932,6 @@ mod tests {
         StageInfo {
             instance: "default".to_string(),
             pipeline: Pipeline::from(pipeline),
-            run_id: 1,
             stage: Stage::from(stage),
             tool: None,
             model: None,
@@ -1077,7 +1073,6 @@ mod tests {
             status: None,
             go_pause: false,
             confirm: false,
-            pipeline_run_id: 0,
             stage_count: 0,
             max_stage_count: DEFAULT_MAX_STAGE_COUNT,
             closed: false,

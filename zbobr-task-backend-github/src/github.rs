@@ -19,7 +19,6 @@ const PARAM_PR_URL: &str = "pr_url";
 const PARAM_STACK: &str = "stack";
 const PARAM_STATE: &str = "state";
 const PARAM_SIGNAL: &str = "signal";
-const PARAM_PIPELINE_RUN_ID: &str = "pipeline_run_id";
 const PARAM_STAGE_COUNT: &str = "stage_count";
 const PARAM_MAX_STAGE_COUNT: &str = "max_stage_count";
 const PARAM_FLAG_PAUSE: &str = "pause";
@@ -724,10 +723,6 @@ impl ZbobrTaskBackendGithubImpl {
             status,
             go_pause: pause,
             confirm,
-            pipeline_run_id: params_map
-                .get(PARAM_PIPELINE_RUN_ID)
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
             stage_count: params_map
                 .get(PARAM_STAGE_COUNT)
                 .and_then(|s| s.parse().ok())
@@ -863,12 +858,6 @@ impl ZbobrTaskBackendGithubImpl {
         // Store signal as param (not label)
         if let Some(ref signal) = task.signal {
             params.insert(PARAM_SIGNAL.to_string(), signal.to_string());
-        }
-        if task.pipeline_run_id > 0 {
-            params.insert(
-                PARAM_PIPELINE_RUN_ID.to_string(),
-                task.pipeline_run_id.to_string(),
-            );
         }
         if task.stage_count > 0 {
             params.insert(PARAM_STAGE_COUNT.to_string(), task.stage_count.to_string());
@@ -1752,7 +1741,6 @@ mod flag_tests {
             status: None,
             go_pause: true,
             confirm: true,
-            pipeline_run_id: 0,
             stage_count: 0,
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
@@ -1778,7 +1766,6 @@ mod flag_tests {
                 info: StageInfo {
                     instance: "default".to_string(),
                     pipeline: Pipeline::Main,
-                    run_id: 1,
                     stage: Stage::new("working"),
                     tool: None,
                     model: None,
@@ -1844,7 +1831,6 @@ mod flag_tests {
                     info: StageInfo {
                         instance: "default".to_string(),
                         pipeline: Pipeline::Main,
-                        run_id: 1,
                         stage: Stage::new("working"),
                         tool: None,
                         model: None,
@@ -1865,7 +1851,6 @@ mod flag_tests {
             status: None,
             go_pause: false,
             confirm: false,
-            pipeline_run_id: 0,
             stage_count: 0,
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
@@ -1898,7 +1883,6 @@ mod flag_tests {
                     info: StageInfo {
                         instance: "default".to_string(),
                         pipeline: Pipeline::Main,
-                        run_id: 1,
                         stage: Stage::new("working"),
                         tool: None,
                         model: None,
@@ -1917,7 +1901,6 @@ mod flag_tests {
             status: None,
             go_pause: false,
             confirm: false,
-            pipeline_run_id: 0,
             stage_count: 0,
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,

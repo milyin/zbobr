@@ -426,15 +426,8 @@ impl ZbobrDispatcher {
         task_id: u64,
         tracker: Arc<std::sync::Mutex<Option<zbobr_api::config_tools::McpTool>>>,
         pipeline: Pipeline,
-        pipeline_run_id: u64,
     ) -> RoleSession {
-        RoleSession::with_shared_tracker(
-            Arc::clone(self),
-            task_id,
-            tracker,
-            pipeline,
-            pipeline_run_id,
-        )
+        RoleSession::with_shared_tracker(Arc::clone(self), task_id, tracker, pipeline)
     }
 }
 

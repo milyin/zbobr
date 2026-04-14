@@ -355,7 +355,7 @@ impl fmt::Display for MdCompactComment {
 ///
 /// Format:
 /// ```text
-/// - YYYY-MM-DD HH:MM:SS <sub>+HHMM</sub> pipeline:run_id:**stage** ...
+/// - YYYY-MM-DD HH:MM:SS <sub>+HHMM</sub> pipeline:**stage** ...
 ///     - [ ] record 1 <sub>ctx_rec_1</sub>
 ///     - ✅ record 2 <sub>ctx_rec_2</sub>
 /// ```
@@ -736,7 +736,6 @@ mod tests {
                     info: StageInfo {
                         instance: "default".to_string(),
                         pipeline: Pipeline::from("main"),
-                        run_id: 1,
                         stage: Stage::new("planning"),
                         tool: Some("claude".to_string()),
                         model: Some("claude-opus-4.6".parse().unwrap()),
@@ -769,7 +768,6 @@ mod tests {
                     info: StageInfo {
                         instance: "default".to_string(),
                         pipeline: Pipeline::from("main"),
-                        run_id: 1,
                         stage: Stage::new("working"),
                         tool: None,
                         model: None,
@@ -877,7 +875,6 @@ mod tests {
 
         let s0 = &parsed.stages[0];
         assert_eq!(s0.info.pipeline, Pipeline::from("main"));
-        assert_eq!(s0.info.run_id, 1);
         assert_eq!(s0.info.stage, Stage::new("planning"));
         assert_eq!(s0.info.timestamp, utc("2024-01-01T00:00:00Z"));
         assert!(s0.info.prompt_link.as_deref() == Some("prompts/plan.md"));
@@ -912,7 +909,6 @@ mod tests {
         assert_eq!(parsed.stages.len(), original.stages.len());
         for (orig_stage, parsed_stage) in original.stages.iter().zip(parsed.stages.iter()) {
             assert_eq!(parsed_stage.info.pipeline, orig_stage.info.pipeline);
-            assert_eq!(parsed_stage.info.run_id, orig_stage.info.run_id);
             assert_eq!(parsed_stage.info.stage, orig_stage.info.stage);
             assert_eq!(parsed_stage.info.timestamp, orig_stage.info.timestamp);
             assert_eq!(parsed_stage.info.tool, orig_stage.info.tool);
@@ -980,7 +976,6 @@ mod tests {
                 info: StageInfo {
                     instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
-                    run_id: 1,
                     stage: Stage::new("working"),
                     tool: None,
                     model: None,
@@ -1029,7 +1024,6 @@ mod tests {
                 info: StageInfo {
                     instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
-                    run_id: 1,
                     stage: Stage::new("working"),
                     tool: None,
                     model: None,
@@ -1079,7 +1073,6 @@ mod tests {
                 info: StageInfo {
                     instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
-                    run_id: 1,
                     stage: Stage::new("working"),
                     tool: None,
                     model: None,
@@ -1161,7 +1154,6 @@ mod tests {
                 instance: "default".to_string(),
                 timestamp: utc("2024-01-01T00:00:00Z"),
                 pipeline: Pipeline::from("main"),
-                run_id: 1,
                 stage: Stage::new("working"),
                 tool: None,
                 model: None,
@@ -1205,7 +1197,6 @@ mod tests {
         assert_eq!(result.stages.len(), ctx.stages.len());
         for (orig, parsed) in ctx.stages.iter().zip(result.stages.iter()) {
             assert_eq!(parsed.info.pipeline, orig.info.pipeline);
-            assert_eq!(parsed.info.run_id, orig.info.run_id);
             assert_eq!(parsed.info.stage, orig.info.stage);
             assert_eq!(parsed.records.len(), orig.records.len());
         }
@@ -1386,7 +1377,6 @@ mod tests {
                 instance: "default".to_string(),
                 timestamp: utc("2024-01-01T00:00:00Z"),
                 pipeline: Pipeline::from("main"),
-                run_id: 1,
                 stage: Stage::new("planning"),
                 tool: Some("claude".to_string()),
                 model: Some("claude-opus-4.6".parse().unwrap()),
@@ -1429,7 +1419,6 @@ mod tests {
                     info: StageInfo {
                         instance: "default".to_string(),
                         pipeline: Pipeline::from("main"),
-                        run_id: 1,
                         stage: Stage::new("planning"),
                         tool: Some("claude".to_string()),
                         model: Some("claude-opus-4.6".parse().unwrap()),
@@ -1449,7 +1438,6 @@ mod tests {
                     info: StageInfo {
                         instance: "default".to_string(),
                         pipeline: Pipeline::from("main"),
-                        run_id: 1,
                         stage: Stage::new("working"),
                         tool: None,
                         model: None,
@@ -1463,7 +1451,6 @@ mod tests {
                     info: StageInfo {
                         instance: "default".to_string(),
                         pipeline: Pipeline::from("main"),
-                        run_id: 1,
                         stage: Stage::new("reviewing"),
                         tool: None,
                         model: None,
@@ -1523,7 +1510,6 @@ mod tests {
                     info: StageInfo {
                         instance: "skynet".to_string(),
                         pipeline: Pipeline::from("main"),
-                        run_id: 1,
                         stage: Stage::new("planning"),
                         tool: Some("claude".to_string()),
                         model: Some("claude-opus-4.6".parse().unwrap()),
@@ -1551,7 +1537,6 @@ mod tests {
                     info: StageInfo {
                         instance: "skynet".to_string(),
                         pipeline: Pipeline::from("main"),
-                        run_id: 1,
                         stage: Stage::new("working"),
                         tool: Some("copilot".to_string()),
                         model: Some("claude-sonnet-4.6".parse().unwrap()),
@@ -1565,7 +1550,6 @@ mod tests {
                     info: StageInfo {
                         instance: "skynet".to_string(),
                         pipeline: Pipeline::from("main"),
-                        run_id: 1,
                         stage: Stage::new("reviewing"),
                         tool: Some("claude".to_string()),
                         model: Some("claude-opus-4.6".parse().unwrap()),
@@ -1943,7 +1927,6 @@ mod tests {
                 info: StageInfo {
                     instance: "default".to_string(),
                     pipeline: Pipeline::from("main"),
-                    run_id: 1,
                     stage: Stage::new("working"),
                     tool: Some("claude".to_string()),
                     model: Some("claude-opus-4.6".parse().unwrap()),

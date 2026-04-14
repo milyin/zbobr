@@ -45,8 +45,6 @@ struct TaskFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     status: Option<String>,
     #[serde(default)]
-    pipeline_run_id: u64,
-    #[serde(default)]
     stage_count: u64,
     #[serde(default)]
     max_stage_count: u64,
@@ -82,7 +80,6 @@ impl TaskFile {
             status: self.status.clone(),
             go_pause: self.pause,
             confirm: self.confirm,
-            pipeline_run_id: self.pipeline_run_id,
             stage_count: self.stage_count,
             max_stage_count: self.max_stage_count,
             closed: self.closed,
@@ -106,7 +103,6 @@ impl TaskFile {
             signal: task.signal.clone(),
             stack: task.stack.clone(),
             status: task.status.clone(),
-            pipeline_run_id: task.pipeline_run_id,
             stage_count: task.stage_count,
             max_stage_count: task.max_stage_count,
             closed,
@@ -494,7 +490,6 @@ impl TaskBackend for ZbobrTaskBackendFs {
             status: None,
             go_pause: false,
             confirm: false,
-            pipeline_run_id: 0,
             stage_count: 0,
             max_stage_count: self.config.default_max_stage_count,
             closed: false,

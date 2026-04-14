@@ -400,7 +400,7 @@ impl<'a> CliStageRunner<'a> {
         State::running(self.pipeline.clone(), self.stage.clone())
     }
 
-    async fn prompt(&self, _pipeline_run_id: u64) -> anyhow::Result<String> {
+    async fn prompt(&self) -> anyhow::Result<String> {
         self.zbobr
             .prompt_builder()
             .build_for_stage(self.stage_def, self.task_id, self.zbobr.task_backend())
@@ -449,16 +449,6 @@ impl<'a> CliStageRunner<'a> {
                 self.zbobr.ensure_pr_url(self.task_id).await?;
             }
         }
-
-        // Allocate pipeline run ID if this is a fresh task (run_id == 0).
-        {
-            let task_session = self.zbobr.task_session(self.task_id);
-            let task = task_session.get_task().await?;
-            if task.pipeline_run_id == 0 {
-                task_session.allocate_pipeline_run_id().await?;
-            }
-        }
-
         // Auto-pause if stage count limit reached (before incrementing to avoid wasted increment).
         {
             let task_session = self.zbobr.task_session(self.task_id);
@@ -516,25 +506,14 @@ impl<'a> CliStageRunner<'a> {
             .and_then(|d| d.mcp.as_ref())
             .map(|tools| tools.iter().copied().collect())
             .unwrap_or_default();
-
-        // Read current pipeline_run_id for this session.
-        let task_snap = self
-            .zbobr
-            .task_backend()
-            .get_task(self.task_id)
-            .await?
-            .snapshot(false)
-            .await?;
-        let pipeline_run_id = task_snap.pipeline_run_id;
-
-        let prompt_text = self.prompt(pipeline_run_id).await?;
+        let prompt_text = self.prompt().await?;
 
         // Store the prompt once; the link is reused for each provider attempt's StageContext entry.
         let prompt_link = {
             let role_session = self.zbobr.role_session(self.task_id);
             let base_name = format!(
-                "prompt_{}_{}_{}_start",
-                self.pipeline, pipeline_run_id, self.stage
+                "prompt_{}_{}_start",
+                self.pipeline, self.stage
             );
             role_session.store_report(&base_name, &prompt_text).await?
         };
@@ -567,7 +546,6 @@ impl<'a> CliStageRunner<'a> {
                             info: StageInfo {
                                 instance,
                                 pipeline: pipeline_name,
-                                run_id: pipeline_run_id,
                                 stage: stage_name,
                                 tool: tool_val,
                                 model: model_val,
@@ -594,7 +572,6 @@ impl<'a> CliStageRunner<'a> {
                     allowed_tools.clone(),
                     Arc::clone(&tool_tracker),
                     self.pipeline.clone(),
-                    pipeline_run_id,
                 )
                 .await?;
 
@@ -637,8 +614,8 @@ impl<'a> CliStageRunner<'a> {
             if let Some(ref output) = outcome.execution_output {
                 let role_session = self.zbobr.role_session(self.task_id);
                 let base_name = format!(
-                    "output_{}_{}_{}_end",
-                    self.pipeline, pipeline_run_id, self.stage
+                    "output_{}_{}_end",
+                    self.pipeline, self.stage
                 );
                 match role_session.store_report(&base_name, output).await {
                     Ok(output_link) => {
@@ -763,8 +740,7 @@ impl ZbobrDispatcher {
     ) -> anyhow::Result<()> {
         let task_session = self.task_session(task_id);
 
-        task_session.allocate_pipeline_run_id().await?;
-        task_session.increment_stage_count().await?;
+                task_session.increment_stage_count().await?;
 
         // Auto-pause if stage count limit reached (before push_stack to prevent stack duplication on resume).
         {
@@ -820,8 +796,7 @@ impl ZbobrDispatcher {
     ) -> anyhow::Result<()> {
         let task_session = self.task_session(task_id);
 
-        task_session.allocate_pipeline_run_id().await?;
-        task_session.increment_stage_count().await?;
+                task_session.increment_stage_count().await?;
 
         // Auto-pause if stage count limit reached (before push_stack to prevent stack duplication on resume).
         {
@@ -975,7 +950,6 @@ impl ZbobrDispatcher {
         let calling_stage = entry.calling_stage.clone();
         let stage_def = self.workflow().stage(&entry.pipeline, &calling_stage);
         let pipeline = entry.pipeline.clone();
-        let restored_run_id = entry.pipeline_run_id;
         // Pre-compute confirm_status outside the closure (needs config access).
         let confirm_status = {
             let ts = chrono::Utc::now().with_timezone(&self.config().fixed_offset());
@@ -998,7 +972,6 @@ impl ZbobrDispatcher {
                 task_session
                     .modify_task(move |mut task| {
                         task.stack.pop();
-                        task.pipeline_run_id = restored_run_id;
                         task.status = Some(status);
                         task.go_pause = true;
                         task.signal = Some(Signal::go(calling_stage));
@@ -1015,7 +988,6 @@ impl ZbobrDispatcher {
                 task_session
                     .modify_task(move |mut task| {
                         task.stack.pop();
-                        task.pipeline_run_id = restored_run_id;
                         task.signal = Some(Signal::go(calling_stage));
                         let new_state = State::pending(pipeline);
                         if task.confirm && task.state != new_state {
@@ -1071,7 +1043,6 @@ impl ZbobrDispatcher {
         task_session
             .modify_task(move |mut task| {
                 task.stack.pop();
-                task.pipeline_run_id = restored_run_id;
                 task.signal = Some(signal);
                 let new_state = State::pending(pipeline);
                 if task.confirm && task.state != new_state {
@@ -1759,8 +1730,7 @@ impl ZbobrDispatcher {
         task_session
             .push_stack(pipeline.clone(), stage.clone())
             .await?;
-        task_session.allocate_pipeline_run_id().await?;
-        task_session
+                task_session
             .set_signal(Some(Signal::call(self.workflow().on_merge())))
             .await?;
         task_session.set_state(pending_state).await?;
@@ -1881,7 +1851,6 @@ impl ZbobrDispatcher {
         allowed_tools: std::collections::HashSet<McpTool>,
         tool_tracker: Arc<std::sync::Mutex<Option<McpTool>>>,
         pipeline: Pipeline,
-        pipeline_run_id: u64,
     ) -> anyhow::Result<(u16, tokio::task::JoinHandle<()>)> {
         let (port_tx, port_rx) = tokio::sync::oneshot::channel();
         let zbobr = Arc::clone(self);
@@ -1896,7 +1865,6 @@ impl ZbobrDispatcher {
                 allowed_tools,
                 tool_tracker,
                 pipeline,
-                pipeline_run_id,
             )
             .await
             {
@@ -2273,7 +2241,6 @@ mod tests {
             status: None,
             go_pause: pause,
             confirm: false,
-            pipeline_run_id: 0,
             stage_count,
             max_stage_count: 0,
             closed: false,
@@ -2334,7 +2301,6 @@ mod tests {
         let wf = make_workflow();
         let stack = vec![StackEntry {
             pipeline: Pipeline::Main,
-            pipeline_run_id: 1,
             calling_stage: Stage::from("working"),
         }];
         let tasks = [make_task(1, State::Pause, 10, false, stack)];
@@ -2367,7 +2333,6 @@ mod tests {
         let wf = make_workflow();
         let stack = vec![StackEntry {
             pipeline: Pipeline::Main,
-            pipeline_run_id: 1,
             calling_stage: Stage::from("working"),
         }];
         let tasks = [
