@@ -1476,6 +1476,17 @@ impl ZbobrDispatcher {
             }
         }
 
+        // Refresh snapshots after applying overrides so Phase 1 uses current state
+        // instead of stale pre-override task copies.
+        all_tasks.clear();
+        for w in &all_weak {
+            match w.snapshot(false).await {
+                Ok(t) => all_tasks.push(t),
+                Err(e) => tracing::warn!("Failed to snapshot task after overrides: {e}"),
+            }
+        }
+        all_tasks.sort_by_key(|b| std::cmp::Reverse(task_priority(b)));
+
         // Phase 1: apply transitions and handle Done / instant call-stage actions for all tasks.
         for task in &all_tasks {
             if task.state.is_done() {
