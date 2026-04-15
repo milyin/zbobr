@@ -392,6 +392,8 @@ fn default_workflow() -> WorkflowConfig {
             STAGE_PLANNING,
             StageDefinition {
                 role: TomlOption::Value(ROLE_PLANNER),
+                on_success: TomlOption::Value(StageTransition::stage(STAGE_PLAN_REVIEW_ADVERSARIAL)),
+                on_intermediate: TomlOption::Value(StageTransition::stage(STAGE_PLAN_REVIEW_ADVERSARIAL)),
                 ..Default::default()
             },
         ),
