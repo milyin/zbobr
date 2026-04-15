@@ -540,6 +540,7 @@ fn default_workflow() -> WorkflowConfig {
                 mcp: Some(vec![
                     StopWithError,
                     StopWithQuestion,
+                    ReportIntermediate,
                     ReportSuccess,
                     GetCtxRec,
                 ]),
@@ -772,7 +773,7 @@ macro_rules! get_ctx_rec_guidance {
 const PLANNER_PROMPT: &str = concat!(
     r#"# Planner Agent
 
-Read the task description and comments provided below in this prompt. Design an implementation plan for the task. See more detailed workflow instructions below.
+Read the task description and comments provided below in this prompt. Design an implementation plan for the task. The plan posted with `{mcp_report_success}` must be a standalone, ready-to-use document, not a conversational reply in the discussion. See more detailed workflow instructions below.
 
 Work autonomously, try to solve problems independently. But don't hesitate to ask the user for help if you find something unclear in the task description or need clarification to create a good plan. Use `{mcp_stop_with_question}` for this purpose.
 
@@ -782,6 +783,7 @@ Work autonomously, try to solve problems independently. But don't hesitate to as
 
 - You can access the internet and run local commands.
 - Use MCP `{mcp_report_success}` to submit the plan for review and implementation — **mandatory at the end of every successful planning session**
+- Use MCP `{mcp_report_intermediate}` for responses to plan-review comments or direct user requests; keep those responses separate from the implementation plan document
 - Use MCP `{mcp_stop_with_question}` when you have doubts or something is unclear — send only focused question(s) with context, do NOT include the full plan in your response
 - Use MCP `{mcp_stop_with_error}` only to report technical errors
 "#,
@@ -800,11 +802,13 @@ Your working directory is already the repository with the work branch checked ou
 
 3. **Identify the closest analog in the codebase BEFORE designing the plan.** Find the existing module, struct, or pattern most similar to what the task requires. This is critical: the implementation must follow the same approaches, conventions, and style as the analog to keep the codebase consistent.
 4. **Design an architecture-level plan**. Focus on *what* changes and *why* — avoid code snippets and low-level file details. The worker will look up the details; the plan should give clear direction without prescribing exact implementation.
+    - The plan content must be systematic and logically organized so it can be executed without reading surrounding discussion.
+    - If you need to answer plan-review feedback or direct user requests, send those answers separately via `{mcp_report_intermediate}` instead of mixing them into the plan.
 5. If some instrument is required and you can't install it yourself, ask the user to install it with `{mcp_stop_with_question}`.
 6. **Determine if the plan is clear and ready**:
    - If something is unclear or you have doubts, use `{mcp_stop_with_question}` to ask only focused question(s) with sufficient context to understand the question. Finish the session after asking.
    - Only if the plan is clear and no questions were posted, proceed to step 7.
-7. **Call `{mcp_report_success}`** with the plan and a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog). **Include the full plan text inline in the report — do NOT write it to a file and reference a path. The entire plan must be readable directly from the report in the context.**
+7. **Call `{mcp_report_success}`** with the plan document written as a standalone artifact (not a conversational discussion reply). The plan must be systematic, logically organized, directly actionable, and include a brief rationale (why this approach was chosen, key design decisions, important constraints, chosen analog).
 
 It's critical to finish work with either `{mcp_report_success}` or `{mcp_stop_with_question}` / `{mcp_stop_with_error}`. Only data returned with the mcp tools is recorded.
 "#,
