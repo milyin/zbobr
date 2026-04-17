@@ -1405,6 +1405,8 @@ impl ZbobrDispatcher {
         // Pre-pass: apply user-initiated state overrides detected by the backend UI
         // (e.g., GitHub label changes). Run before any writes so labels from the
         // previous cycle have settled and comparisons are unambiguous.
+        let mut modified_tasks = std::collections::HashSet::new();
+
         for (task, weak) in all_tasks.iter().zip(all_weak.iter()) {
             if task.state.is_done() {
                 continue;
@@ -1418,6 +1420,8 @@ impl ZbobrDispatcher {
                 }
             };
             let task_session = self.task_session(task.id);
+            let mut modified = false;
+
             match override_req {
                 zbobr_api::StateOverrideRequest::Resume(signal) => {
                     match self.apply_call_return(task.id, signal.clone()).await {
@@ -1427,6 +1431,7 @@ impl ZbobrDispatcher {
                                 task.id,
                                 entry.pipeline
                             );
+                            modified = true;
                         }
                         Ok(None) => {
                             tracing::warn!(
@@ -1447,6 +1452,7 @@ impl ZbobrDispatcher {
                         tracing::error!("Task #{}: user-initiated pause failed: {e}", task.id);
                     } else {
                         tracing::info!("Task #{}: user-initiated pause", task.id);
+                        modified = true;
                     }
                 }
                 zbobr_api::StateOverrideRequest::RunPipeline(pipeline) => {
@@ -1471,8 +1477,13 @@ impl ZbobrDispatcher {
                             task.id,
                             pipeline
                         );
+                        modified = true;
                     }
                 }
+            }
+
+            if modified {
+                modified_tasks.insert(task.id);
             }
         }
 
@@ -1480,7 +1491,8 @@ impl ZbobrDispatcher {
         // instead of stale pre-override task copies.
         all_tasks.clear();
         for w in &all_weak {
-            match w.snapshot(false).await {
+            let refresh = modified_tasks.contains(&w.task_id());
+            match w.snapshot(refresh).await {
                 Ok(t) => all_tasks.push(t),
                 Err(e) => tracing::warn!("Failed to snapshot task after overrides: {e}"),
             }
