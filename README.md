@@ -70,17 +70,28 @@ zbobr init my-workspace
 cd my-workspace
 ```
 
+The `zbobr init` command bootstraps a new task project workspace by creating:
+- a `zbobr.toml` config file with sample settings
+- a `prompts/` directory with role prompt templates
+- `repos/` and `workspaces/` directories for backend state
+- a `loop.sh` helper script that runs `zbobr task advance`, `zbobr task process --select`, and periodic cleanup
+
+Edit `zbobr.toml` to set your task repo, target repo, and AI provider settings before running setup.
+
 **Set up the task project (after editing zbobr.toml):**
 ```bash
 # Create milestones and labels in the configured task repo
 zbobr setup
 ```
 
-**Launch the dispatcher:**
+**Process tasks manually:**
 ```bash
-# Run the manager loop (polls every 60 seconds)
-zbobr loop
+# Select the next eligible task and advance the workflow
+zbobr task list --select
+zbobr task advance
 ```
+
+Use `task list --select` to choose the highest-priority ready task, then `task advance` to progress the workflow.
 
 **Using zbobr.toml:**
 
@@ -88,10 +99,10 @@ Run `zbobr` from a directory containing `zbobr.toml` — it automatically reads 
 
 ```bash
 # Run zbobr commands (automatically uses zbobr.toml config)
-zbobr loop                # Start the dispatcher loop
 zbobr task list           # Show all tasks
 zbobr task list --state READY    # Filter tasks by state
-zbobr task process 42     # Process issue #42 (single step)
+zbobr task process --select  # Process the next eligible task
+zbobr task process 42       # Process issue #42 (single step)
 zbobr task create "Title" --description "desc" --confirm    # create new task that will pause on each stage change
 ```
 
@@ -180,12 +191,17 @@ zbobr setup
 zbobr setup --force
 ```
 
-### Run the manager loop
+### Process tasks manually
 
 ```bash
-# Poll for issues every 30 seconds, clean up every 10 minutes
-zbobr loop --interval 30 --cleanup-interval 600
+# Select the next eligible task
+zbobr task list --select
+
+# Advance the workflow after selection
+zbobr task advance
 ```
+
+This workflow selects the highest-priority ready task and then advances it through the task pipeline.
 
 ### Manually process a specific issue
 

@@ -288,7 +288,7 @@ impl From<&TaskSnapshot> for TaskListEntry {
 /// Priority key for task scheduling: higher value → processed first.
 ///
 /// This is the single source of truth for task priority ordering used by both
-/// [`select_runnable_task`] and [`run_manager_loop`].
+/// [`select_runnable_task`] and the dispatcher scheduling logic.
 fn task_priority(task: &TaskSnapshot) -> u64 {
     task.stage_count
 }
@@ -296,7 +296,7 @@ fn task_priority(task: &TaskSnapshot) -> u64 {
 /// Return the highest-priority task that the workflow is ready to run (non-call [`StateAction::RunStage`]).
 ///
 /// Uses full workflow resolution via [`Workflow::resolve_next_action`] so that the predicate
-/// matches exactly the tasks that [`run_manager_loop`] would schedule in Phase 2.
+/// matches the same tasks as the dispatcher service would schedule in Phase 2.
 ///
 /// Returns all tasks eligible for non-call `RunStage` processing.
 pub fn eligible_runnable_tasks<'a>(workflow: &Workflow, tasks: &'a [TaskSnapshot]) -> Vec<&'a TaskSnapshot> {
@@ -1216,164 +1216,6 @@ impl ZbobrDispatcher {
                 );
             }
         }
-        Ok(())
-    }
-
-    /// Main manager loop: polls for tasks and dispatches role sessions.
-    pub async fn run_manager_loop(
-        self: &Arc<Self>,
-        interval_secs: u64,
-        cleanup_interval_secs: u64,
-    ) -> anyhow::Result<()> {
-        let task_backend = self.task_backend();
-        let repo_backend = self.repo_backend();
-        let prompt_builder = self.prompt_builder();
-        tracing::info!(
-            "Manager loop started (task_backend: {}, repo_backend: {})",
-            task_backend.debug_state(),
-            repo_backend.debug_state()
-        );
-        tracing::info!(
-            "Poll interval: {interval_secs}s, Cleanup interval: {cleanup_interval_secs}s"
-        );
-        tracing::info!(
-            "Configured providers: {:?}",
-            self.config().providers.keys().collect::<Vec<_>>()
-        );
-        if let Some(base) = prompt_builder.base_path() {
-            tracing::info!("Prompts base path: {}", base.display());
-        }
-
-        // Dump stage-specific settings for visibility
-        let workflow = self.workflow();
-        for (pipeline_name, stage_name, stage_def) in workflow.all_stages() {
-            if let Some(target) = stage_def.call_pipeline() {
-                tracing::info!("Stage {}/{}: call={}", pipeline_name, stage_name, target,);
-            } else {
-                let tool_name = self
-                    .config()
-                    .resolve_tool(stage_def, self.workflow().config());
-                tracing::info!(
-                    "Stage {}/{}: role={:?}, tool={:?}, prompts={:?}",
-                    pipeline_name,
-                    stage_name,
-                    stage_def.role().map_or("<none>", |r| r.as_str()),
-                    tool_name,
-                    stage_def.prompts
-                );
-            }
-        }
-
-        let mut last_cleanup = std::time::Instant::now();
-
-        loop {
-            let loop_start = std::time::Instant::now();
-
-            if last_cleanup.elapsed().as_secs() >= cleanup_interval_secs {
-                tracing::info!("Running workspaces cleanup...");
-                if let Err(e) = self.cleanup_closed_tasks(false).await {
-                    tracing::warn!("Cleanup failed: {e}");
-                }
-                last_cleanup = std::time::Instant::now();
-            }
-
-            let mut session_run = false;
-            // Run manager-loop "Phase 1" once over all tasks.
-            //
-            // Applies pause/ready normalization and processes instant transitions (Done and call stages).
-            // Returns the current task snapshot list.
-            let all_tasks = self.advance_tasks().await?;
-
-            // Phase 2: use select_runnable_task to pick the highest-priority RunStage candidate
-            // and run its stage.  This shares the exact same ready-task selection logic as the
-            // `task list --select` CLI flag.
-            if let Some(task) = select_runnable_task(workflow, &all_tasks) {
-                let action = match workflow.resolve_next_action(task) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        tracing::warn!("State machine error for task #{}: {e}", task.id);
-                        continue;
-                    }
-                };
-                if let crate::workflow::StateAction::RunStage(
-                    pipeline_name,
-                    stage_name,
-                    stage_def,
-                ) = action
-                {
-                    tracing::info!(
-                        "Processing task #{} (state={:?}, signal={:?}) — running stage {}/{}",
-                        task.id,
-                        task.state,
-                        task.signal,
-                        pipeline_name,
-                        stage_name,
-                    );
-                    let runner = CliStageRunner::new(
-                        self,
-                        task.id,
-                        pipeline_name,
-                        stage_name,
-                        stage_def,
-                        None,
-                    );
-                    if let Err(e) = runner.run().await {
-                        let msg = format!(
-                            "Stage {}/{} failed for task #{}: {e}",
-                            pipeline_name, stage_name, task.id
-                        );
-                        tracing::error!("{msg}");
-                        let task_session = self.task_session(task.id);
-                        let status = format_error_status(self.config().fixed_offset(), &msg);
-                        if let Err(pause_err) = task_session
-                            .set_pause_with_status_and_signal(
-                                status,
-                                Signal::go(stage_name.as_str()),
-                            )
-                            .await
-                        {
-                            tracing::error!(
-                                "Failed to pause task #{} after stage error: {pause_err}",
-                                task.id
-                            );
-                        }
-                    }
-                    session_run = true;
-                }
-            }
-
-            if session_run {
-                continue;
-            }
-
-            // Task statistics
-            let mut state_counts: std::collections::HashMap<String, usize> =
-                std::collections::HashMap::new();
-            for task in &all_tasks {
-                *state_counts.entry(format!("{:?}", task.state)).or_default() += 1;
-            }
-            let stats: Vec<String> = state_counts
-                .iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect();
-            tracing::info!("Task statistics: {}", stats.join(", "));
-
-            let elapsed = loop_start.elapsed();
-            let interval_dur = std::time::Duration::from_secs(interval_secs);
-            let min_idle_sleep = std::time::Duration::from_secs(1);
-            let sleep_dur = interval_dur.saturating_sub(elapsed).max(min_idle_sleep);
-
-            tracing::info!("No processable tasks. Sleeping {}s...", sleep_dur.as_secs());
-            tokio::select! {
-                _ = tokio::time::sleep(sleep_dur) => {}
-                _ = tokio::signal::ctrl_c() => {
-                    tracing::info!("Received shutdown signal, exiting...");
-                    break;
-                }
-            }
-        }
-
-        tracing::info!("Manager loop terminated gracefully");
         Ok(())
     }
 

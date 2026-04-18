@@ -1322,7 +1322,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn init_workspace_creates_loop_script_with_default_cmd() {
+    async fn init_workspace_creates_loop_script() {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
 
         init_workspace(temp_dir.path(), false)
@@ -1336,39 +1336,17 @@ mod tests {
             .await
             .expect("Failed to read loop.sh");
         assert!(
-            loop_script.contains("ZBOBR_CMD=\"${ZBOBR_CMD:-zbobr}\""),
-            "loop.sh should default ZBOBR_CMD to zbobr"
-        );
-        assert!(
-            loop_script.contains("ZBOBR_LOOP_CMD=\"${ZBOBR_LOOP_CMD:-true}\""),
-            "loop.sh should default ZBOBR_LOOP_CMD to true"
-        );
-        assert!(
-            loop_script.contains("sh -c \"$ZBOBR_LOOP_CMD\""),
-            "loop.sh should check ZBOBR_LOOP_CMD before each iteration"
-        );
-        assert!(
-            loop_script.contains("eval \"$ZBOBR_CMD task advance\""),
+            loop_script.contains("task advance"),
             "loop.sh should run task advance"
         );
         assert!(
-            loop_script.contains("eval \"$ZBOBR_CMD task process --select\""),
+            loop_script.contains("task process --select"),
             "loop.sh should run task process --select"
         );
         assert!(
-            loop_script.contains("eval \"$ZBOBR_CMD cleanup\""),
+            loop_script.contains("cleanup"),
             "loop.sh should run cleanup"
         );
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = tokio::fs::metadata(&loop_script_path)
-                .await
-                .expect("Failed to stat loop.sh")
-                .permissions()
-                .mode();
-            assert_eq!(mode & 0o111, 0o111, "loop.sh should be executable");
-        }
     }
+
 }

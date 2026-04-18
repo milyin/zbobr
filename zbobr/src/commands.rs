@@ -43,15 +43,6 @@ pub enum Command {
         #[arg(long, short = 'f')]
         force: bool,
     },
-    /// Poll for tasks and run roles automatically
-    Loop {
-        /// How often to check for new tasks, in seconds
-        #[arg(long, default_value = "60")]
-        interval: u64,
-        /// How often to clean up workspaces for closed tasks, in seconds
-        #[arg(long, default_value = "600")]
-        cleanup_interval: u64,
-    },
     /// Remove workspace directories for tasks that have been closed
     Cleanup {
         /// Show what would be removed without actually deleting
@@ -292,13 +283,6 @@ async fn run_with_dispatcher(zbobr: ZbobrDispatcher, command: Command) -> anyhow
         }
         Command::Task { subcommand } => {
             run_task_subcommand(&zbobr, subcommand).await?;
-        }
-        Command::Loop {
-            interval,
-            cleanup_interval,
-            ..
-        } => {
-            zbobr.run_manager_loop(interval, cleanup_interval).await?;
         }
     }
     Ok(())
