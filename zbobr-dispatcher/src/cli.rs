@@ -1399,16 +1399,25 @@ impl ZbobrDispatcher {
                 Err(e) => tracing::warn!("Failed to snapshot task: {e}"),
             }
         }
+        // Build ID → weak mapping before sorting so the pre-pass uses the correct
+        // handle for each task regardless of priority order.
+        let weak_by_id: std::collections::HashMap<u64, &dyn zbobr_api::TaskWeak> =
+            all_weak.iter().map(|w| (w.task_id(), w.as_ref())).collect();
+
         // Sort by task_priority descending so tasks closest to completion are processed first.
         all_tasks.sort_by_key(|b| std::cmp::Reverse(task_priority(b)));
 
         // Pre-pass: apply user-initiated state overrides detected by the backend UI
         // (e.g., GitHub label changes). Run before any writes so labels from the
         // previous cycle have settled and comparisons are unambiguous.
-        for (task, weak) in all_tasks.iter().zip(all_weak.iter()) {
+        // Modified tasks are refreshed in-place so Phase 1 sees the updated state.
+        for task in all_tasks.iter_mut() {
             if task.state.is_done() {
                 continue;
             }
+            let Some(weak) = weak_by_id.get(&task.id) else {
+                continue;
+            };
             let override_req = match weak.pending_override().await {
                 Ok(Some(r)) => r,
                 Ok(None) => continue,
@@ -1418,6 +1427,8 @@ impl ZbobrDispatcher {
                 }
             };
             let task_session = self.task_session(task.id);
+            let mut modified = false;
+
             match override_req {
                 zbobr_api::StateOverrideRequest::Resume(signal) => {
                     match self.apply_call_return(task.id, signal.clone()).await {
@@ -1427,6 +1438,7 @@ impl ZbobrDispatcher {
                                 task.id,
                                 entry.pipeline
                             );
+                            modified = true;
                         }
                         Ok(None) => {
                             tracing::warn!(
@@ -1447,6 +1459,7 @@ impl ZbobrDispatcher {
                         tracing::error!("Task #{}: user-initiated pause failed: {e}", task.id);
                     } else {
                         tracing::info!("Task #{}: user-initiated pause", task.id);
+                        modified = true;
                     }
                 }
                 zbobr_api::StateOverrideRequest::RunPipeline(pipeline) => {
@@ -1471,20 +1484,21 @@ impl ZbobrDispatcher {
                             task.id,
                             pipeline
                         );
+                        modified = true;
+                    }
+                }
+            }
+
+            if modified {
+                match weak.snapshot(true).await {
+                    Ok(fresh) => *task = fresh,
+                    Err(e) => {
+                        tracing::warn!("Task #{}: failed to refresh after override: {e}", task.id)
                     }
                 }
             }
         }
-
-        // Refresh snapshots after applying overrides so Phase 1 uses current state
-        // instead of stale pre-override task copies.
-        all_tasks.clear();
-        for w in &all_weak {
-            match w.snapshot(false).await {
-                Ok(t) => all_tasks.push(t),
-                Err(e) => tracing::warn!("Failed to snapshot task after overrides: {e}"),
-            }
-        }
+        // Re-sort in case a state change altered task priorities.
         all_tasks.sort_by_key(|b| std::cmp::Reverse(task_priority(b)));
 
         // Phase 1: apply transitions and handle Done / instant call-stage actions for all tasks.
