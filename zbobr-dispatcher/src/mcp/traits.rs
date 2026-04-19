@@ -24,8 +24,8 @@ fn log_mcp_string_response(role_name: &str, task_id: u64, tool_name: &str, respo
             response
         );
     } else {
-        let display_str = if response.len() > 100 {
-            format!("{}...", &response[..100])
+        let display_str = if response.chars().count() > 100 {
+            format!("{}...", response.chars().take(100).collect::<String>())
         } else {
             response.to_string()
         };
