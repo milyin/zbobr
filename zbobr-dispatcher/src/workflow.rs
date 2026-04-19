@@ -612,7 +612,7 @@ role = "merger"
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
-            dead_context: String::new(),
+            dead_context: TaskContext::default(),
         };
         let action = workflow.resolve_next_action(&task).unwrap();
         match action {

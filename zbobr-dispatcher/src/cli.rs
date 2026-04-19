@@ -2055,7 +2055,7 @@ impl ZbobrDispatcher {
 mod tests {
     use indexmap::IndexMap;
     use zbobr_api::{
-        Pipeline, StackEntry,
+        Pipeline, StackEntry, TaskContext,
         config::{PipelineConfig, StageDefinition, WorkflowConfig},
     };
 
@@ -2112,7 +2112,7 @@ mod tests {
             max_stage_count: 0,
             closed: false,
             etag: None,
-            dead_context: String::new(),
+            dead_context: TaskContext::default(),
         }
     }
 

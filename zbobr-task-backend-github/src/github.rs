@@ -1598,7 +1598,7 @@ impl TaskBackend for TaskBackendGithub {
             &TaskContext::default(),
             &[],
             None,
-            "",
+            &TaskContext::default(),
         );
 
         let issue = retry_github("create issue", || async {
@@ -1753,7 +1753,7 @@ mod flag_tests {
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
-            dead_context: String::new(),
+            dead_context: TaskContext::default(),
         };
         let params = ZbobrTaskBackendGithubImpl::task_to_string_params(&task);
         assert_eq!(
@@ -1797,7 +1797,7 @@ mod flag_tests {
             &context,
             &[],
             Some(&|filename| format!("{report_prefix}{filename}")),
-            "",
+            &TaskContext::default(),
         );
         let issue = IssueResponse {
             number: 1,
@@ -1866,7 +1866,7 @@ mod flag_tests {
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
-            dead_context: String::new(),
+            dead_context: TaskContext::default(),
         };
 
         let err =
@@ -1920,7 +1920,7 @@ mod flag_tests {
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
-            dead_context: String::new(),
+            dead_context: TaskContext::default(),
         };
 
         ZbobrTaskBackendGithubImpl::normalize_task_report_links_for_config(&config, &mut task)
@@ -1968,7 +1968,7 @@ mod flag_tests {
             max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
-            dead_context: String::new(),
+            dead_context: TaskContext::default(),
         };
 
         let err =

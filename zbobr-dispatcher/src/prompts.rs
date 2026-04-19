@@ -170,7 +170,7 @@ pub fn sample_task_and_comments() -> (TaskSnapshot, Vec<Comment>) {
         max_stage_count: DEFAULT_MAX_STAGE_COUNT,
         closed: false,
         etag: None,
-        dead_context: String::new(),
+        dead_context: TaskContext::default(),
     };
     let comments = vec![
         Comment {
@@ -412,7 +412,7 @@ mod tests {
             max_stage_count: DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
-            dead_context: String::new(),
+            dead_context: TaskContext::default(),
         }
     }
 

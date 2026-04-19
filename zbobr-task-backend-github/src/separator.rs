@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
+use chrono::{DateTime, FixedOffset};
 use zbobr_api::{
     Comment,
     context::{parse_context, serialize_context},
@@ -43,10 +44,20 @@ pub(crate) fn serialize_parameters(params: &HashMap<String, String>) -> String {
 
 /// Parse a task description into (description, parameters, status, context, dead_context).
 /// Section order: description → PARAMETERS → STATUS → DEAD_CONTEXT → CONTEXT.
+///
+/// Both `context` and `dead_context` use the same `zbobr-ctx-v1` + markdown
+/// envelope; the only difference is that `dead_context` is never passed to
+/// agent prompts.
 #[allow(clippy::type_complexity)]
 pub(crate) fn parse_description_full(
     full_text: &str,
-) -> Result<(String, HashMap<String, String>, Option<String>, TaskContext, String)> {
+) -> Result<(
+    String,
+    HashMap<String, String>,
+    Option<String>,
+    TaskContext,
+    TaskContext,
+)> {
     // Normalize line endings so separators match regardless of \r\n vs \n.
     let normalized = if full_text.contains("\r\n") {
         full_text.replace("\r\n", "\n")
@@ -95,15 +106,57 @@ pub(crate) fn parse_description_full(
 
     // Parse context using shared format
     let context = parse_context(context_text)?;
-
-    let dead_context = dead_context_text.to_string();
+    let dead_context = parse_context(dead_context_text)?;
 
     Ok((description, parameters, status, context, dead_context))
 }
 
+/// Partition `comments` into (live, dead) groups based on which section's
+/// stages "own" each comment on the task timeline.
+///
+/// A comment is owned by the latest stage (across both contexts) whose
+/// timestamp is ≤ the comment's timestamp. When the owning stage lives in
+/// `dead_context`, the comment goes to the dead bucket; otherwise to live.
+/// Comments preceding every stage go to the live bucket.
+fn partition_comments<'a>(
+    live: &TaskContext,
+    dead: &TaskContext,
+    comments: &'a [Comment],
+) -> (Vec<&'a Comment>, Vec<&'a Comment>) {
+    // Build a timeline of (stage_timestamp, is_dead) entries, sorted ascending.
+    let mut timeline: Vec<(DateTime<FixedOffset>, bool)> = Vec::new();
+    for stage in &live.stages {
+        timeline.push((stage.info.timestamp, false));
+    }
+    for stage in &dead.stages {
+        timeline.push((stage.info.timestamp, true));
+    }
+    timeline.sort_by_key(|&(ts, _)| ts);
+
+    let mut live_comments = Vec::new();
+    let mut dead_comments = Vec::new();
+    for c in comments {
+        // Find the last stage with timestamp ≤ comment.timestamp.
+        let owner_is_dead = timeline
+            .iter()
+            .rev()
+            .find(|(ts, _)| *ts <= c.timestamp)
+            .map(|(_, is_dead)| *is_dead)
+            .unwrap_or(false);
+        if owner_is_dead {
+            dead_comments.push(c);
+        } else {
+            live_comments.push(c);
+        }
+    }
+    (live_comments, dead_comments)
+}
+
 /// Serialize description, parameters, status, context, and dead_context back into the full format.
 /// Section order: description → PARAMETERS → STATUS → DEAD_CONTEXT → CONTEXT.
-/// `comments` are interspersed into the context section as compact titles for user display.
+/// `comments` are partitioned between CONTEXT and DEAD_CONTEXT by timestamp
+/// ownership: a comment follows the latest stage preceding it, wherever that
+/// stage lives.
 pub(crate) fn serialize_description_full(
     original_description: &str,
     parameters: &HashMap<String, String>,
@@ -111,7 +164,7 @@ pub(crate) fn serialize_description_full(
     context: &TaskContext,
     comments: &[Comment],
     report_url: Option<&dyn Fn(&str) -> String>,
-    dead_context: &str,
+    dead_context: &TaskContext,
 ) -> String {
     // Strip everything from the description first
     let clean_description = parse_description_full(original_description)
@@ -133,12 +186,20 @@ pub(crate) fn serialize_description_full(
         result.push('\n');
     }
 
-    // Always emit the DEAD_CONTEXT marker so the user can move context there
+    // Route comments to whichever section's stages own them on the timeline.
+    let (live_comments, dead_comments) = partition_comments(context, dead_context, comments);
+    let live_comments_owned: Vec<Comment> = live_comments.into_iter().cloned().collect();
+    let dead_comments_owned: Vec<Comment> = dead_comments.into_iter().cloned().collect();
+
+    // Always emit the DEAD_CONTEXT marker so the user can move context there.
     result.push_str(DEAD_CONTEXT_SEPARATOR);
-    result.push_str(dead_context);
+    let dead_str = serialize_context(dead_context, &dead_comments_owned, false, report_url);
+    if !dead_str.is_empty() {
+        result.push_str(&dead_str);
+    }
 
     // Add context if non-empty (always last)
-    let context_str = serialize_context(context, comments, false, report_url);
+    let context_str = serialize_context(context, &live_comments_owned, false, report_url);
     if !context_str.is_empty() {
         result.push_str(CONTEXT_SEPARATOR);
         result.push_str(&context_str);
@@ -185,7 +246,8 @@ pub(crate) fn merge_concurrent_description_updates(
     let we_changed_status = new_status != orig_status;
     let we_changed_context = serde_json::to_string(&new_context).unwrap_or_default()
         != serde_json::to_string(&orig_context).unwrap_or_default();
-    let we_changed_dead = new_dead != orig_dead;
+    let we_changed_dead = serde_json::to_string(&new_dead).unwrap_or_default()
+        != serde_json::to_string(&orig_dead).unwrap_or_default();
 
     // Merge: prefer our changes if we made them, otherwise prefer their changes
     let merged_desc = if we_changed_desc { new_desc } else { curr_desc };
@@ -269,7 +331,7 @@ mod tests {
         let ctx = sample_context();
 
         let serialized =
-            serialize_description_full("my task", &HashMap::new(), &None, &ctx, &[], None, "");
+            serialize_description_full("my task", &HashMap::new(), &None, &ctx, &[], None, &TaskContext::default());
         let (desc, _, _, parsed_ctx, _) = parse_description_full(&serialized).unwrap();
 
         assert_eq!(desc, "my task");
@@ -295,7 +357,7 @@ mod tests {
             &TaskContext::default(),
             &[],
             None,
-            "",
+            &TaskContext::default(),
         );
         let (desc, _, _, ctx, _) = parse_description_full(&serialized).unwrap();
 
@@ -312,7 +374,7 @@ mod tests {
         let ctx = sample_context();
 
         let serialized =
-            serialize_description_full("my task", &params, &status, &ctx, &[], None, "");
+            serialize_description_full("my task", &params, &status, &ctx, &[], None, &TaskContext::default());
         let (desc, parsed_params, parsed_status, parsed_ctx, _) =
             parse_description_full(&serialized).unwrap();
 
@@ -339,7 +401,7 @@ mod tests {
             &TaskContext::default(),
             &[],
             None,
-            "",
+            &TaskContext::default(),
         );
         let (desc, _, status, ctx, _) = parse_description_full(&serialized).unwrap();
 
@@ -358,7 +420,7 @@ mod tests {
             &TaskContext::default(),
             &[],
             None,
-            "",
+            &TaskContext::default(),
         );
 
         // They changed the status
@@ -369,7 +431,7 @@ mod tests {
             &TaskContext::default(),
             &[],
             None,
-            "",
+            &TaskContext::default(),
         );
 
         // We changed the context
@@ -380,7 +442,7 @@ mod tests {
             &sample_context(),
             &[],
             None,
-            "",
+            &TaskContext::default(),
         );
 
         let merged = merge_concurrent_description_updates(&original, &current, &our_new).unwrap();
@@ -415,7 +477,7 @@ mod tests {
         };
 
         let original =
-            serialize_description_full("desc", &HashMap::new(), &None, &ctx1, &[], None, "");
+            serialize_description_full("desc", &HashMap::new(), &None, &ctx1, &[], None, &TaskContext::default());
 
         // They changed the context
         let ctx_theirs = TaskContext {
@@ -439,7 +501,7 @@ mod tests {
             }],
         };
         let current =
-            serialize_description_full("desc", &HashMap::new(), &None, &ctx_theirs, &[], None, "");
+            serialize_description_full("desc", &HashMap::new(), &None, &ctx_theirs, &[], None, &TaskContext::default());
 
         // We also changed the context
         let ctx_ours = TaskContext {
@@ -463,7 +525,7 @@ mod tests {
             }],
         };
         let our_new =
-            serialize_description_full("desc", &HashMap::new(), &None, &ctx_ours, &[], None, "");
+            serialize_description_full("desc", &HashMap::new(), &None, &ctx_ours, &[], None, &TaskContext::default());
 
         let merged = merge_concurrent_description_updates(&original, &current, &our_new).unwrap();
         let (_, _, _, ctx, _) = parse_description_full(&merged).unwrap();
