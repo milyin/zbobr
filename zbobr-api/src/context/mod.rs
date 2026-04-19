@@ -1,11 +1,19 @@
 //! Context serialization/deserialization module.
 //!
-//! Provides a two-stage conversion between domain types and markdown format:
-//! 1. Domain types (`TaskContext`, `Comment`) ↔ Markdown representation types (`MdContext`)
-//! 2. Markdown representation types ↔ Markdown string (via `serde::Serialize`/`Deserialize`)
+//! The source of truth for a `TaskContext` is a pretty-printed JSON block
+//! embedded inside the `---CONTEXT---` section, wrapped in a
+//! `<!-- zbobr-ctx-v1 ... -->` HTML comment. The markdown below the block is a
+//! regenerated human-readable view.
 //!
-//! The markdown representation types are local to this module and not exported.
+//! On parse we prefer the JSON block when present. If the marker is missing
+//! we fall back to the legacy markdown parser, which reconstructs the context
+//! from the rendered bullets. Once every live task has been rewritten through
+//! the new serializer the fallback can be removed.
+//!
+//! Agent prompts (`for_prompt = true`) never see the JSON block — only the
+//! rendered markdown — so models don't get fed the raw structured payload.
 
+mod json;
 mod stage_title;
 
 use std::{borrow::Cow, fmt, str::FromStr};
@@ -690,7 +698,9 @@ impl MdContext {
 /// Serialize a `TaskContext` into markdown format, optionally interspersing
 /// user comments (placed by timestamp).
 ///
-/// When `for_prompt` is true, prompt links are omitted from stage headers.
+/// When `for_prompt` is true, prompt links are omitted from stage headers and
+/// the `zbobr-ctx-v1` JSON block is not emitted — the prompt sees only the
+/// rendered human view.
 ///
 /// `report_url` converts a report filename into a display URL for the link.
 /// Pass `None` to use the filename as-is.
@@ -704,14 +714,27 @@ pub fn serialize_context(
         return String::new();
     }
     let md = MdContext::from_task_context(ctx, comments, for_prompt, report_url);
-    md.to_string()
+    let rendered = md.to_string();
+    if for_prompt {
+        rendered
+    } else {
+        // Rendered view first so users see the legible version, JSON block at
+        // the end as the (invisible) source of truth.
+        let json_block = json::serialize_json_block(ctx);
+        format!("{rendered}\n{json_block}\n")
+    }
 }
 
-/// Parse markdown-formatted context back into a `TaskContext`.
+/// Parse context text back into a `TaskContext`.
 ///
-/// Blockquote lines (user comments) are parsed but discarded during conversion.
-/// Returns `Err` on any parse failure.
+/// Prefers the `zbobr-ctx-v1` JSON block when present — that is the source of
+/// truth. Falls back to the legacy markdown parser for older task
+/// descriptions that haven't been rewritten yet. A present-but-malformed JSON
+/// block is an error (never silently drop structured data).
 pub fn parse_context(text: &str) -> Result<TaskContext> {
+    if let Some(result) = json::parse_json_block(text) {
+        return result;
+    }
     let md: MdContext = text.parse()?;
     Ok(md.into_task_context())
 }
@@ -805,7 +828,7 @@ mod tests {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], false, None);
 
-        assert!(output.contains("default:main:1:**planning** `claude` `claude-opus-4.6`"));
+        assert!(output.contains("default:main:**planning** `claude` `claude-opus-4.6`"));
         assert!(
             output.contains("`2024-01-01 00:00:00 +0000` <sub>[prompt](prompts/plan.md)</sub>")
         );
@@ -880,24 +903,26 @@ mod tests {
         assert!(s0.info.prompt_link.as_deref() == Some("prompts/plan.md"));
         assert_eq!(s0.records.len(), 3);
 
-        // Output reorders first non-checkbox to the first slot.
-        assert_eq!(s0.records[0].id, 3);
-        assert_eq!(s0.records[0].record_type, ContextRecordType::Success);
-        assert_eq!(s0.records[0].brief, "Plan completed");
+        // JSON-backed parse preserves insertion order (the old markdown renderer
+        // moved the first non-checkbox record to the top; that was a display
+        // quirk, never a semantic property).
+        assert_eq!(s0.records[0].id, 1);
         assert_eq!(
-            s0.records[0].report_link.as_deref(),
-            Some("reports/plan_success.md")
-        );
-
-        assert_eq!(s0.records[1].id, 1);
-        assert_eq!(
-            s0.records[1].record_type,
+            s0.records[0].record_type,
             ContextRecordType::Checkbox(false)
         );
-        assert_eq!(s0.records[1].brief, "Define API schema");
+        assert_eq!(s0.records[0].brief, "Define API schema");
 
-        assert_eq!(s0.records[2].id, 2);
-        assert_eq!(s0.records[2].record_type, ContextRecordType::Checkbox(true));
+        assert_eq!(s0.records[1].id, 2);
+        assert_eq!(s0.records[1].record_type, ContextRecordType::Checkbox(true));
+
+        assert_eq!(s0.records[2].id, 3);
+        assert_eq!(s0.records[2].record_type, ContextRecordType::Success);
+        assert_eq!(s0.records[2].brief, "Plan completed");
+        assert_eq!(
+            s0.records[2].report_link.as_deref(),
+            Some("reports/plan_success.md")
+        );
     }
 
     #[test]
@@ -916,17 +941,8 @@ mod tests {
             assert_eq!(parsed_stage.info.prompt_link, orig_stage.info.prompt_link);
             assert_eq!(parsed_stage.records.len(), orig_stage.records.len());
 
-            let mut expected_ids: Vec<u64> = orig_stage.records.iter().map(|r| r.id).collect();
-            if let Some(pos) = orig_stage
-                .records
-                .iter()
-                .position(|r| !matches!(r.record_type, ContextRecordType::Checkbox(_)))
-                && pos != 0
-            {
-                let id = expected_ids.remove(pos);
-                expected_ids.insert(0, id);
-            }
-
+            // JSON-backed parse preserves insertion order exactly.
+            let expected_ids: Vec<u64> = orig_stage.records.iter().map(|r| r.id).collect();
             let parsed_ids: Vec<u64> = parsed_stage.records.iter().map(|r| r.id).collect();
             assert_eq!(parsed_ids, expected_ids);
 
@@ -1050,7 +1066,7 @@ mod tests {
         let output = serialize_context(&ctx, &comments, false, None);
 
         // Stage should come before comment (by timestamp)
-        let stage_pos = output.find("default:main:1:**working**").unwrap();
+        let stage_pos = output.find("default:main:**working**").unwrap();
         let comment_pos = output.find("Please hurry up!").unwrap();
         assert!(stage_pos < comment_pos);
         assert!(output.contains("Please hurry up!"));
@@ -1253,7 +1269,11 @@ mod tests {
         )];
         let output = serialize_context(&ctx, &comments, false, None);
         assert!(output.contains("- user:**unknown** first line second line third line"));
-        assert!(output.lines().count() == 1); // all on one line
+        // The rendered comment (markdown view) must collapse to a single line;
+        // the JSON block that follows may contain its own newlines.
+        let rendered_view = output.split_once("<!-- zbobr-ctx-v1").map_or(&output[..], |(v, _)| v);
+        let rendered_lines: Vec<_> = rendered_view.lines().filter(|l| !l.is_empty()).collect();
+        assert_eq!(rendered_lines.len(), 1);
     }
 
     #[test]
@@ -1269,7 +1289,11 @@ mod tests {
         let ctx = TaskContext::default();
         let comments = vec![make_comment("hello world", "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert_eq!(output.lines().count(), 1);
+        // The rendered markdown view (before the JSON block) must be exactly
+        // one non-empty line — no stray newline after the comment.
+        let rendered_view = output.split_once("<!-- zbobr-ctx-v1").map_or(&output[..], |(v, _)| v);
+        let rendered_lines: Vec<_> = rendered_view.lines().filter(|l| !l.is_empty()).collect();
+        assert_eq!(rendered_lines.len(), 1);
     }
 
     #[test]
@@ -2104,9 +2128,9 @@ mod tests {
         // A valid stage followed by <!-- stage --> marker and a malformed stage title
         // (model token with a space) should produce an error, not silently skip.
         let text = "\
-- default:main:1:**working** `claude` `claude-opus-4.6` `2024-01-01 00:00:00 +0000`
+- default:main:**working** `claude` `claude-opus-4.6` `2024-01-01 00:00:00 +0000`
 <!-- stage -->
-- default:main:2:**working** `claude` `bad model` `2024-06-15 10:30:00 +0300`
+- default:main:**working** `claude` `bad model` `2024-06-15 10:30:00 +0300`
 ";
         let result = parse_context(text);
         assert!(
@@ -2118,5 +2142,115 @@ mod tests {
             err_msg.contains("Malformed stage title after <!-- stage --> marker"),
             "error should mention the marker context, got: {err_msg}"
         );
+    }
+
+    // -- JSON-backed context tests --
+
+    #[test]
+    fn serialize_includes_json_block() {
+        let ctx = sample_context();
+        let output = serialize_context(&ctx, &[], false, None);
+        assert!(
+            output.contains("<!-- zbobr-ctx-v1"),
+            "non-prompt output must embed the JSON source of truth"
+        );
+        assert!(output.contains("-->"), "JSON block must be closed");
+    }
+
+    #[test]
+    fn for_prompt_omits_json_block() {
+        let ctx = sample_context();
+        let output = serialize_context(&ctx, &[], true, None);
+        assert!(
+            !output.contains("zbobr-ctx-v1"),
+            "agent prompts must never see the JSON block"
+        );
+    }
+
+    #[test]
+    fn json_block_wins_over_markdown_view() {
+        // Hand-craft a description where the JSON says one thing and the
+        // rendered markdown says another. The JSON must win — it's the
+        // source of truth.
+        let json_ctx = TaskContext {
+            stages: vec![StageContext {
+                info: StageInfo {
+                    instance: "default".to_string(),
+                    pipeline: Pipeline::from("main"),
+                    stage: Stage::new("json_wins"),
+                    tool: None,
+                    model: None,
+                    prompt_link: None,
+                    output_link: None,
+                    timestamp: utc("2024-01-01T00:00:00Z"),
+                },
+                records: vec![ContextRecord {
+                    id: 42,
+                    record_type: ContextRecordType::Success,
+                    brief: "from json".to_string(),
+                    report_link: None,
+                }],
+            }],
+        };
+        let json_payload = serde_json::to_string_pretty(&json_ctx).unwrap();
+        let text = format!(
+            "- default:main:**markdown_wins** `2024-01-01 00:00:00 +0000`\n  \
+             - [ ] from markdown <sub>ctx_rec_99</sub>\n\n\
+             <!-- zbobr-ctx-v1\n{json_payload}\n-->\n"
+        );
+
+        let parsed = parse_context(&text).unwrap();
+        assert_eq!(parsed.stages.len(), 1);
+        assert_eq!(parsed.stages[0].info.stage, Stage::new("json_wins"));
+        assert_eq!(parsed.stages[0].records[0].id, 42);
+        assert_eq!(parsed.stages[0].records[0].brief, "from json");
+    }
+
+    #[test]
+    fn legacy_markdown_without_json_block_still_parses() {
+        // Simulates a task description written before this change: no JSON
+        // block, just the rendered markdown bullets. The legacy parser must
+        // still reconstruct the context.
+        let text = "\
+- default:main:**planning** `2024-01-01 00:00:00 +0000`
+  - [ ] legacy item <sub>ctx_rec_1</sub>
+";
+        let parsed = parse_context(text).unwrap();
+        assert_eq!(parsed.stages.len(), 1);
+        assert_eq!(parsed.stages[0].info.stage, Stage::new("planning"));
+        assert_eq!(parsed.stages[0].records.len(), 1);
+        assert_eq!(parsed.stages[0].records[0].id, 1);
+        assert_eq!(parsed.stages[0].records[0].brief, "legacy item");
+    }
+
+    #[test]
+    fn corrupt_json_block_is_hard_error() {
+        // If the marker is present but the payload is broken, don't silently
+        // fall back to the markdown view — refuse to parse so the user sees
+        // the problem.
+        let text = "\
+- default:main:**planning** `2024-01-01 00:00:00 +0000`
+  - [ ] item <sub>ctx_rec_1</sub>
+
+<!-- zbobr-ctx-v1
+{not valid json}
+-->
+";
+        assert!(parse_context(text).is_err());
+    }
+
+    #[test]
+    fn json_roundtrip_preserves_original_record_order() {
+        // The old markdown renderer reordered non-checkbox records to the top
+        // on serialization — a display quirk that corrupted the logical order
+        // on roundtrip. JSON-backed roundtrip must preserve insertion order.
+        let ctx = sample_context();
+        let serialized = serialize_context(&ctx, &[], false, None);
+        let parsed = parse_context(&serialized).unwrap();
+        for (orig, got) in ctx.stages.iter().zip(parsed.stages.iter()) {
+            let orig_ids: Vec<u64> = orig.records.iter().map(|r| r.id).collect();
+            let got_ids: Vec<u64> = got.records.iter().map(|r| r.id).collect();
+            assert_eq!(got_ids, orig_ids);
+        }
     }
 }

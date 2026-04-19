@@ -759,21 +759,29 @@ impl ZbobrTaskBackendGithubImpl {
         field_name: &str,
         link: &str,
     ) -> anyhow::Result<String> {
-        let Some(prefix) = Self::report_url_prefix_from_config(config, task_id) else {
-            anyhow::bail!(
-                "Invalid task context link in {field_name}: cannot build GitHub blob prefix for task #{task_id}; link='{link}'"
-            );
-        };
-
-        let Some(filename) = link.strip_prefix(&prefix) else {
-            anyhow::bail!(
-                "Invalid task context link in {field_name}: expected full GitHub blob URL with prefix '{prefix}', got '{link}'"
-            );
+        // Source-of-truth JSON stores bare filenames; the legacy markdown
+        // parser reconstructs full URLs. Accept both forms, emit the bare
+        // filename. A URL with the wrong prefix is still rejected so
+        // tampering or a misconfigured repo is surfaced loudly.
+        let filename = if link.contains("://") {
+            let Some(prefix) = Self::report_url_prefix_from_config(config, task_id) else {
+                anyhow::bail!(
+                    "Invalid task context link in {field_name}: cannot build GitHub blob prefix for task #{task_id}; link='{link}'"
+                );
+            };
+            let Some(tail) = link.strip_prefix(&prefix) else {
+                anyhow::bail!(
+                    "Invalid task context link in {field_name}: expected full GitHub blob URL with prefix '{prefix}', got '{link}'"
+                );
+            };
+            tail
+        } else {
+            link
         };
 
         if filename.is_empty() || filename.contains('/') || filename.contains("..") {
             anyhow::bail!(
-                "Invalid task context link in {field_name}: URL tail must be a single filename, got '{link}'"
+                "Invalid task context link in {field_name}: must be a single filename, got '{link}'"
             );
         }
 
@@ -1817,7 +1825,64 @@ mod flag_tests {
     }
 
     #[test]
-    fn normalize_task_report_links_rejects_non_blob_report_link_with_diagnostic() {
+    fn normalize_task_report_links_rejects_path_traversal_in_bare_filename() {
+        // JSON-sourced contexts already hold bare filenames, so normalize
+        // accepts simple ones as-is. But a "bare" value containing a slash
+        // or `..` is either tampering or a bug — reject it loudly.
+        let config = make_config();
+        let mut task = TaskSnapshot {
+            id: 1,
+            title: "t".to_string(),
+            description: "d".to_string(),
+            state: State::Pending(zbobr_api::task::Pipeline::Main),
+            work_branch: None,
+            pr_url: None,
+            context: TaskContext {
+                stages: vec![StageContext {
+                    info: StageInfo {
+                        instance: "default".to_string(),
+                        pipeline: Pipeline::Main,
+                        stage: Stage::new("working"),
+                        tool: None,
+                        model: None,
+                        prompt_link: None,
+                        output_link: None,
+                        timestamp: "2025-01-01T00:00:00Z".parse().unwrap(),
+                    },
+                    records: vec![ContextRecord {
+                        id: 1,
+                        record_type: ContextRecordType::Success,
+                        brief: "done".to_string(),
+                        report_link: Some("../etc/passwd".to_string()),
+                    }],
+                }],
+            },
+            signal: None,
+            stack: vec![],
+            status: None,
+            go_pause: false,
+            confirm: false,
+            stage_count: 0,
+            max_stage_count: zbobr_api::task::DEFAULT_MAX_STAGE_COUNT,
+            closed: false,
+            etag: None,
+            dead_context: String::new(),
+        };
+
+        let err =
+            ZbobrTaskBackendGithubImpl::normalize_task_report_links_for_config(&config, &mut task)
+                .unwrap_err()
+                .to_string();
+
+        assert!(err.contains("stage[0].records[0].report_link"));
+        assert!(err.contains("single filename"));
+    }
+
+    #[test]
+    fn normalize_task_report_links_passes_bare_filename_through() {
+        // A plain filename (the canonical JSON storage form) must be accepted
+        // unchanged — this is the common case after the switch to
+        // JSON-backed context.
         let config = make_config();
         let mut task = TaskSnapshot {
             id: 1,
@@ -1858,14 +1923,12 @@ mod flag_tests {
             dead_context: String::new(),
         };
 
-        let err =
-            ZbobrTaskBackendGithubImpl::normalize_task_report_links_for_config(&config, &mut task)
-                .unwrap_err()
-                .to_string();
-
-        assert!(err.contains("stage[0].records[0].report_link"));
-        assert!(err.contains("expected full GitHub blob URL"));
-        assert!(err.contains("report_main_1_working.md"));
+        ZbobrTaskBackendGithubImpl::normalize_task_report_links_for_config(&config, &mut task)
+            .expect("bare filename must be accepted");
+        assert_eq!(
+            task.context.stages[0].records[0].report_link.as_deref(),
+            Some("report_main_1_working.md")
+        );
     }
 
     #[test]
