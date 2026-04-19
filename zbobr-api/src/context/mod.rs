@@ -233,19 +233,6 @@ impl FromStr for MdRecord {
     }
 }
 
-impl serde::Serialize for MdRecord {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for MdRecord {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
-    }
-}
-
 impl MdRecord {
     /// Try to parse a line as a record. Returns `Ok(None)` for non-record lines.
     fn try_parse(line: &str) -> Result<Option<Self>> {
@@ -436,19 +423,6 @@ impl FromStr for MdStage {
     }
 }
 
-impl serde::Serialize for MdStage {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for MdStage {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
-    }
-}
-
 impl MdStage {
     /// Convert from a domain `StageContext`, applying serialization options.
     fn from_stage_context(
@@ -627,19 +601,6 @@ impl FromStr for MdContext {
             entries,
             for_prompt: false,
         })
-    }
-}
-
-impl serde::Serialize for MdContext {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for MdContext {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
     }
 }
 

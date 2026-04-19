@@ -12,8 +12,6 @@
 //!
 //! This module provides [`MdStageTitle`] which can be converted to/from a string
 //! via `Display`/`FromStr`, and to/from [`StageInfo`] for use in the rest of the codebase.
-//!
-//! `Serialize`/`Deserialize` delegate to `Display`/`FromStr` for serde compatibility.
 
 use std::{fmt, str::FromStr};
 
@@ -196,21 +194,6 @@ impl FromStr for MdStageTitle {
     }
 }
 
-// -- Serde (delegates to Display/FromStr) -------------------------------------
-
-impl serde::Serialize for MdStageTitle {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for MdStageTitle {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
-    }
-}
-
 // -- Parsing helpers ----------------------------------------------------------
 
 fn parse_next_pipeline_stage(rest: &mut &str) -> Result<(String, Pipeline, Stage)> {
@@ -267,34 +250,6 @@ fn parse_markdown_link(s: &str) -> Option<(&str, &str)> {
     let label = before.strip_prefix('[')?;
     let url = after.strip_suffix(')')?;
     Some((label, url))
-}
-
-// -- Display variant without prompt link (for prompts) ------------------------
-
-/// A wrapper that serializes a `MdStageTitle` without the prompt or output links.
-#[allow(dead_code)]
-pub struct MdMdStageTitleForPrompt<'a>(pub &'a MdStageTitle);
-
-impl fmt::Display for MdMdStageTitleForPrompt<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let t = self.0;
-        write!(
-            f,
-            "{}",
-            PipelineStage {
-                instance: &t.instance,
-                pipeline: &t.pipeline,
-                stage: &t.stage,
-            },
-        )?;
-        if let Some(tool) = &t.tool {
-            write!(f, " {}", Backtick(tool))?;
-        }
-        if let Some(model) = &t.model {
-            write!(f, " {}", Backtick(model))?;
-        }
-        write!(f, " {}", Backtick(format_timestamp(&t.timestamp)))
-    }
 }
 
 #[cfg(test)]
@@ -377,19 +332,6 @@ mod tests {
         );
         let parsed: MdStageTitle = s.parse().unwrap();
         assert_eq!(parsed, title);
-    }
-
-    #[test]
-    fn for_prompt_omits_links() {
-        let title = make_title();
-        let full = title.to_string();
-        let prompt = MdMdStageTitleForPrompt(&title).to_string();
-        // Full version has the links
-        assert!(full.contains("<sub>[prompt](prompts/work.md)</sub>"));
-        assert!(full.contains("<sub>[output](output/work.md)</sub>"));
-        // Prompt version has timestamp in backtick but no links
-        assert!(!prompt.contains("<sub>"));
-        assert!(prompt.contains("`2024-06-15 10:30:00 +0300`"));
     }
 
     #[test]
