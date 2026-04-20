@@ -1,24 +1,19 @@
 //! Context serialization/deserialization module.
 //!
-//! The source of truth for a `TaskContext` is a pretty-printed JSON block
-//! embedded inside the `---CONTEXT---` section, wrapped in a
-//! `<!-- zbobr-ctx-v1 ... -->` HTML comment. The markdown below the block is a
-//! regenerated human-readable view.
+//! Each stage is serialized as an independent `<!-- zbobr-ctx-v1-stage ... -->`
+//! JSON record placed immediately before its markdown rendering.  The JSON is
+//! the authoritative source of truth; the markdown below is the human-readable
+//! view regenerated on every write.
 //!
-//! On parse we prefer the JSON block when present. If the marker is missing
-//! we fall back to the legacy markdown parser, which reconstructs the context
-//! from the rendered bullets. Once every live task has been rewritten through
-//! the new serializer the fallback can be removed.
-//!
-//! Agent prompts (`for_prompt = true`) never see the JSON block — only the
+//! Agent prompts (`for_prompt = true`) never see the JSON blocks — only the
 //! rendered markdown — so models don't get fed the raw structured payload.
 
 mod json;
 mod stage_title;
 
-use std::{borrow::Cow, fmt, str::FromStr};
+use std::{borrow::Cow, fmt};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use chrono::{DateTime, FixedOffset};
 use stage_title::MdStageTitle;
 pub use stage_title::format_timestamp;
@@ -51,62 +46,11 @@ impl MdRecordType {
             Self::Question => "- ❓ ",
         }
     }
-
-    /// Try to strip a record type prefix from the line.
-    fn strip_prefix(line: &str) -> Option<(Self, &str)> {
-        if let Some(rest) = line
-            .strip_prefix("- [x] ")
-            .or_else(|| line.strip_prefix("- [X] "))
-        {
-            Some((Self::CheckboxChecked, rest))
-        } else if let Some(rest) = line.strip_prefix("- [ ] ") {
-            Some((Self::CheckboxUnchecked, rest))
-        } else if let Some(rest) = line.strip_prefix("- ✅ ") {
-            Some((Self::Success, rest))
-        } else if let Some(rest) = line.strip_prefix("- ❌ ") {
-            Some((Self::Failure, rest))
-        } else if let Some(rest) = line.strip_prefix("- 💬 ") {
-            Some((Self::Comment, rest))
-        } else if let Some(rest) = line.strip_prefix("- ❓ ") {
-            Some((Self::Question, rest))
-        } else {
-            None
-        }
-    }
 }
 
 impl fmt::Display for MdRecordType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.prefix())
-    }
-}
-
-impl FromStr for MdRecordType {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        match s {
-            "- [ ] " => Ok(Self::CheckboxUnchecked),
-            "- [x] " | "- [X] " => Ok(Self::CheckboxChecked),
-            "- ✅ " => Ok(Self::Success),
-            "- ❌ " => Ok(Self::Failure),
-            "- 💬 " => Ok(Self::Comment),
-            "- ❓ " => Ok(Self::Question),
-            _ => bail!("Invalid record type prefix: {}", s),
-        }
-    }
-}
-
-impl serde::Serialize for MdRecordType {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for MdRecordType {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
     }
 }
 
@@ -119,19 +63,6 @@ impl From<&ContextRecordType> for MdRecordType {
             ContextRecordType::Failure => Self::Failure,
             ContextRecordType::Comment => Self::Comment,
             ContextRecordType::Question => Self::Question,
-        }
-    }
-}
-
-impl From<&MdRecordType> for ContextRecordType {
-    fn from(t: &MdRecordType) -> Self {
-        match t {
-            MdRecordType::CheckboxUnchecked => Self::Checkbox(false),
-            MdRecordType::CheckboxChecked => Self::Checkbox(true),
-            MdRecordType::Success => Self::Success,
-            MdRecordType::Failure => Self::Failure,
-            MdRecordType::Comment => Self::Comment,
-            MdRecordType::Question => Self::Question,
         }
     }
 }
@@ -189,59 +120,7 @@ impl fmt::Display for MdRecord {
     }
 }
 
-impl FromStr for MdRecord {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        let (record_type, rest) = MdRecordType::strip_prefix(s)
-            .ok_or_else(|| anyhow::anyhow!("Not a record line: {}", s))?;
-
-        let sub_start = rest
-            .rfind("<sub>")
-            .ok_or_else(|| anyhow::anyhow!("Missing <sub> marker in: {}", s))?;
-        let inner = rest[sub_start..]
-            .strip_prefix("<sub>")
-            .and_then(|s| s.strip_suffix("</sub>"))
-            .ok_or_else(|| anyhow::anyhow!("Malformed <sub>...</sub> in: {}", s))?;
-
-        let (id_tag, report_link) = if let Some((before, after)) = inner.split_once("](") {
-            let tag = before
-                .strip_prefix('[')
-                .ok_or_else(|| anyhow::anyhow!("Malformed link in <sub> in: {}", s))?;
-            let url = after
-                .strip_suffix(')')
-                .ok_or_else(|| anyhow::anyhow!("Malformed link in <sub> in: {}", s))?;
-            (tag, Some(url.to_string()))
-        } else {
-            (inner, None)
-        };
-
-        let id = id_tag
-            .strip_prefix("ctx_rec_")
-            .and_then(|s| s.parse().ok())
-            .ok_or_else(|| anyhow::anyhow!("Invalid record ID '{}' in: {}", id_tag, s))?;
-
-        let brief = rest[..sub_start].trim().to_string();
-
-        Ok(MdRecord {
-            record_type,
-            brief,
-            id,
-            report_link,
-            for_prompt: false,
-        })
-    }
-}
-
 impl MdRecord {
-    /// Try to parse a line as a record. Returns `Ok(None)` for non-record lines.
-    fn try_parse(line: &str) -> Result<Option<Self>> {
-        if MdRecordType::strip_prefix(line).is_none() {
-            return Ok(None);
-        }
-        Ok(Some(line.parse()?))
-    }
-
     /// Convert from a domain `ContextRecord`, optionally transforming report URLs.
     fn from_context_record(
         r: &ContextRecord,
@@ -264,16 +143,6 @@ impl MdRecord {
             id: r.id,
             report_link,
             for_prompt,
-        }
-    }
-
-    /// Convert to a domain `ContextRecord`.
-    fn into_context_record(self) -> ContextRecord {
-        ContextRecord {
-            id: self.id,
-            record_type: ContextRecordType::from(&self.record_type),
-            brief: self.brief,
-            report_link: self.report_link,
         }
     }
 }
@@ -305,7 +174,6 @@ impl MdCompactComment {
         };
 
         let text = if for_prompt {
-            // For agent prompts: use plain format with full body
             format!("user {}: {}", username, c.body)
         } else if c.body.len() <= COMPACT_COMMENT_MAX_LEN {
             let joined = c.body.lines().collect::<Vec<_>>().join(" ");
@@ -347,13 +215,6 @@ impl fmt::Display for MdCompactComment {
 // ────────────────────────────────────────────────────────────────────────────────
 
 /// A complete stage as it appears in markdown: title line followed by indented records.
-///
-/// Format:
-/// ```text
-/// - YYYY-MM-DD HH:MM:SS <sub>+HHMM</sub> pipeline:**stage** ...
-///     - [ ] record 1 <sub>ctx_rec_1</sub>
-///     - ✅ record 2 <sub>ctx_rec_2</sub>
-/// ```
 #[derive(Debug, Clone)]
 struct MdStage {
     title: MdStageTitle,
@@ -392,34 +253,6 @@ impl fmt::Display for MdStage {
         }
 
         Ok(())
-    }
-}
-
-impl FromStr for MdStage {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        let mut lines = s.lines();
-        let first = lines.next().ok_or_else(|| anyhow::anyhow!("Empty stage"))?;
-        let title: MdStageTitle = first.parse()?;
-        let mut records = Vec::new();
-
-        for line in lines {
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            let trimmed = line.trim();
-
-            if let Some(record) = MdRecord::try_parse(trimmed)? {
-                records.push(record);
-            }
-        }
-        Ok(MdStage {
-            title,
-            records,
-            for_prompt: false,
-        })
     }
 }
 
@@ -463,22 +296,10 @@ impl MdStage {
             for_prompt,
         }
     }
-
-    /// Convert to a domain `StageContext`.
-    fn into_stage_context(self) -> StageContext {
-        StageContext {
-            info: self.title.into(),
-            records: self
-                .records
-                .into_iter()
-                .map(|r| r.into_context_record())
-                .collect(),
-        }
-    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
-// Markdown context document
+// Markdown context document (prompt-mode only)
 // ────────────────────────────────────────────────────────────────────────────────
 
 /// An entry in the context document.
@@ -490,31 +311,18 @@ enum MdEntry {
 
 /// The complete context document in markdown format.
 ///
-/// `Serialize`/`Deserialize` convert to/from the full markdown text.
+/// Only used for `for_prompt = true` rendering. Non-prompt serialization
+/// emits per-stage JSON blocks directly (see `serialize_context`).
 #[derive(Debug, Clone)]
 struct MdContext {
     entries: Vec<MdEntry>,
-    for_prompt: bool,
 }
 
 impl fmt::Display for MdContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Add <!-- stage --> markers before stage entries when compact comments are present
-        // so parsers can distinguish stage lines from compact comment lines.
-        // In prompt mode, these markers are omitted to reduce noise.
-        let has_compact = !self.for_prompt
-            && self
-                .entries
-                .iter()
-                .any(|e| matches!(e, MdEntry::CompactComment(_)));
-
         for entry in &self.entries {
             match entry {
                 MdEntry::Stage(stage) => {
-                    if has_compact {
-                        writeln!(f, "<!-- stage -->")?;
-                    }
-                    // Stage display already ends with \n via writeln!
                     write!(f, "{}", stage)?;
                 }
                 MdEntry::CompactComment(c) => {
@@ -523,84 +331,6 @@ impl fmt::Display for MdContext {
             }
         }
         Ok(())
-    }
-}
-
-impl FromStr for MdContext {
-    type Err = anyhow::Error;
-
-    fn from_str(text: &str) -> Result<Self> {
-        let mut entries: Vec<MdEntry> = Vec::new();
-        let mut current_stage: Option<MdStage> = None;
-        let mut after_stage_marker = false;
-
-        for line in text.lines() {
-            let trimmed = line.trim();
-
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            // Track <!-- stage --> markers (inserted before stage titles in user-display mode)
-            if trimmed == "<!-- stage -->" {
-                after_stage_marker = true;
-                continue;
-            }
-
-            // Try parsing as record (add to current stage)
-            if let Some(record) = MdRecord::try_parse(trimmed)? {
-                after_stage_marker = false;
-                let stage = current_stage.as_mut().ok_or_else(|| {
-                    anyhow::anyhow!("Context record found before any stage header: {}", trimmed)
-                })?;
-                stage.records.push(record);
-                continue;
-            }
-
-            // Parse as stage title — try first to avoid flushing current_stage on failure
-            if trimmed.starts_with("- ") {
-                let was_after_marker = after_stage_marker;
-                after_stage_marker = false;
-                if was_after_marker {
-                    // Preceded by <!-- stage -->: must parse as a valid stage title
-                    let title = trimmed.parse::<MdStageTitle>().map_err(|e| {
-                        anyhow::anyhow!("Malformed stage title after <!-- stage --> marker: {e}")
-                    })?;
-                    if let Some(stage) = current_stage.take() {
-                        entries.push(MdEntry::Stage(stage));
-                    }
-                    current_stage = Some(MdStage {
-                        title,
-                        records: Vec::new(),
-                        for_prompt: false,
-                    });
-                } else if let Ok(title) = trimmed.parse::<MdStageTitle>() {
-                    // Valid stage title without marker: flush previous stage
-                    if let Some(stage) = current_stage.take() {
-                        entries.push(MdEntry::Stage(stage));
-                    }
-                    current_stage = Some(MdStage {
-                        title,
-                        records: Vec::new(),
-                        for_prompt: false,
-                    });
-                }
-                // else: compact comment line or unknown `- ` line — skip silently
-                continue;
-            }
-
-            bail!("Unrecognized line in context: {}", trimmed);
-        }
-
-        // Flush remaining stage
-        if let Some(stage) = current_stage {
-            entries.push(MdEntry::Stage(stage));
-        }
-
-        Ok(MdContext {
-            entries,
-            for_prompt: false,
-        })
     }
 }
 
@@ -634,21 +364,7 @@ impl MdContext {
 
         MdContext {
             entries: events.into_iter().map(|(_, e)| e).collect(),
-            for_prompt,
         }
-    }
-
-    /// Convert to domain `TaskContext` (comments are discarded).
-    fn into_task_context(self) -> TaskContext {
-        let stages = self
-            .entries
-            .into_iter()
-            .filter_map(|e| match e {
-                MdEntry::Stage(s) => Some(s.into_stage_context()),
-                MdEntry::CompactComment(_) => None,
-            })
-            .collect();
-        TaskContext { stages }
     }
 }
 
@@ -690,7 +406,7 @@ pub fn serialize_context(
     // Non-prompt: emit one JSON record per stage, interleaved with compact
     // comments, all sorted by timestamp.
     enum Event<'a> {
-        Stage(&'a crate::task::StageContext),
+        Stage(&'a StageContext),
         Comment(&'a Comment),
     }
 
@@ -724,22 +440,14 @@ pub fn serialize_context(
 
 /// Parse context text back into a `TaskContext`.
 ///
-/// Priority:
-/// 1. Per-stage `<!-- zbobr-ctx-v1-stage ... -->` blocks (current format).
-/// 2. Legacy single `<!-- zbobr-ctx-v1 {"stages":[...]} -->` block.
-/// 3. Legacy markdown parser (for very old tasks with no JSON blocks).
-///
-/// A present-but-malformed JSON block is always an error — we never silently
-/// discard structured data.
+/// Expects `<!-- zbobr-ctx-v1-stage ... -->` blocks (current format).
+/// Returns an empty `TaskContext` when no blocks are present.
+/// A present-but-malformed block is always an error.
 pub fn parse_context(text: &str) -> Result<TaskContext> {
-    if let Some(result) = json::parse_stage_json_blocks(text) {
-        return result.map(|stages| TaskContext { stages });
+    match json::parse_stage_json_blocks(text) {
+        Some(result) => result.map(|stages| TaskContext { stages }),
+        None => Ok(TaskContext::default()),
     }
-    if let Some(result) = json::parse_json_block(text) {
-        return result;
-    }
-    let md: MdContext = text.parse()?;
-    Ok(md.into_task_context())
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -853,14 +561,11 @@ mod tests {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], true, None);
 
-        // Stage header should only contain the stage name
         assert!(output.contains("- planning\n"));
         assert!(output.contains("- working\n"));
-        // Metadata (tool, model, timestamp, prompt link) should not appear
         assert!(!output.contains("`claude`"));
         assert!(!output.contains("`claude-opus-4.6`"));
         assert!(!output.contains("](prompts/plan.md)"));
-        // Interactive records should use plain [ctx_rec_N] format
         assert!(output.contains("[ctx_rec_1]"), "checkbox should show ID");
         assert!(output.contains("[ctx_rec_2]"), "checkbox should show ID");
         assert!(
@@ -871,7 +576,6 @@ mod tests {
             output.contains("[ctx_rec_4]"),
             "failure with link should show ID"
         );
-        // Non-interactive records must NOT have ctx_rec IDs
         assert!(
             !output.contains("[ctx_rec_5]"),
             "comment without link should suppress ID in prompt mode"
@@ -880,7 +584,6 @@ mod tests {
             !output.contains("[ctx_rec_6]"),
             "question without link should suppress ID in prompt mode"
         );
-        // Non-interactive record text should still appear
         assert!(
             output.contains("Retrying with fix"),
             "comment brief should appear"
@@ -906,9 +609,6 @@ mod tests {
         assert!(s0.info.prompt_link.as_deref() == Some("prompts/plan.md"));
         assert_eq!(s0.records.len(), 3);
 
-        // JSON-backed parse preserves insertion order (the old markdown renderer
-        // moved the first non-checkbox record to the top; that was a display
-        // quirk, never a semantic property).
         assert_eq!(s0.records[0].id, 1);
         assert_eq!(
             s0.records[0].record_type,
@@ -944,7 +644,6 @@ mod tests {
             assert_eq!(parsed_stage.info.prompt_link, orig_stage.info.prompt_link);
             assert_eq!(parsed_stage.records.len(), orig_stage.records.len());
 
-            // JSON-backed parse preserves insertion order exactly.
             let expected_ids: Vec<u64> = orig_stage.records.iter().map(|r| r.id).collect();
             let parsed_ids: Vec<u64> = parsed_stage.records.iter().map(|r| r.id).collect();
             assert_eq!(parsed_ids, expected_ids);
@@ -967,10 +666,7 @@ mod tests {
         let original = sample_context();
         let serialized = serialize_context(&original, &[], true, None);
 
-        // for_prompt output is not meant to be parsed back — verify the rendered format instead
-        // Stage name only (no metadata)
         assert!(serialized.contains("- planning\n"));
-        // prompt_link not present
         assert!(!serialized.contains("prompts/plan.md"));
     }
 
@@ -980,11 +676,8 @@ mod tests {
         ctx.stages[0].info.output_link = Some("outputs/plan_output.md".to_string());
         let serialized = serialize_context(&ctx, &[], true, None);
 
-        // for_prompt output is not meant to be parsed back — verify the rendered format instead
-        // Neither prompt nor output links should appear
         assert!(!serialized.contains("prompts/plan.md"));
         assert!(!serialized.contains("outputs/plan_output.md"));
-        // Stage name only
         assert!(serialized.contains("- planning\n"));
     }
 
@@ -1011,29 +704,6 @@ mod tests {
         let output = serialize_context(&ctx, &[], false, Some(&make_url));
 
         assert!(output.contains(&format!("[output]({prefix}output_main_1_working_end.md)")));
-    }
-
-    #[test]
-    fn parse_error_on_record_before_stage() {
-        let text = "  - [ ] orphan item <sub>ctx_rec_1</sub>\n";
-        let result = parse_context(text);
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("before any stage header")
-        );
-    }
-
-    #[test]
-    fn parse_error_on_missing_id() {
-        let text = "\
-- default:main:1:**working** `2024-01-01 00:00:00 +0000`
-  - [ ] no id marker
-";
-        let result = parse_context(text);
-        assert!(result.is_err());
     }
 
     #[test]
@@ -1068,7 +738,6 @@ mod tests {
 
         let output = serialize_context(&ctx, &comments, false, None);
 
-        // Stage should come before comment (by timestamp)
         let stage_pos = output.find("default:main:**working**").unwrap();
         let comment_pos = output.find("Please hurry up!").unwrap();
         assert!(stage_pos < comment_pos);
@@ -1118,7 +787,6 @@ mod tests {
         let make_url = |filename: &str| -> String { format!("{prefix}{filename}") };
         let output = serialize_context(&ctx, &[], false, Some(&make_url));
 
-        // The URL should appear exactly once, not doubled
         assert!(output.contains(
             "[ctx_rec_1](https://github.com/org/repo/blob/reports/reports/task_1/report.md)"
         ));
@@ -1128,106 +796,6 @@ mod tests {
         assert!(
             output.contains("](https://github.com/org/repo/blob/reports/reports/task_1/prompt.md)")
         );
-    }
-
-    // -- Serde roundtrip tests for wrapper types --
-
-    #[test]
-    fn md_record_display_roundtrip() {
-        let record = MdRecord {
-            record_type: MdRecordType::Success,
-            brief: "All tests passed".to_string(),
-            id: 42,
-            report_link: Some("reports/test.md".to_string()),
-            for_prompt: false,
-        };
-        let s = record.to_string();
-        let parsed: MdRecord = s.parse().unwrap();
-        assert_eq!(parsed.id, 42);
-        assert_eq!(parsed.record_type, MdRecordType::Success);
-        assert_eq!(parsed.brief, "All tests passed");
-        assert_eq!(parsed.report_link.as_deref(), Some("reports/test.md"));
-    }
-
-    #[test]
-    fn md_record_no_link_roundtrip() {
-        let record = MdRecord {
-            record_type: MdRecordType::CheckboxUnchecked,
-            brief: "Todo item".to_string(),
-            id: 1,
-            report_link: None,
-            for_prompt: false,
-        };
-        let s = record.to_string();
-        let parsed: MdRecord = s.parse().unwrap();
-        assert_eq!(parsed.id, 1);
-        assert_eq!(parsed.record_type, MdRecordType::CheckboxUnchecked);
-        assert_eq!(parsed.brief, "Todo item");
-        assert!(parsed.report_link.is_none());
-    }
-
-    #[test]
-    fn md_stage_display_roundtrip() {
-        let stage = MdStage {
-            title: MdStageTitle {
-                instance: "default".to_string(),
-                timestamp: utc("2024-01-01T00:00:00Z"),
-                pipeline: Pipeline::from("main"),
-                stage: Stage::new("working"),
-                tool: None,
-                model: None,
-                prompt_link: None,
-                output_link: None,
-            },
-            records: vec![
-                MdRecord {
-                    record_type: MdRecordType::CheckboxUnchecked,
-                    brief: "Item 1".to_string(),
-                    id: 1,
-                    report_link: None,
-                    for_prompt: false,
-                },
-                MdRecord {
-                    record_type: MdRecordType::Success,
-                    brief: "Done".to_string(),
-                    id: 2,
-                    report_link: Some("r.md".to_string()),
-                    for_prompt: false,
-                },
-            ],
-            for_prompt: false,
-        };
-        let s = stage.to_string();
-        let parsed: MdStage = s.parse().unwrap();
-        assert_eq!(parsed.title, stage.title);
-        assert_eq!(parsed.records.len(), 2);
-        // Output reorders first non-checkbox record to the front
-        assert_eq!(parsed.records[0].id, 2);
-        assert_eq!(parsed.records[1].id, 1);
-    }
-
-    #[test]
-    fn md_context_display_roundtrip() {
-        let ctx = sample_context();
-        let md = MdContext::from_task_context(&ctx, &[], false, None);
-        let s = md.to_string();
-        let parsed: MdContext = s.parse().unwrap();
-        let result = parsed.into_task_context();
-        assert_eq!(result.stages.len(), ctx.stages.len());
-        for (orig, parsed) in ctx.stages.iter().zip(result.stages.iter()) {
-            assert_eq!(parsed.info.pipeline, orig.info.pipeline);
-            assert_eq!(parsed.info.stage, orig.info.stage);
-            assert_eq!(parsed.records.len(), orig.records.len());
-        }
-    }
-
-    fn make_comment(text: &str, ts: &str, url: Option<&str>) -> crate::task::Comment {
-        crate::task::Comment {
-            timestamp: utc(ts),
-            username: String::new(),
-            body: text.to_string(),
-            url: url.map(str::to_string),
-        }
     }
 
     #[test]
@@ -1258,7 +826,6 @@ mod tests {
         let comments = vec![make_comment(&long_text, "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, false, None);
         assert!(output.contains("..."));
-        // 80 chars of 'a' followed by '...'
         assert!(output.contains(&format!("{}...", "a".repeat(COMPACT_COMMENT_MAX_LEN))));
     }
 
@@ -1272,10 +839,17 @@ mod tests {
         )];
         let output = serialize_context(&ctx, &comments, false, None);
         assert!(output.contains("- user:**unknown** first line second line third line"));
-        // The rendered comment (markdown view) must collapse to a single line;
-        // the JSON block that follows may contain its own newlines.
-        let rendered_view = output.split_once("<!-- zbobr-ctx-v1").map_or(&output[..], |(v, _)| v);
-        let rendered_lines: Vec<_> = rendered_view.lines().filter(|l| !l.is_empty()).collect();
+        // No per-stage blocks when context is empty; the whole output is just the comment.
+        let rendered_lines: Vec<_> = output.lines().filter(|l| !l.is_empty()).collect();
+        assert_eq!(rendered_lines.len(), 1);
+    }
+
+    #[test]
+    fn compact_comment_no_extra_cr_after_comment() {
+        let ctx = TaskContext::default();
+        let comments = vec![make_comment("hello world", "2024-01-01T00:00:00Z", None)];
+        let output = serialize_context(&ctx, &comments, false, None);
+        let rendered_lines: Vec<_> = output.lines().filter(|l| !l.is_empty()).collect();
         assert_eq!(rendered_lines.len(), 1);
     }
 
@@ -1288,23 +862,10 @@ mod tests {
     }
 
     #[test]
-    fn compact_comment_no_extra_cr_after_comment() {
-        let ctx = TaskContext::default();
-        let comments = vec![make_comment("hello world", "2024-01-01T00:00:00Z", None)];
-        let output = serialize_context(&ctx, &comments, false, None);
-        // The rendered markdown view (before the JSON block) must be exactly
-        // one non-empty line — no stray newline after the comment.
-        let rendered_view = output.split_once("<!-- zbobr-ctx-v1").map_or(&output[..], |(v, _)| v);
-        let rendered_lines: Vec<_> = rendered_view.lines().filter(|l| !l.is_empty()).collect();
-        assert_eq!(rendered_lines.len(), 1);
-    }
-
-    #[test]
     fn stage_json_block_added_before_each_stage_with_compact_comments() {
         let ctx = sample_context();
         let comments = vec![make_comment("a comment", "2024-01-01T00:30:00Z", None)];
         let output = serialize_context(&ctx, &comments, false, None);
-        // New format: per-stage JSON blocks, not <!-- stage --> markers
         assert!(!output.contains("<!-- stage -->"));
         assert!(
             output.contains("<!-- zbobr-ctx-v1-stage\n"),
@@ -1318,7 +879,6 @@ mod tests {
     fn stage_json_block_added_without_comments() {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], false, None);
-        // Per-stage JSON blocks are always emitted in non-prompt mode
         assert!(!output.contains("<!-- stage -->"));
         assert!(output.contains("<!-- zbobr-ctx-v1-stage\n"));
         let block_count = output.matches("<!-- zbobr-ctx-v1-stage\n").count();
@@ -1329,7 +889,6 @@ mod tests {
     fn stage_marker_not_added_in_prompt_mode() {
         let ctx = sample_context();
         let comments = vec![make_comment("a comment", "2024-01-01T00:30:00Z", None)];
-        // Prompt mode must never emit any JSON blocks
         let output = serialize_context(&ctx, &comments, true, None);
         assert!(!output.contains("<!-- stage -->"));
         assert!(!output.contains("zbobr-ctx-v1"));
@@ -1337,7 +896,6 @@ mod tests {
 
     #[test]
     fn compact_comment_roundtrip_preserves_context() {
-        // When compact comments are present, the TaskContext should still be parsed correctly
         let ctx = sample_context();
         let comments = vec![make_comment(
             "comment before stage 2",
@@ -1345,7 +903,6 @@ mod tests {
             None,
         )];
         let serialized = serialize_context(&ctx, &comments, false, None);
-        // Parse back — compact comments should be skipped, stages preserved
         let parsed = parse_context(&serialized).unwrap();
         assert_eq!(parsed.stages.len(), ctx.stages.len());
         assert_eq!(parsed.stages[0].info.stage, ctx.stages[0].info.stage);
@@ -1356,7 +913,6 @@ mod tests {
         let ctx = TaskContext::default();
         let comments = vec![make_comment("a user comment", "2024-01-01T00:00:00Z", None)];
         let output = serialize_context(&ctx, &comments, true, None);
-        // Prompt mode renders comments without timestamp or link
         assert!(!output.contains("> **["));
         assert!(output.contains("- user unknown: a user comment"));
         assert!(!output.contains("`2024-01-01 00:00:00 +0000`"));
@@ -1384,9 +940,7 @@ mod tests {
             for_prompt: true,
         };
         let rendered = record.to_string();
-        // Should use plain [ctx_rec_N] format
         assert_eq!(rendered, "- ✅ Plan completed [ctx_rec_7]");
-        // Must NOT contain <sub> or URL
         assert!(!rendered.contains("<sub>"));
         assert!(!rendered.contains("reports/plan.md"));
     }
@@ -1401,9 +955,7 @@ mod tests {
         };
         let compact = MdCompactComment::from_comment(&comment, true);
         let rendered = compact.to_string();
-        // Should render as simple list item with user prefix
         assert_eq!(rendered, "- user alice: please proceed");
-        // Must NOT contain timestamp or URL
         assert!(!rendered.contains("2024-06-15"));
         assert!(!rendered.contains("https://example.com"));
         assert!(!rendered.contains("<sub>"));
@@ -1432,19 +984,15 @@ mod tests {
             for_prompt: true,
         };
         let rendered = stage.to_string();
-        // Stage header should only show the stage name
         assert!(rendered.starts_with("- planning\n"));
-        // Must NOT contain metadata
         assert!(!rendered.contains("`claude`"));
         assert!(!rendered.contains("claude-opus-4.6"));
         assert!(!rendered.contains("2024-01-01"));
         assert!(!rendered.contains("prompts/plan.md"));
-        // Non-interactive record (Success without report_link) must NOT show ctx_rec ID
         assert!(
             !rendered.contains("ctx_rec_1"),
             "non-interactive success record should suppress ID in prompt mode"
         );
-        // Record text should still appear
         assert!(rendered.contains("Done"), "record brief should appear");
     }
 
@@ -1472,7 +1020,6 @@ mod tests {
                         report_link: None,
                     }],
                 },
-                // Empty stage (no records) — should be filtered in for_prompt mode
                 StageContext {
                     info: StageInfo {
                         instance: "default".to_string(),
@@ -1507,7 +1054,6 @@ mod tests {
             ],
         };
 
-        // for_prompt=true: empty stages should be filtered out
         let prompt_output = serialize_context(&ctx, &[], true, None);
         assert!(
             prompt_output.contains("- planning\n"),
@@ -1522,7 +1068,6 @@ mod tests {
             "stage with records should appear"
         );
 
-        // for_prompt=false: ALL stages should appear, including empty ones
         let full_output = serialize_context(&ctx, &[], false, None);
         assert!(
             full_output.contains("**planning**"),
@@ -1542,7 +1087,6 @@ mod tests {
 
     #[test]
     fn for_prompt_renders_complete_format() {
-        // Build a realistic context with multiple stages, one empty, and interleaved comments
         let ctx = TaskContext {
             stages: vec![
                 StageContext {
@@ -1571,7 +1115,6 @@ mod tests {
                         },
                     ],
                 },
-                // Empty stage — should be filtered out in for_prompt mode
                 StageContext {
                     info: StageInfo {
                         instance: "skynet".to_string(),
@@ -1614,7 +1157,6 @@ mod tests {
             ],
         };
 
-        // Comments interleaved between stages
         let comments = vec![
             Comment {
                 timestamp: utc("2024-06-01T10:30:00Z"),
@@ -1632,13 +1174,10 @@ mod tests {
 
         let output = serialize_context(&ctx, &comments, true, None);
 
-        // 1. No <!-- stage --> markers anywhere
         assert!(
             !output.contains("<!-- stage -->"),
             "prompt output must not contain stage markers"
         );
-
-        // 2. Stage headers are just "- {stage_name}" (no metadata)
         assert!(
             output.contains("- planning\n"),
             "planning stage should appear as plain name"
@@ -1647,14 +1186,10 @@ mod tests {
             output.contains("- reviewing\n"),
             "reviewing stage should appear as plain name"
         );
-
-        // 3. Empty "working" stage is filtered out
         assert!(
             !output.contains("working"),
             "empty working stage should be filtered out"
         );
-
-        // 4. No stage metadata leaks (no tool, model, timestamps, prompt/output links)
         assert!(!output.contains("`claude`"), "no tool metadata");
         assert!(!output.contains("claude-opus-4.6"), "no model metadata");
         assert!(
@@ -1663,8 +1198,6 @@ mod tests {
         );
         assert!(!output.contains("prompts/"), "no prompt links");
         assert!(!output.contains("outputs/"), "no output links");
-
-        // 5. Interactive records use plain [ctx_rec_N] (no <sub>, no URLs)
         assert!(
             output.contains("[ctx_rec_1]"),
             "comment with report_link should have plain ctx_rec tag"
@@ -1686,8 +1219,6 @@ mod tests {
             !output.contains("reports/"),
             "no report URLs in prompt output"
         );
-
-        // 6. Comments are plain "- user {name}: {body}" (no timestamp, no URL, no bold)
         assert!(
             output.contains("- user milyin: proceed with the plan"),
             "comment should use plain format"
@@ -1704,8 +1235,6 @@ mod tests {
             !output.contains("https://github.com/example"),
             "no URLs in prompt comments"
         );
-
-        // 7. Records are properly indented under stages
         assert!(
             output.contains("  - 💬 Plan ready for review [ctx_rec_1]"),
             "non-checkbox record indented with 2 spaces"
@@ -1715,7 +1244,6 @@ mod tests {
             "checkbox record indented with 4 spaces"
         );
 
-        // 8. Verify correct ordering (planning, comment, comment, reviewing)
         let planning_pos = output.find("- planning").unwrap();
         let comment1_pos = output.find("proceed with the plan").unwrap();
         let comment2_pos = output.find("looks good so far").unwrap();
@@ -1741,7 +1269,6 @@ mod tests {
             url: Some("https://example.com/comment/1".to_string()),
         }];
 
-        // for_prompt=true: full multi-line body should be preserved
         let prompt_output = serialize_context(&ctx, &comments, true, None);
         assert!(
             prompt_output.contains("proceed with plan"),
@@ -1761,20 +1288,7 @@ mod tests {
             "full multi-line body should be preserved verbatim"
         );
 
-        // for_prompt=false: lines should be joined with spaces in non-prompt mode
         let normal_output = serialize_context(&ctx, &comments, false, None);
-        assert!(
-            normal_output.contains("proceed with plan"),
-            "first line should appear in normal mode"
-        );
-        assert!(
-            normal_output.contains("also fix the bug"),
-            "second line should appear in normal mode (joined with space)"
-        );
-        assert!(
-            normal_output.contains("and update docs"),
-            "third line should appear in normal mode (joined with space)"
-        );
         assert!(
             normal_output.contains("proceed with plan also fix the bug and update docs"),
             "lines should be joined with spaces in normal mode"
@@ -1794,10 +1308,7 @@ mod tests {
         };
         let rendered = record.to_string();
         assert_eq!(rendered, "- ✅ Build passed");
-        assert!(
-            !rendered.contains("ctx_rec_"),
-            "non-interactive success should suppress ID"
-        );
+        assert!(!rendered.contains("ctx_rec_"));
     }
 
     #[test]
@@ -1811,10 +1322,7 @@ mod tests {
         };
         let rendered = record.to_string();
         assert_eq!(rendered, "- ❌ Tests failed");
-        assert!(
-            !rendered.contains("ctx_rec_"),
-            "non-interactive failure should suppress ID"
-        );
+        assert!(!rendered.contains("ctx_rec_"));
     }
 
     #[test]
@@ -1828,10 +1336,7 @@ mod tests {
         };
         let rendered = record.to_string();
         assert_eq!(rendered, "- 💬 Work in progress");
-        assert!(
-            !rendered.contains("ctx_rec_"),
-            "non-interactive comment should suppress ID"
-        );
+        assert!(!rendered.contains("ctx_rec_"));
     }
 
     #[test]
@@ -1845,10 +1350,7 @@ mod tests {
         };
         let rendered = record.to_string();
         assert_eq!(rendered, "- ❓ Need clarification");
-        assert!(
-            !rendered.contains("ctx_rec_"),
-            "non-interactive question should suppress ID"
-        );
+        assert!(!rendered.contains("ctx_rec_"));
     }
 
     #[test]
@@ -1888,11 +1390,8 @@ mod tests {
         };
         let rendered = record.to_string();
         assert_eq!(rendered, "- ✅ Reviewed [ctx_rec_16]");
-        assert!(
-            !rendered.contains("reports/review.md"),
-            "report URL should not leak"
-        );
-        assert!(!rendered.contains("<sub>"), "no <sub> tags in prompt mode");
+        assert!(!rendered.contains("reports/review.md"));
+        assert!(!rendered.contains("<sub>"));
     }
 
     #[test]
@@ -1906,10 +1405,7 @@ mod tests {
         };
         let rendered = record.to_string();
         assert_eq!(rendered, "- ❌ Build broke [ctx_rec_17]");
-        assert!(
-            !rendered.contains("reports/build.md"),
-            "report URL should not leak"
-        );
+        assert!(!rendered.contains("reports/build.md"));
     }
 
     #[test]
@@ -1923,15 +1419,11 @@ mod tests {
         };
         let rendered = record.to_string();
         assert_eq!(rendered, "- 💬 Plan ready [ctx_rec_18]");
-        assert!(
-            !rendered.contains("reports/plan.md"),
-            "report URL should not leak"
-        );
+        assert!(!rendered.contains("reports/plan.md"));
     }
 
     #[test]
     fn md_record_normal_mode_always_shows_id() {
-        // Verify that normal mode (for_prompt=false) still shows IDs for all record types
         for (record_type, prefix) in [
             (MdRecordType::Success, "- ✅ "),
             (MdRecordType::Failure, "- ❌ "),
@@ -1957,215 +1449,12 @@ mod tests {
         }
     }
 
-    // -- End-to-end test with mixed interactive and non-interactive records in prompt mode --
-
-    #[test]
-    fn for_prompt_mixed_interactive_and_non_interactive_records() {
-        let ctx = TaskContext {
-            stages: vec![StageContext {
-                info: StageInfo {
-                    instance: "default".to_string(),
-                    pipeline: Pipeline::from("main"),
-                    stage: Stage::new("working"),
-                    tool: Some("claude".to_string()),
-                    model: Some("claude-opus-4.6".parse().unwrap()),
-                    prompt_link: None,
-                    output_link: None,
-                    timestamp: utc("2024-01-01T00:00:00Z"),
-                },
-                records: vec![
-                    // Interactive: checkbox unchecked
-                    ContextRecord {
-                        id: 1,
-                        record_type: ContextRecordType::Checkbox(false),
-                        brief: "Implement feature".to_string(),
-                        report_link: None,
-                    },
-                    // Interactive: checkbox checked
-                    ContextRecord {
-                        id: 2,
-                        record_type: ContextRecordType::Checkbox(true),
-                        brief: "Write tests".to_string(),
-                        report_link: None,
-                    },
-                    // Interactive: success with report_link
-                    ContextRecord {
-                        id: 3,
-                        record_type: ContextRecordType::Success,
-                        brief: "All tests passed".to_string(),
-                        report_link: Some("reports/tests.md".to_string()),
-                    },
-                    // Non-interactive: success without report_link
-                    ContextRecord {
-                        id: 4,
-                        record_type: ContextRecordType::Success,
-                        brief: "Lint clean".to_string(),
-                        report_link: None,
-                    },
-                    // Non-interactive: failure without report_link
-                    ContextRecord {
-                        id: 5,
-                        record_type: ContextRecordType::Failure,
-                        brief: "Flaky test".to_string(),
-                        report_link: None,
-                    },
-                    // Interactive: failure with report_link
-                    ContextRecord {
-                        id: 6,
-                        record_type: ContextRecordType::Failure,
-                        brief: "Build error".to_string(),
-                        report_link: Some("reports/build.md".to_string()),
-                    },
-                    // Non-interactive: comment without report_link
-                    ContextRecord {
-                        id: 7,
-                        record_type: ContextRecordType::Comment,
-                        brief: "Retrying now".to_string(),
-                        report_link: None,
-                    },
-                    // Interactive: comment with report_link
-                    ContextRecord {
-                        id: 8,
-                        record_type: ContextRecordType::Comment,
-                        brief: "Plan ready".to_string(),
-                        report_link: Some("reports/plan.md".to_string()),
-                    },
-                    // Non-interactive: question without report_link
-                    ContextRecord {
-                        id: 9,
-                        record_type: ContextRecordType::Question,
-                        brief: "Should we refactor?".to_string(),
-                        report_link: None,
-                    },
-                ],
-            }],
-        };
-
-        let output = serialize_context(&ctx, &[], true, None);
-
-        // Interactive records MUST show [ctx_rec_N]
-        assert!(
-            output.contains("[ctx_rec_1]"),
-            "unchecked checkbox should show ID"
-        );
-        assert!(
-            output.contains("[ctx_rec_2]"),
-            "checked checkbox should show ID"
-        );
-        assert!(
-            output.contains("[ctx_rec_3]"),
-            "success with link should show ID"
-        );
-        assert!(
-            output.contains("[ctx_rec_6]"),
-            "failure with link should show ID"
-        );
-        assert!(
-            output.contains("[ctx_rec_8]"),
-            "comment with link should show ID"
-        );
-
-        // Non-interactive records MUST NOT show [ctx_rec_N]
-        assert!(
-            !output.contains("[ctx_rec_4]"),
-            "success without link should suppress ID"
-        );
-        assert!(
-            !output.contains("[ctx_rec_5]"),
-            "failure without link should suppress ID"
-        );
-        assert!(
-            !output.contains("[ctx_rec_7]"),
-            "comment without link should suppress ID"
-        );
-        assert!(
-            !output.contains("[ctx_rec_9]"),
-            "question without link should suppress ID"
-        );
-
-        // All record briefs should still appear regardless of interactivity
-        assert!(
-            output.contains("Implement feature"),
-            "checkbox brief should appear"
-        );
-        assert!(
-            output.contains("Write tests"),
-            "checkbox brief should appear"
-        );
-        assert!(
-            output.contains("All tests passed"),
-            "success brief should appear"
-        );
-        assert!(
-            output.contains("Lint clean"),
-            "non-interactive success brief should appear"
-        );
-        assert!(
-            output.contains("Flaky test"),
-            "non-interactive failure brief should appear"
-        );
-        assert!(
-            output.contains("Build error"),
-            "failure with link brief should appear"
-        );
-        assert!(
-            output.contains("Retrying now"),
-            "non-interactive comment brief should appear"
-        );
-        assert!(
-            output.contains("Plan ready"),
-            "comment with link brief should appear"
-        );
-        assert!(
-            output.contains("Should we refactor?"),
-            "non-interactive question brief should appear"
-        );
-
-        // No <sub> tags or report URLs in prompt mode
-        assert!(!output.contains("<sub>"), "no <sub> tags in prompt output");
-        assert!(
-            !output.contains("reports/"),
-            "no report URLs in prompt output"
-        );
-
-        // Verify normal mode still shows ALL IDs for comparison
-        let normal_output = serialize_context(&ctx, &[], false, None);
-        for id in 1..=9 {
-            assert!(
-                normal_output.contains(&format!("ctx_rec_{}", id)),
-                "normal mode should show ctx_rec_{id}"
-            );
-        }
-    }
-
-    #[test]
-    fn parse_errors_on_malformed_stage_after_marker() {
-        // A valid stage followed by <!-- stage --> marker and a malformed stage title
-        // (model token with a space) should produce an error, not silently skip.
-        let text = "\
-- default:main:**working** `claude` `claude-opus-4.6` `2024-01-01 00:00:00 +0000`
-<!-- stage -->
-- default:main:**working** `claude` `bad model` `2024-06-15 10:30:00 +0300`
-";
-        let result = parse_context(text);
-        assert!(
-            result.is_err(),
-            "expected error for malformed stage title after <!-- stage --> marker"
-        );
-        let err_msg = result.unwrap_err().to_string();
-        assert!(
-            err_msg.contains("Malformed stage title after <!-- stage --> marker"),
-            "error should mention the marker context, got: {err_msg}"
-        );
-    }
-
-    // -- JSON-backed context tests --
+    // -- JSON block tests --
 
     #[test]
     fn serialize_includes_json_block() {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], false, None);
-        // Non-prompt output must embed per-stage JSON blocks
         assert!(
             output.contains("<!-- zbobr-ctx-v1-stage\n"),
             "non-prompt output must embed per-stage JSON blocks"
@@ -2187,7 +1476,6 @@ mod tests {
 
     #[test]
     fn per_stage_json_block_wins_over_markdown_view() {
-        // Per-stage JSON block is the source of truth; markdown is the view.
         let stage_ctx = StageContext {
             info: StageInfo {
                 instance: "default".to_string(),
@@ -2210,7 +1498,7 @@ mod tests {
         let text = format!(
             "<!-- zbobr-ctx-v1-stage\n{json_payload}\n-->\n\
              - default:main:**markdown_wins** `2024-01-01 00:00:00 +0000`\n  \
-             - [ ] from markdown <sub>ctx_rec_99</sub>\n"
+             - [ ] from markdown\n"
         );
 
         let parsed = parse_context(&text).unwrap();
@@ -2218,80 +1506,10 @@ mod tests {
         assert_eq!(parsed.stages[0].info.stage, Stage::new("json_wins"));
         assert_eq!(parsed.stages[0].records[0].id, 42);
         assert_eq!(parsed.stages[0].records[0].brief, "from json");
-    }
-
-    #[test]
-    fn legacy_json_block_wins_over_markdown_view() {
-        // Old-format single block is still accepted as source of truth.
-        let json_ctx = TaskContext {
-            stages: vec![StageContext {
-                info: StageInfo {
-                    instance: "default".to_string(),
-                    pipeline: Pipeline::from("main"),
-                    stage: Stage::new("json_wins"),
-                    tool: None,
-                    model: None,
-                    prompt_link: None,
-                    output_link: None,
-                    timestamp: utc("2024-01-01T00:00:00Z"),
-                },
-                records: vec![ContextRecord {
-                    id: 42,
-                    record_type: ContextRecordType::Success,
-                    brief: "from json".to_string(),
-                    report_link: None,
-                }],
-            }],
-        };
-        let json_payload = serde_json::to_string_pretty(&json_ctx).unwrap();
-        let text = format!(
-            "- default:main:**markdown_wins** `2024-01-01 00:00:00 +0000`\n  \
-             - [ ] from markdown <sub>ctx_rec_99</sub>\n\n\
-             <!-- zbobr-ctx-v1\n{json_payload}\n-->\n"
-        );
-
-        let parsed = parse_context(&text).unwrap();
-        assert_eq!(parsed.stages.len(), 1);
-        assert_eq!(parsed.stages[0].info.stage, Stage::new("json_wins"));
-        assert_eq!(parsed.stages[0].records[0].id, 42);
-        assert_eq!(parsed.stages[0].records[0].brief, "from json");
-    }
-
-    #[test]
-    fn legacy_markdown_without_json_block_still_parses() {
-        // Simulates a task description written before this change: no JSON
-        // block, just the rendered markdown bullets. The legacy parser must
-        // still reconstruct the context.
-        let text = "\
-- default:main:**planning** `2024-01-01 00:00:00 +0000`
-  - [ ] legacy item <sub>ctx_rec_1</sub>
-";
-        let parsed = parse_context(text).unwrap();
-        assert_eq!(parsed.stages.len(), 1);
-        assert_eq!(parsed.stages[0].info.stage, Stage::new("planning"));
-        assert_eq!(parsed.stages[0].records.len(), 1);
-        assert_eq!(parsed.stages[0].records[0].id, 1);
-        assert_eq!(parsed.stages[0].records[0].brief, "legacy item");
-    }
-
-    #[test]
-    fn corrupt_legacy_json_block_is_hard_error() {
-        // If the legacy marker is present but the payload is broken, refuse to
-        // parse — never silently fall back to the markdown view.
-        let text = "\
-- default:main:**planning** `2024-01-01 00:00:00 +0000`
-  - [ ] item <sub>ctx_rec_1</sub>
-
-<!-- zbobr-ctx-v1
-{not valid json}
--->
-";
-        assert!(parse_context(text).is_err());
     }
 
     #[test]
     fn corrupt_stage_json_block_is_hard_error() {
-        // Same guarantee for per-stage blocks.
         let text = "\
 <!-- zbobr-ctx-v1-stage
 {not valid json}
@@ -2303,9 +1521,6 @@ mod tests {
 
     #[test]
     fn json_roundtrip_preserves_original_record_order() {
-        // The old markdown renderer reordered non-checkbox records to the top
-        // on serialization — a display quirk that corrupted the logical order
-        // on roundtrip. JSON-backed roundtrip must preserve insertion order.
         let ctx = sample_context();
         let serialized = serialize_context(&ctx, &[], false, None);
         let parsed = parse_context(&serialized).unwrap();
@@ -2313,6 +1528,125 @@ mod tests {
             let orig_ids: Vec<u64> = orig.records.iter().map(|r| r.id).collect();
             let got_ids: Vec<u64> = got.records.iter().map(|r| r.id).collect();
             assert_eq!(got_ids, orig_ids);
+        }
+    }
+
+    // -- End-to-end test with mixed interactive and non-interactive records --
+
+    #[test]
+    fn for_prompt_mixed_interactive_and_non_interactive_records() {
+        let ctx = TaskContext {
+            stages: vec![StageContext {
+                info: StageInfo {
+                    instance: "default".to_string(),
+                    pipeline: Pipeline::from("main"),
+                    stage: Stage::new("working"),
+                    tool: Some("claude".to_string()),
+                    model: Some("claude-opus-4.6".parse().unwrap()),
+                    prompt_link: None,
+                    output_link: None,
+                    timestamp: utc("2024-01-01T00:00:00Z"),
+                },
+                records: vec![
+                    ContextRecord {
+                        id: 1,
+                        record_type: ContextRecordType::Checkbox(false),
+                        brief: "Implement feature".to_string(),
+                        report_link: None,
+                    },
+                    ContextRecord {
+                        id: 2,
+                        record_type: ContextRecordType::Checkbox(true),
+                        brief: "Write tests".to_string(),
+                        report_link: None,
+                    },
+                    ContextRecord {
+                        id: 3,
+                        record_type: ContextRecordType::Success,
+                        brief: "All tests passed".to_string(),
+                        report_link: Some("reports/tests.md".to_string()),
+                    },
+                    ContextRecord {
+                        id: 4,
+                        record_type: ContextRecordType::Success,
+                        brief: "Lint clean".to_string(),
+                        report_link: None,
+                    },
+                    ContextRecord {
+                        id: 5,
+                        record_type: ContextRecordType::Failure,
+                        brief: "Flaky test".to_string(),
+                        report_link: None,
+                    },
+                    ContextRecord {
+                        id: 6,
+                        record_type: ContextRecordType::Failure,
+                        brief: "Build error".to_string(),
+                        report_link: Some("reports/build.md".to_string()),
+                    },
+                    ContextRecord {
+                        id: 7,
+                        record_type: ContextRecordType::Comment,
+                        brief: "Retrying now".to_string(),
+                        report_link: None,
+                    },
+                    ContextRecord {
+                        id: 8,
+                        record_type: ContextRecordType::Comment,
+                        brief: "Plan ready".to_string(),
+                        report_link: Some("reports/plan.md".to_string()),
+                    },
+                    ContextRecord {
+                        id: 9,
+                        record_type: ContextRecordType::Question,
+                        brief: "Should we refactor?".to_string(),
+                        report_link: None,
+                    },
+                ],
+            }],
+        };
+
+        let output = serialize_context(&ctx, &[], true, None);
+
+        assert!(output.contains("[ctx_rec_1]"), "unchecked checkbox should show ID");
+        assert!(output.contains("[ctx_rec_2]"), "checked checkbox should show ID");
+        assert!(output.contains("[ctx_rec_3]"), "success with link should show ID");
+        assert!(output.contains("[ctx_rec_6]"), "failure with link should show ID");
+        assert!(output.contains("[ctx_rec_8]"), "comment with link should show ID");
+
+        assert!(!output.contains("[ctx_rec_4]"), "success without link should suppress ID");
+        assert!(!output.contains("[ctx_rec_5]"), "failure without link should suppress ID");
+        assert!(!output.contains("[ctx_rec_7]"), "comment without link should suppress ID");
+        assert!(!output.contains("[ctx_rec_9]"), "question without link should suppress ID");
+
+        assert!(output.contains("Implement feature"));
+        assert!(output.contains("Write tests"));
+        assert!(output.contains("All tests passed"));
+        assert!(output.contains("Lint clean"));
+        assert!(output.contains("Flaky test"));
+        assert!(output.contains("Build error"));
+        assert!(output.contains("Retrying now"));
+        assert!(output.contains("Plan ready"));
+        assert!(output.contains("Should we refactor?"));
+
+        assert!(!output.contains("<sub>"), "no <sub> tags in prompt output");
+        assert!(!output.contains("reports/"), "no report URLs in prompt output");
+
+        let normal_output = serialize_context(&ctx, &[], false, None);
+        for id in 1..=9 {
+            assert!(
+                normal_output.contains(&format!("ctx_rec_{}", id)),
+                "normal mode should show ctx_rec_{id}"
+            );
+        }
+    }
+
+    fn make_comment(text: &str, ts: &str, url: Option<&str>) -> crate::task::Comment {
+        crate::task::Comment {
+            timestamp: utc(ts),
+            username: String::new(),
+            body: text.to_string(),
+            url: url.map(str::to_string),
         }
     }
 }
