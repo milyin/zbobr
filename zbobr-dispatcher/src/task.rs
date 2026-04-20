@@ -208,6 +208,21 @@ impl RoleSession {
         .await
     }
 
+    /// Get the destination_branch override (None → repo backend default).
+    pub async fn get_destination_branch(&self) -> anyhow::Result<Option<String>> {
+        let task = self.get_task().await?;
+        Ok(task.destination_branch)
+    }
+
+    /// Set the destination_branch override. Pass None to clear.
+    pub async fn set_destination_branch(&self, value: Option<String>) -> anyhow::Result<()> {
+        self.modify_task(move |mut task| {
+            task.destination_branch = value;
+            task
+        })
+        .await
+    }
+
     /// Read a report file via the task backend.
     pub async fn read_report(&self, name: &str) -> anyhow::Result<String> {
         let weak = self.zbobr.task_backend().get_task(self.task_id).await?;
@@ -743,6 +758,7 @@ mod comment_model_tests {
                 description: description.to_string(),
                 state,
                 work_branch: None,
+                destination_branch: None,
                 pr_url: None,
                 context: TaskContext::default(),
                 signal: None,

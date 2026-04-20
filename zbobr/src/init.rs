@@ -384,7 +384,7 @@ fn default_config_toml() -> RootConfigToml {
 fn default_workflow() -> WorkflowConfig {
     use McpTool::{
         AddChecklistItem, CheckChecklistItem, GetCtxRec, ReportFailure, ReportIntermediate,
-        ReportSuccess, StopWithError, StopWithQuestion,
+        ReportSuccess, SetDestinationBranch, StopWithError, StopWithQuestion,
     };
 
     let plan_stages = IndexMap::from([
@@ -545,6 +545,7 @@ fn default_workflow() -> WorkflowConfig {
                     ReportIntermediate,
                     ReportSuccess,
                     GetCtxRec,
+                    SetDestinationBranch,
                 ]),
                 prompts: role_prompts("planner.md"),
                 tool: TomlOption::Value(TOOL_PLANNER),

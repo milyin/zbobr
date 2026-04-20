@@ -75,6 +75,10 @@ impl<'de> serde::Deserialize<'de> for FixedOffsetTz {
 pub struct TaskIdentity {
     pub task_id: u64,
     pub work_branch: String,
+    /// Per-task override for the PR base branch. When `None`, worktree backends
+    /// fall back to their configured default branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination_branch: Option<String>,
 }
 
 /// Robustly extract the repository name from a string (which could be a URL, local path, or owner/repo).
@@ -792,6 +796,10 @@ pub struct TaskSnapshot {
     /// Task state.
     pub state: State,
     pub work_branch: Option<String>,
+    /// Per-task override for the PR destination (base) branch. When `None` the
+    /// repo backend's configured default branch is used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination_branch: Option<String>,
     pub pr_url: Option<String>,
     /// Structured task context containing stage execution history and records.
     #[serde(default)]
@@ -845,6 +853,7 @@ impl TaskSnapshot {
         Some(TaskIdentity {
             task_id: self.id,
             work_branch: self.work_branch.clone()?,
+            destination_branch: self.destination_branch.clone(),
         })
     }
 }
@@ -1075,6 +1084,7 @@ mod tests {
             description: String::new(),
             state: State::Empty,
             work_branch: work_branch.map(|s| s.to_string()),
+            destination_branch: None,
             pr_url: None,
             context: TaskContext::default(),
             signal: None,

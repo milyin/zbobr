@@ -12,6 +12,7 @@ pub enum McpTool {
     GetCtxRec,
     StopWithError,
     StopWithQuestion,
+    SetDestinationBranch,
 }
 
 impl McpTool {
@@ -25,6 +26,7 @@ impl McpTool {
             Self::GetCtxRec => "get_ctx_rec",
             Self::StopWithError => "stop_with_error",
             Self::StopWithQuestion => "stop_with_question",
+            Self::SetDestinationBranch => "set_destination_branch",
         }
     }
 }
@@ -48,6 +50,7 @@ impl FromStr for McpTool {
             "get_ctx_rec" => Ok(Self::GetCtxRec),
             "stop_with_error" => Ok(Self::StopWithError),
             "stop_with_question" => Ok(Self::StopWithQuestion),
+            "set_destination_branch" => Ok(Self::SetDestinationBranch),
             other => Err(format!("unknown MCP tool: {other}")),
         }
     }
@@ -62,6 +65,7 @@ pub const ALL_TOOLS: &[McpTool] = &[
     McpTool::GetCtxRec,
     McpTool::StopWithError,
     McpTool::StopWithQuestion,
+    McpTool::SetDestinationBranch,
 ];
 
 /// All possible static MCP tool names across all roles.
@@ -74,4 +78,5 @@ pub const ALL_TOOL_NAMES: &[&str] = &[
     McpTool::GetCtxRec.as_str(),
     McpTool::StopWithError.as_str(),
     McpTool::StopWithQuestion.as_str(),
+    McpTool::SetDestinationBranch.as_str(),
 ];

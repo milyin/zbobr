@@ -601,6 +601,7 @@ role = "merger"
             description: String::new(),
             state: State::Pending(Pipeline::Main),
             work_branch: None,
+            destination_branch: None,
             pr_url: None,
             context: TaskContext::default(),
             signal: None,

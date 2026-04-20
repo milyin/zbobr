@@ -32,6 +32,9 @@ struct TaskFile {
     work_branch: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    destination_branch: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pr_url: Option<String>,
     #[serde(default)]
     pause: bool,
@@ -72,6 +75,7 @@ impl TaskFile {
             description: self.description.clone(),
             state,
             work_branch: self.work_branch.clone(),
+            destination_branch: self.destination_branch.clone(),
             pr_url: self.pr_url.clone(),
 
             context: self.context.clone(),
@@ -96,6 +100,7 @@ impl TaskFile {
             state: task.state.clone(),
             stage: None,
             work_branch: task.work_branch.clone(),
+            destination_branch: task.destination_branch.clone(),
             pr_url: task.pr_url.clone(),
             pause: task.go_pause,
             confirm: task.confirm,
@@ -482,6 +487,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             description: description.to_string(),
             state,
             work_branch: None,
+            destination_branch: None,
             pr_url: None,
 
             context: TaskContext::default(),

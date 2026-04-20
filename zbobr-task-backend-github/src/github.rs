@@ -15,6 +15,7 @@ use zbobr_api::{
 // -- Parameter name constants (GitHub issue body parameter keys) --
 
 const PARAM_WORK_BRANCH: &str = "work_branch";
+const PARAM_DESTINATION_BRANCH: &str = "destination_branch";
 const PARAM_PR_URL: &str = "pr_url";
 const PARAM_STACK: &str = "stack";
 const PARAM_STATE: &str = "state";
@@ -685,6 +686,7 @@ impl ZbobrTaskBackendGithubImpl {
 
         // Promoted fields: read from params_map where they were stored
         let work_branch = params_map.get(PARAM_WORK_BRANCH).cloned();
+        let destination_branch = params_map.get(PARAM_DESTINATION_BRANCH).cloned();
         let pr_url = params_map.get(PARAM_PR_URL).cloned();
 
         // stack is stored as JSON in params_map
@@ -716,6 +718,7 @@ impl ZbobrTaskBackendGithubImpl {
             description,
             state,
             work_branch,
+            destination_branch,
             pr_url,
             context,
             signal,
@@ -852,6 +855,9 @@ impl ZbobrTaskBackendGithubImpl {
         }
         if let Some(ref v) = task.work_branch {
             params.insert(PARAM_WORK_BRANCH.to_string(), v.clone());
+        }
+        if let Some(ref v) = task.destination_branch {
+            params.insert(PARAM_DESTINATION_BRANCH.to_string(), v.clone());
         }
         if !task.stack.is_empty()
             && let Ok(json) = serde_json::to_string(&task.stack)
@@ -1742,6 +1748,7 @@ mod flag_tests {
             description: "d".to_string(),
             state: State::Done,
             work_branch: None,
+            destination_branch: None,
             pr_url: None,
             context: TaskContext::default(),
             signal: None,
@@ -1836,6 +1843,7 @@ mod flag_tests {
             description: "d".to_string(),
             state: State::Pending(zbobr_api::task::Pipeline::Main),
             work_branch: None,
+            destination_branch: None,
             pr_url: None,
             context: TaskContext {
                 stages: vec![StageContext {
@@ -1890,6 +1898,7 @@ mod flag_tests {
             description: "d".to_string(),
             state: State::Pending(zbobr_api::task::Pipeline::Main),
             work_branch: None,
+            destination_branch: None,
             pr_url: None,
             context: TaskContext {
                 stages: vec![StageContext {
@@ -1940,6 +1949,7 @@ mod flag_tests {
             description: "d".to_string(),
             state: State::Pending(zbobr_api::task::Pipeline::Main),
             work_branch: None,
+            destination_branch: None,
             pr_url: None,
             context: TaskContext {
                 stages: vec![StageContext {

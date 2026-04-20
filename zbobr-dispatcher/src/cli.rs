@@ -350,6 +350,9 @@ pub fn print_task(task: &TaskSnapshot, discussion: &[Comment]) {
     if let Some(ref branch) = task.work_branch {
         println!("Work Branch: {}", branch);
     }
+    if let Some(ref branch) = task.destination_branch {
+        println!("Destination Branch: {}", branch);
+    }
     if let Some(ref url) = task.pr_url {
         println!("PR URL: {}", url);
     }
@@ -2101,6 +2104,7 @@ mod tests {
             description: "test description".to_string(),
             state,
             work_branch: None,
+            destination_branch: None,
             pr_url: None,
             context: Default::default(),
             signal: None,

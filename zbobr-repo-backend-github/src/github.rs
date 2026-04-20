@@ -14,6 +14,7 @@ use crate::config::ZbobrRepoBackendGithubConfig;
 struct ExistingPr {
     html_url: String,
     number: u64,
+    base_ref: String,
 }
 
 /// Convert an octocrab error into an anyhow::Error with detailed information.
@@ -612,9 +613,15 @@ impl ZbobrRepoBackendGithub {
         base: Option<&str>,
     ) -> anyhow::Result<ExistingPr> {
         #[derive(serde::Deserialize)]
+        struct PrBaseRef {
+            #[serde(rename = "ref")]
+            ref_field: String,
+        }
+        #[derive(serde::Deserialize)]
         struct PrListItem {
             html_url: String,
             number: u64,
+            base: PrBaseRef,
         }
 
         // GitHub's list-PRs API requires "owner:branch" format for the head
@@ -643,6 +650,7 @@ impl ZbobrRepoBackendGithub {
             .map(|pr| ExistingPr {
                 html_url: pr.html_url,
                 number: pr.number,
+                base_ref: pr.base.ref_field,
             })
             .ok_or_else(|| {
                 anyhow::anyhow!(
@@ -667,6 +675,42 @@ impl ZbobrRepoBackendGithub {
             .await
             .map_err(octocrab_to_anyhow)?;
         Ok(())
+    }
+
+    /// PATCH a PR to retarget its base branch.
+    async fn update_pr_base(
+        &self,
+        pr_repo: &str,
+        pr_number: u64,
+        base: &str,
+    ) -> anyhow::Result<()> {
+        let endpoint = format!("/repos/{pr_repo}/pulls/{pr_number}");
+        let patch_payload = serde_json::json!({ "base": base });
+        self.octocrab
+            .patch::<serde_json::Value, _, _>(&endpoint, Some(&patch_payload))
+            .await
+            .map_err(octocrab_to_anyhow)?;
+        Ok(())
+    }
+
+    /// Check whether a branch exists on the remote repository via the GitHub API.
+    async fn remote_branch_exists(
+        &self,
+        pr_repo: &str,
+        branch: &str,
+    ) -> anyhow::Result<bool> {
+        let endpoint = format!("/repos/{pr_repo}/branches/{branch}");
+        match self
+            .octocrab
+            .get::<serde_json::Value, _, _>(&endpoint, None::<&()>)
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(octocrab::Error::GitHub { ref source, .. }) if source.status_code.as_u16() == 404 => {
+                Ok(false)
+            }
+            Err(e) => Err(octocrab_to_anyhow(e)),
+        }
     }
 
     /// If the destination repository is a GitHub fork, sync its base branch with the upstream
@@ -766,13 +810,28 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         git_user_name: &str,
         git_user_email: &str,
     ) -> anyhow::Result<bool> {
-        let base_branch = &self.backend_config.branch;
+        let default_base = &self.backend_config.branch;
+        let base_branch = identity
+            .destination_branch
+            .as_deref()
+            .unwrap_or(default_base);
         let work_branch = &identity.work_branch;
+        let pr_repo = &self.backend_config.repository;
 
         if work_branch == base_branch {
             anyhow::bail!(
                 "work_branch and base_branch must differ, got '{}'",
                 work_branch
+            );
+        }
+
+        if base_branch != default_base.as_str()
+            && !self.remote_branch_exists(pr_repo, base_branch).await?
+        {
+            anyhow::bail!(
+                "Destination branch '{}' does not exist in {}",
+                base_branch,
+                pr_repo
             );
         }
 
@@ -788,6 +847,21 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
 
         // Phase 3: Fetch remote work branch
         let remote_exists = Self::fetch_remote_work_branch(&bare_dir, work_branch, &env).await?;
+
+        // Phase 3.5: Retarget PR base if an open PR exists and its base drifted
+        // from the task's destination branch.
+        if let Ok(existing) = self.find_existing_pr(pr_repo, work_branch, None).await
+            && existing.base_ref != base_branch
+        {
+            tracing::info!(
+                "Retargeting PR #{} base '{}' -> '{}'",
+                existing.number,
+                existing.base_ref,
+                base_branch
+            );
+            self.update_pr_base(pr_repo, existing.number, base_branch)
+                .await?;
+        }
 
         // Phase 4: Create worktree
         self.ensure_worktree_github(
@@ -897,10 +971,23 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
     ) -> anyhow::Result<String> {
         let work_branch = &identity.work_branch;
         let pr_repo = &self.backend_config.repository;
-        let base_branch = &self.backend_config.branch;
+        let base_branch = identity
+            .destination_branch
+            .as_deref()
+            .unwrap_or(&self.backend_config.branch);
 
         // Find existing PR or create a new one
         if let Ok(existing) = self.find_existing_pr(pr_repo, work_branch, None).await {
+            if existing.base_ref != base_branch {
+                tracing::info!(
+                    "Retargeting PR #{} base '{}' -> '{}'",
+                    existing.number,
+                    existing.base_ref,
+                    base_branch
+                );
+                self.update_pr_base(pr_repo, existing.number, base_branch)
+                    .await?;
+            }
             if let Some(body) = body {
                 tracing::info!(
                     "Updating body of existing PR #{} for {work_branch}",
