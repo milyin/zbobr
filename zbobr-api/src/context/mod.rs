@@ -660,8 +660,15 @@ impl MdContext {
 /// user comments (placed by timestamp).
 ///
 /// When `for_prompt` is true, prompt links are omitted from stage headers and
-/// the `zbobr-ctx-v1` JSON block is not emitted — the prompt sees only the
-/// rendered human view.
+/// no JSON blocks are emitted — the prompt sees only the rendered human view.
+///
+/// When `for_prompt` is false each stage is preceded by an independent
+/// `<!-- zbobr-ctx-v1-stage ... -->` JSON record.  The records are the source
+/// of truth; the markdown that follows them is the human-readable view.
+/// Because every stage has its own self-contained record, the user can move
+/// the `---CONTEXT---` separator to any line between two stage blocks and the
+/// parser will correctly route everything above the separator to `DEAD_CONTEXT`
+/// and everything below to the live `CONTEXT`.
 ///
 /// `report_url` converts a report filename into a display URL for the link.
 /// Pass `None` to use the filename as-is.
@@ -674,25 +681,60 @@ pub fn serialize_context(
     if ctx.stages.is_empty() && comments.is_empty() {
         return String::new();
     }
-    let md = MdContext::from_task_context(ctx, comments, for_prompt, report_url);
-    let rendered = md.to_string();
+
     if for_prompt {
-        rendered
-    } else {
-        // Rendered view first so users see the legible version, JSON block at
-        // the end as the (invisible) source of truth.
-        let json_block = json::serialize_json_block(ctx);
-        format!("{rendered}\n{json_block}\n")
+        let md = MdContext::from_task_context(ctx, comments, true, report_url);
+        return md.to_string();
     }
+
+    // Non-prompt: emit one JSON record per stage, interleaved with compact
+    // comments, all sorted by timestamp.
+    enum Event<'a> {
+        Stage(&'a crate::task::StageContext),
+        Comment(&'a Comment),
+    }
+
+    let mut events: Vec<(DateTime<FixedOffset>, Event<'_>)> = Vec::new();
+    for stage in &ctx.stages {
+        events.push((stage.info.timestamp, Event::Stage(stage)));
+    }
+    for comment in comments {
+        events.push((comment.timestamp, Event::Comment(comment)));
+    }
+    events.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut result = String::new();
+    for (_, event) in events {
+        match event {
+            Event::Stage(stage_ctx) => {
+                result.push_str(&json::serialize_stage_json_block(stage_ctx));
+                result.push('\n');
+                let md_stage =
+                    MdStage::from_stage_context(stage_ctx, false, report_url);
+                result.push_str(&md_stage.to_string());
+            }
+            Event::Comment(comment) => {
+                let md_comment = MdCompactComment::from_comment(comment, false);
+                result.push_str(&format!("{}\n", md_comment));
+            }
+        }
+    }
+    result
 }
 
 /// Parse context text back into a `TaskContext`.
 ///
-/// Prefers the `zbobr-ctx-v1` JSON block when present — that is the source of
-/// truth. Falls back to the legacy markdown parser for older task
-/// descriptions that haven't been rewritten yet. A present-but-malformed JSON
-/// block is an error (never silently drop structured data).
+/// Priority:
+/// 1. Per-stage `<!-- zbobr-ctx-v1-stage ... -->` blocks (current format).
+/// 2. Legacy single `<!-- zbobr-ctx-v1 {"stages":[...]} -->` block.
+/// 3. Legacy markdown parser (for very old tasks with no JSON blocks).
+///
+/// A present-but-malformed JSON block is always an error — we never silently
+/// discard structured data.
 pub fn parse_context(text: &str) -> Result<TaskContext> {
+    if let Some(result) = json::parse_stage_json_blocks(text) {
+        return result.map(|stages| TaskContext { stages });
+    }
     if let Some(result) = json::parse_json_block(text) {
         return result;
     }
@@ -1258,27 +1300,39 @@ mod tests {
     }
 
     #[test]
-    fn stage_marker_added_before_stages_when_compact_comments_present() {
+    fn stage_json_block_added_before_each_stage_with_compact_comments() {
         let ctx = sample_context();
         let comments = vec![make_comment("a comment", "2024-01-01T00:30:00Z", None)];
         let output = serialize_context(&ctx, &comments, false, None);
-        assert!(output.contains("<!-- stage -->"));
+        // New format: per-stage JSON blocks, not <!-- stage --> markers
+        assert!(!output.contains("<!-- stage -->"));
+        assert!(
+            output.contains("<!-- zbobr-ctx-v1-stage\n"),
+            "each stage must have its own JSON block"
+        );
+        let block_count = output.matches("<!-- zbobr-ctx-v1-stage\n").count();
+        assert_eq!(block_count, ctx.stages.len(), "one block per stage");
     }
 
     #[test]
-    fn stage_marker_not_added_without_comments() {
+    fn stage_json_block_added_without_comments() {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], false, None);
+        // Per-stage JSON blocks are always emitted in non-prompt mode
         assert!(!output.contains("<!-- stage -->"));
+        assert!(output.contains("<!-- zbobr-ctx-v1-stage\n"));
+        let block_count = output.matches("<!-- zbobr-ctx-v1-stage\n").count();
+        assert_eq!(block_count, ctx.stages.len());
     }
 
     #[test]
     fn stage_marker_not_added_in_prompt_mode() {
         let ctx = sample_context();
         let comments = vec![make_comment("a comment", "2024-01-01T00:30:00Z", None)];
-        // Even with compact comments present, prompt mode should NOT emit stage markers
+        // Prompt mode must never emit any JSON blocks
         let output = serialize_context(&ctx, &comments, true, None);
         assert!(!output.contains("<!-- stage -->"));
+        assert!(!output.contains("zbobr-ctx-v1"));
     }
 
     #[test]
@@ -2111,11 +2165,14 @@ mod tests {
     fn serialize_includes_json_block() {
         let ctx = sample_context();
         let output = serialize_context(&ctx, &[], false, None);
+        // Non-prompt output must embed per-stage JSON blocks
         assert!(
-            output.contains("<!-- zbobr-ctx-v1"),
-            "non-prompt output must embed the JSON source of truth"
+            output.contains("<!-- zbobr-ctx-v1-stage\n"),
+            "non-prompt output must embed per-stage JSON blocks"
         );
-        assert!(output.contains("-->"), "JSON block must be closed");
+        assert!(output.contains("-->"), "JSON blocks must be closed");
+        let block_count = output.matches("<!-- zbobr-ctx-v1-stage\n").count();
+        assert_eq!(block_count, ctx.stages.len(), "one block per stage");
     }
 
     #[test]
@@ -2124,15 +2181,48 @@ mod tests {
         let output = serialize_context(&ctx, &[], true, None);
         assert!(
             !output.contains("zbobr-ctx-v1"),
-            "agent prompts must never see the JSON block"
+            "agent prompts must never see JSON blocks"
         );
     }
 
     #[test]
-    fn json_block_wins_over_markdown_view() {
-        // Hand-craft a description where the JSON says one thing and the
-        // rendered markdown says another. The JSON must win — it's the
-        // source of truth.
+    fn per_stage_json_block_wins_over_markdown_view() {
+        // Per-stage JSON block is the source of truth; markdown is the view.
+        let stage_ctx = StageContext {
+            info: StageInfo {
+                instance: "default".to_string(),
+                pipeline: Pipeline::from("main"),
+                stage: Stage::new("json_wins"),
+                tool: None,
+                model: None,
+                prompt_link: None,
+                output_link: None,
+                timestamp: utc("2024-01-01T00:00:00Z"),
+            },
+            records: vec![ContextRecord {
+                id: 42,
+                record_type: ContextRecordType::Success,
+                brief: "from json".to_string(),
+                report_link: None,
+            }],
+        };
+        let json_payload = serde_json::to_string_pretty(&stage_ctx).unwrap();
+        let text = format!(
+            "<!-- zbobr-ctx-v1-stage\n{json_payload}\n-->\n\
+             - default:main:**markdown_wins** `2024-01-01 00:00:00 +0000`\n  \
+             - [ ] from markdown <sub>ctx_rec_99</sub>\n"
+        );
+
+        let parsed = parse_context(&text).unwrap();
+        assert_eq!(parsed.stages.len(), 1);
+        assert_eq!(parsed.stages[0].info.stage, Stage::new("json_wins"));
+        assert_eq!(parsed.stages[0].records[0].id, 42);
+        assert_eq!(parsed.stages[0].records[0].brief, "from json");
+    }
+
+    #[test]
+    fn legacy_json_block_wins_over_markdown_view() {
+        // Old-format single block is still accepted as source of truth.
         let json_ctx = TaskContext {
             stages: vec![StageContext {
                 info: StageInfo {
@@ -2185,10 +2275,9 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_json_block_is_hard_error() {
-        // If the marker is present but the payload is broken, don't silently
-        // fall back to the markdown view — refuse to parse so the user sees
-        // the problem.
+    fn corrupt_legacy_json_block_is_hard_error() {
+        // If the legacy marker is present but the payload is broken, refuse to
+        // parse — never silently fall back to the markdown view.
         let text = "\
 - default:main:**planning** `2024-01-01 00:00:00 +0000`
   - [ ] item <sub>ctx_rec_1</sub>
@@ -2196,6 +2285,18 @@ mod tests {
 <!-- zbobr-ctx-v1
 {not valid json}
 -->
+";
+        assert!(parse_context(text).is_err());
+    }
+
+    #[test]
+    fn corrupt_stage_json_block_is_hard_error() {
+        // Same guarantee for per-stage blocks.
+        let text = "\
+<!-- zbobr-ctx-v1-stage
+{not valid json}
+-->
+- default:main:**planning** `2024-01-01 00:00:00 +0000`
 ";
         assert!(parse_context(text).is_err());
     }

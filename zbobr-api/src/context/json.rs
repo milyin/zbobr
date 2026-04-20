@@ -51,38 +51,20 @@
 
 use anyhow::{Context, Result, anyhow};
 
-use crate::task::TaskContext;
+use crate::task::{StageContext, TaskContext};
 
-/// Opening marker of the JSON block. The trailing newline is part of the
-/// marker so the JSON starts on its own line, which is both prettier and
-/// easier to parse.
-const OPEN_MARKER: &str = "<!-- zbobr-ctx-v1\n";
-
-/// Closing marker of the JSON block.
+/// Closing marker shared by all JSON block variants.
 const CLOSE_MARKER: &str = "\n-->";
 
-/// Serialize a `TaskContext` as a pretty-printed JSON block wrapped in the
-/// `zbobr-ctx-v1` HTML comment envelope.
-///
-/// The returned string starts with `OPEN_MARKER` and ends with `CLOSE_MARKER`.
-/// Callers typically want to append a trailing newline before the rendered
-/// markdown view.
-pub(super) fn serialize_json_block(ctx: &TaskContext) -> String {
-    // serde_json only fails on non-string map keys or non-finite floats;
-    // TaskContext has neither, so `expect` is safe.
-    let json =
-        serde_json::to_string_pretty(ctx).expect("TaskContext JSON serialization is infallible");
-    format!("{OPEN_MARKER}{json}{CLOSE_MARKER}")
-}
+// ── Legacy single-block format (zbobr-ctx-v1) ───────────────────────────────
+// Kept for reading tasks written before the per-stage format was introduced.
+// New serialization uses the per-stage format below.
 
-/// Locate a `zbobr-ctx-v1` block anywhere in `text` and parse its JSON payload.
+const OPEN_MARKER: &str = "<!-- zbobr-ctx-v1\n";
+
+/// Parse a legacy `zbobr-ctx-v1` block (whole `TaskContext` in one comment).
 ///
-/// Returns:
-/// - `None` if the marker is absent — caller should fall back to the legacy
-///   markdown parser.
-/// - `Some(Ok(ctx))` on a successful parse.
-/// - `Some(Err(_))` if the marker is present but the payload is missing,
-///   truncated, or not valid JSON. Never silently drop a block we recognise.
+/// Returns `None` if the marker is absent, `Some(Err(_))` if malformed.
 pub(super) fn parse_json_block(text: &str) -> Option<Result<TaskContext>> {
     let open_idx = text.find(OPEN_MARKER)?;
     let after_open = &text[open_idx + OPEN_MARKER.len()..];
@@ -100,6 +82,61 @@ pub(super) fn parse_json_block(text: &str) -> Option<Result<TaskContext>> {
     Some(parsed)
 }
 
+// ── Current per-stage format (zbobr-ctx-v1-stage) ───────────────────────────
+// Each stage has its own JSON block placed immediately before its markdown
+// rendering.  This allows the user to reposition the `---CONTEXT---` separator
+// anywhere inside the context section to move older stages to DEAD_CONTEXT
+// without losing their structured data.
+
+const STAGE_OPEN_MARKER: &str = "<!-- zbobr-ctx-v1-stage\n";
+
+/// Serialize a single `StageContext` as a pretty-printed JSON block wrapped in
+/// the `zbobr-ctx-v1-stage` HTML comment envelope.
+pub(super) fn serialize_stage_json_block(stage: &StageContext) -> String {
+    let json = serde_json::to_string_pretty(stage)
+        .expect("StageContext JSON serialization is infallible");
+    format!("{STAGE_OPEN_MARKER}{json}{CLOSE_MARKER}")
+}
+
+/// Locate all `zbobr-ctx-v1-stage` blocks in `text` and parse them in order.
+///
+/// Returns:
+/// - `None` if no stage marker is present.
+/// - `Some(Ok(stages))` when all blocks parsed successfully.
+/// - `Some(Err(_))` if any block is unclosed or contains invalid JSON.
+pub(super) fn parse_stage_json_blocks(text: &str) -> Option<Result<Vec<StageContext>>> {
+    if !text.contains(STAGE_OPEN_MARKER) {
+        return None;
+    }
+    let mut stages = Vec::new();
+    let mut search_from = 0usize;
+    loop {
+        let Some(rel) = text[search_from..].find(STAGE_OPEN_MARKER) else {
+            break;
+        };
+        let open_idx = search_from + rel;
+        let after_open = &text[open_idx + STAGE_OPEN_MARKER.len()..];
+        let close_rel = match after_open.find(CLOSE_MARKER) {
+            Some(i) => i,
+            None => {
+                return Some(Err(anyhow!(
+                    "zbobr-ctx-v1-stage block is not closed — missing {CLOSE_MARKER:?}"
+                )));
+            }
+        };
+        let payload = &after_open[..close_rel];
+        let parsed: Result<StageContext> = serde_json::from_str(payload)
+            .with_context(|| "failed to parse zbobr-ctx-v1-stage JSON payload");
+        match parsed {
+            Ok(stage) => stages.push(stage),
+            Err(e) => return Some(Err(e)),
+        }
+        search_from =
+            open_idx + STAGE_OPEN_MARKER.len() + close_rel + CLOSE_MARKER.len();
+    }
+    Some(Ok(stages))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,7 +148,7 @@ mod tests {
         s.parse().unwrap()
     }
 
-    fn sample() -> TaskContext {
+    fn sample_task_context() -> TaskContext {
         TaskContext {
             stages: vec![StageContext {
                 info: StageInfo {
@@ -134,57 +171,166 @@ mod tests {
         }
     }
 
+    fn sample_stage() -> StageContext {
+        sample_task_context().stages.into_iter().next().unwrap()
+    }
+
+    // ── Legacy single-block format tests ─────────────────────────────────────
+
     #[test]
-    fn roundtrip() {
-        let ctx = sample();
-        let block = serialize_json_block(&ctx);
-        let parsed = parse_json_block(&block).expect("marker present").unwrap();
-        assert_eq!(parsed, ctx);
+    fn legacy_roundtrip() {
+        let ctx = sample_task_context();
+        let block = parse_json_block(&format!(
+            "<!-- zbobr-ctx-v1\n{}\n-->",
+            serde_json::to_string_pretty(&ctx).unwrap()
+        ))
+        .expect("marker present")
+        .unwrap();
+        assert_eq!(block, ctx);
     }
 
     #[test]
-    fn block_uses_expected_envelope() {
-        let ctx = sample();
-        let block = serialize_json_block(&ctx);
-        assert!(block.starts_with("<!-- zbobr-ctx-v1\n"));
-        assert!(block.ends_with("\n-->"));
+    fn legacy_block_uses_expected_envelope() {
+        // Manually build the old format for the envelope check.
+        let payload = r#"<!-- zbobr-ctx-v1
+{"stages":[]}
+-->"#;
+        assert!(payload.starts_with("<!-- zbobr-ctx-v1\n"));
+        assert!(payload.ends_with("\n-->"));
+        let parsed = parse_json_block(payload).unwrap().unwrap();
+        assert!(parsed.stages.is_empty());
     }
 
     #[test]
-    fn missing_marker_returns_none() {
+    fn legacy_missing_marker_returns_none() {
         assert!(parse_json_block("just some markdown").is_none());
     }
 
     #[test]
-    fn unclosed_block_is_error() {
+    fn legacy_unclosed_block_is_error() {
         let bad = "<!-- zbobr-ctx-v1\n{\"stages\":[]}";
         let err = parse_json_block(bad).expect("marker present").unwrap_err();
         assert!(err.to_string().contains("not closed"));
     }
 
     #[test]
-    fn malformed_json_is_error() {
+    fn legacy_malformed_json_is_error() {
         let bad = "<!-- zbobr-ctx-v1\n{not json}\n-->";
         assert!(parse_json_block(bad).expect("marker present").is_err());
     }
 
     #[test]
-    fn block_can_be_embedded_in_surrounding_markdown() {
-        let ctx = sample();
-        let block = serialize_json_block(&ctx);
+    fn legacy_block_can_be_embedded_in_surrounding_markdown() {
+        let ctx = sample_task_context();
+        let payload = serde_json::to_string_pretty(&ctx).unwrap();
+        let block = format!("<!-- zbobr-ctx-v1\n{payload}\n-->");
         let wrapped = format!("some prose above\n\n{block}\n\nmore prose below\n");
         let parsed = parse_json_block(&wrapped).unwrap().unwrap();
         assert_eq!(parsed, ctx);
     }
 
     #[test]
-    fn unknown_fields_are_ignored() {
-        // Forward-compat: a future writer could add fields; an older reader
-        // must still accept the payload.
+    fn legacy_unknown_fields_are_ignored() {
         let payload = r#"<!-- zbobr-ctx-v1
 {"stages":[],"future_field":42}
 -->"#;
         let parsed = parse_json_block(payload).unwrap().unwrap();
         assert!(parsed.stages.is_empty());
+    }
+
+    // ── Per-stage format tests ────────────────────────────────────────────────
+
+    #[test]
+    fn stage_roundtrip() {
+        let stage = sample_stage();
+        let block = serialize_stage_json_block(&stage);
+        let stages = parse_stage_json_blocks(&block)
+            .expect("marker present")
+            .unwrap();
+        assert_eq!(stages.len(), 1);
+        assert_eq!(stages[0], stage);
+    }
+
+    #[test]
+    fn stage_block_uses_expected_envelope() {
+        let stage = sample_stage();
+        let block = serialize_stage_json_block(&stage);
+        assert!(block.starts_with("<!-- zbobr-ctx-v1-stage\n"));
+        assert!(block.ends_with("\n-->"));
+    }
+
+    #[test]
+    fn stage_missing_marker_returns_none() {
+        assert!(parse_stage_json_blocks("just some markdown").is_none());
+    }
+
+    #[test]
+    fn stage_unclosed_block_is_error() {
+        let bad = "<!-- zbobr-ctx-v1-stage\n{\"info\":{}}";
+        let err = parse_stage_json_blocks(bad)
+            .expect("marker present")
+            .unwrap_err();
+        assert!(err.to_string().contains("not closed"));
+    }
+
+    #[test]
+    fn stage_malformed_json_is_error() {
+        let bad = "<!-- zbobr-ctx-v1-stage\n{not json}\n-->";
+        assert!(parse_stage_json_blocks(bad)
+            .expect("marker present")
+            .is_err());
+    }
+
+    #[test]
+    fn multiple_stage_blocks_parsed_in_order() {
+        let stage1 = sample_stage();
+        let mut stage2 = sample_stage();
+        stage2.info.stage = Stage::new("working");
+
+        let block1 = serialize_stage_json_block(&stage1);
+        let block2 = serialize_stage_json_block(&stage2);
+        let text = format!("{block1}\n- some markdown\n\n{block2}\n- more markdown\n");
+
+        let stages = parse_stage_json_blocks(&text)
+            .expect("markers present")
+            .unwrap();
+        assert_eq!(stages.len(), 2);
+        assert_eq!(stages[0], stage1);
+        assert_eq!(stages[1], stage2);
+    }
+
+    #[test]
+    fn stage_block_embedded_in_surrounding_text() {
+        let stage = sample_stage();
+        let block = serialize_stage_json_block(&stage);
+        let wrapped = format!("prose before\n\n{block}\n- markdown after\n");
+        let stages = parse_stage_json_blocks(&wrapped).unwrap().unwrap();
+        assert_eq!(stages.len(), 1);
+        assert_eq!(stages[0], stage);
+    }
+
+    #[test]
+    fn stage_unknown_fields_are_ignored() {
+        let stage = sample_stage();
+        let mut json_val: serde_json::Value = serde_json::to_value(&stage).unwrap();
+        json_val["future_field"] = serde_json::json!(42);
+        let payload = serde_json::to_string_pretty(&json_val).unwrap();
+        let text = format!("<!-- zbobr-ctx-v1-stage\n{payload}\n-->");
+        let stages = parse_stage_json_blocks(&text).unwrap().unwrap();
+        assert_eq!(stages.len(), 1);
+        assert_eq!(stages[0].info.stage, stage.info.stage);
+    }
+
+    #[test]
+    fn stage_marker_does_not_match_legacy_marker() {
+        // A text with the old "zbobr-ctx-v1\n" marker (no "-stage") must NOT
+        // be picked up by parse_stage_json_blocks.
+        let ctx = sample_task_context();
+        let payload = serde_json::to_string_pretty(&ctx).unwrap();
+        let old_block = format!("<!-- zbobr-ctx-v1\n{payload}\n-->");
+        assert!(
+            parse_stage_json_blocks(&old_block).is_none(),
+            "old-format block must not match per-stage parser"
+        );
     }
 }
