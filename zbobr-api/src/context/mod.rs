@@ -200,7 +200,13 @@ impl MdCompactComment {
 impl fmt::Display for MdCompactComment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.for_prompt {
-            return write!(f, "- {}", self.text);
+            let mut lines = self.text.split('\n');
+            let first = lines.next().unwrap_or("");
+            write!(f, "- {}", first)?;
+            for line in lines {
+                write!(f, "\n  {}", line)?;
+            }
+            return Ok(());
         }
         write!(f, "- {} `{}`", self.text, format_timestamp(&self.timestamp))?;
         if let Some(url) = &self.url {
@@ -1275,17 +1281,18 @@ mod tests {
             "first line should appear in prompt mode"
         );
         assert!(
-            prompt_output.contains("also fix the bug"),
-            "second line should appear in prompt mode"
+            prompt_output.contains("  also fix the bug"),
+            "second line should be indented under the comment bullet"
         );
         assert!(
-            prompt_output.contains("and update docs"),
-            "third line should appear in prompt mode"
+            prompt_output.contains("  and update docs"),
+            "third line should be indented under the comment bullet"
         );
         assert!(
-            prompt_output
-                .starts_with("- user alice: proceed with plan\nalso fix the bug\nand update docs"),
-            "full multi-line body should be preserved verbatim"
+            prompt_output.starts_with(
+                "- user alice: proceed with plan\n  also fix the bug\n  and update docs"
+            ),
+            "continuation lines must be indented so body bullets don't collide with stage titles"
         );
 
         let normal_output = serialize_context(&ctx, &comments, false, None);
