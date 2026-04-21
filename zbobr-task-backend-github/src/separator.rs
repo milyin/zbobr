@@ -112,18 +112,17 @@ pub(crate) fn parse_description_full(
 }
 
 /// Partition `comments` into (live, dead) groups based on which section's
-/// stages "own" each comment on the task timeline.
+/// stages follow each comment on the task timeline.
 ///
-/// A comment is owned by the latest stage (across both contexts) whose
-/// timestamp is ≤ the comment's timestamp. When the owning stage lives in
-/// `dead_context`, the comment goes to the dead bucket; otherwise to live.
-/// Comments preceding every stage go to the live bucket.
+/// A comment belongs to DEAD_CONTEXT only when the next stage after it (by
+/// timestamp, across both contexts) lives in `dead_context`. Comments with
+/// no following stage — including ones made after the last stage when that
+/// stage happens to be dead — go to the live bucket.
 fn partition_comments<'a>(
     live: &TaskContext,
     dead: &TaskContext,
     comments: &'a [Comment],
 ) -> (Vec<&'a Comment>, Vec<&'a Comment>) {
-    // Build a timeline of (stage_timestamp, is_dead) entries, sorted ascending.
     let mut timeline: Vec<(DateTime<FixedOffset>, bool)> = Vec::new();
     for stage in &live.stages {
         timeline.push((stage.info.timestamp, false));
@@ -136,14 +135,12 @@ fn partition_comments<'a>(
     let mut live_comments = Vec::new();
     let mut dead_comments = Vec::new();
     for c in comments {
-        // Find the last stage with timestamp ≤ comment.timestamp.
-        let owner_is_dead = timeline
+        let next_is_dead = timeline
             .iter()
-            .rev()
-            .find(|(ts, _)| *ts <= c.timestamp)
+            .find(|(ts, _)| *ts > c.timestamp)
             .map(|(_, is_dead)| *is_dead)
             .unwrap_or(false);
-        if owner_is_dead {
+        if next_is_dead {
             dead_comments.push(c);
         } else {
             live_comments.push(c);
@@ -154,9 +151,9 @@ fn partition_comments<'a>(
 
 /// Serialize description, parameters, status, context, and dead_context back into the full format.
 /// Section order: description → PARAMETERS → STATUS → DEAD_CONTEXT → CONTEXT.
-/// `comments` are partitioned between CONTEXT and DEAD_CONTEXT by timestamp
-/// ownership: a comment follows the latest stage preceding it, wherever that
-/// stage lives.
+/// `comments` are partitioned between CONTEXT and DEAD_CONTEXT by the stage
+/// that follows each comment: a comment goes to DEAD_CONTEXT only if the next
+/// stage after it is dead; comments with no following stage stay live.
 pub(crate) fn serialize_description_full(
     original_description: &str,
     parameters: &HashMap<String, String>,
@@ -820,5 +817,105 @@ mod tests {
         let (_, _, _, ctx, _) = parse_description_full(&merged).unwrap();
         let ids: Vec<u64> = ctx.stages[0].records.iter().map(|r| r.id).collect();
         assert_eq!(ids, vec![1, 2, 3]);
+    }
+
+    fn comment(body: &str, ts: &str) -> Comment {
+        Comment {
+            timestamp: ts.parse().unwrap(),
+            username: "user".to_string(),
+            body: body.to_string(),
+            url: None,
+        }
+    }
+
+    #[test]
+    fn comment_after_last_stage_stays_live_even_when_last_stage_is_dead() {
+        let a = stage("a", "2024-01-01T00:00:00Z", vec![checkbox(1, "a1", false)]);
+        let b = stage("b", "2024-01-02T00:00:00Z", vec![checkbox(2, "b1", false)]);
+
+        let live = TaskContext::default();
+        let dead = TaskContext { stages: vec![a, b] };
+
+        let c = comment("final comment", "2024-01-03T00:00:00Z");
+
+        let serialized = serialize_description_full(
+            "d",
+            &HashMap::new(),
+            &None,
+            &live,
+            &[c.clone()],
+            None,
+            &dead,
+        );
+
+        let context_pos = serialized
+            .find("---CONTEXT---")
+            .expect("CONTEXT marker should be emitted");
+        let dead_pos = serialized
+            .find("---DEAD_CONTEXT---")
+            .expect("DEAD_CONTEXT marker should be emitted");
+        let comment_pos = serialized
+            .find("final comment")
+            .expect("comment body should appear");
+
+        assert!(dead_pos < context_pos, "sections in expected order");
+        assert!(
+            comment_pos > context_pos,
+            "trailing comment must live under CONTEXT, not DEAD_CONTEXT"
+        );
+    }
+
+    #[test]
+    fn comment_followed_by_dead_stage_goes_to_dead() {
+        let c = comment("mid comment", "2024-01-01T12:00:00Z");
+        let b = stage("b", "2024-01-02T00:00:00Z", vec![checkbox(1, "b1", false)]);
+
+        let live = TaskContext::default();
+        let dead = TaskContext { stages: vec![b] };
+
+        let serialized = serialize_description_full(
+            "d",
+            &HashMap::new(),
+            &None,
+            &live,
+            &[c],
+            None,
+            &dead,
+        );
+
+        let dead_pos = serialized.find("---DEAD_CONTEXT---").unwrap();
+        let comment_pos = serialized.find("mid comment").unwrap();
+        assert!(comment_pos > dead_pos, "comment followed by dead stage belongs to DEAD_CONTEXT");
+        assert!(
+            !serialized.contains("---CONTEXT---"),
+            "no trailing live content, so CONTEXT section must not be emitted"
+        );
+    }
+
+    #[test]
+    fn comment_followed_by_live_stage_goes_to_live() {
+        let dead_stage = stage("d", "2024-01-01T00:00:00Z", vec![checkbox(1, "d1", false)]);
+        let c = comment("between comment", "2024-01-01T12:00:00Z");
+        let live_stage = stage("l", "2024-01-02T00:00:00Z", vec![checkbox(2, "l1", false)]);
+
+        let live = TaskContext { stages: vec![live_stage] };
+        let dead = TaskContext { stages: vec![dead_stage] };
+
+        let serialized = serialize_description_full(
+            "d",
+            &HashMap::new(),
+            &None,
+            &live,
+            &[c],
+            None,
+            &dead,
+        );
+
+        let context_pos = serialized.find("---CONTEXT---").unwrap();
+        let comment_pos = serialized.find("between comment").unwrap();
+        assert!(
+            comment_pos > context_pos,
+            "comment followed by a live stage must go to CONTEXT"
+        );
     }
 }
