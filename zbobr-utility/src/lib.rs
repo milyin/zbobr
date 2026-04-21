@@ -324,6 +324,10 @@ pub async fn cleanup_worktree_for_branch(
 /// `git_user_name` and `git_user_email` as both author and committer.
 /// Unlike rebase, filter-branch does not replay changes, so it cannot
 /// produce merge conflicts.
+///
+/// Skips the rewrite when every commit in the range already has the target
+/// author and committer, so repeated runs don't churn commit SHAs (which
+/// would force a merge on each push).
 pub async fn rewrite_authors_on_worktree(
     work_dir: &Path,
     dest_branch: &str,
@@ -336,6 +340,34 @@ pub async fn rewrite_authors_on_worktree(
 
     // Configure git user locally
     configure_git_user(&git_root_path, git_user_name, git_user_email).await?;
+
+    // Fast path: if every commit in {dest}..HEAD already has the target
+    // author and committer, skip filter-branch entirely. Without this check,
+    // each call rewrites SHAs unconditionally, forcing a merge with
+    // origin/{work_branch} on the next push.
+    let range = format!("{}..HEAD", dest_branch);
+    let log = git_output(
+        &git_root_path,
+        &["log", "--format=%an%x09%ae%x09%cn%x09%ce", &range],
+    )
+    .await?;
+    let all_match = log.lines().all(|line| {
+        let mut parts = line.split('\t');
+        matches!(
+            (parts.next(), parts.next(), parts.next(), parts.next(), parts.next()),
+            (Some(an), Some(ae), Some(cn), Some(ce), None)
+                if an == git_user_name
+                    && ae == git_user_email
+                    && cn == git_user_name
+                    && ce == git_user_email
+        )
+    });
+    if all_match {
+        tracing::info!(
+            "Skipping author rewrite: all commits in {range} already authored by {git_user_name} <{git_user_email}>"
+        );
+        return Ok(());
+    }
 
     // Use git filter-branch to rewrite author/committer in-place.
     let filter_cmd = format!(
