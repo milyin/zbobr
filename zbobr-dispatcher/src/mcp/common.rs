@@ -64,6 +64,14 @@ pub struct GetCtxRecParam {
     pub id: String,
 }
 
+#[derive(Debug, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+pub struct SetDestinationBranchParam {
+    #[schemars(
+        description = "Branch name to use as the PR destination (base) for this task. Pass an empty string to clear the override and revert to the configured default branch."
+    )]
+    pub branch: String,
+}
+
 /// Parse a context record ID from either a numeric string or `ctx_rec_N` format.
 pub fn parse_ctx_rec_id(id: &str) -> Result<u64, String> {
     if let Ok(n) = id.parse::<u64>() {

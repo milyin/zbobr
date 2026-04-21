@@ -434,4 +434,32 @@ pub trait CommonMcpImpl: Send + Sync {
         )
         .await
     }
+
+    async fn set_destination_branch_impl(&self, branch: &str) -> String {
+        let tool_name = McpTool::SetDestinationBranch.as_str();
+        let trimmed = branch.trim();
+        let value = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        };
+        tracing::info!(
+            "[{}#{}] {} value={:?}",
+            self.role(),
+            self.session().task_id(),
+            tool_name,
+            value,
+        );
+
+        let response = match self.session().set_destination_branch(value.clone()).await {
+            Ok(()) => match value {
+                Some(b) => format!("Destination branch set to '{b}'"),
+                None => "Destination branch override cleared".to_string(),
+            },
+            Err(e) => format!("Error: {e}"),
+        };
+
+        log_mcp_string_response(self.role(), self.session().task_id(), tool_name, &response);
+        response
+    }
 }

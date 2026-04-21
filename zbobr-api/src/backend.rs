@@ -157,6 +157,17 @@ pub trait TaskMut: Send + Sync {
         .map(|_| ())
     }
 
+    /// Set the per-task destination (PR base) branch override. `None` clears it,
+    /// causing the repo backend to fall back to its configured default branch.
+    async fn set_destination_branch(&self, branch: Option<String>) -> anyhow::Result<()> {
+        self.modify_task(Box::new(move |mut task| {
+            task.destination_branch = branch;
+            task
+        }))
+        .await
+        .map(|_| ())
+    }
+
     async fn set_description(&self, desc: String) -> anyhow::Result<()> {
         self.modify_task(Box::new(move |mut task| {
             task.description = desc;

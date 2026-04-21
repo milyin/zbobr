@@ -32,6 +32,9 @@ struct TaskFile {
     work_branch: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    destination_branch: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pr_url: Option<String>,
     #[serde(default)]
     pause: bool,
@@ -49,8 +52,8 @@ struct TaskFile {
     #[serde(default)]
     max_stage_count: u64,
     closed: bool,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    dead_context: String,
+    #[serde(default, skip_serializing_if = "TaskContext::is_empty")]
+    dead_context: TaskContext,
 }
 
 impl TaskFile {
@@ -72,6 +75,7 @@ impl TaskFile {
             description: self.description.clone(),
             state,
             work_branch: self.work_branch.clone(),
+            destination_branch: self.destination_branch.clone(),
             pr_url: self.pr_url.clone(),
 
             context: self.context.clone(),
@@ -96,6 +100,7 @@ impl TaskFile {
             state: task.state.clone(),
             stage: None,
             work_branch: task.work_branch.clone(),
+            destination_branch: task.destination_branch.clone(),
             pr_url: task.pr_url.clone(),
             pause: task.go_pause,
             confirm: task.confirm,
@@ -482,6 +487,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             description: description.to_string(),
             state,
             work_branch: None,
+            destination_branch: None,
             pr_url: None,
 
             context: TaskContext::default(),
@@ -494,7 +500,7 @@ impl TaskBackend for ZbobrTaskBackendFs {
             max_stage_count: self.config.default_max_stage_count,
             closed: false,
             etag: None,
-            dead_context: String::new(),
+            dead_context: TaskContext::default(),
         };
 
         let task_file = TaskFile::from_task(&task, false);

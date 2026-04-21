@@ -156,6 +156,7 @@ pub fn sample_task_and_comments() -> (TaskSnapshot, Vec<Comment>) {
         description: "DESCRIPTION".to_string(),
         state: zbobr_api::State::pending("main".to_string()),
         work_branch: Some("zbobr_fix-1-sample-task".to_string()),
+        destination_branch: None,
         pr_url: Some(format!("{SAMPLE_REPO_URL}/pull/42")),
         context,
         signal: Some(Signal::Go(Stage::new("working"))),
@@ -170,7 +171,7 @@ pub fn sample_task_and_comments() -> (TaskSnapshot, Vec<Comment>) {
         max_stage_count: DEFAULT_MAX_STAGE_COUNT,
         closed: false,
         etag: None,
-        dead_context: String::new(),
+        dead_context: TaskContext::default(),
     };
     let comments = vec![
         Comment {
@@ -336,6 +337,11 @@ pub async fn build_full_prompt(
         vars.insert(Cow::Owned(k.clone()), Cow::Owned(v.clone()));
     }
 
+    // Per-task destination branch override takes precedence over the config default.
+    if let Some(ref v) = task.destination_branch {
+        vars.insert(Cow::Borrowed(VAR_DESTINATION_BRANCH), Cow::Borrowed(v));
+    }
+
     // Convert to owned HashMap for Interpolation
     let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
         .into_iter()
@@ -367,6 +373,10 @@ pub fn build_prompt_with_task(
 
     for (k, v) in extra_vars {
         vars.insert(Cow::Owned(k.clone()), Cow::Owned(v.clone()));
+    }
+
+    if let Some(ref v) = task.destination_branch {
+        vars.insert(Cow::Borrowed(VAR_DESTINATION_BRANCH), Cow::Borrowed(v));
     }
 
     let owned_vars: HashMap<Cow<str>, Cow<str>> = vars
@@ -401,6 +411,7 @@ mod tests {
             description: String::new(),
             state: "READY".into(),
             work_branch: None,
+            destination_branch: None,
             pr_url: None,
             context: TaskContext::default(),
             signal: None,
@@ -412,7 +423,7 @@ mod tests {
             max_stage_count: DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
-            dead_context: String::new(),
+            dead_context: TaskContext::default(),
         }
     }
 

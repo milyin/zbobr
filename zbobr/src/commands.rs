@@ -72,6 +72,10 @@ pub enum TaskSubcommand {
         /// When set the task will be paused automatically on every state change
         #[arg(long, action = clap::ArgAction::SetTrue)]
         confirm: bool,
+        /// Override the PR destination (base) branch for this task. When omitted,
+        /// the repository backend's configured default branch is used.
+        #[arg(long)]
+        destination_branch: Option<String>,
     },
     /// List existing tasks (optionally filter by state)
     List {
@@ -111,6 +115,11 @@ pub enum TaskSubcommand {
         /// Pass `--work-branch` without a value to delete the parameter.
         #[arg(long, num_args = 0..=1)]
         work_branch: Option<Option<String>>,
+        /// New destination (PR base) branch override.
+        /// Pass `--destination-branch` without a value to clear the override
+        /// and revert to the repository backend's default branch.
+        #[arg(long, num_args = 0..=1)]
+        destination_branch: Option<Option<String>>,
         /// New signal (go_planning, go_working, etc.)
         #[arg(long)]
         signal: Option<String>,
@@ -303,6 +312,7 @@ async fn run_task_subcommand(
             description,
             state,
             confirm,
+            destination_branch,
         } => {
             let parsed_state = state.parse::<zbobr_api::State>()?;
             let id = zbobr
@@ -310,6 +320,11 @@ async fn run_task_subcommand(
                 .await?;
             if confirm {
                 zbobr.task_session(id).set_confirm(true).await?;
+            }
+            if let Some(branch) = destination_branch {
+                let weak = task_backend.get_task(id).await?;
+                let mutable = weak.upgrade().await?;
+                mutable.set_destination_branch(Some(branch)).await?;
             }
             println!("Created task #{}", id);
         }
@@ -407,6 +422,7 @@ async fn run_task_subcommand(
             description,
             state,
             work_branch,
+            destination_branch,
             signal,
             confirm,
         } => {
@@ -437,6 +453,9 @@ async fn run_task_subcommand(
                     }
                     if let Some(branch) = work_branch {
                         task.work_branch = branch;
+                    }
+                    if let Some(branch) = destination_branch {
+                        task.destination_branch = branch;
                     }
                     task
                 }))

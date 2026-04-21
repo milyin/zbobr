@@ -14,6 +14,7 @@ use crate::config::ZbobrRepoBackendGithubConfig;
 struct ExistingPr {
     html_url: String,
     number: u64,
+    base_ref: String,
 }
 
 /// Convert an octocrab error into an anyhow::Error with detailed information.
@@ -361,7 +362,8 @@ impl ZbobrRepoBackendGithub {
         // If the destination repo is a fork, sync its base branch with the upstream
         // via GitHub's merge-upstream API before fetching, so the subsequent fetch
         // picks up the freshly synced content.
-        self.sync_fork_if_needed(repo).await?;
+        self.sync_fork_if_needed(repo, &self.backend_config.branch)
+            .await?;
 
         tracing::info!("Fetching origin in {}", bare_dir.display());
         git_env(&bare_dir, &["fetch", "origin"], &env).await?;
@@ -612,9 +614,15 @@ impl ZbobrRepoBackendGithub {
         base: Option<&str>,
     ) -> anyhow::Result<ExistingPr> {
         #[derive(serde::Deserialize)]
+        struct PrBaseRef {
+            #[serde(rename = "ref")]
+            ref_field: String,
+        }
+        #[derive(serde::Deserialize)]
         struct PrListItem {
             html_url: String,
             number: u64,
+            base: PrBaseRef,
         }
 
         // GitHub's list-PRs API requires "owner:branch" format for the head
@@ -643,6 +651,7 @@ impl ZbobrRepoBackendGithub {
             .map(|pr| ExistingPr {
                 html_url: pr.html_url,
                 number: pr.number,
+                base_ref: pr.base.ref_field,
             })
             .ok_or_else(|| {
                 anyhow::anyhow!(
@@ -669,11 +678,53 @@ impl ZbobrRepoBackendGithub {
         Ok(())
     }
 
-    /// If the destination repository is a GitHub fork, sync its base branch with the upstream
-    /// parent via the GitHub merge-upstream API. Errors that indicate the sync is not possible
-    /// (conflict, unprocessable, forbidden) are non-fatal: a warning is logged and the pipeline
-    /// continues with whatever state the fork is already in.
-    async fn sync_fork_if_needed(&self, repo: &GitHubRepo) -> anyhow::Result<()> {
+    /// PATCH a PR to retarget its base branch.
+    async fn update_pr_base(
+        &self,
+        pr_repo: &str,
+        pr_number: u64,
+        base: &str,
+    ) -> anyhow::Result<()> {
+        let endpoint = format!("/repos/{pr_repo}/pulls/{pr_number}");
+        let patch_payload = serde_json::json!({ "base": base });
+        self.octocrab
+            .patch::<serde_json::Value, _, _>(&endpoint, Some(&patch_payload))
+            .await
+            .map_err(octocrab_to_anyhow)?;
+        Ok(())
+    }
+
+    /// Check whether a branch exists on the remote repository via the GitHub API.
+    async fn remote_branch_exists(
+        &self,
+        pr_repo: &str,
+        branch: &str,
+    ) -> anyhow::Result<bool> {
+        let endpoint = format!("/repos/{pr_repo}/branches/{branch}");
+        match self
+            .octocrab
+            .get::<serde_json::Value, _, _>(&endpoint, None::<&()>)
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(octocrab::Error::GitHub { ref source, .. }) if source.status_code.as_u16() == 404 => {
+                Ok(false)
+            }
+            Err(e) => Err(octocrab_to_anyhow(e)),
+        }
+    }
+
+    /// Ensure `branch` is present in `repo` on GitHub and, if `repo` is a fork,
+    /// in sync with the upstream parent.
+    ///
+    /// - If `repo` is not a fork: verify the branch exists; bail if not.
+    /// - If `repo` is a fork and the branch already exists: call the GitHub
+    ///   `merge-upstream` API to fast-forward it from the parent.
+    /// - If `repo` is a fork and the branch is missing but exists in the
+    ///   parent: create the ref in the fork pointing to the parent's current
+    ///   commit SHA, so the fork now mirrors upstream for that branch.
+    /// - If the branch is missing everywhere: bail with a clear error.
+    async fn sync_fork_if_needed(&self, repo: &GitHubRepo, branch: &str) -> anyhow::Result<()> {
         let repo_path = &repo.full_name;
         let repo_info = retry_github("get repo metadata for fork check", || {
             self.octocrab
@@ -681,11 +732,73 @@ impl ZbobrRepoBackendGithub {
         })
         .await?;
 
+        let branch_exists_in_fork = self.remote_branch_exists(repo_path, branch).await?;
+
         if !repo_info.fork {
+            if !branch_exists_in_fork {
+                anyhow::bail!(
+                    "Branch '{}' does not exist in {}",
+                    branch,
+                    repo.full_name
+                );
+            }
             return Ok(());
         }
 
-        let branch = &self.backend_config.branch;
+        if !branch_exists_in_fork {
+            let Some(parent) = repo_info.parent.as_ref() else {
+                anyhow::bail!(
+                    "Branch '{}' not found in fork {} and no upstream parent is configured",
+                    branch,
+                    repo.full_name
+                );
+            };
+
+            let parent_endpoint = format!("/repos/{}/branches/{}", parent.full_name, branch);
+            let parent_branch_info = match self
+                .octocrab
+                .get::<serde_json::Value, _, _>(&parent_endpoint, None::<&()>)
+                .await
+            {
+                Ok(v) => v,
+                Err(octocrab::Error::GitHub { ref source, .. })
+                    if source.status_code.as_u16() == 404 =>
+                {
+                    anyhow::bail!(
+                        "Branch '{}' does not exist in fork {} or its upstream parent {}",
+                        branch,
+                        repo.full_name,
+                        parent.full_name
+                    );
+                }
+                Err(e) => return Err(octocrab_to_anyhow(e)),
+            };
+            let sha = parent_branch_info["commit"]["sha"].as_str().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "missing commit.sha in parent branch response for {}/{}",
+                    parent.full_name,
+                    branch
+                )
+            })?;
+            tracing::info!(
+                "Creating branch '{}' in fork {} from upstream {} SHA {}",
+                branch,
+                repo.full_name,
+                parent.full_name,
+                sha
+            );
+            let create_endpoint = format!("/repos/{}/git/refs", repo.full_name);
+            let payload = serde_json::json!({
+                "ref": format!("refs/heads/{branch}"),
+                "sha": sha,
+            });
+            self.octocrab
+                .post::<_, serde_json::Value>(&create_endpoint, Some(&payload))
+                .await
+                .map_err(octocrab_to_anyhow)?;
+            return Ok(());
+        }
+
         tracing::info!(
             "Repository {} is a fork; syncing branch '{}' with upstream via GitHub API",
             repo.full_name,
@@ -766,8 +879,13 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         git_user_name: &str,
         git_user_email: &str,
     ) -> anyhow::Result<bool> {
-        let base_branch = &self.backend_config.branch;
+        let default_base = &self.backend_config.branch;
+        let base_branch = identity
+            .destination_branch
+            .as_deref()
+            .unwrap_or(default_base);
         let work_branch = &identity.work_branch;
+        let pr_repo = &self.backend_config.repository;
 
         if work_branch == base_branch {
             anyhow::bail!(
@@ -783,11 +901,35 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
         let repo = parse_github_repo(&self.backend_config.repository)?;
         let bare_dir = self.ensure_bare_clone_github(&repo).await?;
 
+        // If the task's destination branch differs from the configured default,
+        // ensure it exists on the remote (creating it from the upstream parent
+        // when `repo` is a fork) and fetch it into the local bare clone so the
+        // subsequent merge sees its latest content.
+        if base_branch != default_base.as_str() {
+            self.sync_fork_if_needed(&repo, base_branch).await?;
+            git_env(&bare_dir, &["fetch", "origin"], &env).await?;
+        }
+
         // Phase 2: Validate base branch sync
         Self::sync_local_base_ref(&bare_dir, base_branch).await?;
 
         // Phase 3: Fetch remote work branch
         let remote_exists = Self::fetch_remote_work_branch(&bare_dir, work_branch, &env).await?;
+
+        // Phase 3.5: Retarget PR base if an open PR exists and its base drifted
+        // from the task's destination branch.
+        if let Ok(existing) = self.find_existing_pr(pr_repo, work_branch, None).await
+            && existing.base_ref != base_branch
+        {
+            tracing::info!(
+                "Retargeting PR #{} base '{}' -> '{}'",
+                existing.number,
+                existing.base_ref,
+                base_branch
+            );
+            self.update_pr_base(pr_repo, existing.number, base_branch)
+                .await?;
+        }
 
         // Phase 4: Create worktree
         self.ensure_worktree_github(
@@ -897,10 +1039,32 @@ impl zbobr_api::backend::WorktreeBackend for ZbobrRepoBackendGithub {
     ) -> anyhow::Result<String> {
         let work_branch = &identity.work_branch;
         let pr_repo = &self.backend_config.repository;
-        let base_branch = &self.backend_config.branch;
+        let default_base = &self.backend_config.branch;
+        let base_branch = identity
+            .destination_branch
+            .as_deref()
+            .unwrap_or(default_base);
+
+        // If the destination branch differs from the configured default,
+        // ensure it exists on the remote (pulling it from the upstream parent
+        // when `pr_repo` is a fork) so PR creation/retargeting has a valid base.
+        if base_branch != default_base.as_str() {
+            let repo = parse_github_repo(pr_repo)?;
+            self.sync_fork_if_needed(&repo, base_branch).await?;
+        }
 
         // Find existing PR or create a new one
         if let Ok(existing) = self.find_existing_pr(pr_repo, work_branch, None).await {
+            if existing.base_ref != base_branch {
+                tracing::info!(
+                    "Retargeting PR #{} base '{}' -> '{}'",
+                    existing.number,
+                    existing.base_ref,
+                    base_branch
+                );
+                self.update_pr_base(pr_repo, existing.number, base_branch)
+                    .await?;
+            }
             if let Some(body) = body {
                 tracing::info!(
                     "Updating body of existing PR #{} for {work_branch}",

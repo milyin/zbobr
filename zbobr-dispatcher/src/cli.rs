@@ -350,6 +350,9 @@ pub fn print_task(task: &TaskSnapshot, discussion: &[Comment]) {
     if let Some(ref branch) = task.work_branch {
         println!("Work Branch: {}", branch);
     }
+    if let Some(ref branch) = task.destination_branch {
+        println!("Destination Branch: {}", branch);
+    }
     if let Some(ref url) = task.pr_url {
         println!("PR URL: {}", url);
     }
@@ -2055,7 +2058,7 @@ impl ZbobrDispatcher {
 mod tests {
     use indexmap::IndexMap;
     use zbobr_api::{
-        Pipeline, StackEntry,
+        Pipeline, StackEntry, TaskContext,
         config::{PipelineConfig, StageDefinition, WorkflowConfig},
     };
 
@@ -2101,6 +2104,7 @@ mod tests {
             description: "test description".to_string(),
             state,
             work_branch: None,
+            destination_branch: None,
             pr_url: None,
             context: Default::default(),
             signal: None,
@@ -2112,7 +2116,7 @@ mod tests {
             max_stage_count: 0,
             closed: false,
             etag: None,
-            dead_context: String::new(),
+            dead_context: TaskContext::default(),
         }
     }
 

@@ -16,7 +16,7 @@ use crate::{
     mcp::{
         common::{
             AddChecklistItemParam, CheckChecklistItemParam, GetCtxRecParam, MessageParam,
-            ReportParam,
+            ReportParam, SetDestinationBranchParam,
         },
         traits::CommonMcpImpl,
     },
@@ -155,6 +155,16 @@ impl UnifiedMcp {
     )]
     async fn stop_with_question(&self, Parameters(params): Parameters<MessageParam>) -> String {
         self.stop_with_question_impl(&params.message).await
+    }
+
+    #[tool(
+        description = "Set the PR destination (base) branch for this task. Overrides the repository's default destination branch. Pass an empty string to clear the override and revert to the default."
+    )]
+    async fn set_destination_branch(
+        &self,
+        Parameters(params): Parameters<SetDestinationBranchParam>,
+    ) -> String {
+        self.set_destination_branch_impl(&params.branch).await
     }
 }
 

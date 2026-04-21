@@ -75,6 +75,10 @@ impl<'de> serde::Deserialize<'de> for FixedOffsetTz {
 pub struct TaskIdentity {
     pub task_id: u64,
     pub work_branch: String,
+    /// Per-task override for the PR base branch. When `None`, worktree backends
+    /// fall back to their configured default branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination_branch: Option<String>,
 }
 
 /// Robustly extract the repository name from a string (which could be a URL, local path, or owner/repo).
@@ -196,6 +200,11 @@ pub struct TaskContext {
 }
 
 impl TaskContext {
+    /// Returns true when there are no stages. Used by `skip_serializing_if`.
+    pub fn is_empty(&self) -> bool {
+        self.stages.is_empty()
+    }
+
     /// Returns the next available record id (max existing id + 1).
     pub fn next_id(&self) -> u64 {
         self.stages
@@ -787,6 +796,10 @@ pub struct TaskSnapshot {
     /// Task state.
     pub state: State,
     pub work_branch: Option<String>,
+    /// Per-task override for the PR destination (base) branch. When `None` the
+    /// repo backend's configured default branch is used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination_branch: Option<String>,
     pub pr_url: Option<String>,
     /// Structured task context containing stage execution history and records.
     #[serde(default)]
@@ -824,10 +837,14 @@ pub struct TaskSnapshot {
     /// Used to detect if the task has been modified between read and write operations.
     #[serde(skip)]
     pub etag: Option<String>,
-    /// Dead context: text moved here by the user to hide it from agents.
-    /// Stored verbatim in the task body; never passed to agent prompts.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub dead_context: String,
+    /// Dead context: stages moved here by the user to hide them from agents.
+    ///
+    /// Parsed from the DEAD_CONTEXT section of the task body using the same
+    /// format as live `context`. Never passed to agent prompts. Comments whose
+    /// timestamps fall under a dead stage are rendered inside DEAD_CONTEXT too,
+    /// so moving a stage also "consumes" its comments for the live view.
+    #[serde(default, skip_serializing_if = "TaskContext::is_empty")]
+    pub dead_context: TaskContext,
 }
 
 impl TaskSnapshot {
@@ -836,6 +853,7 @@ impl TaskSnapshot {
         Some(TaskIdentity {
             task_id: self.id,
             work_branch: self.work_branch.clone()?,
+            destination_branch: self.destination_branch.clone(),
         })
     }
 }
@@ -1066,6 +1084,7 @@ mod tests {
             description: String::new(),
             state: State::Empty,
             work_branch: work_branch.map(|s| s.to_string()),
+            destination_branch: None,
             pr_url: None,
             context: TaskContext::default(),
             signal: None,
@@ -1077,7 +1096,7 @@ mod tests {
             max_stage_count: DEFAULT_MAX_STAGE_COUNT,
             closed: false,
             etag: None,
-            dead_context: String::new(),
+            dead_context: TaskContext::default(),
         }
     }
 

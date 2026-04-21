@@ -82,6 +82,7 @@ const TOOL_HELPER: Tool = Tool::new("helper");
 const TOOL_REVIEWER: Tool = Tool::new("reviewer");
 const TOOL_DRUDGE: Tool = Tool::new("drudge");
 
+const ROLE_CONFIGURER: Role = Role::new("configurer");
 const ROLE_PLANNER: Role = Role::new("planner");
 const ROLE_PLAN_REVIEWER: Role = Role::new("plan_reviewer");
 const ROLE_WORKER: Role = Role::new("worker");
@@ -91,6 +92,7 @@ const ROLE_LINTER: Role = Role::new("linter");
 const ROLE_LINTER_WORKER: Role = Role::new("linter_worker");
 const ROLE_MERGER: Role = Role::new("merger");
 
+const STAGE_CONFIGURING: Stage = Stage::new("configuring");
 const STAGE_PLANNING: Stage = Stage::new("planning");
 const STAGE_PLAN_REVIEW_ADVERSARIAL: Stage = Stage::new("plan_review_adversarial");
 const STAGE_PLAN_REVIEW_USER: Stage = Stage::new("plan_review_user");
@@ -384,10 +386,18 @@ fn default_config_toml() -> RootConfigToml {
 fn default_workflow() -> WorkflowConfig {
     use McpTool::{
         AddChecklistItem, CheckChecklistItem, GetCtxRec, ReportFailure, ReportIntermediate,
-        ReportSuccess, StopWithError, StopWithQuestion,
+        ReportSuccess, SetDestinationBranch, StopWithError, StopWithQuestion,
     };
 
     let plan_stages = IndexMap::from([
+        (
+            STAGE_CONFIGURING,
+            StageDefinition {
+                role: TomlOption::Value(ROLE_CONFIGURER),
+                on_success: TomlOption::Value(StageTransition::stage(STAGE_PLANNING)),
+                ..Default::default()
+            },
+        ),
         (
             STAGE_PLANNING,
             StageDefinition {
@@ -536,6 +546,18 @@ fn default_workflow() -> WorkflowConfig {
     }
 
     let roles = IndexMap::from([
+        (
+            ROLE_CONFIGURER,
+            RoleDefinition {
+                mcp: Some(vec![
+                    StopWithError,
+                    ReportSuccess,
+                    SetDestinationBranch,
+                ]),
+                prompts: role_prompts("configurer.md"),
+                tool: TomlOption::Value(TOOL_DRUDGE),
+            },
+        ),
         (
             ROLE_PLANNER,
             RoleDefinition {
@@ -738,6 +760,7 @@ fn inline_dispatcher_tables(doc: &mut DocumentMut) {
 // ---------------------------------------------------------------------------
 
 const PROMPT_FILES: &[(&str, &str)] = &[
+    ("configurer", CONFIGURER_PROMPT),
     ("planner", PLANNER_PROMPT),
     ("plan_reviewer", PLAN_REVIEWER_PROMPT),
     ("worker", WORKER_PROMPT),
@@ -772,6 +795,34 @@ macro_rules! get_ctx_rec_guidance {
     };
 }
 
+const CONFIGURER_PROMPT: &str = r#"# Configurer Agent
+
+Your job is to read the task description and configure task-level settings that the rest of the pipeline relies on. You do NOT write code, design plans, or inspect the repository. Do NOT call any other MCP tools than those listed below.
+
+## Access Model
+
+- Use MCP `{mcp_set_destination_branch}` to set the PR destination (base) branch for this task.
+- Use MCP `{mcp_report_success}` to finish the session.
+- Use MCP `{mcp_stop_with_error}` only to report a technical failure from the tools themselves.
+
+**You MUST end every session by calling `{mcp_report_success}` (or `{mcp_stop_with_error}` on a technical failure). Finishing without one of these is a protocol error.**
+
+## Workflow
+
+1. Read the task description shown in the prompt (the `{description}` block).
+2. Scan the description for an explicit statement of the PR destination (base) branch. Look for phrases like "target branch X", "merge into X", "base branch X", "destination branch X", or a direct link/URL that pins a specific base branch. Accept only branch names that the task itself names — do NOT invent one.
+   - If the task explicitly names a branch AND it differs from the one currently shown in the `# Destination branch:` header of this prompt, call `{mcp_set_destination_branch}` once with exactly that branch name (no surrounding quotes or whitespace).
+   - If the task explicitly asks to revert to the repository default, call `{mcp_set_destination_branch}` once with an empty string.
+   - If the task says nothing about the destination branch, OR the value it names matches the one already shown in the header, do NOT call `{mcp_set_destination_branch}` at all.
+   - Never pass the value already shown in the header just to "confirm" it.
+3. Call `{mcp_report_success}` with a one-line brief describing what you did (e.g. "destination branch set to release-1.2", "no destination branch override needed"). Then finish the session.
+
+## Important
+
+- Do NOT design a plan, read the repository, or modify files. That is handled by later stages.
+- Do NOT ask the user questions — you do not have `stop_with_question` available. If the task description is ambiguous, default to leaving the destination branch unchanged and report that in the success message.
+"#;
+
 const PLANNER_PROMPT: &str = concat!(
     r#"# Planner Agent
 
@@ -801,7 +852,6 @@ Your working directory is already the repository with the work branch checked ou
 
 1. Read the task description, context, and comments provided in the context section.
 2. Inspect already made changes using `git diff origin/<destination_branch>...HEAD` (three dots) to see ALL changes introduced by this task relative to the base branch. Do NOT checkout the base branch (it may conflict with worktree setup). You can also use `git log origin/<destination_branch>..HEAD` to see all commits in the work branch.
-
 3. **Identify the closest analog in the codebase BEFORE designing the plan.** Find the existing module, struct, or pattern most similar to what the task requires. This is critical: the implementation must follow the same approaches, conventions, and style as the analog to keep the codebase consistent.
 4. **Design an architecture-level plan**. Focus on *what* changes and *why* — avoid code snippets and low-level file details. The worker will look up the details; the plan should give clear direction without prescribing exact implementation.
     - The plan content must be systematic and logically organized so it can be executed without reading surrounding discussion.

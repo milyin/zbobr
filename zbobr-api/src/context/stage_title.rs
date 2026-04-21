@@ -1,33 +1,23 @@
-//! Stage title serialization/deserialization.
+//! Stage title rendering for the human-readable markdown view.
 //!
-//! The stage title is a markdown line with the format:
+//! The stage title is a single markdown list item:
 //! ```text
-//! pipeline:**stage** `tool` `model` `YYYY-MM-DD HH:MM:SS +HHMM` <sub>[prompt](prompt_url)</sub> <sub>[output](output_url)</sub>
+//! instance:pipeline:**stage** `tool` `model` `YYYY-MM-DD HH:MM:SS +HHMM` <sub>[prompt](url)</sub> <sub>[output](url)</sub>
 //! ```
-//!
-//! The prompt and output sub-links are optional. When there are no links:
-//! ```text
-//! pipeline:**stage** `tool` `model` `YYYY-MM-DD HH:MM:SS +HHMM`
-//! ```
-//!
-//! This module provides [`MdStageTitle`] which can be converted to/from a string
-//! via `Display`/`FromStr`, and to/from [`StageInfo`] for use in the rest of the codebase.
-//!
-//! `Serialize`/`Deserialize` delegate to `Display`/`FromStr` for serde compatibility.
+//! This module provides [`MdStageTitle`] with `Display` and `From<&StageInfo>`
+//! conversions used when generating the human-readable context view.
 
-use std::{fmt, str::FromStr};
+use std::fmt;
 
-use anyhow::Result;
+use crate::task::{Model, Pipeline, Stage, StageInfo};
 
 /// Label used for the prompt sub-link in the stage title markdown.
 const PROMPT_LABEL: &str = "prompt";
 /// Label used for the output sub-link in the stage title markdown.
 const OUTPUT_LABEL: &str = "output";
 
-use crate::task::{Model, Pipeline, Stage, StageInfo};
-
-/// A parsed stage title line, mapping 1:1 to the markdown format.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A stage title line in its markdown form.
+#[derive(Debug, Clone)]
 pub struct MdStageTitle {
     pub instance: String,
     pub timestamp: chrono::DateTime<chrono::FixedOffset>,
@@ -69,7 +59,7 @@ impl From<MdStageTitle> for StageInfo {
     }
 }
 
-// -- Display (serialization) -------------------------------------------------
+// -- Display ------------------------------------------------------------------
 
 /// Wrapper: `instance:pipeline:**stage**`
 struct PipelineStage<'a> {
@@ -126,177 +116,6 @@ impl fmt::Display for MdStageTitle {
     }
 }
 
-// -- FromStr (deserialization) ------------------------------------------------
-
-impl FromStr for MdStageTitle {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        let s = s.strip_prefix("- ").unwrap_or(s).trim();
-        let mut rest = s;
-
-        // 1. instance:pipeline:**stage**
-        let (instance, pipeline, stage) = parse_next_pipeline_stage(&mut rest)?;
-
-        // 2. Optional backtick tokens (tool, model, timestamp)
-        let mut tool = None;
-        let mut model = None;
-        let mut timestamp_from_backtick = None;
-
-        while !rest.is_empty() {
-            if let Some(value) = try_parse_next_backtick(&mut rest) {
-                // A backtick containing a space is a timestamp (dates look like
-                // "2024-01-01 00:00:00 +0000"); tool names and models never have
-                // spaces — this invariant is enforced at the type level by `Model`.
-                if let Ok(ts) = chrono::DateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S %z") {
-                    timestamp_from_backtick = Some(ts);
-                    break;
-                }
-                if tool.is_none() {
-                    tool = Some(value.to_string());
-                } else if model.is_none() {
-                    model = Some(value.parse::<Model>().map_err(|e| {
-                        anyhow::anyhow!("Invalid model token {:?} in stage title: {e}", value)
-                    })?);
-                }
-                continue;
-            }
-            break;
-        }
-
-        // 3. Parse timestamp and optional links
-        let timestamp = timestamp_from_backtick
-            .ok_or_else(|| anyhow::anyhow!("Missing backtick timestamp in stage title"))?;
-        let mut prompt_link = None;
-        let mut output_link = None;
-        while !rest.is_empty() {
-            if let Some(inner) = try_parse_next_sub(&mut rest) {
-                if let Some((label, url)) = parse_markdown_link(&inner) {
-                    match label {
-                        PROMPT_LABEL => prompt_link = Some(url.to_string()),
-                        OUTPUT_LABEL => output_link = Some(url.to_string()),
-                        _ => {}
-                    }
-                }
-                continue;
-            }
-            break;
-        }
-
-        Ok(MdStageTitle {
-            instance,
-            timestamp,
-            pipeline,
-            stage,
-            tool,
-            model,
-            prompt_link,
-            output_link,
-        })
-    }
-}
-
-// -- Serde (delegates to Display/FromStr) -------------------------------------
-
-impl serde::Serialize for MdStageTitle {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for MdStageTitle {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
-    }
-}
-
-// -- Parsing helpers ----------------------------------------------------------
-
-fn parse_next_pipeline_stage(rest: &mut &str) -> Result<(String, Pipeline, Stage)> {
-    let stage_marker = ":**";
-    let marker_pos = rest
-        .find(stage_marker)
-        .ok_or_else(|| anyhow::anyhow!("Missing ':**' stage marker"))?;
-    let instance_and_pipeline = &rest[..marker_pos];
-    let after_marker = &rest[marker_pos + stage_marker.len()..];
-
-    // Format: instance:pipeline
-    let instance_and_pipeline = instance_and_pipeline.trim();
-
-    let pipeline_sep = instance_and_pipeline
-        .find(':')
-        .ok_or_else(|| anyhow::anyhow!("Missing ':' between instance and pipeline"))?;
-    let instance_str = instance_and_pipeline[..pipeline_sep].trim();
-    let pipeline_str = instance_and_pipeline[pipeline_sep + 1..].trim();
-
-    let stage_end = after_marker
-        .find("**")
-        .ok_or_else(|| anyhow::anyhow!("Missing closing '**' for stage"))?;
-    let stage_str = after_marker[..stage_end].trim();
-    *rest = after_marker[stage_end + 2..].trim();
-
-    Ok((
-        instance_str.to_string(),
-        pipeline_str.parse().unwrap(),
-        Stage::from(stage_str),
-    ))
-}
-
-/// Try to parse a backtick-wrapped value. Returns the inner string if found.
-fn try_parse_next_backtick<'a>(rest: &mut &'a str) -> Option<&'a str> {
-    let after_tick = rest.strip_prefix('`')?;
-    let tick_end = after_tick.find('`')?;
-    let value = &after_tick[..tick_end];
-    *rest = after_tick[tick_end + 1..].trim();
-    Some(value)
-}
-
-/// Try to parse a `<sub>...</sub>` element. Returns the inner content if found.
-fn try_parse_next_sub(rest: &mut &str) -> Option<String> {
-    let after_open = rest.strip_prefix("<sub>")?;
-    let close_pos = after_open.find("</sub>")?;
-    let inner = after_open[..close_pos].to_string();
-    *rest = after_open[close_pos + "</sub>".len()..].trim();
-    Some(inner)
-}
-
-/// Parse a markdown link `[label](url)` and return `(label, url)`.
-fn parse_markdown_link(s: &str) -> Option<(&str, &str)> {
-    let (before, after) = s.split_once("](")?;
-    let label = before.strip_prefix('[')?;
-    let url = after.strip_suffix(')')?;
-    Some((label, url))
-}
-
-// -- Display variant without prompt link (for prompts) ------------------------
-
-/// A wrapper that serializes a `MdStageTitle` without the prompt or output links.
-#[allow(dead_code)]
-pub struct MdMdStageTitleForPrompt<'a>(pub &'a MdStageTitle);
-
-impl fmt::Display for MdMdStageTitleForPrompt<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let t = self.0;
-        write!(
-            f,
-            "{}",
-            PipelineStage {
-                instance: &t.instance,
-                pipeline: &t.pipeline,
-                stage: &t.stage,
-            },
-        )?;
-        if let Some(tool) = &t.tool {
-            write!(f, " {}", Backtick(tool))?;
-        }
-        if let Some(model) = &t.model {
-            write!(f, " {}", Backtick(model))?;
-        }
-        write!(f, " {}", Backtick(format_timestamp(&t.timestamp)))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,14 +134,6 @@ mod tests {
     }
 
     #[test]
-    fn display_roundtrip() {
-        let title = make_title();
-        let s = title.to_string();
-        let parsed: MdStageTitle = s.parse().unwrap();
-        assert_eq!(parsed, title);
-    }
-
-    #[test]
     fn display_format() {
         let title = make_title();
         let s = title.to_string();
@@ -330,14 +141,6 @@ mod tests {
             s,
             "myinstance:main:**working** `claude` `claude-opus-4.6` `2024-06-15 10:30:00 +0300` <sub>[prompt](prompts/work.md)</sub> <sub>[output](output/work.md)</sub>"
         );
-    }
-
-    #[test]
-    fn parse_with_list_prefix() {
-        let title = make_title();
-        let s = format!("- {}", title);
-        let parsed: MdStageTitle = s.parse().unwrap();
-        assert_eq!(parsed, title);
     }
 
     #[test]
@@ -354,8 +157,6 @@ mod tests {
         };
         let s = title.to_string();
         assert_eq!(s, "default:merge:**review** `2024-01-01 00:00:00 +0000`");
-        let parsed: MdStageTitle = s.parse().unwrap();
-        assert_eq!(parsed, title);
     }
 
     #[test]
@@ -375,42 +176,5 @@ mod tests {
             s,
             "default:merge:**review** `2024-01-01 00:00:00 +0000` <sub>[prompt](prompts/review.md)</sub>"
         );
-        let parsed: MdStageTitle = s.parse().unwrap();
-        assert_eq!(parsed, title);
-    }
-
-    #[test]
-    fn for_prompt_omits_links() {
-        let title = make_title();
-        let full = title.to_string();
-        let prompt = MdMdStageTitleForPrompt(&title).to_string();
-        // Full version has the links
-        assert!(full.contains("<sub>[prompt](prompts/work.md)</sub>"));
-        assert!(full.contains("<sub>[output](output/work.md)</sub>"));
-        // Prompt version has timestamp in backtick but no links
-        assert!(!prompt.contains("<sub>"));
-        assert!(prompt.contains("`2024-06-15 10:30:00 +0300`"));
-    }
-
-    #[test]
-    fn parse_rejects_malformed_model_token() {
-        // Valid tool backtick but model backtick contains a space → should fail
-        let s = "myinstance:main:**working** `claude` `bad model` `2024-06-15 10:30:00 +0300`";
-        let result = s.parse::<MdStageTitle>();
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(
-            err_msg.contains("Invalid model token"),
-            "Expected 'Invalid model token' in error, got: {err_msg}"
-        );
-    }
-
-    #[test]
-    fn parse_accepts_valid_model_token() {
-        let s =
-            "myinstance:main:2:**working** `claude` `claude-opus-4.6` `2024-06-15 10:30:00 +0300`";
-        let parsed: MdStageTitle = s.parse().unwrap();
-        assert_eq!(parsed.tool.as_deref(), Some("claude"));
-        assert_eq!(parsed.model.as_ref().unwrap().as_str(), "claude-opus-4.6");
     }
 }
