@@ -244,7 +244,7 @@ impl RoleSession {
         report_link: Option<String>,
     ) -> anyhow::Result<u64> {
         self.modify_task(move |mut task| {
-            let id = task.context.next_id();
+            let id = task.next_record_id();
             if let Some(stage) = task.context.stages.last_mut() {
                 stage.records.push(ContextRecord {
                     id,
@@ -310,7 +310,7 @@ impl RoleSession {
         report_link: Option<String>,
     ) -> anyhow::Result<u64> {
         self.modify_task(move |mut task| {
-            let id = task.context.next_id();
+            let id = task.next_record_id();
             if let Some(stage) = task.context.stages.last_mut() {
                 stage.records.push(ContextRecord {
                     id,

@@ -856,6 +856,21 @@ impl TaskSnapshot {
             destination_branch: self.destination_branch.clone(),
         })
     }
+
+    /// Returns the next available record id, continuous across both live
+    /// `context` and `dead_context`. Records may be moved between the two
+    /// sections by the user, so numbering must not restart or collide.
+    pub fn next_record_id(&self) -> u64 {
+        self.context
+            .stages
+            .iter()
+            .chain(self.dead_context.stages.iter())
+            .flat_map(|s| s.records.iter())
+            .map(|r| r.id)
+            .max()
+            .map(|max| max + 1)
+            .unwrap_or(1)
+    }
 }
 
 #[cfg(test)]
@@ -1098,6 +1113,32 @@ mod tests {
             etag: None,
             dead_context: TaskContext::default(),
         }
+    }
+
+    #[test]
+    fn next_record_id_is_continuous_across_live_and_dead_context() {
+        let mut task = make_task(1, None);
+        assert_eq!(task.next_record_id(), 1);
+
+        task.context.stages.push(StageContext {
+            info: make_stage_info("main", "working"),
+            records: vec![make_record(1, ContextRecordType::Checkbox(false), "a")],
+        });
+        task.dead_context.stages.push(StageContext {
+            info: make_stage_info("main", "old"),
+            records: vec![make_record(5, ContextRecordType::Success, "b")],
+        });
+
+        assert_eq!(
+            task.next_record_id(),
+            6,
+            "next id must exceed the max id across both sections"
+        );
+
+        task.context.stages[0]
+            .records
+            .push(make_record(7, ContextRecordType::Comment, "c"));
+        assert_eq!(task.next_record_id(), 8);
     }
 
     #[test]
