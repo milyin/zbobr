@@ -29,11 +29,12 @@ use super::RootConfigToml;
 
 // Default model names used by init workspace. Copilot paths use dot notation
 // for some claude models, while actual Claude executor uses hyphen notation.
-const COPILOT_MODEL_HAIKU: Model = Model::new("claude-haiku-4.5");
-const CLAUDE_MODEL_HAIKU: Model = Model::new("claude-haiku-4-5");
-const COPILOT_MODEL_SONNET: Model = Model::new("claude-sonnet-4.6");
-const CLAUDE_MODEL_OPUS: Model = Model::new("claude-opus-4-6");
-const CLAUDE_MODEL_SONNET: Model = Model::new("claude-sonnet-4-6");
+const COPILOT_MODEL_HAIKU_4_5: Model = Model::new("claude-haiku-4.5");
+const CLAUDE_MODEL_HAIKU_4_5: Model = Model::new("claude-haiku-4-5");
+// const COPILOT_MODEL_SONNET: Model = Model::new("claude-sonnet-4.6");
+const COPILOT_MODEL_OPUS_4_6: Model = Model::new("claude-opus-4.6");
+const CLAUDE_MODEL_OPUS_4_7: Model = Model::new("claude-opus-4-7");
+const CLAUDE_MODEL_SONNET_4_6: Model = Model::new("claude-sonnet-4-6");
 const COPILOT_MODEL_GPT_5_4: Model = Model::new("gpt-5.4");
 const COPILOT_MODEL_GPT_5_MINI: Model = Model::new("gpt-5-mini");
 
@@ -260,12 +261,12 @@ fn default_config_toml() -> RootConfigToml {
             vec![
                 ToolEntry {
                     provider: PROVIDER_CLAUDE,
-                    model: CLAUDE_MODEL_OPUS,
+                    model: CLAUDE_MODEL_OPUS_4_7,
                     priority: None,
                 },
                 ToolEntry {
                     provider: PROVIDER_COPILOT,
-                    model: COPILOT_MODEL_SONNET,
+                    model: COPILOT_MODEL_OPUS_4_6,
                     priority: Some(0),
                 },
             ],
@@ -275,12 +276,12 @@ fn default_config_toml() -> RootConfigToml {
             vec![
                 ToolEntry {
                     provider: PROVIDER_CLAUDE_PLANNER,
-                    model: CLAUDE_MODEL_OPUS,
+                    model: CLAUDE_MODEL_OPUS_4_7,
                     priority: None,
                 },
                 ToolEntry {
                     provider: PROVIDER_COPILOT_PLANNER,
-                    model: COPILOT_MODEL_SONNET,
+                    model: COPILOT_MODEL_OPUS_4_6,
                     priority: Some(0),
                 },
             ],
@@ -290,12 +291,12 @@ fn default_config_toml() -> RootConfigToml {
             vec![
                 ToolEntry {
                     provider: PROVIDER_COPILOT,
-                    model: COPILOT_MODEL_HAIKU,
+                    model: COPILOT_MODEL_HAIKU_4_5,
                     priority: None,
                 },
                 ToolEntry {
                     provider: PROVIDER_CLAUDE,
-                    model: CLAUDE_MODEL_HAIKU,
+                    model: CLAUDE_MODEL_HAIKU_4_5,
                     priority: Some(0),
                 },
             ],
@@ -310,7 +311,7 @@ fn default_config_toml() -> RootConfigToml {
                 },
                 ToolEntry {
                     provider: PROVIDER_CLAUDE,
-                    model: CLAUDE_MODEL_SONNET,
+                    model: CLAUDE_MODEL_OPUS_4_7,
                     priority: Some(0),
                 },
             ],
@@ -325,7 +326,7 @@ fn default_config_toml() -> RootConfigToml {
                 },
                 ToolEntry {
                     provider: PROVIDER_CLAUDE,
-                    model: CLAUDE_MODEL_HAIKU,
+                    model: CLAUDE_MODEL_HAIKU_4_5,
                     priority: Some(0),
                 },
             ],
