@@ -436,7 +436,7 @@ mod tests {
         );
         let err = wf.validate().unwrap_err();
         assert!(
-            err.to_string().contains("both 'role' and 'call'"),
+            err.to_string().contains("must have exactly one of"),
             "unexpected error: {err}"
         );
     }
