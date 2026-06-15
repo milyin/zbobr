@@ -30,7 +30,7 @@ use super::RootConfigToml;
 // Default model names used by init workspace. All are Copilot model identifiers
 // (dot notation for Claude models, as required by the Copilot CLI --model flag).
 const COPILOT_MODEL_HAIKU_4_5: Model = Model::new("claude-haiku-4.5");
-const COPILOT_MODEL_OPUS_4_6: Model = Model::new("claude-opus-4.6");
+const COPILOT_MODEL_OPUS_4_8: Model = Model::new("claude-opus-4.8");
 const COPILOT_MODEL_GPT_5_4: Model = Model::new("gpt-5.4");
 const COPILOT_MODEL_GPT_5_MINI: Model = Model::new("gpt-5-mini");
 
@@ -234,7 +234,7 @@ fn default_config_toml() -> RootConfigToml {
             TOOL_DEVELOPER,
             vec![ToolEntry {
                 provider: PROVIDER_COPILOT,
-                model: COPILOT_MODEL_OPUS_4_6,
+                model: COPILOT_MODEL_OPUS_4_8,
                 priority: None,
             }],
         ),
@@ -242,7 +242,7 @@ fn default_config_toml() -> RootConfigToml {
             TOOL_PLANNER,
             vec![ToolEntry {
                 provider: PROVIDER_COPILOT_PLANNER,
-                model: COPILOT_MODEL_OPUS_4_6,
+                model: COPILOT_MODEL_OPUS_4_8,
                 priority: None,
             }],
         ),
