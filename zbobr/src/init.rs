@@ -27,14 +27,10 @@ use zbobr_utility::{
 
 use super::RootConfigToml;
 
-// Default model names used by init workspace. Copilot paths use dot notation
-// for some claude models, while actual Claude executor uses hyphen notation.
+// Default model names used by init workspace. All are Copilot model identifiers
+// (dot notation for Claude models, as required by the Copilot CLI --model flag).
 const COPILOT_MODEL_HAIKU_4_5: Model = Model::new("claude-haiku-4.5");
-const CLAUDE_MODEL_HAIKU_4_5: Model = Model::new("claude-haiku-4-5");
-// const COPILOT_MODEL_SONNET: Model = Model::new("claude-sonnet-4.6");
-const COPILOT_MODEL_OPUS_4_6: Model = Model::new("claude-opus-4.6");
-const CLAUDE_MODEL_OPUS_4_7: Model = Model::new("claude-opus-4-7");
-const CLAUDE_MODEL_SONNET_4_6: Model = Model::new("claude-sonnet-4-6");
+const COPILOT_MODEL_OPUS_4_8: Model = Model::new("claude-opus-4.8");
 const COPILOT_MODEL_GPT_5_4: Model = Model::new("gpt-5.4");
 const COPILOT_MODEL_GPT_5_MINI: Model = Model::new("gpt-5-mini");
 
@@ -110,9 +106,7 @@ const PIPELINE_PLAN: Pipeline = Pipeline::new("plan");
 const PIPELINE_WORK: Pipeline = Pipeline::new("work");
 const PIPELINE_MERGE: Pipeline = Pipeline::new("merge");
 
-const PROVIDER_CLAUDE: Provider = Provider::new("claude");
 const PROVIDER_COPILOT: Provider = Provider::new("copilot");
-const PROVIDER_CLAUDE_PLANNER: Provider = Provider::new("claude_planner");
 const PROVIDER_COPILOT_PLANNER: Provider = Provider::new("copilot_planner");
 
 /// Initialize a new zbobr workspace at the given directory.
@@ -214,32 +208,12 @@ fn default_config_toml() -> RootConfigToml {
 
     let providers = IndexMap::from([
         (
-            PROVIDER_CLAUDE,
-            ProviderDefinition {
-                executor: TomlOption::Value(Executor::claude()),
-                parent: TomlOption::Absent,
-                priority: TomlOption::Absent,
-                plan_mode: TomlOption::Absent,
-                access_key: TomlOption::Absent,
-            },
-        ),
-        (
             PROVIDER_COPILOT,
             ProviderDefinition {
                 executor: TomlOption::Value(Executor::copilot()),
                 parent: TomlOption::Absent,
                 priority: TomlOption::Absent,
                 plan_mode: TomlOption::Absent,
-                access_key: TomlOption::Absent,
-            },
-        ),
-        (
-            PROVIDER_CLAUDE_PLANNER,
-            ProviderDefinition {
-                executor: TomlOption::Absent,
-                parent: TomlOption::Value(PROVIDER_CLAUDE),
-                priority: TomlOption::Absent,
-                plan_mode: TomlOption::Value(true),
                 access_key: TomlOption::Absent,
             },
         ),
@@ -258,78 +232,43 @@ fn default_config_toml() -> RootConfigToml {
     let tools = IndexMap::from([
         (
             TOOL_DEVELOPER,
-            vec![
-                ToolEntry {
-                    provider: PROVIDER_CLAUDE,
-                    model: CLAUDE_MODEL_OPUS_4_7,
-                    priority: None,
-                },
-                ToolEntry {
-                    provider: PROVIDER_COPILOT,
-                    model: COPILOT_MODEL_OPUS_4_6,
-                    priority: Some(0),
-                },
-            ],
+            vec![ToolEntry {
+                provider: PROVIDER_COPILOT,
+                model: COPILOT_MODEL_OPUS_4_8,
+                priority: None,
+            }],
         ),
         (
             TOOL_PLANNER,
-            vec![
-                ToolEntry {
-                    provider: PROVIDER_CLAUDE_PLANNER,
-                    model: CLAUDE_MODEL_OPUS_4_7,
-                    priority: None,
-                },
-                ToolEntry {
-                    provider: PROVIDER_COPILOT_PLANNER,
-                    model: COPILOT_MODEL_OPUS_4_6,
-                    priority: Some(0),
-                },
-            ],
+            vec![ToolEntry {
+                provider: PROVIDER_COPILOT_PLANNER,
+                model: COPILOT_MODEL_OPUS_4_8,
+                priority: None,
+            }],
         ),
         (
             TOOL_HELPER,
-            vec![
-                ToolEntry {
-                    provider: PROVIDER_COPILOT,
-                    model: COPILOT_MODEL_HAIKU_4_5,
-                    priority: None,
-                },
-                ToolEntry {
-                    provider: PROVIDER_CLAUDE,
-                    model: CLAUDE_MODEL_HAIKU_4_5,
-                    priority: Some(0),
-                },
-            ],
+            vec![ToolEntry {
+                provider: PROVIDER_COPILOT,
+                model: COPILOT_MODEL_HAIKU_4_5,
+                priority: None,
+            }],
         ),
         (
             TOOL_REVIEWER,
-            vec![
-                ToolEntry {
-                    provider: PROVIDER_COPILOT,
-                    model: COPILOT_MODEL_GPT_5_4,
-                    priority: None,
-                },
-                ToolEntry {
-                    provider: PROVIDER_CLAUDE,
-                    model: CLAUDE_MODEL_OPUS_4_7,
-                    priority: Some(0),
-                },
-            ],
+            vec![ToolEntry {
+                provider: PROVIDER_COPILOT,
+                model: COPILOT_MODEL_GPT_5_4,
+                priority: None,
+            }],
         ),
         (
             TOOL_DRUDGE,
-            vec![
-                ToolEntry {
-                    provider: PROVIDER_COPILOT,
-                    model: COPILOT_MODEL_GPT_5_MINI,
-                    priority: None,
-                },
-                ToolEntry {
-                    provider: PROVIDER_CLAUDE,
-                    model: CLAUDE_MODEL_HAIKU_4_5,
-                    priority: Some(0),
-                },
-            ],
+            vec![ToolEntry {
+                provider: PROVIDER_COPILOT,
+                model: COPILOT_MODEL_GPT_5_MINI,
+                priority: None,
+            }],
         ),
     ]);
 
